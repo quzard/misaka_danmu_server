@@ -615,7 +615,7 @@ class BilibiliScraper(BaseScraper):
         formatted = []
         for c in processed_comments:
             timestamp = c.progress / 1000.0
-            p_string = f"{timestamp:.3f},{c.mode},{c.fontsize},{c.color},[{self.provider_name}]"
+            p_string = f"{timestamp:.3f},{c.mode},{c.color},[{self.provider_name}]"
             formatted.append({
                 "cid": str(c.id),
                 "p": p_string,
