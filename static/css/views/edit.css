@@ -1,7 +1,15 @@
+/* ==========================================================================
+   Edit Anime & Episode View Styles
+   ========================================================================== */
+
+/* --- Main Edit Form --- */
+
 #edit-anime-form input::placeholder {
     text-align: left;
     color: #aaa;
 }
+
+/* --- Input with Icon (e.g., for search buttons) --- */
 
 .input-with-icon {
     display: flex;
@@ -52,6 +60,8 @@
     background-color: #f5f7fa;
 }
 
+/* --- Input with Apply Button (for suggested aliases) --- */
+
 .input-with-apply-icon {
     display: flex;
     align-items: stretch;
@@ -85,52 +95,28 @@
     color: var(--primary-color);
 }
 
-/* Styles for the TMDB Episode Group list to prevent layout issues with long descriptions */
-.egid-group-list li {
-    /* 修正：将对齐方式改回居中，以确保按钮在垂直方向上始终对齐 */
-    align-items: center;
-}
 
-.egid-group-list .info {
-    /* Allow the info block to shrink and not push the buttons */
-    min-width: 0;
-}
-
-.egid-group-list .meta {
-    /* Allow the description to wrap */
-    white-space: normal;
-    /* To prevent very long words from breaking the layout */
-    word-break: break-word; 
-    /* Remove ellipsis since it's now multi-line */
-    overflow: visible;
-    text-overflow: clip;
-}
-
-.egid-group-list .actions {
-    /* Ensure buttons don't shrink */
-    flex-shrink: 0;
-    margin-left: 15px; /* Add some space */
-}
-
-/* --- Styles for Metadata Search Results (Bangumi, TMDB, Douban) --- */
+/* ==========================================================================
+   Metadata Search Views (TMDB, Bangumi, etc.)
+   ========================================================================== */
 
 .metadata-search-list li {
-    /* 固定高度 (海报56px + 上下padding 2*10px) */
+    /* Fixed height for consistent layout (poster 56px + padding 2*10px) */
     height: 78px;
     box-sizing: border-box;
 }
 
 .metadata-search-list li .info {
-    /* 让 info 块和海报一样高，并使用 flex 布局 */
+    /* Make info block same height as poster and use flexbox */
     height: 56px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between; /* 核心：将内容推向两端 */
+    justify-content: space-between; /* Pushes content to top and bottom */
 }
 
 .metadata-search-list li .info .title-container {
     display: flex;
-    align-items: baseline; /* 基线对齐，看起来更专业 */
+    align-items: baseline; /* Align title and ID tag nicely */
 }
 
 .metadata-search-list li .info .title-container .title {
@@ -162,4 +148,43 @@
 
 .metadata-search-list li .select-btn {
     flex-shrink: 0;
+}
+
+
+/* ==========================================================================
+   TMDB Episode Group (EGID) View Styles
+   ========================================================================== */
+
+.egid-group-list li {
+    /* Revert to center alignment to keep buttons vertically aligned */
+    align-items: center;
+}
+
+.egid-group-list .info {
+    /* Allow the info block to shrink and not push the buttons */
+    min-width: 0;
+}
+
+.egid-group-list .meta {
+    /* Allow the description to wrap */
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.egid-group-list .actions {
+    /* Ensure buttons don't shrink */
+    flex-shrink: 0;
+    margin-left: 15px;
+}
+
+
+/* ==========================================================================
+   Reassociate Sources View Styles
+   ========================================================================== */
+
+#reassociate-target-table tbody tr.selected {
+    background-color: #e9f5ff; /* A light blue to indicate selection */
+    border-left: 3px solid var(--primary-color);
 }

@@ -844,7 +844,7 @@ export function setupEditAnimeEventListeners() {
     backToEditFromEgidBtn.addEventListener('click', () => switchView('edit-anime-view'));
 
     backToDetailFromReassociateBtn.addEventListener('click', () => {
-        const sourceAnimeId = reassociateView.dataset.sourceAnimeId;
+        const sourceAnimeId = parseInt(reassociateView.dataset.sourceAnimeId, 10);
         if (sourceAnimeId) {
             document.dispatchEvent(new CustomEvent('show:anime-detail', { detail: { animeId: sourceAnimeId } }));
         } else {
@@ -856,9 +856,9 @@ export function setupEditAnimeEventListeners() {
     reassociateTableBody.addEventListener('click', (e) => {
         const clickedRow = e.target.closest('tr');
         if (!clickedRow || !clickedRow.dataset.targetId) return;
-        const isSelected = clickedRow.classList.contains('selected');
+        // A more standard single-select list behavior
         reassociateTableBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
-        if (!isSelected) clickedRow.classList.add('selected');
+        clickedRow.classList.add('selected');
         updateReassociateButtonState();
     });
     document.getElementById('reassociate-search-input').addEventListener('input', handleReassociateSearch);
