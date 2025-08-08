@@ -114,6 +114,8 @@ class IqiyiComment(BaseModel):
 
 class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
+    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
+
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
@@ -341,6 +343,14 @@ class IqiyiScraper(BaseScraper):
                 url=ep.play_url
             ) for ep in episodes if ep.link_id
         ]
+        
+        # 根据黑名单过滤分集
+        if self._EPISODE_BLACKLIST_PATTERN:
+            original_count = len(provider_episodes)
+            provider_episodes = [ep for ep in provider_episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
+            filtered_count = original_count - len(provider_episodes)
+            if filtered_count > 0:
+                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
 
         # 仅当不是强制模式且获取完整列表时才进行缓存
         if target_episode_index is None and db_media_type is None and provider_episodes:

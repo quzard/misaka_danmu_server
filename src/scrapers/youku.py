@@ -89,6 +89,7 @@ class YoukuRpcResult(BaseModel):
 
 class YoukuScraper(BaseScraper):
     provider_name = "youku"
+    _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
@@ -194,10 +195,13 @@ class YoukuScraper(BaseScraper):
                 if not page_result or not page_result.videos:
                     break
                 
-                if page == 1:
+                if page == 1 and page_result.total:
                     total_episodes = page_result.total
 
-                filtered_videos = [v for v in page_result.videos if "彩蛋" not in v.title]
+                filtered_videos = []
+                for v in page_result.videos:
+                    if not any(kw in v.title for kw in self._EPISODE_BLACKLIST_KEYWORDS):
+                        filtered_videos.append(v)
                 all_episodes.extend(filtered_videos)
 
                 if len(all_episodes) >= total_episodes or len(page_result.videos) < page_size:

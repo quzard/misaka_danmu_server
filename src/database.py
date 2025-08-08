@@ -218,8 +218,7 @@ async def _init_default_config(cursor: aiomysql.Cursor):
         ('webhook_custom_domain', '', '用于拼接Webhook URL的自定义域名。'),
         ('tvdb_api_key', '', '用于访问 TheTVDB API 的密钥。'),
         ('bangumi_client_id', '', '用于Bangumi OAuth的App ID。'),
-        ('bangumi_client_secret', '', '用于Bangumi OAuth的App Secret。'),
-        ('tencent_episode_blacklist_regex', '', '腾讯视频分集标题黑名单正则表达式。')
+        ('bangumi_client_secret', '', '用于Bangumi OAuth的App Secret。')
     ]
 
     # 1. 获取所有已存在的配置

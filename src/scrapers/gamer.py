@@ -24,6 +24,8 @@ class GamerScraper(BaseScraper):
         "gamer_cookie": "Cookie",
         "gamer_user_agent": "User-Agent",
     }
+    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
+
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
@@ -224,6 +226,14 @@ class GamerScraper(BaseScraper):
                             url=f"https://ani.gamer.com.tw/animeVideo.php?sn={ep_sn}"
                         ))
 
+            # 根据黑名单过滤分集
+            if self._EPISODE_BLACKLIST_PATTERN:
+                original_count = len(episodes)
+                episodes = [ep for ep in episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
+                filtered_count = original_count - len(episodes)
+                if filtered_count > 0:
+                    self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
+            
             if target_episode_index:
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
             
