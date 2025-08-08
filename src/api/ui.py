@@ -455,17 +455,20 @@ async def edit_episode_info(
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """更新指定分集的标题、集数和链接。"""
-    updated = await crud.update_episode_info(
-        pool,
-        episode_id,
-        update_data.title,
-        update_data.episode_index,
-        update_data.source_url
-    )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
-    logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episode_id} 的信息。")
-    return
+    try:
+        updated = await crud.update_episode_info(
+            pool,
+            episode_id,
+            update_data.title,
+            update_data.episode_index,
+            update_data.source_url
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+        logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episode_id} 的信息。")
+        return
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.post("/library/source/{source_id}/reorder-episodes", status_code=status.HTTP_202_ACCEPTED, summary="重整指定源的分集顺序")
 async def reorder_source_episodes(

@@ -786,6 +786,23 @@ async def update_episode_info(pool: aiomysql.Pool, episode_id: int, title: str, 
     """更新分集信息"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
+            # 1. 获取当前分集的 source_id
+            await cursor.execute("SELECT source_id FROM episode WHERE id = %s", (episode_id,))
+            result = await cursor.fetchone()
+            if not result:
+                return False # Episode not found
+            source_id = result[0]
+
+            # 2. 检查新的 episode_index 是否已在该 source_id 下被其他分集使用
+            await cursor.execute(
+                "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s AND id != %s",
+                (source_id, episode_index, episode_id)
+            )
+            if await cursor.fetchone():
+                # 如果找到了，说明集数重复，抛出特定错误
+                raise ValueError("该集数已存在，请使用其他集数。")
+
+            # 3. 如果没有重复，则执行更新
             query = "UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s"
             affected_rows = await cursor.execute(query, (title, episode_index, source_url, episode_id))
             return affected_rows > 0
