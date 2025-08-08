@@ -104,10 +104,6 @@ class JellyfinWebhook(BaseWebhook):
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
 
-        # 动态创建一个 ScraperManager 实例以供导入任务使用
-        scraper_manager = ScraperManager(self.pool)
-        await scraper_manager.load_and_sync_scrapers()
-
         # 使用新的、专门的 webhook 任务
         task_coro = lambda callback: webhook_search_and_dispatch_task(
             anime_title=anime_title,
@@ -122,7 +118,7 @@ class JellyfinWebhook(BaseWebhook):
             webhook_source='jellyfin',
             progress_callback=callback,
             pool=self.pool,
-            manager=scraper_manager,
+            manager=self.scraper_manager,
             task_manager=self.task_manager
         )
         await self.task_manager.submit_task(task_coro, task_title)

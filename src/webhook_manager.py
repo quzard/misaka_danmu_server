@@ -7,14 +7,16 @@ from typing import Dict, Type, List
 import aiomysql
 
 from .task_manager import TaskManager
+from .scraper_manager import ScraperManager
 from .webhook.base import BaseWebhook
 
 logger = logging.getLogger(__name__)
 
 class WebhookManager:
-    def __init__(self, pool: aiomysql.Pool, task_manager: TaskManager):
+    def __init__(self, pool: aiomysql.Pool, task_manager: TaskManager, scraper_manager: ScraperManager):
         self.pool = pool
         self.task_manager = task_manager
+        self.scraper_manager = scraper_manager
         self._handlers: Dict[str, Type[BaseWebhook]] = {}
         self._load_handlers()
 
@@ -42,7 +44,7 @@ class WebhookManager:
         handler_class = self._handlers.get(webhook_type)
         if not handler_class:
             raise ValueError(f"未找到类型为 '{webhook_type}' 的 Webhook 处理器")
-        return handler_class(self.pool, self.task_manager)
+        return handler_class(self.pool, self.task_manager, self.scraper_manager)
 
     def get_available_handlers(self) -> List[str]:
         """返回所有成功加载的 webhook 处理器类型（即文件名）的列表。"""
