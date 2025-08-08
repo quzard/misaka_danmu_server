@@ -2,6 +2,7 @@
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)  
+[![telegram](https://img.shields.io/static/v1?label=telegram&amp;message=misaka_danmu_server&amp;color=blue)](https://t.me/misaka_danmu_server)
 
 一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
@@ -21,103 +22,98 @@
 - **自动化**: 支持通过 Webhook 接收来自 Sonarr, Radarr, Emby 等服务的通知，实现全自动化的弹幕导入。
 - **灵活部署**: 提供 Docker 镜像和 Docker Compose 文件，方便快速部署。
 
+## 其他
+
+### 推广须知
+
+- 请不要在 ***B站*** 发布视频宣传本项目
+
+
+
 ## 🚀 快速开始 (使用 Docker Compose)
 
-推荐使用 Docker 和 Docker Compose 进行部署。我们将分两步部署：先部署数据库，再部署应用本身。
+推荐使用 Docker 和 Docker Compose 进行部署。
 
-### 步骤 1: 部署 MySQL 数据库
+### 步骤 1: 启动服务
 
-1.  在一个合适的目录（例如 `/opt/docker/danmu-api`）下，创建一个名为 `docker-compose.mysql.yml` 的文件，内容如下：
+1. 在一个合适的目录（例如 `./danmu-api`）下，
 
-    ```yaml
-    # docker-compose.mysql.yml
-    version: '3.5'
-    services:
-      mysql:
-        image: mysql:8.1.0-oracle
-        restart: always
-        privileged: true
-        container_name: danmu-mysql
-        volumes:
-          - ./mysql-data:/var/lib/mysql
-          - ./mysql-conf:/etc/mysql/conf.d
-          - ./mysql-logs:/logs
-        command:
-          --character-set-server=utf8mb4
-          --collation-server=utf8mb4_general_ci
-          --explicit_defaults_for_timestamp=true
-        environment:
-          # !!! 重要：请务必替换为您的强密码 !!!
-          MYSQL_ROOT_PASSWORD: "your_strong_root_password"
-          MYSQL_DATABASE: "danmuapi"
-          MYSQL_USER: "danmuapi"
-          MYSQL_PASSWORD: "your_strong_user_password"
-          TZ: "Asia/Shanghai"
-        ports:
-          - "3306:3306"
-    ```
+  ```shell
+  mkdir danmu-api
+  cd danmu-api
+  ```
+  
+2. 目录内创建一个名为 `docker-compose.yaml` 的文件，内容如下
 
-2.  **重要**: 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
+  ```yaml
+  services:
+    mysql:
+      image: mysql:8.1.0-oracle
+      container_name: danmu-mysql
+      restart: unless-stopped
+      environment:
+        # !!! 重要：请务必替换为您的强密码 !!!
+        MYSQL_ROOT_PASSWORD: "your_strong_root_password"
+        MYSQL_DATABASE: "danmuapi"
+        MYSQL_USER: "danmuapi"
+        MYSQL_PASSWORD: "your_strong_user_password"
+        TZ: "Asia/Shanghai"
+      volumes:
+        - ./mysql-data:/var/lib/mysql
+        - ./mysql-conf:/etc/mysql/conf.d
+        - ./mysql-logs:/logs
+      command:
+        --character-set-server=utf8mb4
+        --collation-server=utf8mb4_general_ci
+        --explicit_defaults_for_timestamp=true
+      healthcheck:
+        test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+        interval: 5s
+        timeout: 3s
+        retries: 2
+        start_period: 0s
+      networks:
+        - danmuserver
 
-3.  在 `docker-compose.mysql.yml` 所在目录运行命令启动数据库：
-    ```bash
-    docker-compose -f docker-compose.mysql.yml up -d
-    ```
+    danmu-app:
+      image: l429609201/misaka_danmu_server:latest
+      container_name: misaka-danmu-server
+      restart: unless-stopped
+      environment:
+        # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
+        - PUID=1000
+        - PGID=1000
+        - UMASK=0022
+       #  连接MySql数据库相关配置
+        - DANMUAPI_DATABASE__HOST=mysql
+        - DANMUAPI_DATABASE__PORT=3306
+        - DANMUAPI_DATABASE__NAME=danmuapi
+        # !!! 重要：请使用上面mysql容器相同的用户名和密码 !!!
+        - DANMUAPI_DATABASE__USER=danmuapi
+        - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
 
-### 步骤 2: 部署 Misaka Danmu Server 应用
+        # --- 初始管理员配置 ---
+        - DANMUAPI_ADMIN__INITIAL_USER=admin
+      volumes:
+        - ./config:/app/config
+      depends_on:
+        - mysql
+      ports:
+        - "7768:7768"
 
-1.  在同一个目录下，创建另一个名为 `docker-compose.app.yml` 的文件，内容如下。
+      networks:
+        - danmuserver
 
-    ```yaml
-    # docker-compose.app.yml
-    version: '3.8'
-    services:
-      app:
-        # 替换为您自己的Docker Hub用户名和镜像名，或使用本地构建
-        image: l429609201/misaka_danmu_server:latest
-        container_name: misaka-danmu-server # 容器名称
-        restart: unless-stopped
-        # 使用主机网络模式，容器将直接使用宿主机的网络。
-        # 这意味着容器内的 127.0.0.1 就是宿主机的 127.0.0.1。
-        # 应用将直接在宿主机的 7768 端口上可用，无需端口映射。
-        network_mode: "host"
-        environment:
-          # --- 权限配置 ---
-          # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
-          - PUID=1000
-          - PGID=1000
-          - UMASK=0022
-          # --- 服务配置 ---
-          # 应用将监听在宿主机的 0.0.0.0:7768 上
-          - DANMUAPI_SERVER__HOST=0.0.0.0
-          - DANMUAPI_SERVER__PORT=7768
-          # --- 数据库连接配置 ---
-        # 推荐使用host模式
-          # '127.0.0.1' 指向宿主机，因为我们使用了主机网络模式
-          - DANMUAPI_DATABASE__HOST=127.0.0.1
-          - DANMUAPI_DATABASE__PORT=3306
-          - DANMUAPI_DATABASE__NAME=danmuapi
-          # !!! 重要：请使用您在步骤1中为数据库设置的用户名和密码 !!!
-          - DANMUAPI_DATABASE__USER=danmuapi
-          - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
-    
-          
-          # --- 初始管理员配置 ---
-          - DANMUAPI_ADMIN__INITIAL_USER=admin
-        volumes:
-          # 挂载 config 目录以持久化日志和配置文件。
-          # 由于我们使用了 'user' 指令，容器进程将有权限写入此目录。
-          - ./config:/app/config
-    ```
+  networks:
+    danmuserver:
+      driver: bridge
+  ```
 
-2.  **重要**:
-    -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yml` 中设置的 `MYSQL_PASSWORD` 一致。
+3. 在 `docker-compose.mysql.yml` 所在目录运行命令启动应用：
 
-
-3.  在同一目录运行命令启动应用：
-    ```bash
-    docker-compose -f docker-compose.app.yml up -d
-    ```
+  ```bash
+  docker compose up -d
+  ```
 
 ### 步骤 3: 访问和配置
 
