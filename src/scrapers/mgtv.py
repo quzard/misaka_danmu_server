@@ -224,7 +224,8 @@ class MgtvScraper(BaseScraper):
                                 season=get_season_from_title(item.title),
                                 year=item.year,
                                 imageUrl=item.img,
-                                episodeCount=item.video_count,
+                                # 搜索结果中不包含总集数，设为None
+                                episodeCount=None,
                                 currentEpisodeIndex=episode_info.get("episode") if episode_info else None
                             )
                             results.append(provider_search_info)
