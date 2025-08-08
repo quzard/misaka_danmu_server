@@ -6,7 +6,7 @@ import hashlib
 import html
 import json
 from urllib.parse import urlencode
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, ClassVar
 from datetime import datetime
 from collections import defaultdict
 
