@@ -362,8 +362,8 @@ export function setupLibraryEventListeners() {
 
     document.getElementById('reassociate-sources-from-detail-btn').addEventListener('click', () => {
         const animeId = parseInt(animeDetailView.dataset.animeId, 10);
-        const animeTitle = animeDetailView.dataset.animeTitle;
-        if (animeId && animeTitle) {
+        const animeTitle = document.getElementById('detail-view-title').textContent;
+        if (animeId && animeTitle && animeTitle !== '加载中...') {
             document.dispatchEvent(new CustomEvent('show:reassociate-view', { detail: { animeId, animeTitle } }));
         }
     });
