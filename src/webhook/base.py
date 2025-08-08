@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict, Optional
 
 import aiomysql
+from fastapi import Request
 from pydantic import BaseModel
 
 from ..task_manager import TaskManager
@@ -23,6 +24,6 @@ class BaseWebhook(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
-    async def handle(self, payload: Dict[str, Any]):
+    async def handle(self, request: Request):
         """处理传入的 Webhook 负载。"""
         raise NotImplementedError

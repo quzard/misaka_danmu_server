@@ -1,5 +1,7 @@
 import logging
+import json
 from typing import Any, Dict
+from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
 from ..scraper_manager import ScraperManager
@@ -8,7 +10,46 @@ from .tasks import webhook_search_and_dispatch_task
 logger = logging.getLogger(__name__)
 
 class JellyfinWebhook(BaseWebhook):
-    async def handle(self, payload: Dict[str, Any]):
+    async def handle(self, request: Request):
+        # 处理器现在负责解析请求体。
+        # 这段逻辑是从主 webhook_api.py 移过来的，专门处理 Jellyfin 的情况。
+        content_type = request.headers.get("content-type", "").lower()
+        raw_body = await request.body()
+        payload = None
+
+        if not raw_body:
+            self.logger.warning("Jellyfin Webhook: 收到了一个空的请求体。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体为空。")
+
+        try:
+            if "application/x-www-form-urlencoded" in content_type:
+                from urllib.parse import parse_qs
+                form_data = parse_qs(raw_body.decode())
+                if 'payload' in form_data:
+                    payload_str = form_data['payload'][0]
+                    self.logger.info("Jellyfin Webhook: 检测到表单数据，正在解析 'payload' 字段...")
+                    payload = json.loads(payload_str)
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="表单数据中不包含 'payload' 字段。"
+                    )
+            else: # 默认为 JSON
+                if "application/json" not in content_type:
+                    self.logger.warning(f"Jellyfin Webhook: 未知的 Content-Type: '{content_type}'，将尝试直接解析为 JSON。")
+                payload = json.loads(raw_body)
+        except json.JSONDecodeError:
+            self.logger.error(f"Jellyfin Webhook: 无法将请求体解析为 JSON。Content-Type: '{content_type}'")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON格式。")
+        except Exception as e:
+            self.logger.error(f"Jellyfin Webhook: 解析负载时发生未知错误: {e}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法解析请求体。错误: {e}")
+
+        if not payload:
+            self.logger.error("Jellyfin Webhook: 解析后负载为空。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="解析后负载为空。")
+
+        # 从这里开始，代码与之前相同，处理已解析的 payload
         event_type = payload.get("NotificationType")
         if event_type not in ["ItemAdded"]:
             logger.info(f"Webhook: 忽略非 'ItemAdded' 的事件 (类型: {event_type})")
@@ -36,6 +77,7 @@ class JellyfinWebhook(BaseWebhook):
                 logger.warning(f"Webhook: 忽略一个剧集，因为缺少系列标题、季度或集数信息。")
                 return
 
+            logger.info(f"Jellyfin Webhook: 解析到剧集 - 标题: '{series_title}', 类型: Episode, 季: {season_number}, 集: {episode_number}")
             logger.info(f"Webhook: 收到剧集 '{series_title}' S{season_number:02d}E{episode_number:02d}' 的入库通知。")
             
             task_title = f"Webhook（jellyfin）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
@@ -49,6 +91,7 @@ class JellyfinWebhook(BaseWebhook):
                 logger.warning(f"Webhook: 忽略一个电影，因为缺少标题信息。")
                 return
             
+            logger.info(f"Jellyfin Webhook: 解析到电影 - 标题: '{movie_title}', 类型: Movie")
             logger.info(f"Webhook: 收到电影 '{movie_title}' 的入库通知。")
             
             task_title = f"Webhook（jellyfin）搜索: {movie_title}"
