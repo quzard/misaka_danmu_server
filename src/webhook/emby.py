@@ -45,7 +45,7 @@ class EmbyWebhook(BaseWebhook):
 
             logger.info(f"Webhook: 收到剧集 '{series_title}' S{season_number:02d}E{episode_number:02d}' 的入库通知。")
             
-            task_title = f"Webhook导入: {series_title} - S{season_number:02d}E{episode_number:02d}"
+            task_title = f"Webhook（emby）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
             search_keyword = f"{series_title} S{season_number:02d}E{episode_number:02d}"
             media_type = "tv_series"
             anime_title = series_title
@@ -58,7 +58,7 @@ class EmbyWebhook(BaseWebhook):
             
             logger.info(f"Webhook: 收到电影 '{movie_title}' 的入库通知。")
             
-            task_title = f"Webhook导入: {movie_title}"
+            task_title = f"Webhook（emby）搜索: {movie_title}"
             search_keyword = movie_title
             media_type = "movie"
             season_number = 1
@@ -83,6 +83,7 @@ class EmbyWebhook(BaseWebhook):
             tmdb_id=str(tmdb_id) if tmdb_id else None,
             imdb_id=str(imdb_id) if imdb_id else None,
             tvdb_id=str(tvdb_id) if tvdb_id else None,
+            webhook_source='emby',
             progress_callback=callback,
             pool=self.pool,
             manager=scraper_manager,
