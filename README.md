@@ -2,6 +2,7 @@
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)  
+[![telegram](https://img.shields.io/static/v1?label=telegram&amp;message=misaka_danmu_server&amp;color=blue)](https://t.me/misaka_danmu_server)
 
 一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
@@ -20,6 +21,14 @@
 - **元数据整合**: 支持与 TMDB, TVDB, Bangumi, Douban, IMDb 集成，丰富您的媒体信息。
 - **自动化**: 支持通过 Webhook 接收来自 Sonarr, Radarr, Emby 等服务的通知，实现全自动化的弹幕导入。
 - **灵活部署**: 提供 Docker 镜像和 Docker Compose 文件，方便快速部署。
+
+## 其他
+
+### 推广须知
+
+- 请不要在 ***B站*** 发布视频宣传本项目
+
+
 
 ## 🚀 快速开始 (使用 Docker Compose)
 
