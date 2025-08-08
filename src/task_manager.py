@@ -28,6 +28,7 @@ class Task:
         self.coro_factory = coro_factory
         self.done_event = asyncio.Event()
         self.pause_event = asyncio.Event()
+        self.running_coro_task: Optional[asyncio.Task] = None
         self.pause_event.set() # 默认为运行状态 (事件被设置)
 
 class TaskManager:
@@ -67,12 +68,12 @@ class TaskManager:
             )
             
             try:
-                # 创建一个回调函数，该函数将由任务内部调用以更新其进度
                 progress_callback = self._get_progress_callback(task)
-                # task.coro_factory 是一个需要回调函数作为参数的 lambda
-                # 调用它以获取真正的、可等待的协程
                 actual_coroutine = task.coro_factory(progress_callback)
-                await actual_coroutine
+                # 将协程包装在Task中，以便可以取消它
+                running_task = asyncio.create_task(actual_coroutine)
+                task.running_coro_task = running_task
+                await running_task
                 
                 # 对于没有引发 TaskSuccess 异常而正常结束的任务，使用通用成功消息
                 await crud.finalize_task_in_history(
@@ -86,6 +87,12 @@ class TaskManager:
                     self._pool, task.task_id, TaskStatus.COMPLETED, final_message
                 )
                 logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
+            except asyncio.CancelledError:
+                # 当任务被中止时，会捕获此异常
+                logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
+                await crud.finalize_task_in_history(
+                    self._pool, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
+                )
             except Exception:
                 error_message = "任务执行失败"
                 await crud.finalize_task_in_history(
@@ -147,6 +154,18 @@ class TaskManager:
             await self._queue.put(task)
             
         return found_and_removed
+
+    async def abort_current_task(self, task_id: str) -> bool:
+        """如果ID匹配，则中止当前正在运行或暂停的任务。"""
+        if self._current_task and self._current_task.task_id == task_id and self._current_task.running_coro_task:
+            self.logger.info(f"正在中止当前任务 '{self._current_task.title}' (ID: {task_id})")
+            # 解除暂停，以便任务可以接收到取消异常
+            self._current_task.pause_event.set()
+            # 取消底层的协程
+            self._current_task.running_coro_task.cancel()
+            return True
+        self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
+        return False
 
     async def pause_current_task(self):
         if self._current_task:

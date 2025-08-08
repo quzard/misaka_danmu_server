@@ -747,31 +747,33 @@ async def delete_task_from_history_endpoint(
     pool: aiomysql.Pool = Depends(get_db_pool),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """从历史记录中删除一个任务。只能删除已完成、失败、已暂停或排队中的任务。"""
+    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。"""
     task = await crud.get_task_from_history_by_id(pool, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
 
-    if task['status'] == TaskStatus.RUNNING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除正在运行的任务。")
+    status = task['status']
 
-    # 如果任务是待处理状态，尝试从队列中取消它
-    if task['status'] == TaskStatus.PENDING:
-        cancelled = await task_manager.cancel_pending_task(task_id)
-        if not cancelled:
-            # 这是一个竞态条件：在我们检查和删除之间，任务可能已经开始运行。
-            # 重新检查数据库中的状态。
-            logger.warning(f"尝试删除待处理任务 {task_id}，但在队列中未找到。可能已开始运行。正在重新检查状态...")
+    if status == TaskStatus.PENDING:
+        await task_manager.cancel_pending_task(task_id)
+    elif status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+        aborted = await task_manager.abort_current_task(task_id)
+        if not aborted:
+            # 这可能是一个竞态条件：在我们检查和中止之间，任务可能已经完成。
+            # 重新检查数据库中的状态以确认。
             task_after_check = await crud.get_task_from_history_by_id(pool, task_id)
-            if task_after_check and task_after_check['status'] == TaskStatus.RUNNING:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务刚刚开始运行，无法删除。请稍后重试。")
-            # 如果它不是运行中（例如，它可能已经快速完成或失败），那么我们可以安全地继续删除历史记录。
+            if task_after_check and task_after_check['status'] in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+                # 如果它仍然在运行/暂停，说明中止失败，可能因为它不是当前任务。
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能它不是当前正在执行的任务。")
+            logger.info(f"任务 {task_id} 在中止前已完成，将直接删除历史记录。")
 
     deleted = await crud.delete_task_from_history(pool, task_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="在删除过程中未找到任务。")
-    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (状态: {task['status']})。")
+        # 这不是一个严重错误，可能意味着任务在处理过程中已被删除。
+        logger.info(f"在尝试删除时，任务 {task_id} 已不存在于历史记录中。")
+        return
+    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {status})。")
     return
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
