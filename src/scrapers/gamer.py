@@ -75,8 +75,14 @@ class GamerScraper(BaseScraper):
             else:
                 self.logger.warning("Gamer: Cookie 刷新请求已发送，但未收到新的 Cookie 值。")
                 return False
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                self.logger.error(f"Gamer: 刷新 Cookie 失败 (403 Forbidden)。这通常意味着您的 Cookie 已完全失效或 IP 被临时阻止。请尝试在设置中更新 Cookie。")
+            else:
+                self.logger.error(f"Gamer: 刷新 Cookie 时发生 HTTP 错误: {e}", exc_info=True)
+            return False
         except Exception as e:
-            self.logger.error(f"Gamer: 刷新 Cookie 失败: {e}", exc_info=True)
+            self.logger.error(f"Gamer: 刷新 Cookie 时发生未知错误: {e}", exc_info=True)
             return False
 
     async def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
@@ -168,8 +174,14 @@ class GamerScraper(BaseScraper):
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             self.logger.warning(f"Gamer: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
             return []
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                self.logger.error(f"Gamer: 搜索 '{keyword}' 失败 (403 Forbidden)。这通常是由于无效或过期的 Cookie 导致的。请尝试在“搜索源”设置中更新巴哈姆特动画疯的 Cookie。")
+            else:
+                self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生 HTTP 错误: {e}", exc_info=True)
+            return []
         except Exception as e:
-            self.logger.error(f"Gamer: 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生未知错误: {e}", exc_info=True)
             return []
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
