@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from collections import defaultdict
 from datetime import datetime
 from .base import BaseScraper, get_season_from_title
-from .. import models
+from .. import models, crud
 
 # --- Pydantic 模型，用于解析腾讯API的响应 ---
 
@@ -82,6 +82,10 @@ class TencentScraper(BaseScraper):
     用于从腾讯视频抓取分集信息和弹幕的客户端。
     """
     provider_name = "tencent"
+    # 新增：声明此源是可配置的，并定义了配置字段
+    configurable_fields: Dict[str, str] = {
+        "tencent_episode_blacklist_regex": "分集标题黑名单 (正则)",
+    }
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
@@ -319,6 +323,20 @@ class TencentScraper(BaseScraper):
         # 腾讯的逻辑不区分电影和电视剧，都是从一个cid获取列表，
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
         tencent_episodes = await self._internal_get_episodes(media_id, target_episode_index=target_episode_index)
+        
+        # 新增：根据黑名单过滤分集
+        blacklist_regex_str = await crud.get_config_value(self.pool, "tencent_episode_blacklist_regex", "")
+        if blacklist_regex_str:
+            try:
+                blacklist_pattern = re.compile(blacklist_regex_str, re.IGNORECASE)
+                original_count = len(tencent_episodes)
+                tencent_episodes = [ep for ep in tencent_episodes if not blacklist_pattern.search(ep.title)]
+                filtered_count = original_count - len(tencent_episodes)
+                if filtered_count > 0:
+                    self.logger.info(f"Tencent: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
+            except re.error as e:
+                self.logger.error(f"Tencent: 分集标题黑名单正则表达式无效: '{blacklist_regex_str}', 错误: {e}")
+
         
         all_provider_episodes = [
             models.ProviderEpisodeInfo(
