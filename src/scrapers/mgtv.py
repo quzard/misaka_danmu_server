@@ -283,15 +283,10 @@ class MgtvScraper(BaseScraper):
                     continue
                 filtered_episodes.append(ep)
 
-            # 修正：根据媒体类型决定排序方式
-            if db_media_type == 'movie':
-                # 对于电影，按时长倒序排列，确保正片在最前面
-                def get_duration_seconds(time_str: str) -> int:
-                    parts = (time_str or "0").split(':')
-                    return sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-                sorted_episodes = sorted(filtered_episodes, key=lambda x: get_duration_seconds(x.time), reverse=True)
-            else:
-                sorted_episodes = sorted(filtered_episodes, key=lambda x: int(x.video_id))
+            # The API returns episodes in the correct order.
+            # The previous sorting by video_id was incorrect and has been removed.
+            # We will now process the filtered_episodes list directly.
+            sorted_episodes = filtered_episodes
             
             provider_episodes = [
                 models.ProviderEpisodeInfo(
