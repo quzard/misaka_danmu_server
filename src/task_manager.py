@@ -124,6 +124,30 @@ class TaskManager:
             )
         return pausable_callback
 
+    async def cancel_pending_task(self, task_id: str) -> bool:
+        """
+        从队列中移除一个待处理的任务。
+        注意：此操作不是线程安全的，但对于单工作线程模型是可接受的。
+        """
+        found_and_removed = False
+        temp_list = []
+        while not self._queue.empty():
+            try:
+                task = self._queue.get_nowait()
+                if task.task_id == task_id:
+                    found_and_removed = True
+                    task.done_event.set()
+                    logger.info(f"已从队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
+                else:
+                    temp_list.append(task)
+            except asyncio.QueueEmpty:
+                break
+        
+        for task in temp_list:
+            await self._queue.put(task)
+            
+        return found_and_removed
+
     async def pause_current_task(self):
         if self._current_task:
             self._current_task.pause_event.clear()

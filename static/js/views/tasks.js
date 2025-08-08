@@ -168,7 +168,7 @@ function updateTaskActionButtons() {
     }
 
     const status = selectedTask.dataset.status;
-    const isDeletable = status === '已完成' || status === '失败' || status === '已暂停';
+    const isDeletable = status === '已完成' || status === '失败' || status === '已暂停' || status === '排队中';
     const isPausable = status === '运行中';
     const isResumable = status === '已暂停';
 
@@ -295,8 +295,8 @@ async function handleDeleteRunningTask() {
     }
     const taskId = selectedTask.dataset.taskId;
     const status = selectedTask.dataset.status;
-    if (status === '运行中' || status === '排队中') {
-        alert('不能删除正在运行或排队中的任务。');
+    if (status === '运行中') {
+        alert('不能删除正在运行的任务。');
         return;
     }
     const taskTitle = selectedTask.querySelector('.task-title').textContent;

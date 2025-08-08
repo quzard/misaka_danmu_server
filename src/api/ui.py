@@ -744,21 +744,34 @@ async def get_all_tasks(
 async def delete_task_from_history_endpoint(
     task_id: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """从历史记录中删除一个任务。只能删除已完成、失败或已暂停的任务。"""
+    """从历史记录中删除一个任务。只能删除已完成、失败、已暂停或排队中的任务。"""
     task = await crud.get_task_from_history_by_id(pool, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
 
-    if task['status'] in [TaskStatus.RUNNING, TaskStatus.PENDING]:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除正在运行或排队中的任务。")
+    if task['status'] == TaskStatus.RUNNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除正在运行的任务。")
+
+    # 如果任务是待处理状态，尝试从队列中取消它
+    if task['status'] == TaskStatus.PENDING:
+        cancelled = await task_manager.cancel_pending_task(task_id)
+        if not cancelled:
+            # 这是一个竞态条件：在我们检查和删除之间，任务可能已经开始运行。
+            # 重新检查数据库中的状态。
+            logger.warning(f"尝试删除待处理任务 {task_id}，但在队列中未找到。可能已开始运行。正在重新检查状态...")
+            task_after_check = await crud.get_task_from_history_by_id(pool, task_id)
+            if task_after_check and task_after_check['status'] == TaskStatus.RUNNING:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务刚刚开始运行，无法删除。请稍后重试。")
+            # 如果它不是运行中（例如，它可能已经快速完成或失败），那么我们可以安全地继续删除历史记录。
 
     deleted = await crud.delete_task_from_history(pool, task_id)
     if not deleted:
-        # This case should be rare if the first check passed, but good for safety
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="在删除过程中未找到任务。")
+    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (状态: {task['status']})。")
     return
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
