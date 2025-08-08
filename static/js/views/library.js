@@ -415,4 +415,8 @@ export function setupLibraryEventListeners() {
         const animeTitle = e.detail.animeTitle;
         showEpisodeListView(sourceId, animeTitle, animeId);
     });
+
+    document.addEventListener('show:anime-detail', (e) => {
+        showAnimeDetailView(e.detail.animeId);
+    });
 }

@@ -4,10 +4,18 @@ import { switchView } from '../ui.js';
 // --- State ---
 let _currentSearchSelectionData = null;
 
+// --- Constants ---
+const typeMap = {
+    'tv_series': '电视节目',
+    'movie': '电影/剧场版',
+    'ova': 'OVA',
+    'other': '其他'
+};
+
 // --- DOM Elements ---
 let editAnimeView, editAnimeForm, editAnimeTypeSelect, selectEgidBtn, editAnimeTmdbIdInput;
 let bangumiSearchView, tmdbSearchView, doubanSearchView, imdbSearchView, tvdbSearchView, egidView, reassociateView;
-let backToEditAnimeFromBgmSearchBtn, backToEditAnimeFromTmdbSearchBtn, backToEditAnimeFromDoubanSearchBtn, backToEditAnimeFromImdbSearchBtn, backToEditAnimeFromTvdbSearchBtn, backToEditFromEgidBtn, backToEditFromReassociateBtn;
+let backToEditAnimeFromBgmSearchBtn, backToEditAnimeFromTmdbSearchBtn, backToEditAnimeFromDoubanSearchBtn, backToEditAnimeFromImdbSearchBtn, backToEditAnimeFromTvdbSearchBtn, backToEditFromEgidBtn, backToDetailFromReassociateBtn;
 let editEpisodeView, editEpisodeForm;
 
 function initializeElements() {
@@ -37,7 +45,7 @@ function initializeElements() {
     backToEditAnimeFromTvdbSearchBtn = document.getElementById('back-to-edit-anime-from-tvdb-search-btn');
     backToEditAnimeFromImdbSearchBtn = document.getElementById('back-to-edit-anime-from-imdb-search-btn');
     backToEditFromEgidBtn = document.getElementById('back-to-edit-from-egid-btn');
-    backToEditFromReassociateBtn = document.getElementById('back-to-edit-from-reassociate-btn');
+    backToDetailFromReassociateBtn = document.getElementById('back-to-detail-from-reassociate-btn');
 
     editEpisodeView = document.getElementById('edit-episode-view');
     editEpisodeForm = document.getElementById('edit-episode-form');
@@ -699,21 +707,31 @@ async function handleReassociateSourcesClick({ animeId, animeTitle }) {
     }
 }
 
+function updateReassociateButtonState() {
+    const confirmBtn = document.getElementById('confirm-reassociation-btn');
+    const selectedRow = document.querySelector('#reassociate-target-table tbody tr.selected');
+    confirmBtn.disabled = !selectedRow;
+}
+
 function renderReassociateTargets(animes, sourceAnimeId) {
     const tableBody = document.querySelector('#reassociate-target-table tbody');
     tableBody.innerHTML = '';
     const potentialTargets = animes.filter(anime => anime.animeId !== sourceAnimeId);    if (potentialTargets.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="2">没有其他可用的目标作品。</td></tr>';
+        tableBody.innerHTML = '<tr><td>没有其他可用的目标作品。</td></tr>';
         return;
     }
     potentialTargets.forEach(anime => {
         const row = tableBody.insertRow();
         row.dataset.title = anime.title.toLowerCase();
+        row.dataset.targetId = anime.animeId;
+        row.dataset.targetTitle = anime.title;
+        row.style.cursor = 'pointer';
+
+        const displayType = typeMap[anime.type] || anime.type;
+
         row.innerHTML = `
-            <td><strong>${anime.title}</strong> (ID: ${anime.animeId}, 季: ${anime.season}, 类型: ${anime.type})</td>
-            <td><button class="associate-btn">关联到此</button></td>
+            <td><strong>${anime.title}</strong> (ID: ${anime.animeId}, 季: ${anime.season}, 类型: ${displayType})</td>
         `;
-        row.querySelector('.associate-btn').addEventListener('click', () => handleReassociateConfirm(sourceAnimeId, anime.animeId, anime.title));
     });
 }
 
@@ -726,7 +744,16 @@ function handleReassociateSearch() {
     });
 }
 
-async function handleReassociateConfirm(sourceAnimeId, targetAnimeId, targetAnimeTitle) {
+async function handleReassociateConfirm() {
+    const selectedRow = document.querySelector('#reassociate-target-table tbody tr.selected');
+    if (!selectedRow) {
+        alert('请选择一个目标作品。');
+        return;
+    }
+    const sourceAnimeId = parseInt(reassociateView.dataset.sourceAnimeId, 10);
+    const targetAnimeId = parseInt(selectedRow.dataset.targetId, 10);
+    const targetAnimeTitle = selectedRow.dataset.targetTitle;
+
     if (confirm(`您确定要将当前作品的所有数据源关联到 "${targetAnimeTitle}" (ID: ${targetAnimeId}) 吗？\n\n此操作不可撤销！`)) {
         try {
             await apiFetch(`/api/ui/library/anime/${sourceAnimeId}/reassociate`, {
@@ -815,7 +842,25 @@ export function setupEditAnimeEventListeners() {
     backToEditAnimeFromImdbSearchBtn.addEventListener('click', handleBackToEditAnime);
     document.getElementById('imdb-search-form').addEventListener('submit', handleImdbSearchSubmit);
     backToEditFromEgidBtn.addEventListener('click', () => switchView('edit-anime-view'));
-    backToEditFromReassociateBtn.addEventListener('click', () => switchView('edit-anime-view'));
+
+    backToDetailFromReassociateBtn.addEventListener('click', () => {
+        const sourceAnimeId = reassociateView.dataset.sourceAnimeId;
+        if (sourceAnimeId) {
+            document.dispatchEvent(new CustomEvent('show:anime-detail', { detail: { animeId: sourceAnimeId } }));
+        } else {
+            switchView('library-view');
+        }
+    });
+    document.getElementById('confirm-reassociation-btn').addEventListener('click', handleReassociateConfirm);
+    const reassociateTableBody = document.querySelector('#reassociate-target-table tbody');
+    reassociateTableBody.addEventListener('click', (e) => {
+        const clickedRow = e.target.closest('tr');
+        if (!clickedRow || !clickedRow.dataset.targetId) return;
+        const isSelected = clickedRow.classList.contains('selected');
+        reassociateTableBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
+        if (!isSelected) clickedRow.classList.add('selected');
+        updateReassociateButtonState();
+    });
     document.getElementById('reassociate-search-input').addEventListener('input', handleReassociateSearch);
 
     editEpisodeForm.addEventListener('submit', handleEditEpisodeSave);

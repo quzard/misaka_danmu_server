@@ -145,7 +145,7 @@ async def init_db_tables(app: FastAPI):
             # 遍历需要创建的表
             for table_name, create_sql in tables_to_create.items():
                 if table_name in existing_tables:
-                    logger.info(f"数据表 '{table_name}' 已存在，跳过创建。")
+                    logger.debug(f"数据表 '{table_name}' 已存在，跳过创建。")
                 else:
                     logger.info(f"正在创建数据表 '{table_name}'...")
                     # 在建表语句中保留 IF NOT EXISTS 作为最后的保险
