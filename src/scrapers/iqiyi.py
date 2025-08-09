@@ -201,6 +201,9 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
         self.logger.info(f"爱奇艺: 搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"爱奇艺: 搜索结果列表:\n{log_results}")
         results_to_cache = [r.model_dump() for r in results]
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results

@@ -271,6 +271,11 @@ class RenrenScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"renren: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
+        self.logger.info(f"renren: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"renren: 搜索结果列表:\n{log_results}")
+
         await self._set_to_cache(cache_key, [r.model_dump() for r in results], 'search_ttl_seconds', 300)
         return results
 

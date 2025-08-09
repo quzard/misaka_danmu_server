@@ -110,6 +110,16 @@ def setup_logging():
     # --- 新增：为爬虫响应设置一个专用的日志记录器 ---
     scraper_log_file = log_dir / "scraper_responses.log"
     
+    # 在启动时清空此日志文件，以确保只包含当前会话的调试信息
+    if scraper_log_file.exists():
+        try:
+            # 使用 'w' 模式打开文件会直接截断它
+            with open(scraper_log_file, 'w', encoding='utf-8') as f:
+                f.truncate(0)
+            logging.info(f"已清空旧的原始响应日志: {scraper_log_file}")
+        except IOError as e:
+            logging.error(f"清空原始响应日志失败: {e}")
+
     scraper_logger = logging.getLogger("scraper_responses")
     scraper_logger.setLevel(logging.DEBUG) # 始终记录DEBUG级别的响应
     scraper_logger.propagate = False # 防止日志冒泡到根记录器，避免在控制台和UI上重复显示

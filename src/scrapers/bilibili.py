@@ -354,6 +354,9 @@ class BilibiliScraper(BaseScraper):
                 seen_media_ids.add(item.mediaId)
 
         self.logger.info(f"Bilibili: 搜索 '{keyword}' 完成，找到 {len(final_results)} 个有效结果。")
+        if final_results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in final_results])
+            self.logger.info(f"Bilibili: 搜索结果列表:\n{log_results}")
         await self._set_to_cache(cache_key, [r.model_dump() for r in final_results], 'search_ttl_seconds', 300)
         return final_results
 

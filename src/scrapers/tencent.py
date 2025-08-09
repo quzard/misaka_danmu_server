@@ -120,7 +120,6 @@ class TencentScraper(BaseScraper):
         try:
             self.logger.info(f"Tencent: 正在搜索 '{keyword}'...")
             response = await self.client.post(url, json=payload)
-            scraper_responses_logger.debug(f"Tencent 搜索响应 (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             response_json = response.json()
             data = TencentSearchResult.model_validate(response_json)
@@ -180,6 +179,9 @@ class TencentScraper(BaseScraper):
             self.logger.error(f"解析搜索结果失败: {e}", exc_info=True)
         
         self.logger.info(f"Tencent: 搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"Tencent: 搜索结果列表:\n{log_results}")
         results_to_cache = [r.model_dump() for r in results]
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
@@ -225,7 +227,6 @@ class TencentScraper(BaseScraper):
             try:
                 self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
                 response = await self.client.post(url, json=payload)
-                scraper_responses_logger.debug(f"Tencent 分集列表响应 (cid={cid}, page_context='{page_context}'): {response.text}")
                 response.raise_for_status()
                 data = response.json()
     
@@ -361,7 +362,6 @@ class TencentScraper(BaseScraper):
         index_url = f"https://dm.video.qq.com/barrage/base/{vid}"
         try:
             response = await self.client.get(index_url)
-            scraper_responses_logger.debug(f"Tencent 弹幕索引响应 (vid='{vid}'): {response.text}")
             response.raise_for_status()
             index_data = response.json()
             segment_index = index_data.get("segment_index", {})
@@ -395,7 +395,6 @@ class TencentScraper(BaseScraper):
             segment_url = f"https://dm.video.qq.com/barrage/segment/{vid}/{segment_name}"
             try:
                 response = await self.client.get(segment_url)
-                scraper_responses_logger.debug(f"Tencent 弹幕分段响应 (vid='{vid}', segment='{segment_name}'): {response.text}")
                 response.raise_for_status()
                 comment_data = response.json()
                 

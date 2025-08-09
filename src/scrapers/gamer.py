@@ -171,6 +171,9 @@ class GamerScraper(BaseScraper):
                 results.append(provider_search_info)
             
             self.logger.info(f"Gamer: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+            if results:
+                log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+                self.logger.info(f"Gamer: 搜索结果列表:\n{log_results}")
             return results
 
         except (httpx.TimeoutException, httpx.ConnectError) as e:
