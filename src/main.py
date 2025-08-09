@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 import json
 from .database import create_db_pool, close_db_pool, init_db_tables, create_initial_admin_user
 from .api.ui import router as ui_router, auth_router
@@ -126,9 +126,32 @@ app.include_router(tvdb_router, prefix="/api/tvdb", tags=["TVDB"])
 app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
 
 # 根路径返回前端页面
-@app.get("/", response_class=FileResponse, include_in_schema=False)
-async def read_index():
-    return "static/index.html"
+@app.get("/", include_in_schema=False)
+async def read_index(request: Request):
+    # 支持通过查询参数关闭移动端跳转：/?desktop=1
+    if request.query_params.get("desktop") == "1":
+        return FileResponse("static/index.html")
+
+    ua = request.headers.get("user-agent", "").lower()
+    is_mobile = any(
+        kw in ua for kw in [
+            "iphone",
+            "android",
+            "ipad",
+            "windows phone",
+            "mobile",
+            "opera mini",
+            "mobile safari",
+        ]
+    )
+    if is_mobile:
+        return RedirectResponse(url="/m", status_code=307)
+    return FileResponse("static/index.html")
+
+# 移动端页面
+@app.get("/m", response_class=FileResponse, include_in_schema=False)
+async def read_mobile():
+    return "static/mobile.html"
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
