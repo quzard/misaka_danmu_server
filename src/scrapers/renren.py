@@ -257,6 +257,9 @@ class RenrenScraper(BaseScraper):
                 # provider mediaId is drama id
                 title_clean = re.sub(r"<[^>]+>", "", item.title).replace(":", "：")
                 media_type = "tv_series"  # 人人视频以剧集为主，若将来提供电影可再细分
+                episode_count = item.episode_total
+                if not episode_count:
+                    episode_count = await self._episode_count_from_sid(str(item.id))
                 results.append(models.ProviderSearchInfo(
                     provider=self.provider_name,
                     mediaId=str(item.id),
@@ -265,7 +268,7 @@ class RenrenScraper(BaseScraper):
                     season=get_season_from_title(title_clean),
                     year=item.year,
                     imageUrl=item.cover,
-                    episodeCount=item.episode_total,
+                    episodeCount=episode_count,
                     currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
                 ))
         except Exception as e:
@@ -292,6 +295,20 @@ class RenrenScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"renren: 获取剧集详情失败 drama_id={drama_id}: {e}", exc_info=True)
         return None
+
+    async def _episode_count_from_sid(self, drama_id: str) -> Optional[int]:
+        """Infer episode count by counting valid SID entries from drama detail.
+
+        Args:
+            drama_id: The Renren drama id.
+
+        Returns:
+            Number of episodes if episode list is available; otherwise None.
+        """
+        detail_env = await self._fetch_drama_detail(drama_id)
+        if not detail_env or not detail_env.data or not detail_env.data.episodeList:
+            return None
+        return sum(1 for ep in detail_env.data.episodeList if str(ep.get("sid", "")).strip())
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         cache_key = f"episodes_{self.provider_name}_{media_id}"
