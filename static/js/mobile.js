@@ -59,6 +59,20 @@ function toggleLoader(show) {
   document.getElementById('loader').classList.toggle('hidden', !show);
 }
 
+// 搜索结果骨架屏切换
+function showResultsSkeleton(show) {
+  const sk = document.getElementById('results-skeleton');
+  if (!sk) return;
+  sk.classList.toggle('hidden', !show);
+  // 同时隐藏/显示实际结果与“空”提示，避免视觉重叠
+  const list = document.getElementById('results-list');
+  const empty = document.getElementById('results-empty');
+  if (show) {
+    if (list) list.innerHTML = '';
+    empty?.classList.add('hidden');
+  }
+}
+
 function typeToLabel(t) {
   return ({ tv_series: '电视节目', movie: '电影/剧场版' }[t] || t);
 }
@@ -66,10 +80,12 @@ function typeToLabel(t) {
 function renderResults(items) {
   const ul = document.getElementById('results-list');
   ul.innerHTML = '';
+  const empty = document.getElementById('results-empty');
   if (!items || items.length === 0) {
-    ul.innerHTML = '<li class="small">没有结果</li>';
+    empty.classList.remove('hidden');
     return;
   }
+  empty.classList.add('hidden');
   items.forEach(item => {
     const li = document.createElement('li');
     const poster = createPosterImage(item.imageUrl, item.title);
@@ -102,6 +118,7 @@ function renderResults(items) {
       e.stopPropagation();
       act.disabled = true; act.textContent = '提交中...';
       try {
+        startTasksProgressLoop();
         const payload = {
           provider: item.provider,
           media_id: item.mediaId,
@@ -118,6 +135,7 @@ function renderResults(items) {
         alert(`导入失败: ${err.message || err}`);
       } finally {
         act.disabled = false; act.textContent = '导入';
+        stopTasksProgressLoop();
       }
     });
 
@@ -154,14 +172,16 @@ async function handleSearch(e) {
   const kw = document.getElementById('search-input').value.trim();
   if (!kw) return;
   saveRecentKeyword(kw);
-  toggleLoader(true);
+  showResultsSkeleton(true);
+  startSearchProgressLoop();
   try {
     const data = await apiFetch(`/api/ui/search/provider?keyword=${encodeURIComponent(kw)}`);
     renderResults(data.results || []);
   } catch (err) {
     alert(`搜索失败: ${err.message || err}`);
   } finally {
-    toggleLoader(false);
+    showResultsSkeleton(false);
+    completeSearchProgress();
   }
 }
 
@@ -180,16 +200,15 @@ function saveRecentKeyword(kw) {
   renderRecent();
 }
 function renderRecent() {
-  let container = document.getElementById('recent-wrap');
-  if (!container) {
-    const card = document.createElement('section');
-    card.className = 'card';
-    container = document.createElement('div');
-    container.id = 'recent-wrap';
+  let wrap = document.getElementById('recent-card');
+  if (!wrap) {
+    wrap = document.createElement('section');
+    wrap.id = 'recent-card';
+    wrap.className = 'card';
     const title = document.createElement('h2'); title.textContent = '最近搜索'; title.style.margin = '6px 0 10px'; title.style.fontSize = '16px';
     const list = document.createElement('div'); list.id = 'recent-list'; list.style.display = 'flex'; list.style.flexWrap = 'wrap'; list.style.gap = '8px';
-    card.appendChild(title); card.appendChild(list);
-    document.querySelector('.content').insertBefore(card, document.getElementById('results-card'));
+    wrap.appendChild(title); wrap.appendChild(list);
+    document.querySelector('.content').insertBefore(wrap, document.getElementById('results-card'));
   }
   const list = document.getElementById('recent-list');
   list.innerHTML = '';
@@ -316,27 +335,38 @@ function switchTab(tab) {
   const libraryCard = document.getElementById('library-card');
   const tokensCard = document.getElementById('tokens-card');
   const settingsCard = document.getElementById('settings-card');
+  const recentCard = document.getElementById('recent-card');
   document.getElementById('tab-search').classList.remove('active');
   document.getElementById('tab-library').classList.remove('active');
   document.getElementById('tab-tasks').classList.remove('active');
   document.getElementById('tab-tokens').classList.remove('active');
   document.getElementById('tab-settings').classList.remove('active');
+  moveNavIndicator(tab);
   if (tab === 'search') {
     [searchCard, resultsCard].forEach(el => el.classList.remove('hidden'));
+    if (recentCard) recentCard.classList.remove('hidden');
     [tasksCard, libraryCard, tokensCard, settingsCard].forEach(el => el.classList.add('hidden'));
     document.getElementById('tab-search').classList.add('active');
+    [searchCard, resultsCard].forEach(el => el.classList.add('anim-in'));
   } else if (tab === 'library') {
     [libraryCard].forEach(el => el.classList.remove('hidden'));
+    if (recentCard) recentCard.classList.add('hidden');
     [searchCard, resultsCard, tasksCard, tokensCard, settingsCard].forEach(el => el.classList.add('hidden'));
     document.getElementById('tab-library').classList.add('active');
     loadLibrary();
+    libraryCard.classList.add('anim-in');
   } else if (tab === 'tasks') {
     [tasksCard].forEach(el => el.classList.remove('hidden'));
+    if (recentCard) recentCard.classList.add('hidden');
     [searchCard, resultsCard, libraryCard, tokensCard, settingsCard].forEach(el => el.classList.add('hidden'));
     document.getElementById('tab-tasks').classList.add('active');
     loadTasks();
+    // 进入任务页时展示渐进式进度，导入提交或加载完成时结束
+    startTasksProgressLoop();
+    tasksCard.classList.add('anim-in');
   } else if (tab === 'tokens') {
     [tokensCard].forEach(el => el.classList.remove('hidden'));
+    if (recentCard) recentCard.classList.add('hidden');
     [searchCard, resultsCard, libraryCard, tasksCard, settingsCard].forEach(el => el.classList.add('hidden'));
     document.getElementById('tab-tokens').classList.add('active');
     // 初始化 Token 配置：域名、UA 模式
@@ -351,18 +381,65 @@ function switchTab(tab) {
       } catch {}
       loadTokens();
     })();
+    tokensCard.classList.add('anim-in');
   } else if (tab === 'settings') {
     [settingsCard].forEach(el => el.classList.remove('hidden'));
+    if (recentCard) recentCard.classList.add('hidden');
     [searchCard, resultsCard, libraryCard, tasksCard, tokensCard].forEach(el => el.classList.add('hidden'));
     document.getElementById('tab-settings').classList.add('active');
     initMobileSettingsOnce();
+    settingsCard.classList.add('anim-in');
   }
+}
+
+// 导航滑块指示器
+function moveNavIndicator(tab) {
+  const order = { 'search': 0, 'library': 1, 'tasks': 2, 'tokens': 3, 'settings': 4 };
+  const idx = order[tab] || 0;
+  const indicator = document.getElementById('nav-indicator');
+  if (!indicator) return;
+  const nav = document.querySelector('.bottom-nav');
+  const style = getComputedStyle(nav);
+  const paddingLeft = parseFloat(style.paddingLeft) || 12;
+  const paddingRight = parseFloat(style.paddingRight) || 12;
+  const gap = 8;
+  const items = Array.from(nav.querySelectorAll('.nav-btn'));
+  const count = items.length || 5;
+  const navWidth = nav.clientWidth - paddingLeft - paddingRight;
+  const slotWidth = (navWidth - gap * (count - 1)) / count;
+  // 调整指示器本身宽度，避免计算误差
+  const indicatorEl = document.getElementById('nav-indicator');
+  indicatorEl.style.width = `${slotWidth}px`;
+  const x = paddingLeft + idx * (slotWidth + gap);
+  indicator.style.transform = `translate(${x}px, -50%)`;
+}
+
+function getActiveTabKey() {
+  const active = document.querySelector('.bottom-nav .nav-btn.active');
+  if (!active || !active.id) return 'search';
+  return active.id.replace('tab-', '');
 }
 
 // Init
 document.getElementById('login-form').addEventListener('submit', handleLogin);
 document.getElementById('logout-btn').addEventListener('click', logout);
 document.getElementById('search-form').addEventListener('submit', handleSearch);
+// 兜底：点击搜索按钮可能未触发表单 submit（某些浏览器内核）
+document.querySelector('#search-form .primary')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  handleSearch(new Event('submit'));
+});
+// 输入防抖（预留联想）
+let searchDebounceTimer = null;
+let searchProgressTimer = null;
+let tasksPollTimer = null; // 定时轮询任务进度
+document.getElementById('search-input').addEventListener('input', () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    const _v = document.getElementById('search-input').value.trim();
+    // TODO: 可接入联想 API
+  }, 300);
+});
 document.getElementById('tab-search').addEventListener('click', () => switchTab('search'));
 document.getElementById('tab-library').addEventListener('click', () => switchTab('library'));
 document.getElementById('tab-tasks').addEventListener('click', () => switchTab('tasks'));
@@ -370,6 +447,101 @@ document.getElementById('tab-tokens').addEventListener('click', () => switchTab(
 document.getElementById('tab-settings').addEventListener('click', () => switchTab('settings'));
 checkLogin();
 renderRecent();
+// 初始与尺寸变化时，确保滑块位置准确
+moveNavIndicator('search');
+window.addEventListener('resize', () => moveNavIndicator(getActiveTabKey()));
+
+// --- Progress bars ---
+function setSearchProgress(percentOrNull) {
+  const el = document.getElementById('search-progress');
+  if (!el) return;
+  const bar = el.querySelector('.bar');
+  const label = document.getElementById('search-progress-label');
+  if (percentOrNull == null) {
+    el.classList.add('indeterminate');
+    el.classList.remove('hidden');
+    bar.style.width = '';
+    if (label) label.textContent = '';
+  } else if (percentOrNull === 100) {
+    el.classList.add('hidden');
+    el.classList.remove('indeterminate');
+    bar.style.width = '100%';
+    if (label) label.textContent = '100%';
+  } else {
+    el.classList.remove('indeterminate');
+    el.classList.remove('hidden');
+    const v = Math.max(0, Math.min(100, percentOrNull));
+    bar.style.width = `${v}%`;
+    if (label) label.textContent = `${Math.round(v)}%`;
+  }
+}
+
+function setTasksProgress(percentOrNull) {
+  const el = document.getElementById('tasks-progress');
+  if (!el) return;
+  const bar = el.querySelector('.bar');
+  const label = document.getElementById('tasks-progress-label');
+  if (percentOrNull == null) {
+    el.classList.add('indeterminate');
+    el.classList.remove('hidden');
+    bar.style.width = '';
+    if (label) label.textContent = '';
+  } else if (percentOrNull === 100) {
+    el.classList.add('hidden');
+    el.classList.remove('indeterminate');
+    bar.style.width = '100%';
+    if (label) label.textContent = '100%';
+  } else {
+    el.classList.remove('indeterminate');
+    el.classList.remove('hidden');
+    const v = Math.max(0, Math.min(100, percentOrNull));
+    bar.style.width = `${v}%`;
+    if (label) label.textContent = `${Math.round(v)}%`;
+  }
+}
+
+function startSearchProgressLoop() {
+  clearInterval(searchProgressTimer);
+  let p = 10;
+  setSearchProgress(p);
+  searchProgressTimer = setInterval(() => {
+    p = Math.min(90, p + 1);
+    setSearchProgress(p);
+    if (p >= 90) clearInterval(searchProgressTimer);
+  }, 80);
+}
+
+function completeSearchProgress() {
+  clearInterval(searchProgressTimer);
+  setSearchProgress(100);
+}
+
+async function pollTasksProgressOnce() {
+  try {
+    const tasks = await apiFetch('/api/ui/tasks');
+    // 查找运行中的导入类任务，聚合进度（取平均或最大值）
+    const running = (tasks || []).filter(t => t.status === '运行中' || t.status === '排队中');
+    if (running.length === 0) { setTasksProgress(100); return; }
+    const numeric = running.map(t => Number(t.progress) || 0);
+    const avg = Math.round(numeric.reduce((a,b)=>a+b,0) / numeric.length);
+    setTasksProgress(avg);
+  } catch (e) {
+    // 失败不打断 UI
+  }
+}
+
+function startTasksProgressLoop() {
+  clearInterval(tasksPollTimer);
+  // 立即拉一次，以便尽快显示真实进度
+  pollTasksProgressOnce();
+  tasksPollTimer = setInterval(pollTasksProgressOnce, 1500);
+}
+
+function stopTasksProgressLoop() {
+  clearInterval(tasksPollTimer);
+  tasksPollTimer = null;
+  setTasksProgress(100);
+}
 // Settings 复刻（账户/Webhook/Bangumi/TMDB/豆瓣/TVDB）
 let settingsInitialized = false;
 function initMobileSettingsOnce() {
@@ -385,7 +557,10 @@ function initMobileSettingsOnce() {
   const showView = (id) => {
     subTabs.forEach(([tabId, viewId]) => {
       document.getElementById(tabId).classList.toggle('active', viewId === id);
-      document.getElementById(viewId).classList.toggle('hidden', viewId !== id);
+      const view = document.getElementById(viewId);
+      const isTarget = viewId === id;
+      view.classList.toggle('hidden', !isTarget);
+      if (isTarget) view.classList.add('anim-in');
     });
   };
   subTabs.forEach(([tabId, viewId]) => {
@@ -659,3 +834,5 @@ function createPosterImage(src, altText) {
   img.onerror = () => { if (img.src !== window.location.origin + '/static/placeholder.png' && !img.src.endsWith('/static/placeholder.png')) { img.onerror = null; img.src = '/static/placeholder.png'; } };
   return img;
 }
+
+
