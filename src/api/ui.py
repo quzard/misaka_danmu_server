@@ -1081,11 +1081,14 @@ async def generic_import_task(
             db_media_type=media_type
         )
         if not episodes:
-            logger.warning(f"未能为 provider='{provider}' media_id='{media_id}' 获取到任何分集。")
+            # 修正：当找不到分集时，抛出 TaskSuccess 异常，以便任务管理器能以一个有意义的消息结束任务，
+            # 而不是简单地返回并显示通用的“成功”消息。
             if current_episode_index:
-                logger.warning(f"特别是，未能找到指定的目标分集: {current_episode_index}。")
-            logger.warning("任务终止。")
-            return
+                msg = f"未能找到第 {current_episode_index} 集。"
+            else:
+                msg = "未能获取到任何分集。"
+            logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
+            raise TaskSuccess(msg)
 
         # 如果是电影，即使返回了多个版本（如原声、国语），也只处理第一个
         if media_type == "movie" and episodes:
