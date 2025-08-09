@@ -116,6 +116,7 @@ class TencentScraper(BaseScraper):
         try:
             self.logger.info(f"Tencent: 正在搜索 '{keyword}'...")
             response = await self.client.post(url, json=payload)
+            self.logger.debug(f"Tencent 搜索响应 (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             response_json = response.json()
             data = TencentSearchResult.model_validate(response_json)
@@ -341,6 +342,7 @@ class TencentScraper(BaseScraper):
         index_url = f"https://dm.video.qq.com/barrage/base/{vid}"
         try:
             response = await self.client.get(index_url)
+            self.logger.debug(f"Tencent 弹幕索引响应 (vid='{vid}'): {response.text}")
             response.raise_for_status()
             index_data = response.json()
             segment_index = index_data.get("segment_index", {})
@@ -374,6 +376,7 @@ class TencentScraper(BaseScraper):
             segment_url = f"https://dm.video.qq.com/barrage/segment/{vid}/{segment_name}"
             try:
                 response = await self.client.get(segment_url)
+                self.logger.debug(f"Tencent 弹幕分段响应 (vid='{vid}', segment='{segment_name}'): {response.text}")
                 response.raise_for_status()
                 comment_data = response.json()
                 
