@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from typing import List
 
+from .config import settings
+
 # 这个双端队列将用于在内存中存储最新的日志，以供Web界面展示
 _logs_deque = collections.deque(maxlen=200)
 
@@ -75,8 +77,10 @@ def setup_logging():
     # 为Web界面定义一个更简洁的格式
     ui_formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
+    # 从配置中获取日志级别，如果无效则默认为 INFO
+    log_level = getattr(logging, settings.log.level.upper(), logging.INFO)
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(log_level)
 
     # 清理已存在的处理器，以避免在热重载时重复添加
     if logger.hasHandlers():
@@ -102,6 +106,24 @@ def setup_logging():
             handler.setFormatter(verbose_formatter)
     
     logging.info("日志系统已初始化，日志将输出到控制台和 %s", log_file)
+
+    # --- 新增：为爬虫响应设置一个专用的日志记录器 ---
+    scraper_log_file = log_dir / "scraper_responses.log"
+    
+    scraper_logger = logging.getLogger("scraper_responses")
+    scraper_logger.setLevel(logging.DEBUG) # 始终记录DEBUG级别的响应
+    scraper_logger.propagate = False # 防止日志冒泡到根记录器，避免在控制台和UI上重复显示
+
+    # 为其配置一个独立的文件处理器
+    scraper_handler = logging.handlers.RotatingFileHandler(
+        scraper_log_file, maxBytes=10*1024*1024, backupCount=3, encoding='utf-8'
+    )
+    scraper_handler.setFormatter(logging.Formatter(
+        '[%(asctime)s] [%(name)s] - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    scraper_logger.addHandler(scraper_handler)
+    logging.info("专用的爬虫响应日志已初始化，将输出到 %s", scraper_log_file)
 
 def get_logs() -> List[str]:
     """返回为API存储的所有日志条目列表。"""

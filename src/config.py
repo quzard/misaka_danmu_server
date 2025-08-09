@@ -27,6 +27,9 @@ class AdminConfig(BaseModel):
     initial_user: Optional[str] = None
     initial_password: Optional[str] = None
 
+class LogConfig(BaseModel):
+    level: str = "INFO"
+
 # 5. (新增) Bangumi OAuth 配置
 class BangumiConfig(BaseModel):
     client_id: str = "" # 将从数据库加载
@@ -61,6 +64,7 @@ class Settings(BaseSettings):
     jwt: JWTConfig = JWTConfig()
     admin: AdminConfig = AdminConfig()
     bangumi: BangumiConfig = BangumiConfig()
+    log: LogConfig = LogConfig()
     douban: DoubanConfig = DoubanConfig()
     class Config:
         # 为环境变量设置前缀，避免与系统变量冲突
