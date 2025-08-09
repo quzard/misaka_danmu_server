@@ -39,21 +39,32 @@
       </header>
 
       <main class="content" id="main-content">
-        <section id="search-card" class="card">
+        <section id="search-card" class="card search-sticky">
           <form id="search-form" class="search-bar">
             <input id="search-input" type="text" inputmode="search" placeholder="输入番剧名称，支持 SxxExx" required />
             <button type="submit" class="primary">搜索</button>
           </form>
           <div id="loader" class="loader hidden"></div>
+          <div id="search-progress" class="progress hidden"><div class="bar"></div><span id="search-progress-label" class="label">0%</span></div>
         </section>
 
         <section id="results-card" class="card">
           <h2>搜索结果</h2>
+          <div id="results-skeleton" class="skeleton hidden"></div>
+          <div id="results-empty" class="empty hidden">
+            <div class="empty-illustration"></div>
+            <p class="empty-title">还没有结果</p>
+            <p class="empty-sub">试试输入完整片名，或用 SxxExx 精确到集数</p>
+            <div class="empty-actions">
+              <button id="btn-demo-search" class="row-action">示例搜索</button>
+            </div>
+          </div>
           <ul id="results-list" class="list"></ul>
         </section>
 
         <section id="tasks-card" class="card hidden">
           <h2>任务</h2>
+          <div id="tasks-progress" class="progress hidden"><div class="bar"></div><span id="tasks-progress-label" class="label">0%</span></div>
           <ul id="tasks-list" class="list"></ul>
         </section>
 
@@ -230,6 +241,7 @@
         <button id="tab-tasks" class="nav-btn">任务</button>
         <button id="tab-tokens" class="nav-btn">Token</button>
         <button id="tab-settings" class="nav-btn">设置</button>
+        <span id="nav-indicator" class="nav-indicator"></span>
       </nav>
     </section>
   </div>
