@@ -221,6 +221,7 @@ class TencentScraper(BaseScraper):
                 self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
                 response = await self.client.post(url, json=payload)
                 self.logger.debug(f"收到响应 (cid={cid}), Status Code: {response.status_code}")
+                self.logger.debug(f"原始响应内容 (cid={cid}): {response.text}")
                 response.raise_for_status()
                 data = response.json()
     
