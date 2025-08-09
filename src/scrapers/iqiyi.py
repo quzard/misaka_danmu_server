@@ -114,6 +114,13 @@ class IqiyiComment(BaseModel):
 
 class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
+    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
+    # 新增：用于过滤搜索结果中非正片内容的正则表达式
+    _SEARCH_JUNK_TITLE_PATTERN = re.compile(
+        r'纪录片|预告|花絮|专访|MV|特辑|演唱会|音乐会|独家|解读|揭秘|赏析|速看|资讯|彩蛋|访谈|番外|短片',
+        re.IGNORECASE
+    )
+
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
@@ -152,7 +159,14 @@ class IqiyiScraper(BaseScraper):
                 album = doc.album_doc_info
                 if not (album.album_link and "iqiyi.com" in album.album_link and album.site_id == "iqiyi" and album.video_doc_type == 1):
                     continue
-                if "原创" in album.channel or "教育" in album.channel:
+               # 修正：增加对 album.channel 的非空检查，并添加对“纪录片”频道的过滤
+                if album.channel and ("原创" in album.channel or "教育" in album.channel or "纪录片" in album.channel):
+                    self.logger.debug(f"爱奇艺: 根据频道 '{album.channel}' 过滤掉 '{album.album_title}'")
+                    continue
+
+                # 新增：根据标题过滤掉非正片内容
+                if album.album_title and self._SEARCH_JUNK_TITLE_PATTERN.search(album.album_title):
+                    self.logger.debug(f"爱奇艺: 根据标题黑名单过滤掉 '{album.album_title}'")
                     continue
 
                 douban_id = None
@@ -187,6 +201,9 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
         self.logger.info(f"爱奇艺: 搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"爱奇艺: 搜索结果列表:\n{log_results}")
         results_to_cache = [r.model_dump() for r in results]
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
@@ -341,6 +358,14 @@ class IqiyiScraper(BaseScraper):
                 url=ep.play_url
             ) for ep in episodes if ep.link_id
         ]
+        
+        # 根据黑名单过滤分集
+        if self._EPISODE_BLACKLIST_PATTERN:
+            original_count = len(provider_episodes)
+            provider_episodes = [ep for ep in provider_episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
+            filtered_count = original_count - len(provider_episodes)
+            if filtered_count > 0:
+                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
 
         # 仅当不是强制模式且获取完整列表时才进行缓存
         if target_episode_index is None and db_media_type is None and provider_episodes:

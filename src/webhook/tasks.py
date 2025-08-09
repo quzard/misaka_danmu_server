@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Any, Callable, Optional
 
+from datetime import datetime
 import aiomysql
 from thefuzz import fuzz
 
@@ -35,6 +36,7 @@ async def webhook_search_and_dispatch_task(
     tmdb_id: Optional[str],
     imdb_id: Optional[str],
     tvdb_id: Optional[str],
+    webhook_source: str,
     progress_callback: Callable,
     pool: aiomysql.Pool,
     manager: ScraperManager,
@@ -111,7 +113,12 @@ async def webhook_search_and_dispatch_task(
         logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
         progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
-        task_title = f"Webhook自动导入: {best_match.title} ({best_match.provider})"
+        # 根据媒体类型格式化任务标题，以包含季集信息和时间戳
+        current_time = datetime.now().strftime("%H:%M:%S")
+        if media_type == "tv_series":
+            task_title = f"Webhook（{webhook_source}）自动导入：{best_match.title} - S{season:02d}E{current_episode_index:02d} ({best_match.provider}) [{current_time}]"
+        else: # movie
+            task_title = f"Webhook（{webhook_source}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
         task_coro = lambda cb: generic_import_task(
             provider=best_match.provider, media_id=best_match.mediaId,
             anime_title=best_match.title, media_type=best_match.type,

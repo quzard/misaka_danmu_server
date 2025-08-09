@@ -6,7 +6,7 @@ import hashlib
 import html
 import json
 from urllib.parse import urlencode
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, ClassVar
 from datetime import datetime
 from collections import defaultdict
 
@@ -152,8 +152,8 @@ class BilibiliScraper(BaseScraper):
 
     # Regex to filter out non-main content like specials, trailers, etc.
     # Based on user-provided rules.
-    _JUNK_TITLE_PATTERN = re.compile(
-        r'(\[|\【|\b)(NC)?(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|映像|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)',
+    _JUNK_TITLE_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r'(\[|\【|\b)(NC)?(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)',
         re.IGNORECASE
     )
 
@@ -354,6 +354,9 @@ class BilibiliScraper(BaseScraper):
                 seen_media_ids.add(item.mediaId)
 
         self.logger.info(f"Bilibili: 搜索 '{keyword}' 完成，找到 {len(final_results)} 个有效结果。")
+        if final_results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in final_results])
+            self.logger.info(f"Bilibili: 搜索结果列表:\n{log_results}")
         await self._set_to_cache(cache_key, [r.model_dump() for r in final_results], 'search_ttl_seconds', 300)
         return final_results
 
@@ -615,7 +618,7 @@ class BilibiliScraper(BaseScraper):
         formatted = []
         for c in processed_comments:
             timestamp = c.progress / 1000.0
-            p_string = f"{timestamp:.3f},{c.mode},{c.fontsize},{c.color},[{self.provider_name}]"
+            p_string = f"{timestamp:.3f},{c.mode},{c.color},[{self.provider_name}]"
             formatted.append({
                 "cid": str(c.id),
                 "p": p_string,

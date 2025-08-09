@@ -24,6 +24,8 @@ class GamerScraper(BaseScraper):
         "gamer_cookie": "Cookie",
         "gamer_user_agent": "User-Agent",
     }
+    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
+
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
@@ -75,8 +77,14 @@ class GamerScraper(BaseScraper):
             else:
                 self.logger.warning("Gamer: Cookie 刷新请求已发送，但未收到新的 Cookie 值。")
                 return False
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                self.logger.error(f"Gamer: 刷新 Cookie 失败 (403 Forbidden)。这通常意味着您的 Cookie 已完全失效或 IP 被临时阻止。请尝试在设置中更新 Cookie。")
+            else:
+                self.logger.error(f"Gamer: 刷新 Cookie 时发生 HTTP 错误: {e}", exc_info=True)
+            return False
         except Exception as e:
-            self.logger.error(f"Gamer: 刷新 Cookie 失败: {e}", exc_info=True)
+            self.logger.error(f"Gamer: 刷新 Cookie 时发生未知错误: {e}", exc_info=True)
             return False
 
     async def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
@@ -163,13 +171,22 @@ class GamerScraper(BaseScraper):
                 results.append(provider_search_info)
             
             self.logger.info(f"Gamer: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+            if results:
+                log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+                self.logger.info(f"Gamer: 搜索结果列表:\n{log_results}")
             return results
 
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             self.logger.warning(f"Gamer: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
             return []
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                self.logger.error(f"Gamer: 搜索 '{keyword}' 失败 (403 Forbidden)。这通常是由于无效或过期的 Cookie 导致的。请尝试在“搜索源”设置中更新巴哈姆特动画疯的 Cookie。")
+            else:
+                self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生 HTTP 错误: {e}", exc_info=True)
+            return []
         except Exception as e:
-            self.logger.error(f"Gamer: 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生未知错误: {e}", exc_info=True)
             return []
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
@@ -212,6 +229,14 @@ class GamerScraper(BaseScraper):
                             url=f"https://ani.gamer.com.tw/animeVideo.php?sn={ep_sn}"
                         ))
 
+            # 根据黑名单过滤分集
+            if self._EPISODE_BLACKLIST_PATTERN:
+                original_count = len(episodes)
+                episodes = [ep for ep in episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
+                filtered_count = original_count - len(episodes)
+                if filtered_count > 0:
+                    self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
+            
             if target_episode_index:
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
             

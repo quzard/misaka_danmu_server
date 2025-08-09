@@ -89,6 +89,7 @@ class YoukuRpcResult(BaseModel):
 
 class YoukuScraper(BaseScraper):
     provider_name = "youku"
+    _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
@@ -168,6 +169,9 @@ class YoukuScraper(BaseScraper):
             self.logger.error(f"Youku search failed for '{keyword}': {e}", exc_info=True)
 
         self.logger.info(f"Youku: 搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"Youku: 搜索结果列表:\n{log_results}")
         results_to_cache = [r.model_dump() for r in results]
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
@@ -194,10 +198,13 @@ class YoukuScraper(BaseScraper):
                 if not page_result or not page_result.videos:
                     break
                 
-                if page == 1:
+                if page == 1 and page_result.total:
                     total_episodes = page_result.total
 
-                filtered_videos = [v for v in page_result.videos if "彩蛋" not in v.title]
+                filtered_videos = []
+                for v in page_result.videos:
+                    if not any(kw in v.title for kw in self._EPISODE_BLACKLIST_KEYWORDS):
+                        filtered_videos.append(v)
                 all_episodes.extend(filtered_videos)
 
                 if len(all_episodes) >= total_episodes or len(page_result.videos) < page_size:

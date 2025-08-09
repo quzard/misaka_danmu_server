@@ -834,5 +834,3 @@ function createPosterImage(src, altText) {
   img.onerror = () => { if (img.src !== window.location.origin + '/static/placeholder.png' && !img.src.endsWith('/static/placeholder.png')) { img.onerror = null; img.src = '/static/placeholder.png'; } };
   return img;
 }
-
-

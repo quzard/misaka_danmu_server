@@ -8,7 +8,7 @@ import aiomysql
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from .. import models
+from .. import models, crud
 from .base import BaseScraper, get_season_from_title
 
 # --- Pydantic Models for Mgtv API ---
@@ -147,8 +147,8 @@ class MgtvScraper(BaseScraper):
     _JUNK_TITLE_PATTERN = re.compile(
         # 英文缩写/单词，需要单词边界或括号
         r'(\[|\【|\b)(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|OST|BGM)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)'
-        # 中文关键词，直接匹配
-        r'|(特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|映像|纪录片|访谈|番外|短片)',
+        # 中文关键词，直接匹配 (已合并新规则)
+        r'|(特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|映像|纪录片|访谈|番外|短片|加更|走心|解忧|纯享)',
         re.IGNORECASE
     )
 
@@ -224,7 +224,8 @@ class MgtvScraper(BaseScraper):
                                 season=get_season_from_title(item.title),
                                 year=item.year,
                                 imageUrl=item.img,
-                                episodeCount=item.video_count,
+                                # 搜索结果中不包含总集数，设为None
+                                episodeCount=None,
                                 currentEpisodeIndex=episode_info.get("episode") if episode_info else None
                             )
                             results.append(provider_search_info)
@@ -283,15 +284,10 @@ class MgtvScraper(BaseScraper):
                     continue
                 filtered_episodes.append(ep)
 
-            # 修正：根据媒体类型决定排序方式
-            if db_media_type == 'movie':
-                # 对于电影，按时长倒序排列，确保正片在最前面
-                def get_duration_seconds(time_str: str) -> int:
-                    parts = (time_str or "0").split(':')
-                    return sum(int(p) * 60**i for i, p in enumerate(reversed(parts)))
-                sorted_episodes = sorted(filtered_episodes, key=lambda x: get_duration_seconds(x.time), reverse=True)
-            else:
-                sorted_episodes = sorted(filtered_episodes, key=lambda x: int(x.video_id))
+            # The API returns episodes in the correct order.
+            # The previous sorting by video_id was incorrect and has been removed.
+            # We will now process the filtered_episodes list directly.
+            sorted_episodes = filtered_episodes
             
             provider_episodes = [
                 models.ProviderEpisodeInfo(
@@ -303,6 +299,19 @@ class MgtvScraper(BaseScraper):
                     url=f"https://www.mgtv.com/b/{media_id}/{ep.video_id}.html"
                 ) for i, ep in enumerate(sorted_episodes)
             ]
+
+            # 新增：根据黑名单过滤分集
+            blacklist_regex_str = await crud.get_config_value(self.pool, "mgtv_episode_blacklist_regex", "")
+            if blacklist_regex_str:
+                try:
+                    blacklist_pattern = re.compile(blacklist_regex_str, re.IGNORECASE)
+                    original_count = len(provider_episodes)
+                    provider_episodes = [ep for ep in provider_episodes if not blacklist_pattern.search(ep.title)]
+                    filtered_count = original_count - len(provider_episodes)
+                    if filtered_count > 0:
+                        self.logger.info(f"Mgtv: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
+                except re.error as e:
+                    self.logger.error(f"Mgtv: 分集标题黑名单正则表达式无效: '{blacklist_regex_str}', 错误: {e}")
 
             if target_episode_index:
                 return [ep for ep in provider_episodes if ep.episodeIndex == target_episode_index]

@@ -16,6 +16,8 @@ protobuf==3.20.3
 # 用于模糊字符串匹配，提高搜索结果排序的准确性
 thefuzz
 python-Levenshtein
+# 用于人人源的AES解密
+pycryptodome
 # 用于解析HTML
 beautifulsoup4
 lxml

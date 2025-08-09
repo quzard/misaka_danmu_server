@@ -1,5 +1,6 @@
 import logging
 from typing import Any, Dict
+from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
 from ..scraper_manager import ScraperManager
@@ -8,7 +9,15 @@ from .tasks import webhook_search_and_dispatch_task
 logger = logging.getLogger(__name__)
 
 class EmbyWebhook(BaseWebhook):
-    async def handle(self, payload: Dict[str, Any]):
+    async def handle(self, request: Request):
+        # 处理器现在负责解析请求体。
+        # Emby 通常发送 application/json。
+        try:
+            payload = await request.json()
+        except Exception:
+            self.logger.error("Emby Webhook: 无法解析请求体为JSON。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
+
         event_type = payload.get("Event")
         # 我们只关心新媒体入库的事件, 兼容 emby 的 'library.new' 和 jellyfin 的 'item.add'
         if event_type not in ["library.new"]:
@@ -43,9 +52,10 @@ class EmbyWebhook(BaseWebhook):
                 logger.warning(f"Webhook: 忽略一个剧集，因为缺少系列标题、季度或集数信息。")
                 return
 
+            logger.info(f"Emby Webhook: 解析到剧集 - 标题: '{series_title}', 类型: Episode, 季: {season_number}, 集: {episode_number}")
             logger.info(f"Webhook: 收到剧集 '{series_title}' S{season_number:02d}E{episode_number:02d}' 的入库通知。")
             
-            task_title = f"Webhook导入: {series_title} - S{season_number:02d}E{episode_number:02d}"
+            task_title = f"Webhook（emby）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
             search_keyword = f"{series_title} S{season_number:02d}E{episode_number:02d}"
             media_type = "tv_series"
             anime_title = series_title
@@ -56,9 +66,10 @@ class EmbyWebhook(BaseWebhook):
                 logger.warning(f"Webhook: 忽略一个电影，因为缺少标题信息。")
                 return
             
+            logger.info(f"Emby Webhook: 解析到电影 - 标题: '{movie_title}', 类型: Movie")
             logger.info(f"Webhook: 收到电影 '{movie_title}' 的入库通知。")
             
-            task_title = f"Webhook导入: {movie_title}"
+            task_title = f"Webhook（emby）搜索: {movie_title}"
             search_keyword = movie_title
             media_type = "movie"
             season_number = 1
@@ -67,10 +78,6 @@ class EmbyWebhook(BaseWebhook):
         
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
-
-        # 动态创建一个 ScraperManager 实例以供导入任务使用
-        scraper_manager = ScraperManager(self.pool)
-        await scraper_manager.load_and_sync_scrapers()
 
         # 使用新的、专门的 webhook 任务
         task_coro = lambda callback: webhook_search_and_dispatch_task(
@@ -83,9 +90,10 @@ class EmbyWebhook(BaseWebhook):
             tmdb_id=str(tmdb_id) if tmdb_id else None,
             imdb_id=str(imdb_id) if imdb_id else None,
             tvdb_id=str(tvdb_id) if tvdb_id else None,
+            webhook_source='emby',
             progress_callback=callback,
             pool=self.pool,
-            manager=scraper_manager,
+            manager=self.scraper_manager,
             task_manager=self.task_manager
         )
         await self.task_manager.submit_task(task_coro, task_title)

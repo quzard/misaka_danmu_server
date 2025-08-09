@@ -87,15 +87,15 @@ class DandanEpisodeInfo(BaseModel):
 class DandanAnimeInfo(BaseModel):
     """dandanplay /search/episodes 接口中的番剧信息模型"""
     animeId: int
-    bangumiId: Optional[str] = ""
     animeTitle: str
+    imageUrl: str = ""
+    searchKeyword: str = ""
     type: str
     typeDescription: str
-    imageUrl: Optional[str] = None
-    startDate: Optional[datetime] = None
-    episodeCount: int
-    rating: int = 0
+    isOnAir: bool = False
+    airDay: int = 0
     isFavorited: bool = False
+    rating: float = 0.0
     episodes: List[DandanEpisodeInfo]
 
 class DandanSearchEpisodesResponse(DandanResponseBase):
@@ -231,9 +231,23 @@ async def _search_implementation(
             detail="Missing required query parameter: 'anime' or 'keyword'"
         )
 
-    episode_number = int(episode) if episode and episode.isdigit() else None
-    
-    flat_results = await crud.search_episodes_in_library(pool, search_term, episode_number)
+    # 新增：调用解析函数
+    parsed_info = _parse_search_term(search_term)
+    title_to_search = parsed_info["title"]
+    season_to_search = parsed_info.get("season")
+    episode_from_title = parsed_info.get("episode")
+
+    # 优先使用独立的 'episode' 参数
+    episode_number_from_param = int(episode) if episode and episode.isdigit() else None
+    final_episode_to_search = episode_number_from_param if episode_number_from_param is not None else episode_from_title
+
+    # 使用解析后的信息进行数据库查询
+    flat_results = await crud.search_episodes_in_library(
+        pool,
+        anime_title=title_to_search,
+        episode_number=final_episode_to_search,
+        season_number=season_to_search
+    )
 
     grouped_animes: Dict[int, DandanAnimeInfo] = {}
 
@@ -244,14 +258,14 @@ async def _search_implementation(
             dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
 
             grouped_animes[anime_id] = DandanAnimeInfo(
-                bangumiId=res.get('bangumiId') or f"A{anime_id}",
                 animeId=anime_id,
                 animeTitle=res['animeTitle'],
+                imageUrl=res.get('imageUrl') or "",
+                searchKeyword=search_term or "",
                 type=dandan_type,
                 typeDescription=dandan_type_desc,
-                imageUrl=res.get('imageUrl'),
-                startDate=res.get('startDate'),
-                episodeCount=res.get('totalEpisodeCount', 0),
+                # isFavorited 字段现在由数据库查询提供
+                isFavorited=res.get('isFavorited', False),
                 episodes=[]
             )
         
@@ -646,7 +660,7 @@ async def match_single_file(
     if normalized_search_title:
         exact_matches = [
             r for r in results 
-            if r['animeTitle'].replace("：", ":").replace(" ", "") == normalized_search_title
+            if r['animeTitle'].replace("：", ":").replace(" ", "").startswith(normalized_search_title)
         ]
         if len(exact_matches) < len(results):
             logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")

@@ -455,17 +455,20 @@ async def edit_episode_info(
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """更新指定分集的标题、集数和链接。"""
-    updated = await crud.update_episode_info(
-        pool,
-        episode_id,
-        update_data.title,
-        update_data.episode_index,
-        update_data.source_url
-    )
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
-    logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episode_id} 的信息。")
-    return
+    try:
+        updated = await crud.update_episode_info(
+            pool,
+            episode_id,
+            update_data.title,
+            update_data.episode_index,
+            update_data.source_url
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+        logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episode_id} 的信息。")
+        return
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.post("/library/source/{source_id}/reorder-episodes", status_code=status.HTTP_202_ACCEPTED, summary="重整指定源的分集顺序")
 async def reorder_source_episodes(
@@ -741,21 +744,36 @@ async def get_all_tasks(
 async def delete_task_from_history_endpoint(
     task_id: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """从历史记录中删除一个任务。只能删除已完成、失败或已暂停的任务。"""
+    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。"""
     task = await crud.get_task_from_history_by_id(pool, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
 
-    if task['status'] in [TaskStatus.RUNNING, TaskStatus.PENDING]:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除正在运行或排队中的任务。")
+    status = task['status']
+
+    if status == TaskStatus.PENDING:
+        await task_manager.cancel_pending_task(task_id)
+    elif status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+        aborted = await task_manager.abort_current_task(task_id)
+        if not aborted:
+            # 这可能是一个竞态条件：在我们检查和中止之间，任务可能已经完成。
+            # 重新检查数据库中的状态以确认。
+            task_after_check = await crud.get_task_from_history_by_id(pool, task_id)
+            if task_after_check and task_after_check['status'] in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+                # 如果它仍然在运行/暂停，说明中止失败，可能因为它不是当前任务。
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能它不是当前正在执行的任务。")
+            logger.info(f"任务 {task_id} 在中止前已完成，将直接删除历史记录。")
 
     deleted = await crud.delete_task_from_history(pool, task_id)
     if not deleted:
-        # This case should be rare if the first check passed, but good for safety
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="在删除过程中未找到任务。")
+        # 这不是一个严重错误，可能意味着任务在处理过程中已被删除。
+        logger.info(f"在尝试删除时，任务 {task_id} 已不存在于历史记录中。")
+        return
+    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {status})。")
     return
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
@@ -918,40 +936,82 @@ async def get_available_webhook_types(
 
 async def delete_anime_task(anime_id: int, pool: aiomysql.Pool, progress_callback: Callable):
     """Background task to delete an anime and all its related data."""
-    progress_callback(0, "开始删除...")
+    await progress_callback(0, "开始删除...")
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            try:
+                await conn.begin()
 
-    # 新增：在删除数据库记录前，先清理关联的缓存
-    try:
-        sources = await crud.get_anime_sources(pool, anime_id)
-        for source in sources:
-            media_id = source.get('media_id')
-            if media_id:
-                # 清理可能存在的各种缓存
-                await crud.delete_cache(pool, f"episodes_{media_id}")
-                await crud.delete_cache(pool, f"base_info_{media_id}") # 针对爱奇艺
-        logger.info(f"已为作品 ID {anime_id} 清理了 {len(sources)} 个数据源的关联缓存。")
-    except Exception as e:
-        logger.warning(f"为作品 ID {anime_id} 清理缓存时发生非致命错误: {e}")
+                # 1. 获取该作品关联的所有源ID
+                await progress_callback(10, "正在查找关联的数据源...")
+                await cursor.execute("SELECT id FROM anime_sources WHERE anime_id = %s", (anime_id,))
+                source_ids = [row[0] for row in await cursor.fetchall()]
 
-    try:
-        deleted = await crud.delete_anime(pool, anime_id)
-        if deleted:
-            raise TaskSuccess("删除成功。")
-        else:
-            raise TaskSuccess("作品未找到，无需删除。")
-    except Exception as e:
-        logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
-        raise
+                if source_ids:
+                    # 2. 获取所有源关联的所有分集ID
+                    await progress_callback(20, "正在查找关联的分集...")
+                    format_strings_sources = ','.join(['%s'] * len(source_ids))
+                    await cursor.execute(f"SELECT id FROM episode WHERE source_id IN ({format_strings_sources})", tuple(source_ids))
+                    episode_ids = [row[0] for row in await cursor.fetchall()]
+
+                    if episode_ids:
+                        # 3. 删除所有分集关联的弹幕
+                        await progress_callback(40, "正在删除弹幕...")
+                        format_strings_episodes = ','.join(['%s'] * len(episode_ids))
+                        await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings_episodes})", tuple(episode_ids))
+                        
+                        # 4. 删除所有分集
+                        await progress_callback(60, "正在删除分集...")
+                        await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings_episodes})", tuple(episode_ids))
+                    
+                    # 5. 删除所有源记录
+                    await progress_callback(80, "正在删除数据源...")
+                    await cursor.execute(f"DELETE FROM anime_sources WHERE id IN ({format_strings_sources})", tuple(source_ids))
+
+                # 6. 删除元数据 (别名表有级联删除，元数据表没有，需要手动删除)
+                await progress_callback(90, "正在删除元数据...")
+                await cursor.execute("DELETE FROM anime_metadata WHERE anime_id = %s", (anime_id,))
+
+                # 7. 删除作品本身
+                await progress_callback(95, "正在删除作品条目...")
+                affected_rows = await cursor.execute("DELETE FROM anime WHERE id = %s", (anime_id,))
+                
+                await conn.commit()
+
+                if affected_rows > 0:
+                    raise TaskSuccess("删除成功。")
+                else:
+                    raise TaskSuccess("作品未找到，无需删除。")
+            except Exception as e:
+                await conn.rollback()
+                logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
+                raise
 
 async def delete_source_task(source_id: int, pool: aiomysql.Pool, progress_callback: Callable):
     """Background task to delete a source and all its related data."""
     progress_callback(0, "开始删除...")
     try:
-        deleted = await crud.delete_anime_source(pool, source_id)
-        if deleted:
-            raise TaskSuccess("删除成功。")
-        else:
-            raise TaskSuccess("数据源未找到，无需删除。")
+        # Re-implementing crud.delete_anime_source with progress
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+                await progress_callback(10, "正在检查数据源...")
+                await cursor.execute("SELECT 1 FROM anime_sources WHERE id = %s", (source_id,))
+                if not await cursor.fetchone():
+                    raise TaskSuccess("数据源未找到，无需删除。")
+                await progress_callback(20, "正在查找关联的分集...")
+                await cursor.execute("SELECT id FROM episode WHERE source_id = %s", (source_id,))
+                episode_ids = [row[0] for row in await cursor.fetchall()]
+                if episode_ids:
+                    await progress_callback(40, "正在删除弹幕...")
+                    format_strings = ','.join(['%s'] * len(episode_ids))
+                    await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings})", tuple(episode_ids))
+                    await progress_callback(70, "正在删除分集...")
+                    await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings})", tuple(episode_ids))
+                await progress_callback(90, "正在删除数据源记录...")
+                await cursor.execute("DELETE FROM anime_sources WHERE id = %s", (source_id,))
+                await conn.commit()
+        raise TaskSuccess("删除成功。")
     except Exception as e:
         logger.error(f"删除源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
         raise
@@ -960,11 +1020,20 @@ async def delete_episode_task(episode_id: int, pool: aiomysql.Pool, progress_cal
     """Background task to delete an episode and its comments."""
     progress_callback(0, "开始删除...")
     try:
-        deleted = await crud.delete_episode(pool, episode_id)
-        if deleted:
-            raise TaskSuccess("删除成功。")
-        else:
-            raise TaskSuccess("分集未找到，无需删除。")
+        # Re-implementing crud.delete_episode with progress
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+                await progress_callback(20, "正在检查分集...")
+                await cursor.execute("SELECT 1 FROM episode WHERE id = %s", (episode_id,))
+                if not await cursor.fetchone():
+                    raise TaskSuccess("分集未找到，无需删除。")
+                await progress_callback(50, "正在删除弹幕...")
+                await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
+                await progress_callback(80, "正在删除分集记录...")
+                await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
+                await conn.commit()
+        raise TaskSuccess("删除成功。")
     except Exception as e:
         logger.error(f"删除分集任务 (ID: {episode_id}) 失败: {e}", exc_info=True)
         raise
@@ -1012,11 +1081,14 @@ async def generic_import_task(
             db_media_type=media_type
         )
         if not episodes:
-            logger.warning(f"未能为 provider='{provider}' media_id='{media_id}' 获取到任何分集。")
+            # 修正：当找不到分集时，抛出 TaskSuccess 异常，以便任务管理器能以一个有意义的消息结束任务，
+            # 而不是简单地返回并显示通用的“成功”消息。
             if current_episode_index:
-                logger.warning(f"特别是，未能找到指定的目标分集: {current_episode_index}。")
-            logger.warning("任务终止。")
-            return
+                msg = f"未能找到第 {current_episode_index} 集。"
+            else:
+                msg = "未能获取到任何分集。"
+            logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
+            raise TaskSuccess(msg)
 
         # 如果是电影，即使返回了多个版本（如原声、国语），也只处理第一个
         if media_type == "movie" and episodes:
@@ -1100,8 +1172,26 @@ async def delete_bulk_sources_task(source_ids: List[int], pool: aiomysql.Pool, p
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {source_id})...")
         try:
-            if await crud.delete_anime_source(pool, source_id):
-                deleted_count += 1
+            # Inlined logic from delete_anime_source
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await conn.begin()
+                    await cursor.execute("SELECT 1 FROM anime_sources WHERE id = %s", (source_id,))
+                    if not await cursor.fetchone():
+                        await conn.rollback()
+                        continue # Source not found, skip
+
+                    await cursor.execute("SELECT id FROM episode WHERE source_id = %s", (source_id,))
+                    episode_ids = [row[0] for row in await cursor.fetchall()]
+
+                    if episode_ids:
+                        format_strings = ','.join(['%s'] * len(episode_ids))
+                        await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings})", tuple(episode_ids))
+                        await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings})", tuple(episode_ids))
+
+                    await cursor.execute("DELETE FROM anime_sources WHERE id = %s", (source_id,))
+                    await conn.commit()
+                    deleted_count += 1
         except Exception as e:
             logger.error(f"批量删除源任务中，删除源 (ID: {source_id}) 失败: {e}", exc_info=True)
             # Continue to the next one

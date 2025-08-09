@@ -786,69 +786,26 @@ async def update_episode_info(pool: aiomysql.Pool, episode_id: int, title: str, 
     """更新分集信息"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
+            # 1. 获取当前分集的 source_id
+            await cursor.execute("SELECT source_id FROM episode WHERE id = %s", (episode_id,))
+            result = await cursor.fetchone()
+            if not result:
+                return False # Episode not found
+            source_id = result[0]
+
+            # 2. 检查新的 episode_index 是否已在该 source_id 下被其他分集使用
+            await cursor.execute(
+                "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s AND id != %s",
+                (source_id, episode_index, episode_id)
+            )
+            if await cursor.fetchone():
+                # 如果找到了，说明集数重复，抛出特定错误
+                raise ValueError("该集数已存在，请使用其他集数。")
+
+            # 3. 如果没有重复，则执行更新
             query = "UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s"
             affected_rows = await cursor.execute(query, (title, episode_index, source_url, episode_id))
             return affected_rows > 0
-
-async def delete_anime(pool: aiomysql.Pool, anime_id: int) -> bool:
-    """
-    删除一个番剧及其所有关联数据（分集、弹幕）。
-    此操作在事务中执行以保证数据一致性。
-    """
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            try:
-                await conn.begin()  # 开始事务
-
-                # 1. 获取该作品关联的所有源ID
-                await cursor.execute("SELECT id FROM anime_sources WHERE anime_id = %s", (anime_id,))
-                source_ids = [row[0] for row in await cursor.fetchall()]
-
-                if source_ids:
-                    # 2. 获取所有源关联的所有分集ID
-                    format_strings_sources = ','.join(['%s'] * len(source_ids))
-                    await cursor.execute(f"SELECT id FROM episode WHERE source_id IN ({format_strings_sources})", tuple(source_ids))
-                    episode_ids = [row[0] for row in await cursor.fetchall()]
-
-                    if episode_ids:
-                        # 3. 删除所有分集关联的弹幕
-                        format_strings_episodes = ','.join(['%s'] * len(episode_ids))
-                        await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings_episodes})", tuple(episode_ids))
-                        # 4. 删除所有分集
-                        await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings_episodes})", tuple(episode_ids))
-                    
-                    # 5. 删除所有源记录
-                    await cursor.execute(f"DELETE FROM anime_sources WHERE id IN ({format_strings_sources})", tuple(source_ids))
-
-                # 6. 删除元数据 (别名表有级联删除，元数据表没有，需要手动删除)
-                await cursor.execute("DELETE FROM anime_metadata WHERE anime_id = %s", (anime_id,))
-
-                # 7. 删除作品本身
-                affected_rows = await cursor.execute("DELETE FROM anime WHERE id = %s", (anime_id,))
-                await conn.commit()  # 提交事务
-                return affected_rows > 0
-            except Exception as e:
-                await conn.rollback()  # 如果出错则回滚
-                raise e
-
-async def delete_episode(pool: aiomysql.Pool, episode_id: int) -> bool:
-    """
-    删除一个分集及其所有弹幕。
-    此操作在事务中执行以保证数据一致性。
-    """
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            try:
-                await conn.begin()
-                # 1. 删除弹幕
-                await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
-                # 2. 删除分集
-                affected_rows = await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
-                await conn.commit()
-                return affected_rows > 0
-            except Exception as e:
-                await conn.rollback()
-                raise e
 
 async def sync_scrapers_to_db(pool: aiomysql.Pool, provider_names: List[str]):
     """将发现的搜索源同步到数据库，新的搜索源会被添加进去。"""

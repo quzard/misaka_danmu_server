@@ -48,6 +48,8 @@
 }
 
 .bulk-actions-bar {
+    display: flex;
+    justify-content: flex-end; /* 将按钮推到右边 */
     margin-bottom: 10px;
 }
 

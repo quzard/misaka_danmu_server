@@ -274,6 +274,12 @@ class RenrenScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"renren: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
+
+        self.logger.info(f"renren: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"renren: 搜索结果列表:\n{log_results}")
+
         await self._set_to_cache(cache_key, [r.model_dump() for r in results], 'search_ttl_seconds', 300)
         return results
 
@@ -298,10 +304,8 @@ class RenrenScraper(BaseScraper):
 
     async def _episode_count_from_sid(self, drama_id: str) -> Optional[int]:
         """Infer episode count by counting valid SID entries from drama detail.
-
         Args:
             drama_id: The Renren drama id.
-
         Returns:
             Number of episodes if episode list is available; otherwise None.
         """
@@ -434,7 +438,8 @@ class RenrenScraper(BaseScraper):
         for c in processed:
             timestamp = float(c["timestamp"]) if isinstance(c["timestamp"], (int, float)) else 0.0
             color = int(c["color"]) if isinstance(c["color"], int) else 16777215
-            p_string = f"{timestamp:.2f},1,{color},[{self.provider_name}]"
+            mode = int(c["mode"]) if isinstance(c["mode"], int) else 1
+            p_string = f"{timestamp:.2f},{mode},{color},[{self.provider_name}]"
             out.append({
                 "cid": c["content_id"],
                 "p": p_string,
