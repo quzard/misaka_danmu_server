@@ -26,6 +26,7 @@ class TencentEpisode(BaseModel):
     vid: str = Field(..., description="分集视频ID")
     title: str = Field(..., description="分集标题")
     is_trailer: str = Field("0")
+    union_title: Optional[str] = None
 
 class TencentComment(BaseModel):
     id: str = Field(..., description="弹幕ID")
@@ -255,12 +256,28 @@ class TencentScraper(BaseScraper):
     
                     episode = TencentEpisode.model_validate(params)
     
-                    # 参考C#代码，增加更详细的过滤规则，过滤掉预告、彩蛋、直拍、直播回顾等非正片内容
-                    is_preview = episode.is_trailer == "1" or any(
-                        kw in episode.title for kw in ["预告", "彩蛋", "直拍", "直播回顾", "加更", "走心", "解忧", "纯享"]
-                    )
-    
-                    if not is_preview and episode.vid not in all_episodes:
+                    # 过滤非正片内容
+                    is_junk = False
+                    reason = ""
+                    # 1. 根据 is_trailer 标志
+                    if episode.is_trailer == "1":
+                        is_junk = True
+                        reason = "is_trailer flag"
+                    # 2. 根据标题中的关键词
+                    if not is_junk:
+                        junk_keywords = ["预告", "彩蛋", "直拍", "直播回顾", "加更", "走心", "解忧", "纯享", "节点"]
+                        for kw in junk_keywords:
+                            if kw in episode.title:
+                                is_junk = True
+                                reason = f"title keyword '{kw}'"
+                                break
+                    # 3. 根据 union_title 中的关键词
+                    if not is_junk and episode.union_title and "预告" in episode.union_title:
+                        is_junk = True
+                        reason = "union_title keyword '预告'"
+                    if is_junk:
+                        self.logger.debug(f"Tencent: 过滤掉非正片内容 '{episode.title}' (vid: {episode.vid}), 原因: {reason}")
+                    elif episode.vid not in all_episodes:
                         all_episodes[episode.vid] = episode
                         new_episodes_found += 1
     
