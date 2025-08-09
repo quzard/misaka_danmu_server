@@ -274,6 +274,7 @@ class RenrenScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"renren: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
+
         self.logger.info(f"renren: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
         if results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
@@ -300,6 +301,7 @@ class RenrenScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"renren: 获取剧集详情失败 drama_id={drama_id}: {e}", exc_info=True)
         return None
+
     async def _episode_count_from_sid(self, drama_id: str) -> Optional[int]:
         """Infer episode count by counting valid SID entries from drama detail.
         Args:
