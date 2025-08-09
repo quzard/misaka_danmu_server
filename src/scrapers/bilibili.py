@@ -153,7 +153,7 @@ class BilibiliScraper(BaseScraper):
     # Regex to filter out non-main content like specials, trailers, etc.
     # Based on user-provided rules.
     _JUNK_TITLE_PATTERN: ClassVar[re.Pattern] = re.compile(
-        r'(\[|\【|\b)(NC)?(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|映像|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)',
+        r'(\[|\【|\b)(NC)?(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)',
         re.IGNORECASE
     )
 
