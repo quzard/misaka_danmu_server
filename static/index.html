@@ -395,14 +395,12 @@
                             <button id="reassociate-sources-from-detail-btn">调整关联数据源</button>
                         </div>
                         <div class="bulk-actions-bar">
+                            <button id="select-all-sources-btn">全选</button>
                             <button id="delete-selected-sources-btn">删除选中</button>
                         </div>
                         <table id="source-detail-table">
                             <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="select-all-sources-checkbox" title="全选"></th>
-                                    <th>源提供方</th><th>源媒体ID</th><th>状态</th><th>收录时间</th><th>操作</th>
-                                </tr>
+                                <tr><th><input type="checkbox" class="hidden"></th><th>源提供方</th><th>源媒体ID</th><th>状态</th><th>收录时间</th><th>操作</th></tr>
                             </thead>
                             <tbody id="source-detail-table-body"></tbody>
                         </table>

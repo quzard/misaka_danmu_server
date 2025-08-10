@@ -101,6 +101,21 @@ async function handleLibraryAction(e) {
     }
 }
 
+function updateSelectAllButtonState() {
+    const selectAllBtn = document.getElementById('select-all-sources-btn');
+    if (!selectAllBtn) return;
+
+    const allCheckboxes = sourceDetailTableBody.querySelectorAll('.source-checkbox');
+    if (allCheckboxes.length === 0) {
+        selectAllBtn.textContent = '全选';
+        selectAllBtn.disabled = true;
+        return;
+    }
+    const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+    selectAllBtn.textContent = allChecked ? '取消全选' : '全选';
+    selectAllBtn.disabled = false;
+}
+
 async function showAnimeDetailView(animeId) {
     switchView('anime-detail-view');
     detailViewTitle.textContent = '加载中...';
@@ -125,6 +140,7 @@ async function showAnimeDetailView(animeId) {
         animeDetailView.dataset.animeId = anime.animeId; // Store for back button
 
         renderSourceDetailTable(sources, anime);
+        updateSelectAllButtonState(); // Initial state update
     } catch (error) {
         detailViewTitle.textContent = '加载详情失败';
         detailViewMeta.textContent = error.message || error;
@@ -136,6 +152,13 @@ function renderSourceDetailTable(sources, anime) {
     if (sources.length > 0) {
         sources.forEach(source => {
             const row = sourceDetailTableBody.insertRow();
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
+                    const checkbox = row.querySelector('.source-checkbox');
+                    if (checkbox) checkbox.click();
+                }
+            });
             row.innerHTML = `
                 <td><input type="checkbox" class="source-checkbox" value="${source.source_id}"></td>
                 <td>${source.provider_name}</td>
@@ -155,6 +178,10 @@ function renderSourceDetailTable(sources, anime) {
     } else {
         sourceDetailTableBody.innerHTML = `<tr><td colspan="6">未关联任何数据源。</td></tr>`;
     }
+    // Add event listener for individual checkboxes to update the "Select All" button state
+    sourceDetailTableBody.querySelectorAll('.source-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateSelectAllButtonState);
+    });
 }
 
 async function handleSourceAction(e) {
@@ -368,11 +395,13 @@ export function setupLibraryEventListeners() {
         }
     });
 
-    document.getElementById('select-all-sources-checkbox').addEventListener('click', (e) => {
-        const isChecked = e.target.checked;
+    document.getElementById('select-all-sources-btn').addEventListener('click', () => {
+        const allCheckboxes = sourceDetailTableBody.querySelectorAll('.source-checkbox');
+        const shouldSelectAll = Array.from(allCheckboxes).some(cb => !cb.checked);
         sourceDetailTableBody.querySelectorAll('.source-checkbox').forEach(cb => {
-            cb.checked = isChecked;
+            cb.checked = shouldSelectAll;
         });
+        updateSelectAllButtonState();
     });
 
     document.getElementById('delete-selected-sources-btn').addEventListener('click', async () => {
