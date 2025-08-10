@@ -110,6 +110,14 @@ class BaseScraper(ABC):
         is_enabled_str = await crud.get_config_value(self.pool, config_key, "false")
         return is_enabled_str.lower() == 'true'
 
+    async def execute_action(self, action_name: str, payload: Dict[str, Any]) -> Any:
+        """
+        执行一个指定的操作。
+        子类应重写此方法来处理其声明的操作。
+        :param action_name: 要执行的操作的名称。
+        :param payload: 包含操作所需参数的字典。
+        """
+        raise NotImplementedError(f"操作 '{action_name}' 在 {self.provider_name} 中未实现。")
 
     @abstractmethod
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:

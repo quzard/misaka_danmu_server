@@ -724,6 +724,30 @@ async def get_tmdb_settings(
     values = await asyncio.gather(*tasks)
     return dict(zip(keys, values))
 
+@router.post("/scrapers/{provider_name}/actions/{action_name}", summary="执行搜索源的自定义操作")
+async def execute_scraper_action(
+    provider_name: str,
+    action_name: str,
+    payload: Dict[str, Any] = None, # FastAPI will parse JSON body into a dict
+    current_user: models.User = Depends(security.get_current_user),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """
+    执行指定搜索源的特定操作。
+    例如，Bilibili的登录流程可以通过调用 'get_login_info', 'generate_qrcode', 'poll_login' 等操作来驱动。
+    """
+    try:
+        scraper = manager.get_scraper(provider_name)
+        result = await scraper.execute_action(action_name, payload or {})
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except NotImplementedError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"执行搜索源 '{provider_name}' 的操作 '{action_name}' 时出错: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="执行操作时发生内部错误。")
+
 @router.put("/config/tmdb", status_code=status.HTTP_204_NO_CONTENT, summary="更新TMDB配置")
 async def update_tmdb_settings(
     payload: Dict[str, str],

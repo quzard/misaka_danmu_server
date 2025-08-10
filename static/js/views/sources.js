@@ -74,6 +74,24 @@ function renderDanmakuSources(settings) {
             configBtn.dataset.fields = JSON.stringify(setting.configurable_fields);
             configBtn.dataset.isLoggable = setting.is_loggable;
             li.appendChild(configBtn);
+
+            // 新增：如果源是Bilibili，则添加一个登录状态检查和按钮
+            if (setting.provider_name === 'bilibili') {
+                const loginStatusDiv = document.createElement('div');
+                loginStatusDiv.className = 'source-login-status';
+                loginStatusDiv.dataset.provider = 'bilibili';
+                loginStatusDiv.textContent = '登录状态: 未知';
+                li.appendChild(loginStatusDiv);
+
+                // 异步检查登录状态 - 使用新的通用操作端点
+                apiFetch('/api/ui/scrapers/bilibili/actions/get_login_info', { method: 'POST' })
+                    .then(info => {
+                        const statusDiv = danmakuSourcesList.querySelector(`.source-login-status[data-provider="bilibili"]`);
+                        if (statusDiv) {
+                            statusDiv.textContent = info.isLogin ? `已登录: ${info.uname}` : '未登录';
+                        }
+                    });
+            }
         }
 
         const statusIcon = document.createElement('span');
@@ -191,6 +209,24 @@ async function handleDanmakuSourceAction(e) {
     const isLoggable = button.dataset.isLoggable === 'true';
     const fields = JSON.parse(button.dataset.fields);
     
+    // 新增：为Bilibili弹窗添加登录部分
+    if (providerName === 'bilibili') {
+        const modalBody = document.getElementById('modal-body');
+        const biliLoginSection = document.createElement('div');
+        biliLoginSection.id = 'bili-login-section';
+        biliLoginSection.innerHTML = `
+            <div class="form-row" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <label>账号登录</label>
+                <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
+                    <div id="bili-login-status">正在检查登录状态...</div>
+                    <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
+                </div>
+            </div>
+            <div id="bili-qrcode-container" style="text-align: center; margin-top: 15px;"></div>
+        `;
+        // 确保在显示之前插入
+        setTimeout(() => modalBody.appendChild(biliLoginSection), 0);
+    }
     showScraperConfigModal(providerName, fields, isLoggable);
 }
 
@@ -276,9 +312,33 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                 logSection.appendChild(helpText);
                 modalBody.appendChild(logSection);
             }
+
+            // 如果是Bilibili，添加登录部分
+            if (providerName === 'bilibili') {
+                const biliLoginSection = document.createElement('div');
+                biliLoginSection.id = 'bili-login-section';
+                biliLoginSection.innerHTML = `
+                    <div class="form-row" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                        <label>账号登录</label>
+                        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
+                            <div id="bili-login-status">正在检查登录状态...</div>
+                            <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
+                        </div>
+                    </div>
+                    <div id="bili-qrcode-container" style="text-align: center; margin-top: 15px;"></div>
+                `;
+                logSection.appendChild(labelEl);
+                logSection.appendChild(inputEl);
+                logSection.appendChild(helpText);
+                modalBody.appendChild(logSection);
+            }
         })
         .catch(error => {
             modalBody.innerHTML = `<p class="error">加载配置失败: ${error.message}</p>`;
+        })
+        .finally(() => {
+            // 在所有内容加载完毕后，为Bilibili登录按钮绑定事件
+            if (providerName === 'bilibili') setupBiliLoginListeners();
         });
 }
 
@@ -303,6 +363,108 @@ async function handleSaveScraperConfig() {
     await apiFetch(`/api/ui/scrapers/${currentProviderForModal}/config`, { method: 'PUT', body: JSON.stringify(payload) });
     hideScraperConfigModal();
     alert('配置已保存！');
+}
+
+let biliPollInterval = null;
+
+function stopBiliPolling() {
+    if (biliPollInterval) {
+        clearInterval(biliPollInterval);
+        biliPollInterval = null;
+    }
+}
+
+async function checkBiliLoginStatus() {
+    const statusDiv = document.getElementById('bili-login-status');
+    if (!statusDiv) return;
+    statusDiv.textContent = '正在检查登录状态...';
+    statusDiv.className = '';
+    try {
+        const info = await apiFetch('/api/ui/scrapers/bilibili/actions/get_login_info', { method: 'POST' });
+        if (info.isLogin) {
+            statusDiv.textContent = `已登录: ${info.uname} (Lv.${info.level})`;
+            statusDiv.classList.add('success');
+            document.getElementById('bili-login-btn').textContent = '注销';
+        } else {
+            statusDiv.textContent = '当前未登录。';
+            document.getElementById('bili-login-btn').textContent = '扫码登录';
+        }
+    } catch (error) {
+        statusDiv.textContent = `检查状态失败: ${error.message}`;
+        statusDiv.classList.add('error');
+    }
+}
+
+async function handleBiliLoginClick() {
+    const loginBtn = document.getElementById('bili-login-btn');
+    const statusDiv = document.getElementById('bili-login-status');
+    const qrContainer = document.getElementById('bili-qrcode-container');
+    if (!loginBtn || !statusDiv || !qrContainer) return;
+
+    // 检查当前是登录还是注销
+    if (loginBtn.textContent === '注销') {
+        if (confirm('确定要注销当前的Bilibili登录吗？')) {
+            await apiFetch('/api/ui/scrapers/bilibili/actions/logout', { method: 'POST' });
+            await checkBiliLoginStatus(); // 刷新状态
+            loadDanmakuSources(); // 重新加载源列表以更新主视图中的状态
+        }
+        return;
+    }
+
+    // --- 以下是登录流程 ---
+    stopBiliPolling();
+    loginBtn.disabled = true;
+    statusDiv.textContent = '正在获取二维码...';
+    qrContainer.innerHTML = '';
+
+    try {
+        const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
+        const qrImg = document.createElement('img');
+        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`;
+        qrContainer.appendChild(qrImg);
+        statusDiv.textContent = '请使用Bilibili手机客户端扫描二维码。';
+
+        biliPollInterval = setInterval(async () => {
+            try {
+                const pollPayload = { qrcode_key: qrData.qrcode_key };
+                const pollRes = await apiFetch('/api/ui/scrapers/bilibili/actions/poll_login', { method: 'POST', body: JSON.stringify(pollPayload) });
+                if (pollRes.code === 0) { // 登录成功
+                    stopBiliPolling();
+                    statusDiv.textContent = '登录成功！';
+                    statusDiv.classList.add('success');
+                    qrContainer.innerHTML = '';
+                    setTimeout(() => { hideScraperConfigModal(); loadDanmakuSources(); }, 1500);
+                } else if (pollRes.code === 86038) { // 二维码失效
+                    stopBiliPolling();
+                    statusDiv.textContent = '二维码已失效，请重新获取。';
+                    statusDiv.classList.add('error');
+                    qrContainer.innerHTML = '';
+                } else if (pollRes.code === 86090) { // 已扫描，待确认
+                    statusDiv.textContent = '已扫描，请在手机上确认登录。';
+                }
+            } catch (pollError) {
+                stopBiliPolling();
+                statusDiv.textContent = `轮询失败: ${pollError.message}`;
+                statusDiv.classList.add('error');
+            }
+        }, 2000);
+    } catch (error) {
+        statusDiv.textContent = `获取二维码失败: ${error.message}`;
+        statusDiv.classList.add('error');
+    } finally {
+        loginBtn.disabled = false;
+    }
+}
+
+function setupBiliLoginListeners() {
+    const loginBtn = document.getElementById('bili-login-btn');
+    if (loginBtn) {
+        loginBtn.addEventListener('click', handleBiliLoginClick);
+        checkBiliLoginStatus();
+    }
+    // 确保在弹窗关闭时停止轮询
+    document.getElementById('modal-close-btn').addEventListener('click', stopBiliPolling);
+    document.getElementById('modal-cancel-btn').addEventListener('click', stopBiliPolling);
 }
 
 export function setupSourcesEventListeners() {

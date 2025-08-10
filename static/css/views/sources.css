@@ -75,3 +75,9 @@
     background-color: #e9ecef;
     flex-shrink: 0;
 }
+
+.source-login-status {
+    font-size: 0.85em;
+    color: #6c757d;
+    margin-left: 10px;
+}

@@ -280,3 +280,26 @@ th {
 .modal-help-text a:hover {
     text-decoration: underline;
 }
+
+/* Bilibili Login Modal Styles */
+#bili-qrcode-container img {
+    width: 180px;
+    height: 180px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+#bili-login-status {
+    font-size: 0.9em;
+    color: #606266;
+    min-height: 1.2em;
+}
+
+#bili-login-status.success {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+#bili-login-status.error {
+    color: var(--error-color);
+}
