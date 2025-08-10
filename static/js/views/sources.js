@@ -279,15 +279,15 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
 
             // 如果是Bilibili，添加登录部分
             if (providerName === 'bilibili') {
+                // 修正：移除 form-row 布局，使用一个独立的、居中的容器
                 const biliLoginSectionHTML = `
-                    <div class="form-row" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                        <label>账号登录</label>
-                        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
-                            <div id="bili-login-status">正在检查登录状态...</div>
+                    <div id="bili-login-section">
+                        <div id="bili-login-status">正在检查登录状态...</div>
+                        <div id="bili-login-controls">
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
                         </div>
+                        <div id="bili-qrcode-container"></div>
                     </div>
-                    <div id="bili-qrcode-container" style="text-align: center; margin-top: 15px;"></div>
                 `;
                 modalBody.insertAdjacentHTML('beforeend', biliLoginSectionHTML);
             }
@@ -377,15 +377,6 @@ async function handleBiliLoginClick() {
     qrContainer.innerHTML = '';
 
     try {
-        // 增加健壮性检查：确保QRCode库已加载
-        if (typeof QRCode === 'undefined') {
-            console.error("QRCode library is not loaded. Check the script tag in index.html.");
-            statusDiv.textContent = '二维码生成库加载失败，请刷新页面重试。';
-            statusDiv.classList.add('error');
-            loginBtn.disabled = false;
-            return;
-        }
-
         const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
 
         // 使用本地库生成二维码，避免外部依赖和网络问题
@@ -402,8 +393,6 @@ async function handleBiliLoginClick() {
         const refreshBtn = document.createElement('button');
         refreshBtn.className = 'secondary-btn';
         refreshBtn.textContent = '刷新二维码';
-        refreshBtn.style.display = 'block'; // 确保按钮在二维码下方
-        refreshBtn.style.margin = '10px auto 0'; // 居中
         refreshBtn.addEventListener('click', handleBiliLoginClick); // 点击时重新调用此函数
         qrContainer.appendChild(refreshBtn);
 

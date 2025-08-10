@@ -282,6 +282,20 @@ th {
 }
 
 /* Bilibili Login Modal Styles */
+#bili-login-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+#bili-login-controls {
+    text-align: center;
+}
+
 #bili-qrcode-container {
     display: flex;
     flex-direction: column;
@@ -289,7 +303,8 @@ th {
     gap: 10px; /* 二维码和刷新按钮之间的间距 */
 }
 
-#bili-qrcode-container img {
+#bili-qrcode-container img,
+#bili-qrcode-container canvas {
     width: 180px;
     height: 180px;
     border: 1px solid var(--border-color);
