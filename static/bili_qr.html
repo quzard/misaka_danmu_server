@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Bilibili 扫码登录</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f4f4f4; text-align: center; }
+        #container { background-color: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        #qrcode { margin-top: 10px; }
+        p { color: #333; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h2>Bilibili 扫码登录</h2>
+        <p>请使用Bilibili手机客户端扫描二维码</p>
+        <div id="qrcode"></div>
+    </div>
+    <script type="text/javascript" src="/static/js/lib/qrcode.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const qrUrl = params.get('url');
+
+            if (qrUrl) {
+                new QRCode(document.getElementById('qrcode'), { text: qrUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+            } else {
+                document.getElementById('qrcode').textContent = '错误：二维码链接无效。';
+            }
+        });
+    </script>
+</body>
+</html>
