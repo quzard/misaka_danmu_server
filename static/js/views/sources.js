@@ -377,6 +377,15 @@ async function handleBiliLoginClick() {
     qrContainer.innerHTML = '';
 
     try {
+        // 增加健壮性检查：确保QRCode库已加载
+        if (typeof QRCode === 'undefined') {
+            console.error("QRCode library is not loaded. Check the script tag in index.html.");
+            statusDiv.textContent = '二维码生成库加载失败，请刷新页面重试。';
+            statusDiv.classList.add('error');
+            loginBtn.disabled = false;
+            return;
+        }
+
         const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
 
         // 使用本地库生成二维码，避免外部依赖和网络问题
