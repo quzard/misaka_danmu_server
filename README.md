@@ -99,7 +99,8 @@
         - mysql
       ports:
         - "7768:7768"
-
+       # 这里将内部使用的mysql映射到3310端口，不与其他的mysql抢端口
+        - "3310:3306"   
       networks:
         - danmuserver
 
