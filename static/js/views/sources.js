@@ -279,14 +279,14 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
 
             // 如果是Bilibili，添加登录部分
             if (providerName === 'bilibili') {
-                // 修正：移除 form-row 布局，使用一个独立的、居中的容器
+                // 修正：调整HTML结构以实现垂直居中布局
                 const biliLoginSectionHTML = `
-                    <div id="bili-login-section">
+                    <div id="bili-login-section" style="text-align: center;">
                         <div id="bili-login-status">正在检查登录状态...</div>
-                        <div id="bili-login-controls">
+                        <div id="bili-login-controls"> <!-- 新增容器用于居中 -->
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
+                            <div id="bili-qrcode-container"></div>
                         </div>
-                        <div id="bili-qrcode-container"></div>
                     </div>
                 `;
                 modalBody.insertAdjacentHTML('beforeend', biliLoginSectionHTML);
