@@ -73,9 +73,9 @@ class IqiyiHtmlVideoInfo(BaseModel):
     video_id: Optional[int] = Field(None, alias="videoId")
     # 修正：新API返回的字段名不同
     video_name: str = Field(alias="name")
-    video_url: str = Field(alias="pageUrl")
+    video_url: str = Field(alias="playUrl")
     channel_name: Optional[str] = Field(None, alias="channelName")
-    duration: int
+    duration: int = Field(alias="durationSec")
     # video_count 不再从此模型获取，但保留字段以兼容旧缓存
     video_count: int = 0 
 
