@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bilibili 扫码登录</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f4f4f4; text-align: center; }
@@ -34,7 +35,10 @@
                 if (event.data && event.data.type === 'BILI_QR_URL') {
                     const qrUrl = event.data.url;
                     if (qrUrl) {
-                        new QRCode(document.getElementById('qrcode'), { text: qrUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+                        // 修正：直接使用数值 4 (对应 QRCode.CorrectLevel.H) 作为纠错级别。
+                        // 这可以避免因 qrcode.js 库在某些浏览器环境下未能正确初始化 QRCode.CorrectLevel
+                        // 对象而导致的 "Cannot read properties of undefined (reading 'H')" 错误。
+                        new QRCode(document.getElementById('qrcode'), { text: qrUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: 4 });
                     } else {
                         document.getElementById('qrcode').textContent = '错误：未收到有效的二维码链接。';
                     }
