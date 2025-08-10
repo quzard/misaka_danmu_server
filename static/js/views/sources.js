@@ -380,13 +380,13 @@ async function handleBiliLoginClick() {
         const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
 
         // 使用本地库生成二维码，避免外部依赖和网络问题
-        new QRCode(qrContainer, {
+        new window.QRCode(qrContainer, {
             text: qrData.url,
             width: 180,
             height: 180,
             colorDark: "#000000",
             colorLight: "#ffffff",
-            correctLevel: QRCode.CorrectLevel.H
+            correctLevel: window.QRCode.CorrectLevel.H
         });
 
         // 新增：添加一个刷新按钮
