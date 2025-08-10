@@ -221,7 +221,7 @@ class IqiyiScraper(BaseScraper):
             response = await self.client.get(api_url)
             response.raise_for_status()
             data = response.json()
-            if data.get("code") == "A00000" and data.get("data"):
+            if data.get("code") in ["A00000", "0"] and data.get("data"):
                 return str(data["data"])
             else:
                 self.logger.warning(f"爱奇艺: decode API 未成功返回 tvid (link_id: {link_id})。响应: {data}")
