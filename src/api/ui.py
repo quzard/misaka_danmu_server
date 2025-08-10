@@ -1298,13 +1298,14 @@ async def import_from_provider(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    # 新增：在提交任务前，检查该数据源是否已存在
-    source_exists = await crud.check_source_exists_by_media_id(pool, request_data.provider, request_data.media_id)
-    if source_exists:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="该数据源已存在于弹幕库中，无需重复导入。"
-        )
+    # 只有在全量导入（非单集导入）时才执行此检查
+    if request_data.current_episode_index is None:
+        source_exists = await crud.check_source_exists_by_media_id(pool, request_data.provider, request_data.media_id)
+        if source_exists:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该数据源已存在于弹幕库中，无需重复导入。"
+            )
 
     # 创建一个将传递给任务管理器的协程工厂 (lambda)
     task_coro = lambda callback: generic_import_task(
