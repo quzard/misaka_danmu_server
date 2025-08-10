@@ -754,6 +754,23 @@ async def delete_anime_source(pool: aiomysql.Pool, source_id: int, conn: Optiona
     finally:
         if not conn: pool.release(_conn)
 
+async def delete_episode(pool: aiomysql.Pool, episode_id: int, conn: Optional[aiomysql.Connection] = None) -> bool:
+    """删除一个分集及其所有关联的弹幕。"""
+    _conn = conn or await pool.acquire()
+    try:
+        async with _conn.cursor() as cursor:
+            if not conn: await _conn.begin()
+            await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
+            affected_rows = await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
+            if not conn: await _conn.commit()
+            return affected_rows > 0
+    except Exception as e:
+        if not conn: await _conn.rollback()
+        logging.error(f"删除分集 (ID: {episode_id}) 时发生错误: {e}", exc_info=True)
+        return False
+    finally:
+        if not conn: pool.release(_conn)
+
 async def reassociate_anime_sources(pool: aiomysql.Pool, source_anime_id: int, target_anime_id: int) -> bool:
     """将一个作品的所有数据源移动到另一个作品，并删除原作品。如果目标作品已存在相同源，则会删除源作品的重复源及其数据。"""
     async with pool.acquire() as conn:

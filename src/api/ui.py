@@ -417,6 +417,31 @@ async def delete_source_from_anime(
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {source_id} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除源 '{source_info['provider_name']}' 的任务已提交。", "task_id": task_id}
 
+class BulkDeleteEpisodesRequest(models.BaseModel):
+    episode_ids: List[int]
+
+@router.post("/library/episodes/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除分集的任务")
+async def delete_bulk_episodes(
+    request_data: BulkDeleteEpisodesRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """提交一个后台任务来批量删除多个分集。"""
+    if not request_data.episode_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Episode IDs list cannot be empty.")
+
+    task_title = f"批量删除 {len(request_data.episode_ids)} 个分集"
+    
+    # 注意：这里我们将整个列表传递给任务
+    task_coro = lambda callback: delete_bulk_episodes_task(request_data.episode_ids, pool, callback)
+    
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+
+    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episode_ids)} 个分集的任务 (Task ID: {task_id})。")
+    return {"message": task_title + "的任务已提交。", "task_id": task_id}
+
+
 @router.put("/library/source/{source_id}/favorite", status_code=status.HTTP_204_NO_CONTENT, summary="切换数据源的精确标记状态")
 async def toggle_source_favorite(
     source_id: int,
@@ -1058,6 +1083,26 @@ async def delete_episode_task(episode_id: int, pool: aiomysql.Pool, progress_cal
     except Exception as e:
         logger.error(f"删除分集任务 (ID: {episode_id}) 失败: {e}", exc_info=True)
         raise
+
+async def delete_bulk_episodes_task(episode_ids: List[int], pool: aiomysql.Pool, progress_callback: Callable):
+    """后台任务：批量删除多个分集。"""
+    total = len(episode_ids)
+    deleted_count = 0
+    for i, episode_id in enumerate(episode_ids):
+        progress = int((i / total) * 100)
+        await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id})...")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await conn.begin()
+                    await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
+                    affected_rows = await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
+                    await conn.commit()
+                    if affected_rows > 0:
+                        deleted_count += 1
+        except Exception as e:
+            logger.error(f"批量删除分集任务中，删除分集 (ID: {episode_id}) 失败: {e}", exc_info=True)
+    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
 
 async def generic_import_task(
     provider: str,
