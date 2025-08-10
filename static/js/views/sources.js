@@ -382,12 +382,20 @@ async function handleBiliLoginClick() {
     try {
         const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
 
-        // 在新窗口中打开二维码页面
-        const popupUrl = `/static/bili_qr.html?url=${encodeURIComponent(qrData.url)}`;
+        // 在新窗口中打开一个干净的二维码页面，不通过URL传递数据
+        const popupUrl = `/static/bili_qr.html`;
         const width = 350, height = 400;
         const left = (window.screen.width / 2) - (width / 2);
         const top = (window.screen.height / 2) - (height / 2);
         biliLoginPopup = window.open(popupUrl, 'BiliLogin', `width=${width},height=${height},top=${top},left=${left}`);
+
+        // 使用 postMessage 将二维码 URL 安全地传递给弹窗，避免在地址栏暴露
+        // 设置一个短暂的延迟以确保弹窗中的脚本已加载并准备好接收消息
+        setTimeout(() => {
+            if (biliLoginPopup && !biliLoginPopup.closed) {
+                biliLoginPopup.postMessage({ type: 'BILI_QR_URL', url: qrData.url }, window.location.origin);
+            }
+        }, 200);
 
         statusDiv.textContent = '已打开新窗口，请在新窗口中扫码。';
 
