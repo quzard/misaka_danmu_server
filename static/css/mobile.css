@@ -202,12 +202,11 @@ button:active { transform: translateY(1px); transition: transform .15s ease, box
 #token-list .token-list-item {
     grid-template-columns: 1fr auto auto auto;
     gap: 10px;
-    align-items: start; /* 顶部对齐以适应多行内容 */
+    align-items: center;
 }
 
 #token-list .token-list-item .status-cell {
     text-align: center;
-    padding-top: 4px; /* 微调垂直对齐 */
 }
 
 #token-list .token-list-item .status-cell .status-icon {
@@ -225,21 +224,36 @@ button:active { transform: translateY(1px); transition: transform .15s ease, box
 #token-list .token-list-item .time-cell {
     display: flex;
     flex-direction: column;
-    text-align: right;
+    gap: 6px; /* 创建时间和过期时间之间的垂直间距 */
+}
+
+.time-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.time-label-split {
+    display: flex;
+    flex-direction: column;
+    text-align: center;
     font-size: 12px;
-    line-height: 1.4;
-    color: var(--text);
-    white-space: nowrap; /* 防止时间换行 */
+    color: var(--muted);
+    line-height: 1.2;
+    flex-shrink: 0;
 }
 
-#token-list .token-list-item .time-cell .expires-time {
-    color: var(--muted);
+.time-value-split {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
-#token-list .token-list-item .time-cell .time-label {
+.time-value-split span:last-child {
     color: var(--muted);
-    margin-right: 4px;
-    display: inline-block; /* 确保标签和时间在同一行 */
 }
 
 #token-list .token-list-item .actions-cell {
@@ -247,14 +261,6 @@ button:active { transform: translateY(1px); transition: transform .15s ease, box
     flex-direction: column;
     gap: 6px;
     align-items: flex-end;
-}
-
-#token-list .token-list-item .actions-cell .row-action {
-    /* 恢复为与其他按钮一致的样式，但尺寸稍小以适应列表 */
-    height: 34px;
-    padding: 0 12px;
-    font-size: 14px;
-    border-radius: 17px;
 }
 
 /* iOS-style indicator slider */

@@ -729,7 +729,8 @@ async function loadTokens() {
       li.classList.add('token-list-item');
 
       // Column 1: Name
-      const nameCell = document.createElement('div'); nameCell.className = 'info';
+      const nameCell = document.createElement('div');
+      nameCell.className = 'info';
       nameCell.innerHTML = `<div class="title">${t.name}</div>`;
 
       // Column 2: Status
@@ -742,12 +743,22 @@ async function loadTokens() {
       timeCell.className = 'time-cell';
       const createdDate = new Date(t.created_at);
       const expiresDate = t.expires_at ? new Date(t.expires_at) : null;
+      const createdDateStr = createdDate.toLocaleDateString();
+      const createdTimeStr = createdDate.toLocaleTimeString();
+      let expiresDateStr = '永久';
+      let expiresTimeStr = '&nbsp;'; // 使用一个空格来保持对齐
+      if (expiresDate) {
+          expiresDateStr = expiresDate.toLocaleDateString();
+          expiresTimeStr = expiresDate.toLocaleTimeString();
+      }
       timeCell.innerHTML = `
           <div class="time-row created-time">
-            <span class="time-label">创建:</span>${createdDate.toLocaleString()}
+            <div class="time-label-split"><span>创建</span><span>时间</span></div>
+            <div class="time-value-split"><span>${createdDateStr}</span><span>${createdTimeStr}</span></div>
           </div>
           <div class="time-row expires-time">
-            <span class="time-label">过期:</span>${expiresDate ? expiresDate.toLocaleString() : '永久'}
+            <div class="time-label-split"><span>过期</span><span>时间</span></div>
+            <div class="time-value-split"><span>${expiresDateStr}</span><span>${expiresTimeStr}</span></div>
           </div>
       `;
 
