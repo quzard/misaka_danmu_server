@@ -23,7 +23,13 @@
             const qrUrl = params.get('url');
 
             if (qrUrl) {
-                new QRCode(document.getElementById('qrcode'), { text: qrUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+                // 显式使用 window.QRCode 以确保在任何环境下都能正确访问到 qrcode.js 库定义的全局对象。
+                // 这可以避免因作用域问题导致的 "QRCode is not defined" 或类似错误。
+                if (window.QRCode) {
+                    new window.QRCode(document.getElementById('qrcode'), { text: qrUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.H });
+                } else {
+                    document.getElementById('qrcode').textContent = '错误：二维码生成库 (qrcode.js) 未能加载。';
+                }
             } else {
                 document.getElementById('qrcode').textContent = '错误：二维码链接无效。';
             }
