@@ -726,18 +726,30 @@ async function loadTokens() {
     if (!tokens || tokens.length === 0) { ul.innerHTML = '<li class="small">暂无 Token</li>'; return; }
     tokens.forEach(t => {
       const li = document.createElement('li');
-      // 为 Token 列表项添加特定类以便应用样式
       li.classList.add('token-list-item');
 
-      const dateHtml = formatDateForMobile(t.created_at);
+      // Column 1: Name
       const left = document.createElement('div'); left.className = 'info';
-      left.innerHTML = `<div class="title">${t.name}</div><div class="meta">${t.is_enabled ? '启用' : '禁用'} · ${t.expires_at ? '限时' : '永久'}</div>`;
+      left.innerHTML = `<div class="title">${t.name}</div>`;
 
-      const dateCell = document.createElement('div');
-      dateCell.innerHTML = dateHtml;
+      // Column 2: Status
+      const statusCell = document.createElement('div');
+      statusCell.className = 'status-cell';
+      statusCell.innerHTML = `<span class="${t.is_enabled ? 'enabled' : 'disabled'}">${t.is_enabled ? '启用' : '禁用'}</span>`;
 
-      const actions = document.createElement('div');
-      actions.className = 'actions'; // 添加类以便样式化
+      // Column 3: Time
+      const timeCell = document.createElement('div');
+      timeCell.className = 'time-cell';
+      const createdDate = new Date(t.created_at);
+      const expiresDate = t.expires_at ? new Date(t.expires_at) : null;
+      timeCell.innerHTML = `
+          <div class="time-row created-time">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div>
+          <div class="time-row expires-time">${expiresDate ? (expiresDate.toLocaleDateString() + ' ' + expiresDate.toLocaleTimeString()) : '永久'}</div>
+      `;
+
+      // Column 4: Actions
+      const actionsCell = document.createElement('div');
+      actionsCell.className = 'actions-cell';
 
       const copyBtn = document.createElement('button'); copyBtn.className = 'row-action'; copyBtn.textContent = '复制链接';
       copyBtn.addEventListener('click', async () => {
@@ -752,8 +764,13 @@ async function loadTokens() {
       toggleBtn.addEventListener('click', async () => { await apiFetch(`/api/ui/tokens/${t.id}/toggle`, { method: 'PUT' }); loadTokens(); });
       const delBtn = document.createElement('button'); delBtn.className = 'row-action'; delBtn.textContent = '删除';
       delBtn.addEventListener('click', async () => { if (!confirm('删除该 Token？')) return; await apiFetch(`/api/ui/tokens/${t.id}`, { method: 'DELETE' }); loadTokens(); });
-      actions.appendChild(copyBtn); actions.appendChild(logBtn); actions.appendChild(toggleBtn); actions.appendChild(delBtn);
-      li.appendChild(left); li.appendChild(dateCell); li.appendChild(actions); ul.appendChild(li);
+      actionsCell.appendChild(copyBtn); actionsCell.appendChild(logBtn); actionsCell.appendChild(toggleBtn); actionsCell.appendChild(delBtn);
+
+      li.appendChild(left);
+      li.appendChild(statusCell);
+      li.appendChild(timeCell);
+      li.appendChild(actionsCell);
+      ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
 }
