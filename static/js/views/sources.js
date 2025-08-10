@@ -74,24 +74,6 @@ function renderDanmakuSources(settings) {
             configBtn.dataset.fields = JSON.stringify(setting.configurable_fields);
             configBtn.dataset.isLoggable = setting.is_loggable;
             li.appendChild(configBtn);
-
-            // 新增：如果源是Bilibili，则添加一个登录状态检查和按钮
-            if (setting.provider_name === 'bilibili') {
-                const loginStatusDiv = document.createElement('div');
-                loginStatusDiv.className = 'source-login-status';
-                loginStatusDiv.dataset.provider = 'bilibili';
-                loginStatusDiv.textContent = '登录状态: 未知';
-                li.appendChild(loginStatusDiv);
-
-                // 异步检查登录状态 - 使用新的通用操作端点
-                apiFetch('/api/ui/scrapers/bilibili/actions/get_login_info', { method: 'POST' })
-                    .then(info => {
-                        const statusDiv = danmakuSourcesList.querySelector(`.source-login-status[data-provider="bilibili"]`);
-                        if (statusDiv) {
-                            statusDiv.textContent = info.isLogin ? `已登录: ${info.uname}` : '未登录';
-                        }
-                    });
-            }
         }
 
         const statusIcon = document.createElement('span');
@@ -209,24 +191,6 @@ async function handleDanmakuSourceAction(e) {
     const isLoggable = button.dataset.isLoggable === 'true';
     const fields = JSON.parse(button.dataset.fields);
     
-    // 新增：为Bilibili弹窗添加登录部分
-    if (providerName === 'bilibili') {
-        const modalBody = document.getElementById('modal-body');
-        const biliLoginSection = document.createElement('div');
-        biliLoginSection.id = 'bili-login-section';
-        biliLoginSection.innerHTML = `
-            <div class="form-row" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                <label>账号登录</label>
-                <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
-                    <div id="bili-login-status">正在检查登录状态...</div>
-                    <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
-                </div>
-            </div>
-            <div id="bili-qrcode-container" style="text-align: center; margin-top: 15px;"></div>
-        `;
-        // 确保在显示之前插入
-        setTimeout(() => modalBody.appendChild(biliLoginSection), 0);
-    }
     showScraperConfigModal(providerName, fields, isLoggable);
 }
 
@@ -315,9 +279,7 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
 
             // 如果是Bilibili，添加登录部分
             if (providerName === 'bilibili') {
-                const biliLoginSection = document.createElement('div');
-                biliLoginSection.id = 'bili-login-section';
-                biliLoginSection.innerHTML = `
+                const biliLoginSectionHTML = `
                     <div class="form-row" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
                         <label>账号登录</label>
                         <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
@@ -327,10 +289,7 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                     </div>
                     <div id="bili-qrcode-container" style="text-align: center; margin-top: 15px;"></div>
                 `;
-                logSection.appendChild(labelEl);
-                logSection.appendChild(inputEl);
-                logSection.appendChild(helpText);
-                modalBody.appendChild(logSection);
+                modalBody.insertAdjacentHTML('beforeend', biliLoginSectionHTML);
             }
         })
         .catch(error => {
