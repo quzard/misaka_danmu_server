@@ -726,12 +726,19 @@ async function loadTokens() {
     if (!tokens || tokens.length === 0) { ul.innerHTML = '<li class="small">暂无 Token</li>'; return; }
     tokens.forEach(t => {
       const li = document.createElement('li');
+      // 为 Token 列表项添加特定类以便应用样式
+      li.classList.add('token-list-item');
+
       const dateHtml = formatDateForMobile(t.created_at);
       const left = document.createElement('div'); left.className = 'info';
       left.innerHTML = `<div class="title">${t.name}</div><div class="meta">${t.is_enabled ? '启用' : '禁用'} · ${t.expires_at ? '限时' : '永久'}</div>`;
 
-      const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.gap = '6px'; actions.style.justifyItems = 'end';
-      actions.innerHTML = dateHtml; // Add formatted date here
+      const dateCell = document.createElement('div');
+      dateCell.innerHTML = dateHtml;
+
+      const actions = document.createElement('div');
+      actions.className = 'actions'; // 添加类以便样式化
+
       const copyBtn = document.createElement('button'); copyBtn.className = 'row-action'; copyBtn.textContent = '复制链接';
       copyBtn.addEventListener('click', async () => {
         const domain = (document.getElementById('token-custom-domain-input').value || '').trim();
@@ -746,7 +753,7 @@ async function loadTokens() {
       const delBtn = document.createElement('button'); delBtn.className = 'row-action'; delBtn.textContent = '删除';
       delBtn.addEventListener('click', async () => { if (!confirm('删除该 Token？')) return; await apiFetch(`/api/ui/tokens/${t.id}`, { method: 'DELETE' }); loadTokens(); });
       actions.appendChild(copyBtn); actions.appendChild(logBtn); actions.appendChild(toggleBtn); actions.appendChild(delBtn);
-      li.appendChild(left); li.appendChild(actions); ul.appendChild(li);
+      li.appendChild(left); li.appendChild(dateCell); li.appendChild(actions); ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
 }

@@ -144,7 +144,7 @@ button { height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid v
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background-color: rgba(0, 0, 0, 0.1);
+    background-color: var(--error);
     color: white;
     border: none;
     display: flex;
@@ -154,17 +154,17 @@ button { height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid v
     line-height: 1;
     cursor: pointer;
     padding: 0;
-    transition: background-color 0.2s, transform 0.1s;
+    transition: background-color 0.2s, transform 0.1s, opacity 0.2s;
     /* Override generic button styles */
     box-shadow: none;
 }
 
 .chip-delete:hover {
-    background-color: rgba(0, 0, 0, 0.2);
+    opacity: 0.8;
 }
 
 .chip-delete:active {
-    background-color: rgba(0, 0, 0, 0.3);
+    opacity: 0.6;
     transform: translateY(-50%) scale(0.9);
 }
 
@@ -197,6 +197,18 @@ button:active { transform: translateY(1px); transition: transform .15s ease, box
     margin-top: 4px;
 }
 
+/* 修正 Token 列表布局 */
+#token-list .token-list-item {
+    grid-template-columns: 1fr auto auto; /* info, date, actions */
+    align-items: center;
+}
+
+#token-list .token-list-item .actions {
+    display: flex;
+    flex-wrap: wrap; /* 允许按钮在小屏幕上换行 */
+    gap: 6px;
+    justify-content: flex-end;
+}
 
 /* iOS-style indicator slider */
 .nav-indicator { position: absolute; z-index: 1; left: 0; right: auto; top: 50%; width: calc((100% - 12px*2 - 8px*4)/5); height: 34px; border-radius: 12px; background: linear-gradient(180deg, rgba(0,122,255,0.18), rgba(0,122,255,0.08)); border: 1px solid rgba(0,122,255,0.25); box-shadow: 0 6px 14px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6); transform: translate(0, -50%); transition: transform .25s cubic-bezier(.22,.61,.36,1); pointer-events: none; }
