@@ -303,3 +303,8 @@ th {
 #bili-login-status.error {
     color: var(--error-color);
 }
+
+#bili-qrcode-container img.expired {
+    opacity: 0.3;
+    filter: grayscale(100%);
+}

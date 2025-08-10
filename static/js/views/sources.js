@@ -377,10 +377,20 @@ async function handleBiliLoginClick() {
     qrContainer.innerHTML = '';
 
     try {
-        const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
+        const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });       
         const qrImg = document.createElement('img');
+        // 修正：使用 HTTPS 协议避免混合内容问题导致图片无法加载
         qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`;
         qrContainer.appendChild(qrImg);
+
+        // 新增：添加一个刷新按钮
+        const refreshBtn = document.createElement('button');
+        refreshBtn.className = 'secondary-btn';
+        refreshBtn.textContent = '刷新二维码';
+        refreshBtn.style.marginTop = '10px';
+        refreshBtn.addEventListener('click', handleBiliLoginClick); // 点击时重新调用此函数
+        qrContainer.appendChild(refreshBtn);
+
         statusDiv.textContent = '请使用Bilibili手机客户端扫描二维码。';
 
         biliPollInterval = setInterval(async () => {
@@ -397,7 +407,11 @@ async function handleBiliLoginClick() {
                     stopBiliPolling();
                     statusDiv.textContent = '二维码已失效，请重新获取。';
                     statusDiv.classList.add('error');
-                    qrContainer.innerHTML = '';
+                    // 使过期的二维码变暗，提示用户刷新
+                    const qrImgEl = qrContainer.querySelector('img');
+                    if (qrImgEl) {
+                        qrImgEl.classList.add('expired');
+                    }
                 } else if (pollRes.code === 86090) { // 已扫描，待确认
                     statusDiv.textContent = '已扫描，请在手机上确认登录。';
                 }
