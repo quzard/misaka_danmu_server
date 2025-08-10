@@ -8,6 +8,7 @@
    --muted: #8e8e93;            /* secondary */
    --border: #e5e5ea;           /* separator */
    --error: #ff3b30;
+   --success-color: #34c759; /* iOS system green */
    --soft: #eef3ff;
  }
 
@@ -102,12 +103,72 @@ main.content > .card { will-change: transform, opacity; }
 .list li > * { min-width: 0; }
 .list li:last-child { border-bottom: none; }
 .poster { width: 44px; height: 62px; border-radius: 8px; object-fit: cover; background: #eee; image-rendering: auto; }
+.date-cell {
+    line-height: 1.3;
+    font-size: 13px;
+    text-align: right;
+}
+.date-cell .time-part {
+    font-size: 12px;
+    color: var(--muted);
+}
+
 .info { overflow: hidden; }
 .title { font-weight: 700; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .small { font-size: 12px; color: var(--muted); }
 .chip { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: #ffffff; color: var(--accent); border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
 button { height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--border); background: linear-gradient(180deg, #fff, #f9fafb); color: var(--text); font-size: 16px; box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 2px rgba(0,0,0,0.04); }
+
+/* Recent Search Chips with Delete Button */
+#recent-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 8px; /* row-gap column-gap */
+}
+
+.chip-wrapper {
+    position: relative;
+    display: inline-flex; /* Let it size to its content */
+}
+
+.chip-wrapper .chip {
+    /* Add padding on the right to make space for the delete button */
+    padding-right: 28px;
+}
+
+.chip-delete {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: var(--error);
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    transition: background-color 0.2s, transform 0.1s, opacity 0.2s;
+    /* Override generic button styles */
+    box-shadow: none;
+}
+
+.chip-delete:hover {
+    opacity: 0.8;
+}
+
+.chip-delete:active {
+    opacity: 0.6;
+    transform: translateY(-50%) scale(0.9);
+}
+
 button:active { transform: translateY(1px); transition: transform .15s ease, box-shadow .15s ease; box-shadow: 0 0 0 rgba(0,0,0,0.0) inset, 0 0 0 rgba(0,0,0,0.0); }
 .row-action { background: linear-gradient(180deg, rgba(0,122,255,0.12), rgba(0,122,255,0.06)); color: var(--accent); border: 1px solid rgba(0,122,255,0.25); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
 .row-action:active { background: linear-gradient(180deg, rgba(0,122,255,0.2), rgba(0,122,255,0.1)); }
@@ -125,6 +186,82 @@ button:active { transform: translateY(1px); transition: transform .15s ease, box
 .bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 8px 12px; background: rgba(255,255,255,0.92); backdrop-filter: saturate(180%) blur(12px); border-top: 1px solid var(--border); }
 .bottom-nav .nav-btn { position: relative; z-index: 2; background: transparent; border: none; border-radius: 12px; padding: 8px 10px; color: #6b7280; font-size: 13px; width: 100%; justify-self: stretch; text-align: center; }
 .bottom-nav .nav-btn.active { background: transparent; color: var(--accent); }
+
+/* 修正 Token 日志布局 */
+#token-log-list li {
+    grid-template-columns: 1fr auto; /* 左侧信息占满，右侧时间固定 */
+    align-items: start; /* 顶部对齐 */
+}
+#token-log-list .info .meta {
+    white-space: normal; /* 允许UA换行 */
+    word-break: break-all;
+    margin-top: 4px;
+}
+
+/* 修正 Token 列表布局 */
+#token-list .token-list-item {
+    grid-template-columns: 1fr auto auto auto;
+    gap: 10px;
+    align-items: center;
+}
+
+#token-list .token-list-item .status-cell {
+    text-align: center;
+}
+
+#token-list .token-list-item .status-cell .status-icon {
+    font-size: 1.2em;
+}
+
+#token-list .token-list-item .status-cell .status-icon.enabled {
+    color: var(--success-color, #28a745); /* 使用一个绿色作为成功色 */
+}
+
+#token-list .token-list-item .status-cell .status-icon.disabled {
+    color: var(--error);
+}
+
+#token-list .token-list-item .time-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px; /* 创建时间和过期时间之间的垂直间距 */
+}
+
+.time-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.time-label-split {
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
+.time-value-split {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.time-value-split span:last-child {
+    color: var(--muted);
+}
+
+#token-list .token-list-item .actions-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+}
 
 /* iOS-style indicator slider */
 .nav-indicator { position: absolute; z-index: 1; left: 0; right: auto; top: 50%; width: calc((100% - 12px*2 - 8px*4)/5); height: 34px; border-radius: 12px; background: linear-gradient(180deg, rgba(0,122,255,0.18), rgba(0,122,255,0.08)); border: 1px solid rgba(0,122,255,0.25); box-shadow: 0 6px 14px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6); transform: translate(0, -50%); transition: transform .25s cubic-bezier(.22,.61,.36,1); pointer-events: none; }

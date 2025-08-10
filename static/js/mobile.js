@@ -8,6 +8,16 @@ function showAuth(show) {
   mainScreen.classList.toggle('hidden', show);
 }
 
+function formatDateForMobile(dateString) {
+    if (!dateString) return 'N/A';
+    try {
+        const d = new Date(dateString);
+        return `<div class="date-cell">${d.toLocaleDateString()}<br><span class="time-part">${d.toLocaleTimeString()}</span></div>`;
+    } catch (e) {
+        return 'Invalid Date';
+    }
+}
+
 async function handleLogin(e) {
   e.preventDefault();
   const username = document.getElementById('login-username').value.trim();
@@ -199,6 +209,15 @@ function saveRecentKeyword(kw) {
   writeRecentKeywords(items);
   renderRecent();
 }
+function deleteRecentKeyword(kw) {
+  const items = readRecentKeywords();
+  const index = items.indexOf(kw);
+  if (index > -1) {
+    items.splice(index, 1);
+    writeRecentKeywords(items);
+    renderRecent();
+  }
+}
 function renderRecent() {
   let wrap = document.getElementById('recent-card');
   if (!wrap) {
@@ -206,21 +225,36 @@ function renderRecent() {
     wrap.id = 'recent-card';
     wrap.className = 'card';
     const title = document.createElement('h2'); title.textContent = '最近搜索'; title.style.margin = '6px 0 10px'; title.style.fontSize = '16px';
-    const list = document.createElement('div'); list.id = 'recent-list'; list.style.display = 'flex'; list.style.flexWrap = 'wrap'; list.style.gap = '8px';
+    const list = document.createElement('div'); list.id = 'recent-list';
     wrap.appendChild(title); wrap.appendChild(list);
     document.querySelector('.content').insertBefore(wrap, document.getElementById('results-card'));
   }
   const list = document.getElementById('recent-list');
   list.innerHTML = '';
   readRecentKeywords().forEach(kw => {
-    const btn = document.createElement('button');
-    btn.className = 'chip';
-    btn.textContent = kw;
-    btn.addEventListener('click', () => {
+    const chipWrapper = document.createElement('div');
+    chipWrapper.className = 'chip-wrapper';
+
+    const keywordBtn = document.createElement('button');
+    keywordBtn.className = 'chip';
+    keywordBtn.textContent = kw;
+    keywordBtn.addEventListener('click', () => {
       document.getElementById('search-input').value = kw;
       document.getElementById('search-form').dispatchEvent(new Event('submit'));
     });
-    list.appendChild(btn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'chip-delete';
+    deleteBtn.innerHTML = '&times;';
+    deleteBtn.title = `删除 "${kw}"`;
+    deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteRecentKeyword(kw);
+    });
+
+    chipWrapper.appendChild(keywordBtn);
+    chipWrapper.appendChild(deleteBtn);
+    list.appendChild(chipWrapper);
   });
 }
 
@@ -692,11 +726,46 @@ async function loadTokens() {
     if (!tokens || tokens.length === 0) { ul.innerHTML = '<li class="small">暂无 Token</li>'; return; }
     tokens.forEach(t => {
       const li = document.createElement('li');
-      li.style.gridTemplateColumns = '1fr auto';
-      const left = document.createElement('div');
-      left.innerHTML = `<div class=\"title\">${t.name}</div><div class=\"meta\">${t.is_enabled ? '启用' : '禁用'} · ${new Date(t.created_at).toLocaleString()}</div>`;
+      li.classList.add('token-list-item');
 
-      const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.gap = '6px'; actions.style.justifyItems = 'end';
+      // Column 1: Name
+      const nameCell = document.createElement('div');
+      nameCell.className = 'info';
+      nameCell.innerHTML = `<div class="title">${t.name}</div>`;
+
+      // Column 2: Status
+      const statusCell = document.createElement('div');
+      statusCell.className = 'status-cell';
+      statusCell.innerHTML = `<span class="status-icon ${t.is_enabled ? 'enabled' : 'disabled'}">${t.is_enabled ? '✅' : '❌'}</span>`;
+
+      // Column 3: Time
+      const timeCell = document.createElement('div');
+      timeCell.className = 'time-cell';
+      const createdDate = new Date(t.created_at);
+      const expiresDate = t.expires_at ? new Date(t.expires_at) : null;
+      const createdDateStr = createdDate.toLocaleDateString();
+      const createdTimeStr = createdDate.toLocaleTimeString();
+      let expiresDateStr = '永久';
+      let expiresTimeStr = '&nbsp;'; // 使用一个空格来保持对齐
+      if (expiresDate) {
+          expiresDateStr = expiresDate.toLocaleDateString();
+          expiresTimeStr = expiresDate.toLocaleTimeString();
+      }
+      timeCell.innerHTML = `
+          <div class="time-row created-time">
+            <div class="time-label-split"><span>创建</span><span>时间</span></div>
+            <div class="time-value-split"><span>${createdDateStr}</span><span>${createdTimeStr}</span></div>
+          </div>
+          <div class="time-row expires-time">
+            <div class="time-label-split"><span>过期</span><span>时间</span></div>
+            <div class="time-value-split"><span>${expiresDateStr}</span><span>${expiresTimeStr}</span></div>
+          </div>
+      `;
+
+      // Column 4: Actions
+      const actionsCell = document.createElement('div');
+      actionsCell.className = 'actions-cell';
+
       const copyBtn = document.createElement('button'); copyBtn.className = 'row-action'; copyBtn.textContent = '复制链接';
       copyBtn.addEventListener('click', async () => {
         const domain = (document.getElementById('token-custom-domain-input').value || '').trim();
@@ -710,8 +779,13 @@ async function loadTokens() {
       toggleBtn.addEventListener('click', async () => { await apiFetch(`/api/ui/tokens/${t.id}/toggle`, { method: 'PUT' }); loadTokens(); });
       const delBtn = document.createElement('button'); delBtn.className = 'row-action'; delBtn.textContent = '删除';
       delBtn.addEventListener('click', async () => { if (!confirm('删除该 Token？')) return; await apiFetch(`/api/ui/tokens/${t.id}`, { method: 'DELETE' }); loadTokens(); });
-      actions.appendChild(copyBtn); actions.appendChild(logBtn); actions.appendChild(toggleBtn); actions.appendChild(delBtn);
-      li.appendChild(left); li.appendChild(actions); ul.appendChild(li);
+      actionsCell.appendChild(copyBtn); actionsCell.appendChild(logBtn); actionsCell.appendChild(toggleBtn); actionsCell.appendChild(delBtn);
+
+      li.appendChild(nameCell);
+      li.appendChild(statusCell);
+      li.appendChild(timeCell);
+      li.appendChild(actionsCell);
+      ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
 }
@@ -760,11 +834,11 @@ async function loadUaRules() {
     if (!rules || rules.length === 0) { ul.innerHTML = '<li class="small">名单为空</li>'; return; }
     rules.forEach(r => {
       const li = document.createElement('li');
-      li.style.gridTemplateColumns = '1fr auto';
-      li.innerHTML = `<div><div class=\"title\">${r.ua_string}</div><div class=\"meta\">${new Date(r.created_at).toLocaleString()}</div></div>`;
+      const dateHtml = formatDateForMobile(r.created_at);
+      li.innerHTML = `<div><div class="title">${r.ua_string}</div></div>${dateHtml}`;
       const del = document.createElement('button'); del.className = 'row-action'; del.textContent = '删除';
       del.addEventListener('click', async () => { await apiFetch(`/api/ui/ua-rules/${r.id}`, { method: 'DELETE' }); loadUaRules(); });
-      const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.justifyItems = 'end'; actions.appendChild(del);
+      const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.justifyItems = 'end'; actions.appendChild(del); // This seems redundant, but keeping for consistency if other actions are added.
       li.appendChild(actions); ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
@@ -795,8 +869,9 @@ async function loadTokenLog(tokenId) {
     if (!logs || logs.length === 0) { ul.innerHTML = '<li class="small">暂无记录</li>'; return; }
     logs.forEach(l => {
       const li = document.createElement('li');
-      li.innerHTML = `<div class=\"title\">${new Date(l.access_time).toLocaleString()}</div><div class=\"meta\">${l.ip_address} · ${l.status} · ${l.path || ''}</div>`;
-      ul.appendChild(li);
+      const dateHtml = formatDateForMobile(l.access_time);
+      li.innerHTML = `<div class="info"><div class="title">${l.ip_address} · ${l.status}</div><div class="meta">${l.user_agent || 'No User-Agent'}</div></div>${dateHtml}`;
+       ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
 }
