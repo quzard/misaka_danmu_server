@@ -377,17 +377,24 @@ async function handleBiliLoginClick() {
     qrContainer.innerHTML = '';
 
     try {
-        const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });       
-        const qrImg = document.createElement('img');
-        // 修正：使用 HTTPS 协议避免混合内容问题导致图片无法加载
-        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`;
-        qrContainer.appendChild(qrImg);
+        const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
+
+        // 使用本地库生成二维码，避免外部依赖和网络问题
+        new QRCode(qrContainer, {
+            text: qrData.url,
+            width: 180,
+            height: 180,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
 
         // 新增：添加一个刷新按钮
         const refreshBtn = document.createElement('button');
         refreshBtn.className = 'secondary-btn';
         refreshBtn.textContent = '刷新二维码';
-        refreshBtn.style.marginTop = '10px';
+        refreshBtn.style.display = 'block'; // 确保按钮在二维码下方
+        refreshBtn.style.margin = '10px auto 0'; // 居中
         refreshBtn.addEventListener('click', handleBiliLoginClick); // 点击时重新调用此函数
         qrContainer.appendChild(refreshBtn);
 
