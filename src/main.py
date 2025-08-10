@@ -36,6 +36,11 @@ async def lifespan(app: FastAPI):
 
     pool = await create_db_pool(app)
     await init_db_tables(app)
+    # 新增：在启动时清理任何未完成的任务
+    interrupted_count = await crud.mark_interrupted_tasks_as_failed(pool)
+    if interrupted_count > 0:
+        logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
+
     app.state.scraper_manager = ScraperManager(pool)
     await app.state.scraper_manager.load_and_sync_scrapers()
     app.state.task_manager = TaskManager(pool)

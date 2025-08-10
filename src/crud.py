@@ -1356,3 +1356,14 @@ async def delete_task_from_history(pool: aiomysql.Pool, task_id: str) -> bool:
         async with conn.cursor() as cursor:
             affected_rows = await cursor.execute("DELETE FROM task_history WHERE id = %s", (task_id,))
             return affected_rows > 0
+
+async def mark_interrupted_tasks_as_failed(pool: aiomysql.Pool) -> int:
+    """
+    在应用启动时，将所有处于“运行中”或“已暂停”状态的任务标记为失败。
+    这用于处理应用异常关闭导致的状态不一致问题。
+    """
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            query = "UPDATE task_history SET status = %s, description = %s, finished_at = NOW() WHERE status IN (%s, %s)"
+            affected_rows = await cursor.execute(query, ("失败", "因程序重启而中断", "运行中", "已暂停"))
+            return affected_rows
