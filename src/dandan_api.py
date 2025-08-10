@@ -102,6 +102,64 @@ class DandanSearchEpisodesResponse(DandanResponseBase):
     hasMore: bool = False
     animes: List[DandanAnimeInfo]
 
+def _roman_to_int(s: str) -> int:
+    """将罗马数字字符串转换为整数。"""
+    roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    s = s.upper()
+    result = 0
+    i = 0
+    while i < len(s):
+        # 处理减法规则 (e.g., IV, IX)
+        if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
+            result += roman_map[s[i+1]] - roman_map[s[i]]
+            i += 2
+        else:
+            result += roman_map[s[i]]
+            i += 1
+    return result
+
+def _parse_search_term(keyword: str) -> Dict[str, Any]:
+    """
+    解析搜索关键词，提取标题、季数和集数。
+    支持 "Title S01E01", "Title S01", "Title 2", "Title 第二季", "Title Ⅲ" 等格式。
+    """
+    keyword = keyword.strip()
+
+    # 1. 优先匹配 SXXEXX 格式
+    s_e_pattern = re.compile(r"^(?P<title>.+?)\s*[._-]*[Ss](?P<season>\d{1,2})[._-]*[Ee](?P<episode>\d{1,4})\b", re.IGNORECASE)
+    match = s_e_pattern.search(keyword)
+    if match:
+        data = match.groupdict()
+        return {"title": data["title"].strip(), "season": int(data["season"]), "episode": int(data["episode"])}
+
+    # 2. 匹配季度信息
+    chinese_num_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+    season_patterns = [
+        # 格式: Season 1, S01
+        (re.compile(r"^(.*?)\s*[._-]*(?:S|Season)\s*(\d{1,2})\b", re.I), lambda m: int(m.group(2))),
+        # 格式: 第 X 季/部
+        (re.compile(r"^(.*?)\s*第\s*([一二三四五六七八九十]|\d+)\s*[季部]", re.I),
+         lambda m: chinese_num_map.get(m.group(2)) if not m.group(2).isdigit() else int(m.group(2))),
+        # 格式: Unicode 罗马数字, e.g., Ⅲ
+        (re.compile(r"^(.*?)\s+([Ⅰ-Ⅻ])\b", re.I),
+         lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(2).upper())),
+        # 格式: ASCII 罗马数字, e.g., III
+        (re.compile(r"^(.*?)\s+([IVXLCDM]+)\b", re.I), lambda m: _roman_to_int(m.group(2))),
+    ]
+
+    for pattern, handler in season_patterns:
+        match = pattern.match(keyword)
+        if match:
+            try:
+                title = match.group(1).strip()
+                season = handler(match)
+                if season:
+                    return {"title": title, "season": season, "episode": None}
+            except (ValueError, KeyError, IndexError):
+                continue
+
+    # 3. 如果没有匹配到特定格式，则返回原始标题
+    return {"title": keyword, "season": None, "episode": None}
 
 # --- Models for /search/anime ---
 class DandanSearchAnimeItem(BaseModel):
