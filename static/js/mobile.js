@@ -729,13 +729,13 @@ async function loadTokens() {
       li.classList.add('token-list-item');
 
       // Column 1: Name
-      const left = document.createElement('div'); left.className = 'info';
-      left.innerHTML = `<div class="title">${t.name}</div>`;
+      const nameCell = document.createElement('div'); nameCell.className = 'info';
+      nameCell.innerHTML = `<div class="title">${t.name}</div>`;
 
       // Column 2: Status
       const statusCell = document.createElement('div');
       statusCell.className = 'status-cell';
-      statusCell.innerHTML = `<span class="${t.is_enabled ? 'enabled' : 'disabled'}">${t.is_enabled ? '启用' : '禁用'}</span>`;
+      statusCell.innerHTML = `<span class="status-icon ${t.is_enabled ? 'enabled' : 'disabled'}">${t.is_enabled ? '✅' : '❌'}</span>`;
 
       // Column 3: Time
       const timeCell = document.createElement('div');
@@ -743,8 +743,12 @@ async function loadTokens() {
       const createdDate = new Date(t.created_at);
       const expiresDate = t.expires_at ? new Date(t.expires_at) : null;
       timeCell.innerHTML = `
-          <div class="time-row created-time">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div>
-          <div class="time-row expires-time">${expiresDate ? (expiresDate.toLocaleDateString() + ' ' + expiresDate.toLocaleTimeString()) : '永久'}</div>
+          <div class="time-row created-time">
+            <span class="time-label">创建:</span>${createdDate.toLocaleString()}
+          </div>
+          <div class="time-row expires-time">
+            <span class="time-label">过期:</span>${expiresDate ? expiresDate.toLocaleString() : '永久'}
+          </div>
       `;
 
       // Column 4: Actions
@@ -766,7 +770,7 @@ async function loadTokens() {
       delBtn.addEventListener('click', async () => { if (!confirm('删除该 Token？')) return; await apiFetch(`/api/ui/tokens/${t.id}`, { method: 'DELETE' }); loadTokens(); });
       actionsCell.appendChild(copyBtn); actionsCell.appendChild(logBtn); actionsCell.appendChild(toggleBtn); actionsCell.appendChild(delBtn);
 
-      li.appendChild(left);
+      li.appendChild(nameCell);
       li.appendChild(statusCell);
       li.appendChild(timeCell);
       li.appendChild(actionsCell);
