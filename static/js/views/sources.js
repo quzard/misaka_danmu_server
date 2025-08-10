@@ -62,8 +62,8 @@ function renderDanmakuSources(settings) {
         nameSpan.textContent = setting.provider_name;
         li.appendChild(nameSpan);
 
-        // 新增：如果源是可配置的，则添加配置按钮
-        if (setting.configurable_fields && Object.keys(setting.configurable_fields).length > 0) {
+        // 如果源有可配置字段或支持日志记录，则显示配置按钮
+        if ((setting.configurable_fields && Object.keys(setting.configurable_fields).length > 0) || setting.is_loggable) {
             const configBtn = document.createElement('button');
             configBtn.className = 'action-btn config-btn';
             configBtn.title = `配置 ${setting.provider_name}`;
@@ -72,6 +72,7 @@ function renderDanmakuSources(settings) {
             configBtn.dataset.providerName = setting.provider_name;
             // 将字段信息存储为JSON字符串以便后续使用
             configBtn.dataset.fields = JSON.stringify(setting.configurable_fields);
+            configBtn.dataset.isLoggable = setting.is_loggable;
             li.appendChild(configBtn);
         }
 
@@ -187,14 +188,15 @@ async function handleDanmakuSourceAction(e) {
     if (!button || button.dataset.action !== 'configure') return;
 
     const providerName = button.dataset.providerName;
+    const isLoggable = button.dataset.isLoggable === 'true';
     const fields = JSON.parse(button.dataset.fields);
     
-    showScraperConfigModal(providerName, fields);
+    showScraperConfigModal(providerName, fields, isLoggable);
 }
 
 let currentProviderForModal = null;
 
-function showScraperConfigModal(providerName, fields) {
+function showScraperConfigModal(providerName, fields, isLoggable) {
     currentProviderForModal = providerName;
     const modal = document.getElementById('generic-modal');
     const modalTitle = document.getElementById('modal-title');
@@ -208,35 +210,72 @@ function showScraperConfigModal(providerName, fields) {
         .then(currentConfig => {
             modalBody.innerHTML = ''; // 清空加载提示
 
-            // 新增：为 gamer 源添加特别说明
-            if (providerName === 'gamer') {
+            // 渲染文本字段（如果存在）
+            if (fields && Object.keys(fields).length > 0) {
                 const helpText = document.createElement('p');
                 helpText.className = 'modal-help-text';
-                helpText.innerHTML = `仅当无法正常搜索时才需要填写。请先尝试清空配置并保存，如果问题依旧，再从 <a href="https://ani.gamer.com.tw/" target="_blank" rel="noopener noreferrer">巴哈姆特动画疯</a> 获取最新的 User-Agent 和 Cookie。`;
+                if (providerName === 'gamer') {
+                    helpText.innerHTML = `仅当无法正常搜索时才需要填写。请先尝试清空配置并保存，如果问题依旧，再从 <a href="https://ani.gamer.com.tw/" target="_blank" rel="noopener noreferrer">巴哈姆特动画疯</a> 获取最新的 User-Agent 和 Cookie。`;
+                } else {
+                    helpText.textContent = `请为 ${providerName} 源填写以下配置信息。`;
+                }
                 modalBody.appendChild(helpText);
+
+                Object.entries(fields).forEach(([key, label]) => {
+                    const value = currentConfig[key] || '';
+                    const formRow = document.createElement('div');
+                    formRow.className = 'form-row';
+                    
+                    const labelEl = document.createElement('label');
+                    labelEl.htmlFor = `config-input-${key}`;
+                    labelEl.textContent = label;
+                    
+                    const isCookie = key.toLowerCase().includes('cookie');
+                    const inputEl = document.createElement(isCookie ? 'textarea' : 'input');
+                    if (!isCookie) inputEl.type = 'text';
+                    inputEl.id = `config-input-${key}`;
+                    inputEl.name = key;
+                    inputEl.value = value;
+                    if (isCookie) inputEl.rows = 4;
+                    
+                    formRow.appendChild(labelEl);
+                    formRow.appendChild(inputEl);
+                    modalBody.appendChild(formRow);
+                });
             }
 
-            Object.entries(fields).forEach(([key, label]) => {
-                const value = currentConfig[key] || '';
-                const formRow = document.createElement('div');
-                formRow.className = 'form-row';
-                
+            // 渲染日志开关（如果支持）
+            if (isLoggable) {
+                const logKey = `scraper_${providerName}_log_responses`;
+                const isEnabled = currentConfig[logKey] === 'true';
+
+                const logSection = document.createElement('div');
+                logSection.className = 'form-row';
+                logSection.style.marginTop = '20px';
+                logSection.style.paddingTop = '15px';
+                logSection.style.borderTop = '1px solid var(--border-color)';
+
                 const labelEl = document.createElement('label');
-                labelEl.htmlFor = `config-input-${key}`;
-                labelEl.textContent = label;
+                labelEl.htmlFor = 'config-input-log-responses';
+                labelEl.textContent = '记录原始响应';
                 
-                const isCookie = key.toLowerCase().includes('cookie');
-                const inputEl = document.createElement(isCookie ? 'textarea' : 'input');
-                if (!isCookie) inputEl.type = 'text';
-                inputEl.id = `config-input-${key}`;
-                inputEl.name = key;
-                inputEl.value = value;
-                if (isCookie) inputEl.rows = 4;
+                const inputEl = document.createElement('input');
+                inputEl.type = 'checkbox';
+                inputEl.id = 'config-input-log-responses';
+                inputEl.name = logKey;
+                inputEl.checked = isEnabled;
                 
-                formRow.appendChild(labelEl);
-                formRow.appendChild(inputEl);
-                modalBody.appendChild(formRow);
-            });
+                const helpText = document.createElement('p');
+                helpText.className = 'modal-help-text';
+                helpText.style.margin = '0 0 0 15px';
+                helpText.style.padding = '5px 10px';
+                helpText.textContent = '启用后，此源的所有API请求的原始响应将被记录到 config/logs/scraper_responses.log 文件中，用于调试。';
+
+                logSection.appendChild(labelEl);
+                logSection.appendChild(inputEl);
+                logSection.appendChild(helpText);
+                modalBody.appendChild(logSection);
+            }
         })
         .catch(error => {
             modalBody.innerHTML = `<p class="error">加载配置失败: ${error.message}</p>`;
@@ -251,9 +290,16 @@ function hideScraperConfigModal() {
 async function handleSaveScraperConfig() {
     if (!currentProviderForModal) return;
     const payload = {};
-    document.getElementById('modal-body').querySelectorAll('input, textarea').forEach(input => {
+    // 获取文本字段的值
+    document.getElementById('modal-body').querySelectorAll('input[type="text"], textarea').forEach(input => {
         payload[input.name] = input.value.trim();
     });
+    // 获取日志开关的值
+    const logCheckbox = document.getElementById('config-input-log-responses');
+    if (logCheckbox) {
+        payload[logCheckbox.name] = logCheckbox.checked ? 'true' : 'false';
+    }
+
     await apiFetch(`/api/ui/scrapers/${currentProviderForModal}/config`, { method: 'PUT', body: JSON.stringify(payload) });
     hideScraperConfigModal();
     alert('配置已保存！');

@@ -592,6 +592,7 @@ async def delete_bulk_sources(
 
 class ScraperSettingWithConfig(models.ScraperSetting):
     configurable_fields: Optional[Dict[str, str]] = None
+    is_loggable: bool = False
 
 @router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
@@ -607,6 +608,7 @@ async def get_scraper_settings(
         scraper_class = manager.get_scraper_class(s['provider_name'])
         s_with_config = ScraperSettingWithConfig.model_validate(s)
         if scraper_class:
+            s_with_config.is_loggable = getattr(scraper_class, 'is_loggable', False)
             s_with_config.configurable_fields = getattr(scraper_class, 'configurable_fields', None)
         full_settings.append(s_with_config)
             
@@ -637,8 +639,12 @@ async def get_scraper_config(
     if not scraper_class or not hasattr(scraper_class, 'configurable_fields'):
         raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
     
-    config_keys = scraper_class.configurable_fields.keys()
-    tasks = [crud.get_config_value(pool, key, "") for key in config_keys]
+    config_keys = list(scraper_class.configurable_fields.keys())
+    # 如果源是可记录日志的，也获取其日志配置
+    if getattr(scraper_class, 'is_loggable', False):
+        config_keys.append(f"scraper_{provider_name}_log_responses")
+
+    tasks = [crud.get_config_value(pool, key, "") for key in config_keys] # 默认为空字符串
     values = await asyncio.gather(*tasks)
     
     return dict(zip(config_keys, values))
@@ -655,7 +661,11 @@ async def update_scraper_config(
     if not scraper_class or not hasattr(scraper_class, 'configurable_fields') or not scraper_class.configurable_fields:
         raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
 
-    allowed_keys = scraper_class.configurable_fields.keys()
+    allowed_keys = list(scraper_class.configurable_fields.keys())
+    # 如果源是可记录日志的，也允许更新其日志配置
+    if getattr(scraper_class, 'is_loggable', False):
+        allowed_keys.append(f"scraper_{provider_name}_log_responses")
+
     tasks = [crud.update_config_value(pool, key, value or "") for key, value in payload.items() if key in allowed_keys]
     
     if tasks:

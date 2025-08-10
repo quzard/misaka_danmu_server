@@ -97,6 +97,20 @@ class BaseScraper(ABC):
     # (可选) 子类可以覆盖此字典来声明其可配置的字段
     configurable_fields: Dict[str, str] = {}
 
+    # (新增) 子类可以覆盖此属性，以表明其是否支持日志记录
+    is_loggable: bool = True
+
+    async def _should_log_responses(self) -> bool:
+        """检查数据库以确定是否应为此爬虫记录原始响应。"""
+        if not self.is_loggable:
+            return False
+        
+        config_key = f"scraper_{self.provider_name}_log_responses"
+        # 如果未设置，则默认为 'false'
+        is_enabled_str = await crud.get_config_value(self.pool, config_key, "false")
+        return is_enabled_str.lower() == 'true'
+
+
     @abstractmethod
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

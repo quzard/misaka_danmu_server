@@ -269,6 +269,8 @@ class BilibiliScraper(BaseScraper):
 
         async def _fetch_key_data():
             nav_resp = await self._request_with_rate_limit("GET", "https://api.bilibili.com/x/web-interface/nav")
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili WBI Key Response: {nav_resp.text}")
             nav_resp.raise_for_status()
             return nav_resp.json().get("data", {})
 
@@ -373,6 +375,8 @@ class BilibiliScraper(BaseScraper):
         results = []
         try:
             response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili Search Response (type='{search_type}', keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             
             response_json = response.json()
@@ -449,6 +453,8 @@ class BilibiliScraper(BaseScraper):
         try:
             await self._ensure_session_cookie()
             response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili PGC Episodes Response (media_id={media_id}): {response.text}")
             response.raise_for_status()
             data = BiliSeasonResult.model_validate(response.json())
             if data.code == 0 and data.result and data.result.episodes:
@@ -474,6 +480,8 @@ class BilibiliScraper(BaseScraper):
         try:
             await self._ensure_session_cookie()
             response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili UGC Episodes Response (media_id={media_id}): {response.text}")
             response.raise_for_status()
             data = BiliVideoViewResult.model_validate(response.json())
             if data.code == 0 and data.data and data.data.pages:
@@ -501,6 +509,8 @@ class BilibiliScraper(BaseScraper):
             # The /x/player/v2 endpoint provides subtitle information
             url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={cid}"
             response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili Danmaku Pools Response (aid={aid}, cid={cid}): {response.text}")
             response.raise_for_status()
             data = response.json()
 
@@ -526,6 +536,8 @@ class BilibiliScraper(BaseScraper):
 
                 url = f"https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&pid={aid}&segment_index={segment_index}"
                 response = await self._request_with_rate_limit("GET", url)
+                # Protobuf is binary, so we don't log it as text
+                # if await self._should_log_responses(): ...
 
                 if response.status_code == 304:
                     break
