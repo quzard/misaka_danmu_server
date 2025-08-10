@@ -636,15 +636,21 @@ async def get_scraper_config(
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     scraper_class = manager.get_scraper_class(provider_name)
-    if not scraper_class or not hasattr(scraper_class, 'configurable_fields'):
+    is_configurable = hasattr(scraper_class, 'configurable_fields') and scraper_class.configurable_fields
+    is_loggable = getattr(scraper_class, 'is_loggable', False)
+
+    if not scraper_class or not (is_configurable or is_loggable):
         raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
     
-    config_keys = list(scraper_class.configurable_fields.keys())
+    config_keys = []
+    if is_configurable:
+        config_keys.extend(scraper_class.configurable_fields.keys())
     # 如果源是可记录日志的，也获取其日志配置
-    if getattr(scraper_class, 'is_loggable', False):
+    if is_loggable:
         config_keys.append(f"scraper_{provider_name}_log_responses")
 
-    tasks = [crud.get_config_value(pool, key, "") for key in config_keys] # 默认为空字符串
+    if not config_keys: return {}
+    tasks = [crud.get_config_value(pool, key, "") for key in config_keys]
     values = await asyncio.gather(*tasks)
     
     return dict(zip(config_keys, values))
@@ -658,12 +664,17 @@ async def update_scraper_config(
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     scraper_class = manager.get_scraper_class(provider_name)
-    if not scraper_class or not hasattr(scraper_class, 'configurable_fields') or not scraper_class.configurable_fields:
+    is_configurable = hasattr(scraper_class, 'configurable_fields') and scraper_class.configurable_fields
+    is_loggable = getattr(scraper_class, 'is_loggable', False)
+
+    if not scraper_class or not (is_configurable or is_loggable):
         raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
 
-    allowed_keys = list(scraper_class.configurable_fields.keys())
+    allowed_keys = []
+    if is_configurable:
+        allowed_keys.extend(scraper_class.configurable_fields.keys())
     # 如果源是可记录日志的，也允许更新其日志配置
-    if getattr(scraper_class, 'is_loggable', False):
+    if is_loggable:
         allowed_keys.append(f"scraper_{provider_name}_log_responses")
 
     tasks = [crud.update_config_value(pool, key, value or "") for key, value in payload.items() if key in allowed_keys]
