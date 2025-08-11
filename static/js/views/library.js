@@ -46,7 +46,7 @@ function renderLibrary(animes) {
         row.dataset.title = anime.title.toLowerCase();
         
         row.innerHTML = `
-            <td class="poster-cell"><img src="${anime.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${anime.title}"></td>
+            <td class="poster-cell"><img src="${anime.imageUrl || '/static/placeholder.png'}" referrerpolicy="strict-origin-when-cross-origin" alt="${anime.title}"></td>
             <td>${anime.title}</td>
             <td>${{ 'tv_series': '电视节目', 'movie': '电影/剧场版', 'ova': 'OVA', 'other': '其他' }[anime.type] || anime.type}</td>
             <td>${anime.season}</td>

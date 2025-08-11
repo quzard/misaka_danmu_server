@@ -1,5 +1,17 @@
 import { apiFetch } from '../api.js';
 
+// Helper function to normalize image URLs to HTTPS, which is more robust for cross-origin images.
+function normalizeImageUrl(url) {
+    if (!url) {
+        return '/static/placeholder.png';
+    }
+    let newUrl = String(url);
+    if (newUrl.startsWith('//')) {
+        newUrl = 'https:' + newUrl;
+    }
+    return newUrl.replace(/^http:/, 'https:');
+}
+
 // DOM Elements
 let sourcesSubNav, sourcesSubViews;
 let danmakuSourcesList, saveDanmakuSourcesBtn, toggleDanmakuSourceBtn, moveDanmakuSourceUpBtn, moveDanmakuSourceDownBtn;
@@ -297,7 +309,7 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                 const biliLoginSectionHTML = `
                     <div id="bili-login-section">
                         <div id="bili-user-profile" class="hidden">
-                            <img id="bili-user-avatar" src="/static/placeholder.png" alt="avatar">
+                            <img id="bili-user-avatar" src="/static/placeholder.png" alt="avatar" referrerpolicy="no-referrer">
                             <div id="bili-user-info">
                                 <span id="bili-user-nickname"></span>
                                 <span id="bili-user-vip-status"></span>
@@ -356,7 +368,7 @@ async function updateBiliStatusOnSourcesView() {
                 vipText = info.vipType === 2 ? '<span class="bili-list-vip annual">年度大会员</span>' : '<span class="bili-list-vip">大会员</span>';
             }
             statusDiv.innerHTML = `
-                <img src="${info.face ? info.face.replace('http:', 'https') : '/static/placeholder.png'}" alt="avatar" class="bili-list-avatar">
+                <img src="${normalizeImageUrl(info.face)}" alt="avatar" class="bili-list-avatar" referrerpolicy="no-referrer">
                 <span class="bili-list-uname">${info.uname}</span>
                 ${vipText}
             `;
@@ -401,7 +413,7 @@ async function checkBiliLoginStatus() {
         if (info.isLogin) {
             profileDiv.classList.remove('hidden');
             statusDiv.classList.add('hidden');
-            avatarImg.src = info.face ? info.face.replace('http:', 'https') : '/static/placeholder.png';
+            avatarImg.src = normalizeImageUrl(info.face);
             nicknameSpan.textContent = `${info.uname} (Lv.${info.level})`;
             if (info.vipStatus === 1) {
                 let vipText = '大会员';
