@@ -45,6 +45,10 @@ async function loadDanmakuSources() {
     try {
         const settings = await apiFetch('/api/ui/scrapers');
         renderDanmakuSources(settings);
+        // 渲染后，如果Bilibili源存在，则更新其登录状态
+        if (document.getElementById('bili-status-on-source-list')) {
+            updateBiliStatusOnSourcesView();
+        }
     } catch (error) {
         danmakuSourcesList.innerHTML = `<li class="error">加载失败: ${(error.message || error)}</li>`;
     }
@@ -61,6 +65,15 @@ function renderDanmakuSources(settings) {
         nameSpan.className = 'source-name';
         nameSpan.textContent = setting.provider_name;
         li.appendChild(nameSpan);
+
+        // 新增：为Bilibili源添加一个专门的状态显示区域
+        if (setting.provider_name === 'bilibili') {
+            const biliStatusDiv = document.createElement('div');
+            biliStatusDiv.id = 'bili-status-on-source-list';
+            biliStatusDiv.className = 'source-login-status';
+            biliStatusDiv.textContent = '正在检查...';
+            li.appendChild(biliStatusDiv);
+        }
 
         // 如果源有可配置字段或支持日志记录，则显示配置按钮
         if ((setting.configurable_fields && Object.keys(setting.configurable_fields).length > 0) || setting.is_loggable) {
@@ -331,6 +344,30 @@ async function handleSaveScraperConfig() {
     alert('配置已保存！');
 }
 
+async function updateBiliStatusOnSourcesView() {
+    const statusDiv = document.getElementById('bili-status-on-source-list');
+    if (!statusDiv) return;
+
+    try {
+        const info = await apiFetch('/api/ui/scrapers/bilibili/actions/get_login_info', { method: 'POST' });
+        if (info.isLogin) {
+            let vipText = '';
+            if (info.vipStatus === 1) {
+                vipText = info.vipType === 2 ? '<span class="bili-list-vip annual">年度大会员</span>' : '<span class="bili-list-vip">大会员</span>';
+            }
+            statusDiv.innerHTML = `
+                <img src="${info.face ? info.face.replace('http:', 'https') : '/static/placeholder.png'}" alt="avatar" class="bili-list-avatar">
+                <span class="bili-list-uname">${info.uname}</span>
+                ${vipText}
+            `;
+        } else {
+            statusDiv.textContent = '未登录';
+        }
+    } catch (error) {
+        statusDiv.textContent = '状态检查失败';
+    }
+}
+
 let biliPollInterval = null;
 let biliLoginPopup = null; // 引用弹出的登录窗口
 
@@ -367,7 +404,12 @@ async function checkBiliLoginStatus() {
             avatarImg.src = info.face ? info.face.replace('http:', 'https') : '/static/placeholder.png';
             nicknameSpan.textContent = `${info.uname} (Lv.${info.level})`;
             if (info.vipStatus === 1) {
-                vipSpan.textContent = '大会员';
+                let vipText = '大会员';
+                if (info.vipType === 2) {
+                    vipText = '年度大会员';
+                }
+                const dueDate = new Date(info.vipDueDate).toLocaleDateString();
+                vipSpan.textContent = `${vipText} (到期: ${dueDate})`;
                 vipSpan.className = 'vip';
             } else {
                 vipSpan.textContent = '';

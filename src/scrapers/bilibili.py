@@ -252,11 +252,15 @@ class BilibiliScraper(BaseScraper):
         nav_resp.raise_for_status()
         data = nav_resp.json().get("data", {})
         if data.get("isLogin"):
+            vip_info = data.get("vip", {})
             return {
                 "isLogin": True,
                 "uname": data.get("uname"),
                 "face": data.get("face"),
                 "level": data.get("level_info", {}).get("current_level"),
+                "vipStatus": vip_info.get("status"), # 0: 非会员, 1: 会员
+                "vipType": vip_info.get("type"), # 0:无, 1:月度, 2:年度
+                "vipDueDate": vip_info.get("due_date") # 毫秒时间戳
             }
         return {"isLogin": False}
 
