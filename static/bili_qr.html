@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     <title>Bilibili 扫码登录</title>
     <style>
         body { 
@@ -23,7 +24,12 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
             width: 300px; 
         }
+        h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+        }
         #qrcode { 
+            margin-top: 10px;
             line-height: 0; /* prevent extra space under canvas */
             display: flex; /* Use flex to center the QR code */
             justify-content: center; /* Center horizontally */
@@ -43,6 +49,8 @@
 </head>
 <body>
     <div id="container">
+        <h2>Bilibili 扫码登录</h2>
+        <p>请使用Bilibili手机客户端扫描二维码</p>
         <div id="qrcode">
             <!-- QR code will be generated here -->
         </div>
