@@ -127,13 +127,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 包含 v2 版本的 API 路由
 app.include_router(ui_router, prefix="/api/ui", tags=["Web UI API"])
 app.include_router(auth_router, prefix="/api/ui/auth", tags=["Auth"])
-app.include_router(dandan_router, prefix="/api", tags=["DanDanPlay Compatible"])
 app.include_router(bangumi_router, prefix="/api/bgm", tags=["Bangumi"])
 app.include_router(tmdb_router, prefix="/api/tmdb", tags=["TMDB"])
 app.include_router(douban_router, prefix="/api/douban", tags=["Douban"])
 app.include_router(imdb_router, prefix="/api/imdb", tags=["IMDb"])
 app.include_router(tvdb_router, prefix="/api/tvdb", tags=["TVDB"])
 app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
+
+# 将最通用的 dandan_router 挂载在最后，以避免路径冲突。
+# 这样可以确保像 /api/ui 这样的静态路径会优先于 /api/{token} 被匹配。
+app.include_router(dandan_router, prefix="/api", tags=["DanDanPlay Compatible"])
 
 # 根路径返回前端页面
 @app.get("/", include_in_schema=False)
