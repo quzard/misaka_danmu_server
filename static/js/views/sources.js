@@ -12,6 +12,20 @@ function normalizeImageUrl(url) {
     return newUrl.replace(/^http:/, 'https:');
 }
 
+// Helper to dynamically load a script if it's not already present
+function loadScript(src) {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) {
+            return resolve();
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = (e) => reject(new Error(`Script load error for ${src}: ${e}`));
+        document.head.appendChild(script);
+    });
+}
+
 // DOM Elements
 let sourcesSubNav, sourcesSubViews;
 let danmakuSourcesList, saveDanmakuSourcesBtn, toggleDanmakuSourceBtn, moveDanmakuSourceUpBtn, moveDanmakuSourceDownBtn;
@@ -432,18 +446,20 @@ async function updateBiliStatusOnSourcesView() {
     }
 }
 
-let biliPollInterval = null;
-let biliLoginPopup = null; // 引用弹出的登录窗口
 
 function stopBiliPolling() {
     if (biliPollInterval) {
         clearInterval(biliPollInterval);
         biliPollInterval = null;
     }
-    // 新增：如果弹窗存在且未关闭，则关闭它
-    if (biliLoginPopup && !biliLoginPopup.closed) {
-        biliLoginPopup.close();
-        biliLoginPopup = null;
+    // 移除二维码容器并恢复登录按钮
+    const qrContainer = document.getElementById('bili-qrcode-container');
+    if (qrContainer) {
+        qrContainer.remove();
+    }
+    const controlsDiv = document.getElementById('bili-login-controls');
+    if (controlsDiv) {
+        controlsDiv.classList.remove('hidden');
     }
 }
 
@@ -495,7 +511,10 @@ async function checkBiliLoginStatus() {
 async function handleBiliLoginClick() {
     const loginBtn = document.getElementById('bili-login-btn');
     const statusDiv = document.getElementById('bili-login-status');
-    if (!loginBtn || !statusDiv) return;
+    const controlsDiv = document.getElementById('bili-login-controls');
+    const loginSection = document.getElementById('bili-login-section');
+
+    if (!loginBtn || !statusDiv || !controlsDiv || !loginSection) return;
 
     // 检查当前是登录还是注销
     if (loginBtn.textContent === '注销') {
@@ -511,34 +530,46 @@ async function handleBiliLoginClick() {
     stopBiliPolling();
     loginBtn.disabled = true;
     statusDiv.textContent = '正在获取二维码...';
+    statusDiv.className = 'bili-login-status'; // 重置样式
 
     try {
+        // 动态加载 qrcode.js 库
+        await loadScript('/static/js/libs/qrcode.min.js');        
         const qrData = await apiFetch('/api/ui/scrapers/bilibili/actions/generate_qrcode', { method: 'POST' });
 
-        // 在新窗口中打开一个干净的二维码页面，不通过URL传递数据
-        const popupUrl = `/static/bili_qr.html`;
-        const width = 350, height = 400;
-        const left = (window.screen.width / 2) - (width / 2);
-        const top = (window.screen.height / 2) - (height / 2);
-        biliLoginPopup = window.open(popupUrl, 'BiliLogin', `width=${width},height=${height},top=${top},left=${left},resizable=no,menubar=no,toolbar=no,location=no`);
+        // 隐藏登录按钮
+        controlsDiv.classList.add('hidden');
 
-        // 使用 postMessage 将二维码 URL 安全地传递给弹窗，避免在地址栏暴露
-        // 设置一个短暂的延迟以确保弹窗中的脚本已加载并准备好接收消息
-        setTimeout(() => {
-            if (biliLoginPopup && !biliLoginPopup.closed) {
-                biliLoginPopup.postMessage({ type: 'BILI_QR_URL', url: qrData.url }, window.location.origin);
-            }
-        }, 200);
+        // 创建并显示二维码容器
+        const qrContainer = document.createElement('div');
+        qrContainer.id = 'bili-qrcode-container';
+        qrContainer.innerHTML = `
+            <div id="bili-qrcode-canvas"></div>
+            <p>请使用Bilibili手机客户端扫描二维码</p>
+            <button type="button" id="bili-cancel-login-btn" class="secondary-btn">取消登录</button>
+        `;
+        loginSection.appendChild(qrContainer);
 
-        statusDiv.textContent = '已打开新窗口，请在新窗口中扫码。';
+        // 生成二维码
+        new QRCode(document.getElementById('bili-qrcode-canvas'), {
+            text: qrData.url,
+            width: 180,
+            height: 180,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
+
+        // 添加取消按钮的事件监听
+        document.getElementById('bili-cancel-login-btn').addEventListener('click', () => {
+            stopBiliPolling();
+            statusDiv.textContent = '登录已取消。';
+        });
+
+        statusDiv.textContent = '请扫码登录。';
+
 
         biliPollInterval = setInterval(async () => {
-            // 如果用户手动关闭了弹窗，则停止轮询
-            if (biliLoginPopup && biliLoginPopup.closed) {
-                stopBiliPolling();
-                statusDiv.textContent = '登录已取消。';
-                return;
-            }
 
             try {
                 const pollPayload = { qrcode_key: qrData.qrcode_key };
@@ -547,7 +578,7 @@ async function handleBiliLoginClick() {
                     stopBiliPolling();
                     statusDiv.textContent = '登录成功！';
                     statusDiv.classList.add('success');
-                    // 成功后自动关闭弹窗和模态框
+                    // 成功后自动关闭模态框
                     setTimeout(() => {
                         hideScraperConfigModal();
                         loadDanmakuSources(); // 刷新主界面状态
@@ -556,6 +587,9 @@ async function handleBiliLoginClick() {
                     stopBiliPolling();
                     statusDiv.textContent = '二维码已失效，请重新获取。';
                     statusDiv.classList.add('error');
+                    // 使二维码变灰以提示用户
+                    const canvas = document.querySelector('#bili-qrcode-canvas canvas');
+                    if (canvas) canvas.style.opacity = '0.3';
                 } else if (pollRes.code === 86090) { // 已扫描，待确认
                     statusDiv.textContent = '已扫描，请在手机上确认登录。';
                 }
@@ -573,6 +607,7 @@ async function handleBiliLoginClick() {
     }
 }
 
+let biliPollInterval = null;
 function setupBiliLoginListeners() {
     const loginBtn = document.getElementById('bili-login-btn');
     if (loginBtn) {
