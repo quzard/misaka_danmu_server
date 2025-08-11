@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from .. import models
 from .base import BaseScraper, get_season_from_title
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 # --- Pydantic Models for Youku API ---
 
 # Search
@@ -128,6 +130,8 @@ class YoukuScraper(BaseScraper):
         results = []
         try:
             response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Youku Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             data = YoukuSearchResult.model_validate(response.json())
 
@@ -243,6 +247,8 @@ class YoukuScraper(BaseScraper):
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
         url = f"https://openapi.youku.com/v2/shows/videos.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&ext=show&show_id={show_id}&page={page}&count={page_size}"
         response = await self.client.get(url)
+        if await self._should_log_responses():
+            scraper_responses_logger.debug(f"Youku Episodes Page Response (show_id={show_id}, page={page}): {response.text}")
         response.raise_for_status()
         return YoukuVideoResult.model_validate(response.json())
 
@@ -254,6 +260,8 @@ class YoukuScraper(BaseScraper):
             
             episode_info_url = f"https://openapi.youku.com/v2/videos/show_basic.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&video_id={vid}"
             episode_info_resp = await self.client.get(episode_info_url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Youku Episode Info Response (vid={vid}): {episode_info_resp.text}")
             episode_info_resp.raise_for_status()
             episode_info = YoukuEpisodeInfo.model_validate(episode_info_resp.json())
             total_mat = episode_info.total_mat
@@ -363,6 +371,8 @@ class YoukuScraper(BaseScraper):
             data={"data": data_payload},
             headers={"Referer": "https://v.youku.com"}
         )
+        if await self._should_log_responses():
+            scraper_responses_logger.debug(f"Youku Danmaku Segment Response (vid={vid}, mat={mat}): {response.text}")
         response.raise_for_status()
 
         # 修正：优酷API现在直接返回JSON，而不是JSONP。

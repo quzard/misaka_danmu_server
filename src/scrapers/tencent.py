@@ -12,7 +12,6 @@ from datetime import datetime
 from .base import BaseScraper, get_season_from_title
 from .. import models, crud
 
-# 新增：获取专用于记录原始响应的日志记录器
 scraper_responses_logger = logging.getLogger("scraper_responses")
 
 # --- Pydantic 模型，用于解析腾讯API的响应 ---
@@ -120,6 +119,9 @@ class TencentScraper(BaseScraper):
         try:
             self.logger.info(f"Tencent: 正在搜索 '{keyword}'...")
             response = await self.client.post(url, json=payload)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Search Response (keyword='{keyword}'): {response.text}")
+
             response.raise_for_status()
             response_json = response.json()
             data = TencentSearchResult.model_validate(response_json)
@@ -227,6 +229,8 @@ class TencentScraper(BaseScraper):
             try:
                 self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
                 response = await self.client.post(url, json=payload)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Tencent Episodes Response (cid='{cid}', page_context='{page_context}'): {response.text}")
                 response.raise_for_status()
                 data = response.json()
     
@@ -362,6 +366,8 @@ class TencentScraper(BaseScraper):
         index_url = f"https://dm.video.qq.com/barrage/base/{vid}"
         try:
             response = await self.client.get(index_url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Danmaku Index Response (vid={vid}): {response.text}")
             response.raise_for_status()
             index_data = response.json()
             segment_index = index_data.get("segment_index", {})
@@ -395,6 +401,8 @@ class TencentScraper(BaseScraper):
             segment_url = f"https://dm.video.qq.com/barrage/segment/{vid}/{segment_name}"
             try:
                 response = await self.client.get(segment_url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Tencent Danmaku Segment Response (vid={vid}, segment={segment_name}): status={response.status_code}")
                 response.raise_for_status()
                 comment_data = response.json()
                 

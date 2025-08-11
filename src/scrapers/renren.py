@@ -21,6 +21,8 @@ from pydantic import BaseModel, Field, field_validator
 from .. import models
 from .base import BaseScraper, get_season_from_title
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 
 # =====================
 #  Common utils (ported from the previous standalone script and adapted)
@@ -227,6 +229,8 @@ class RenrenScraper(BaseScraper):
             device_id = self._generate_device_id()
             headers = build_signed_headers(method=method, url=url, params=params or {}, device_id=device_id)
             resp = await self.client.request(method, url, params=params, headers=headers)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
             self._last_request_time = time.time()
             return resp
 
@@ -364,6 +368,8 @@ class RenrenScraper(BaseScraper):
                 "Referer": prof.referer,
             }
             resp = await self.client.get(url, timeout=20.0, headers=headers)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}")
             resp.raise_for_status()
             data = auto_decode(resp.text)
             if isinstance(data, list):

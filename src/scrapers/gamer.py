@@ -13,6 +13,8 @@ from opencc import OpenCC
 from .. import crud, models
 from .base import BaseScraper, get_season_from_title
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 
 class GamerScraper(BaseScraper):
     provider_name = "gamer"
@@ -91,6 +93,9 @@ class GamerScraper(BaseScraper):
         """一个可以进行请求的包装器，在 cookie 刷新后可以重试一次。"""
         await self._ensure_config()
         response = await self.client.request(method, url, **kwargs)
+        if await self._should_log_responses():
+            # 截断HTML以避免日志过长
+            scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
         is_login_required = "登入" in response.text and "animeVideo" in url
         if response.status_code == 200 and not is_login_required:
             return response
@@ -98,6 +103,8 @@ class GamerScraper(BaseScraper):
         if await self._refresh_cookie():
             self.logger.info(f"Gamer: Cookie 刷新后，正在重试请求 {url}...")
             response = await self.client.request(method, url, **kwargs)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Gamer Retry Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
         return response
 
     async def close(self):
@@ -261,6 +268,8 @@ class GamerScraper(BaseScraper):
             
             await self._ensure_config()
             response = await self.client.post(url, data=data)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Gamer Danmaku Response (episode_id={episode_id}): {response.text}")
             try:
                 danmu_data = response.json()
             except json.JSONDecodeError:
@@ -270,6 +279,8 @@ class GamerScraper(BaseScraper):
                 self.logger.warning(f"Gamer: 弹幕API未返回列表或有效JSON，尝试刷新Cookie后重试。响应: {response.text[:100]}")
                 if await self._refresh_cookie():
                     response = await self.client.post(url, data=data)
+                    if await self._should_log_responses():
+                        scraper_responses_logger.debug(f"Gamer Danmaku Retry Response (episode_id={episode_id}): {response.text}")
                 danmu_data = response.json()
 
             if not isinstance(danmu_data, list):

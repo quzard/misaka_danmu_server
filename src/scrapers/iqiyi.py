@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from .. import models
 from .base import BaseScraper, get_season_from_title
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 # --- Pydantic Models for iQiyi API (部分模型现在仅用于旧缓存兼容或作为新API响应的子集) ---
 
 class IqiyiVideoLibMeta(BaseModel):
@@ -150,6 +152,8 @@ class IqiyiScraper(BaseScraper):
         results = []
         try:
             response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             data = IqiyiSearchResult.model_validate(response.json())
 
@@ -219,6 +223,8 @@ class IqiyiScraper(BaseScraper):
         api_url = f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg"
         try:
             response = await self.client.get(api_url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi Decode API Response (link_id={link_id}): {response.text}")
             response.raise_for_status()
             data = response.json()
             if data.get("code") in ["A00000", "0"] and data.get("data"):
@@ -252,6 +258,8 @@ class IqiyiScraper(BaseScraper):
         url = f"https://pcw-api.iqiyi.com/video/video/baseinfo/{tvid}"
         try:
             response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi BaseInfo Response (tvid={tvid}): {response.text}")
             response.raise_for_status()
             data = response.json()
             if data.get("code") != "A00000" or not data.get("data"):
@@ -272,6 +280,8 @@ class IqiyiScraper(BaseScraper):
         url = f"https://pcw-api.iqiyi.com/albums/album/avlistinfo?aid={album_id}&page=1&size={size}"
         try:
             response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi Album List Response (album_id={album_id}): {response.text}")
             response.raise_for_status()
             data = IqiyiVideoResult.model_validate(response.json())
             return data.data.epsodelist if data.data else []
@@ -375,6 +385,8 @@ class IqiyiScraper(BaseScraper):
         
         try:
             response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi Danmaku Segment Response (tvId={tv_id}, mat={mat}): status={response.status_code}")
             if response.status_code == 404:
                 self.logger.info(f"爱奇艺: 找不到 tvId {tv_id} 的弹幕分段 {mat}，停止获取。")
                 return [] # 404 means no more segments

@@ -189,6 +189,8 @@ class MgtvScraper(BaseScraper):
         
         try:
             response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"MGTV Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
             search_result = MgtvSearchResult.model_validate(response.json())
 
@@ -258,6 +260,8 @@ class MgtvScraper(BaseScraper):
             while page_index < total_pages:
                 url = f"https://pcweb.api.mgtv.com/variety/showlist?allowedRC=1&collection_id={media_id}&month={month}&page=1&_support=10000000"
                 response = await self._request_with_rate_limit("GET", url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"MGTV Episodes Response (media_id={media_id}, month={month}): {response.text}")
                 response.raise_for_status()
                 result = MgtvEpisodeListResult.model_validate(response.json())
 
@@ -338,6 +342,8 @@ class MgtvScraper(BaseScraper):
         try:
             ctl_url = f"https://galaxy.bz.mgtv.com/getctlbarrage?version=8.1.39&abroad=0&uuid=&os=10.15.7&platform=0&mac=&vid={vid}&pid=&cid={cid}&ticket="
             ctl_response = await self._request_with_rate_limit("GET", ctl_url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"MGTV Control Barrage Response (cid={cid}, vid={vid}): {ctl_response.text}")
             ctl_response.raise_for_status()
             ctl_result = MgtvControlBarrageResult.model_validate(ctl_response.json())
 
@@ -345,6 +351,8 @@ class MgtvScraper(BaseScraper):
                 self.logger.info("MGTV: 使用主策略 (getctlbarrage) 获取弹幕。")
                 video_info_url = f"https://pcweb.api.mgtv.com/video/info?allowedRC=1&cid={cid}&vid={vid}&change=3&datatype=1&type=1&_support=10000000"
                 video_info_response = await self._request_with_rate_limit("GET", video_info_url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"MGTV Video Info Response (cid={cid}, vid={vid}): {video_info_response.text}")
                 video_info_response.raise_for_status()
                 video_info_result = MgtvVideoInfoResult.model_validate(video_info_response.json())
 
@@ -359,6 +367,8 @@ class MgtvScraper(BaseScraper):
                         segment_url = f"https://{ctl_result.data.cdn_host}/{ctl_result.data.cdn_version}/{minute}.json"
                         try:
                             segment_response = await self._request_with_rate_limit("GET", segment_url)
+                            if await self._should_log_responses():
+                                scraper_responses_logger.debug(f"MGTV Danmaku Segment Response (vid={vid}, minute={minute}): status={segment_response.status_code}")
                             segment_response.raise_for_status()
                             segment_data = MgtvCommentSegmentResult.model_validate(segment_response.json())
                             if segment_data.data and segment_data.data.items:
@@ -383,6 +393,8 @@ class MgtvScraper(BaseScraper):
 
                 fallback_url = f"https://galaxy.bz.mgtv.com/cdn/opbarrage?vid={vid}&pid=&cid={cid}&ticket=&time={time_offset}&allowedRC=1"
                 fallback_response = await self._request_with_rate_limit("GET", fallback_url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"MGTV Fallback Danmaku Response (vid={vid}, time={time_offset}): {fallback_response.text}")
                 fallback_response.raise_for_status()
                 fallback_result = MgtvCommentSegmentResult.model_validate(fallback_response.json())
 
