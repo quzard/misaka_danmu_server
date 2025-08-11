@@ -10,6 +10,29 @@ let episodeListView, danmakuListView;
 let currentEpisodes = [];
 let currentModalConfirmHandler = null; // 仅用于本模块控制通用模态的“确认”按钮
 
+// --- 统计辅助函数：更稳健的异常点检测 ---
+function median(numbers) {
+    if (!numbers.length) return 0;
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function mad(numbers, med) {
+    const deviations = numbers.map((x) => Math.abs(x - med));
+    return median(deviations);
+}
+
+function mean(numbers) {
+    return numbers.reduce((a, b) => a + b, 0) / (numbers.length || 1);
+}
+
+function stddev(numbers, avg) {
+    const m = avg ?? mean(numbers);
+    const variance = numbers.reduce((acc, x) => acc + (x - m) ** 2, 0) / (numbers.length || 1);
+    return Math.sqrt(variance);
+}
+
 function initializeElements() {
     libraryTableBody = document.querySelector('#library-table tbody');
     librarySearchInput = document.getElementById('library-search-input');
@@ -362,7 +385,7 @@ async function handleReorderEpisodes(sourceId, animeTitle) {
     }
 }
 
-// 计算平均弹幕数并删除低于平均值的分集（带预览确认）
+// 正片重整：使用稳健统计剔除明显低值；若整体均匀则不删除（认为都为正片）
 async function handleCleanupByAverage(sourceId, animeTitle) {
     const episodes = currentEpisodes || [];
     if (!episodes.length) {
@@ -378,14 +401,40 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
         return;
     }
 
-    const average = validCounts.reduce((a, b) => a + b, 0) / validCounts.length;
-    const toDelete = episodes.filter(ep => Number(ep.comment_count) < average);
-    const toKeep = episodes.filter(ep => Number(ep.comment_count) >= average);
+    // 1) 在对数域中使用 MAD 计算鲁棒Z分数，识别明显低值
+    const logCounts = validCounts.map((c) => Math.log10(c + 1));
+    const med = median(logCounts);
+    const m = mad(logCounts, med);
+    const robustZ = logCounts.map((x) => (m === 0 ? 0 : 0.6745 * (x - med) / m));
+    let toDeleteIdx = robustZ
+        .map((z, idx) => ({ idx, z }))
+        .filter((o) => o.z < -2.5) // 明显低值
+        .map((o) => o.idx);
 
-    if (toDelete.length === 0) {
-        alert(`未找到低于平均值 (${average.toFixed(2)}) 的分集。`);
+    // 2) 如果 MAD 分割效果不明显，则回退到 IQR
+    if (toDeleteIdx.length === 0 || toDeleteIdx.length > validCounts.length * 0.6) {
+        const sorted = [...logCounts].sort((a, b) => a - b);
+        const q1 = sorted[Math.floor(sorted.length * 0.25)] ?? med;
+        const q3 = sorted[Math.floor(sorted.length * 0.75)] ?? med;
+        const iqr = Math.max(0, q3 - q1);
+        const lowThr = q1 - 1.5 * iqr;
+        toDeleteIdx = logCounts
+            .map((x, idx) => ({ x, idx }))
+            .filter((o) => o.x < lowThr)
+            .map((o) => o.idx);
+    }
+
+    // 3) 若整体分布很均匀（CV<0.35）或最终没有明确低值，则认为都是正片
+    const avg = mean(validCounts);
+    const sd = stddev(validCounts, avg);
+    const cv = avg > 0 ? sd / avg : 0;
+    if (cv < 0.35 || toDeleteIdx.length === 0) {
+        alert('分布较为均匀，未检测到明显低值，已认为全部为正片。');
         return;
     }
+
+    const toDelete = episodes.filter((_, i) => toDeleteIdx.includes(i));
+    const toKeep = episodes.filter((_, i) => !toDeleteIdx.includes(i));
 
     // 在通用模态中展示“将保留的分集”预览
     const modal = document.getElementById('generic-modal');
@@ -408,9 +457,9 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
     const keepCountText = `<span style="color: var(--success-color); font-weight: 600;">${toKeep.length}</span>`;
 
     modalBody.innerHTML = `
-        <p>将基于平均弹幕数进行正片重整：</p>
+        <p>将基于稳健统计进行正片重整：</p>
         <ul>
-            <li>平均弹幕数：<strong>${average.toFixed(2)}</strong></li>
+            <li>平均弹幕数：<strong>${avg.toFixed(2)}</strong></li>
             <li>预计删除分集：${deleteCountText} / ${episodes.length}</li>
             <li>预计保留分集：${keepCountText} / ${episodes.length}</li>
         </ul>
