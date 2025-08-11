@@ -1,6 +1,30 @@
 import { apiFetch } from '../api.js';
 import { toggleLoader, switchView } from '../ui.js';
 
+let logRefreshInterval = null;
+
+async function refreshServerLogs() {
+    const logOutput = document.getElementById('log-output');
+    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
+    try {
+        const logs = await apiFetch('/api/ui/logs');
+        logOutput.textContent = logs.join('\n');
+    } catch (error) {
+        console.error("刷新日志失败:", error.message);
+    }
+}
+
+function startLogRefresh() {
+    refreshServerLogs();
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = setInterval(refreshServerLogs, 3000);
+}
+
+function stopLogRefresh() {
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = null;
+}
+
 let currentSearchData = { results: [], searchSeason: null, keyword: '' };
 let itemsForBulkImport = [];
 
