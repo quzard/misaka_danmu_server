@@ -520,7 +520,7 @@ async function handleBiliLoginClick() {
         const width = 350, height = 400;
         const left = (window.screen.width / 2) - (width / 2);
         const top = (window.screen.height / 2) - (height / 2);
-        biliLoginPopup = window.open(popupUrl, 'BiliLogin', `width=${width},height=${height},top=${top},left=${left}`);
+        biliLoginPopup = window.open(popupUrl, 'BiliLogin', `width=${width},height=${height},top=${top},left=${left},resizable=no,menubar=no,toolbar=no,location=no`);
 
         // 使用 postMessage 将二维码 URL 安全地传递给弹窗，避免在地址栏暴露
         // 设置一个短暂的延迟以确保弹窗中的脚本已加载并准备好接收消息
