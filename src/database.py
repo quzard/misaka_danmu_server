@@ -82,11 +82,17 @@ async def create_initial_admin_user(app: FastAPI):
     user_to_create = models.UserCreate(username=admin_user, password=admin_pass)
     await crud.create_user(pool, user_to_create)
 
-    # 打印凭据信息，方便用户查看日志
+    # 打印凭据信息。
+    # 注意：，
+    # 以确保敏感的初始密码只输出到控制台，而不会被写入到持久化的日志文件中，从而提高安全性。     
     logger.info("\n" + "="*60)
     logger.info(f"=== 初始管理员账户已创建 (用户: {admin_user}) ".ljust(56) + "===")
     logger.info(f"=== 请使用以下随机生成的密码登录: {admin_pass} ".ljust(56) + "===")
     logger.info("="*60 + "\n")
+    print("\n" + "="*60)
+    print(f"=== 初始管理员账户已创建 (用户: {admin_user}) ".ljust(56) + "===")
+    print(f"=== 请使用以下随机生成的密码登录: {admin_pass} ".ljust(56) + "===")
+    print("="*60 + "\n")
 
 async def init_db_tables(app: FastAPI):
     """初始化数据库和表"""

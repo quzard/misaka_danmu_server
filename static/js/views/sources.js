@@ -280,8 +280,16 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
             // 如果是Bilibili，添加登录部分
             if (providerName === 'bilibili') {
                 // 修正：调整HTML结构以实现垂直居中布局
+                // 新增：为登录后的用户 profile 创建专用容器
                 const biliLoginSectionHTML = `
                     <div id="bili-login-section">
+                        <div id="bili-user-profile" class="hidden">
+                            <img id="bili-user-avatar" src="/static/placeholder.png" alt="avatar">
+                            <div id="bili-user-info">
+                                <span id="bili-user-nickname"></span>
+                                <span id="bili-user-vip-status"></span>
+                            </div>
+                        </div>
                         <div id="bili-login-status">正在检查登录状态...</div>
                         <div id="bili-login-controls">
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
@@ -339,19 +347,38 @@ function stopBiliPolling() {
 }
 
 async function checkBiliLoginStatus() {
+    const profileDiv = document.getElementById('bili-user-profile');
+    const avatarImg = document.getElementById('bili-user-avatar');
+    const nicknameSpan = document.getElementById('bili-user-nickname');
+    const vipSpan = document.getElementById('bili-user-vip-status');
     const statusDiv = document.getElementById('bili-login-status');
-    if (!statusDiv) return;
+    const loginBtn = document.getElementById('bili-login-btn');
+
+    if (!profileDiv || !statusDiv || !loginBtn) return;
+
     statusDiv.textContent = '正在检查登录状态...';
     statusDiv.className = '';
+
     try {
         const info = await apiFetch('/api/ui/scrapers/bilibili/actions/get_login_info', { method: 'POST' });
         if (info.isLogin) {
-            statusDiv.textContent = `已登录: ${info.uname} (Lv.${info.level})`;
-            statusDiv.classList.add('success');
-            document.getElementById('bili-login-btn').textContent = '注销';
+            profileDiv.classList.remove('hidden');
+            statusDiv.classList.add('hidden');
+            avatarImg.src = info.face ? info.face.replace('http:', 'https') : '/static/placeholder.png';
+            nicknameSpan.textContent = `${info.uname} (Lv.${info.level})`;
+            if (info.vipStatus === 1) {
+                vipSpan.textContent = '大会员';
+                vipSpan.className = 'vip';
+            } else {
+                vipSpan.textContent = '';
+                vipSpan.className = '';
+            }
+            loginBtn.textContent = '注销';
         } else {
+            profileDiv.classList.add('hidden');
+            statusDiv.classList.remove('hidden');
             statusDiv.textContent = '当前未登录。';
-            document.getElementById('bili-login-btn').textContent = '扫码登录';
+            loginBtn.textContent = '扫码登录';
         }
     } catch (error) {
         statusDiv.textContent = `检查状态失败: ${error.message}`;
