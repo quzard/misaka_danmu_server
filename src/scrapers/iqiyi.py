@@ -132,7 +132,13 @@ class IqiyiScraper(BaseScraper):
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
 
-        self.client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        self.client = httpx.AsyncClient(
+            headers={
+                "User-Agent": self.mobile_user_agent,
+                "Referer": "https://www.iqiyi.com/",
+            },
+            timeout=20.0, follow_redirects=True
+        )
 
     async def close(self):
         await self.client.aclose()
@@ -276,18 +282,34 @@ class IqiyiScraper(BaseScraper):
             return None
 
     async def _get_tv_episodes(self, album_id: int, size: int = 500) -> List[IqiyiEpisodeInfo]:
-        # 这个函数被 get_episodes 调用，缓存应该在 get_episodes 层面处理
-        url = f"https://pcw-api.iqiyi.com/albums/album/avlistinfo?aid={album_id}&page=1&size={size}"
-        try:
-            response = await self.client.get(url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"iQiyi Album List Response (album_id={album_id}): {response.text}")
-            response.raise_for_status()
-            data = IqiyiVideoResult.model_validate(response.json())
-            return data.data.epsodelist if data.data else []
-        except Exception as e:
-            self.logger.error(f"爱奇艺: 获取剧集列表失败 (album_id: {album_id}): {e}", exc_info=True)
-            return []
+        """
+        获取剧集列表，实现主/备API端点回退机制以提高成功率。
+        优先尝试国际版API，失败则回退到国内版API。
+        """
+        endpoints = [
+            f"https://pcw-api.iq.com/api/album/album/avlistinfo?aid={album_id}&page=1&size={size}",  # 国际版 (主)
+            f"https://pcw-api.iqiyi.com/albums/album/avlistinfo?aid={album_id}&page=1&size={size}"  # 国内版 (备)
+        ]
+
+        for i, url in enumerate(endpoints):
+            try:
+                self.logger.info(f"爱奇艺: 正在尝试从端点 #{i+1} 获取剧集列表 (album_id: {album_id})")
+                response = await self.client.get(url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"iQiyi Album List Response (album_id={album_id}, endpoint=#{i+1}): {response.text}")
+                response.raise_for_status()
+                data = IqiyiVideoResult.model_validate(response.json())
+                
+                if data.data and data.data.epsodelist:
+                    self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功获取 {len(data.data.epsodelist)} 个分集。")
+                    return data.data.epsodelist
+                
+                self.logger.warning(f"爱奇艺: 端点 #{i+1} 未返回分集数据。")
+            except Exception as e:
+                self.logger.error(f"爱奇艺: 尝试端点 #{i+1} 时发生错误 (album_id: {album_id}): {e}")
+        
+        self.logger.error(f"爱奇艺: 所有端点均未能获取到剧集列表 (album_id: {album_id})。")
+        return []
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         cache_key = f"episodes_{media_id}"

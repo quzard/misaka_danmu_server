@@ -24,7 +24,7 @@ class TencentCommentContentStyle(BaseModel):
 class TencentEpisode(BaseModel):
     vid: str = Field(..., description="分集视频ID")
     title: str = Field(..., description="分集标题")
-    is_trailer: str = Field("0")
+    is_trailer: str = Field("0", alias="is_trailer")
     union_title: Optional[str] = None
 
 class TencentComment(BaseModel):
@@ -88,6 +88,13 @@ class TencentScraper(BaseScraper):
 
     def __init__(self, pool: aiomysql.Pool):
         super().__init__(pool)
+        # 修正：使用更健壮的正则表达式来过滤非正片内容
+        self._EPISODE_BLACKLIST_PATTERN = re.compile(
+            r"预告|彩蛋|专访|直拍|直播回顾|加更|走心|解忧|纯享|节点|解读|揭秘|赏析|速看|资讯|访谈|番外|短片|纪录片",
+            re.IGNORECASE
+        )
+        # 用于从标题中提取集数的正则表达式
+        self._EPISODE_INDEX_PATTERN = re.compile(r"^(?:第)?(\d+)(?:集|话)?$")
         self.base_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Referer": "https://v.qq.com/",
@@ -188,6 +195,20 @@ class TencentScraper(BaseScraper):
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
 
+    def _get_episode_index_from_title(self, title: str) -> Optional[int]:
+        """
+        从分集标题（如 "01", "第01集"）中解析出集数。
+        """
+        if not title:
+            return None
+        match = self._EPISODE_INDEX_PATTERN.match(title.strip())
+        if match:
+            try:
+                return int(match.group(1))
+            except (ValueError, IndexError):
+                return None
+        return None
+
     async def _internal_get_episodes(self, cid: str) -> List[TencentEpisode]:
         """
         获取指定cid的所有分集列表。
@@ -262,20 +283,9 @@ class TencentScraper(BaseScraper):
                     episode = TencentEpisode.model_validate(params)
     
                     # 过滤非正片内容
-                    is_junk = False
-                    reason = ""
-                    # 1. 根据 is_trailer 标志
-                    if episode.is_trailer == "1":
-                        is_junk = True
-                        reason = "is_trailer flag"
-                    # 2. 根据标题中的关键词
-                    if not is_junk:
-                        junk_keywords = ["预告", "彩蛋", "直拍", "直播回顾", "加更", "走心", "解忧", "纯享", "节点"]
-                        for kw in junk_keywords:
-                            if kw in episode.title:
-                                is_junk = True
-                                reason = f"title keyword '{kw}'"
-                                break
+                    title_to_check = episode.union_title or episode.title
+                    is_junk = episode.is_trailer == "1" or self._EPISODE_BLACKLIST_PATTERN.search(title_to_check)
+                    
                     # 3. 根据 union_title 中的关键词
                     if not is_junk and episode.union_title and "预告" in episode.union_title:
                         is_junk = True
@@ -338,22 +348,32 @@ class TencentScraper(BaseScraper):
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
         tencent_episodes = await self._internal_get_episodes(media_id)
         
-        all_provider_episodes = [
-            models.ProviderEpisodeInfo(
+        all_provider_episodes = []
+        for i, ep in enumerate(tencent_episodes):
+            # 核心修正：优先从标题解析集数，如果失败则使用 enumerate 的索引作为后备
+            episode_index = self._get_episode_index_from_title(ep.title)
+            if episode_index is None:
+                self.logger.warning(f"无法从标题 '{ep.title}' 解析集数，将使用顺序索引 {i+1} 作为后备。")
+                episode_index = i + 1
+
+            # 智能选择标题：优先使用更完整的 union_title，否则使用原始 title
+            display_title = ep.union_title if ep.union_title and ep.union_title != ep.title else ep.title
+            
+            all_provider_episodes.append(models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.vid,
-                title=ep.title,
-                episodeIndex=i + 1,
+                title=display_title,
+                episodeIndex=episode_index,
                 url=f"https://v.qq.com/x/cover/{media_id}/{ep.vid}.html"
-            )
-            for i, ep in enumerate(tencent_episodes)
-        ]
+            ))
+
+        # 关键步骤：在返回前，根据我们解析出的真实集数进行排序
+        all_provider_episodes.sort(key=lambda x: x.episodeIndex)
 
         # 如果指定了目标，则只返回目标分集
         if target_episode_index is not None:
             target_episode = next((ep for ep in all_provider_episodes if ep.episodeIndex == target_episode_index), None)
             return [target_episode] if target_episode else []
-
         return all_provider_episodes
 
     async def _internal_get_comments(self, vid: str, progress_callback: Optional[Callable] = None) -> List[TencentComment]:
@@ -472,8 +492,8 @@ class TencentScraper(BaseScraper):
                 
                 if c.content_style.color:
                     try:
-                        # 将16进制颜色字符串转为10进制整数
-                        color = int(c.content_style.color, 16)
+                        # 修正：腾讯的颜色值是十进制字符串，直接转换为整数
+                        color = int(c.content_style.color)
                     except (ValueError, TypeError):
                         pass # 转换失败则使用默认白色
             

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import asyncio
 import base64
 import hmac
@@ -22,7 +23,6 @@ from .. import models
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
-
 
 # =====================
 #  Common utils (ported from the previous standalone script and adapted)
@@ -369,7 +369,7 @@ class RenrenScraper(BaseScraper):
             }
             resp = await self.client.get(url, timeout=20.0, headers=headers)
             if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}")
+                scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}") 
             resp.raise_for_status()
             data = auto_decode(resp.text)
             if isinstance(data, list):

@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from .. import models, crud
 from .base import BaseScraper, get_season_from_title
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 # --- Pydantic Models for Mgtv API ---
 
 # 修正：此模型现在严格遵循C#代码的逻辑，通过属性派生出ID、类型和年份，而不是直接解析。
