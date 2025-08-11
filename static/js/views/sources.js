@@ -15,7 +15,7 @@ function normalizeImageUrl(url) {
 // DOM Elements
 let sourcesSubNav, sourcesSubViews;
 let danmakuSourcesList, saveDanmakuSourcesBtn, toggleDanmakuSourceBtn, moveDanmakuSourceUpBtn, moveDanmakuSourceDownBtn;
-let metadataSourcesList, saveMetadataSourcesBtn, toggleMetadataSourceBtn, moveMetadataSourceUpBtn, moveMetadataSourceDownBtn;
+let metadataSourcesList, saveMetadataSourcesBtn, moveMetadataSourceUpBtn, moveMetadataSourceDownBtn;
 
 function initializeElements() {
     sourcesSubNav = document.querySelector('#sources-view .settings-sub-nav');
@@ -29,7 +29,6 @@ function initializeElements() {
 
     metadataSourcesList = document.getElementById('metadata-sources-list');
     saveMetadataSourcesBtn = document.getElementById('save-metadata-sources-btn');
-    toggleMetadataSourceBtn = document.getElementById('toggle-metadata-source-btn');
     moveMetadataSourceUpBtn = document.getElementById('move-metadata-source-up-btn');
     moveMetadataSourceDownBtn = document.getElementById('move-metadata-source-down-btn');
 }
@@ -208,9 +207,19 @@ function renderMetadataSources(sources) {
         const enabledIcon = document.createElement('span');
         enabledIcon.className = 'status-icon';
         enabledIcon.textContent = setting.is_enabled ? '✅' : '❌';
+        // 新增：让状态图标本身可点击以切换状态，更直观
+        enabledIcon.style.cursor = 'pointer';
+        enabledIcon.title = '点击切换启用/禁用状态';
+        enabledIcon.addEventListener('click', (e) => {
+            e.stopPropagation(); // 防止触发li的选中事件
+            const isEnabled = li.dataset.isEnabled === 'true';
+            li.dataset.isEnabled = !isEnabled;
+            enabledIcon.textContent = !isEnabled ? '✅' : '❌';
+        });
         li.appendChild(enabledIcon);
 
-        li.addEventListener('click', () => {
+        li.addEventListener('click', (e) => {
+            if (e.target === enabledIcon) return; // 如果点击的是图标，则不执行选中
             metadataSourcesList.querySelectorAll('li').forEach(item => item.classList.remove('selected'));
             li.classList.add('selected');
         });
@@ -218,20 +227,13 @@ function renderMetadataSources(sources) {
     });
 }
 
-function handleMetadataSourceAction(action, direction = null) {
+function handleMetadataSourceAction(direction) {
     const selected = metadataSourcesList.querySelector('li.selected');
     if (!selected) return;
-
-    if (action === 'move') {
-        if (direction === 'up' && selected.previousElementSibling) {
-            metadataSourcesList.insertBefore(selected, selected.previousElementSibling);
-        } else if (direction === 'down' && selected.nextElementSibling) {
-            metadataSourcesList.insertBefore(selected.nextElementSibling, selected);
-        }
-    } else if (action === 'toggle') {
-        const isEnabled = selected.dataset.isEnabled === 'true';
-        selected.dataset.isEnabled = !isEnabled;
-        selected.querySelector('.status-icon').textContent = !isEnabled ? '✅' : '❌';
+    if (direction === 'up' && selected.previousElementSibling) {
+        metadataSourcesList.insertBefore(selected, selected.previousElementSibling);
+    } else if (direction === 'down' && selected.nextElementSibling) {
+        metadataSourcesList.insertBefore(selected.nextElementSibling, selected);
     }
 }
 
@@ -254,7 +256,7 @@ async function handleSaveMetadataSources() {
         alert(`保存失败: ${(error.message || error)}`);
     } finally {
         saveMetadataSourcesBtn.disabled = false;
-        saveMetadataSourcesBtn.textContent = '保存排序';
+        saveMetadataSourcesBtn.textContent = '保存设置';
     }
 }
 
@@ -589,13 +591,12 @@ export function setupSourcesEventListeners() {
     danmakuSourcesList.addEventListener('click', handleDanmakuSourceAction);
     saveDanmakuSourcesBtn.addEventListener('click', handleSaveDanmakuSources);
     toggleDanmakuSourceBtn.addEventListener('click', handleToggleDanmakuSource);
-    toggleMetadataSourceBtn.addEventListener('click', () => handleMetadataSourceAction('toggle'));
     moveDanmakuSourceUpBtn.addEventListener('click', () => handleMoveDanmakuSource('up'));
     moveDanmakuSourceDownBtn.addEventListener('click', () => handleMoveDanmakuSource('down'));
 
     saveMetadataSourcesBtn.addEventListener('click', handleSaveMetadataSources);
-    moveMetadataSourceUpBtn.addEventListener('click', () => handleMetadataSourceAction('move', 'up'));
-    moveMetadataSourceDownBtn.addEventListener('click', () => handleMetadataSourceAction('move', 'down'));
+    moveMetadataSourceUpBtn.addEventListener('click', () => handleMetadataSourceAction('up'));
+    moveMetadataSourceDownBtn.addEventListener('click', () => handleMetadataSourceAction('down'));
 
     // Modal event listeners
     document.getElementById('modal-close-btn').addEventListener('click', hideScraperConfigModal);
