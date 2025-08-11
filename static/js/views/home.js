@@ -183,7 +183,10 @@ async function handleSearch(e) {
         console.log("前端缓存命中：正在使用上次的搜索结果。");
         toggleLoader(true);
 
-        const updatedResults = JSON.parse(JSON.stringify(currentSearchData.results));
+        // 关键修正：当从缓存中为特定分集提供结果时，只保留“电视节目”类型。
+        const tvSeriesResults = currentSearchData.results.filter(item => item.type === 'tv_series');
+        const updatedResults = JSON.parse(JSON.stringify(tvSeriesResults));
+
         updatedResults.forEach(item => {
             item.currentEpisodeIndex = newEpisode;
         });
