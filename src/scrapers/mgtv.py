@@ -144,13 +144,13 @@ class MgtvCommentSegmentResult(BaseModel):
 class MgtvScraper(BaseScraper):
     provider_name = "mgtv"
 
-    # 修正：优化标题过滤器，将需要单词边界的英文缩写与不需要边界的中文关键词分开处理，
-    # 以正确过滤如“幕后纪录片”等标题。
+    # English keywords that often appear as standalone acronyms or words
+    _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
+    # Chinese keywords that are often embedded in titles.
+    _CN_JUNK = r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇|纪录片|访谈|番外|短片|加更|走心|解忧|纯享'
+
     _JUNK_TITLE_PATTERN = re.compile(
-        # 英文缩写/单词，需要单词边界或括号
-        r'(\[|\【|\b)(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|OST|BGM)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)'
-        # 中文关键词，直接匹配 (已合并新规则)
-        r'|(特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|映像|纪录片|访谈|番外|短片|加更|走心|解忧|纯享)',
+        r'(\[|\【|\b)(' + _ENG_JUNK + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)|(' + _CN_JUNK + r')',
         re.IGNORECASE
     )
 
