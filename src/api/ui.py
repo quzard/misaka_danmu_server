@@ -1459,6 +1459,35 @@ async def resume_current_task(
     await task_manager.resume_current_task()
     return {"message": "恢复请求已发送。"}
 
+@router.post("/tasks/{task_id}/abort", status_code=status.HTTP_202_ACCEPTED, summary="中止一个正在运行的任务")
+async def abort_running_task(
+    task_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """
+    尝试中止一个任务。
+    如果任务是当前正在运行的任务，会尝试取消它。
+    如果任务不是当前任务（例如，卡在“运行中”状态），则会强制将其状态更新为“失败”。
+    """
+    task = await crud.get_task_from_history_by_id(pool, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    if task['status'] != TaskStatus.RUNNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法中止一个状态为 '{task['status']}' 的任务。")
+
+    logger.info(f"用户 '{current_user.username}' 请求中止任务 ID: {task_id} ({task['title']})。")
+    
+    aborted = await task_manager.abort_current_task(task_id)
+    if aborted:
+        return {"message": "任务中止请求已发送。"}
+    else:
+        logger.warning(f"无法优雅地中止任务 {task_id}，将强制标记为失败。")
+        await crud.finalize_task_in_history(pool, task_id, TaskStatus.FAILED, "被用户手动中止")
+        return {"message": "任务已被强制标记为失败。"}
+
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),

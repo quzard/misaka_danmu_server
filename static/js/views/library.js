@@ -8,6 +8,7 @@ let episodeListView, danmakuListView;
 
 // State
 let currentEpisodes = [];
+let currentModalConfirmHandler = null; // 仅用于本模块控制通用模态的“确认”按钮
 
 function initializeElements() {
     libraryTableBody = document.querySelector('#library-table tbody');
@@ -265,6 +266,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
             <div class="header-actions">
                 <button id="select-all-episodes-btn" class="secondary-btn">全选</button>
                 <button id="delete-selected-episodes-btn" class="secondary-btn danger">批量删除选中</button>
+                <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
                 <button id="reorder-episodes-btn" class="secondary-btn">重整集数</button>
                 <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
             </div>
@@ -314,6 +316,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     });
     document.getElementById('select-all-episodes-btn').addEventListener('click', handleSelectAllEpisodes);
     document.getElementById('delete-selected-episodes-btn').addEventListener('click', handleDeleteSelectedEpisodes);
+    document.getElementById('cleanup-by-average-btn').addEventListener('click', () => handleCleanupByAverage(sourceId, animeTitle));
     document.getElementById('reorder-episodes-btn').addEventListener('click', () => handleReorderEpisodes(sourceId, animeTitle));
     document.getElementById('back-to-detail-view-btn').addEventListener('click', () => showAnimeDetailView(animeId));
     tableBody.addEventListener('click', handleEpisodeAction);
@@ -357,6 +360,102 @@ async function handleReorderEpisodes(sourceId, animeTitle) {
     } catch (error) {
         alert(`提交重整任务失败: ${error.message}`);
     }
+}
+
+// 计算平均弹幕数并删除低于平均值的分集（带预览确认）
+async function handleCleanupByAverage(sourceId, animeTitle) {
+    const episodes = currentEpisodes || [];
+    if (!episodes.length) {
+        alert('没有可用的分集数据。');
+        return;
+    }
+
+    const validCounts = episodes
+        .map(ep => Number(ep.comment_count))
+        .filter(n => Number.isFinite(n) && n >= 0);
+    if (validCounts.length === 0) {
+        alert('所有分集的弹幕数不可用。');
+        return;
+    }
+
+    const average = validCounts.reduce((a, b) => a + b, 0) / validCounts.length;
+    const toDelete = episodes.filter(ep => Number(ep.comment_count) < average);
+    const toKeep = episodes.filter(ep => Number(ep.comment_count) >= average);
+
+    if (toDelete.length === 0) {
+        alert(`未找到低于平均值 (${average.toFixed(2)}) 的分集。`);
+        return;
+    }
+
+    // 在通用模态中展示“将保留的分集”预览
+    const modal = document.getElementById('generic-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const modalSaveBtn = document.getElementById('modal-save-btn');
+    const modalCancelBtn = document.getElementById('modal-cancel-btn');
+    const modalCloseBtn = document.getElementById('modal-close-btn');
+
+    modalTitle.textContent = `正片重整预览 - ${animeTitle}`;
+    modalSaveBtn.textContent = '确认执行';
+
+    const keepPreviewRows = toKeep
+        .sort((a, b) => a.episode_index - b.episode_index)
+        .slice(0, 80) // 控制渲染数量
+        .map(ep => `<tr><td>${ep.episode_index}</td><td>${ep.title}</td><td>${ep.comment_count}</td></tr>`) // 预览保留的集
+        .join('');
+
+    const deleteCountText = `<span style="color: var(--error-color); font-weight: 600;">${toDelete.length}</span>`;
+    const keepCountText = `<span style="color: var(--success-color); font-weight: 600;">${toKeep.length}</span>`;
+
+    modalBody.innerHTML = `
+        <p>将基于平均弹幕数进行正片重整：</p>
+        <ul>
+            <li>平均弹幕数：<strong>${average.toFixed(2)}</strong></li>
+            <li>预计删除分集：${deleteCountText} / ${episodes.length}</li>
+            <li>预计保留分集：${keepCountText} / ${episodes.length}</li>
+        </ul>
+        <div class="form-card">
+            <h4 style="margin-top:0">预览将保留的分集（最多显示 80 条）</h4>
+            <table class="compact-table">
+                <thead><tr><th>集数</th><th>标题</th><th>弹幕数</th></tr></thead>
+                <tbody>${keepPreviewRows || '<tr><td colspan="3">无</td></tr>'}</tbody>
+            </table>
+            <p class="small">确认后：先批量删除低于平均值的分集，然后自动重整集数。</p>
+        </div>
+    `;
+
+    // 仅绑定一次我们的确认处理器，避免多次触发
+    if (currentModalConfirmHandler) {
+        modalSaveBtn.removeEventListener('click', currentModalConfirmHandler);
+        currentModalConfirmHandler = null;
+    }
+    currentModalConfirmHandler = async (e) => {
+        e.preventDefault();
+        try {
+            // 1) 提交批量删除
+            const episodeIds = toDelete.map(ep => ep.id);
+            await apiFetch('/api/ui/library/episodes/delete-bulk', {
+                method: 'POST',
+                body: JSON.stringify({ episode_ids: episodeIds })
+            });
+            // 2) 紧接着提交重整集数（队列中会按顺序执行）
+            await apiFetch(`/api/ui/library/source/${sourceId}/reorder-episodes`, { method: 'POST' });
+
+            modal.classList.add('hidden');
+            alert('已提交：批量删除 + 重整集数 两个任务。');
+            document.querySelector('.nav-link[data-view="task-manager-view"]').click();
+        } catch (error) {
+            alert(`提交任务失败: ${error.message}`);
+        }
+    };
+    modalSaveBtn.addEventListener('click', currentModalConfirmHandler);
+
+    // 关闭时清理本模块的确认处理器引用
+    const clearHandlerRef = () => { if (currentModalConfirmHandler) { modalSaveBtn.removeEventListener('click', currentModalConfirmHandler); currentModalConfirmHandler = null; } };
+    modalCancelBtn.addEventListener('click', clearHandlerRef, { once: true });
+    modalCloseBtn.addEventListener('click', clearHandlerRef, { once: true });
+
+    modal.classList.remove('hidden');
 }
 
 async function handleEpisodeAction(e) {
