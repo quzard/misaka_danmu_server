@@ -154,9 +154,17 @@ class BuvidResponse(BaseModel):
 class BilibiliScraper(BaseScraper):
     provider_name = "bilibili"
 
-    # Regex to filter out non-main content like specials, trailers, etc.
+    # English keywords that often appear as standalone acronyms or words
+    _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
+    # Chinese keywords that are often embedded in titles. Added '番外篇' from user feedback.
+    _CN_JUNK = r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇'
+
+    # Regex to filter out non-main content.
+    # It's split into two parts:
+    # 1. English keywords that require word boundaries or brackets to avoid incorrect matches (e.g., 'SP' in 'speed').
+    # 2. Chinese keywords that can be embedded within other text.
     _JUNK_TITLE_PATTERN = re.compile(
-        r'(\[|\【|\b)(NC)?(OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot)(\d{1,2})?(\s|_ALL)?(\]|\】|\b)',
+        r'(\[|\【|\b)(' + _ENG_JUNK + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)|(' + _CN_JUNK + r')',
         re.IGNORECASE
     )
 
