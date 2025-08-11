@@ -115,6 +115,7 @@ class BiliEpisode(BaseModel):
     bvid: str
     title: str
     long_title: str
+    show_title: Optional[str] = None
 
 class BiliSeasonData(BaseModel):
     episodes: List[BiliEpisode]
