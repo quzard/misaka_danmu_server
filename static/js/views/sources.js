@@ -281,9 +281,9 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
             if (providerName === 'bilibili') {
                 // 修正：调整HTML结构以实现垂直居中布局
                 const biliLoginSectionHTML = `
-                    <div id="bili-login-section" style="text-align: center; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                    <div id="bili-login-section">
                         <div id="bili-login-status">正在检查登录状态...</div>
-                        <div id="bili-login-controls" style="margin-top: 10px;">
+                        <div id="bili-login-controls">
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
                         </div>
                     </div>

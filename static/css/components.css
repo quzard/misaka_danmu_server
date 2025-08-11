@@ -289,6 +289,8 @@ th {
 #bili-login-section {
     margin-top: 20px;
     padding-top: 15px;
+    padding-bottom: 15px; /* 增加底部间距，与顶部对称 */
+    text-align: center; /* 确保内部文本居中 */
     border-top: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
