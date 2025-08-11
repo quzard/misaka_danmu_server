@@ -9,6 +9,30 @@ const typeMap = {
     'movie': '电影/剧场版'
 };
 
+let logRefreshInterval = null;
+
+async function refreshServerLogs() {
+    const logOutput = document.getElementById('log-output');
+    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
+    try {
+        const logs = await apiFetch('/api/ui/logs');
+        logOutput.textContent = logs.join('\n');
+    } catch (error) {
+        console.error("刷新日志失败:", error.message);
+    }
+}
+
+function startLogRefresh() {
+    refreshServerLogs();
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = setInterval(refreshServerLogs, 3000);
+}
+
+function stopLogRefresh() {
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = null;
+}
+
 /**
  * A lightweight keyword parser for frontend caching logic.
  * It's not as robust as the backend's but covers common cases.
