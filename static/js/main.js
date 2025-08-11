@@ -7,6 +7,31 @@ import { setupTokensEventListeners } from './views/tokens.js';
 import { setupSourcesEventListeners } from './views/sources.js';
 import { setupSettingsEventListeners } from './views/settings.js';
 import { switchView, setActiveSidebar } from './ui.js';
+import { apiFetch } from './api.js';
+
+let logRefreshInterval = null;
+
+async function refreshServerLogs() {
+    const logOutput = document.getElementById('log-output');
+    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
+    try {
+        const logs = await apiFetch('/api/ui/logs');
+        logOutput.textContent = logs.join('\n');
+    } catch (error) {
+        console.error("刷新日志失败:", error.message);
+    }
+}
+
+function startLogRefresh() {
+    refreshServerLogs();
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = setInterval(refreshServerLogs, 3000);
+}
+
+function stopLogRefresh() {
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = null;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     // Setup all event listeners from different modules
