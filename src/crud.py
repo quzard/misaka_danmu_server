@@ -864,6 +864,49 @@ async def update_scrapers_settings(pool: aiomysql.Pool, settings: List[models.Sc
             data_to_update = [(s.is_enabled, s.display_order, s.provider_name) for s in settings]
             await cursor.executemany(query, data_to_update)
 
+# --- Metadata Source Management ---
+
+async def sync_metadata_sources_to_db(pool: aiomysql.Pool, provider_names: List[str]):
+    """将发现的元数据源同步到数据库。"""
+    if not provider_names:
+        return
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT provider_name FROM metadata_sources")
+            existing_providers = {row[0] for row in await cursor.fetchall()}
+            new_providers = [name for name in provider_names if name not in existing_providers]
+            if not new_providers:
+                return
+            await cursor.execute("SELECT MAX(display_order) FROM metadata_sources")
+            max_order = (await cursor.fetchone())[0] or 0
+            data_to_insert = []
+            for i, name in enumerate(new_providers):
+                # TMDB is always an enabled auxiliary source
+                is_aux_enabled = True if name == 'tmdb' else False
+                data_to_insert.append((name, max_order + i + 1, is_aux_enabled))
+            
+            query = "INSERT INTO metadata_sources (provider_name, display_order, is_aux_search_enabled) VALUES (%s, %s, %s)"
+            await cursor.executemany(query, data_to_insert)
+
+async def get_all_metadata_source_settings(pool: aiomysql.Pool) -> List[Dict[str, Any]]:
+    """获取所有元数据源的设置。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute("SELECT provider_name, is_enabled, is_aux_search_enabled, display_order FROM metadata_sources ORDER BY display_order ASC")
+            return await cursor.fetchall()
+
+async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['models.MetadataSourceSettingUpdate']):
+    """批量更新元数据源的设置。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            query = "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s"
+            data_to_update = []
+            for s in settings:
+                # Enforce TMDB as always-on for auxiliary search
+                is_aux = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
+                data_to_update.append((s.is_enabled, is_aux, s.display_order, s.provider_name))
+            await cursor.executemany(query, data_to_update)
+
 async def update_episode_fetch_time(pool: aiomysql.Pool, episode_id: int):
     """更新分集的采集时间"""
     async with pool.acquire() as conn:

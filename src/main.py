@@ -16,6 +16,7 @@ from .api.tvdb_api import router as tvdb_router
 from .api.douban_api import router as douban_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
+from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .webhook_manager import WebhookManager
 from .scheduler import SchedulerManager
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
 
     app.state.scraper_manager = ScraperManager(pool)
     await app.state.scraper_manager.load_and_sync_scrapers()
+    # 新增：初始化元数据源管理器
+    app.state.metadata_manager = MetadataSourceManager(pool)
+    await app.state.metadata_manager.initialize()
+
     app.state.task_manager = TaskManager(pool)
     app.state.webhook_manager = WebhookManager(pool, app.state.task_manager, app.state.scraper_manager)
     app.state.task_manager.start()

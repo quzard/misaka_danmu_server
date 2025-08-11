@@ -15,7 +15,7 @@ function normalizeImageUrl(url) {
 // DOM Elements
 let sourcesSubNav, sourcesSubViews;
 let danmakuSourcesList, saveDanmakuSourcesBtn, toggleDanmakuSourceBtn, moveDanmakuSourceUpBtn, moveDanmakuSourceDownBtn;
-let metadataSourcesList, saveMetadataSourcesBtn, moveMetadataSourceUpBtn, moveMetadataSourceDownBtn;
+let metadataSourcesList, saveMetadataSourcesBtn, toggleMetadataSourceBtn, moveMetadataSourceUpBtn, moveMetadataSourceDownBtn;
 
 function initializeElements() {
     sourcesSubNav = document.querySelector('#sources-view .settings-sub-nav');
@@ -29,6 +29,7 @@ function initializeElements() {
 
     metadataSourcesList = document.getElementById('metadata-sources-list');
     saveMetadataSourcesBtn = document.getElementById('save-metadata-sources-btn');
+    toggleMetadataSourceBtn = document.getElementById('toggle-metadata-source-btn');
     moveMetadataSourceUpBtn = document.getElementById('move-metadata-source-up-btn');
     moveMetadataSourceDownBtn = document.getElementById('move-metadata-source-down-btn');
 }
@@ -164,11 +165,7 @@ async function loadMetadataSources() {
     if (!metadataSourcesList) return;
     metadataSourcesList.innerHTML = '<li>加载中...</li>';
     try {
-        // This should be a new endpoint in the future, for now we hardcode it
-        const sources = [
-            { name: 'TMDB', status: '已配置' },
-            { name: 'Bangumi', status: '已授权' }
-        ];
+        const sources = await apiFetch('/api/ui/metadata-sources');
         renderMetadataSources(sources);
     } catch (error) {
         metadataSourcesList.innerHTML = `<li class="error">加载失败: ${(error.message || error)}</li>`;
@@ -177,14 +174,42 @@ async function loadMetadataSources() {
 
 function renderMetadataSources(sources) {
     metadataSourcesList.innerHTML = '';
-    sources.forEach(source => {
+    sources.forEach(setting => {
         const li = document.createElement('li');
-        li.dataset.sourceName = source.name;
-        li.textContent = source.name;
-        const statusIcon = document.createElement('span');
-        statusIcon.className = 'status-icon';
-        statusIcon.textContent = source.status;
-        li.appendChild(statusIcon);
+        li.dataset.providerName = setting.provider_name;
+        li.dataset.isEnabled = setting.is_enabled;
+        li.dataset.isAuxSearchEnabled = setting.is_aux_search_enabled;
+
+        // Auxiliary Search Checkbox
+        const auxSearchCheckbox = document.createElement('input');
+        auxSearchCheckbox.type = 'checkbox';
+        auxSearchCheckbox.className = 'aux-search-checkbox';
+        auxSearchCheckbox.checked = setting.is_aux_search_enabled;
+        auxSearchCheckbox.title = '启用作为辅助搜索源';
+        if (setting.provider_name === 'tmdb') {
+            auxSearchCheckbox.disabled = true;
+            auxSearchCheckbox.title = 'TMDB 是必需的辅助搜索源';
+        }
+        auxSearchCheckbox.addEventListener('change', (e) => {
+            li.dataset.isAuxSearchEnabled = e.target.checked;
+        });
+        li.appendChild(auxSearchCheckbox);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'source-name';
+        nameSpan.textContent = setting.provider_name.toUpperCase();
+        li.appendChild(nameSpan);
+
+        const statusText = document.createElement('span');
+        statusText.className = 'source-status-text';
+        statusText.textContent = setting.status;
+        li.appendChild(statusText);
+
+        const enabledIcon = document.createElement('span');
+        enabledIcon.className = 'status-icon';
+        enabledIcon.textContent = setting.is_enabled ? '✅' : '❌';
+        li.appendChild(enabledIcon);
+
         li.addEventListener('click', () => {
             metadataSourcesList.querySelectorAll('li').forEach(item => item.classList.remove('selected'));
             li.classList.add('selected');
@@ -193,19 +218,44 @@ function renderMetadataSources(sources) {
     });
 }
 
-function handleMoveMetadataSource(direction) {
+function handleMetadataSourceAction(action, direction = null) {
     const selected = metadataSourcesList.querySelector('li.selected');
     if (!selected) return;
-    if (direction === 'up' && selected.previousElementSibling) {
-        metadataSourcesList.insertBefore(selected, selected.previousElementSibling);
-    } else if (direction === 'down' && selected.nextElementSibling) {
-        metadataSourcesList.insertBefore(selected.nextElementSibling, selected);
+
+    if (action === 'move') {
+        if (direction === 'up' && selected.previousElementSibling) {
+            metadataSourcesList.insertBefore(selected, selected.previousElementSibling);
+        } else if (direction === 'down' && selected.nextElementSibling) {
+            metadataSourcesList.insertBefore(selected.nextElementSibling, selected);
+        }
+    } else if (action === 'toggle') {
+        const isEnabled = selected.dataset.isEnabled === 'true';
+        selected.dataset.isEnabled = !isEnabled;
+        selected.querySelector('.status-icon').textContent = !isEnabled ? '✅' : '❌';
     }
 }
 
-function handleSaveMetadataSources() {
-    // In the future, this would save the order to the backend.
-    alert('元信息搜索源的排序功能暂未实现后端保存。');
+async function handleSaveMetadataSources() {
+    const settingsToSave = [];
+    metadataSourcesList.querySelectorAll('li').forEach((li, index) => {
+        settingsToSave.push({
+            provider_name: li.dataset.providerName,
+            is_enabled: li.dataset.isEnabled === 'true',
+            is_aux_search_enabled: li.dataset.isAuxSearchEnabled === 'true',
+            display_order: index + 1,
+        });
+    });
+    try {
+        saveMetadataSourcesBtn.disabled = true;
+        saveMetadataSourcesBtn.textContent = '保存中...';
+        await apiFetch('/api/ui/metadata-sources', { method: 'PUT', body: JSON.stringify(settingsToSave) });
+        alert('元信息搜索源设置已保存！');
+    } catch (error) {
+        alert(`保存失败: ${(error.message || error)}`);
+    } finally {
+        saveMetadataSourcesBtn.disabled = false;
+        saveMetadataSourcesBtn.textContent = '保存排序';
+    }
 }
 
 async function handleDanmakuSourceAction(e) {
@@ -539,12 +589,13 @@ export function setupSourcesEventListeners() {
     danmakuSourcesList.addEventListener('click', handleDanmakuSourceAction);
     saveDanmakuSourcesBtn.addEventListener('click', handleSaveDanmakuSources);
     toggleDanmakuSourceBtn.addEventListener('click', handleToggleDanmakuSource);
+    toggleMetadataSourceBtn.addEventListener('click', () => handleMetadataSourceAction('toggle'));
     moveDanmakuSourceUpBtn.addEventListener('click', () => handleMoveDanmakuSource('up'));
     moveDanmakuSourceDownBtn.addEventListener('click', () => handleMoveDanmakuSource('down'));
 
     saveMetadataSourcesBtn.addEventListener('click', handleSaveMetadataSources);
-    moveMetadataSourceUpBtn.addEventListener('click', () => handleMoveMetadataSource('up'));
-    moveMetadataSourceDownBtn.addEventListener('click', () => handleMoveMetadataSource('down'));
+    moveMetadataSourceUpBtn.addEventListener('click', () => handleMetadataSourceAction('move', 'up'));
+    moveMetadataSourceDownBtn.addEventListener('click', () => handleMetadataSourceAction('move', 'down'));
 
     // Modal event listeners
     document.getElementById('modal-close-btn').addEventListener('click', hideScraperConfigModal);

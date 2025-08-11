@@ -43,6 +43,12 @@
     gap: 10px;
 }
 
+.aux-search-checkbox {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+}
+
 #danmaku-sources-list li:last-child,
 #metadata-sources-list li:last-child {
     border-bottom: none;
@@ -76,7 +82,7 @@
     flex-shrink: 0;
 }
 
-.source-login-status {
+.source-login-status, .source-status-text {
     font-size: 0.85em;
     color: #6c757d;
     margin-left: 10px;

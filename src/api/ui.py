@@ -14,6 +14,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from .. import crud, models, security
 from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
+from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
 from ..webhook_manager import WebhookManager
 from ..scheduler import SchedulerManager
@@ -103,6 +104,11 @@ async def get_webhook_manager(request: Request) -> WebhookManager:
     """依赖项：从应用状态获取 Webhook 管理器"""
     return request.app.state.webhook_manager
 
+async def get_metadata_manager(request: Request) -> MetadataSourceManager:
+    """依赖项：从应用状态获取元数据源管理器"""
+    return request.app.state.metadata_manager
+
+
 async def update_tmdb_mappings(
     pool: aiomysql.Pool,
     client: httpx.AsyncClient,
@@ -178,13 +184,13 @@ async def search_anime_provider(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
-    tmdb_client: httpx.AsyncClient = Depends(get_tmdb_client),
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
     支持 "标题 SXXEXX" 格式来指定集数。
-    新增TMDB辅助搜索：如果配置了TMDB，会先用关键词搜索TMDB获取别名，然后用原始关键词搜索所有弹幕源，最后用获取到的别名集对搜索结果进行过滤。
+    如果配置了TMDB API Key，会先用关键词搜索TMDB获取别名，然后用原始关键词搜索所有弹幕源，最后用获取到的别名集对搜索结果进行过滤。
+    如果未配置，则直接使用关键词进行搜索。
     """
     parsed_keyword = parse_search_keyword(keyword)
     search_title = parsed_keyword["title"]
@@ -200,87 +206,88 @@ async def search_anime_provider(
     if not manager.has_enabled_scrapers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="没有启用的搜索源，请在“搜索源”页面中启用至少一个。"
+            detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
         )
 
-    # --- 元数据辅助搜索 (重构) ---
-    filter_aliases = {search_title}
+    tmdb_api_key = await crud.get_config_value(pool, "tmdb_api_key", "")
 
-    async def _get_tmdb_aliases() -> set:
-        """从TMDB获取别名。"""
-        local_aliases = set()
-        try:
-            # 1. Search with zh-CN to get a best match
-            tv_task = tmdb_client.get("/search/tv", params={"query": search_title, "language": "zh-CN"})
-            movie_task = tmdb_client.get("/search/movie", params={"query": search_title, "language": "zh-CN"})
-            tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
+    if not tmdb_api_key:
+        logger.info("TMDB API Key 未配置，跳过辅助搜索，直接进行全网搜索。")
+        results = await manager.search_all([search_title], episode_info=episode_info)
+        logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
+    else:
+        logger.info("TMDB API Key 已配置，将执行元数据辅助搜索。")
+        tmdb_domain = await crud.get_config_value(pool, "tmdb_api_base_url", "https://api.themoviedb.org")
+        cleaned_domain = tmdb_domain.rstrip('/')
+        base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
+        params = {"api_key": tmdb_api_key}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        
+        async with httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0) as tmdb_client:
+            filter_aliases = {search_title}
 
-            tmdb_results = []
-            if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
-                tmdb_results.extend(tv_res.json().get("results", []))
-            if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
-                tmdb_results.extend(movie_res.json().get("results", []))
+            async def _get_tmdb_aliases() -> set:
+                """从TMDB获取别名。"""
+                local_aliases = set()
+                try:
+                    tv_task = tmdb_client.get("/search/tv", params={"query": search_title, "language": "zh-CN"})
+                    movie_task = tmdb_client.get("/search/movie", params={"query": search_title, "language": "zh-CN"})
+                    tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
 
-            if tmdb_results:
-                best_match = tmdb_results[0]
-                media_type = "tv" if "name" in best_match else "movie"
-                media_id = best_match['id']
+                    tmdb_results = []
+                    if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+                        tmdb_results.extend(tv_res.json().get("results", []))
+                    if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+                        tmdb_results.extend(movie_res.json().get("results", []))
 
-                # 2. Fetch details for zh-CN (with all alternative titles) and zh-TW concurrently
-                details_cn_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
-                details_tw_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"language": "zh-TW"})
-                
-                details_cn_res, details_tw_res = await asyncio.gather(details_cn_task, details_tw_task, return_exceptions=True)
+                    if tmdb_results:
+                        best_match = tmdb_results[0]
+                        media_type = "tv" if "name" in best_match else "movie"
+                        media_id = best_match['id']
 
-                # Process zh-CN response (which includes all alternative_titles)
-                if isinstance(details_cn_res, httpx.Response) and details_cn_res.status_code == 200:
-                    details = details_cn_res.json()
-                    # Add the main title from zh-CN response
-                    local_aliases.add(details.get('name') or details.get('title'))
-                    # Add the original title
-                    local_aliases.add(details.get('original_name') or details.get('original_title'))
-                    # Add all alternative titles from all regions
-                    alt_titles = details.get("alternative_titles", {}).get("titles", [])
-                    for title_info in alt_titles:
-                        local_aliases.add(title_info['title'])
-                
-                # Process zh-TW response to specifically get the Taiwanese title
-                if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
-                    details_tw = details_tw_res.json()
-                    local_aliases.add(details_tw.get('name') or details_tw.get('title'))
+                        details_cn_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
+                        details_tw_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"language": "zh-TW"})
+                        details_cn_res, details_tw_res = await asyncio.gather(details_cn_task, details_tw_task, return_exceptions=True)
 
-                logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
-        except Exception as e:
-            logger.warning(f"TMDB辅助搜索失败: {e}")
-        return {alias for alias in local_aliases if alias}
+                        if isinstance(details_cn_res, httpx.Response) and details_cn_res.status_code == 200:
+                            details = details_cn_res.json()
+                            local_aliases.add(details.get('name') or details.get('title'))
+                            local_aliases.add(details.get('original_name') or details.get('original_title'))
+                            alt_titles = details.get("alternative_titles", {}).get("titles", [])
+                            for title_info in alt_titles:
+                                local_aliases.add(title_info['title'])
+                        
+                        if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
+                            details_tw = details_tw_res.json()
+                            local_aliases.add(details_tw.get('name') or details_tw.get('title'))
 
-    # 并发执行所有辅助搜索
-    tasks = [
-        _get_tmdb_aliases(),
-    ]
-    results = await asyncio.gather(*tasks)
-    for alias_set in results:
-        filter_aliases.update(alias_set)
-    logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
+                        logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+                except Exception as e:
+                    logger.warning(f"TMDB辅助搜索失败: {e}")
+                return {alias for alias in local_aliases if alias}
 
-    # 1. 仅使用解析后的主标题搜索所有弹幕源
-    logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
-    all_results = await manager.search_all([search_title], episode_info=episode_info)
+            tasks = [_get_tmdb_aliases()]
+            results_from_helpers = await asyncio.gather(*tasks)
+            for alias_set in results_from_helpers:
+                filter_aliases.update(alias_set)
+            logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
-    # 2. 使用TMDB获取的别名集合对结果进行过滤
-    def normalize_for_filtering(title: str) -> str:
-        if not title: return ""
-        title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-        return title.lower().replace(" ", "").replace("：", ":").strip()
-    normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
-    filtered_results = []
-    for item in all_results:
-        normalized_item_title = normalize_for_filtering(item.title)
-        if not normalized_item_title: continue
-        if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
-            filtered_results.append(item)
-    logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-    results = filtered_results
+            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+            all_results = await manager.search_all([search_title], episode_info=episode_info)
+
+            def normalize_for_filtering(title: str) -> str:
+                if not title: return ""
+                title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+                return title.lower().replace(" ", "").replace("：", ":").strip()
+            normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
+            filtered_results = []
+            for item in all_results:
+                normalized_item_title = normalize_for_filtering(item.title)
+                if not normalized_item_title: continue
+                if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+                    filtered_results.append(item)
+            logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+            results = filtered_results
 
     # 辅助函数，用于根据标题修正媒体类型
     def is_movie_by_title(title: str) -> bool:
@@ -638,6 +645,24 @@ async def get_scraper_settings(
         full_settings.append(s_with_config)
             
     return full_settings
+
+@router.get("/metadata-sources", response_model=List[Dict[str, Any]], summary="获取所有元数据源的设置")
+async def get_metadata_source_settings(
+    current_user: models.User = Depends(security.get_current_user),
+    manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """获取所有元数据源及其当前状态（配置、连接性等）。"""
+    return await manager.get_sources_with_status()
+
+@router.put("/metadata-sources", status_code=status.HTTP_204_NO_CONTENT, summary="更新元数据源的设置")
+async def update_metadata_source_settings(
+    settings: List[models.MetadataSourceSettingUpdate],
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """批量更新元数据源的启用状态、辅助搜索状态和显示顺序。"""
+    await crud.update_metadata_sources_settings(pool, settings)
+    logger.info(f"用户 '{current_user.username}' 更新了元数据源设置。")
 
 @router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
 async def update_scraper_settings(
