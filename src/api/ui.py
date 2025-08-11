@@ -331,6 +331,39 @@ async def search_anime_provider(
         search_season=season_to_filter,
         search_episode=episode_to_filter
     )
+    # --- 新增：后端缓存逻辑 ---
+    # 将完整的搜索上下文缓存到数据库，以便用户可以加载上次的结果
+    cache_key = f"last_search_results_{current_user.id}"
+    data_to_cache = {
+        "results": [r.model_dump() for r in results],
+        "search_season": season_to_filter,
+        "search_episode": episode_to_filter,
+        "keyword": keyword  # 保存原始关键词
+    }
+    # 缓存1小时
+    await crud.set_cache(pool, cache_key, data_to_cache, 3600, provider="user_search")
+    logger.info(f"为用户 '{current_user.username}' 缓存了搜索结果。")
+
+    return UIProviderSearchResponse(
+        results=results,
+        search_season=season_to_filter,
+        search_episode=episode_to_filter
+    )
+
+@router.get("/search/last", response_model=Dict[str, Any], summary="获取上次的搜索结果")
+async def get_last_search_results(
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """从数据库缓存中获取当前用户的上一次搜索结果。"""
+    cache_key = f"last_search_results_{current_user.id}"
+    cached_data = await crud.get_cache(pool, cache_key)
+    if not cached_data:
+        # 为了与前端期望的数据结构保持一致，在没有缓存时返回一个空对象
+        return {"results": [], "search_season": None, "keyword": ""}
+    
+    # crud.get_cache 会自动反序列化JSON
+    return cached_data
 
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
