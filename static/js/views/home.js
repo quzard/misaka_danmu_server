@@ -44,7 +44,6 @@ function setupEventListeners() {
     // Home View
     document.getElementById('search-form').addEventListener('submit', handleSearch);
     document.getElementById('test-match-form').addEventListener('submit', handleTestMatch);
-    document.getElementById('load-last-search-btn').addEventListener('click', handleLoadLastSearch);
     document.getElementById('clear-cache-btn').addEventListener('click', handleClearCache);
     document.getElementById('bulk-import-btn').addEventListener('click', handleBulkImport);
     document.getElementById('select-all-btn').addEventListener('click', handleSelectAll);
@@ -111,32 +110,22 @@ function setupEventListeners() {
         document.getElementById('final-import-tmdb-id').value = e.detail.id || '';
         switchView('bulk-import-view'); // Switch back to the bulk import view
     });
-}
-
-async function handleLoadLastSearch() {
-    const btn = document.getElementById('load-last-search-btn');
-    btn.disabled = true;
-    btn.textContent = '加载中...';
-    toggleLoader(true);
-    document.getElementById('results-list').innerHTML = '';
-
-    try {
-        const data = await apiFetch('/api/ui/search/last');
-        if (data && data.results && data.results.length > 0) {
-            document.getElementById('search-keyword').value = data.keyword || '';
-            // displayResults 会更新内存中的 currentSearchData
-            displayResults(data.results, data.search_season, data.keyword);
-        } else {
-            alert('没有找到上次的搜索结果。');
-            document.getElementById('results-list').innerHTML = '<li>没有找到上次的搜索结果。</li>';
+    // 恢复：监听视图切换事件，以便在返回主页时恢复上一次的搜索结果
+    document.addEventListener('viewchange', (e) => {
+        if (e.detail.viewId === 'home-view') {
+            const lastResultsJSON = sessionStorage.getItem('lastSearchResults');
+            if (lastResultsJSON) {
+                try {
+                    const lastData = JSON.parse(lastResultsJSON);
+                    // 恢复上次的搜索结果和关键词
+                    displayResults(lastData.results || [], lastData.search_season, lastData.keyword || '');
+                } catch (err) {
+                    console.error("从 sessionStorage 解析上次搜索结果失败", err);
+                    sessionStorage.removeItem('lastSearchResults');
+                }
+            }
         }
-    } catch (error) {
-        alert(`加载上次结果失败: ${error.message || error}`);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '加载上次结果';
-        toggleLoader(false);
-    }
+    });
 }
 
 function handleBulkImportModeChange(e) {
@@ -215,6 +204,8 @@ async function handleSearch(e) {
 
     try {
         const data = await apiFetch(`/api/ui/search/provider?keyword=${encodeURIComponent(keyword)}`);
+        // 恢复：将搜索结果和关键词一同存入 sessionStorage
+        sessionStorage.setItem('lastSearchResults', JSON.stringify({ ...data, keyword }));
         const processedResults = data.results || [];
         const searchSeason = data.search_season;
         displayResults(processedResults, searchSeason, keyword);
