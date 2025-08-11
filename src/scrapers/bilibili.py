@@ -474,12 +474,22 @@ class BilibiliScraper(BaseScraper):
             response.raise_for_status()
             data = BiliSeasonResult.model_validate(response.json())
             if data.code == 0 and data.result and data.result.episodes:
+                # 新增：过滤掉非正片内容，如PV、SP、预告等
+                filtered_episodes = []
+                for ep in data.result.episodes:
+                    # 优先检查更具体的 show_title，然后检查 long_title
+                    title_to_check = ep.show_title or ep.long_title
+                    if self._JUNK_TITLE_PATTERN.search(title_to_check):
+                        self.logger.debug(f"Bilibili: 过滤掉PGC分集: '{title_to_check}'")
+                        continue
+                    filtered_episodes.append(ep)
+
                 episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name, episodeId=f"{ep.aid},{ep.cid}",
                         title=ep.long_title or ep.title, episodeIndex=i + 1,
                         url=f"https://www.bilibili.com/bangumi/play/ep{ep.id}"
-                    ) for i, ep in enumerate(data.result.episodes)
+                    ) for i, ep in enumerate(filtered_episodes)
                 ]
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index] if target_episode_index else episodes
         except Exception as e:
