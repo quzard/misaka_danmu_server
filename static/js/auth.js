@@ -60,7 +60,8 @@ async function logout() {
 }
 
 async function checkLogin() {
-    token = localStorage.getItem('danmu_api_token');
+    // The module-level 'token' is already initialized from localStorage when the script loads.
+    // We just need to check its current state.
     if (!token) {
         showAuthView(true);
         return;
