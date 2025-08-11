@@ -1,7 +1,6 @@
 import { apiFetch } from '../api.js';
 import { toggleLoader, switchView } from '../ui.js';
 
-let logRefreshInterval = null;
 let currentSearchData = { results: [], searchSeason: null, keyword: '' };
 let itemsForBulkImport = [];
 
@@ -141,28 +140,6 @@ function insertAtCursor(inputField, textToInsert) {
     inputField.focus();
     inputField.selectionStart = startPos + textToInsert.length;
     inputField.selectionEnd = startPos + textToInsert.length;
-}
-
-function startLogRefresh() {
-    refreshServerLogs();
-    if (logRefreshInterval) clearInterval(logRefreshInterval);
-    logRefreshInterval = setInterval(refreshServerLogs, 3000);
-}
-
-function stopLogRefresh() {
-    if (logRefreshInterval) clearInterval(logRefreshInterval);
-    logRefreshInterval = null;
-}
-
-async function refreshServerLogs() {
-    const logOutput = document.getElementById('log-output');
-    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
-    try {
-        const logs = await apiFetch('/api/ui/logs');
-        logOutput.textContent = logs.join('\n');
-    } catch (error) {
-        console.error("刷新日志失败:", error.message);
-    }
 }
 
 async function handleSearch(e) {

@@ -2,7 +2,6 @@ import { apiFetch } from './api.js';
 import { switchView, setActiveSidebar } from './ui.js';
 
 let token = localStorage.getItem('danmu_api_token');
-let logRefreshInterval = null;
 
 function showAuthView(show) {
     document.getElementById('auth-view').classList.toggle('hidden', !show);
@@ -60,8 +59,7 @@ async function logout() {
 }
 
 async function checkLogin() {
-    // The module-level 'token' is already initialized from localStorage when the script loads.
-    // We just need to check its current state.
+    token = localStorage.getItem('danmu_api_token');
     if (!token) {
         showAuthView(true);
         return;
