@@ -2,29 +2,6 @@ import { apiFetch } from '../api.js';
 import { toggleLoader, switchView } from '../ui.js';
 
 let logRefreshInterval = null;
-
-async function refreshServerLogs() {
-    const logOutput = document.getElementById('log-output');
-    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
-    try {
-        const logs = await apiFetch('/api/ui/logs');
-        logOutput.textContent = logs.join('\n');
-    } catch (error) {
-        console.error("刷新日志失败:", error.message);
-    }
-}
-
-function startLogRefresh() {
-    refreshServerLogs();
-    if (logRefreshInterval) clearInterval(logRefreshInterval);
-    logRefreshInterval = setInterval(refreshServerLogs, 3000);
-}
-
-function stopLogRefresh() {
-    if (logRefreshInterval) clearInterval(logRefreshInterval);
-    logRefreshInterval = null;
-}
-
 let currentSearchData = { results: [], searchSeason: null, keyword: '' };
 let itemsForBulkImport = [];
 
@@ -133,7 +110,8 @@ function setupEventListeners() {
         document.getElementById('final-import-tmdb-id').value = e.detail.id || '';
         switchView('bulk-import-view'); // Switch back to the bulk import view
     });
-    // 恢复：监听视图切换事件，以便在返回主页时恢复上一次的搜索结果
+
+    // 新增：监听视图切换事件，以便在返回主页时恢复上一次的搜索结果
     document.addEventListener('viewchange', (e) => {
         if (e.detail.viewId === 'home-view') {
             const lastResultsJSON = sessionStorage.getItem('lastSearchResults');
@@ -166,6 +144,28 @@ function insertAtCursor(inputField, textToInsert) {
     inputField.selectionEnd = startPos + textToInsert.length;
 }
 
+function startLogRefresh() {
+    refreshServerLogs();
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = setInterval(refreshServerLogs, 3000);
+}
+
+function stopLogRefresh() {
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = null;
+}
+
+async function refreshServerLogs() {
+    const logOutput = document.getElementById('log-output');
+    if (!localStorage.getItem('danmu_api_token') || !logOutput) return;
+    try {
+        const logs = await apiFetch('/api/ui/logs');
+        logOutput.textContent = logs.join('\n');
+    } catch (error) {
+        console.error("刷新日志失败:", error.message);
+    }
+}
+
 async function handleSearch(e) {
     e.preventDefault();
     const keyword = document.getElementById('search-keyword').value.trim();
@@ -183,16 +183,15 @@ async function handleSearch(e) {
         console.log("前端缓存命中：正在使用上次的搜索结果。");
         toggleLoader(true);
 
-        // 关键修正：当从缓存中为特定分集提供结果时，只保留“电视节目”类型。
-        const tvSeriesResults = currentSearchData.results.filter(item => item.type === 'tv_series');
-        const updatedResults = JSON.parse(JSON.stringify(tvSeriesResults));
-
+        const updatedResults = JSON.parse(JSON.stringify(currentSearchData.results));
         updatedResults.forEach(item => {
             item.currentEpisodeIndex = newEpisode;
         });
 
         const seasonForDisplay = newSeason || lastSeason || 1;
         
+        // 更新 sessionStorage 和当前状态
+        sessionStorage.setItem('lastSearchResults', JSON.stringify({ results: updatedResults, search_season: seasonForDisplay, keyword: keyword }));
         displayResults(updatedResults, seasonForDisplay, keyword);
         
         toggleLoader(false);
@@ -205,7 +204,7 @@ async function handleSearch(e) {
 
     try {
         const data = await apiFetch(`/api/ui/search/provider?keyword=${encodeURIComponent(keyword)}`);
-        // 恢复：将搜索结果和关键词一同存入 sessionStorage
+        // 新增：将搜索结果和关键词一同存入 sessionStorage
         sessionStorage.setItem('lastSearchResults', JSON.stringify({ ...data, keyword }));
         const processedResults = data.results || [];
         const searchSeason = data.search_season;

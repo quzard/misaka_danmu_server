@@ -2,6 +2,7 @@ import { apiFetch } from './api.js';
 import { switchView, setActiveSidebar } from './ui.js';
 
 let token = localStorage.getItem('danmu_api_token');
+let logRefreshInterval = null;
 
 function showAuthView(show) {
     document.getElementById('auth-view').classList.toggle('hidden', !show);
