@@ -799,30 +799,48 @@ async def reassociate_anime_sources(pool: aiomysql.Pool, source_anime_id: int, t
                 logging.error(f"重新关联源从 {source_anime_id} 到 {target_anime_id} 时出错: {e}", exc_info=True)
                 return False
 
-async def update_episode_info(pool: aiomysql.Pool, episode_id: int, title: str, episode_index: int, source_url: Optional[str]) -> bool:
-    """更新分集信息"""
+async def update_episode_info(pool: aiomysql.Pool, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:
+    """
+    更新分集信息。
+    此函数具有弹性：如果原始 episode_id 不再存在（可能由于刷新任务），
+    它会尝试使用 source_id 和 original_episode_index 找到新的 episode_id 并更新它。
+    """
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            # 1. 获取当前分集的 source_id
-            await cursor.execute("SELECT source_id FROM episode WHERE id = %s", (episode_id,))
-            result = await cursor.fetchone()
-            if not result:
-                return False # Episode not found
-            source_id = result[0]
-
-            # 2. 检查新的 episode_index 是否已在该 source_id 下被其他分集使用
+            # 检查新的集数是否与此源下的其他分集冲突
             await cursor.execute(
                 "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s AND id != %s",
-                (source_id, episode_index, episode_id)
+                (update_data.source_id, update_data.episode_index, episode_id)
             )
             if await cursor.fetchone():
-                # 如果找到了，说明集数重复，抛出特定错误
                 raise ValueError("该集数已存在，请使用其他集数。")
 
-            # 3. 如果没有重复，则执行更新
-            query = "UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s"
-            affected_rows = await cursor.execute(query, (title, episode_index, source_url, episode_id))
-            return affected_rows > 0
+            # 1. 尝试直接使用原始 episode_id 更新
+            query_update = "UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s"
+            affected_rows = await cursor.execute(query_update, (update_data.title, update_data.episode_index, update_data.source_url, episode_id))
+            
+            if affected_rows > 0:
+                return True # 成功
+
+            # 2. 如果更新失败，说明原始 episode 可能已被删除。尝试使用 source_id 和 original_episode_index 查找新的 episode_id。
+            logging.warning(f"Episode ID {episode_id} not found for update. Attempting to find replacement via source_id={update_data.source_id} and original_index={update_data.original_episode_index}.")
+            
+            await cursor.execute(
+                "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s",
+                (update_data.source_id, update_data.original_episode_index)
+            )
+            result = await cursor.fetchone()
+            
+            if not result:
+                return False
+            
+            new_episode_id = result[0]
+            logging.info(f"Found replacement episode with ID {new_episode_id}. Retrying update.")
+            
+            # 3. 使用新找到的 episode_id 重试更新
+            affected_rows_retry = await cursor.execute(query_update, (update_data.title, update_data.episode_index, update_data.source_url, new_episode_id))
+            
+            return affected_rows_retry > 0
 
 async def sync_scrapers_to_db(pool: aiomysql.Pool, provider_names: List[str]):
     """将发现的搜索源同步到数据库，新的搜索源会被添加进去。"""

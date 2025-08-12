@@ -488,13 +488,7 @@ async def edit_episode_info(
 ):
     """更新指定分集的标题、集数和链接。"""
     try:
-        updated = await crud.update_episode_info(
-            pool,
-            episode_id,
-            update_data.title,
-            update_data.episode_index,
-            update_data.source_url
-        )
+        updated = await crud.update_episode_info(pool, episode_id, update_data)
         if not updated:
             logger.warning(f"尝试更新一个不存在的分集 (ID: {episode_id})，操作被拒绝。")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
