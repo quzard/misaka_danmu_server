@@ -365,7 +365,13 @@ async def get_tmdb_details(
             
             name_en, name_jp, name_romaji = found_titles.get('en'), found_titles.get('jp'), found_titles.get('romaji')
 
-        if not name_en and original_language == 'en': name_en = original_title
+        # 修正：更健壮的英文名获取逻辑
+        if not name_en:
+            # 如果主标题不是中日韩文字，则很有可能就是英文名
+            if not _is_cjk(main_title_cn):
+                name_en = main_title_cn
+            elif original_language == 'en':
+                name_en = original_title
         if not name_jp and original_language == 'ja': name_jp = original_title
         if main_title_cn: aliases_cn.append(main_title_cn)
         
