@@ -140,7 +140,6 @@ class ScraperSetting(BaseModel):
 
 class MetadataSourceSettingUpdate(BaseModel):
     provider_name: str
-    is_enabled: bool
     is_aux_search_enabled: bool
     display_order: int
 

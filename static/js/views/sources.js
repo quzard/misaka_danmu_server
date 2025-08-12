@@ -217,24 +217,9 @@ function renderMetadataSources(sources) {
         statusText.className = 'source-status-text';
         statusText.textContent = setting.status;
         li.appendChild(statusText);
-
-        const enabledIcon = document.createElement('span');
-        enabledIcon.className = 'status-icon';
-        enabledIcon.textContent = setting.is_enabled ? '✅' : '❌';
-        // 新增：让状态图标本身可点击以切换状态，更直观
-        enabledIcon.style.cursor = 'pointer';
-        enabledIcon.title = '点击切换启用/禁用状态';
-        // 修正：为每个图标和列表项直接绑定事件，以避免事件委托中可能存在的未知竞争条件。
-        // 这种方法虽然会创建更多监听器，但逻辑更直接，有助于隔离问题。
-        enabledIcon.addEventListener('click', (e) => {
-            e.stopPropagation(); // 阻止事件冒泡到li，避免触发选中
-            const isEnabled = li.dataset.isEnabled === 'true';
-            const newIsEnabled = !isEnabled;
-            li.dataset.isEnabled = newIsEnabled;
-            enabledIcon.textContent = newIsEnabled ? '✅' : '❌';
-        });
-        li.appendChild(enabledIcon);
-
+        
+        // 移除启用/禁用图标和逻辑，默认全部启用。
+        
         // 为列表项本身添加选中逻辑
         li.addEventListener('click', (e) => {
             // 仅当点击的不是可交互的子元素时才执行选中
@@ -261,7 +246,6 @@ async function handleSaveMetadataSources() {
     metadataSourcesList.querySelectorAll('li').forEach((li, index) => {
         settingsToSave.push({
             provider_name: li.dataset.providerName,
-            is_enabled: li.dataset.isEnabled === 'true',
             is_aux_search_enabled: li.dataset.isAuxSearchEnabled === 'true',
             display_order: index + 1,
         });
