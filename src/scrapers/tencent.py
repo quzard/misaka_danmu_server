@@ -86,8 +86,8 @@ class TencentScraper(BaseScraper):
     """
     provider_name = "tencent"
 
-    def __init__(self, pool: aiomysql.Pool):
-        super().__init__(pool)
+    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
+        super().__init__(pool, config_manager)
         # 修正：使用更健壮的正则表达式来过滤非正片内容
         self._EPISODE_BLACKLIST_PATTERN = re.compile(
             r"预告|彩蛋|专访|直拍|直播回顾|加更|走心|解忧|纯享|节点|解读|揭秘|赏析|速看|资讯|访谈|番外|短片|纪录片",

@@ -201,8 +201,8 @@ class RrspDanmuItem(BaseModel):
 class RenrenScraper(BaseScraper):
     provider_name = "renren"
 
-    def __init__(self, pool: aiomysql.Pool):
-        super().__init__(pool)
+    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
+        super().__init__(pool, config_manager)
         self.client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0
