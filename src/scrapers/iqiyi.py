@@ -115,6 +115,36 @@ class IqiyiComment(BaseModel):
     # user_info 字段在XML中可能不存在，设为可选
     user_info: Optional[IqiyiUserInfo] = Field(None, alias="userInfo")
 
+# --- 新增：用于综艺节目分集获取的模型 ---
+class IqiyiAlbumVideoInfo(BaseModel):
+    publish_time: int = Field(alias="publishTime")
+
+class IqiyiAlbumBaseInfoData(BaseModel):
+    first_video: IqiyiAlbumVideoInfo = Field(alias="firstVideo")
+    latest_video: IqiyiAlbumVideoInfo = Field(alias="latestVideo")
+
+class IqiyiAlbumBaseInfoResult(BaseModel):
+    data: IqiyiAlbumBaseInfoData
+
+class IqiyiMobileVideo(BaseModel):
+    id: int
+    vid: str
+    short_title: str = Field(alias="shortTitle")
+    page_url: str = Field(alias="pageUrl")
+    publish_time: int = Field(alias="publishTime")
+    duration: str
+
+    @property
+    def link_id(self) -> Optional[str]:
+        match = re.search(r"v_(\w+?)\.html", self.page_url)
+        return match.group(1).strip() if match else None
+
+class IqiyiMobileVideoListData(BaseModel):
+    videos: List[IqiyiMobileVideo]
+
+class IqiyiMobileVideoListResult(BaseModel):
+    data: IqiyiMobileVideoListData
+
 # --- Main Scraper Class ---
 
 class IqiyiScraper(BaseScraper):
@@ -256,7 +286,7 @@ class IqiyiScraper(BaseScraper):
                 self.logger.error(f"Pydantic 验证错误: {e}")
                 return None
 
-        # 重构：使用新的API调用方式
+        # 主方案：使用API获取信息
         tvid = await self._get_tvid_from_link_id(link_id)
         if not tvid:
             return None
@@ -279,6 +309,26 @@ class IqiyiScraper(BaseScraper):
             return video_info
         except Exception as e:
             self.logger.error(f"爱奇艺: 获取或解析 baseinfo 失败 (tvid: {tvid}): {e}", exc_info=True)
+            
+        # 备用方案：如果API失败，则尝试解析HTML页面
+        self.logger.warning(f"爱奇艺: API获取基础信息失败，正在尝试备用方案 (解析HTML)...")
+        try:
+            url = f"https://m.iqiyi.com/v_{link_id}.html"
+            response = await self.client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi HTML Fallback Response (link_id={link_id}): {response.text}")
+            response.raise_for_status()
+            html_content = response.text
+            match = self.reg_video_info.search(html_content)
+            if match:
+                video_json_str = match.group(1)
+                video_info = IqiyiHtmlVideoInfo.model_validate(json.loads(video_json_str))
+                self.logger.info(f"爱奇艺: 备用方案成功解析到视频信息 (link_id={link_id})")
+                info_to_cache = video_info.model_dump()
+                await self._set_to_cache(cache_key, info_to_cache, 'base_info_ttl_seconds', 1800)
+                return video_info
+        except Exception as fallback_e:
+            self.logger.error(f"爱奇艺: 备用方案 (解析HTML) 也失败了: {fallback_e}", exc_info=True)
             return None
 
     async def _get_tv_episodes(self, album_id: int, size: int = 500) -> List[IqiyiEpisodeInfo]:
@@ -311,6 +361,68 @@ class IqiyiScraper(BaseScraper):
         self.logger.error(f"爱奇艺: 所有端点均未能获取到剧集列表 (album_id: {album_id})。")
         return []
 
+    async def _get_zongyi_episodes(self, album_id: int) -> List[IqiyiEpisodeInfo]:
+        """新增：专门为综艺节目获取分集列表。"""
+        self.logger.info(f"爱奇艺: 检测到综艺节目 (album_id={album_id})，使用按月获取策略。")
+        try:
+            # 1. 获取节目的开播和最新日期
+            url = f"https://pcw-api.iqiyi.com/album/album/baseinfo/{album_id}"
+            response = await self.client.get(url)
+            response.raise_for_status()
+            album_base_info = IqiyiAlbumBaseInfoResult.model_validate(response.json()).data
+            start_date = datetime.fromtimestamp(album_base_info.first_video.publish_time / 1000)
+            end_date = datetime.fromtimestamp(album_base_info.latest_video.publish_time / 1000)
+
+            # 2. 逐月获取分集
+            all_videos: List[IqiyiMobileVideo] = []
+            current_date = start_date
+            while current_date <= end_date:
+                year = current_date.year
+                month = f"{current_date.month:02d}"
+                month_url = f"https://pub.m.iqiyi.com/h5/main/videoList/source/month/?sourceId={album_id}&year={year}&month={month}"
+                
+                self.logger.debug(f"爱奇艺 (综艺): 正在获取 {year}-{month} 的分集...")
+                month_response = await self.client.get(month_url)
+                # 如果某个月份没有数据，API可能返回404或空列表，这都是正常情况
+                if month_response.status_code == 200:
+                    try:
+                        # 响应是 JSONP 格式，需要清理
+                        jsonp_text = month_response.text
+                        json_text = re.sub(r'^[^{]*\(|\)[^}]*$', '', jsonp_text)
+                        month_data = IqiyiMobileVideoListResult.model_validate(json.loads(json_text))
+                        if month_data.data and month_data.data.videos:
+                            all_videos.extend(month_data.data.videos)
+                    except (json.JSONDecodeError, ValidationError) as e:
+                        self.logger.warning(f"爱奇艺 (综艺): 解析 {year}-{month} 的分集失败: {e}")
+                
+                # 移至下一个月
+                if current_date.month == 12:
+                    current_date = current_date.replace(year=current_date.year + 1, month=1)
+                else:
+                    current_date = current_date.replace(month=current_date.month + 1)
+                await asyncio.sleep(0.3) # 礼貌性等待
+
+            # 3. 过滤、排序并转换为标准格式
+            filtered_videos = [v for v in all_videos if "精编版" not in v.short_title and "会员版" not in v.short_title]
+            filtered_videos.sort(key=lambda v: v.publish_time)
+
+            # 4. 异步获取所有分集的 tvid
+            tvid_tasks = [self._get_tvid_from_link_id(v.link_id) for v in filtered_videos if v.link_id]
+            tvids = await asyncio.gather(*tvid_tasks)
+            
+            # 5. 构建最终结果
+            final_episodes = []
+            for i, video in enumerate(filtered_videos):
+                tvid = tvids[i]
+                if tvid:
+                    final_episodes.append(IqiyiEpisodeInfo(tvId=int(tvid), name=video.short_title, order=i + 1, playUrl=video.page_url))
+            
+            return final_episodes
+
+        except Exception as e:
+            self.logger.error(f"爱奇艺: 获取综艺分集列表失败 (album_id={album_id}): {e}", exc_info=True)
+            return []
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         cache_key = f"episodes_{media_id}"
         # 仅当不是强制模式（即初次导入）且请求完整列表时才使用缓存
@@ -324,20 +436,12 @@ class IqiyiScraper(BaseScraper):
         if base_info is None:
             return []
 
+        # 修正：更灵活地决定处理模式
+        channel = base_info.channel_name or ""
+        is_movie_mode = db_media_type == "movie" or (db_media_type is None and channel == "电影")
+        is_zongyi_mode = db_media_type == "tv_series" and channel == "综艺"
+
         episodes: List[IqiyiEpisodeInfo] = []
-
-        # 决定处理模式：优先使用数据库类型，其次根据刮削信息判断
-        is_movie_mode = False
-        if db_media_type == "movie":
-            is_movie_mode = True
-            self.logger.info(f"爱奇艺: 根据数据库类型 'movie'，强制使用单集模式 (media_id={media_id})")
-        elif db_media_type == "tv_series":
-            is_movie_mode = False
-            self.logger.info(f"爱奇艺: 根据数据库类型 'tv_series'，强制使用剧集模式 (media_id={media_id})")
-        else:  # db_media_type is None, fall back to scraping logic
-            # 修正：新API不一定有video_count，主要依赖channelName
-            is_movie_mode = base_info.channel_name is not None and base_info.channel_name.strip() == "电影"
-
         if is_movie_mode:
             # 单集（电影）处理逻辑
             episode_data = {
@@ -347,6 +451,9 @@ class IqiyiScraper(BaseScraper):
                 "playUrl": base_info.video_url
             }
             episodes.append(IqiyiEpisodeInfo.model_validate(episode_data))
+        elif is_zongyi_mode:
+            # 新增：综艺节目处理逻辑
+            episodes = await self._get_zongyi_episodes(base_info.album_id)
         else:
             # 多集（电视剧/动漫）处理逻辑
             episodes = await self._get_tv_episodes(base_info.album_id)
@@ -397,6 +504,19 @@ class IqiyiScraper(BaseScraper):
             episodes_to_cache = [e.model_dump() for e in provider_episodes]
             await self._set_to_cache(cache_key, episodes_to_cache, 'episodes_ttl_seconds', 1800)
         return provider_episodes
+
+    async def _get_duration_for_tvid(self, tvid: str) -> Optional[int]:
+        """新增：为指定的tvid获取视频时长。"""
+        url = f"https://pcw-api.iqiyi.com/video/video/baseinfo/{tvid}"
+        try:
+            response = await self.client.get(url)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == "A00000" and data.get("data"):
+                return data["data"].get("durationSec")
+        except Exception as e:
+            self.logger.warning(f"爱奇艺: 获取视频时长失败 (tvid={tvid}): {e}")
+        return None
 
     async def _get_danmu_content_by_mat(self, tv_id: str, mat: int) -> List[IqiyiComment]:
         if len(tv_id) < 4: return []
@@ -458,20 +578,25 @@ class IqiyiScraper(BaseScraper):
         tv_id = episode_id # For iqiyi, episodeId is tvId
         all_comments = []
         
-        # iqiyi danmaku is fetched in 300-second segments (5 minutes)
-        # We loop through segments until we get an empty response or a 404
-        for mat in range(1, 100): # Limit to 500 minutes to prevent infinite loops
+        # 优化：先获取视频总时长，以确定需要请求多少个分段
+        duration = await self._get_duration_for_tvid(tv_id)
+        if duration and duration > 0:
+            total_mats = (duration // 300) + 1
+            self.logger.info(f"爱奇艺: 视频时长 {duration}s, 预计弹幕分段数: {total_mats}")
+        else:
+            total_mats = 100 # 如果获取时长失败，回退到旧的固定循环次数
+            self.logger.warning(f"爱奇艺: 未能获取视频时长，将使用默认循环次数 ({total_mats})。")
+
+        for mat in range(1, total_mats + 1):
             if progress_callback:
-                # 爱奇艺没有总分段数，因此我们只能显示当前正在获取哪个分段
-                # 进度条可以模拟一个递增的值
-                progress = min(95, mat * 5) # 假设大部分视频不会超过20个分段 (100分钟)
-                await progress_callback(progress, f"正在获取第 {mat} 分段")
+                progress = int((mat / total_mats) * 100) if total_mats > 0 else 100
+                await progress_callback(progress, f"正在获取第 {mat}/{total_mats} 分段")
 
             comments_in_mat = await self._get_danmu_content_by_mat(tv_id, mat)
             if not comments_in_mat:
                 break
             all_comments.extend(comments_in_mat)
-            await asyncio.sleep(0.1) # Be nice to the server
+            await asyncio.sleep(0.2) # Be nice to the server
 
         if progress_callback:
             await progress_callback(100, "弹幕整合完成")
