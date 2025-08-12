@@ -352,7 +352,7 @@ async def get_tmdb_details(
                         # 新增：确保罗马音标题不包含中文字符
                         if 'romaji' not in found_titles and not _is_cjk(title_text):
                             found_titles['romaji'] = title_text
-                    # Only consider titles with an empty type as the primary Japanese title
+                    # 
                     elif not alt_title.type:
                         # 新增：确保日文标题包含中文字符
                         if 'jp' not in found_titles and _is_cjk(title_text):
