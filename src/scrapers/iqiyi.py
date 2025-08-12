@@ -441,7 +441,6 @@ class IqiyiScraper(BaseScraper):
         is_movie_mode = db_media_type == "movie" or (db_media_type is None and channel == "电影")
         is_zongyi_mode = db_media_type == "tv_series" and channel == "综艺"
 
-        episodes: List[IqiyiEpisodeInfo] = []
         if is_movie_mode:
             # 单集（电影）处理逻辑
             episode_data = {
@@ -450,13 +449,15 @@ class IqiyiScraper(BaseScraper):
                 "order": 1,
                 "playUrl": base_info.video_url
             }
-            episodes.append(IqiyiEpisodeInfo.model_validate(episode_data))
-        elif is_zongyi_mode:
-            # 新增：综艺节目处理逻辑
-            episodes = await self._get_zongyi_episodes(base_info.album_id)
+            episodes: List[IqiyiEpisodeInfo] = [IqiyiEpisodeInfo.model_validate(episode_data)]
         else:
-            # 多集（电视剧/动漫）处理逻辑
+            # 对于电视剧和综艺节目，优先尝试标准剧集接口
             episodes = await self._get_tv_episodes(base_info.album_id)
+
+            # 如果标准接口未返回任何分集，则尝试使用综艺接口作为备用方案
+            if not episodes:
+                self.logger.info(f"爱奇艺: 标准剧集接口未返回分集，尝试使用综艺节目接口作为备用方案 (album_id={base_info.album_id})。")
+                episodes = await self._get_zongyi_episodes(base_info.album_id)
 
             if target_episode_index:
                 target_episode_from_list = next((ep for ep in episodes if ep.order == target_episode_index), None)
