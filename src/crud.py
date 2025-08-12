@@ -807,40 +807,43 @@ async def update_episode_info(pool: aiomysql.Pool, episode_id: int, update_data:
     """
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            # 检查新的集数是否与此源下的其他分集冲突
-            await cursor.execute(
-                "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s AND id != %s",
-                (update_data.source_id, update_data.episode_index, episode_id)
-            )
-            if await cursor.fetchone():
-                raise ValueError("该集数已存在，请使用其他集数。")
+            await conn.begin()
+            try:
+                # 步骤 1: 确定要更新的实际 episode_id
+                actual_episode_id = None
+                
+                # 1a: 尝试通过原始 ID 查找
+                await cursor.execute("SELECT id FROM episode WHERE id = %s", (episode_id,))
+                result = await cursor.fetchone()
+                if result:
+                    actual_episode_id = result[0]
+                else:
+                    # 1b: 如果找不到，尝试通过 source_id 和 original_index 查找
+                    logging.warning(f"Episode ID {episode_id} not found for update. Attempting to find replacement via source_id={update_data.source_id} and original_index={update_data.original_episode_index}.")
+                    await cursor.execute(
+                        "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s",
+                        (update_data.source_id, update_data.original_episode_index)
+                    )
+                    result = await cursor.fetchone()
+                    if result:
+                        actual_episode_id = result[0]
+                        logging.info(f"Found replacement episode with ID {actual_episode_id}. Proceeding with update.")
+                
+                if actual_episode_id is None:
+                    await conn.rollback()
+                    return False
 
-            # 1. 尝试直接使用原始 episode_id 更新
-            query_update = "UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s"
-            affected_rows = await cursor.execute(query_update, (update_data.title, update_data.episode_index, update_data.source_url, episode_id))
-            
-            if affected_rows > 0:
-                return True # 成功
+                await cursor.execute("SELECT id FROM episode WHERE source_id = %s AND episode_index = %s AND id != %s", (update_data.source_id, update_data.episode_index, actual_episode_id))
+                if await cursor.fetchone(): raise ValueError("该集数已存在，请使用其他集数。")
 
-            # 2. 如果更新失败，说明原始 episode 可能已被删除。尝试使用 source_id 和 original_episode_index 查找新的 episode_id。
-            logging.warning(f"Episode ID {episode_id} not found for update. Attempting to find replacement via source_id={update_data.source_id} and original_index={update_data.original_episode_index}.")
-            
-            await cursor.execute(
-                "SELECT id FROM episode WHERE source_id = %s AND episode_index = %s",
-                (update_data.source_id, update_data.original_episode_index)
-            )
-            result = await cursor.fetchone()
-            
-            if not result:
+                await cursor.execute("UPDATE episode SET title = %s, episode_index = %s, source_url = %s WHERE id = %s", (update_data.title, update_data.episode_index, update_data.source_url, actual_episode_id))
+                await conn.commit()
+                return True
+            except Exception as e:
+                await conn.rollback()
+                if isinstance(e, ValueError): raise
+                logging.error(f"更新分集信息时发生数据库错误: {e}", exc_info=True)
                 return False
-            
-            new_episode_id = result[0]
-            logging.info(f"Found replacement episode with ID {new_episode_id}. Retrying update.")
-            
-            # 3. 使用新找到的 episode_id 重试更新
-            affected_rows_retry = await cursor.execute(query_update, (update_data.title, update_data.episode_index, update_data.source_url, new_episode_id))
-            
-            return affected_rows_retry > 0
 
 async def sync_scrapers_to_db(pool: aiomysql.Pool, provider_names: List[str]):
     """将发现的搜索源同步到数据库，新的搜索源会被添加进去。"""
@@ -926,16 +929,16 @@ async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['
                 tmdb_setting = next((s for s in settings if s.provider_name == 'tmdb'), None)
                 if tmdb_setting:
                     await cursor.execute(
-                        "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
+                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
+                        (tmdb_setting.is_enabled, True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
                     )
 
                 # 2. 批量处理所有其他源
                 other_settings = [s for s in settings if s.provider_name != 'tmdb']
                 for s in other_settings:
                     await cursor.execute(
-                        "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (s.is_aux_search_enabled, s.display_order, s.provider_name)
+                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
+                        (s.is_enabled, s.is_aux_search_enabled, s.display_order, s.provider_name)
                     )
 
                 await conn.commit()
