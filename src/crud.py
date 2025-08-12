@@ -897,15 +897,23 @@ async def get_all_metadata_source_settings(pool: aiomysql.Pool) -> List[Dict[str
 
 async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['models.MetadataSourceSettingUpdate']):
     """批量更新元数据源的设置。"""
+    # 修正：使用事务和逐行更新，以提高健壮性并避免潜在的 executemany 问题。
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            query = "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s"
-            data_to_update = []
-            for s in settings:
-                # Enforce TMDB as always-on for auxiliary search
-                is_aux = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
-                data_to_update.append((s.is_enabled, is_aux, s.display_order, s.provider_name))
-            await cursor.executemany(query, data_to_update)
+            await conn.begin()
+            try:
+                for s in settings:
+                    # 强制 TMDB 始终作为辅助搜索源
+                    is_aux = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
+                    await cursor.execute(
+                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
+                        (s.is_enabled, is_aux, s.display_order, s.provider_name)
+                    )
+                await conn.commit()
+            except Exception as e:
+                await conn.rollback()
+                logging.error(f"更新元数据源设置时发生错误: {e}", exc_info=True)
+                raise
 
 async def update_episode_fetch_time(pool: aiomysql.Pool, episode_id: int):
     """更新分集的采集时间"""

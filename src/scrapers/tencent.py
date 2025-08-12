@@ -285,10 +285,15 @@ class TencentScraper(BaseScraper):
     
                     # 过滤非正片内容
                     title_to_check = episode.union_title or episode.title
-                    is_junk = episode.is_trailer == "1" or self._EPISODE_BLACKLIST_PATTERN.search(title_to_check)
-                    
-                    # 3. 根据 union_title 中的关键词
-                    if not is_junk and episode.union_title and "预告" in episode.union_title:
+                    is_junk = False
+                    reason = ""
+                    if episode.is_trailer == "1":
+                        is_junk = True
+                        reason = "is_trailer flag is set"
+                    elif self._EPISODE_BLACKLIST_PATTERN.search(title_to_check):
+                        is_junk = True
+                        reason = "title matches blacklist pattern"
+                    elif episode.union_title and "预告" in episode.union_title:
                         is_junk = True
                         reason = "union_title keyword '预告'"
                     if is_junk:
