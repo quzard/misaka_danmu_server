@@ -496,6 +496,7 @@ async def edit_episode_info(
             update_data.source_url
         )
         if not updated:
+            logger.warning(f"尝试更新一个不存在的分集 (ID: {episode_id})，操作被拒绝。")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
         logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episode_id} 的信息。")
         return
@@ -640,11 +641,12 @@ async def get_scraper_settings(
         scraper_class = manager.get_scraper_class(s['provider_name'])
         s_with_config = ScraperSettingWithConfig.model_validate(s)
         if scraper_class:
-            s_with_config.is_loggable = getattr(scraper_class, 'is_loggable', False)
-            s_with_config.configurable_fields = getattr(scraper_class, 'configurable_fields', None)
-            # 动态添加通用的黑名单配置字段
-            if s_with_config.configurable_fields is None:
-                s_with_config.configurable_fields = {}
+            s_with_config.is_loggable = getattr(scraper_class, "is_loggable", False)
+            # 关键修复：复制类属性以避免修改共享的可变字典
+            base_fields = getattr(scraper_class, "configurable_fields", None)
+            s_with_config.configurable_fields = base_fields.copy() if base_fields is not None else {}
+
+            # 为当前源动态添加其专属的黑名单配置字段
             blacklist_key = f"{s['provider_name']}_episode_blacklist_regex"
             s_with_config.configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
         full_settings.append(s_with_config)
