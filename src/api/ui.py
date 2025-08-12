@@ -1186,35 +1186,21 @@ async def generic_import_task(
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
     """
-    total_comments_added = 0
     try:
         scraper = manager.get_scraper(provider)
 
         # 统一将标题中的英文冒号替换为中文冒号，作为写入数据库前的最后保障
         normalized_title = anime_title.replace(":", "：")
 
-        # 1. 在数据库中创建或获取番剧ID，并链接数据源
-        anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
-        # 智能更新所有从Webhook获取的元数据ID
-        await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
-        source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
-
-        logger.info(f"媒体 '{normalized_title}' (ID: {anime_id}, 类型: {media_type}) 已准备就绪。")
-
-        # 2. 获取所有分集信息
-        # 将目标集数信息传递给 scraper，让其可以优化获取过程
+        # 步骤 1: 获取所有分集信息
+        await progress_callback(10, "正在获取分集列表...")
         episodes = await scraper.get_episodes(
             media_id,
             target_episode_index=current_episode_index,
             db_media_type=media_type
         )
         if not episodes:
-            # 修正：当找不到分集时，抛出 TaskSuccess 异常，以便任务管理器能以一个有意义的消息结束任务，
-            # 而不是简单地返回并显示通用的“成功”消息。
-            if current_episode_index:
-                msg = f"未能找到第 {current_episode_index} 集。"
-            else:
-                msg = "未能获取到任何分集。"
+            msg = f"未能找到第 {current_episode_index} 集。" if current_episode_index else "未能获取到任何分集。"
             logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
             raise TaskSuccess(msg)
 
@@ -1222,43 +1208,45 @@ async def generic_import_task(
         if media_type == "movie" and episodes:
             logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
             episodes = episodes[:1]
-        
-        # 3. 为每个分集获取并存储弹幕
+
+        # 步骤 2: 为每个分集获取弹幕，并存储在内存中
+        episode_comment_data = []
+        total_episodes = len(episodes)
         for i, episode in enumerate(episodes):
-            logger.info(f"--- 开始处理分集 {i+1}/{len(episodes)}: '{episode.title}' (ID: {episode.episodeId}) ---")
-            await progress_callback(progress=(i / len(episodes)) * 100, description=f"正在处理: {episode.title} ({i+1}/{len(episodes)})")
-
-            # 3.1 在数据库中创建或获取分集ID
-            episode_db_id = await crud.get_or_create_episode(pool, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-
-            # 为弹幕获取创建一个子进度回调
-            base_progress = (i / len(episodes)) * 100
-            progress_range = (1 / len(episodes)) * 100
+            logger.info(f"--- 开始处理分集 {i+1}/{total_episodes}: '{episode.title}' (ID: {episode.episodeId}) ---")
+            base_progress = 10 + int((i / total_episodes) * 80)
+            await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
 
             async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
-                # danmaku_progress is 0-100
-                # Map it to the current episode's progress slice
-                current_total_progress = base_progress + (danmaku_progress / 100) * progress_range
-                # 使用位置参数调用，以保持与其他任务回调的一致性
+                current_total_progress = base_progress + (danmaku_progress / 100) * (80 / total_episodes)
                 await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
 
-            # 3.2 获取弹幕
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
-            if not comments:
-                logger.info(f"分集 '{episode.title}' 未找到弹幕，跳过。")
-                continue
+            episode_comment_data.append({"episode_info": episode, "comments": comments})
 
-            # 3.3 批量插入弹幕 (get_comments 已按要求格式化)
-            await progress_callback(base_progress + progress_range * 0.98, f"处理: {episode.title} - 正在写入数据库")
+        # 步骤 3: 所有数据获取成功，现在开始写入数据库
+        await progress_callback(95, "数据获取完成，正在写入数据库...")
+        anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
+        await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
+        source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
+
+        # 步骤 4: 循环写入分集和弹幕
+        total_comments_added = 0
+        for data in episode_comment_data:
+            episode_info = data["episode_info"]
+            comments = data["comments"]
+            episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_info.episodeIndex, episode_info.title, episode_info.url, episode_info.episodeId)
+            if not comments: continue
             added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
             total_comments_added += added_count
-            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+            logger.info(f"分集 '{episode_info.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+
+        raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
     except TaskSuccess:
         raise # 重新抛出以被 TaskManager 正确处理
     except Exception as e:
         logger.error(f"导入任务发生严重错误: {e}", exc_info=True)
         raise  # 重新抛出异常，以便任务管理器能捕获并标记任务为“失败”
-    logger.info(f"--- {provider} 导入任务完成 (media_id={media_id})。总共新增 {total_comments_added} 条弹幕。 ---")
 
 async def full_refresh_task(source_id: int, pool: aiomysql.Pool, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
     """

@@ -897,18 +897,31 @@ async def get_all_metadata_source_settings(pool: aiomysql.Pool) -> List[Dict[str
 
 async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['models.MetadataSourceSettingUpdate']):
     """批量更新元数据源的设置。"""
-    # 修正：使用事务和逐行更新，以提高健壮性并避免潜在的 executemany 问题。
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await conn.begin()
             try:
-                for s in settings:
-                    # 强制 TMDB 始终作为辅助搜索源
-                    is_aux = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
+                # 为了彻底解决状态互相干扰的Bug，我们将TMDB的更新和其他源的更新分开处理。
+                # 这种方式隔离了具有特殊逻辑的条目，增加了操作的原子性和可预测性。
+                
+                # 1. 单独处理 TMDB
+                tmdb_setting = next((s for s in settings if s.provider_name == 'tmdb'), None)
+                if tmdb_setting:
                     await cursor.execute(
                         "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (s.is_enabled, is_aux, s.display_order, s.provider_name)
+                        (tmdb_setting.is_enabled, True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
                     )
+
+                # 2. 批量处理所有其他源
+                other_settings = [s for s in settings if s.provider_name != 'tmdb']
+                if other_settings:
+                    query = "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s"
+                    data_to_update = [
+                        (s.is_enabled, s.is_aux_search_enabled, s.display_order, s.provider_name)
+                        for s in other_settings
+                    ]
+                    await cursor.executemany(query, data_to_update)
+
                 await conn.commit()
             except Exception as e:
                 await conn.rollback()
