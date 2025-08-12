@@ -929,16 +929,16 @@ async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['
                 tmdb_setting = next((s for s in settings if s.provider_name == 'tmdb'), None)
                 if tmdb_setting:
                     await cursor.execute(
-                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (tmdb_setting.is_enabled, True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
+                        "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
+                        (True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
                     )
 
                 # 2. 批量处理所有其他源
                 other_settings = [s for s in settings if s.provider_name != 'tmdb']
                 for s in other_settings:
                     await cursor.execute(
-                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (s.is_enabled, s.is_aux_search_enabled, s.display_order, s.provider_name)
+                        "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
+                        (s.is_aux_search_enabled, s.display_order, s.provider_name)
                     )
 
                 await conn.commit()
