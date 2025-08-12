@@ -225,9 +225,12 @@ function renderMetadataSources(sources) {
         enabledIcon.style.cursor = 'pointer';
         enabledIcon.title = '点击切换启用/禁用状态';
         enabledIcon.addEventListener('click', (e) => {
+            console.log(`[Debug] Clicked icon for: ${li.dataset.providerName}`);
             e.stopPropagation(); // 防止触发li的选中事件
             const isEnabled = li.dataset.isEnabled === 'true';
+            console.log(`[Debug] Current state: ${isEnabled}`);
             li.dataset.isEnabled = !isEnabled;
+            console.log(`[Debug] New state: ${li.dataset.isEnabled}`);
             enabledIcon.textContent = !isEnabled ? '✅' : '❌';
         });
         li.appendChild(enabledIcon);
