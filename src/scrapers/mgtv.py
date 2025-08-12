@@ -8,6 +8,7 @@ import aiomysql
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from ..config_manager import ConfigManager
 from .. import models, crud
 from .base import BaseScraper, get_season_from_title
 

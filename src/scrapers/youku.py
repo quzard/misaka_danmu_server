@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from ..config_manager import ConfigManager
 from .. import models
 from .base import BaseScraper, get_season_from_title
 

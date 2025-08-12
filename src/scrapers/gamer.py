@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from opencc import OpenCC
 
 from .. import crud, models
+from ..config_manager import ConfigManager
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")

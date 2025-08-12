@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional, Union, Callable
 from pydantic import BaseModel, Field, ValidationError
 from collections import defaultdict
 from datetime import datetime
+from ..config_manager import ConfigManager
 from .base import BaseScraper, get_season_from_title
 from .. import models, crud
 

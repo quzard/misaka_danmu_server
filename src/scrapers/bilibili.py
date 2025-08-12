@@ -80,6 +80,7 @@ DanmakuElem = factory.GetPrototype(danmaku_elem_descriptor)
 Flag = factory.GetPrototype(flag_descriptor)
 DmSegMobileReply = factory.GetPrototype(dm_seg_reply_descriptor)
 # --- End of merged dm_dynamic.py content ---
+from ..config_manager import ConfigManager
 
 from .. import models
 from .base import BaseScraper, get_season_from_title
@@ -178,8 +179,8 @@ class BilibiliScraper(BaseScraper):
         36, 20, 34, 44, 52
     ]
 
-    def __init__(self, pool: aiomysql.Pool):
-        super().__init__(pool)
+    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
+        super().__init__(pool, config_manager)
         self.client = httpx.AsyncClient(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

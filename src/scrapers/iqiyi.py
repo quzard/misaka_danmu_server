@@ -12,6 +12,7 @@ from collections import defaultdict
 import httpx
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from ..config_manager import ConfigManager
 from .. import models
 from .base import BaseScraper, get_season_from_title
 

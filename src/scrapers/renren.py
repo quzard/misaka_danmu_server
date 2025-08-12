@@ -19,6 +19,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from pydantic import BaseModel, Field, field_validator
 
+from ..config_manager import ConfigManager
 from .. import models
 from .base import BaseScraper, get_season_from_title
 
