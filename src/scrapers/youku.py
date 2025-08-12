@@ -443,3 +443,14 @@ class YoukuScraper(BaseScraper):
             p_string = f"{timestamp:.2f},{mode},{color},[{self.provider_name}]"
             formatted.append({"cid": str(c.id), "p": p_string, "m": c.content, "t": round(timestamp, 2)})
         return formatted
+
+    async def get_vid_from_url(self, url: str) -> Optional[str]:
+        """从优酷视频URL中提取 vid。"""
+        # 优酷的URL格式通常是 v.youku.com/v_show/id_XXXXXXXX.html
+        match = re.search(r'id_([a-zA-Z0-9=]+)\.html', url)
+        if match:
+            vid = match.group(1)
+            self.logger.info(f"Youku: 从URL {url} 解析到 vid: {vid}")
+            return vid
+        self.logger.warning(f"Youku: 无法从URL中解析出 vid: {url}")
+        return None

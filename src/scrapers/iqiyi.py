@@ -660,3 +660,21 @@ class IqiyiScraper(BaseScraper):
                 "t": timestamp
             })
         return formatted
+
+    async def get_tvid_from_url(self, url: str) -> Optional[str]:
+        """
+        从爱奇艺视频URL中提取 tvid。
+        """
+        link_id_match = re.search(r"v_(\w+?)\.html", url)
+        if not link_id_match:
+            self.logger.warning(f"爱奇艺: 无法从URL中解析出 link_id: {url}")
+            return None
+        
+        link_id = link_id_match.group(1)
+        base_info = await self._get_video_base_info(link_id)
+        if base_info and base_info.tv_id:
+            self.logger.info(f"爱奇艺: 从URL {url} 解析到 tvid: {base_info.tv_id}")
+            return str(base_info.tv_id)
+        
+        self.logger.warning(f"爱奇艺: 未能从 link_id '{link_id}' 获取到 tvid。")
+        return None

@@ -519,3 +519,14 @@ class TencentScraper(BaseScraper):
             formatted_comments.append({"cid": c.id, "p": p_string, "m": c.content, "t": round(timestamp, 2)})
 
         return formatted_comments
+
+    async def get_vid_from_url(self, url: str) -> Optional[str]:
+        """从腾讯视频URL中提取 vid。"""
+        # 腾讯视频的URL格式多样，但通常vid是路径的最后一部分
+        match = re.search(r'/([a-zA-Z0-9]+)\.html', url)
+        if match:
+            vid = match.group(1)
+            self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
+            return vid
+        self.logger.warning(f"Tencent: 无法从URL中解析出 vid: {url}")
+        return None

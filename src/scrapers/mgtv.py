@@ -440,3 +440,13 @@ class MgtvScraper(BaseScraper):
                 "t": round(timestamp, 2)
             })
         return formatted_comments
+
+    async def get_ids_from_url(self, url: str) -> Optional[Dict[str, str]]:
+        """从芒果TV URL中提取 collection_id 和 video_id。"""
+        match = re.search(r'/b/(\d+)/(\d+)\.html', url)
+        if match:
+            cid, vid = match.groups()
+            self.logger.info(f"MGTV: 从URL {url} 解析到 cid={cid}, vid={vid}")
+            return {"cid": cid, "vid": vid}
+        self.logger.warning(f"MGTV: 无法从URL中解析出 cid 和 vid: {url}")
+        return None

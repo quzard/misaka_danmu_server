@@ -330,6 +330,42 @@ class BilibiliScraper(BaseScraper):
         else:
             return await super().execute_action(action_name, payload)
 
+    async def get_ids_from_url(self, url: str) -> Optional[Dict[str, int]]:
+        """
+        从一个Bilibili视频URL中获取aid和cid。
+        """
+        self.logger.info(f"Bilibili: 正在从URL解析ID: {url}")
+        try:
+            await self._ensure_config_and_cookie()
+            response = await self._request_with_rate_limit("GET", url)
+            response.raise_for_status()
+            html = response.text
+
+            # 优先尝试从初始状态JSON中查找
+            match = re.search(r'__INITIAL_STATE__=({.*?});', html)
+            if match:
+                initial_state = json.loads(match.group(1))
+                video_data = initial_state.get('videoData', {})
+                aid = video_data.get('aid')
+                cid = video_data.get('cid')
+                if aid and cid:
+                    self.logger.info(f"Bilibili: 从INITIAL_STATE解析成功: aid={aid}, cid={cid}")
+                    return {"aid": aid, "cid": cid}
+
+            # 如果找不到，则回退到正则表达式
+            aid_match = re.search(r'"aid"\s*:\s*(\d+)', html)
+            cid_match = re.search(r'"cid"\s*:\s*(\d+)', html)
+            if aid_match and cid_match:
+                aid, cid = int(aid_match.group(1)), int(cid_match.group(2))
+                self.logger.info(f"Bilibili: 通过正则表达式解析成功: aid={aid}, cid={cid}")
+                return {"aid": aid, "cid": cid}
+
+            self.logger.warning(f"Bilibili: 无法从URL中解析aid和cid: {url}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Bilibili: 从URL {url} 获取或解析页面ID失败: {e}", exc_info=True)
+            return None
+
     async def _get_wbi_mixin_key(self) -> str:
         """获取用于WBI签名的mixinKey，带缓存。"""
         now = int(time.time())
