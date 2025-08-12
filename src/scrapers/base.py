@@ -104,8 +104,7 @@ class BaseScraper(ABC):
         is_enabled_str = await self.config_manager.get(config_key, "false")
         return is_enabled_str.lower() == 'true'
 
-    @property
-    def episode_blacklist_pattern(self) -> Optional[re.Pattern]:
+    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
         获取并编译此源的自定义分集黑名单正则表达式。
         结果会被缓存以提高性能。
@@ -114,7 +113,7 @@ class BaseScraper(ABC):
             return self._blacklist_pattern_cache
 
         key = f"{self.provider_name}_episode_blacklist_regex"
-        regex_str = self.config_manager.get(key, "")
+        regex_str = await self.config_manager.get(key, "")
         if regex_str:
             try:
                 self._blacklist_pattern_cache = re.compile(regex_str, re.IGNORECASE)

@@ -705,6 +705,10 @@ async def get_scraper_config(
     # 如果源是可记录日志的，也获取其日志配置
     if is_loggable:
         config_keys.append(f"scraper_{provider_name}_log_responses")
+    
+    # 新增：总是获取该源的自定义黑名单配置
+    blacklist_key = f"{provider_name}_episode_blacklist_regex"
+    config_keys.append(blacklist_key)
 
     if not config_keys: return {}
     tasks = [crud.get_config_value(pool, key, "") for key in config_keys]

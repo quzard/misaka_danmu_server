@@ -224,22 +224,8 @@ function renderMetadataSources(sources) {
         // 新增：让状态图标本身可点击以切换状态，更直观
         enabledIcon.style.cursor = 'pointer';
         enabledIcon.title = '点击切换启用/禁用状态';
-        enabledIcon.addEventListener('click', (e) => {
-            console.log(`[Debug] Clicked icon for: ${li.dataset.providerName}`);
-            e.stopPropagation(); // 防止触发li的选中事件
-            const isEnabled = li.dataset.isEnabled === 'true';
-            console.log(`[Debug] Current state: ${isEnabled}`);
-            li.dataset.isEnabled = !isEnabled;
-            console.log(`[Debug] New state: ${li.dataset.isEnabled}`);
-            enabledIcon.textContent = !isEnabled ? '✅' : '❌';
-        });
         li.appendChild(enabledIcon);
 
-        li.addEventListener('click', (e) => {
-            if (e.target === enabledIcon) return; // 如果点击的是图标，则不执行选中
-            metadataSourcesList.querySelectorAll('li').forEach(item => item.classList.remove('selected'));
-            li.classList.add('selected');
-        });
         metadataSourcesList.appendChild(li);
     });
 }
@@ -635,6 +621,27 @@ export function setupSourcesEventListeners() {
     saveMetadataSourcesBtn.addEventListener('click', handleSaveMetadataSources);
     moveMetadataSourceUpBtn.addEventListener('click', () => handleMetadataSourceAction('up'));
     moveMetadataSourceDownBtn.addEventListener('click', () => handleMetadataSourceAction('down'));
+
+    // 使用事件委托来统一处理元数据源列表的点击事件，此模式更健壮。
+    metadataSourcesList.addEventListener('click', (e) => {
+        const li = e.target.closest('li');
+        if (!li) return;
+
+        // 检查点击的是否是状态图标
+        if (e.target.classList.contains('status-icon')) {
+            e.stopPropagation(); // 阻止事件冒泡
+            const isEnabled = li.dataset.isEnabled === 'true';
+            const newIsEnabled = !isEnabled;
+            li.dataset.isEnabled = newIsEnabled;
+            e.target.textContent = newIsEnabled ? '✅' : '❌';
+        } else {
+            // 如果点击的不是状态图标，则处理选中逻辑
+            // 移除所有其他项的 'selected' class
+            metadataSourcesList.querySelectorAll('li').forEach(item => item.classList.remove('selected'));
+            // 添加 'selected' class 到被点击的项
+            li.classList.add('selected');
+        }
+    });
 
     // Modal event listeners
     document.getElementById('modal-close-btn').addEventListener('click', hideScraperConfigModal);

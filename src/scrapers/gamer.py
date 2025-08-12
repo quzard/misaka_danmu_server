@@ -246,9 +246,10 @@ class GamerScraper(BaseScraper):
                     self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
             
             # Apply custom blacklist from config
-            if self.episode_blacklist_pattern:
+            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            if blacklist_pattern:
                 original_count = len(episodes)
-                episodes = [ep for ep in episodes if not self.episode_blacklist_pattern.search(ep.title)]
+                episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
                 filtered_count = original_count - len(episodes)
                 if filtered_count > 0:
                     self.logger.info(f"Gamer: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
