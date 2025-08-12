@@ -914,13 +914,11 @@ async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['
 
                 # 2. 批量处理所有其他源
                 other_settings = [s for s in settings if s.provider_name != 'tmdb']
-                if other_settings:
-                    query = "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s"
-                    data_to_update = [
+                for s in other_settings:
+                    await cursor.execute(
+                        "UPDATE metadata_sources SET is_enabled = %s, is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
                         (s.is_enabled, s.is_aux_search_enabled, s.display_order, s.provider_name)
-                        for s in other_settings
-                    ]
-                    await cursor.executemany(query, data_to_update)
+                    )
 
                 await conn.commit()
             except Exception as e:

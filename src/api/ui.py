@@ -668,7 +668,23 @@ async def update_metadata_source_settings(
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """批量更新元数据源的启用状态、辅助搜索状态和显示顺序。"""
-    await crud.update_metadata_sources_settings(pool, settings)
+    # This now writes to the config table instead of the metadata_sources table.
+    tasks = []
+    
+    # Extract and save the order
+    provider_order = [s.provider_name for s in sorted(settings, key=lambda x: x.display_order)]
+    tasks.append(crud.update_config_value(pool, "metadata_source_order", json.dumps(provider_order)))
+
+    # Save individual settings
+    for s in settings:
+        # Enforce TMDB as always-on for auxiliary search
+        is_aux = "true" if s.provider_name == 'tmdb' else "true" if s.is_aux_search_enabled else "false"
+        is_enabled = "true" if s.is_enabled else "false"
+        
+        tasks.append(crud.update_config_value(pool, f"metadata_source_{s.provider_name}_enabled", is_enabled))
+        tasks.append(crud.update_config_value(pool, f"metadata_source_{s.provider_name}_aux", is_aux))
+
+    await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了元数据源设置。")
 
 @router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
