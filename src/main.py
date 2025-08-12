@@ -6,6 +6,7 @@ import logging
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 import json
+from .config_manager import ConfigManager
 from .database import create_db_pool, close_db_pool, init_db_tables, create_initial_admin_user
 from .api.ui import router as ui_router, auth_router
 from .api.bangumi_api import router as bangumi_router
@@ -41,15 +42,48 @@ async def lifespan(app: FastAPI):
     interrupted_count = await crud.mark_interrupted_tasks_as_failed(pool)
     if interrupted_count > 0:
         logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
+    
+    # 新增：初始化配置管理器
+    app.state.config_manager = ConfigManager(pool)
+    # 新增：集中定义所有默认配置
+    default_configs = {
+        # 缓存 TTL
+        'search_ttl_seconds': (10800, '搜索结果的缓存时间（秒），最低3小时。'),
+        'episodes_ttl_seconds': (10800, '分集列表的缓存时间（秒），最低3小时。'),
+        'base_info_ttl_seconds': (10800, '基础媒体信息（如爱奇艺）的缓存时间（秒），最低3小时。'),
+        'metadata_search_ttl_seconds': (10800, '元数据（如TMDB, Bangumi）搜索结果的缓存时间（秒），最低3小时。'),
+        # API 和 Webhook
+        'custom_api_domain': ('', '用于拼接弹幕API地址的自定义域名。'),
+        'webhook_api_key': ('', '用于Webhook调用的安全密钥。'),
+        'webhook_custom_domain': ('', '用于拼接Webhook URL的自定义域名。'),
+        # 认证
+        'jwt_expire_minutes': (settings.jwt.access_token_expire_minutes, 'JWT令牌的有效期（分钟）。-1 表示永不过期。'),
+        # 元数据源
+        'tmdb_api_key': ('', '用于访问 The Movie Database API 的密钥。'),
+        'tmdb_api_base_url': ('https://api.themoviedb.org', 'TMDB API 的基础域名。'),
+        'tmdb_image_base_url': ('https://image.tmdb.org', 'TMDB 图片服务的基础 URL。'),
+        'tvdb_api_key': ('', '用于访问 TheTVDB API 的密钥。'),
+        'bangumi_client_id': ('', '用于Bangumi OAuth的App ID。'),
+        'bangumi_client_secret': ('', '用于Bangumi OAuth的App Secret。'),
+        'douban_cookie': ('', '用于访问豆瓣API的Cookie。'),
+        # 弹幕源
+        'bilibili_cookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
+        'gamer_cookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
+        'gamer_user_agent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
+    }
+    await app.state.config_manager.register_defaults(default_configs)
 
-    app.state.scraper_manager = ScraperManager(pool)
+    app.state.scraper_manager = ScraperManager(pool, app.state.config_manager)
     await app.state.scraper_manager.load_and_sync_scrapers()
     # 新增：初始化元数据源管理器
     app.state.metadata_manager = MetadataSourceManager(pool)
     await app.state.metadata_manager.initialize()
 
     app.state.task_manager = TaskManager(pool)
-    app.state.webhook_manager = WebhookManager(pool, app.state.task_manager, app.state.scraper_manager)
+    # 修正：将 ConfigManager 传递给 WebhookManager
+    app.state.webhook_manager = WebhookManager(
+        pool, app.state.task_manager, app.state.scraper_manager, app.state.config_manager
+    )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))

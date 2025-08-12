@@ -492,6 +492,14 @@ class IqiyiScraper(BaseScraper):
                 url=ep.play_url
             ) for ep in episodes if ep.link_id
         ]
+
+        # 应用自定义黑名单和内置黑名单
+        if self.episode_blacklist_pattern:
+            original_count = len(provider_episodes)
+            provider_episodes = [ep for ep in provider_episodes if not self.episode_blacklist_pattern.search(ep.title)]
+            filtered_count = original_count - len(provider_episodes)
+            if filtered_count > 0:
+                self.logger.info(f"Iqiyi: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
         
         # 根据黑名单过滤分集
         if self._EPISODE_BLACKLIST_PATTERN:

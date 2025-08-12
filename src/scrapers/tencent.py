@@ -370,6 +370,14 @@ class TencentScraper(BaseScraper):
         # 关键步骤：在返回前，根据我们解析出的真实集数进行排序
         all_provider_episodes.sort(key=lambda x: x.episodeIndex)
 
+        # Apply custom blacklist from config
+        if self.episode_blacklist_pattern:
+            original_count = len(all_provider_episodes)
+            all_provider_episodes = [ep for ep in all_provider_episodes if not self.episode_blacklist_pattern.search(ep.title)]
+            filtered_count = original_count - len(all_provider_episodes)
+            if filtered_count > 0:
+                self.logger.info(f"Tencent: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
+
         # 如果指定了目标，则只返回目标分集
         if target_episode_index is not None:
             target_episode = next((ep for ep in all_provider_episodes if ep.episodeIndex == target_episode_index), None)

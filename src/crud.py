@@ -1410,3 +1410,31 @@ async def mark_interrupted_tasks_as_failed(pool: aiomysql.Pool) -> int:
             query = "UPDATE task_history SET status = %s, description = %s, finished_at = NOW() WHERE status IN (%s, %s)"
             affected_rows = await cursor.execute(query, ("失败", "因程序重启而中断", "运行中", "已暂停"))
             return affected_rows
+
+async def initialize_configs(pool: aiomysql.Pool, defaults: Dict[str, tuple[Any, str]]):
+    """
+    初始化配置表的默认值。如果配置项不存在，则创建它。
+    """
+    if not defaults:
+        return
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # 1. 获取所有已存在的配置
+            await cursor.execute("SELECT config_key FROM config")
+            existing_keys = {row[0] for row in await cursor.fetchall()}
+
+            # 2. 准备插入新配置
+            configs_to_insert = []
+            for key, (value, description) in defaults.items():
+                if key not in existing_keys:
+                    logging.getLogger(__name__).info(f"正在初始化配置项 '{key}'...")
+                    configs_to_insert.append((key, str(value), description))
+
+            # 3. 批量插入新配置
+            if configs_to_insert:
+                query_insert = "INSERT INTO config (config_key, config_value, description) VALUES (%s, %s, %s)"
+                await cursor.executemany(query_insert, configs_to_insert)
+                logging.getLogger(__name__).info(f"成功初始化 {len(configs_to_insert)} 个新配置项。")
+
+    logging.getLogger(__name__).info("默认配置检查完成。")

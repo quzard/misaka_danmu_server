@@ -306,18 +306,13 @@ class MgtvScraper(BaseScraper):
                 ) for i, ep in enumerate(sorted_episodes)
             ]
 
-            # 新增：根据黑名单过滤分集
-            blacklist_regex_str = await crud.get_config_value(self.pool, "mgtv_episode_blacklist_regex", "")
-            if blacklist_regex_str:
-                try:
-                    blacklist_pattern = re.compile(blacklist_regex_str, re.IGNORECASE)
-                    original_count = len(provider_episodes)
-                    provider_episodes = [ep for ep in provider_episodes if not blacklist_pattern.search(ep.title)]
-                    filtered_count = original_count - len(provider_episodes)
-                    if filtered_count > 0:
-                        self.logger.info(f"Mgtv: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
-                except re.error as e:
-                    self.logger.error(f"Mgtv: 分集标题黑名单正则表达式无效: '{blacklist_regex_str}', 错误: {e}")
+            # Apply custom blacklist from config
+            if self.episode_blacklist_pattern:
+                original_count = len(provider_episodes)
+                provider_episodes = [ep for ep in provider_episodes if not self.episode_blacklist_pattern.search(ep.title)]
+                filtered_count = original_count - len(provider_episodes)
+                if filtered_count > 0:
+                    self.logger.info(f"Mgtv: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
 
             if target_episode_index:
                 return [ep for ep in provider_episodes if ep.episodeIndex == target_episode_index]

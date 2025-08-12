@@ -234,6 +234,14 @@ class YoukuScraper(BaseScraper):
             ) for i, ep in enumerate(all_episodes)
         ]
 
+        # Apply custom blacklist from config
+        if self.episode_blacklist_pattern:
+            original_count = len(provider_episodes)
+            provider_episodes = [ep for ep in provider_episodes if not self.episode_blacklist_pattern.search(ep.title)]
+            filtered_count = original_count - len(provider_episodes)
+            if filtered_count > 0:
+                self.logger.info(f"Youku: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
+
         if target_episode_index is None:
             episodes_to_cache = [e.model_dump() for e in provider_episodes]
             await self._set_to_cache(cache_key, episodes_to_cache, 'episodes_ttl_seconds', 1800)

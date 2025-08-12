@@ -500,6 +500,15 @@ class BilibiliScraper(BaseScraper):
                         url=f"https://www.bilibili.com/bangumi/play/ep{ep.id}"
                     ) for i, ep in enumerate(filtered_episodes)
                 ]
+
+                # Apply custom blacklist from config
+                if self.episode_blacklist_pattern:
+                    original_count = len(episodes)
+                    episodes = [ep for ep in episodes if not self.episode_blacklist_pattern.search(ep.title)]
+                    filtered_count = original_count - len(episodes)
+                    if filtered_count > 0:
+                        self.logger.info(f"Bilibili: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
+
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index] if target_episode_index else episodes
         except Exception as e:
             self.logger.error(f"Bilibili: 获取PGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)
@@ -523,6 +532,15 @@ class BilibiliScraper(BaseScraper):
                         url=f"https://www.bilibili.com/video/{bvid}?p={p.page}"
                     ) for p in data.data.pages
                 ]
+
+                # Apply custom blacklist from config
+                if self.episode_blacklist_pattern:
+                    original_count = len(episodes)
+                    episodes = [ep for ep in episodes if not self.episode_blacklist_pattern.search(ep.title)]
+                    filtered_count = original_count - len(episodes)
+                    if filtered_count > 0:
+                        self.logger.info(f"Bilibili: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
+
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index] if target_episode_index else episodes
         except Exception as e:
             self.logger.error(f"Bilibili: 获取UGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)

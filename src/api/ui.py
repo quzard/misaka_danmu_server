@@ -642,6 +642,11 @@ async def get_scraper_settings(
         if scraper_class:
             s_with_config.is_loggable = getattr(scraper_class, 'is_loggable', False)
             s_with_config.configurable_fields = getattr(scraper_class, 'configurable_fields', None)
+            # 动态添加通用的黑名单配置字段
+            if s_with_config.configurable_fields is None:
+                s_with_config.configurable_fields = {}
+            blacklist_key = f"{s['provider_name']}_episode_blacklist_regex"
+            s_with_config.configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
         full_settings.append(s_with_config)
             
     return full_settings
@@ -726,6 +731,8 @@ async def update_scraper_config(
     # 如果源是可记录日志的，也允许更新其日志配置
     if is_loggable:
         allowed_keys.append(f"scraper_{provider_name}_log_responses")
+    # 允许更新通用的黑名单配置
+    allowed_keys.append(f"{provider_name}_episode_blacklist_regex")
 
     tasks = [crud.update_config_value(pool, key, value or "") for key, value in payload.items() if key in allowed_keys]
     
