@@ -382,7 +382,7 @@ class BilibiliScraper(BaseScraper):
             aid_match = re.search(r'"aid"\s*:\s*(\d+)', html)
             cid_match = re.search(r'"cid"\s*:\s*(\d+)', html)
             if aid_match and cid_match:
-                aid, cid = int(aid_match.group(1)), int(cid_match.group(2))
+                aid, cid = int(aid_match.group(1)), int(cid_match.group(1))
                 self.logger.info(f"Bilibili: 通过正则表达式解析成功: aid={aid}, cid={cid}")
                 return {"aid": aid, "cid": cid}
 
