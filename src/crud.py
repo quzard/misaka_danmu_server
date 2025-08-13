@@ -1283,6 +1283,13 @@ async def delete_bangumi_auth(pool: aiomysql.Pool, user_id: int) -> bool:
             affected_rows = await cursor.execute("DELETE FROM bangumi_auth WHERE user_id = %s", (user_id,))
             return affected_rows > 0
 
+async def get_all_source_ids(pool: aiomysql.Pool) -> List[int]:
+    """获取所有数据源的ID。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id FROM anime_sources")
+            return [row[0] for row in await cursor.fetchall()]
+
 # --- Scheduled Tasks ---
 
 async def get_animes_with_tmdb_id(pool: aiomysql.Pool) -> List[Dict[str, Any]]:

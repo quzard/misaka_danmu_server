@@ -541,6 +541,64 @@ async def reorder_source_episodes(
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {source_id} 集数的任务 (Task ID: {task_id})。")
     return {"message": f"重整集数任务 '{task_title}' 已提交。", "task_id": task_id}
 
+@router.post("/library/source/{source_id}/incremental-refresh", status_code=status.HTTP_202_ACCEPTED, summary="增量刷新指定源")
+async def incremental_refresh_source(
+    source_id: int,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """提交一个后台任务，增量刷新指定源，抓取比当前已收录分集多一集的弹幕"""
+    source_info = await crud.get_anime_source_info(pool, source_id)
+    if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
+
+    # 获取当前最新分集
+    eps = await crud.get_episodes_for_source(pool, source_id)
+    if eps.length > 0:
+        latest_episode_index = sorted(eps, key=lambda x: x.episode_index)[-1].episode_index
+    else:
+        latest_episode_index = 0
+
+    next_episode_index = latest_episode_index + 1
+    logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {source_id}) 启动了增量刷新任务。")
+
+    # 从新集信息创建任务
+    task_coro = lambda callback: incremental_refresh_task(source_id, next_episode_index, pool, scraper_manager, task_manager, callback, source_info["title"])
+    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} - 尝试获取第{next_episode_index}集")
+
+    return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "task_id": task_id}
+
+async def incremental_refresh_task(source_id: int, next_episode_index: int, pool: aiomysql.Pool, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
+    """后台任务：增量刷新一个已存在的番剧。"""
+    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
+    source_info = await crud.get_anime_source_info(pool, source_id)
+    if not source_info:
+        progress_callback(100, "失败: 找不到源信息")
+        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
+        return
+    try:
+        # 重新执行通用导入逻辑, 只导入指定的一集
+        await generic_import_task(
+            provider=source_info["provider_name"],
+            media_id=source_info["media_id"],
+            anime_title=anime_title,
+            media_type=source_info["type"],
+            season=source_info.get("season", 1),
+            current_episode_index=next_episode_index,
+            image_url=None,
+            douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
+            imdb_id=None, tvdb_id=None,
+            progress_callback=progress_callback,
+            pool=pool,
+            manager=manager,
+            task_manager=task_manager)
+    except Exception as e:
+        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
+        raise
+
+
 @router.delete("/library/episode/{episode_id}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务")
 async def delete_episode_from_source(
     episode_id: int,

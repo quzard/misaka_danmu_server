@@ -50,6 +50,9 @@ class SchedulerManager:
 
     def get_available_jobs(self) -> List[Dict[str, str]]:
         """获取所有已加载的可用任务类型及其名称。"""
+        # 添加增量任务
+        jobs = [{"type": "incremental_refresh", "name": "自动增量更新"}]
+
         return [{"type": job.job_type, "name": job.job_name} for job in self._job_classes.values()]
 
     def _create_job_runner(self, job_type: str) -> Callable:
@@ -116,6 +119,10 @@ class SchedulerManager:
     async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool) -> Dict[str, Any]:
         if job_type not in self._job_classes:
             raise ValueError(f"未知的任务类型: {job_type}")
+         # 确保cron表达式的轮询间隔不低于3小时
+        if not cron_is_valid(cron, 3):
+            cron = "0 */3 * * *" # 强制更新为3小时一次
+            raise ValueError("定时任务cron表达式的轮询间隔不得低于3小时，已强制更新为3小时")
         task_id = str(uuid4())
         await crud.create_scheduled_task(self.pool, task_id, name, job_type, cron, is_enabled)
         runner = self._create_job_runner(job_type)
@@ -126,6 +133,10 @@ class SchedulerManager:
 
     async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool) -> Optional[Dict[str, Any]]:
         if not (job := self.scheduler.get_job(task_id)): return None
+        # 确保cron表达式的轮询间隔不低于3小时
+        if not cron_is_valid(cron, 3):
+            cron = "0 */3 * * *" # 强制更新为3小时一次
+            raise ValueError("定时任务cron表达式的轮询间隔不得低于3小时，已强制更新为3小时")
         await crud.update_scheduled_task(self.pool, task_id, name, cron, is_enabled)
         job.modify(name=name)
         job.reschedule(trigger=CronTrigger.from_crontab(cron))
