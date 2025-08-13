@@ -10,38 +10,6 @@ let episodeListView, danmakuListView;
 let currentEpisodes = [];
 let currentModalConfirmHandler = null; // 仅用于本模块控制通用模态的“确认”按钮
 
-// --- 统计辅助函数：更稳健的异常点检测 ---
-function median(numbers) {
-    if (!numbers.length) return 0;
-    const sorted = [...numbers].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
-function mad(numbers, med) {
-    const deviations = numbers.map((x) => Math.abs(x - med));
-    return median(deviations);
-}
-
-function mean(numbers) {
-    return numbers.reduce((a, b) => a + b, 0) / (numbers.length || 1);
-}
-
-function stddev(numbers, avg) {
-    const m = avg ?? mean(numbers);
-    const variance = numbers.reduce((acc, x) => acc + (x - m) ** 2, 0) / (numbers.length || 1);
-    return Math.sqrt(variance);
-}
-
-// 非正片常见关键词（更严格过滤）
-const NON_MAIN_TITLE_PATTERNS = [
-    /plus\s*版/i,
-    /\bplus\b/i,
-    /体验版/i,
-    /纯享|直拍|花絮|幕后|彩蛋|先导|预告|番外|外传|特辑|片段|合集|加更|加长/i,
-    /SP(?!\d)/i
-];
-
 function initializeElements() {
     libraryTableBody = document.querySelector('#library-table tbody');
     librarySearchInput = document.getElementById('library-search-input');
@@ -295,12 +263,17 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     episodeListView.innerHTML = `
         <div class="episode-list-header">
             <h3>分集列表: ${animeTitle}</h3>
-            <div class="header-actions">
+            <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
+        </div>
+        <div class="episode-list-actions">
+            <div class="actions-left">
                 <button id="select-all-episodes-btn" class="secondary-btn">全选</button>
                 <button id="delete-selected-episodes-btn" class="secondary-btn danger">批量删除选中</button>
-                <button id="cleanup-by-average-btn" class="secondary-btn danger">综艺重整</button>
+            </div>
+            <div class="actions-right">
+                <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
                 <button id="reorder-episodes-btn" class="secondary-btn">重整集数</button>
-                <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
+                <button id="manual-import-btn" class="secondary-btn">手动导入</button>
             </div>
         </div>
         <table id="episode-list-table">
@@ -350,6 +323,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     document.getElementById('delete-selected-episodes-btn').addEventListener('click', handleDeleteSelectedEpisodes);
     document.getElementById('cleanup-by-average-btn').addEventListener('click', () => handleCleanupByAverage(sourceId, animeTitle));
     document.getElementById('reorder-episodes-btn').addEventListener('click', () => handleReorderEpisodes(sourceId, animeTitle));
+    document.getElementById('manual-import-btn').addEventListener('click', () => showManualImportModal(sourceId));
     document.getElementById('back-to-detail-view-btn').addEventListener('click', () => showAnimeDetailView(animeId));
     tableBody.addEventListener('click', handleEpisodeAction);
 }
@@ -394,7 +368,7 @@ async function handleReorderEpisodes(sourceId, animeTitle) {
     }
 }
 
-// 正片重整：稳健统计 + 关键词过滤；若整体均匀且无关键词命中，则认为都是正片
+// 计算平均弹幕数并删除低于平均值的分集（带预览确认）
 async function handleCleanupByAverage(sourceId, animeTitle) {
     const episodes = currentEpisodes || [];
     if (!episodes.length) {
@@ -410,51 +384,14 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
         return;
     }
 
-    // 统计量
-    const avg = mean(validCounts);
-    const sd = stddev(validCounts, avg);
-    const cv = avg > 0 ? sd / avg : 0; 
+    const average = validCounts.reduce((a, b) => a + b, 0) / validCounts.length;
+    const toDelete = episodes.filter(ep => Number(ep.comment_count) < average);
+    const toKeep = episodes.filter(ep => Number(ep.comment_count) >= average);
 
-    // 标题关键词命中
-    const keywordHitIdx = episodes
-        .map((ep, idx) => ({ idx, title: ep.title || '' }))
-        .filter(({ title }) => NON_MAIN_TITLE_PATTERNS.some((r) => r.test(title)))
-        .map(({ idx }) => idx);
-
-    // 稳健异常检测（对数域上更敏感一点的阈值）
-    const logCounts = validCounts.map((c) => Math.log10(c + 1));
-    const med = median(logCounts);
-    const m = mad(logCounts, med);
-    const robustZ = logCounts.map((x) => (m === 0 ? 0 : 0.6745 * (x - med) / m));
-    let statLowIdx = robustZ
-        .map((z, idx) => ({ idx, z }))
-        .filter((o) => o.z < -2.0) // 比 -2.5 更严格地识别低值
-        .map((o) => o.idx);
-
-    // IQR 兜底
-    if (statLowIdx.length === 0 || statLowIdx.length > validCounts.length * 0.6) {
-        const sorted = [...logCounts].sort((a, b) => a - b);
-        const q1 = sorted[Math.floor(sorted.length * 0.25)] ?? med;
-        const q3 = sorted[Math.floor(sorted.length * 0.75)] ?? med;
-        const iqr = Math.max(0, q3 - q1);
-        const lowThr = q1 - 1.5 * iqr;
-        statLowIdx = logCounts
-            .map((x, idx) => ({ x, idx }))
-            .filter((o) => o.x < lowThr)
-            .map((o) => o.idx);
-    }
-
-    // 合并：关键词命中 + 统计低值
-    const finalDeleteIdxSet = new Set([...keywordHitIdx, ...statLowIdx]);
-
-    // 若整体非常均匀且没有关键词命中与统计低值，则认为全部为正片
-    if (cv < 0.25 && finalDeleteIdxSet.size === 0) {
-        alert('分布较为均匀，未检测到明显低值，已认为全部为正片。');
+    if (toDelete.length === 0) {
+        alert(`未找到低于平均值 (${average.toFixed(2)}) 的分集。`);
         return;
     }
-
-    const toDelete = episodes.filter((_, i) => finalDeleteIdxSet.has(i));
-    const toKeep = episodes.filter((_, i) => !finalDeleteIdxSet.has(i));
 
     // 在通用模态中展示“将保留的分集”预览
     const modal = document.getElementById('generic-modal');
@@ -477,9 +414,9 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
     const keepCountText = `<span style="color: var(--success-color); font-weight: 600;">${toKeep.length}</span>`;
 
     modalBody.innerHTML = `
-        <p>将基于稳健统计 + 标题关键词进行正片重整：</p>
+        <p>将基于平均弹幕数进行正片重整：</p>
         <ul>
-            <li>平均弹幕数：<strong>${avg.toFixed(2)}</strong></li>
+            <li>平均弹幕数：<strong>${average.toFixed(2)}</strong></li>
             <li>预计删除分集：${deleteCountText} / ${episodes.length}</li>
             <li>预计保留分集：${keepCountText} / ${episodes.length}</li>
         </ul>
@@ -489,7 +426,7 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
                 <thead><tr><th>集数</th><th>标题</th><th>弹幕数</th></tr></thead>
                 <tbody>${keepPreviewRows || '<tr><td colspan="3">无</td></tr>'}</tbody>
             </table>
-            <p class="small">确认后：先批量删除检测到的非正片（含 Plus/体验版等），然后自动重整集数。</p>
+            <p class="small">确认后：先批量删除低于平均值的分集，然后自动重整集数。</p>
         </div>
     `;
 
@@ -527,6 +464,92 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
     modal.classList.remove('hidden');
 }
 
+async function showManualImportModal(sourceId) {
+    try {
+        const sourceDetails = await apiFetch(`/api/ui/library/source/${sourceId}/details`);
+        const providerName = sourceDetails.provider_name;
+        const urlPrefixMap = {
+            'bilibili': ['https://www.bilibili.com/video/', 'https://www.bilibili.com/bangumi/play/'],
+            'tencent': 'https://v.qq.com/x/cover/',
+            'iqiyi': 'https://www.iqiyi.com/v_',
+            'youku': 'https://v.youku.com/v_show/',
+            'mgtv': 'https://www.mgtv.com/b/',
+            'acfun': 'https://www.acfun.cn/v/',
+            'renren': 'https://www.rrsp.com.cn/video/'
+        };
+        const urlValidationPrefix = urlPrefixMap[providerName] || '';
+        const urlPlaceholder = Array.isArray(urlValidationPrefix) ? `${urlValidationPrefix[0]}...` : (urlValidationPrefix ? `${urlValidationPrefix}...` : '请输入完整视频链接');
+
+        const modal = document.getElementById('generic-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalSaveBtn = document.getElementById('modal-save-btn');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+
+        modalTitle.textContent = `手动导入弹幕 (${providerName})`;
+        modalSaveBtn.textContent = '开始导入';
+        modalBody.innerHTML = `
+            <form id="manual-import-form" onsubmit="return false;">
+                <div class="form-row"><label for="manual-episode-title">分集标题</label><input type="text" id="manual-episode-title" required></div>
+                <div class="form-row"><label for="manual-episode-index">集数</label><input type="number" id="manual-episode-index" min="1" required></div>
+                <div class="form-row"><label for="manual-episode-url">视频链接</label><input type="url" id="manual-episode-url" placeholder="${urlPlaceholder}" required></div>
+             </form>
+        `;
+
+        const handleSave = async () => {
+            const payload = {
+                title: document.getElementById('manual-episode-title').value,
+                episode_index: parseInt(document.getElementById('manual-episode-index').value, 10),
+                url: document.getElementById('manual-episode-url').value
+            };
+            if (!payload.title || !payload.episode_index || !payload.url) { alert('请填写所有字段。'); return; }
+
+            // 新增：前端URL前缀验证，支持多个有效前缀
+            if (urlValidationPrefix) {
+                const prefixes = Array.isArray(urlValidationPrefix) ? urlValidationPrefix : [urlValidationPrefix];
+                if (!prefixes.some(prefix => payload.url.startsWith(prefix))) {
+                    const expected = prefixes.map(p => `"${p}"`).join(' 或 ');
+                    alert(`URL格式不正确。\n\n当前源为 "${providerName}"，链接应以 ${expected} 开头。`);
+                    return;
+                }
+            }
+
+            modalSaveBtn.disabled = true;
+            modalSaveBtn.textContent = '导入中...';
+            try {
+                const response = await apiFetch(`/api/ui/library/source/${sourceId}/manual-import`, { method: 'POST', body: JSON.stringify(payload) });
+                alert(response.message || '手动导入任务已提交。');
+                hideScraperConfigModal();
+                document.querySelector('.nav-link[data-view="task-manager-view"]').click();
+            } catch (error) {
+                alert(`导入失败: ${error.message}`);
+            } finally {
+                modalSaveBtn.disabled = false;
+                modalSaveBtn.textContent = '开始导入';
+            }
+        };
+        
+        if (currentModalConfirmHandler) modalSaveBtn.removeEventListener('click', currentModalConfirmHandler);
+        currentModalConfirmHandler = handleSave;
+        modalSaveBtn.addEventListener('click', currentModalConfirmHandler);
+
+        modal.classList.remove('hidden');
+    } catch (error) {
+        alert(`无法加载源信息: ${error.message}`);
+    }
+}
+
+function hideScraperConfigModal() {
+    const modal = document.getElementById('generic-modal');
+    const modalSaveBtn = document.getElementById('modal-save-btn');
+    modal.classList.add('hidden');
+    if (currentModalConfirmHandler) {
+        modalSaveBtn.removeEventListener('click', currentModalConfirmHandler);
+        currentModalConfirmHandler = null;
+    }
+}
+
 async function handleEpisodeAction(e) {
     const button = e.target.closest('.action-btn');
     if (!button) return;
@@ -548,6 +571,10 @@ async function handleEpisodeAction(e) {
             }
             break;
         case 'refresh':
+            if (!episodeTitle) {
+                alert('No episode with that ID found.');
+                return;
+            }
             if (confirm(`您确定要刷新分集 '${episodeTitle}' 的弹幕吗？`)) {
                 apiFetch(`/api/ui/library/episode/${episodeId}/refresh`, { method: 'POST' })
                     .then(response => alert(response.message || "刷新任务已开始。"))
