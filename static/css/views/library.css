@@ -30,9 +30,24 @@
 .episode-list-header .header-actions {
     display: flex;
     gap: 10px;
-    justify-content: flex-end; /* 右对齐 */
 }
 
+
+.episode-list-actions {
+    display: flex;
+    justify-content: space-between; /* 保持左右对齐 */
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.episode-list-actions .header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.episode-list-actions .header-actions .secondary-btn {
+    width: 100px; /* 确保每个按钮都有相同的宽度 */
+}
 
 .episode-list-header h3 {
     margin: 0;

@@ -208,6 +208,10 @@ async function handleSourceAction(e) {
             showEpisodeListView(sourceId, animeTitle, animeId);
             break;
         case 'refresh':
+                if (!episodeTitle) {
+        alert('No episode with that ID found.');
+                return;
+                }
             if (confirm(`您确定要为 '${animeTitle}' 的这个数据源执行全量刷新吗？`)) {
                 apiFetch(`/api/ui/library/source/${sourceId}/refresh`, { method: 'POST' })
                     .then(response => alert(response.message || "刷新任务已开始。"))
@@ -263,10 +267,14 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     episodeListView.innerHTML = `
         <div class="episode-list-header">
             <h3>分集列表: ${animeTitle}</h3>
+        </div>
+        <div class="episode-list-actions">
             <div class="header-actions">
                 <button id="select-all-episodes-btn" class="secondary-btn">全选</button>
                 <button id="delete-selected-episodes-btn" class="secondary-btn danger">批量删除选中</button>
-                <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
+            </div>
+            <div class="episode-management">
+               <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
                 <button id="reorder-episodes-btn" class="secondary-btn">重整集数</button>
                 <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
             </div>
@@ -479,6 +487,10 @@ async function handleEpisodeAction(e) {
             }
             break;
         case 'refresh':
+                if (!episodeTitle) {
+        alert('No episode with that ID found.');
+                return;
+            }
             if (confirm(`您确定要刷新分集 '${episodeTitle}' 的弹幕吗？`)) {
                 apiFetch(`/api/ui/library/episode/${episodeId}/refresh`, { method: 'POST' })
                     .then(response => alert(response.message || "刷新任务已开始。"))
