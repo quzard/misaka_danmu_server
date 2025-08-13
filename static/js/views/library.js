@@ -208,10 +208,6 @@ async function handleSourceAction(e) {
             showEpisodeListView(sourceId, animeTitle, animeId);
             break;
         case 'refresh':
-                if (!episodeTitle) {
-        alert('No episode with that ID found.');
-                return;
-                }
             if (confirm(`您确定要为 '${animeTitle}' 的这个数据源执行全量刷新吗？`)) {
                 apiFetch(`/api/ui/library/source/${sourceId}/refresh`, { method: 'POST' })
                     .then(response => alert(response.message || "刷新任务已开始。"))
@@ -267,16 +263,17 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     episodeListView.innerHTML = `
         <div class="episode-list-header">
             <h3>分集列表: ${animeTitle}</h3>
+            <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
         </div>
         <div class="episode-list-actions">
-            <div class="header-actions">
+            <div class="actions-left">
                 <button id="select-all-episodes-btn" class="secondary-btn">全选</button>
                 <button id="delete-selected-episodes-btn" class="secondary-btn danger">批量删除选中</button>
             </div>
-            <div class="episode-management">
-               <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
+            <div class="actions-right">
+                <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
                 <button id="reorder-episodes-btn" class="secondary-btn">重整集数</button>
-                <button id="back-to-detail-view-btn">&lt; 返回作品详情</button>
+                <button id="manual-import-btn" class="secondary-btn">手动导入</button>
             </div>
         </div>
         <table id="episode-list-table">
@@ -326,6 +323,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     document.getElementById('delete-selected-episodes-btn').addEventListener('click', handleDeleteSelectedEpisodes);
     document.getElementById('cleanup-by-average-btn').addEventListener('click', () => handleCleanupByAverage(sourceId, animeTitle));
     document.getElementById('reorder-episodes-btn').addEventListener('click', () => handleReorderEpisodes(sourceId, animeTitle));
+    document.getElementById('manual-import-btn').addEventListener('click', () => showManualImportModal(sourceId));
     document.getElementById('back-to-detail-view-btn').addEventListener('click', () => showAnimeDetailView(animeId));
     tableBody.addEventListener('click', handleEpisodeAction);
 }
@@ -466,6 +464,79 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
     modal.classList.remove('hidden');
 }
 
+async function showManualImportModal(sourceId) {
+    try {
+        const sourceDetails = await apiFetch(`/api/ui/library/source/${sourceId}/details`);
+        const providerName = sourceDetails.provider_name;
+        const urlPrefix = {
+            'bilibili': 'https://www.bilibili.com/video/...',
+            'tencent': 'https://v.qq.com/x/cover/...',
+            'iqiyi': 'https://www.iqiyi.com/v_...',
+            'youku': 'https://v.youku.com/v_show/...',
+            'mgtv': 'https://www.mgtv.com/b/...',
+            'acfun': 'https://www.acfun.cn/v/ac...'
+        }[providerName] || '请输入完整视频链接';
+
+        const modal = document.getElementById('generic-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalSaveBtn = document.getElementById('modal-save-btn');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+
+        modalTitle.textContent = `手动导入弹幕 (${providerName})`;
+        modalSaveBtn.textContent = '开始导入';
+        modalBody.innerHTML = `
+            <form id="manual-import-form" onsubmit="return false;">
+                <div class="form-row"><label for="manual-episode-title">分集标题</label><input type="text" id="manual-episode-title" required></div>
+                <div class="form-row"><label for="manual-episode-index">集数</label><input type="number" id="manual-episode-index" min="1" required></div>
+                <div class="form-row"><label for="manual-episode-url">视频链接</label><input type="url" id="manual-episode-url" placeholder="${urlPrefix}" required></div>
+            </form>
+        `;
+
+        const handleSave = async () => {
+            const payload = {
+                title: document.getElementById('manual-episode-title').value,
+                episode_index: parseInt(document.getElementById('manual-episode-index').value, 10),
+                url: document.getElementById('manual-episode-url').value
+            };
+            if (!payload.title || !payload.episode_index || !payload.url) { alert('请填写所有字段。'); return; }
+
+            modalSaveBtn.disabled = true;
+            modalSaveBtn.textContent = '导入中...';
+            try {
+                const response = await apiFetch(`/api/ui/library/source/${sourceId}/manual-import`, { method: 'POST', body: JSON.stringify(payload) });
+                alert(response.message || '手动导入任务已提交。');
+                hideScraperConfigModal();
+                document.querySelector('.nav-link[data-view="task-manager-view"]').click();
+            } catch (error) {
+                alert(`导入失败: ${error.message}`);
+            } finally {
+                modalSaveBtn.disabled = false;
+                modalSaveBtn.textContent = '开始导入';
+            }
+        };
+        
+        if (currentModalConfirmHandler) modalSaveBtn.removeEventListener('click', currentModalConfirmHandler);
+        currentModalConfirmHandler = handleSave;
+        modalSaveBtn.addEventListener('click', currentModalConfirmHandler);
+
+        modal.classList.remove('hidden');
+    } catch (error) {
+        alert(`无法加载源信息: ${error.message}`);
+    }
+}
+
+function hideScraperConfigModal() {
+    const modal = document.getElementById('generic-modal');
+    const modalSaveBtn = document.getElementById('modal-save-btn');
+    modal.classList.add('hidden');
+    if (currentModalConfirmHandler) {
+        modalSaveBtn.removeEventListener('click', currentModalConfirmHandler);
+        currentModalConfirmHandler = null;
+    }
+}
+
 async function handleEpisodeAction(e) {
     const button = e.target.closest('.action-btn');
     if (!button) return;
@@ -487,8 +558,8 @@ async function handleEpisodeAction(e) {
             }
             break;
         case 'refresh':
-                if (!episodeTitle) {
-        alert('No episode with that ID found.');
+            if (!episodeTitle) {
+                alert('No episode with that ID found.');
                 return;
             }
             if (confirm(`您确定要刷新分集 '${episodeTitle}' 的弹幕吗？`)) {

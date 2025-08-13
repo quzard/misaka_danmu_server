@@ -38,6 +38,8 @@
     justify-content: space-between; /* 保持左右对齐 */
     align-items: center;
     margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .episode-list-actions .header-actions {
@@ -45,8 +47,10 @@
     gap: 10px;
 }
 
-.episode-list-actions .header-actions .secondary-btn {
-    width: 100px; /* 确保每个按钮都有相同的宽度 */
+/* 确保“全选”按钮在切换文本时保持宽度一致 */
+#select-all-episodes-btn {
+    min-width: 80px;
+    text-align: center;
 }
 
 .episode-list-header h3 {

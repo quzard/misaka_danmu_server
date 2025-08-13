@@ -385,6 +385,18 @@ async def edit_anime_info(
             logger.error(f"更新TMDB映射失败: {e}", exc_info=True)
     return
 
+@router.get("/library/source/{source_id}/details", summary="获取单个数据源的详情")
+async def get_source_details(
+    source_id: int,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """获取指定数据源的详细信息，包括其提供方名称。"""
+    source_info = await crud.get_anime_source_info(pool, source_id)
+    if not source_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+    return source_info
+
 class ReassociationRequest(models.BaseModel):
     target_anime_id: int
 
@@ -1383,6 +1395,77 @@ async def reorder_episodes_task(source_id: int, pool: aiomysql.Pool, progress_ca
         raise TaskSuccess(f"重整完成，共更新了 {updated_count} 个分集的集数。")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
+        raise
+
+class ManualImportRequest(models.BaseModel):
+    title: str
+    episode_index: int
+    url: str
+
+@router.post("/library/source/{source_id}/manual-import", status_code=status.HTTP_202_ACCEPTED, summary="手动导入单个分集弹幕")
+async def manual_import_episode(
+    source_id: int,
+    request_data: ManualImportRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """提交一个后台任务，从给定的URL手动导入弹幕。"""
+    source_info = await crud.get_anime_source_info(pool, source_id)
+    if not source_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
+    provider_name = source_info['provider_name']
+    
+    url_prefixes = {
+        'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com',
+        'youku': 'youku.com', 'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
+    }
+    expected_prefix = url_prefixes.get(provider_name)
+    if not expected_prefix or expected_prefix not in request_data.url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
+
+    task_title = f"手动导入: {request_data.title}"
+    task_coro = lambda callback: manual_import_task(
+        source_id=source_id, title=request_data.title, episode_index=request_data.episode_index,
+        url=request_data.url, provider_name=provider_name,
+        progress_callback=callback, pool=pool, manager=scraper_manager
+    )
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    return {"message": f"手动导入任务 '{task_title}' 已提交。", "task_id": task_id}
+
+async def manual_import_task(
+    source_id: int, title: str, episode_index: int, url: str, provider_name: str,
+    progress_callback: Callable, pool: aiomysql.Pool, manager: ScraperManager
+):
+    """后台任务：从URL手动导入弹幕。"""
+    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
+    await progress_callback(10, "正在准备导入...")
+    
+    try:
+        scraper = manager.get_scraper(provider_name)
+        
+        provider_episode_id = None
+        if hasattr(scraper, 'get_ids_from_url'): provider_episode_id = await scraper.get_ids_from_url(url)
+        elif hasattr(scraper, 'get_danmaku_id_from_url'): provider_episode_id = await scraper.get_danmaku_id_from_url(url)
+        elif hasattr(scraper, 'get_tvid_from_url'): provider_episode_id = await scraper.get_tvid_from_url(url)
+        elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
+        
+        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
+        await progress_callback(20, f"已解析视频ID: {provider_episode_id}")
+
+        comments = await scraper.get_comments(provider_episode_id, progress_callback=progress_callback)
+        if not comments: raise TaskSuccess("未找到任何弹幕。")
+
+        await progress_callback(90, "正在写入数据库...")
+        episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_index, title, url, str(provider_episode_id))
+        added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
+        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
 
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED, summary="从指定数据源导入弹幕")
