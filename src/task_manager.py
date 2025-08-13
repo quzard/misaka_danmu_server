@@ -167,12 +167,22 @@ class TaskManager:
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
-    async def pause_current_task(self):
-        if self._current_task:
+    async def pause_task(self, task_id: str) -> bool:
+        """如果ID匹配，则暂停当前正在运行的任务。"""
+        if self._current_task and self._current_task.task_id == task_id:
             self._current_task.pause_event.clear()
             await crud.update_task_status(self._pool, self._current_task.task_id, TaskStatus.PAUSED)
+            self.logger.info(f"已暂停任务 '{self._current_task.title}' (ID: {task_id})。")
+            return True
+        self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
+        return False
 
-    async def resume_current_task(self):
-        if self._current_task:
+    async def resume_task(self, task_id: str) -> bool:
+        """如果ID匹配，则恢复当前已暂停的任务。"""
+        if self._current_task and self._current_task.task_id == task_id:
             self._current_task.pause_event.set()
             await crud.update_task_status(self._pool, self._current_task.task_id, TaskStatus.RUNNING)
+            self.logger.info(f"已恢复任务 '{self._current_task.title}' (ID: {task_id})。")
+            return True
+        self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
+        return False

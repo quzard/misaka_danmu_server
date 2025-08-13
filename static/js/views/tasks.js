@@ -321,11 +321,12 @@ async function handlePauseResumeTask() {
         alert('请先选择一个任务。');
         return;
     }
-
+    
+    const taskId = selectedTask.dataset.taskId;
     const status = selectedTask.dataset.status;
     let endpoint = '';
-    if (status === '运行中') endpoint = '/api/ui/tasks/pause';
-    else if (status === '已暂停') endpoint = '/api/ui/tasks/resume';
+    if (status === '运行中') endpoint = `/api/ui/tasks/${taskId}/pause`;
+    else if (status === '已暂停') endpoint = `/api/ui/tasks/${taskId}/resume`;
     else return; // Not pausable or resumable
 
     try {

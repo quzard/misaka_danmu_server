@@ -1438,22 +1438,28 @@ async def import_from_provider(
 
     return {"message": f"'{request_data.anime_title}' 的导入任务已提交。请在任务管理器中查看进度。", "task_id": task_id}
 
-@router.post("/tasks/pause", status_code=status.HTTP_202_ACCEPTED, summary="暂停当前正在运行的任务")
-async def pause_current_task(
+@router.post("/tasks/{task_id}/pause", status_code=status.HTTP_202_ACCEPTED, summary="暂停一个正在运行的任务")
+async def pause_task(
+    task_id: str,
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """暂停当前正在运行的任务。注意：此操作只对当前队列中正在执行的单个任务有效。"""
-    await task_manager.pause_current_task()
+    """暂停一个指定的、当前正在运行的任务。"""
+    success = await task_manager.pause_task(task_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="无法暂停任务，因为它不是当前正在运行的任务。")
     return {"message": "暂停请求已发送。"}
 
-@router.post("/tasks/resume", status_code=status.HTTP_202_ACCEPTED, summary="恢复当前已暂停的任务")
-async def resume_current_task(
+@router.post("/tasks/{task_id}/resume", status_code=status.HTTP_202_ACCEPTED, summary="恢复一个已暂停的任务")
+async def resume_task(
+    task_id: str,
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """恢复当前已暂停的任务。"""
-    await task_manager.resume_current_task()
+    """恢复一个指定的、已暂停的任务。"""
+    success = await task_manager.resume_task(task_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="无法恢复任务，因为它不是当前已暂停的任务。")
     return {"message": "恢复请求已发送。"}
 
 @router.post("/tasks/{task_id}/abort", status_code=status.HTTP_202_ACCEPTED, summary="中止一个正在运行的任务")
