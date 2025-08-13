@@ -24,7 +24,7 @@ from .scrapers.mgtv import MgtvScraper
 
 logger = logging.getLogger(__name__)
 
-# --- Module-level Constants for Type Mappings ---
+# --- Module-level Constants for Type Mappings and Parsing ---
 # To avoid repetition and improve maintainability.
 DANDAN_TYPE_MAPPING = {
     "tv_series": "tvseries", "movie": "movie", "ova": "ova", "other": "other"
@@ -32,6 +32,11 @@ DANDAN_TYPE_MAPPING = {
 DANDAN_TYPE_DESC_MAPPING = {
     "tv_series": "TV动画", "movie": "电影/剧场版", "ova": "OVA", "other": "其他"
 }
+# 新增：用于清理文件名中常见元数据关键词的正则表达式
+METADATA_KEYWORDS_PATTERN = re.compile(
+    r'1080p|720p|2160p|4k|bluray|x264|h\s*\.?\s*264|hevc|x265|h\s*\.?\s*265|aac|flac|web-dl|BDRip|WEBRip|TVRip|DVDrip|AVC|CHT|CHS|BIG5|GB|10bit|8bit',
+    re.IGNORECASE
+)
 
 # 这个子路由将包含所有接口的实际实现。
 # 它将被挂载到主路由的不同路径上。
@@ -382,7 +387,7 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
             title = data["title"]
             # 清理标题中的元数据
             title = re.sub(r'\[.*?\]|\(.*?\)|\【.*?\】', '', title).strip()
-            title = re.sub(r'1080p|720p|4k|bluray|x264|h\s*\.?\s*264|hevc|x265|h\s*\.?\s*265|aac|flac|web-dl|BDRip|WEBRip|TVRip|DVDrip|AVC|CHT|CHS|BIG5|GB', '', title, flags=re.IGNORECASE).strip()
+            title = METADATA_KEYWORDS_PATTERN.sub('', title).strip()
             title = title.replace("_", " ").replace(".", " ").strip()
             # 新增：移除标题中的年份并清理多余空格
             title = re.sub(r'\b(19|20)\d{2}\b', '', title).strip()
@@ -396,7 +401,7 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     # 模式3: 电影或单文件视频 (没有集数)
     title = name_without_ext
     title = re.sub(r'\[.*?\]|\(.*?\)|\【.*?\】', '', title).strip()
-    title = re.sub(r'1080p|720p|4k|bluray|x264|h\s*\.?\s*264|hevc|x265|h\s*\.?\s*265|aac|flac|web-dl|BDRip|WEBRip|TVRip|DVDrip|AVC|CHT|CHS|BIG5|GB', '', title, flags=re.IGNORECASE).strip()
+    title = METADATA_KEYWORDS_PATTERN.sub('', title).strip()
     title = title.replace("_", " ").replace(".", " ").strip()
     # 移除年份, 兼容括号内和独立两种形式
     title = re.sub(r'\(\s*(19|20)\d{2}\s*\)', '', title).strip()
