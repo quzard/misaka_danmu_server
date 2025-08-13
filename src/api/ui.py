@@ -326,8 +326,14 @@ async def search_anime_provider(
     for item in results:
         item.currentEpisodeIndex = current_episode_index_for_this_request
 
+    # 新增：根据搜索源的显示顺序对结果进行排序
+    source_settings = await crud.get_all_scraper_settings(pool)
+    source_order_map = {s['provider_name']: s['display_order'] for s in source_settings}
+    # 使用 sorted 创建一个新的排序列表，而不是原地排序
+    sorted_results = sorted(results, key=lambda x: source_order_map.get(x.provider, 999))
+
     return UIProviderSearchResponse(
-        results=results,
+        results=sorted_results,
         search_season=season_to_filter,
         search_episode=episode_to_filter
     )
@@ -1336,11 +1342,6 @@ async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: Sc
         provider_name = info["provider_name"]
         provider_episode_id = info["provider_episode_id"]
         scraper = manager.get_scraper(provider_name)
-
-        # 2. 清空旧弹幕
-        await progress_callback(25, "正在清空旧弹幕...")
-        await crud.clear_episode_comments(pool, episode_id)
-        logger.info(f"已清空分集 ID: {episode_id} 的旧弹幕。")
 
         # 3. 获取新弹幕并插入
         await progress_callback(30, "正在从源获取新弹幕...")
