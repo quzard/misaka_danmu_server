@@ -468,14 +468,17 @@ async function showManualImportModal(sourceId) {
     try {
         const sourceDetails = await apiFetch(`/api/ui/library/source/${sourceId}/details`);
         const providerName = sourceDetails.provider_name;
-        const urlPrefix = {
-            'bilibili': 'https://www.bilibili.com/video/...',
-            'tencent': 'https://v.qq.com/x/cover/...',
-            'iqiyi': 'https://www.iqiyi.com/v_...',
-            'youku': 'https://v.youku.com/v_show/...',
-            'mgtv': 'https://www.mgtv.com/b/...',
-            'acfun': 'https://www.acfun.cn/v/ac...'
-        }[providerName] || '请输入完整视频链接';
+        const urlPrefixMap = {
+            'bilibili': 'https://www.bilibili.com/video/',
+            'tencent': 'https://v.qq.com/x/cover/',
+            'iqiyi': 'https://www.iqiyi.com/v_',
+            'youku': 'https://v.youku.com/v_show/',
+            'mgtv': 'https://www.mgtv.com/b/',
+            'acfun': 'https://www.acfun.cn/v/',
+            'renren': 'https://www.rrsp.com.cn/video/'
+        };
+        const urlValidationPrefix = urlPrefixMap[providerName] || '';
+        const urlPlaceholder = urlValidationPrefix ? `${urlValidationPrefix}...` : '请输入完整视频链接';
 
         const modal = document.getElementById('generic-modal');
         const modalTitle = document.getElementById('modal-title');
@@ -490,7 +493,7 @@ async function showManualImportModal(sourceId) {
             <form id="manual-import-form" onsubmit="return false;">
                 <div class="form-row"><label for="manual-episode-title">分集标题</label><input type="text" id="manual-episode-title" required></div>
                 <div class="form-row"><label for="manual-episode-index">集数</label><input type="number" id="manual-episode-index" min="1" required></div>
-                <div class="form-row"><label for="manual-episode-url">视频链接</label><input type="url" id="manual-episode-url" placeholder="${urlPrefix}" required></div>
+                <div class="form-row"><label for="manual-episode-url">视频链接</label><input type="url" id="manual-episode-url" placeholder="${urlPlaceholder}" required></div>
             </form>
         `;
 
@@ -501,6 +504,12 @@ async function showManualImportModal(sourceId) {
                 url: document.getElementById('manual-episode-url').value
             };
             if (!payload.title || !payload.episode_index || !payload.url) { alert('请填写所有字段。'); return; }
+
+            // 新增：前端URL前缀验证
+            if (urlValidationPrefix && !payload.url.startsWith(urlValidationPrefix)) {
+                alert(`URL格式不正确。\n\n当前源为 "${providerName}"，链接应以 "${urlValidationPrefix}" 开头。`);
+                return;
+            }
 
             modalSaveBtn.disabled = true;
             modalSaveBtn.textContent = '导入中...';
