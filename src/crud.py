@@ -642,8 +642,7 @@ async def update_anime_details(pool: aiomysql.Pool, anime_id: int, update_data: 
                 # 3. 更新 anime_aliases 表 (使用新的 AS alias 语法)
                 await cursor.execute("""
                     INSERT INTO anime_aliases (anime_id, name_en, name_jp, name_romaji, alias_cn_1, alias_cn_2, alias_cn_3)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    AS new_values ON DUPLICATE KEY UPDATE
+                    VALUES (%s, %s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE
                         name_en = VALUES(name_en), name_jp = VALUES(name_jp),
                         name_romaji = VALUES(name_romaji), alias_cn_1 = VALUES(alias_cn_1),
                         alias_cn_2 = VALUES(alias_cn_2), alias_cn_3 = VALUES(alias_cn_3)
@@ -1022,9 +1021,9 @@ async def set_cache(pool: aiomysql.Pool, key: str, value: Any, ttl_seconds: int,
         async with conn.cursor() as cursor:
             json_value = json.dumps(value, ensure_ascii=False)
             query = """
-                INSERT INTO cache_data (cache_provider, cache_key, cache_value, expires_at) 
-                VALUES (%s, %s, %s, NOW() + INTERVAL %s SECOND) 
-                AS new_values ON DUPLICATE KEY UPDATE
+                INSERT INTO cache_data (cache_provider, cache_key, cache_value, expires_at)
+                VALUES (%s, %s, %s, NOW() + INTERVAL %s SECOND)
+                ON DUPLICATE KEY UPDATE
                     cache_provider = VALUES(cache_provider),
                     cache_value = VALUES(cache_value),
                     expires_at = VALUES(expires_at)
@@ -1035,11 +1034,7 @@ async def update_config_value(pool: aiomysql.Pool, key: str, value: str):
     """更新或插入一个配置项。"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            query = """
-                INSERT INTO config (config_key, config_value)
-                VALUES (%s, %s) AS new_values
-                ON DUPLICATE KEY UPDATE config_value = new_values.config_value
-            """
+            query = "INSERT INTO config (config_key, config_value) VALUES (%s, %s) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)"
             await cursor.execute(query, (key, value))
 
 async def clear_expired_cache(pool: aiomysql.Pool):
@@ -1256,7 +1251,7 @@ async def save_bangumi_auth(pool: aiomysql.Pool, user_id: int, auth_data: Dict[s
             # 当记录已存在时（ON DUPLICATE KEY UPDATE），authorized_at 不会被更新，保留首次授权时间。
             query = """
                 INSERT INTO bangumi_auth (user_id, bangumi_user_id, nickname, avatar_url, access_token, refresh_token, expires_at, authorized_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s) AS new_values
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     bangumi_user_id = VALUES(bangumi_user_id),
                     nickname = VALUES(nickname),
@@ -1264,7 +1259,7 @@ async def save_bangumi_auth(pool: aiomysql.Pool, user_id: int, auth_data: Dict[s
                     access_token = VALUES(access_token),
                     refresh_token = VALUES(refresh_token),
                     expires_at = VALUES(expires_at),
-                    authorized_at = IF(bangumi_auth.authorized_at IS NULL, new_values.authorized_at, bangumi_auth.authorized_at)
+                    authorized_at = IF(bangumi_auth.authorized_at IS NULL, VALUES(authorized_at), bangumi_auth.authorized_at)
             """
             await cursor.execute(query, (
                 user_id, auth_data.get('bangumi_user_id'), auth_data.get('nickname'),

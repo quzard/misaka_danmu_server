@@ -447,7 +447,8 @@ class YoukuScraper(BaseScraper):
     async def get_vid_from_url(self, url: str) -> Optional[str]:
         """从优酷视频URL中提取 vid。"""
         # 优酷的URL格式通常是 v.youku.com/v_show/id_XXXXXXXX.html
-        match = re.search(r'id_([a-zA-Z0-9=]+)\.html', url)
+        # 修正：移除对 .html 后缀的强制要求，以兼容新版URL
+        match = re.search(r'id_([a-zA-Z0-9=]+)', url)
         if match:
             vid = match.group(1)
             self.logger.info(f"Youku: 从URL {url} 解析到 vid: {vid}")
