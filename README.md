@@ -215,8 +215,15 @@
 
 现在，当有新的电影或剧集添加到您的 Emby/Jellyfin 媒体库时，本服务将自动收到通知，并创建一个后台任务来为其搜索和导入弹幕。
 
+
 ### 贡献者
 
 <a href="https://github.com/l429609201/misaka_danmu_server/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=l429609201/misaka_danmu_server" alt="contributors" />
 </a>
+
+## 参考项目
+
+ - [danmuku](https://github.com/lyz05/danmaku)
+ - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
+ - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
