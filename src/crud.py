@@ -379,6 +379,14 @@ async def fetch_comments(pool: aiomysql.Pool, episode_id: int) -> List[Dict[str,
             await cursor.execute(query, (episode_id,))
             return await cursor.fetchall()
 
+async def get_existing_comment_cids(pool: aiomysql.Pool, episode_id: int) -> set:
+    """获取指定分集已存在的所有弹幕 cid。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # cid 在数据库中是 VARCHAR，所以这里获取的是字符串集合
+            await cursor.execute("SELECT cid FROM comment WHERE episode_id = %s", (episode_id,))
+            return {row[0] for row in await cursor.fetchall()}
+
 async def get_or_create_anime(pool: aiomysql.Pool, title: str, media_type: str, season: int, image_url: Optional[str]) -> int:
     """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
     async with pool.acquire() as conn:

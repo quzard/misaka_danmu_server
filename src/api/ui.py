@@ -1351,10 +1351,23 @@ async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: Sc
             current_total_progress = 30 + (danmaku_progress / 100) * 65
             await progress_callback(current_total_progress, danmaku_description)
 
-        comments = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
+        all_comments_from_source = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
 
-        await progress_callback(96, f"正在写入 {len(comments)} 条新弹幕...")
-        added_count = await crud.bulk_insert_comments(pool, episode_id, comments)
+        if not all_comments_from_source:
+            await crud.update_episode_fetch_time(pool, episode_id)
+            raise TaskSuccess("未找到任何弹幕。")
+
+        # 新增：在插入前，先筛选出数据库中不存在的新弹幕，以避免产生大量的“重复条目”警告。
+        await progress_callback(95, "正在比对新旧弹幕...")
+        existing_cids = await crud.get_existing_comment_cids(pool, episode_id)
+        new_comments = [c for c in all_comments_from_source if str(c.get('cid')) not in existing_cids]
+
+        if not new_comments:
+            await crud.update_episode_fetch_time(pool, episode_id)
+            raise TaskSuccess("刷新完成，没有新增弹幕。")
+
+        await progress_callback(96, f"正在写入 {len(new_comments)} 条新弹幕...")
+        added_count = await crud.bulk_insert_comments(pool, episode_id, new_comments)
         await crud.update_episode_fetch_time(pool, episode_id)
         logger.info(f"分集 ID: {episode_id} 刷新完成，新增 {added_count} 条弹幕。")
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
