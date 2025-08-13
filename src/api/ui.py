@@ -326,11 +326,18 @@ async def search_anime_provider(
     for item in results:
         item.currentEpisodeIndex = current_episode_index_for_this_request
 
-    # 新增：根据搜索源的显示顺序对结果进行排序
+    # 新增：根据搜索源的显示顺序和标题相似度对结果进行排序
     source_settings = await crud.get_all_scraper_settings(pool)
     source_order_map = {s['provider_name']: s['display_order'] for s in source_settings}
-    # 使用 sorted 创建一个新的排序列表，而不是原地排序
-    sorted_results = sorted(results, key=lambda x: source_order_map.get(x.provider, 999))
+
+    def sort_key(item: models.ProviderSearchInfo):
+        provider_order = source_order_map.get(item.provider, 999)
+        # 使用 token_set_ratio 来获得更鲁棒的标题相似度评分
+        similarity_score = fuzz.token_set_ratio(search_title, item.title)
+        # 主排序键：源顺序（升序）；次排序键：相似度（降序）
+        return (provider_order, -similarity_score)
+
+    sorted_results = sorted(results, key=sort_key)
 
     return UIProviderSearchResponse(
         results=sorted_results,
