@@ -334,25 +334,51 @@ class BilibiliScraper(BaseScraper):
         """
         从一个Bilibili视频URL中获取aid和cid。
         """
-        self.logger.info(f"Bilibili: 正在从URL解析ID: {url}")
+        self.logger.info(f"Bilibili: 正在从URL解析ID: {url!r}")
         try:
             await self._ensure_config_and_cookie()
             response = await self._request_with_rate_limit("GET", url)
             response.raise_for_status()
             html = response.text
 
-            # 优先尝试从初始状态JSON中查找
+            # 步骤 1: 优先尝试从 __INITIAL_STATE__ JSON块中查找
             match = re.search(r'__INITIAL_STATE__=({.*?});', html)
             if match:
                 initial_state = json.loads(match.group(1))
                 video_data = initial_state.get('videoData', {})
                 aid = video_data.get('aid')
-                cid = video_data.get('cid')
-                if aid and cid:
-                    self.logger.info(f"Bilibili: 从INITIAL_STATE解析成功: aid={aid}, cid={cid}")
-                    return {"aid": aid, "cid": cid}
+                
+                # 步骤 2: 智能确定目标 cid
+                target_cid = None
+                # 2a: 检查番剧的 ep_id
+                ep_match = re.search(r'/play/ep(\d+)', url)
+                if ep_match and 'epList' in initial_state:
+                    target_ep_id = int(ep_match.group(1))
+                    for ep in initial_state['epList']:
+                        if ep.get('id') == target_ep_id:
+                            target_cid = ep.get('cid')
+                            self.logger.info(f"Bilibili: 通过 ep_id ({target_ep_id}) 精确匹配到 cid: {target_cid}")
+                            break
+                
+                # 2b: 检查普通视频的 p 参数
+                p_match = re.search(r'[?&]p=(\d+)', url)
+                if not target_cid and p_match and 'pages' in video_data:
+                    target_p_num = int(p_match.group(1))
+                    for page in video_data['pages']:
+                        if page.get('page') == target_p_num:
+                            target_cid = page.get('cid')
+                            self.logger.info(f"Bilibili: 通过 p={target_p_num} 精确匹配到 cid: {target_cid}")
+                            break
+                
+                # 2c: 如果没有特定分集，则使用默认的 cid
+                if not target_cid:
+                    target_cid = video_data.get('cid')
 
-            # 如果找不到，则回退到正则表达式
+                if aid and target_cid:
+                    self.logger.info(f"Bilibili: 从INITIAL_STATE解析成功: aid={aid}, cid={target_cid}")
+                    return {"aid": aid, "cid": target_cid}
+
+            # 步骤 3: 如果找不到，则回退到正则表达式
             aid_match = re.search(r'"aid"\s*:\s*(\d+)', html)
             cid_match = re.search(r'"cid"\s*:\s*(\d+)', html)
             if aid_match and cid_match:

@@ -469,7 +469,7 @@ async function showManualImportModal(sourceId) {
         const sourceDetails = await apiFetch(`/api/ui/library/source/${sourceId}/details`);
         const providerName = sourceDetails.provider_name;
         const urlPrefixMap = {
-            'bilibili': 'https://www.bilibili.com/video/',
+            'bilibili': ['https://www.bilibili.com/video/', 'https://www.bilibili.com/bangumi/play/'],
             'tencent': 'https://v.qq.com/x/cover/',
             'iqiyi': 'https://www.iqiyi.com/v_',
             'youku': 'https://v.youku.com/v_show/',
@@ -478,7 +478,7 @@ async function showManualImportModal(sourceId) {
             'renren': 'https://www.rrsp.com.cn/video/'
         };
         const urlValidationPrefix = urlPrefixMap[providerName] || '';
-        const urlPlaceholder = urlValidationPrefix ? `${urlValidationPrefix}...` : '请输入完整视频链接';
+        const urlPlaceholder = Array.isArray(urlValidationPrefix) ? `${urlValidationPrefix[0]}...` : (urlValidationPrefix ? `${urlValidationPrefix}...` : '请输入完整视频链接');
 
         const modal = document.getElementById('generic-modal');
         const modalTitle = document.getElementById('modal-title');
@@ -494,7 +494,7 @@ async function showManualImportModal(sourceId) {
                 <div class="form-row"><label for="manual-episode-title">分集标题</label><input type="text" id="manual-episode-title" required></div>
                 <div class="form-row"><label for="manual-episode-index">集数</label><input type="number" id="manual-episode-index" min="1" required></div>
                 <div class="form-row"><label for="manual-episode-url">视频链接</label><input type="url" id="manual-episode-url" placeholder="${urlPlaceholder}" required></div>
-            </form>
+             </form>
         `;
 
         const handleSave = async () => {
@@ -505,10 +505,14 @@ async function showManualImportModal(sourceId) {
             };
             if (!payload.title || !payload.episode_index || !payload.url) { alert('请填写所有字段。'); return; }
 
-            // 新增：前端URL前缀验证
-            if (urlValidationPrefix && !payload.url.startsWith(urlValidationPrefix)) {
-                alert(`URL格式不正确。\n\n当前源为 "${providerName}"，链接应以 "${urlValidationPrefix}" 开头。`);
-                return;
+            // 新增：前端URL前缀验证，支持多个有效前缀
+            if (urlValidationPrefix) {
+                const prefixes = Array.isArray(urlValidationPrefix) ? urlValidationPrefix : [urlValidationPrefix];
+                if (!prefixes.some(prefix => payload.url.startsWith(prefix))) {
+                    const expected = prefixes.map(p => `"${p}"`).join(' 或 ');
+                    alert(`URL格式不正确。\n\n当前源为 "${providerName}"，链接应以 ${expected} 开头。`);
+                    return;
+                }
             }
 
             modalSaveBtn.disabled = true;
