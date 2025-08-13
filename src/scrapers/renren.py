@@ -294,7 +294,7 @@ class RenrenScraper(BaseScraper):
             "hsdrOpen": 0,
             "isAgeLimit": 0,
             "dramaId": str(drama_id),
-            "quality": "AI4K",
+#            "quality": "AI4K",   #会影响获取，@didi佬
             "hevcOpen": 1,
         }
         try:

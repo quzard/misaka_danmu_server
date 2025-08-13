@@ -1357,10 +1357,12 @@ async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: Sc
         await crud.update_episode_fetch_time(pool, episode_id)
         logger.info(f"分集 ID: {episode_id} 刷新完成，新增 {added_count} 条弹幕。")
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
-
+    except TaskSuccess:
+        # 任务成功完成，直接重新抛出，由 TaskManager 处理
+        raise
     except Exception as e:
         logger.error(f"刷新分集 ID: {episode_id} 时发生严重错误: {e}", exc_info=True)
-        raise e # Re-raise so the task manager catches it and marks as FAILED
+        raise # Re-raise so the task manager catches it and marks as FAILED
 
 async def reorder_episodes_task(source_id: int, pool: aiomysql.Pool, progress_callback: Callable):
     """后台任务：重新编号一个源的所有分集。"""
@@ -1453,13 +1455,25 @@ async def manual_import_task(
         elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
         
         if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
-        await progress_callback(20, f"已解析视频ID: {provider_episode_id}")
 
-        comments = await scraper.get_comments(provider_episode_id, progress_callback=progress_callback)
+        # 修正：处理 Bilibili 和 MGTV 返回的字典ID，并将其格式化为 get_comments 期望的字符串格式。
+        episode_id_for_comments = provider_episode_id
+        if isinstance(provider_episode_id, dict):
+            if provider_name == 'bilibili':
+                episode_id_for_comments = f"{provider_episode_id.get('aid')},{provider_episode_id.get('cid')}"
+            elif provider_name == 'mgtv':
+                # MGTV 的 get_comments 期望 "cid,vid"
+                episode_id_for_comments = f"{provider_episode_id.get('cid')},{provider_episode_id.get('vid')}"
+            else:
+                # 对于其他可能的字典返回，将其字符串化
+                episode_id_for_comments = str(provider_episode_id)
+
+        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
+        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
         if not comments: raise TaskSuccess("未找到任何弹幕。")
 
         await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_index, title, url, str(provider_episode_id))
+        episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_index, title, url, episode_id_for_comments)
         added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
