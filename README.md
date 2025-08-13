@@ -220,3 +220,9 @@
 <a href="https://github.com/l429609201/misaka_danmu_server/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=l429609201/misaka_danmu_server" alt="contributors" />
 </a>
+
+## 参考项目
+
+ - [danmuku](https://github.com/lyz05/danmaku)
+ - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
+ - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)

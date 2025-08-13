@@ -99,6 +99,11 @@
     padding: 5px 0;
 }
 
+.action-buttons-wrapper .action-btn {
+    border-radius: 50%;
+    width: 30px;
+}
+
 #episode-list-table th:first-child,
 #episode-list-table td:first-child {
     width: 1%;

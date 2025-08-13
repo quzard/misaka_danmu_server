@@ -169,14 +169,17 @@ function renderSourceDetailTable(sources, anime) {
                 <td class="actions-cell">
                     <div class="action-buttons-wrapper" data-source-id="${source.source_id}" data-anime-title="${anime.title}" data-anime-id="${anime.animeId}">
                         <button class="action-btn" data-action="favorite" title="精确标记">${source.is_favorited ? '🌟' : '⭐'}</button>
+                        <button class="action-btn" data-action="incremental-update" title="手动增量更新 (获取下一集)">⏭️</button>
                         <button class="action-btn" data-action="view_episodes" title="查看/编辑分集">📖</button>
                         <button class="action-btn" data-action="refresh" title="刷新此源">🔄</button>
+                        <button class="action-btn" data-action="schedule-update" title="设置定时更新">⏰</button>
                         <button class="action-btn" data-action="delete" title="删除此源">🗑️</button>
                     </div>
                 </td>
             `;
         });
     } else {
+
         sourceDetailTableBody.innerHTML = `<tr><td colspan="6">未关联任何数据源。</td></tr>`;
     }
     // Add event listener for individual checkboxes to update the "Select All" button state
