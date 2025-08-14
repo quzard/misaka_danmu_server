@@ -324,6 +324,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
                     </div>
                 </td>
             `;
+
         });
     } else {
         tableBody.innerHTML = `<tr><td colspan="8">未找到任何分集数据。</td></tr>`;
