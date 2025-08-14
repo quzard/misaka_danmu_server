@@ -486,6 +486,18 @@ async def toggle_source_favorite(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     return
 
+@router.put("/library/source/{source_id}/toggle-incremental-refresh", status_code=status.HTTP_204_NO_CONTENT, summary="切换数据源的定时增量更新状态")
+async def toggle_source_incremental_refresh(
+    source_id: int,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """切换指定数据源的定时增量更新的启用/禁用状态。"""
+    toggled = await crud.toggle_source_incremental_refresh(pool, source_id)
+    if not toggled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+    logger.info(f"用户 '{current_user.username}' 切换了源 ID {source_id} 的定时增量更新状态。")
+
 class SourceDetail(models.BaseModel):
     source_id: int
     provider_name: str
