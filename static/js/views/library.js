@@ -168,11 +168,11 @@ function renderSourceDetailTable(sources, anime) {
                 <td>${new Date(source.created_at).toLocaleString()}</td>
                 <td class="actions-cell">
                     <div class="action-buttons-wrapper" data-source-id="${source.source_id}" data-anime-title="${anime.title}" data-anime-id="${anime.animeId}">
-                        <button class="action-btn" data-action="favorite" title="精确标记">${source.is_favorited ? '🌟' : '⭐'}</button>
+                        <button class="action-btn" data-action="favorite" title="精确标记(用于自动匹配)">${source.is_favorited ? '🌟' : '⭐'}</button>
+                        <button class="action-btn" data-action="toggle-incremental" title="定时增量更新">${source.incremental_refresh_enabled ? '🔔' : '🔕'}</button>
                         <button class="action-btn" data-action="incremental-update" title="手动增量更新 (获取下一集)">⏭️</button>
                         <button class="action-btn" data-action="view_episodes" title="查看/编辑分集">📖</button>
                         <button class="action-btn" data-action="refresh" title="刷新此源">🔄</button>
-                        <button class="action-btn" data-action="schedule-update" title="设置定时更新">⏰</button>
                         <button class="action-btn" data-action="delete" title="删除此源">🗑️</button>
                     </div>
                 </td>
@@ -203,6 +203,16 @@ async function handleSourceAction(e) {
             try {
                 await apiFetch(`/api/ui/library/source/${sourceId}/favorite`, { method: 'PUT' });
                 showAnimeDetailView(animeId);
+            } catch (error) {
+                alert(`操作失败: ${error.message}`);
+            }
+            break;
+        case 'toggle-incremental':
+            try {
+                await apiFetch(`/api/ui/library/source/${sourceId}/toggle-incremental-refresh`, { method: 'PUT' });
+                // Visually update the button without a full reload for better UX
+                const icon = button.textContent;
+                button.textContent = icon === '🔔' ? '🔕' : '🔔';
             } catch (error) {
                 alert(`操作失败: ${error.message}`);
             }

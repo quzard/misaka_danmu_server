@@ -487,6 +487,15 @@ async def toggle_source_favorite(
     return
 
 @router.get("/library/anime/{anime_id}/sources", response_model=List[Dict[str, Any]], summary="获取作品的所有数据源")
+class SourceDetail(models.BaseModel):
+    source_id: int
+    provider_name: str
+    media_id: str
+    is_favorited: bool
+    incremental_refresh_enabled: bool
+    created_at: datetime
+
+@router.get("/library/anime/{anime_id}/sources", response_model=List[SourceDetail], summary="获取作品的所有数据源")
 async def get_anime_sources_for_anime(
     anime_id: int,
     current_user: models.User = Depends(security.get_current_user),

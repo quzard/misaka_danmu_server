@@ -533,7 +533,7 @@ async def get_anime_sources(pool: aiomysql.Pool, anime_id: int) -> List[Dict[str
     """获取指定作品的所有关联数据源。"""
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
-            query = "SELECT id as source_id, provider_name, media_id, is_favorited, created_at FROM anime_sources WHERE anime_id = %s ORDER BY created_at ASC"
+            query = "SELECT id as source_id, provider_name, media_id, is_favorited, incremental_refresh_enabled, created_at FROM anime_sources WHERE anime_id = %s ORDER BY created_at ASC"
             await cursor.execute(query, (anime_id,))
             return await cursor.fetchall()
 
@@ -1211,6 +1211,16 @@ async def toggle_source_favorite_status(pool: aiomysql.Pool, source_id: int) -> 
                 logging.error(f"切换源收藏状态时出错: {e}", exc_info=True)
                 return False
 
+async def toggle_source_incremental_refresh(pool: aiomysql.Pool, source_id: int) -> bool:
+    """切换一个数据源的定时增量更新状态。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            affected_rows = await cursor.execute(
+                "UPDATE anime_sources SET incremental_refresh_enabled = NOT incremental_refresh_enabled WHERE id = %s",
+                (source_id,)
+            )
+            return affected_rows > 0
+
 # --- OAuth State Management ---
 
 async def create_oauth_state(pool: aiomysql.Pool, user_id: int) -> str:
@@ -1283,11 +1293,11 @@ async def delete_bangumi_auth(pool: aiomysql.Pool, user_id: int) -> bool:
             affected_rows = await cursor.execute("DELETE FROM bangumi_auth WHERE user_id = %s", (user_id,))
             return affected_rows > 0
 
-async def get_all_source_ids(pool: aiomysql.Pool) -> List[int]:
-    """获取所有数据源的ID。"""
+async def get_sources_with_incremental_refresh_enabled(pool: aiomysql.Pool) -> List[int]:
+    """获取所有启用了定时增量更新的数据源的ID。"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT id FROM anime_sources")
+            await cursor.execute("SELECT id FROM anime_sources WHERE incremental_refresh_enabled = TRUE")
             return [row[0] for row in await cursor.fetchall()]
 
 # --- Scheduled Tasks ---

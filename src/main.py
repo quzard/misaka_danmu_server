@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(pool, app.state.task_manager)
+    app.state.scheduler_manager = SchedulerManager(pool, app.state.task_manager, app.state.scraper_manager)
     await app.state.scheduler_manager.start()
     
     yield
