@@ -486,7 +486,6 @@ async def toggle_source_favorite(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     return
 
-@router.get("/library/anime/{anime_id}/sources", response_model=List[Dict[str, Any]], summary="获取作品的所有数据源")
 class SourceDetail(models.BaseModel):
     source_id: int
     provider_name: str

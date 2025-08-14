@@ -929,25 +929,14 @@ async def update_metadata_sources_settings(pool: aiomysql.Pool, settings: List['
         async with conn.cursor() as cursor:
             await conn.begin()
             try:
-                # 为了彻底解决状态互相干扰的Bug，我们将TMDB的更新和其他源的更新分开处理。
-                # 这种方式隔离了具有特殊逻辑的条目，增加了操作的原子性和可预测性。
-                
-                # 1. 单独处理 TMDB
-                tmdb_setting = next((s for s in settings if s.provider_name == 'tmdb'), None)
-                if tmdb_setting:
+                # 在一个事务中更新所有设置
+                for s in settings:
+                    # 强制 TMDB 的 is_aux_search_enabled 为 True
+                    is_aux_enabled = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
                     await cursor.execute(
                         "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (True, tmdb_setting.display_order, 'tmdb') # is_aux_search_enabled is always True for TMDB
+                        (is_aux_enabled, s.display_order, s.provider_name)
                     )
-
-                # 2. 批量处理所有其他源
-                other_settings = [s for s in settings if s.provider_name != 'tmdb']
-                for s in other_settings:
-                    await cursor.execute(
-                        "UPDATE metadata_sources SET is_aux_search_enabled = %s, display_order = %s WHERE provider_name = %s",
-                        (s.is_aux_search_enabled, s.display_order, s.provider_name)
-                    )
-
                 await conn.commit()
             except Exception as e:
                 await conn.rollback()
