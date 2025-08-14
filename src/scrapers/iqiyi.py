@@ -376,8 +376,9 @@ class IqiyiScraper(BaseScraper):
 
             # 2. 逐月获取分集
             all_videos: List[IqiyiMobileVideo] = []
-            current_date = start_date
-            while current_date <= end_date:
+            # 标准化 current_date 为当月第一天，以进行安全的月份迭代
+            current_date = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            while (current_date.year, current_date.month) <= (end_date.year, end_date.month):
                 year = current_date.year
                 month = f"{current_date.month:02d}"
                 month_url = f"https://pub.m.iqiyi.com/h5/main/videoList/source/month/?sourceId={album_id}&year={year}&month={month}"
