@@ -100,13 +100,18 @@
 }
 
 .action-buttons-wrapper .action-btn {
-    border-radius: 50%;
+    border-radius: 6px; /* 使用固定的圆角值，形成圆角方形 */
     width: 30px;
     height: 30px;
     padding: 0; /* 重置内边距以确保尺寸精确 */
     display: flex; /* 使用 flexbox 居中图标 */
     align-items: center;
     justify-content: center;
+    transition: background-color 0.2s ease; /* 添加过渡效果 */
+}
+
+.action-buttons-wrapper .action-btn:hover {
+    background-color: var(--secondary-color); /* 悬停时显示浅灰色背景 */
 }
 
 #episode-list-table th:first-child,
