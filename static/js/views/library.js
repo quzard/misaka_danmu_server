@@ -207,6 +207,17 @@ async function handleSourceAction(e) {
                 alert(`操作失败: ${error.message}`);
             }
             break;
+        case 'incremental-update':
+            if (confirm(`您确定要为 '${animeTitle}' 的这个数据源执行增量更新吗？\n此操作将尝试获取下一集。`)) {
+                apiFetch(`/api/ui/library/source/${sourceId}/incremental-refresh`, { method: 'POST' })
+                    .then(response => {
+                        if (confirm((response.message || "增量更新任务已提交。") + "\n\n是否立即跳转到任务管理器查看进度？")) {
+                            document.querySelector('.nav-link[data-view="task-manager-view"]').click();
+                        }
+                    })
+                    .catch(error => alert(`启动增量更新任务失败: ${error.message}`));
+            }
+            break;
         case 'view_episodes':
             showEpisodeListView(sourceId, animeTitle, animeId);
             break;

@@ -114,11 +114,6 @@ function renderDanmakuSources(settings) {
             configBtn.dataset.isLoggable = setting.is_loggable;
             li.appendChild(configBtn);
         }
-        const incrementalRefreshBtn = document.createElement('button');
-        incrementalRefreshBtn.className = 'action-btn incremental-refresh-btn';
-        incrementalRefreshBtn.textContent = '增量更新';
-        li.appendChild(incrementalRefreshBtn)
-
         const statusIcon = document.createElement('span');
         statusIcon.className = 'status-icon';
         statusIcon.textContent = setting.is_enabled ? '✅' : '❌';

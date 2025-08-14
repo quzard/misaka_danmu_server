@@ -556,8 +556,8 @@ async def incremental_refresh_source(
 
     # 获取当前最新分集
     eps = await crud.get_episodes_for_source(pool, source_id)
-    if eps.length > 0:
-        latest_episode_index = sorted(eps, key=lambda x: x.episode_index)[-1].episode_index
+    if len(eps) > 0:
+        latest_episode_index = sorted(eps, key=lambda x: x['episode_index'])[-1]['episode_index']
     else:
         latest_episode_index = 0
 
