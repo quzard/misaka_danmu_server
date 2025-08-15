@@ -847,7 +847,7 @@ async def match_batch_files(
     summary="[dandanplay兼容] 获取外部弹幕"
 )
 async def get_external_comments_from_url(
-    url: str = Query(..., description="外部视频链接 (支持 AcFun, Bilibili, 腾讯, 爱奇艺, 优酷, 芒果TV)"),
+    url: str = Query(..., description="外部视频链接 (支持 Bilibili, 腾讯, 爱奇艺, 优酷, 芒果TV)"),
     chConvert: int = Query(0, description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
     token: str = Depends(get_token_from_path),
     pool: aiomysql.Pool = Depends(get_db_pool),
