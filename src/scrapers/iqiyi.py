@@ -7,56 +7,16 @@ from datetime import datetime
 from typing import ClassVar
 import zlib
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Callable, Union
+from typing import Any, Dict, List, Optional, Callable
 from collections import defaultdict
 import httpx
-from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
 
 from ..config_manager import ConfigManager
 from .. import models
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
-
-# --- 新增：用于V3 Search API的模型 ---
-class IqiyiV3Video(BaseModel):
-    title: Optional[str] = None
-    pageUrl: Optional[str] = None
-    playUrl: Optional[str] = None
-    number: Optional[int] = None
-
-class IqiyiV3AlbumInfo(BaseModel):
-    title: Optional[str] = None
-    qipuId: Optional[str] = None
-    playQipuId: Optional[str] = None
-    pageUrl: Optional[str] = None
-    playUrl: Optional[str] = None
-    channel: Optional[str] = None
-    img: Optional[str] = None
-    imgH: Optional[str] = None
-    releaseDate: Optional[str] = None
-    btnText: Optional[str] = None
-    videos: Optional[List[IqiyiV3Video]] = None
-    year: Optional[Dict[str, Any]] = None
-    actors: Optional[Dict[str, Any]] = None
-    directors: Optional[Dict[str, Any]] = None
-    metaTags: Optional[List[Dict[str, Any]]] = None
-    people: Optional[List[Dict[str, Any]]] = None
-    brief: Optional[Dict[str, Any]] = None
-
-    @field_validator('qipuId', 'playQipuId', mode='before')
-    @classmethod
-    def _coerce_ids_to_str(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        return str(v)
-
-class IqiyiV3Template(BaseModel):
-    template: int
-    albumInfo: Optional[IqiyiV3AlbumInfo] = None
-
-class IqiyiV3Data(BaseModel):
-    templates: List[IqiyiV3Template]
 
 # --- Pydantic Models for iQiyi API (部分模型现在仅用于旧缓存兼容或作为新API响应的子集) ---
 
@@ -105,7 +65,7 @@ class IqiyiSearchDoc(BaseModel):
     docinfos: List[IqiyiAlbumDoc]
 
 class IqiyiSearchResult(BaseModel):
-    docinfos: List[IqiyiAlbumDoc]
+    data: IqiyiSearchDoc
 
 class IqiyiHtmlAlbumInfo(BaseModel):
     video_count: Optional[int] = Field(None, alias="videoCount")
@@ -198,14 +158,6 @@ class IqiyiScraper(BaseScraper):
     # 新增：用于过滤搜索结果中非正片内容的正则表达式
     _SEARCH_JUNK_TITLE_PATTERN = re.compile(
         r'纪录片|预告|花絮|专访|MV|特辑|演唱会|音乐会|独家|解读|揭秘|赏析|速看|资讯|彩蛋|访谈|番外|短片',
-        re.IGNORECASE
-    )
-    _SEARCH_JUNK_TITLE_PATTERN_V3: ClassVar[re.Pattern] = re.compile(
-        r"拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|"
-        r"预告片|先导预告|终极预告|正式预告|官方预告|"
-        r"彩蛋片段|删减片段|未播片段|番外彩蛋|"
-        r"精彩片段|精彩看点|精彩回顾|精彩集锦|看点解析|看点预告|"
-        r"NG镜头|NG花絮|番外篇|番外特辑|制作特辑|拍摄特辑|幕后特辑|导演特辑|演员特辑|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV|前季回顾|剧情回顾|往期回顾|内容总结|剧情盘点|精选合集|剪辑合集|混剪视频|独家专访|演员访谈|导演访谈|主创访谈|媒体采访|发布会采访|抢先看|抢先版|试看版|即将上线",
         re.IGNORECASE
     )
 
