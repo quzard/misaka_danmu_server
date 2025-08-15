@@ -291,11 +291,10 @@ class MgtvScraper(BaseScraper):
                     continue
                 filtered_episodes.append(ep)
 
-            # The API returns episodes in the correct order.
-            # The previous sorting by video_id was incorrect and has been removed.
-            # We will now process the filtered_episodes list directly.
-            sorted_episodes = filtered_episodes
-            
+            # 修正：API返回的默认顺序并不可靠，特别是对于老番或综艺。
+            # video_id 是一个自增的数字ID，按其排序可以得到最稳定、最正确的播放顺序。
+            sorted_episodes = sorted(filtered_episodes, key=lambda ep: int(ep.video_id))
+
             provider_episodes = [
                 models.ProviderEpisodeInfo(
                     provider=self.provider_name,
