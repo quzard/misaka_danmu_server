@@ -87,7 +87,7 @@ class AnimeDetailUpdate(BaseModel):
     """用于更新番剧详细信息的模型"""
     title: str = Field(..., min_length=1, description="新的影视名称")
     type: str
-    season: int = Field(..., ge=1, description="新的季度")
+    season: int = Field(..., ge=0, description="新的季度")
     episode_count: Optional[int] = Field(None, ge=1, description="新的集数")
     tmdb_id: Optional[str] = None
     tmdb_episode_group_id: Optional[str] = None
