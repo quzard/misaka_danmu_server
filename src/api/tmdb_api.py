@@ -292,22 +292,32 @@ async def get_tmdb_details(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的媒体类型，必须是 'tv' 或 'movie'。")
 
     async with client:
-        params = {
-            "append_to_response": "alternative_titles,external_ids",
-            "language": "zh-CN",
-        }
-        details_response = await client.get(f"/{media_type}/{tmdb_id}", params=params)
+        # --- New parallel fetching logic ---
+        details_cn_task = client.get(f"/{media_type}/{tmdb_id}", params={"append_to_response": "alternative_titles,external_ids", "language": "zh-CN"})
+        details_en_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "en-US"})
+        details_ja_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "ja-JP"})
+        details_tw_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "zh-TW"})
 
-        if details_response.status_code == 401:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="TMDB API Key 无效或未授权，请在设置中检查您的密钥。",
-            )
-        if details_response.status_code == 404:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到 TMDB 条目。")
+        responses = await asyncio.gather(
+            details_cn_task, details_en_task, details_ja_task, details_tw_task,
+            return_exceptions=True
+        )
         
-        details_response.raise_for_status()
-        details_json = details_response.json()
+        details_cn_res, details_en_res, details_ja_res, details_tw_res = responses
+
+        # --- Process Chinese (main) response ---
+        if isinstance(details_cn_res, Exception) or details_cn_res.status_code != 200:
+            # Handle potential 401/404 from the main request
+            if isinstance(details_cn_res, httpx.Response):
+                if details_cn_res.status_code == 401:
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TMDB API Key 无效或未授权。")
+                if details_cn_res.status_code == 404:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到 TMDB 条目。")
+            
+            logger.error(f"获取 TMDB 中文详情失败 (ID: {tmdb_id}): {details_cn_res}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取 TMDB 详情失败 (ID: {tmdb_id})。")
+        
+        details_json = details_cn_res.json()
 
         # Initialize variables
         name_en = None
@@ -321,58 +331,46 @@ async def get_tmdb_details(
         if media_type == "tv":
             details = TMDBTVDetails.model_validate(details_json)
             main_title_cn = details.name
-            original_title = details.original_name
-            original_language = details.original_language
         else: # movie
             details = TMDBMovieDetails.model_validate(details_json)
             main_title_cn = details.title
-            original_title = details.original_title
-            original_language = details.original_language
 
         # Extract external IDs
         if details.external_ids:
             imdb_id = details.external_ids.imdb_id
             tvdb_id = details.external_ids.tvdb_id
 
-        # Process alternative titles for more accurate names
+        # Process alternative titles from Chinese response
         if details.alternative_titles:
-            found_titles = {}
             for alt_title in details.alternative_titles.titles:
                 title_text = alt_title.title
                 if not title_text: continue
 
-                # Chinese Aliases
-                if alt_title.iso_3166_1 in ["CN", "HK", "TW"]:
-                    # 新增：确保标题确实包含中文字符
+                # Get Romaji from JP region with type "Romaji"
+                if alt_title.iso_3166_1 == "JP" and alt_title.type == "Romaji":
+                    if not name_romaji and not _is_cjk(title_text):
+                        name_romaji = title_text
+                
+                # Get other Chinese aliases
+                elif alt_title.iso_3166_1 in ["CN", "HK"]:
                     if _is_cjk(title_text):
                         aliases_cn.append(title_text)
-                # Japanese Title
-                elif alt_title.iso_3166_1 == "JP":
-                    if alt_title.type == "Romaji":
-                        # 新增：确保罗马音标题不包含中文字符
-                        if 'romaji' not in found_titles and not _is_cjk(title_text):
-                            found_titles['romaji'] = title_text
-                    # 
-                    elif not alt_title.type:
-                        # 新增：确保日文标题包含中文字符
-                        if 'jp' not in found_titles and _is_cjk(title_text):
-                            found_titles['jp'] = title_text
-                # English Title (prefer US, then GB)
-                elif alt_title.iso_3166_1 in ["US", "GB"]:
-                    # 新增：确保英文标题不包含中文字符
-                    if 'en' not in found_titles and not _is_cjk(title_text):
-                        found_titles['en'] = title_text
-            
-            name_en, name_jp, name_romaji = found_titles.get('en'), found_titles.get('jp'), found_titles.get('romaji')
 
-        # 修正：更健壮的英文名获取逻辑
-        if not name_en:
-            # 如果主标题不是中日韩文字，则很有可能就是英文名
-            if not _is_cjk(main_title_cn):
-                name_en = main_title_cn
-            elif original_language == 'en':
-                name_en = original_title
-        if not name_jp and original_language == 'ja': name_jp = original_title
+        # --- Process other language responses ---
+        if isinstance(details_en_res, httpx.Response) and details_en_res.status_code == 200:
+            en_json = details_en_res.json()
+            name_en = en_json.get('name') or en_json.get('title')
+
+        if isinstance(details_ja_res, httpx.Response) and details_ja_res.status_code == 200:
+            ja_json = details_ja_res.json()
+            name_jp = ja_json.get('name') or ja_json.get('title')
+
+        if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
+            tw_json = details_tw_res.json()
+            name_tw = tw_json.get('name') or tw_json.get('title')
+            if name_tw and _is_cjk(name_tw):
+                aliases_cn.append(name_tw)
+        
         if main_title_cn: aliases_cn.append(main_title_cn)
         
         cleaned_aliases_cn = [_clean_movie_title(alias) for alias in aliases_cn if alias]
