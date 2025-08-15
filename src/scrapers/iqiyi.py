@@ -167,6 +167,12 @@ class IqiyiScraper(BaseScraper):
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
 
+    async def close(self):
+        """关闭HTTP客户端"""
+        if self.client:
+            await self.client.aclose()
+            self.client = None
+
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """
         A wrapper for making requests that lazily initializes the client.
