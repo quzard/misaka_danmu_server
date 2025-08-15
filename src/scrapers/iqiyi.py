@@ -89,6 +89,13 @@ class IqiyiDesktopSearchAlbumInfo(BaseModel):
     actors: Optional[Dict[str, Any]] = None
     directors: Optional[Dict[str, Any]] = None
 
+    @field_validator('qipuId', 'playQipuId', mode='before')
+    @classmethod
+    def coerce_qipu_ids_to_string(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
+
     @property
     def link_id(self) -> Optional[str]:
         url_to_parse = self.pageUrl or self.playUrl
