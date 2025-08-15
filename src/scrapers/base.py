@@ -97,7 +97,7 @@ class BaseScraper(ABC):
 
         proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
 
-        client_kwargs = {"proxies": proxies, "timeout": 20.0, "follow_redirects": True, **kwargs}
+        client_kwargs = {"proxy": proxies, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:

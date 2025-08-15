@@ -107,7 +107,7 @@ async def get_tmdb_client(
         # 使用一个更通用的 User-Agent
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0, proxies=proxies)
+    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0, proxy=proxies)
 
 # --- Pydantic Models for TMDB API ---
 # Most models have been moved to src/models.py.

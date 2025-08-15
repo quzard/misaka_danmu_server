@@ -852,7 +852,7 @@ async def test_proxy_latency(
         "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
     ]
     latencies = {}
-    async with httpx.AsyncClient(proxies=proxy_url, timeout=10.0) as client:
+    async with httpx.AsyncClient(proxy=proxy_url, timeout=10.0) as client:
         for domain in test_domains:
             try:
                 start_time = time.time()
