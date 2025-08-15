@@ -165,17 +165,12 @@ class IqiyiScraper(BaseScraper):
         super().__init__(pool, config_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
-
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": self.mobile_user_agent,
-                "Referer": "https://www.iqiyi.com/",
-            },
-            timeout=20.0, follow_redirects=True
-        )
+        # self.client is now initialized lazily by the _request method
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
@@ -191,7 +186,7 @@ class IqiyiScraper(BaseScraper):
         url = f"https://search.video.iqiyi.com/o?if=html5&key={keyword}&pageNum=1&pageSize=20"
         results = []
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
@@ -262,7 +257,7 @@ class IqiyiScraper(BaseScraper):
         """
         api_url = f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg"
         try:
-            response = await self.client.get(api_url)
+            response = await self._request("GET", api_url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi Decode API Response (link_id={link_id}): {response.text}")
             response.raise_for_status()
@@ -297,7 +292,7 @@ class IqiyiScraper(BaseScraper):
 
         url = f"https://pcw-api.iqiyi.com/video/video/baseinfo/{tvid}"
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi BaseInfo Response (tvid={tvid}): {response.text}")
             response.raise_for_status()
@@ -318,7 +313,7 @@ class IqiyiScraper(BaseScraper):
         self.logger.warning(f"爱奇艺: API获取基础信息失败，正在尝试备用方案 (解析HTML)...")
         try:
             url = f"https://m.iqiyi.com/v_{link_id}.html"
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi HTML Fallback Response (link_id={link_id}): {response.text}")
             response.raise_for_status()
@@ -348,7 +343,7 @@ class IqiyiScraper(BaseScraper):
         for i, url in enumerate(endpoints):
             try:
                 self.logger.info(f"爱奇艺: 正在尝试从端点 #{i+1} 获取剧集列表 (album_id: {album_id})")
-                response = await self.client.get(url)
+                response = await self._request("GET", url)
                 if await self._should_log_responses():
                     scraper_responses_logger.debug(f"iQiyi Album List Response (album_id={album_id}, endpoint=#{i+1}): {response.text}")
                 response.raise_for_status()
@@ -371,7 +366,7 @@ class IqiyiScraper(BaseScraper):
         try:
             # 1. 获取节目的开播和最新日期
             url = f"https://pcw-api.iqiyi.com/album/album/baseinfo/{album_id}"
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             response.raise_for_status()
             album_base_info = IqiyiAlbumBaseInfoResult.model_validate(response.json()).data
             start_date = datetime.fromtimestamp(album_base_info.first_video.publish_time / 1000)
@@ -387,7 +382,7 @@ class IqiyiScraper(BaseScraper):
                 month_url = f"https://pub.m.iqiyi.com/h5/main/videoList/source/month/?sourceId={album_id}&year={year}&month={month}"
                 
                 self.logger.debug(f"爱奇艺 (综艺): 正在获取 {year}-{month} 的分集...")
-                month_response = await self.client.get(month_url)
+                month_response = await self._request("GET", month_url)
                 # 如果某个月份没有数据，API可能返回404或空列表，这都是正常情况
                 if month_response.status_code == 200:
                     try:
@@ -524,7 +519,7 @@ class IqiyiScraper(BaseScraper):
         """新增：为指定的tvid获取视频时长。"""
         url = f"https://pcw-api.iqiyi.com/video/video/baseinfo/{tvid}"
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             response.raise_for_status()
             data = response.json()
             if data.get("code") == "A00000" and data.get("data"):
@@ -541,7 +536,7 @@ class IqiyiScraper(BaseScraper):
         url = f"http://cmts.iqiyi.com/bullet/{s1}/{s2}/{tv_id}_300_{mat}.z"
         
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi Danmaku Segment Response (tvId={tv_id}, mat={mat}): status={response.status_code}")
             if response.status_code == 404:
