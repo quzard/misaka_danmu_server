@@ -165,12 +165,21 @@ class IqiyiScraper(BaseScraper):
         super().__init__(pool, config_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
-        # self.client is now initialized lazily by the _request method
+        self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
 
-    async def close(self):
-        if self.client:
-            await self.client.aclose()
-            self.client = None
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """
+        A wrapper for making requests that lazily initializes the client.
+        """
+        if self.client is None:
+            self.client = await self._create_client(
+                headers={
+                    "User-Agent": self.mobile_user_agent,
+                    "Referer": "https://www.iqiyi.com/",
+                },
+                cookies=self.cookies,
+            )
+        return await self.client.request(method, url, **kwargs)
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
