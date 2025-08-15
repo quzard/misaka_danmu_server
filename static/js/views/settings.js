@@ -4,6 +4,7 @@ import { apiFetch } from '../api.js';
 let settingsSubNav, settingsSubViews;
 // Account
 let changePasswordForm, passwordChangeMessage;
+let proxySettingsForm, proxyTestResults, proxySaveMessage, testProxyBtn;
 // Webhook
 let webhookApiKeyInput, regenerateWebhookKeyBtn, webhookCustomDomainInput, saveWebhookDomainBtn, webhookDomainSaveMessage;
 let webhookServiceSelect, webhookGeneratedUrlInput, copyWebhookUrlBtn;
@@ -28,6 +29,12 @@ function initializeElements() {
     // Account
     changePasswordForm = document.getElementById('change-password-form');
     passwordChangeMessage = document.getElementById('password-change-message');
+
+    // Proxy
+    proxySettingsForm = document.getElementById('proxy-settings-form');
+    proxyTestResults = document.getElementById('proxy-test-results');
+    proxySaveMessage = document.getElementById('proxy-save-message');
+    testProxyBtn = document.getElementById('test-proxy-btn');
 
     // Webhook
     webhookApiKeyInput = document.getElementById('webhook-api-key');
@@ -83,6 +90,9 @@ function handleSettingsSubNav(e) {
     switch (subViewId) {
         case 'account-settings-subview':
             // No data to load initially
+            break;
+        case 'proxy-settings-subview':
+            loadProxySettings();
             break;
         case 'webhook-settings-subview':
             loadWebhookSettings();
@@ -141,6 +151,61 @@ async function handleChangePassword(e) {
         passwordChangeMessage.classList.add('error');
     } finally {
         saveBtn.disabled = false;
+    }
+}
+
+// --- Proxy Settings ---
+async function loadProxySettings() {
+    proxySaveMessage.textContent = '';
+    proxyTestResults.classList.add('hidden');
+    try {
+        const data = await apiFetch('/api/ui/config/proxy');
+        document.getElementById('proxy-url').value = data.proxy_url || '';
+        document.getElementById('proxy-enabled').checked = data.proxy_enabled === 'true';
+    } catch (error) {
+        proxySaveMessage.textContent = `加载代理配置失败: ${error.message}`;
+        proxySaveMessage.classList.add('error');
+    }
+}
+
+async function handleSaveProxySettings(e) {
+    e.preventDefault();
+    const payload = {
+        proxy_url: document.getElementById('proxy-url').value.trim(),
+        proxy_enabled: document.getElementById('proxy-enabled').checked.toString(),
+    };
+    const saveBtn = e.target.querySelector('button[type="submit"]');
+    saveBtn.disabled = true;
+    proxySaveMessage.textContent = '保存中...';
+    proxySaveMessage.className = 'message';
+    try {
+        await apiFetch('/api/ui/config/proxy', { method: 'PUT', body: JSON.stringify(payload) });
+        proxySaveMessage.textContent = '代理配置保存成功！';
+        proxySaveMessage.classList.add('success');
+    } catch (error) {
+        proxySaveMessage.textContent = `保存失败: ${error.message}`;
+        proxySaveMessage.classList.add('error');
+    } finally {
+        saveBtn.disabled = false;
+    }
+}
+
+async function handleTestProxy() {
+    proxyTestResults.classList.remove('hidden');
+    proxyTestResults.textContent = '正在测试...';
+    testProxyBtn.disabled = true;
+    try {
+        const latencies = await apiFetch('/api/ui/proxy/test', { method: 'POST' });
+        let resultsText = '测试结果 (ms):\n';
+        for (const [domain, latency] of Object.entries(latencies)) {
+            const status = latency === -1 ? '失败' : `${latency.toFixed(0)} ms`;
+            resultsText += `${domain}: ${status}\n`;
+        }
+        proxyTestResults.textContent = resultsText;
+    } catch (error) {
+        proxyTestResults.textContent = `测试失败: ${error.message}`;
+    } finally {
+        testProxyBtn.disabled = false;
     }
 }
 
@@ -499,6 +564,10 @@ export function setupSettingsEventListeners() {
 
     // Account
     changePasswordForm.addEventListener('submit', handleChangePassword);
+
+    // Proxy
+    proxySettingsForm.addEventListener('submit', handleSaveProxySettings);
+    testProxyBtn.addEventListener('click', handleTestProxy);
 
     // Webhook
     regenerateWebhookKeyBtn.addEventListener('click', handleRegenerateWebhookKey);

@@ -142,7 +142,8 @@ async def init_db_tables(app: FastAPI):
                 "tmdb_episode_mapping": """CREATE TABLE `tmdb_episode_mapping` (`id` BIGINT NOT NULL AUTO_INCREMENT, `tmdb_tv_id` INT NOT NULL, `tmdb_episode_group_id` VARCHAR(50) NOT NULL, `tmdb_episode_id` INT NOT NULL, `tmdb_season_number` INT NOT NULL, `tmdb_episode_number` INT NOT NULL, `custom_season_number` INT NOT NULL, `custom_episode_number` INT NOT NULL, `absolute_episode_number` INT NOT NULL, PRIMARY KEY (`id`), UNIQUE KEY `idx_group_episode_unique` (`tmdb_episode_group_id`, `tmdb_episode_id`), INDEX `idx_custom_season_episode` (`tmdb_tv_id`, `tmdb_episode_group_id`, `custom_season_number`, `custom_episode_number`), INDEX `idx_absolute_episode` (`tmdb_tv_id`, `tmdb_episode_group_id`, `absolute_episode_number`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
                 "scheduled_tasks": """CREATE TABLE `scheduled_tasks` (`id` VARCHAR(100) NOT NULL, `name` VARCHAR(255) NOT NULL, `job_type` VARCHAR(50) NOT NULL, `cron_expression` VARCHAR(100) NOT NULL, `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `last_run_at` TIMESTAMP NULL, `next_run_at` TIMESTAMP NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
                 "task_history": """CREATE TABLE `task_history` (`id` VARCHAR(100) NOT NULL, `title` VARCHAR(255) NOT NULL, `status` VARCHAR(50) NOT NULL, `progress` INT NOT NULL DEFAULT 0, `description` TEXT NULL, `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `finished_at` TIMESTAMP NULL, PRIMARY KEY (`id`), INDEX `idx_created_at` (`created_at` DESC)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
-                "metadata_sources": """CREATE TABLE `metadata_sources` (`provider_name` VARCHAR(50) NOT NULL, `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `is_aux_search_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `display_order` INT NOT NULL DEFAULT 0, PRIMARY KEY (`provider_name`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
+                "scrapers": """CREATE TABLE `scrapers` (`provider_name` VARCHAR(50) NOT NULL, `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `display_order` INT NOT NULL DEFAULT 0, `use_proxy` BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY (`provider_name`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
+                "metadata_sources": """CREATE TABLE `metadata_sources` (`provider_name` VARCHAR(50) NOT NULL, `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `is_aux_search_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `display_order` INT NOT NULL DEFAULT 0, `use_proxy` BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY (`provider_name`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
             }
 
             # 先获取数据库中所有已存在的表
@@ -216,6 +217,24 @@ async def init_db_tables(app: FastAPI):
                     logger.info("在 'anime' 表中未找到 'local_image_path' 列，正在添加...")
                     await cursor.execute("ALTER TABLE anime ADD COLUMN local_image_path VARCHAR(512) NULL DEFAULT NULL AFTER image_url;")
                     logger.info("列 'local_image_path' 添加成功。")
+
+                # 新增：检查 scrapers.use_proxy
+                await cursor.execute("""
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'scrapers' AND COLUMN_NAME = 'use_proxy'
+                """, (db_name,))
+                if not await cursor.fetchone():
+                    logger.info("在 'scrapers' 表中未找到 'use_proxy' 列，正在添加...")
+                    await cursor.execute("ALTER TABLE scrapers ADD COLUMN use_proxy BOOLEAN NOT NULL DEFAULT FALSE;")
+
+                # 新增：检查 metadata_sources.use_proxy
+                await cursor.execute("""
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'metadata_sources' AND COLUMN_NAME = 'use_proxy'
+                """, (db_name,))
+                if not await cursor.fetchone():
+                    logger.info("在 'metadata_sources' 表中未找到 'use_proxy' 列，正在添加...")
+                    await cursor.execute("ALTER TABLE metadata_sources ADD COLUMN use_proxy BOOLEAN NOT NULL DEFAULT FALSE;")
             except Exception as e:
                 # 仅记录错误，不中断启动流程
                 logger.warning(f"检查或更新表结构时发生非致命错误: {e}")

@@ -64,6 +64,21 @@ async def get_tmdb_client(
     pool: aiomysql.Pool = Depends(get_db_pool),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有 TMDB 授权的 httpx 客户端。"""
+    # Proxy logic
+    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+
+    proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
+        proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
+    )
+    proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
+
+    tmdb_setting = next((s for s in metadata_settings if s['provider_name'] == 'tmdb'), None)
+    use_proxy_for_tmdb = tmdb_setting.get('use_proxy', False) if tmdb_setting else False
+
+    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_tmdb and proxy_url else None
+
     # Fetch all configs in parallel
     keys = ["tmdb_api_key", "tmdb_api_base_url"]
     tasks = [crud.get_config_value(pool, key, "") for key in keys]
@@ -92,7 +107,7 @@ async def get_tmdb_client(
         # 使用一个更通用的 User-Agent
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0)
+    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0, proxies=proxies)
 
 # --- Pydantic Models for TMDB API ---
 # Most models have been moved to src/models.py.

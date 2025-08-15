@@ -137,11 +137,13 @@ class AnimeFullDetails(BaseModel):
 class ScraperSetting(BaseModel):
     provider_name: str
     is_enabled: bool
+    use_proxy: bool
     display_order: int
 
 class MetadataSourceSettingUpdate(BaseModel):
     provider_name: str
     is_aux_search_enabled: bool
+    use_proxy: bool
     display_order: int
 
 

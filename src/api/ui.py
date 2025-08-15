@@ -811,6 +811,57 @@ async def update_scraper_settings(
     logger.info(f"用户 '{current_user.username}' 更新了搜索源设置，已重新加载。")
     return
 
+@router.get("/config/proxy", response_model=Dict[str, str], summary="获取代理配置")
+async def get_proxy_settings(
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """获取全局代理配置。"""
+    keys = ["proxy_url", "proxy_enabled"]
+    tasks = [crud.get_config_value(pool, key, "") for key in keys]
+    values = await asyncio.gather(*tasks)
+    return dict(zip(keys, values))
+
+@router.put("/config/proxy", status_code=status.HTTP_204_NO_CONTENT, summary="更新代理配置")
+async def update_proxy_settings(
+    payload: Dict[str, str],
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """更新全局代理配置。"""
+    tasks = []
+    for key, value in payload.items():
+        if key in ["proxy_url", "proxy_enabled"]:
+            tasks.append(crud.update_config_value(pool, key, value or ""))
+    await asyncio.gather(*tasks)
+    logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
+
+@router.post("/proxy/test", response_model=Dict[str, float], summary="测试代理延迟")
+async def test_proxy_latency(
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """测试代理到常用域名的连接延迟。"""
+    proxy_url = await crud.get_config_value(pool, "proxy_url", "")
+    if not proxy_url:
+        raise HTTPException(status_code=400, detail="代理URL未配置。")
+
+    test_domains = [
+        "https://api.bilibili.com", "https://www.iqiyi.com", "https://v.qq.com",
+        "https://youku.com", "https://www.mgtv.com", "https://ani.gamer.com.tw",
+        "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
+    ]
+    latencies = {}
+    async with httpx.AsyncClient(proxies=proxy_url, timeout=10.0) as client:
+        for domain in test_domains:
+            try:
+                start_time = time.time()
+                await client.get(domain)
+                latencies[domain] = (time.time() - start_time) * 1000  # ms
+            except Exception as e:
+                latencies[domain] = -1  # -1 indicates failure
+    return latencies
+
 @router.get("/scrapers/{provider_name}/config", response_model=Dict[str, str], summary="获取指定搜索源的配置")
 async def get_scraper_config(
     provider_name: str,
