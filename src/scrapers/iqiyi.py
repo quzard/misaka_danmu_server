@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
 from collections import defaultdict
 import httpx
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
 
 from ..config_manager import ConfigManager
 from .. import models
@@ -72,6 +72,9 @@ class IqiyiHtmlAlbumInfo(BaseModel):
 
 # 修正：此模型现在用于解析新的 baseinfo API 响应
 class IqiyiHtmlVideoInfo(BaseModel):
+    # 新增：允许模型通过字段名或别名进行填充，以兼容新旧缓存格式
+    model_config = ConfigDict(populate_by_name=True)
+
     album_id: int = Field(alias="albumId")
     tv_id: Optional[int] = Field(None, alias="tvId")
     video_id: Optional[int] = Field(None, alias="videoId")
