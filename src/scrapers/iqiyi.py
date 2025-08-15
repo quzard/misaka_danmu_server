@@ -58,9 +58,6 @@ class IqiyiV3Template(BaseModel):
 class IqiyiV3Data(BaseModel):
     templates: List[IqiyiV3Template]
 
-class IqiyiV3SearchResult(BaseModel):
-    data: Optional[IqiyiV3Data] = None
-
 # --- Pydantic Models for iQiyi API (部分模型现在仅用于旧缓存兼容或作为新API响应的子集) ---
 
 class IqiyiVideoLibMeta(BaseModel):
@@ -229,6 +226,7 @@ class IqiyiScraper(BaseScraper):
         await self.client.aclose()
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
         cache_key_suffix = f"_s{episode_info['season']}e{episode_info['episode']}" if episode_info else ""
         cache_key = f"search_{self.provider_name}_{keyword}{cache_key_suffix}"
         cached_results = await self._get_from_cache(cache_key)
@@ -236,216 +234,43 @@ class IqiyiScraper(BaseScraper):
             self.logger.info(f"爱奇艺: 从缓存中命中搜索结果 '{keyword}{cache_key_suffix}'")
             return [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
 
-        # 方案3 (主): 使用新的 mesh API
-        try:
-            results_v3 = await self._search_v3(keyword, episode_info)
-            if results_v3:
-                self.logger.info("爱奇艺: 已通过新版 mesh API 成功获取搜索结果。")
-                await self._set_to_cache(cache_key, [r.model_dump() for r in results_v3], 'search_ttl_seconds', 300)
-                return results_v3
-        except Exception as e:
-            self.logger.warning(f"爱奇艺: 新版 mesh API 搜索失败，将尝试备用方案。错误: {e}", exc_info=True)
+        self.logger.info(f"爱奇艺: 正在搜索 '{keyword}'...")
 
-        # 方案2 (备): 回退到旧的 o API
-        self.logger.warning("爱奇艺: 新版 API 失败，正在回退到旧版 o API 进行搜索...")
-        results_v2 = await self._search_v2(keyword, episode_info)
-        if results_v2:
-            await self._set_to_cache(cache_key, [r.model_dump() for r in results_v2], 'search_ttl_seconds', 300)
-        return results_v2
-
-    def _determine_content_type_v3(self, channel: Optional[str]) -> str:
-        if not channel: return "未知"
-        if '电影' in channel: return '电影'
-        if '电视剧' in channel: return '电视剧'
-        if '综艺' in channel: return '综艺'
-        if '动漫' in channel: return '动漫'
-        return "未知"
-
-    def _extract_year_v3(self, album_info: IqiyiV3AlbumInfo) -> Optional[int]:
-        if album_info.year and album_info.year.get("value"):
-            match = re.search(r'(\d{4})', str(album_info.year["value"]))
-            if match: return int(match.group(1))
-        if album_info.releaseDate:
-            match = re.search(r'(\d{4})', album_info.releaseDate)
-            if match: return int(match.group(1))
-        return None
-
-    def _process_variety_episodes_v3(self, episodes: List[Dict]) -> List[Dict]:
-        # 翻译自 JS 中的 processIqiyiVarietyEpisodes
-        has_qi_format = any(re.search(r'第\d+期', ep['title']) for ep in episodes)
-        if not has_qi_format:
-            return episodes
-
-        episode_infos = []
-        for ep in episodes:
-            title = ep['title']
-            qi_up_down_match = re.search(r'第(\d+)期([上下])', title)
-            qi_match = re.search(r'第(\d+)期', title) and not qi_up_down_match
-
-            if qi_up_down_match:
-                qi_num_str, up_down = qi_up_down_match.groups()
-                after_text = title.split(f"第{qi_num_str}期{up_down}", 1)[-1]
-                if not re.match(r'^(加更|会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text):
-                    episode_infos.append(ep)
-            elif qi_match:
-                if not re.search(r'(会员版|纯享版|特别版|独家版|加更版|Plus|\+|拍摄花絮|制作花絮|幕后花絮|预告片|先导预告|彩蛋片段|抢先看|抢先版|精选合集|未播花絮|剧情回顾|制作特辑|拍摄特辑|幕后特辑|独家专访|演员访谈|导演访谈|剪辑合集|混剪视频|内容总结|剧情盘点|删减片段|未播片段|NG镜头|NG花絮|番外篇|番外特辑|精彩片段|精彩看点|精彩回顾|看点解析|看点预告|主创访谈|媒体采访|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV)', title):
-                    episode_infos.append(ep)
-
-        def sort_key(ep):
-            title = ep['title']
-            qi_match = re.search(r'第(\d+)期', title)
-            qi_num = int(qi_match.group(1)) if qi_match else 9999
-            
-            up_down_match = re.search(r'第\d+期([上下])', title)
-            part_order = {'上': 1, '下': 2}.get(up_down_match.group(1) if up_down_match else '', 0)
-            
-            return (qi_num, part_order)
-
-        episode_infos.sort(key=sort_key)
-        return episode_infos
-
-    async def _search_v3(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        self.logger.info(f"爱奇艺 (v3): 正在搜索 '{keyword}'...")
-        params = {
-            'key': keyword, 'current_page': '1', 'mode': '11', 'source': 'input',
-            'suggest': '', 'pcv': '13.074.22699', 'version': '13.074.22699',
-            'pageNum': '1', 'pageSize': '25', 'u': 'f6440fc5d919dca1aea12b6aff56e1c7',
-            'scale': '200', 'vipType': '-1', 'osShortName': 'win10',
-            'ad': json.dumps({"lm":3,"azd":1000000000951,"azt":733,"position":"feed"}),
-            'adExt': json.dumps({"r":"2.1.5-ares6-pure"})
-        }
-        headers = {
-            'Referer': 'https://www.iqiyi.com/',
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36'
-        }
-        url = "https://mesh.if.iqiyi.com/portal/lw/search/homePageV3"
-        response = await self.client.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        
-        try:
-            search_result = IqiyiV3SearchResult.model_validate(response.json())
-        except (json.JSONDecodeError, ValidationError) as e:
-            self.logger.error(f"爱奇艺 (v3): 解析搜索结果失败: {e} - 响应: {response.text[:200]}")
-            return []
-
-        if not search_result.data or not search_result.data.templates:
-            return []
-
-        results = []
-        for template in search_result.data.templates:
-            if template.template not in [101, 102, 103] or not template.albumInfo:
-                continue
-            
-            album = template.albumInfo
-            title = re.sub(r'<[^>]+>', '', album.title or '')
-            if self._SEARCH_JUNK_TITLE_PATTERN_V3.search(title):
-                continue
-
-            content_type_str = self._determine_content_type_v3(album.channel)
-            if content_type_str not in ['电影', '电视剧', '综艺']:
-                continue
-
-            link_id = None
-            if album.pageUrl:
-                match = re.search(r"v_(\w+?)\.html", album.pageUrl)
-                if match: link_id = match.group(1).strip()
-            
-            if not link_id: continue
-
-            media_type = "movie" if content_type_str == "电影" else "tv_series"
-            
-            # --- Pre-fetch and cache episodes ---
-            episodes_to_cache = []
-            if album.videos:
-                parsed_episodes = [{"title": ep.title, "url": ep.pageUrl} for ep in album.videos if ep.title and ep.pageUrl]
-                if content_type_str == '综艺':
-                    parsed_episodes = self._process_variety_episodes_v3(parsed_episodes)
-
-                for i, ep_data in enumerate(parsed_episodes):
-                    ep_link_id_match = re.search(r"v_(\w+?)\.html", ep_data['url'])
-                    if ep_link_id_match:
-                        ep_link_id = ep_link_id_match.group(1)
-                        # We need tvid for get_comments, so we fetch it here
-                        tvid = await self._get_tvid_from_link_id(ep_link_id)
-                        if tvid:
-                            episodes_to_cache.append(models.ProviderEpisodeInfo(
-                                provider=self.provider_name,
-                                episodeId=tvid,
-                                title=ep_data['title'],
-                                episodeIndex=i + 1,
-                                url=ep_data['url']
-                            ))
-            
-            if episodes_to_cache:
-                cache_key = f"episodes_{link_id}"
-                await self._set_to_cache(cache_key, [e.model_dump() for e in episodes_to_cache], 'episodes_ttl_seconds', 1800)
-            # --- End of episode caching ---
-
-            provider_search_info = models.ProviderSearchInfo(
-                provider=self.provider_name,
-                mediaId=link_id,
-                title=title.replace(":", "："),
-                type=media_type,
-                season=get_season_from_title(title),
-                year=self._extract_year_v3(album),
-                imageUrl=album.img or album.imgH,
-                episodeCount=len(episodes_to_cache) if episodes_to_cache else None,
-                currentEpisodeIndex=episode_info.get("episode") if episode_info else None
-            )
-            results.append(provider_search_info)
-
-        return results
-
-    async def _search_v2(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        """旧版搜索逻辑，作为备用方案。"""
-        self.logger.info(f"爱奇艺 (v2): 正在搜索 '{keyword}'...")
-
-        callback_name = f"__jp{int(time.time() * 1000)}"
-        params = {
-            'if': 'html5', 'key': keyword, 'pageNum': '1', 'pageSize': '20',
-            'channel_name': '', 'u': 'c6bb19d4d627271c435442a8da168424', 'pu': '0',
-            'video_allow_3rd': '1', 'intent_result_number': '10', 'intent_category_type': '1',
-            'vfrm': '2-3-0-1', 'callback': callback_name
-        }
-        url = f"https://search.video.iqiyi.com/o"
+        url = f"https://search.video.iqiyi.com/o?if=html5&key={keyword}&pageNum=1&pageSize=20"
         results = []
         try:
-            response = await self.client.get(url, params=params)
+            response = await self.client.get(url)
             if await self._should_log_responses():
-                scraper_responses_logger.debug(f"iQiyi Search Response (v2) (keyword='{keyword}'): {response.text}")
+                scraper_responses_logger.debug(f"iQiyi Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
-            
-            # --- Correctly handle JSONP response ---
-            jsonp_text = response.text
-            prefix = f"try{{{callback_name}("
-            suffix = ")}}catch(e){}"
-            if jsonp_text.startswith(prefix) and jsonp_text.endswith(suffix):
-                json_str = jsonp_text[len(prefix):-len(suffix)]
-                data = IqiyiSearchResult.model_validate(json.loads(json_str))
-            else:
-                raise ValueError("响应不是预期的JSONP格式。")
-            # --- End of JSONP handling ---
+            data = IqiyiSearchResult.model_validate(response.json())
 
-            if not data or not data.docinfos:
+            if not data.data or not data.data.docinfos:
                 return []
 
-            for doc in data.docinfos:
+            for doc in data.data.docinfos:
                 if doc.score < 0.7: continue
                 
                 album = doc.album_doc_info
                 if not (album.album_link and "iqiyi.com" in album.album_link and album.site_id == "iqiyi" and album.video_doc_type == 1):
                     continue
+               # 修正：增加对 album.channel 的非空检查，并添加对“纪录片”频道的过滤
                 if album.channel and ("原创" in album.channel or "教育" in album.channel or "纪录片" in album.channel):
-                    self.logger.debug(f"爱奇艺 (v2): 根据频道 '{album.channel}' 过滤掉 '{album.album_title}'")
+                    self.logger.debug(f"爱奇艺: 根据频道 '{album.channel}' 过滤掉 '{album.album_title}'")
                     continue
 
+                # 新增：根据标题过滤掉非正片内容
                 if album.album_title and self._SEARCH_JUNK_TITLE_PATTERN.search(album.album_title):
-                    self.logger.debug(f"爱奇艺 (v2): 根据标题黑名单过滤掉 '{album.album_title}'")
+                    self.logger.debug(f"爱奇艺: 根据标题黑名单过滤掉 '{album.album_title}'")
                     continue
 
-                douban_id = str(album.video_lib_meta.douban_id) if album.video_lib_meta and album.video_lib_meta.douban_id else None
+                douban_id = None
+                if album.video_lib_meta and album.video_lib_meta.douban_id:
+                    douban_id = str(album.video_lib_meta.douban_id)
+
                 link_id = album.link_id
-                if not link_id: continue
+                if not link_id:
+                    continue
 
                 channel_name = album.channel.split(',')[0] if album.channel else ""
                 media_type = "movie" if channel_name == "电影" else "tv_series"
@@ -453,16 +278,29 @@ class IqiyiScraper(BaseScraper):
                 current_episode = episode_info.get("episode") if episode_info else None
                 cleaned_title = re.sub(r'<[^>]+>', '', album.album_title).replace(":", "：") if album.album_title else "未知标题"
                 provider_search_info = models.ProviderSearchInfo(
-                    provider=self.provider_name, mediaId=link_id, title=cleaned_title,
-                    type=media_type, season=get_season_from_title(cleaned_title),
-                    year=album.year, imageUrl=album.album_img, douban_id=douban_id,
-                    episodeCount=album.item_total_number, currentEpisodeIndex=current_episode,
+                    provider=self.provider_name,
+                    mediaId=link_id,
+                    title=cleaned_title,
+                    type=media_type,
+                    season=get_season_from_title(cleaned_title),
+                    year=album.year,
+                    imageUrl=album.album_img,
+                    douban_id=douban_id,
+                    episodeCount=album.item_total_number,
+                    currentEpisodeIndex=current_episode,
                 )
+                self.logger.debug(f"爱奇艺: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
 
         except Exception as e:
-            self.logger.error(f"爱奇艺 (v2): 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.error(f"爱奇艺: 搜索 '{keyword}' 失败: {e}", exc_info=True)
 
+        self.logger.info(f"爱奇艺: 搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+        if results:
+            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+            self.logger.info(f"爱奇艺: 搜索结果列表:\n{log_results}")
+        results_to_cache = [r.model_dump() for r in results]
+        await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
 
     async def _get_tvid_from_link_id(self, link_id: str) -> Optional[str]:
