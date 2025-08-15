@@ -17,6 +17,7 @@ async def get_library_anime(pool: aiomysql.Pool) -> List[Dict[str, Any]]:
             query = """
                 SELECT
                     a.id as animeId,
+                    a.local_image_path,
                     a.image_url as imageUrl,
                     a.title,
             a.type,
@@ -617,6 +618,7 @@ async def get_anime_full_details(pool: aiomysql.Pool, anime_id: int) -> Optional
                     a.title,
                     a.type,
                     a.season,
+                    a.local_image_path,
                     a.episode_count,
                     a.image_url,
                     m.tmdb_id,
@@ -649,11 +651,11 @@ async def update_anime_details(pool: aiomysql.Pool, anime_id: int, update_data: 
                 return False
             try:
                 await conn.begin()
-
-                # 1. 更新 anime 表 (此表没有 ON DUPLICATE KEY UPDATE，无需修改)
+                
+                # 1. 更新 anime 表
                 await cursor.execute(
-                    "UPDATE anime SET title = %s, type = %s, season = %s, episode_count = %s WHERE id = %s",
-                    (update_data.title, update_data.type, update_data.season, update_data.episode_count, anime_id)
+                    "UPDATE anime SET title = %s, type = %s, season = %s, episode_count = %s, image_url = %s WHERE id = %s",
+                    (update_data.title, update_data.type, update_data.season, update_data.episode_count, update_data.image_url, anime_id)
                 )
                 
                 # 2. 更新 anime_metadata 表 (使用新的 AS alias 语法)

@@ -118,6 +118,7 @@ class AnimeFullDetails(BaseModel):
     type: str
     season: int
     episode_count: Optional[int] = None
+    local_image_path: Optional[str] = None
     image_url: Optional[str] = None
     tmdb_id: Optional[str] = None
     tmdb_episode_group_id: Optional[str] = None
@@ -148,6 +149,7 @@ class MetadataSourceSettingUpdate(BaseModel):
 class LibraryAnimeInfo(BaseModel):
     """代表媒体库中的一个番剧条目。"""
     animeId: int
+    local_image_path: Optional[str] = None
     imageUrl: Optional[str] = None
     title: str
     type: str

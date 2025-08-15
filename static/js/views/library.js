@@ -45,9 +45,12 @@ function renderLibrary(animes) {
     animes.forEach(anime => {
         const row = libraryTableBody.insertRow();
         row.dataset.title = anime.title.toLowerCase();
-        
+
+        // 优先使用本地缓存路径，否则回退到原始URL，最后使用占位图
+        const imageUrl = anime.local_image_path || anime.imageUrl || '/static/placeholder.png';
+
         row.innerHTML = `
-            <td class="poster-cell"><img src="${anime.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${anime.title}"></td>
+            <td class="poster-cell"><img src="${imageUrl}" referrerpolicy="no-referrer" alt="${anime.title}"></td>
             <td>${anime.title}</td>
             <td>${{ 'tv_series': '电视节目', 'movie': '电影/剧场版', 'ova': 'OVA', 'other': '其他' }[anime.type] || anime.type}</td>
             <td>${anime.season}</td>
@@ -133,7 +136,8 @@ async function showAnimeDetailView(animeId) {
         const anime = fullLibrary.animes.find(a => a.animeId === animeId);
         if (!anime) throw new Error("找不到该作品的信息。");
 
-        detailViewImg.src = anime.imageUrl || '/static/placeholder.png';
+        // 同样，在详情页也优先使用本地图片
+        detailViewImg.src = anime.local_image_path || anime.imageUrl || '/static/placeholder.png';
         detailViewImg.alt = anime.title;
         detailViewTitle.textContent = anime.title;
         detailViewMeta.textContent = `季: ${anime.season} | 总集数: ${anime.episodeCount || 0} | 已关联 ${sources.length} 个源`;

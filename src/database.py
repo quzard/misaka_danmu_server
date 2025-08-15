@@ -206,6 +206,16 @@ async def init_db_tables(app: FastAPI):
                     logger.info("在 'anime_sources' 表中未找到 'incremental_refresh_enabled' 列，正在添加...")
                     await cursor.execute("ALTER TABLE anime_sources ADD COLUMN incremental_refresh_enabled BOOLEAN NOT NULL DEFAULT FALSE;")
                     logger.info("列 'incremental_refresh_enabled' 添加成功。")
+
+                # 检查 anime.local_image_path
+                await cursor.execute("""
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'anime' AND COLUMN_NAME = 'local_image_path'
+                """, (db_name,))
+                if not await cursor.fetchone():
+                    logger.info("在 'anime' 表中未找到 'local_image_path' 列，正在添加...")
+                    await cursor.execute("ALTER TABLE anime ADD COLUMN local_image_path VARCHAR(512) NULL DEFAULT NULL AFTER image_url;")
+                    logger.info("列 'local_image_path' 添加成功。")
             except Exception as e:
                 # 仅记录错误，不中断启动流程
                 logger.warning(f"检查或更新表结构时发生非致命错误: {e}")

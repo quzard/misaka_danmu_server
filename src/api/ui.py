@@ -17,6 +17,7 @@ from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
 from ..webhook_manager import WebhookManager
+from ..image_utils import download_image
 from ..scheduler import SchedulerManager
 from thefuzz import fuzz
 from .tmdb_api import get_tmdb_client, _get_robust_image_base_url
@@ -379,7 +380,7 @@ async def edit_anime_info(
     """更新指定番剧的标题、季度和元数据。"""
     updated = await crud.update_anime_details(pool, anime_id, update_data)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or update failed")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到或更新失败")
     logger.info(f"用户 '{current_user.username}' 更新了番剧 ID: {anime_id} 的详细信息。")
 
     # 新增：如果提供了TMDB ID和剧集组ID，则更新映射表
@@ -397,6 +398,32 @@ async def edit_anime_info(
             # 仅记录错误，不中断主流程，因为核心信息已保存
             logger.error(f"更新TMDB映射失败: {e}", exc_info=True)
     return
+
+class RefreshPosterRequest(models.BaseModel):
+    image_url: str
+
+@router.post("/library/anime/{anime_id}/refresh-poster", summary="刷新并缓存影视海报")
+async def refresh_anime_poster(
+    anime_id: int,
+    request_data: RefreshPosterRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """根据提供的URL，重新下载并缓存海报，更新数据库记录。"""
+    new_local_path = await download_image(request_data.image_url)
+    if not new_local_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # 同时更新原始URL和本地路径
+            affected_rows = await cursor.execute(
+                "UPDATE anime SET image_url = %s, local_image_path = %s WHERE id = %s",
+                (request_data.image_url, new_local_path, anime_id)
+            )
+    if affected_rows == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
+    return {"new_path": new_local_path}
 
 @router.get("/library/source/{source_id}/details", summary="获取单个数据源的详情")
 async def get_source_details(
@@ -1329,6 +1356,10 @@ async def generic_import_task(
             if comments and anime_id is None:
                 logger.info("首次成功获取弹幕，正在创建数据库主条目...")
                 await progress_callback(base_progress + 1, "正在创建数据库主条目...")
+                # 在创建主条目前，先下载并缓存图片
+                local_image_path = await download_image(image_url)
+                # 修正：将 local_image_path 传递给 get_or_create_anime
+                anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url, local_image_path)
                 anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
                 await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
                 source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)

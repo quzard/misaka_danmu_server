@@ -157,6 +157,7 @@ async def cleanup_task(app: FastAPI):
 # 挂载静态文件目录
 # 注意：这应该在项目根目录运行，以便能找到 'static' 文件夹
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/images", StaticFiles(directory="config/image"), name="images")
 
 # 包含 v2 版本的 API 路由
 app.include_router(ui_router, prefix="/api/ui", tags=["Web UI API"])
