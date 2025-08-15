@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import ClassVar
 import zlib
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, Union
 from collections import defaultdict
 import httpx
-from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
+from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
 
 from ..config_manager import ConfigManager
 from .. import models
@@ -43,6 +43,13 @@ class IqiyiV3AlbumInfo(BaseModel):
     metaTags: Optional[List[Dict[str, Any]]] = None
     people: Optional[List[Dict[str, Any]]] = None
     brief: Optional[Dict[str, Any]] = None
+
+    @field_validator('qipuId', 'playQipuId', mode='before')
+    @classmethod
+    def _coerce_ids_to_str(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
 
 class IqiyiV3Template(BaseModel):
     template: int
