@@ -311,17 +311,11 @@ class MgtvScraper(BaseScraper):
         """
         新的分集获取逻辑，基于移动端API，能更好地处理综艺节目。
         """
-        # 1. 从移动端页面获取 uuid
-        page_url = f"https://m.mgtv.com/b/{collection_id}/"
-        page_resp = await self._request_with_rate_limit("GET", page_url)
-        page_resp.raise_for_status()
-        uuid_match = re.search(r'"uuid"\s*:\s*"([^"]+)"', page_resp.text)
-        if not uuid_match:
-            self.logger.warning("MGTV (v2): 无法从页面中解析出 uuid。")
-            return []
-        uuid = uuid_match.group(1)
+        # 修正：uuid 和 cid 都可以使用 collection_id。无需从页面解析。
+        uuid = collection_id
+        cid = collection_id
 
-        # 2. 请求详情API
+        # 请求详情API
         callback_name = f"jsonp_{int(time.time() * 1000)}"
         params = {
             "listItems": 0, "uuid": uuid, "cid": collection_id, "ic": 1, "abroad": 0,
