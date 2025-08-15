@@ -442,22 +442,35 @@ async def link_source_to_anime(pool: aiomysql.Pool, anime_id: int, provider: str
             source = await cursor.fetchone()
             return source[0]
 
-async def get_or_create_episode(pool: aiomysql.Pool, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
-    """如果分集不存在则创建，并返回其ID"""
+async def create_episode_if_not_exists(pool: aiomysql.Pool, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
+    """如果分集不存在则创建，并返回其确定性的ID。"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             # 检查是否存在
             await cursor.execute("SELECT id FROM episode WHERE source_id = %s AND episode_index = %s", (source_id, episode_index))
             result = await cursor.fetchone()
             if result:
-                return result[0]
-            
-            # 不存在则创建
+                return int(result[0])
+
+            # 获取此源在当前作品下的索引 (1-based)
+            await cursor.execute("SELECT id FROM anime_sources WHERE anime_id = %s ORDER BY id ASC", (anime_id,))
+            source_ids = [row[0] for row in await cursor.fetchall()]
+            try:
+                source_order = source_ids.index(source_id) + 1
+            except ValueError:
+                # This should not happen in a normal flow
+                raise ValueError(f"Source ID {source_id} does not belong to Anime ID {anime_id}")
+
+            # 生成新的确定性ID
+            # 格式: 25{anime_id:06d}{source_order:02d}{episode_index:04d}
+            new_episode_id_str = f"25{anime_id:06d}{source_order:02d}{episode_index:04d}"
+            new_episode_id = int(new_episode_id_str)
+
             await cursor.execute(
-                "INSERT INTO episode (source_id, episode_index, provider_episode_id, title, source_url, fetched_at) VALUES (%s, %s, %s, %s, %s, %s)",
-                (source_id, episode_index, provider_episode_id, title, url, datetime.now())
+                "INSERT INTO episode (id, source_id, episode_index, provider_episode_id, title, source_url, fetched_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (new_episode_id, source_id, episode_index, provider_episode_id, title, url, datetime.now())
             )
-            return cursor.lastrowid
+            return new_episode_id
 
 
 async def bulk_insert_comments(pool: aiomysql.Pool, episode_id: int, comments: List[Dict[str, Any]]) -> int:

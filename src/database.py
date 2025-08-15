@@ -125,7 +125,7 @@ async def init_db_tables(app: FastAPI):
             # 将所有建表语句放入一个字典中
             tables_to_create = {
                 "anime": """CREATE TABLE `anime` (`id` BIGINT NOT NULL AUTO_INCREMENT, `title` VARCHAR(255) NOT NULL, `type` ENUM('tv_series', 'movie', 'ova', 'other') NOT NULL DEFAULT 'tv_series', `image_url` VARCHAR(512) NULL, `season` INT NOT NULL DEFAULT 1, `episode_count` INT NULL DEFAULT NULL, `source_url` VARCHAR(512) NULL, `created_at` TIMESTAMP NULL, PRIMARY KEY (`id`), FULLTEXT INDEX `idx_title_fulltext` (`title`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
-                "episode": """CREATE TABLE `episode` (`id` BIGINT NOT NULL AUTO_INCREMENT, `source_id` BIGINT NOT NULL, `title` VARCHAR(255) NOT NULL, `episode_index` INT NOT NULL, `provider_episode_id` VARCHAR(255) NULL, `source_url` VARCHAR(512) NULL, `fetched_at` TIMESTAMP NULL, `comment_count` INT NOT NULL DEFAULT 0, PRIMARY KEY (`id`), UNIQUE INDEX `idx_source_episode_unique` (`source_id` ASC, `episode_index` ASC)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
+                "episode": """CREATE TABLE `episode` (`id` BIGINT NOT NULL, `source_id` BIGINT NOT NULL, `title` VARCHAR(255) NOT NULL, `episode_index` INT NOT NULL, `provider_episode_id` VARCHAR(255) NULL, `source_url` VARCHAR(512) NULL, `fetched_at` TIMESTAMP NULL, `comment_count` INT NOT NULL DEFAULT 0, PRIMARY KEY (`id`), UNIQUE INDEX `idx_source_episode_unique` (`source_id` ASC, `episode_index` ASC)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
                 "comment": """CREATE TABLE `comment` (`id` BIGINT NOT NULL AUTO_INCREMENT, `cid` VARCHAR(255) NOT NULL, `episode_id` BIGINT NOT NULL, `p` VARCHAR(255) NOT NULL, `m` TEXT NOT NULL, `t` DECIMAL(10, 2) NOT NULL, PRIMARY KEY (`id`), UNIQUE INDEX `idx_episode_cid_unique` (`episode_id` ASC, `cid` ASC), INDEX `idx_episode_time` (`episode_id` ASC, `t` ASC)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
                 "users": """CREATE TABLE `users` (`id` BIGINT NOT NULL AUTO_INCREMENT, `username` VARCHAR(50) NOT NULL, `hashed_password` VARCHAR(255) NOT NULL, `token` TEXT NULL, `token_update` TIMESTAMP NULL, `created_at` TIMESTAMP NULL, PRIMARY KEY (`id`), UNIQUE INDEX `idx_username_unique` (`username` ASC)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
                 "scrapers": """CREATE TABLE `scrapers` (`provider_name` VARCHAR(50) NOT NULL, `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE, `display_order` INT NOT NULL DEFAULT 0, PRIMARY KEY (`provider_name`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
@@ -206,6 +206,21 @@ async def init_db_tables(app: FastAPI):
                     logger.info("在 'anime_sources' 表中未找到 'incremental_refresh_enabled' 列，正在添加...")
                     await cursor.execute("ALTER TABLE anime_sources ADD COLUMN incremental_refresh_enabled BOOLEAN NOT NULL DEFAULT FALSE;")
                     logger.info("列 'incremental_refresh_enabled' 添加成功。")
+            except Exception as e:
+                # 仅记录错误，不中断启动流程
+                logger.warning(f"检查或更新表结构时发生非致命错误: {e}")
+
+            try:
+                # 新增：检查并修正 episode.id 的自增属性
+                await cursor.execute("""
+                    SELECT EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'episode' AND COLUMN_NAME = 'id'
+                """, (db_name,))
+                id_col_extra = await cursor.fetchone()
+                if id_col_extra and 'auto_increment' in id_col_extra[0].lower():
+                    logger.info("检测到旧的 'episode.id' 列定义 (带自增属性)，正在进行迁移...")
+                    await cursor.execute("ALTER TABLE `episode` DROP PRIMARY KEY, MODIFY `id` BIGINT NOT NULL, ADD PRIMARY KEY (`id`);")
+                    logger.info("列 'episode.id' 结构迁移成功。")
             except Exception as e:
                 # 仅记录错误，不中断启动流程
                 logger.warning(f"检查或更新表结构时发生非致命错误: {e}")

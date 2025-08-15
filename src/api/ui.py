@@ -1340,7 +1340,7 @@ async def generic_import_task(
                 if not comments:
                     logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
                     continue
-                added_count = await crud.bulk_insert_comments(pool, str(episode_db_id), comments)
+                added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
                 total_comments_added += added_count
                 logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
             else:
