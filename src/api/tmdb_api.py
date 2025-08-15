@@ -286,6 +286,7 @@ async def search_tmdb_movie_subjects(
 async def get_tmdb_details(
     media_type: str = Path(..., description="媒体类型, 'tv' 或 'movie'"),
     tmdb_id: int = Path(..., description="TMDB ID"),
+    season: Optional[int] = Query(None, description="要专门为其获取别名的季度号"),
     client: httpx.AsyncClient = Depends(get_tmdb_client),
 ):
     if media_type not in ["tv", "movie"]:
@@ -342,18 +343,28 @@ async def get_tmdb_details(
 
         # Process alternative titles from Chinese response
         if details.alternative_titles:
-            for alt_title in details.alternative_titles.titles:
+            for alt_title in details.alternative_titles.titles: # type: ignore
                 title_text = alt_title.title
+                alt_type = alt_title.type or ""
+                alt_country = alt_title.iso_3166_1
+
                 if not title_text: continue
 
                 # Get Romaji from JP region with type "Romaji"
-                if alt_title.iso_3166_1 == "JP" and alt_title.type == "Romaji":
+                if alt_country == "JP" and alt_type == "Romaji":
                     if not name_romaji and not _is_cjk(title_text):
                         name_romaji = title_text
-                
-                # Get other Chinese aliases
-                elif alt_title.iso_3166_1 in ["CN", "HK"]:
-                    if _is_cjk(title_text):
+                    continue
+
+                # Handle Chinese Aliases
+                if alt_country in ["CN", "HK", "TW"]:
+                    season_match = re.match(r'Season\s*(\d+)', alt_type, re.IGNORECASE)
+                    if season_match:
+                        title_season = int(season_match.group(1))
+                        if season and season == title_season and _is_cjk(title_text):
+                            aliases_cn.append(title_text)
+                    # Add generic aliases (no type)
+                    elif not alt_type and _is_cjk(title_text):
                         aliases_cn.append(title_text)
 
         # --- Process other language responses ---

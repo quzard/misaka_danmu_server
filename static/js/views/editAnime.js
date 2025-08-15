@@ -386,8 +386,14 @@ function renderTmdbSearchResults(results) {
         `;
         li.querySelector('.select-btn').addEventListener('click', async () => {
             const mediaType = document.getElementById('edit-anime-type').value === 'movie' ? 'movie' : 'tv';
+            const seasonInput = document.getElementById('edit-anime-season');
+            const season = seasonInput.value ? parseInt(seasonInput.value, 10) : null;
             try {
-                const details = await apiFetch(`/api/tmdb/details/${mediaType}/${result.id}`);
+                let apiUrl = `/api/tmdb/details/${mediaType}/${result.id}`;
+                if (season) {
+                    apiUrl += `?season=${season}`;
+                }
+                const details = await apiFetch(apiUrl);
                 details._source = 'tmdb';
                 details.main_title_from_search = result.name; // 将搜索时的主标题传递给详情对象
                 if (tmdbSearchView.dataset.source === 'bulk-import') {
