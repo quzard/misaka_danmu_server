@@ -1308,39 +1308,49 @@ async def generic_import_task(
             logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
             episodes = episodes[:1]
 
-        # 步骤 2: 为每个分集获取弹幕，并存储在内存中
-        episode_comment_data = []
+        # 步骤 2: 循环处理分集，在首次成功获取弹幕后再创建数据库主条目
+        anime_id: Optional[int] = None
+        source_id: Optional[int] = None
+        total_comments_added = 0
         total_episodes = len(episodes)
+
         for i, episode in enumerate(episodes):
             logger.info(f"--- 开始处理分集 {i+1}/{total_episodes}: '{episode.title}' (ID: {episode.episodeId}) ---")
-            base_progress = 10 + int((i / total_episodes) * 80)
+            base_progress = 10 + int((i / total_episodes) * 85) # 10% for setup, 85% for processing, 5% for final
             await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
 
             async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
-                current_total_progress = base_progress + (danmaku_progress / 100) * (80 / total_episodes)
+                current_total_progress = base_progress + (danmaku_progress / 100) * (85 / total_episodes)
                 await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
 
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
-            episode_comment_data.append({"episode_info": episode, "comments": comments})
 
-        # 步骤 3: 所有数据获取成功，现在开始写入数据库
-        await progress_callback(95, "数据获取完成，正在写入数据库...")
-        anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
-        await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
-        source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
+            # 只有在确实有弹幕需要写入时，才创建番剧和源的记录
+            if comments and anime_id is None:
+                logger.info("首次成功获取弹幕，正在创建数据库主条目...")
+                await progress_callback(base_progress + 1, "正在创建数据库主条目...")
+                anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
+                await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
+                source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
+                logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
 
-        # 步骤 4: 循环写入分集和弹幕
-        total_comments_added = 0
-        for data in episode_comment_data:
-            episode_info = data["episode_info"]
-            comments = data["comments"]
-            episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_info.episodeIndex, episode_info.title, episode_info.url, episode_info.episodeId)
-            if not comments: continue
-            added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
-            total_comments_added += added_count
-            logger.info(f"分集 '{episode_info.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+            # 如果主条目已创建（意味着至少有一集有弹幕），则处理当前分集
+            if anime_id and source_id:
+                episode_db_id = await crud.get_or_create_episode(pool, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                if not comments:
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
+                    continue
+                added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
+                total_comments_added += added_count
+                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+            else:
+                # 如果 anime_id 仍然是 None，说明到目前为止还没有一集成功获取到弹幕
+                logger.info(f"分集 '{episode.title}' 未找到弹幕，跳过创建主条目。")
 
-        raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
+        if total_comments_added == 0:
+            raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+        else:
+            raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
     except TaskSuccess:
         raise # 重新抛出以被 TaskManager 正确处理
     except Exception as e:
