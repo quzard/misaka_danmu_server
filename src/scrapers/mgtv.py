@@ -315,7 +315,7 @@ class MgtvScraper(BaseScraper):
                     provider=self.provider_name,
                     # The comment ID is a combination of collection_id and video_id
                     episodeId=f"{media_id},{ep.video_id}",
-                    title=ep.title2 if re.match(r"^第.+?集$", ep.title2) else ep.title,
+                    title=f"{ep.title2} {ep.title}".strip(),
                     episodeIndex=i + 1,
                     url=f"https://www.mgtv.com/b/{media_id}/{ep.video_id}.html"
                 ) for i, ep in enumerate(sorted_episodes)
