@@ -76,6 +76,7 @@ class MgtvEpisode(BaseModel):
     title3: Optional[str] = Field(None, alias="t3")
     time: Optional[str] = None
     video_id: str = Field(alias="video_id")
+    timestamp: Optional[str] = Field(None, alias="ts")
 
 class MgtvEpisodeListTab(BaseModel):
     month: str = Field(alias="m")
@@ -291,10 +292,22 @@ class MgtvScraper(BaseScraper):
                     continue
                 filtered_episodes.append(ep)
 
-            # 修正：API返回的默认顺序并不可靠，特别是对于老番或综艺。
-            # video_id 是一个自增的数字ID，按其排序可以得到最稳定、最正确的播放顺序。
-            sorted_episodes = sorted(filtered_episodes, key=lambda ep: int(ep.video_id))
+            # 修正：API返回的默认顺序和 video_id 都不可靠。
+            # 优先使用标题中的“第N集”进行排序，如果无法解析，则回退到使用发布时间戳排序。
+            # 这种复合排序策略比单独依赖 video_id 或 API 顺序更健壮。
+            def get_sort_keys(episode: MgtvEpisode) -> tuple:
+                # 主排序键：从标题 't2' (例如 "第1集") 中解析出的集数
+                ep_num_match = re.search(r'第(\d+)集', episode.title2)
+                ep_num = int(ep_num_match.group(1)) if ep_num_match else float('inf')
+                
+                # 次排序键：发布时间戳
+                # 如果时间戳不存在，则给一个很大的默认值，使其排在后面
+                timestamp = episode.timestamp or "9999-99-99 99:99:99.9"
 
+                return (ep_num, timestamp)
+
+            sorted_episodes = sorted(filtered_episodes, key=get_sort_keys)
+            
             provider_episodes = [
                 models.ProviderEpisodeInfo(
                     provider=self.provider_name,
