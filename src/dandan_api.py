@@ -732,7 +732,7 @@ async def match_single_file(
     if normalized_search_title:
         exact_matches = [
             r for r in results 
-            if r['animeTitle'].replace("：", ":").replace(" ", "").startswith(normalized_search_title)
+            if normalized_search_title in r['animeTitle'].replace("：", ":").replace(" ", "")
         ]
         if len(exact_matches) < len(results):
             logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
