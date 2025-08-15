@@ -114,6 +114,12 @@
     background-color: var(--secondary-color); /* 悬停时显示浅灰色背景 */
 }
 
+/* Style for the disabled state of the schedule icon */
+.action-buttons-wrapper .action-btn.disabled-icon {
+    opacity: 0.35;
+    filter: grayscale(1);
+}
+
 #episode-list-table th:first-child,
 #episode-list-table td:first-child {
     width: 1%;
