@@ -172,7 +172,9 @@ class MgtvScraper(BaseScraper):
         )
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
-        self._min_interval = 0.5
+        # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，
+        # 适当增加延迟以提高稳定性。
+        self._min_interval = 1.0
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         async with self._api_lock:
