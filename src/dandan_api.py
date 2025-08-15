@@ -730,10 +730,27 @@ async def match_single_file(
     # 新增：对结果进行严格的标题过滤，避免模糊匹配带来的问题
     normalized_search_title = parsed_info["title"].replace("：", ":").replace(" ", "")
     if normalized_search_title:
-        exact_matches = [
-            r for r in results 
-            if normalized_search_title in r['animeTitle'].replace("：", ":").replace(" ", "")
-        ]
+        exact_matches = []
+        for r in results:
+            # 将主标题和所有别名都收集起来进行检查
+            all_titles_to_check = [
+                r.get('animeTitle'),
+                r.get('name_en'),
+                r.get('name_jp'),
+                r.get('name_romaji'),
+                r.get('alias_cn_1'),
+                r.get('alias_cn_2'),
+                r.get('alias_cn_3'),
+            ]
+            # 规范化并移除空值
+            normalized_aliases = {
+                t.replace("：", ":").replace(" ", "") for t in all_titles_to_check if t
+            }
+            
+            # 检查搜索词是否是任何一个标题/别名的子串
+            if any(normalized_search_title in alias for alias in normalized_aliases):
+                exact_matches.append(r)
+
         if len(exact_matches) < len(results):
             logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
             results = exact_matches

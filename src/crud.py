@@ -70,7 +70,13 @@ async def search_episodes_in_library(pool: aiomysql.Pool, anime_title: str, epis
             CASE
                 WHEN a.type = 'movie' THEN CONCAT(s.provider_name, ' 源')
                 ELSE e.title
-            END AS episodeTitle,
+            END AS episodeTitle,            
+            al.name_en,
+            al.name_jp,
+            al.name_romaji,
+            al.alias_cn_1,
+            al.alias_cn_2,
+            al.alias_cn_3,
             sc.display_order,
             s.is_favorited AS isFavorited,
             (SELECT COUNT(DISTINCT e_count.id) FROM anime_sources s_count JOIN episode e_count ON s_count.id = e_count.source_id WHERE s_count.anime_id = a.id) as totalEpisodeCount,
