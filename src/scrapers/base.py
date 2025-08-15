@@ -4,6 +4,8 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type
 
+import httpx
+
 import aiomysql
 from .. import crud
 from .. import models
