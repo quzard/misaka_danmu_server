@@ -167,7 +167,7 @@ app.include_router(tmdb_router, prefix="/api/tmdb", tags=["TMDB"])
 app.include_router(douban_router, prefix="/api/douban", tags=["Douban"])
 app.include_router(imdb_router, prefix="/api/imdb", tags=["IMDb"])
 app.include_router(tvdb_router, prefix="/api/tvdb", tags=["TVDB"])
-app.include_router(s360_router, prefix="/api/360", tags=["360 Search"])
+app.include_router(so360_router, prefix="/api/so360", tags=["360 Search"])
 app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
 
 # 将最通用的 dandan_router 挂载在最后，以避免路径冲突。

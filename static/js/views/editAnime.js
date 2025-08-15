@@ -922,8 +922,8 @@ export function setupEditAnimeEventListeners() {
     document.getElementById('search-doubanid-btn').addEventListener('click', handleSearchDoubanId);
     document.getElementById('search-tvdbid-btn').addEventListener('click', handleSearchTvdbId);
     document.getElementById('search-imdbid-btn').addEventListener('click', handleSearchImdbId);
-    document.getElementById('search-360-btn').addEventListener('click', handleSearch360);
-    document.getElementById('s360-search-form').addEventListener('submit', handleS360SearchSubmit);
+    document.getElementById('search-so360-btn').addEventListener('click', handleSearchSo360);
+    document.getElementById('so360-search-form').addEventListener('submit', handleSo360SearchSubmit);
     document.getElementById('select-egid-btn').addEventListener('click', handleSelectEgidBtnClick);
 
     backToEditAnimeFromBgmSearchBtn.addEventListener('click', handleBackToEditAnime);
