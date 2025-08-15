@@ -304,7 +304,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
             </div>
         </div>
         <table id="episode-list-table">
-            <thead><tr><th><input type="checkbox" class="hidden"></th><th>ID</th><th>剧集名</th><th>集数</th><th>弹幕数</th><th>采集时间</th><th>官方链接</th><th>剧集操作</th></tr></thead>
+            <thead><tr><th><input type="checkbox" class="hidden"></th><th>ID</th><th>剧集名</th><th>集数</th><th>弹幕数</th><th>采集时间</th><th>官方<br>链接</th><th>剧集操作</th></tr></thead>
             <tbody></tbody>
         </table>
     `;

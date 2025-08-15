@@ -124,3 +124,31 @@
 #episode-list-table td:first-child {
     width: 1%;
 }
+
+/* --- Episode List Table Layout --- */
+#episode-list-table {
+    table-layout: fixed; /* 强制表格遵守设定的宽度 */
+    width: 100%;
+}
+
+#episode-list-table th,
+#episode-list-table td {
+    word-wrap: break-word; /* 确保长内容能换行 */
+    overflow: hidden;
+    text-overflow: ellipsis; /* 超出部分显示省略号 */
+}
+
+/* 设置每一列的宽度 */
+#episode-list-table th:nth-child(1), #episode-list-table td:nth-child(1) { width: 4%; } /* Checkbox */
+#episode-list-table th:nth-child(2), #episode-list-table td:nth-child(2) { width: 8%; } /* ID */
+#episode-list-table th:nth-child(3), #episode-list-table td:nth-child(3) { width: 35%; } /* 剧集名 */
+#episode-list-table th:nth-child(4), #episode-list-table td:nth-child(4) { width: 8%; text-align: center; } /* 集数 */
+#episode-list-table th:nth-child(5), #episode-list-table td:nth-child(5) { width: 10%; text-align: center; } /* 弹幕数 */
+#episode-list-table th:nth-child(6), #episode-list-table td:nth-child(6) { width: 15%; } /* 采集时间 */
+#episode-list-table th:nth-child(7), #episode-list-table td:nth-child(7) { width: 8%; text-align: center; } /* 官方链接 */
+#episode-list-table th:nth-child(8), #episode-list-table td:nth-child(8) { width: 12%; } /* 剧集操作 */
+
+/* 官方链接表头换行 */
+#episode-list-table th:nth-child(7) {
+    line-height: 1.2; /* 调整行高以适应两行文本 */
+}

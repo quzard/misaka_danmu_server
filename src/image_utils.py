@@ -51,7 +51,7 @@ async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider
         if provider_setting:
             use_proxy_for_this_provider = provider_setting.get('use_proxy', False)
 
-    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+    proxies = {"all://": proxy_url} if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
     # --- End of new proxy logic ---
 
     # 修正：确保URL以http开头
@@ -59,7 +59,7 @@ async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider
         image_url = 'https:' + image_url
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxy=proxies) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxies=proxies) as client:
             # 动态设置 Referer 以提高下载成功率
             referer_map = {
                 "bilibili": "https://www.bilibili.com/",
