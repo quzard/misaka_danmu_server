@@ -60,7 +60,20 @@ async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxy=proxies) as client:
-            response = await client.get(image_url, headers={"Referer": "https://www.bilibili.com"})
+            # 动态设置 Referer 以提高下载成功率
+            referer_map = {
+                "bilibili": "https://www.bilibili.com/",
+                "iqiyi": "https://www.iqiyi.com/",
+                "tencent": "https://v.qq.com/",
+                "youku": "https://www.youku.com/",
+                "mgtv": "https://www.mgtv.com/",
+                "gamer": "https://ani.gamer.com.tw/",
+                "renren": "https://rrsp.com.cn/",
+            }
+            # 如果提供了源名称，则使用对应的Referer，否则使用一个通用的默认值
+            referer = referer_map.get(provider_name, "https://www.google.com/")
+            
+            response = await client.get(image_url, headers={"Referer": referer})
             response.raise_for_status()
 
             content_type = response.headers.get("content-type", "")

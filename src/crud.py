@@ -394,19 +394,30 @@ async def get_existing_comment_cids(pool: aiomysql.Pool, episode_id: int) -> set
             await cursor.execute("SELECT cid FROM comment WHERE episode_id = %s", (episode_id,))
             return {row[0] for row in await cursor.fetchall()}
 
-async def get_or_create_anime(pool: aiomysql.Pool, title: str, media_type: str, season: int, image_url: Optional[str]) -> int:
+async def get_or_create_anime(pool: aiomysql.Pool, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str]) -> int:
     """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             # 1. 检查番剧是否已存在
-            await cursor.execute("SELECT id, image_url FROM anime WHERE title = %s AND season = %s", (title, season))
+            await cursor.execute("SELECT id, image_url, local_image_path FROM anime WHERE title = %s AND season = %s", (title, season))
             result = await cursor.fetchone()
             if result:
                 anime_id = result[0]
                 existing_image_url = result[1]
-                # 如果番剧已存在，但没有海报，而这次导入提供了海报，则更新它
+                existing_local_path = result[2]
+                
+                updates, params = [], []
+                # 如果番剧已存在，但没有远程海报URL，而这次导入提供了，则更新它
                 if not existing_image_url and image_url:
-                    await cursor.execute("UPDATE anime SET image_url = %s WHERE id = %s", (image_url, anime_id))
+                    updates.append("image_url = %s")
+                    params.append(image_url)
+                # 如果番剧已存在，但没有本地海报路径，而这次导入提供了，则更新它
+                if not existing_local_path and local_image_path:
+                    updates.append("local_image_path = %s")
+                    params.append(local_image_path)
+                if updates:
+                    params.append(anime_id)
+                    await cursor.execute(f"UPDATE anime SET {', '.join(updates)} WHERE id = %s", tuple(params))
                 return anime_id
             
             # 2. 番剧不存在，在事务中创建新记录
@@ -414,8 +425,8 @@ async def get_or_create_anime(pool: aiomysql.Pool, title: str, media_type: str, 
                 await conn.begin()
                 # 2.1 插入主表
                 await cursor.execute(
-                    "INSERT INTO anime (title, type, season, image_url, created_at) VALUES (%s, %s, %s, %s, %s)",
-                    (title, media_type, season, image_url, datetime.now())
+                    "INSERT INTO anime (title, type, season, image_url, local_image_path, created_at) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (title, media_type, season, image_url, local_image_path, datetime.now())
                 )
                 anime_id = cursor.lastrowid
                 # 2.2 插入元数据表 (使用 INSERT IGNORE 避免因孤儿数据导致重复键警告)
