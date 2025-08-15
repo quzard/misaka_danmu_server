@@ -1266,7 +1266,7 @@ async def delete_bulk_episodes_task(episode_ids: List[int], pool: aiomysql.Pool,
     raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
 
 async def generic_import_task(
-    provider: str,
+    provider: str, # noqa: F821
     media_id: str,
     anime_title: str,
     media_type: str,
@@ -1336,11 +1336,11 @@ async def generic_import_task(
 
             # 如果主条目已创建（意味着至少有一集有弹幕），则处理当前分集
             if anime_id and source_id:
-                episode_db_id = await crud.get_or_create_episode(pool, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                episode_db_id = await crud.create_episode_if_not_exists(pool, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
                 if not comments:
                     logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
                     continue
-                added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
+                added_count = await crud.bulk_insert_comments(pool, str(episode_db_id), comments)
                 total_comments_added += added_count
                 logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
             else:
