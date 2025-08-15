@@ -160,35 +160,6 @@
     flex-shrink: 0;
 }
 
-/* 360 Search Results Specific Styles */
-.s360-results li {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-}
-
-.s360-results .result-item-header {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    width: 100%;
-}
-
-.s360-results .platform-list {
-    list-style: none;
-    padding-left: 55px; /* Align with info block */
-    width: 100%;
-    margin: 0;
-}
-
-.s360-results .platform-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    border-top: 1px solid var(--border-color);
-}
-
 
 /* ==========================================================================
    TMDB Episode Group (EGID) View Styles

@@ -15,7 +15,6 @@ from .api.webhook_api import router as webhook_router
 from .api.imdb_api import router as imdb_router
 from .api.tvdb_api import router as tvdb_router
 from .api.douban_api import router as douban_router
-from .api.s360_api import router as s360_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -167,7 +166,6 @@ app.include_router(tmdb_router, prefix="/api/tmdb", tags=["TMDB"])
 app.include_router(douban_router, prefix="/api/douban", tags=["Douban"])
 app.include_router(imdb_router, prefix="/api/imdb", tags=["IMDb"])
 app.include_router(tvdb_router, prefix="/api/tvdb", tags=["TVDB"])
-app.include_router(s360_router, prefix="/api/360", tags=["360 Search"])
 app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
 
 # 将最通用的 dandan_router 挂载在最后，以避免路径冲突。

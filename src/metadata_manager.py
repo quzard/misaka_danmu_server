@@ -15,7 +15,7 @@ class MetadataSourceManager:
     """
     def __init__(self, pool: aiomysql.Pool):
         self.pool = pool
-        self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb', '360']
+        self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb']
         # Ephemeral status, checked on startup
         self.connectivity_status: Dict[str, str] = {}
 
@@ -46,13 +46,6 @@ class MetadataSourceManager:
                 self.connectivity_status['imdb'] = "可访问"
             except Exception:
                 self.connectivity_status['imdb'] = "访问失败"
-            
-            # Check 360kan
-            try:
-                await client.get("https://www.360kan.com/", headers={"User-Agent": "Mozilla/5.0"})
-                self.connectivity_status['360'] = "可访问"
-            except Exception:
-                self.connectivity_status['360'] = "访问失败"
         logger.info(f"元数据源连接状态检查完成: {self.connectivity_status}")
 
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
