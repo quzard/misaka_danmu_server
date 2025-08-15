@@ -909,7 +909,7 @@ async def sync_metadata_sources_to_db(pool: aiomysql.Pool, provider_names: List[
             max_order = (await cursor.fetchone())[0] or 0
             data_to_insert = []
             for i, name in enumerate(new_providers):
-                # TMDB is always an enabled auxiliary source
+                # TMDB is always an enabled auxiliary source, others are disabled by default.
                 is_aux_enabled = True if name == 'tmdb' else False
                 data_to_insert.append((name, max_order + i + 1, is_aux_enabled))
             

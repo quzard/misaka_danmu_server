@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
-from .. import crud, models, security
+from .. import crud, models, security, scraper_manager
 from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
@@ -1769,6 +1769,88 @@ async def create_scheduled_task(
     except Exception as e:
         logger.error(f"创建定时任务失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="创建定时任务时发生内部错误")
+
+class ImportFromUrlRequest(models.BaseModel):
+    provider: str
+    url: str
+    title: str
+    media_type: str
+    season: int
+
+@router.post("/import-from-url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入弹幕")
+async def import_from_url(
+    request_data: ImportFromUrlRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    provider = request_data.provider
+    url = request_data.url
+    title = request_data.title
+    
+    try:
+        scraper = scraper_manager.get_scraper(provider)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    media_id_for_scraper = None
+
+    try:
+        if provider == 'bilibili':
+            bvid_match = re.search(r'video/(BV[a-zA-Z0-9]+)', url)
+            ssid_match = re.search(r'bangumi/play/ss(\d+)', url)
+            epid_match = re.search(r'bangumi/play/ep(\d+)', url)
+            if ssid_match:
+                media_id_for_scraper = f"ss{ssid_match.group(1)}"
+            elif bvid_match:
+                media_id_for_scraper = f"bv{bvid_match.group(1)}"
+            elif epid_match:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True)
+                    resp.raise_for_status()
+                    html_text = resp.text
+                    ssid_match_from_page = re.search(r'"season_id":(\d+)', html_text)
+                    if ssid_match_from_page:
+                        media_id_for_scraper = f"ss{ssid_match_from_page.group(1)}"
+        elif provider == 'tencent':
+            cid_match = re.search(r'/cover/([^/]+)', url)
+            if cid_match:
+                media_id_for_scraper = cid_match.group(1)
+        elif provider == 'iqiyi':
+            linkid_match = re.search(r'v_(\w+)\.html', url)
+            if linkid_match:
+                media_id_for_scraper = linkid_match.group(1)
+        elif provider == 'youku':
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True)
+                resp.raise_for_status()
+                html_text = resp.text
+                showid_match = re.search(r'showid:"(\d+)"', html_text)
+                if showid_match:
+                    media_id_for_scraper = showid_match.group(1)
+        elif provider == 'mgtv':
+            cid_match = re.search(r'/b/(\d+)/', url)
+            if cid_match:
+                media_id_for_scraper = cid_match.group(1)
+    except Exception as e:
+        logger.error(f"从URL解析媒体ID时出错: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="从URL解析媒体ID时出错")
+
+    if not media_id_for_scraper:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法从URL '{url}' 中为提供商 '{provider}' 解析出媒体ID。")
+
+    task_coro = lambda callback: generic_import_task(
+        provider=provider, media_id=media_id_for_scraper, anime_title=title,
+        media_type=request_data.media_type, season=request_data.season,
+        current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None,
+        progress_callback=callback, pool=pool, manager=scraper_manager, task_manager=task_manager
+    )
+    
+    task_title = f"URL导入: {title}"
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+
+    return {"message": f"'{title}' 的URL导入任务已提交。", "task_id": task_id}
 
 @router.put("/scheduled-tasks/{task_id}", response_model=ScheduledTaskInfo, summary="更新定时任务")
 async def update_scheduled_task(

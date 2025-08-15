@@ -14,7 +14,7 @@ const typeMap = {
 
 // --- DOM Elements ---
 let editAnimeView, editAnimeForm, editAnimeTypeSelect, selectEgidBtn, editAnimeTmdbIdInput;
-let bangumiSearchView, tmdbSearchView, doubanSearchView, imdbSearchView, tvdbSearchView, egidView, reassociateView;
+let bangumiSearchView, tmdbSearchView, doubanSearchView, imdbSearchView, tvdbSearchView, egidView, reassociateView, s360SearchView;
 let backToEditAnimeFromBgmSearchBtn, backToEditAnimeFromTmdbSearchBtn, backToEditAnimeFromDoubanSearchBtn, backToEditAnimeFromImdbSearchBtn, backToEditAnimeFromTvdbSearchBtn, backToEditFromEgidBtn, backToDetailFromReassociateBtn;
 let editEpisodeView, editEpisodeForm;
 
@@ -36,6 +36,7 @@ function initializeElements() {
     document.getElementById('douban-search-results-list').classList.add('metadata-search-list');
     document.getElementById('tmdb-search-results-list').classList.add('metadata-search-list');
     document.getElementById('tvdb-search-results-list').classList.add('metadata-search-list');
+    s360SearchView = document.getElementById('s360-search-view');
     document.getElementById('imdb-search-results-list').classList.add('metadata-search-list');
     reassociateView = document.getElementById('reassociate-view');
 
@@ -44,6 +45,7 @@ function initializeElements() {
     backToEditAnimeFromDoubanSearchBtn = document.getElementById('back-to-edit-anime-from-douban-search-btn');
     backToEditAnimeFromTvdbSearchBtn = document.getElementById('back-to-edit-anime-from-tvdb-search-btn');
     backToEditAnimeFromImdbSearchBtn = document.getElementById('back-to-edit-anime-from-imdb-search-btn');
+    document.getElementById('back-to-edit-anime-from-s360-search-btn').addEventListener('click', handleBackToEditAnime);
     backToEditFromEgidBtn = document.getElementById('back-to-edit-from-egid-btn');
     backToDetailFromReassociateBtn = document.getElementById('back-to-detail-from-reassociate-btn');
 
@@ -601,6 +603,87 @@ function renderTvdbSearchResults(results) {
     });
 }
 
+function handleSearch360() {
+    const title = document.getElementById('edit-anime-title').value;
+    switchView('s360-search-view');
+    document.getElementById('s360-search-keyword').value = title;
+    document.getElementById('s360-search-view-title').textContent = `为 "${title}" 进行聚合搜索`;
+    document.getElementById('s360-search-results-list').innerHTML = '';
+}
+
+async function handleS360SearchSubmit(e) {
+    e.preventDefault();
+    const keyword = document.getElementById('s360-search-keyword').value.trim();
+    if (!keyword) return;
+    const resultsList = document.getElementById('s360-search-results-list');
+    resultsList.innerHTML = '<li>正在搜索...</li>';
+    const searchButton = e.target.querySelector('button[type="submit"]');
+    searchButton.disabled = true;
+    try {
+        const results = await apiFetch(`/api/360/search?keyword=${encodeURIComponent(keyword)}`);
+        renderS360SearchResults(results);
+    } catch (error) {
+        resultsList.innerHTML = `<li class="error">搜索失败: ${error.message}</li>`;
+    } finally {
+        searchButton.disabled = false;
+    }
+}
+function renderS360SearchResults(results) {
+    const resultsList = document.getElementById('s360-search-results-list');
+    resultsList.innerHTML = '';
+    if (results.length === 0) {
+        resultsList.innerHTML = '<li>未找到匹配项。</li>';
+        return;
+    }
+    results.forEach(result => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+            <div class="result-item-header">
+                <img class="poster" src="${result.cover || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
+                <div class="info">
+                    <p class="title">${result.title}</p>
+                    <p class="meta">${result.content_type} / ${result.year || 'N/A'}</p>
+                </div>
+            </div>
+            <ul class="platform-list"></ul>
+        `;
+        const platformList = li.querySelector('.platform-list');
+        result.platforms.forEach(platform => {
+            const platformItem = document.createElement('li');
+            platformItem.className = 'platform-item';
+            platformItem.innerHTML = `
+                <span>${platform.platform_name}</span>
+                <button class="action-btn import-from-platform-btn" title="从该平台导入">📥</button>
+            `;
+            platformItem.querySelector('.import-from-platform-btn').addEventListener('click', () => {
+                const url = platform.url || (platform.episodes && platform.episodes.length > 0 ? platform.episodes[0].url : null);
+                if (!url) {
+                    alert('没有可用的导入链接。');
+                    return;
+                }
+                const platformMap = {'qq': 'tencent', 'qiyi': 'iqiyi', 'youku': 'youku', 'bilibili': 'bilibili', 'bilibili1': 'bilibili', 'imgo': 'mgtv'};
+                const provider = platformMap[platform.platform_code];
+                if (!provider) {
+                    alert(`不支持的平台: ${platform.platform_name}`);
+                    return;
+                }
+                const payload = {
+                    provider: provider, url: url, title: result.title,
+                    media_type: result.is_multi_episode ? 'tv_series' : 'movie',
+                    season: 1 // 360kan doesn't provide season, default to 1
+                };
+                if (confirm(`确定要从 ${platform.platform_name} 导入 "${result.title}" 吗？\n这将提交一个后台任务。`)) {
+                    apiFetch('/api/ui/import-from-url', { method: 'POST', body: JSON.stringify(payload) })
+                        .then(response => { alert(response.message || '导入任务已提交。'); document.querySelector('.nav-link[data-view="task-manager-view"]').click(); })
+                        .catch(error => { alert(`导入失败: ${error.message}`); });
+                }
+            });
+            platformList.appendChild(platformItem);
+        });
+        resultsList.appendChild(li);
+    });
+}
+
 async function handleSelectEgidBtnClick() {
     const tmdbId = editAnimeTmdbIdInput.value.trim();
     const animeTitle = document.getElementById('edit-anime-title').value.trim();
@@ -839,6 +922,8 @@ export function setupEditAnimeEventListeners() {
     document.getElementById('search-doubanid-btn').addEventListener('click', handleSearchDoubanId);
     document.getElementById('search-tvdbid-btn').addEventListener('click', handleSearchTvdbId);
     document.getElementById('search-imdbid-btn').addEventListener('click', handleSearchImdbId);
+    document.getElementById('search-360-btn').addEventListener('click', handleSearch360);
+    document.getElementById('s360-search-form').addEventListener('submit', handleS360SearchSubmit);
     document.getElementById('select-egid-btn').addEventListener('click', handleSelectEgidBtnClick);
 
     backToEditAnimeFromBgmSearchBtn.addEventListener('click', handleBackToEditAnime);
