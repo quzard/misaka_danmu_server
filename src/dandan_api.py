@@ -15,7 +15,6 @@ from fastapi.routing import APIRoute
 from . import crud, models
 from .database import get_db_pool
 from .scraper_manager import ScraperManager
-from .scrapers.acfun import AcfunScraper
 from .scrapers.bilibili import BilibiliScraper
 from .scrapers.iqiyi import IqiyiScraper
 from .scrapers.tencent import TencentScraper
@@ -851,7 +850,6 @@ async def get_external_comments_from_url(
         comments_data = []
         
         provider_map = {
-            "acfun.cn": ("acfun", AcfunScraper),
             "bilibili.com": ("bilibili", BilibiliScraper),
             "iqiyi.com": ("iqiyi", IqiyiScraper),
             "v.qq.com": ("tencent", TencentScraper),
@@ -867,11 +865,8 @@ async def get_external_comments_from_url(
         try:
             scraper = manager.get_scraper(provider)
             if not isinstance(scraper, scraper_class):
-                raise ValueError(f"{provider} scraper not found or has wrong type.")
-
-            if provider == "acfun":
-                if danmaku_id := await scraper.get_danmaku_id_from_url(url): comments_data = await scraper.get_comments(danmaku_id)
-            elif provider == "bilibili":
+                raise ValueError(f"{provider} scraper not found or has wrong type.")            
+            if provider == "bilibili":
                 if ids := await scraper.get_ids_from_url(url): comments_data = await scraper.get_comments(f"{ids['aid']},{ids['cid']}")
             elif provider == "iqiyi":
                 if tvid := await scraper.get_tvid_from_url(url): comments_data = await scraper.get_comments(tvid)
