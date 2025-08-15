@@ -20,6 +20,21 @@ async def get_douban_client(
     pool: aiomysql.Pool = Depends(get_db_pool),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有可选豆瓣Cookie的httpx客户端。"""
+    # --- Start of new proxy logic ---
+    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+
+    proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
+        proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
+    )
+    proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
+
+    provider_setting = next((s for s in metadata_settings if s['provider_name'] == 'douban'), None)
+    use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
+
+    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+    # --- End of new proxy logic ---
     cookie = await crud.get_config_value(pool, "douban_cookie", "")
 
     headers = {
@@ -28,7 +43,7 @@ async def get_douban_client(
     if cookie:
         headers["Cookie"] = cookie
 
-    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True)
+    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxies)
 
 
 class DoubanSearchResult(BaseModel):

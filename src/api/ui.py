@@ -8,6 +8,7 @@ import logging
 from datetime import timedelta, datetime, timezone
 import aiomysql
 import httpx
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -410,7 +411,7 @@ async def refresh_anime_poster(
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """根据提供的URL，重新下载并缓存海报，更新数据库记录。"""
-    new_local_path = await download_image(request_data.image_url)
+    new_local_path = await download_image(request_data.image_url, pool)
     if not new_local_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
 
@@ -836,15 +837,18 @@ async def update_proxy_settings(
     await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
+class ProxyTestRequest(BaseModel):
+    proxy_url: Optional[str] = None
+
 @router.post("/proxy/test", response_model=Dict[str, float], summary="测试代理延迟")
 async def test_proxy_latency(
+    request: ProxyTestRequest,
     current_user: models.User = Depends(security.get_current_user),
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
-    """测试代理到常用域名的连接延迟。"""
-    proxy_url = await crud.get_config_value(pool, "proxy_url", "")
-    if not proxy_url:
-        raise HTTPException(status_code=400, detail="代理URL未配置。")
+    """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
+    proxy_url = request.proxy_url
+    proxy_to_use = proxy_url if proxy_url else None
 
     test_domains = [
         "https://api.bilibili.com", "https://www.iqiyi.com", "https://v.qq.com",
@@ -852,7 +856,7 @@ async def test_proxy_latency(
         "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
     ]
     latencies = {}
-    async with httpx.AsyncClient(proxy=proxy_url, timeout=10.0) as client:
+    async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
         for domain in test_domains:
             try:
                 start_time = time.time()
@@ -1408,10 +1412,9 @@ async def generic_import_task(
                 logger.info("首次成功获取弹幕，正在创建数据库主条目...")
                 await progress_callback(base_progress + 1, "正在创建数据库主条目...")
                 # 在创建主条目前，先下载并缓存图片
-                local_image_path = await download_image(image_url)
+                local_image_path = await download_image(image_url, pool, provider)
                 # 修正：将 local_image_path 传递给 get_or_create_anime
                 anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url, local_image_path)
-                anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url)
                 await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
                 source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
                 logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")

@@ -6,8 +6,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-
-from .. import models, security
+import aiomysql
+from .. import crud, models, security
+from ..database import get_db_pool
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -15,13 +16,29 @@ router = APIRouter()
 
 async def get_imdb_client(
     current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有特定请求头的 httpx 客户端，以模拟浏览器访问。"""
+    # --- Start of new proxy logic ---
+    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+
+    proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
+        proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
+    )
+    proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
+
+    provider_setting = next((s for s in metadata_settings if s['provider_name'] == 'imdb'), None)
+    use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
+
+    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+    # --- End of new proxy logic ---
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7", # 优先请求英文内容以获得更规范的数据
     }
-    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True)
+    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxies)
 
 
 class ImdbSearchResult(BaseModel):

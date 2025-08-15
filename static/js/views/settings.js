@@ -194,9 +194,16 @@ async function handleTestProxy() {
     proxyTestResults.classList.remove('hidden');
     proxyTestResults.textContent = '正在测试...';
     testProxyBtn.disabled = true;
+
+    const proxyUrlToTest = document.getElementById('proxy-url').value.trim();
+    const payload = { proxy_url: proxyUrlToTest };
+
     try {
-        const latencies = await apiFetch('/api/ui/proxy/test', { method: 'POST' });
-        let resultsText = '测试结果 (ms):\n';
+        const latencies = await apiFetch('/api/ui/proxy/test', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        let resultsText = proxyUrlToTest ? '代理连接测试结果 (ms):\n' : '无代理直接连接测试结果 (ms):\n';
         for (const [domain, latency] of Object.entries(latencies)) {
             const status = latency === -1 ? '失败' : `${latency.toFixed(0)} ms`;
             resultsText += `${domain}: ${status}\n`;
