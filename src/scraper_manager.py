@@ -28,10 +28,11 @@ class ScraperManager:
         # 注意：加载逻辑现在是异步的，将在应用启动时调用
 
     def _load_public_key(self):
-        """从 config/public_key.pem 加载公钥。"""
-        key_path = Path(__file__).parent.parent / "config" / "public_key.pem"
+        """从 src/public_key.pem 加载公钥。"""
+        # 公钥是应用代码的一部分，而不是用户配置。
+        key_path = Path(__file__).parent / "public_key.pem"
         if not key_path.exists():
-            logging.getLogger(__name__).warning("公钥文件 'config/public_key.pem' 未找到。所有搜索源都将无法通过验证。")
+            logging.getLogger(__name__).warning("公钥文件 'src/public_key.pem' 未找到。所有搜索源都将无法通过验证。")
             self._public_key = None
             return
         
