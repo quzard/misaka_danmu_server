@@ -160,14 +160,20 @@ function handleTaskSelection(e) {
 }
 
 function updateTaskActionButtons() {
-    const allTasks = taskListUl.querySelectorAll('.task-item');
+    const allTasks = Array.from(taskListUl.querySelectorAll('.task-item'));
     const selectedTasks = Array.from(taskListUl.querySelectorAll('.task-item.selected'));
     const firstSelectedTask = selectedTasks.length > 0 ? selectedTasks[0] : null;
 
     // Handle "Select All" button
     if (selectAllRunningTasksBtn) {
-        selectAllRunningTasksBtn.disabled = allTasks.length === 0;
-        if (allTasks.length > 0 && selectedTasks.length === allTasks.length) {
+        const selectableTasks = allTasks.filter(task => task.dataset.status !== '运行中');
+        const selectedIds = new Set(selectedTasks.map(t => t.dataset.taskId));
+        const selectableIds = new Set(selectableTasks.map(t => t.dataset.taskId));
+
+        selectAllRunningTasksBtn.disabled = selectableTasks.length === 0;
+
+        const isAllSelectableSelected = selectableIds.size > 0 && selectableIds.size === selectedIds.size && [...selectableIds].every(id => selectedIds.has(id));
+        if (isAllSelectableSelected) {
             selectAllRunningTasksBtn.textContent = '取消全选';
         } else {
             selectAllRunningTasksBtn.textContent = '全选';
@@ -395,15 +401,25 @@ async function handleAbortRunningTask() {
 }
 
 function handleSelectAllRunningTasks() {
-    const taskItems = taskListUl.querySelectorAll('.task-item');
-    if (taskItems.length === 0) return;
+    const allTasks = Array.from(taskListUl.querySelectorAll('.task-item'));
+    const selectableTasks = allTasks.filter(task => task.dataset.status !== '运行中');
+    const nonSelectableTasks = allTasks.filter(task => task.dataset.status === '运行中');
+    const selectedTasks = allTasks.filter(task => task.classList.contains('selected'));
 
-    // If at least one item is not selected, we select all. Otherwise, we deselect all.
-    const shouldSelectAll = Array.from(taskItems).some(item => !item.classList.contains('selected'));
+    if (selectableTasks.length === 0) return;
 
-    taskItems.forEach(item => {
-        item.classList.toggle('selected', shouldSelectAll);
-    });
+    const selectableIds = new Set(selectableTasks.map(t => t.dataset.taskId));
+    const selectedIds = new Set(selectedTasks.map(t => t.dataset.taskId));
+    const isAllSelectableSelected = selectableIds.size === selectedIds.size && [...selectableIds].every(id => selectedIds.has(id));
+
+    if (isAllSelectableSelected) {
+        // Action: Deselect all
+        allTasks.forEach(item => item.classList.remove('selected'));
+    } else {
+        // Action: Select all selectable, and deselect all non-selectable
+        selectableTasks.forEach(item => item.classList.add('selected'));
+        nonSelectableTasks.forEach(item => item.classList.remove('selected'));
+    }
 
     updateTaskActionButtons();
 }
