@@ -402,11 +402,15 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                             </div>
                         </div>
                         <div id="bili-login-status">正在检查登录状态...</div>
+                        </div>
                         <div id="bili-login-controls">
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
                         </div>
+                        <div class="bili-disclaimer-agreement">
+                            <input type="checkbox" id="bili-disclaimer-checkbox">
+                            <label for="bili-disclaimer-checkbox">我已阅读并同意以下免责声明</label>
+                        </div>
                         <p class="bili-login-disclaimer">
-                            非官方公开接口登录免责声明
                             登录接口由 <a href="https://github.com/SocialSisterYi/bilibili-API-collect" target="_blank" rel="noopener noreferrer">bilibili-API-collect</a> 提供，为Blibili官方非公开接口。
                             您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
                         </p>
