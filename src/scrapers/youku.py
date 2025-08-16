@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import aiomysql
 import hashlib
 import json
 import logging
@@ -9,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional, Union, Callable
 from collections import defaultdict
 from urllib.parse import urlencode
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -94,8 +94,8 @@ class YoukuScraper(BaseScraper):
     provider_name = "youku"
     _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         # Regexes from C#
         self.year_reg = re.compile(r"[12][890][0-9][0-9]")
         self.unused_words_reg = re.compile(r"<[^>]+>|【.+?】")

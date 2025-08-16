@@ -3,12 +3,12 @@ import re
 import json
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-import aiomysql
 from .. import crud, models, security
-from ..database import get_db_pool
+from ..database import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -16,13 +16,13 @@ router = APIRouter()
 
 async def get_imdb_client(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有特定请求头的 httpx 客户端，以模拟浏览器访问。"""
     # --- Start of new proxy logic ---
-    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
-    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
-    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(session)
 
     proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
         proxy_url_task, proxy_enabled_globally_task, metadata_settings_task

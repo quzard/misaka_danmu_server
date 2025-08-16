@@ -13,7 +13,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Mapping, Optional
 from urllib.parse import urlencode, urlparse
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
@@ -202,8 +202,8 @@ class RrspDanmuItem(BaseModel):
 class RenrenScraper(BaseScraper):
     provider_name = "renren"
 
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         self.client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0

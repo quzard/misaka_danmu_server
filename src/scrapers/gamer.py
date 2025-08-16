@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 from bs4 import BeautifulSoup
 from opencc import OpenCC
@@ -28,9 +28,8 @@ class GamerScraper(BaseScraper):
         "gamer_user_agent": "User-Agent",
     }
     _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
-
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
         self.client = httpx.AsyncClient(
@@ -46,8 +45,9 @@ class GamerScraper(BaseScraper):
         if self._config_loaded:
             return
         
-        self._cookie = await crud.get_config_value(self.pool, "gamer_cookie", "")
-        user_agent = await crud.get_config_value(self.pool, "gamer_user_agent", "")
+        async with self._session_factory() as session:
+            self._cookie = await crud.get_config_value(session, "gamer_cookie", "")
+            user_agent = await crud.get_config_value(session, "gamer_user_agent", "")
 
         if self._cookie:
             self.client.headers["Cookie"] = self._cookie
@@ -74,7 +74,8 @@ class GamerScraper(BaseScraper):
             
             if new_cookie_str and new_cookie_str != self._cookie:
                 self.logger.info("Gamer: Cookie 刷新成功，正在更新数据库...")
-                await crud.update_config_value(self.pool, "gamer_cookie", new_cookie_str)
+                async with self._session_factory() as session:
+                    await crud.update_config_value(session, "gamer_cookie", new_cookie_str)
                 self._cookie = new_cookie_str # 更新内部状态
                 return True
             else:

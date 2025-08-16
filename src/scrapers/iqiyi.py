@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
 from collections import defaultdict
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
 
 from ..config_manager import ConfigManager
@@ -218,8 +219,8 @@ class IqiyiScraper(BaseScraper):
         re.IGNORECASE
     )
 
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}

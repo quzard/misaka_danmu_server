@@ -4,10 +4,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
 import json
 from .config_manager import ConfigManager
-from .database import create_db_pool, close_db_pool, init_db_tables, create_initial_admin_user
+from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api.ui import router as ui_router, auth_router
 from .api.bangumi_api import router as bangumi_router
 from .api.tmdb_api import router as tmdb_router
@@ -35,16 +35,18 @@ async def lifespan(app: FastAPI):
     # --- Startup Logic ---
     setup_logging()
 
-
-    pool = await create_db_pool(app)
+    # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
     await init_db_tables(app)
+    session_factory = app.state.db_session_factory
+
     # 新增：在启动时清理任何未完成的任务
-    interrupted_count = await crud.mark_interrupted_tasks_as_failed(pool)
-    if interrupted_count > 0:
-        logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
+    async with session_factory() as session:
+        interrupted_count = await crud.mark_interrupted_tasks_as_failed(session)
+        if interrupted_count > 0:
+            logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
     
     # 新增：初始化配置管理器
-    app.state.config_manager = ConfigManager(pool)
+    app.state.config_manager = ConfigManager(session_factory)
     # 新增：集中定义所有默认配置
     default_configs = {
         # 缓存 TTL
@@ -76,21 +78,21 @@ async def lifespan(app: FastAPI):
     }
     await app.state.config_manager.register_defaults(default_configs)
 
-    app.state.scraper_manager = ScraperManager(pool, app.state.config_manager)
+    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
     await app.state.scraper_manager.load_and_sync_scrapers()
     # 新增：初始化元数据源管理器
-    app.state.metadata_manager = MetadataSourceManager(pool)
+    app.state.metadata_manager = MetadataSourceManager(session_factory)
     await app.state.metadata_manager.initialize()
 
-    app.state.task_manager = TaskManager(pool)
+    app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
-        pool, app.state.task_manager, app.state.scraper_manager, app.state.config_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(pool, app.state.task_manager, app.state.scraper_manager)
+    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager)
     await app.state.scheduler_manager.start()
     
     yield
@@ -102,7 +104,7 @@ async def lifespan(app: FastAPI):
             await app.state.cleanup_task
         except asyncio.CancelledError:
             pass
-    await close_db_pool(app)
+    await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
     if hasattr(app.state, "task_manager"):
@@ -146,12 +148,13 @@ async def log_not_found_requests(request: Request, call_next):
 
 async def cleanup_task(app: FastAPI):
     """定期清理过期缓存和OAuth states的后台任务。"""
-    pool = app.state.db_pool
+    session_factory = app.state.db_session_factory
     while True:
         try:
             await asyncio.sleep(3600) # 每小时清理一次
-            await crud.clear_expired_cache(pool)
-            await crud.clear_expired_oauth_states(app.state.db_pool)
+            async with session_factory() as session:
+                await crud.clear_expired_cache(session)
+                await crud.clear_expired_oauth_states(session)
         except asyncio.CancelledError:
             break
         except Exception as e:

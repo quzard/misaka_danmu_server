@@ -4,7 +4,7 @@ import time
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -156,9 +156,8 @@ class MgtvScraper(BaseScraper):
         re.IGNORECASE
     )
 
-
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         self.client = httpx.AsyncClient(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

@@ -1,10 +1,11 @@
 import asyncio
-import aiomysql
 import logging
 import traceback
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Tuple
-from uuid import uuid4
+from typing import Any, Callable, Coroutine, Dict, List, Tuple, Optional
+from uuid import uuid4, UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import models, crud
 
@@ -25,15 +26,15 @@ class Task:
     def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine]):
         self.task_id = task_id
         self.title = title
-        self.coro_factory = coro_factory
+        self.coro_factory: Callable[[AsyncSession, Callable], Coroutine] = coro_factory
         self.done_event = asyncio.Event()
         self.pause_event = asyncio.Event()
         self.running_coro_task: Optional[asyncio.Task] = None
         self.pause_event.set() # 默认为运行状态 (事件被设置)
 
 class TaskManager:
-    def __init__(self, pool: aiomysql.Pool):
-        self._pool = pool
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+        self._session_factory = session_factory
         self._queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
         self._current_task: Optional[Task] = None
@@ -64,60 +65,62 @@ class TaskManager:
             self._current_task = task
             self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id})")
             
-            await crud.update_task_progress_in_history(
-                self._pool, task.task_id, TaskStatus.RUNNING, 0, "正在初始化..."
-            )
-            
-            try:
-                progress_callback = self._get_progress_callback(task)
-                actual_coroutine = task.coro_factory(progress_callback)
-                # 将协程包装在Task中，以便可以取消它
-                running_task = asyncio.create_task(actual_coroutine)
-                task.running_coro_task = running_task
-                await running_task
+            async with self._session_factory() as session:
+                await crud.update_task_progress_in_history(
+                    session, task.task_id, TaskStatus.RUNNING, 0, "正在初始化..."
+                )
                 
-                # 对于没有引发 TaskSuccess 异常而正常结束的任务，使用通用成功消息
-                await crud.finalize_task_in_history(
-                    self._pool, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
-                )
-                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成。")
-            except TaskSuccess as e:
-                # 捕获 TaskSuccess 异常，使用其消息作为最终描述
-                final_message = str(e) if str(e) else "任务成功完成"
-                await crud.finalize_task_in_history(
-                    self._pool, task.task_id, TaskStatus.COMPLETED, final_message
-                )
-                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
-            except asyncio.CancelledError:
-                # 当任务被中止时，会捕获此异常
-                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
-                await crud.finalize_task_in_history(
-                    self._pool, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
-                )
-            except Exception:
-                error_message = "任务执行失败"
-                await crud.finalize_task_in_history(
-                    self._pool, task.task_id, TaskStatus.FAILED, error_message
-                )
-                self.logger.error(f"任务 '{task.title}' (ID: {task.task_id}) 执行失败: {traceback.format_exc()}")
-            finally:
-                self._queue.task_done()
-                task.done_event.set()
+                try:
+                    progress_callback = self._get_progress_callback(task, session)
+                    actual_coroutine = task.coro_factory(session, progress_callback)
+                    # 将协程包装在Task中，以便可以取消它
+                    running_task = asyncio.create_task(actual_coroutine)
+                    task.running_coro_task = running_task
+                    await running_task
+                    
+                    # 对于没有引发 TaskSuccess 异常而正常结束的任务，使用通用成功消息
+                    await crud.finalize_task_in_history(
+                        session, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
+                    )
+                    self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成。")
+                except TaskSuccess as e:
+                    # 捕获 TaskSuccess 异常，使用其消息作为最终描述
+                    final_message = str(e) if str(e) else "任务成功完成"
+                    await crud.finalize_task_in_history(
+                        session, task.task_id, TaskStatus.COMPLETED, final_message
+                    )
+                    self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
+                except asyncio.CancelledError:
+                    # 当任务被中止时，会捕获此异常
+                    self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
+                    await crud.finalize_task_in_history(
+                        session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
+                    )
+                except Exception:
+                    error_message = "任务执行失败"
+                    await crud.finalize_task_in_history(
+                        session, task.task_id, TaskStatus.FAILED, error_message
+                    )
+                    self.logger.error(f"任务 '{task.title}' (ID: {task.task_id}) 执行失败: {traceback.format_exc()}")
+                finally:
+                    self._queue.task_done()
+                    task.done_event.set()
 
-    async def submit_task(self, coro_factory: Callable[[Callable], Coroutine], title: str) -> Tuple[str, asyncio.Event]:
+    async def submit_task(self, coro_factory: Callable[[AsyncSession, Callable], Coroutine], title: str) -> Tuple[str, asyncio.Event]:
         """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。"""
         task_id = str(uuid4())
         task = Task(task_id, title, coro_factory)
         
-        await crud.create_task_in_history(
-            self._pool, task_id, title, TaskStatus.PENDING, "等待执行..."
-        )
+        async with self._session_factory() as session:
+            await crud.create_task_in_history(
+                session, task_id, title, TaskStatus.PENDING, "等待执行..."
+            )
         
         await self._queue.put(task)
         self.logger.info(f"任务 '{title}' 已提交，ID: {task_id}")
         return task_id, task.done_event
 
-    def _get_progress_callback(self, task: Task) -> Callable:
+    def _get_progress_callback(self, task: Task, session: AsyncSession) -> Callable:
         """为特定任务创建一个可暂停的回调闭包。"""
         async def pausable_callback(progress: int, description: str):
             # 核心暂停逻辑：在每次更新进度前，检查暂停事件。
@@ -127,7 +130,7 @@ class TaskManager:
             # 这是一个“即发即忘”的调用，以避免阻塞正在运行的任务
             asyncio.create_task(
                 crud.update_task_progress_in_history(
-                    self._pool, task.task_id, TaskStatus.RUNNING, int(progress), description
+                    session, task.task_id, TaskStatus.RUNNING, int(progress), description
                 )
             )
         return pausable_callback
@@ -171,19 +174,21 @@ class TaskManager:
     async def pause_task(self, task_id: str) -> bool:
         """如果ID匹配，则暂停当前正在运行的任务。"""
         if self._current_task and self._current_task.task_id == task_id:
-            self._current_task.pause_event.clear()
-            await crud.update_task_status(self._pool, self._current_task.task_id, TaskStatus.PAUSED)
-            self.logger.info(f"已暂停任务 '{self._current_task.title}' (ID: {task_id})。")
-            return True
+            async with self._session_factory() as session:
+                self._current_task.pause_event.clear()
+                await crud.update_task_status(session, self._current_task.task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停任务 '{self._current_task.title}' (ID: {task_id})。")
+                return True
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
     async def resume_task(self, task_id: str) -> bool:
         """如果ID匹配，则恢复当前已暂停的任务。"""
         if self._current_task and self._current_task.task_id == task_id:
-            self._current_task.pause_event.set()
-            await crud.update_task_status(self._pool, self._current_task.task_id, TaskStatus.RUNNING)
-            self.logger.info(f"已恢复任务 '{self._current_task.title}' (ID: {task_id})。")
-            return True
+            async with self._session_factory() as session:
+                self._current_task.pause_event.set()
+                await crud.update_task_status(session, self._current_task.task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复任务 '{self._current_task.title}' (ID: {task_id})。")
+                return True
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
         return False

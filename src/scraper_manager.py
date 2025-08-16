@@ -2,7 +2,7 @@ import asyncio
 import importlib
 import inspect
 import logging
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Type
 
@@ -11,13 +11,12 @@ from .config_manager import ConfigManager
 from .models import ProviderSearchInfo
 from . import crud
 
-
 class ScraperManager:
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         self.scrapers: Dict[str, BaseScraper] = {}
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
-        self.pool = pool
+        self._session_factory = session_factory
         self.config_manager = config_manager
         # 注意：加载逻辑现在是异步的，将在应用启动时调用
 
@@ -85,15 +84,17 @@ class ScraperManager:
                 logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)
         
         # 新增：在同步新搜索源之前，先从数据库中移除不再存在的过时搜索源。
-        await crud.remove_stale_scrapers(self.pool, discovered_providers)
+        async with self._session_factory() as session:
+            await crud.remove_stale_scrapers(session, discovered_providers)
         
-        await crud.sync_scrapers_to_db(self.pool, discovered_providers)
-        settings_list = await crud.get_all_scraper_settings(self.pool)
+        async with self._session_factory() as session:
+            await crud.sync_scrapers_to_db(session, discovered_providers)
+            settings_list = await crud.get_all_scraper_settings(session)
         self.scraper_settings = {s['provider_name']: s for s in settings_list}
 
         # Instantiate all discovered scrapers
         for provider_name, scraper_class in self._scraper_classes.items():
-            self.scrapers[provider_name] = scraper_class(self.pool, self.config_manager)
+            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager)
             setting = self.scraper_settings.get(provider_name)
             if setting:
                 status = "已启用" if setting.get('is_enabled') else "已禁用"

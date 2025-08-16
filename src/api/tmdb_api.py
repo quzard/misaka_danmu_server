@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Path
 from pydantic import BaseModel, Field, ValidationError
@@ -10,7 +10,7 @@ from typing import List, Dict, Optional, Any
 
 from .. import crud, models, security
 from ..config import settings
-from ..database import get_db_pool
+from ..database import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -43,13 +43,13 @@ def _clean_movie_title(title: Optional[str]) -> Optional[str]:
     return cleaned_title
 
 
-async def _get_robust_image_base_url(pool: aiomysql.Pool) -> str:
+async def _get_robust_image_base_url(session: AsyncSession) -> str:
     """
     获取TMDB图片基础URL，并对其进行健壮性处理。
     如果用户只配置了域名，则自动附加默认的尺寸路径。
     """
     image_base_url_config = await crud.get_config_value(
-        pool, "tmdb_image_base_url", "https://image.tmdb.org/t/p/w500"
+        session, "tmdb_image_base_url", "https://image.tmdb.org/t/p/w500"
     )
     
     # 如果配置中不包含 /t/p/ 路径，说明用户可能只填写了域名
@@ -61,13 +61,13 @@ async def _get_robust_image_base_url(pool: aiomysql.Pool) -> str:
 
 async def get_tmdb_client(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有 TMDB 授权的 httpx 客户端。"""
     # Proxy logic
-    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
-    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
-    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(session)
 
     proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
         proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
@@ -81,7 +81,7 @@ async def get_tmdb_client(
 
     # Fetch all configs in parallel
     keys = ["tmdb_api_key", "tmdb_api_base_url"]
-    tasks = [crud.get_config_value(pool, key, "") for key in keys]
+    tasks = [crud.get_config_value(session, key, "") for key in keys]
     api_key, domain = await asyncio.gather(*tasks)
 
     if not api_key:
@@ -185,10 +185,10 @@ class TMDBSeasonDetails(BaseModel):
 async def search_tmdb_subjects(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_tmdb_client),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"tmdb_search_tv_{keyword}"
-    cached_results = await crud.get_cache(pool, cache_key)
+    cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"TMDB 电视剧搜索 '{keyword}' 命中缓存。")
         # Pydantic will re-validate the cached data against the response_model
@@ -220,7 +220,7 @@ async def search_tmdb_subjects(
             return []
 
         # Fetch image base URL
-        image_base_url = await _get_robust_image_base_url(pool)
+        image_base_url = await _get_robust_image_base_url(session)
 
         # 步骤 3: 组合并格式化最终结果
         final_results = []
@@ -238,8 +238,8 @@ async def search_tmdb_subjects(
                 logger.error(f"验证 TMDB subject 详情失败: {e}")
 
         # 缓存结果
-        ttl_seconds_str = await crud.get_config_value(pool, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(pool, cache_key, final_results, int(ttl_seconds_str), provider='tmdb')
+        ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
+        await crud.set_cache(session, cache_key, final_results, int(ttl_seconds_str), provider='tmdb')
 
         return final_results
  
@@ -247,10 +247,10 @@ async def search_tmdb_subjects(
 async def search_tmdb_movie_subjects(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_tmdb_client),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"tmdb_search_movie_{keyword}"
-    cached_results = await crud.get_cache(pool, cache_key)
+    cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"TMDB 电影搜索 '{keyword}' 命中缓存。")
         return cached_results
@@ -281,7 +281,7 @@ async def search_tmdb_movie_subjects(
             return []
 
         # Fetch image base URL
-        image_base_url = await _get_robust_image_base_url(pool)
+        image_base_url = await _get_robust_image_base_url(session)
 
         results = [
             {
@@ -292,8 +292,8 @@ async def search_tmdb_movie_subjects(
             for subject in search_result.results
         ]
         # 缓存结果
-        ttl_seconds_str = await crud.get_config_value(pool, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(pool, cache_key, results, int(ttl_seconds_str), provider='tmdb')
+        ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
+        await crud.set_cache(session, cache_key, results, int(ttl_seconds_str), provider='tmdb')
         return results
 
 
@@ -415,10 +415,10 @@ async def get_tmdb_details(
 async def get_tmdb_episode_groups(
     tmdb_id: int = Path(..., description="TMDB电视剧ID"),
     client: httpx.AsyncClient = Depends(get_tmdb_client),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"tmdb_episode_groups_{tmdb_id}"
-    cached_results = await crud.get_cache(pool, cache_key)
+    cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"TMDB 电视剧(ID: {tmdb_id})的剧集组列表命中缓存。")
         return cached_results
@@ -434,8 +434,8 @@ async def get_tmdb_episode_groups(
         data = response.json()
         results = [TMDBEpisodeGroup.model_validate(r) for r in data.get("results", [])]
         results_to_cache = [r.model_dump() for r in results]
-        ttl_seconds_str = await crud.get_config_value(pool, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(pool, cache_key, results_to_cache, int(ttl_seconds_str), provider='tmdb')
+        ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
+        await crud.set_cache(session, cache_key, results_to_cache, int(ttl_seconds_str), provider='tmdb')
         return results
 
 @router.get("/episode_group/{group_id}", response_model=models.EnrichedTMDBEpisodeGroupDetails, summary="获取特定剧集组的详情")
@@ -443,10 +443,10 @@ async def get_tmdb_episode_group_details(
     group_id: str = Path(..., description="TMDB剧集组ID"),
     tv_id: int = Query(..., description="TMDB电视剧ID, 用于获取图片"),
     client: httpx.AsyncClient = Depends(get_tmdb_client),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"tmdb_episode_group_details_{group_id}_{tv_id}"
-    cached_results = await crud.get_cache(pool, cache_key)
+    cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"TMDB 剧集组详情(ID: {group_id})命中缓存。")
         return cached_results
@@ -498,7 +498,7 @@ async def get_tmdb_episode_group_details(
                 return {}
 
         if season_numbers:
-            season_tasks = [fetch_season_stills(s_num) for s_num in season_numbers]
+            season_tasks = [fetch_season_stills(s_num) for s_num in season_numbers] # type: ignore
             season_results = await asyncio.gather(*season_tasks)
             for season_map in season_results:
                 image_map.update(season_map)
@@ -524,7 +524,7 @@ async def get_tmdb_episode_group_details(
         final_response_object = models.EnrichedTMDBEpisodeGroupDetails(**details.model_dump(exclude={'groups'}), groups=enriched_groups)
         
         # Cache the final object
-        ttl_seconds_str = await crud.get_config_value(pool, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(pool, cache_key, final_response_object.model_dump(), int(ttl_seconds_str), provider='tmdb')
+        ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
+        await crud.set_cache(session, cache_key, final_response_object.model_dump(), int(ttl_seconds_str), provider='tmdb')
 
         return final_response_object

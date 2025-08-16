@@ -1,6 +1,5 @@
 import asyncio
 import httpx
-import aiomysql
 import re
 import logging
 import html
@@ -8,6 +7,7 @@ import json
 from typing import List, Dict, Any, Optional, Union, Callable
 from pydantic import BaseModel, Field, ValidationError
 from collections import defaultdict
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from datetime import datetime
 from ..config_manager import ConfigManager
 from .base import BaseScraper, get_season_from_title
@@ -87,8 +87,8 @@ class TencentScraper(BaseScraper):
     """
     provider_name = "tencent"
 
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         # 修正：使用更健壮的正则表达式来过滤非正片内容
         # 合并了用户脚本中的关键词，并增加了对 "纯享版"、"会员版" 等常见衍生内容的过滤
         self._EPISODE_BLACKLIST_PATTERN = re.compile(

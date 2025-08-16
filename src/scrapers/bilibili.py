@@ -9,8 +9,7 @@ from urllib.parse import urlencode
 from typing import Any, Callable, Dict, List, Optional, Union
 from datetime import datetime
 from collections import defaultdict
-
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .. import crud
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -178,9 +177,8 @@ class BilibiliScraper(BaseScraper):
         61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
         36, 20, 34, 44, 52
     ]
-
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        super().__init__(pool, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        super().__init__(session_factory, config_manager)
         self.client = httpx.AsyncClient(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -219,7 +217,8 @@ class BilibiliScraper(BaseScraper):
         """
         if not hasattr(self, '_config_loaded') or self._config_loaded is False or force_refresh:
             self.logger.debug("Bilibili: 正在从数据库加载Cookie...")
-            cookie_str = await crud.get_config_value(self.pool, "bilibili_cookie", "")
+            async with self._session_factory() as session:
+                cookie_str = await crud.get_config_value(session, "bilibili_cookie", "")
             
             self.client.cookies.clear()
 
@@ -301,7 +300,8 @@ class BilibiliScraper(BaseScraper):
             
             if "SESSDATA" in self.client.cookies:
                 cookie_string = "; ".join(all_cookies)
-                await crud.update_config_value(self.pool, "bilibili_cookie", cookie_string)
+                async with self._session_factory() as session:
+                    await crud.update_config_value(session, "bilibili_cookie", cookie_string)
                 self.logger.info("Bilibili: 新的登录Cookie已保存到数据库。")
                 self._config_loaded = False
             else:
@@ -324,7 +324,8 @@ class BilibiliScraper(BaseScraper):
             return await self.poll_login_status(qrcode_key)
         elif action_name == "logout":
             # 从数据库中清除cookie
-            await crud.update_config_value(self.pool, "bilibili_cookie", "")
+            async with self._session_factory() as session:
+                await crud.update_config_value(session, "bilibili_cookie", "")
             self._config_loaded = False  # 强制下次请求时重新加载配置
             return {"message": "注销成功"}
         else:

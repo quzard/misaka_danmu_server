@@ -3,7 +3,7 @@ import re
 from typing import Any, Callable, Optional
 
 from datetime import datetime
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
 from .. import crud
@@ -38,7 +38,7 @@ async def webhook_search_and_dispatch_task(
     tvdb_id: Optional[str],
     webhook_source: str,
     progress_callback: Callable,
-    pool: aiomysql.Pool,
+    session: AsyncSession,
     manager: ScraperManager,
     task_manager: TaskManager,
 ):
@@ -50,7 +50,7 @@ async def webhook_search_and_dispatch_task(
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源
-        favorited_source = await crud.find_favorited_source_for_anime(pool, anime_title, season)
+        favorited_source = await crud.find_favorited_source_for_anime(session, anime_title, season)
         if favorited_source:
             logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['provider_name']}'，将直接使用此源。")
             progress_callback(10, f"找到已收藏的源: {favorited_source['provider_name']}")
@@ -63,7 +63,7 @@ async def webhook_search_and_dispatch_task(
                 season=season, current_episode_index=current_episode_index,
                 image_url=favorited_source['image_url'], douban_id=douban_id,
                 tmdb_id=tmdb_id, imdb_id=imdb_id, tvdb_id=tvdb_id,
-                progress_callback=cb, pool=pool, manager=manager,
+                progress_callback=cb, session=session, manager=manager,
                 task_manager=task_manager
             )
             await task_manager.submit_task(task_coro, task_title)
@@ -86,7 +86,7 @@ async def webhook_search_and_dispatch_task(
             raise TaskSuccess(f"Webhook 任务失败: 未找到 '{anime_title}' 的任何可用源。")
 
         # 3. 从所有源的返回结果中，根据类型、季度和标题相似度选择最佳匹配项
-        ordered_settings = await crud.get_all_scraper_settings(pool)
+        ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['provider_name']: s['display_order'] for s in ordered_settings}
 
         valid_candidates = []
@@ -125,7 +125,7 @@ async def webhook_search_and_dispatch_task(
             season=season, current_episode_index=best_match.currentEpisodeIndex,
             image_url=best_match.imageUrl, douban_id=douban_id,
             tmdb_id=tmdb_id, imdb_id=imdb_id, tvdb_id=tvdb_id,
-            progress_callback=cb, pool=pool, manager=manager,
+            progress_callback=cb, session=session, manager=manager,
             task_manager=task_manager
         )
         await task_manager.submit_task(task_coro, task_title)

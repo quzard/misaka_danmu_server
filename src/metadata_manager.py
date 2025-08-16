@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, List, Any
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 
 from . import crud
@@ -13,31 +13,33 @@ class MetadataSourceManager:
     """
     Manages the state and status of metadata sources.
     """
-    def __init__(self, pool: aiomysql.Pool):
-        self.pool = pool
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+        self._session_factory = session_factory
         self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb']
         # Ephemeral status, checked on startup
         self.connectivity_status: Dict[str, str] = {}
 
     async def initialize(self):
         """Syncs providers with DB and performs initial checks."""
-        await crud.sync_metadata_sources_to_db(self.pool, self.providers)
+        async with self._session_factory() as session:
+            await crud.sync_metadata_sources_to_db(session, self.providers)
         await self._check_connectivity()
         logger.info("元数据源管理器已初始化。")
 
     async def _check_connectivity(self):
         """Performs connectivity checks for sources that need it."""
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            # Check Douban
-            try:
-                douban_cookie = await crud.get_config_value(self.pool, "douban_cookie", "")
-                headers = {"User-Agent": "Mozilla/5.0"}
-                if douban_cookie:
-                    headers["Cookie"] = douban_cookie
-                await client.get("https://movie.douban.com/", headers=headers)
-                self.connectivity_status['douban'] = "可访问"
-            except Exception:
-                self.connectivity_status['douban'] = "访问失败"
+            async with self._session_factory() as session:
+                # Check Douban
+                try:
+                    douban_cookie = await crud.get_config_value(session, "douban_cookie", "")
+                    headers = {"User-Agent": "Mozilla/5.0"}
+                    if douban_cookie:
+                        headers["Cookie"] = douban_cookie
+                    await client.get("https://movie.douban.com/", headers=headers)
+                    self.connectivity_status['douban'] = "可访问"
+                except Exception:
+                    self.connectivity_status['douban'] = "访问失败"
             
             # Check IMDb
             try:
@@ -50,11 +52,12 @@ class MetadataSourceManager:
 
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
         """Gets all metadata sources with their persistent and ephemeral status."""
-        settings = await crud.get_all_metadata_source_settings(self.pool)
-        
-        # Get config statuses in parallel
-        config_keys = ["tmdb_api_key", "bangumi_client_id", "tvdb_api_key"]
-        config_values = await asyncio.gather(*[crud.get_config_value(self.pool, key, "") for key in config_keys])
+        async with self._session_factory() as session:
+            settings = await crud.get_all_metadata_source_settings(session)
+            
+            # Get config statuses in parallel
+            config_keys = ["tmdb_api_key", "bangumi_client_id", "tvdb_api_key"]
+            config_values = await asyncio.gather(*[crud.get_config_value(session, key, "") for key in config_keys])
         tmdb_key, bgm_id, tvdb_key = config_values
         
         full_status_list = []

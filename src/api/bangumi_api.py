@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from urllib.parse import urlencode, quote
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from .. import crud, models, security
 from ..config import settings
-from ..database import get_db_pool
+from ..database import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -169,10 +169,10 @@ class BangumiAuthState(BaseModel):
 
 async def get_bangumi_client(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有 Bangumi 授权的 httpx 客户端。"""
-    auth_info = await crud.get_bangumi_auth(pool, current_user.id)
+    auth_info = await crud.get_bangumi_auth(session, current_user.id)
     if not auth_info or not auth_info.get("access_token"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bangumi not authenticated")
 
@@ -181,8 +181,8 @@ async def get_bangumi_client(
     if expires_at and datetime.now() >= expires_at:
         # 尝试刷新 token
         try:
-            client_id_task = crud.get_config_value(pool, "bangumi_client_id", "")
-            client_secret_task = crud.get_config_value(pool, "bangumi_client_secret", "")
+            client_id_task = crud.get_config_value(session, "bangumi_client_id", "")
+            client_secret_task = crud.get_config_value(session, "bangumi_client_secret", "")
             client_id, client_secret = await asyncio.gather(client_id_task, client_secret_task)
             if not client_id or not client_secret:
                 raise ValueError("Bangumi App ID/Secret 未配置，无法刷新Token。")
@@ -201,7 +201,7 @@ async def get_bangumi_client(
                 auth_info["access_token"] = new_token_info.access_token
                 auth_info["refresh_token"] = new_token_info.refresh_token
                 auth_info["expires_at"] = datetime.now() + timedelta(seconds=new_token_info.expires_in)
-                await crud.save_bangumi_auth(pool, current_user.id, auth_info)
+                await crud.save_bangumi_auth(session, current_user.id, auth_info)
                 logger.info(f"用户 '{current_user.username}' 的 Bangumi token 已成功刷新。")
         except Exception as e:
             logger.error(f"刷新 Bangumi token 失败: {e}", exc_info=True)
@@ -219,13 +219,13 @@ async def get_bangumi_client(
 async def get_bangumi_auth_url(
     request: Request,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """生成用于 Bangumi OAuth 流程的重定向 URL。"""
     # 1. 创建并存储一个唯一的、有有效期的 state
-    state = await crud.create_oauth_state(pool, current_user.id)
+    state = await crud.create_oauth_state(session, current_user.id)
 
-    client_id = await crud.get_config_value(pool, "bangumi_client_id", "")
+    client_id = await crud.get_config_value(session, "bangumi_client_id", "")
     if not client_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bangumi App ID 未在设置中配置。")
 
@@ -245,25 +245,25 @@ async def get_bangumi_auth_url(
 async def bangumi_auth_callback(
     code: str = Query(...),
     state: str = Query(...),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     request: Request = None
 ):
     """处理来自 Bangumi 的 OAuth 回调，用 code 交换 token。"""
     # 1. 验证并消费 state，获取发起授权的用户ID
-    user_id = await crud.consume_oauth_state(pool, state)
+    user_id = await crud.consume_oauth_state(session, state)
     if user_id is None:
         logger.error(f"Bangumi OAuth回调失败：无效或已过期的 state '{state}'")
         return HTMLResponse("<h1>认证失败：无效的请求状态，请重新发起授权。</h1>", status_code=400)
 
     # 2. 从数据库获取用户信息
-    user_dict = await crud.get_user_by_id(pool, user_id)
+    user_dict = await crud.get_user_by_id(session, user_id)
     if not user_dict:
         logger.error(f"Bangumi OAuth回调失败：找不到与 state 关联的用户 ID '{user_id}'")
         return HTMLResponse("<h1>认证失败：找不到与此授权请求关联的用户。</h1>", status_code=404)
     user = models.User.model_validate(user_dict)
 
-    client_id_task = crud.get_config_value(pool, "bangumi_client_id", "")
-    client_secret_task = crud.get_config_value(pool, "bangumi_client_secret", "")
+    client_id_task = crud.get_config_value(session, "bangumi_client_id", "")
+    client_secret_task = crud.get_config_value(session, "bangumi_client_secret", "")
     client_id, client_secret = await asyncio.gather(client_id_task, client_secret_task)
     if not client_id or not client_secret:
         return HTMLResponse("<h1>认证失败：服务器未配置Bangumi App ID或App Secret。</h1>", status_code=500)
@@ -295,7 +295,7 @@ async def bangumi_auth_callback(
                 "refresh_token": token_info.refresh_token,
                 "expires_at": datetime.now() + timedelta(seconds=token_info.expires_in)
             }
-            await crud.save_bangumi_auth(pool, user.id, auth_to_save)
+            await crud.save_bangumi_auth(session, user.id, auth_to_save)
 
         # 返回一个HTML页面，该页面将关闭自身并通知父窗口
         return HTMLResponse("<script>window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); window.close();</script>")
@@ -306,9 +306,9 @@ async def bangumi_auth_callback(
 @router.get("/auth/state", response_model=BangumiAuthState, summary="获取 Bangumi 授权状态")
 async def get_bangumi_auth_state(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    auth_info = await crud.get_bangumi_auth(pool, current_user.id)
+    auth_info = await crud.get_bangumi_auth(session, current_user.id)
     if not auth_info:
         return BangumiAuthState(is_authenticated=False)
     return BangumiAuthState(
@@ -323,18 +323,18 @@ async def get_bangumi_auth_state(
 @router.delete("/auth", status_code=status.HTTP_204_NO_CONTENT, summary="注销 Bangumi 授权")
 async def deauthorize_bangumi(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    await crud.delete_bangumi_auth(pool, current_user.id)
+    await crud.delete_bangumi_auth(session, current_user.id)
 
 @router.get("/search", response_model=List[Dict[str, Any]], summary="搜索 Bangumi 作品")
 async def search_bangumi_subjects(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_bangumi_client),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"bgm_search_{keyword}"
-    cached_results = await crud.get_cache(pool, cache_key)
+    cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"Bangumi 搜索 '{keyword}' 命中缓存。")
         # The response model is List[Dict[str, Any]], so no strict validation is needed here
@@ -394,7 +394,7 @@ async def search_bangumi_subjects(
                     logger.error(f"验证 Bangumi subject 详情失败: {e}")
         
         # 缓存结果
-        ttl_seconds_str = await crud.get_config_value(pool, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(pool, cache_key, final_results, int(ttl_seconds_str), provider='bangumi')
+        ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
+        await crud.set_cache(session, cache_key, final_results, int(ttl_seconds_str), provider='bangumi')
 
         return final_results

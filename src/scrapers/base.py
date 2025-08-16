@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import aiomysql
 from .. import crud
 from .. import models
 from ..config_manager import ConfigManager
@@ -72,9 +72,8 @@ class BaseScraper(ABC):
     所有搜索源的抽象基类。
     定义了搜索媒体、获取分集和获取弹幕的通用接口。
     """
-
-    def __init__(self, pool: aiomysql.Pool, config_manager: ConfigManager):
-        self.pool = pool
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        self._session_factory = session_factory
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client: Optional[httpx.AsyncClient] = None
@@ -86,11 +85,12 @@ class BaseScraper(ABC):
         """
         proxy_url_task = self.config_manager.get("proxy_url", "")
         proxy_enabled_globally_task = self.config_manager.get("proxy_enabled", "false")
-        scraper_settings_task = crud.get_all_scraper_settings(self.pool)
 
-        proxy_url, proxy_enabled_str, scraper_settings = await asyncio.gather(
-            proxy_url_task, proxy_enabled_globally_task, scraper_settings_task
-        )
+        async with self._session_factory() as session:
+            scraper_settings_task = crud.get_all_scraper_settings(session)
+            proxy_url, proxy_enabled_str, scraper_settings = await asyncio.gather(
+                proxy_url_task, proxy_enabled_globally_task, scraper_settings_task
+            )
         proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
 
         provider_setting = next((s for s in scraper_settings if s['provider_name'] == self.provider_name), None)
@@ -103,14 +103,16 @@ class BaseScraper(ABC):
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
         """从数据库缓存中获取数据。"""
-        return await crud.get_cache(self.pool, key)
+        async with self._session_factory() as session:
+            return await crud.get_cache(session, key)
 
     async def _set_to_cache(self, key: str, value: Any, config_key: str, default_ttl: int):
         """将数据存入数据库缓存，TTL从配置中读取。"""
         ttl_str = await self.config_manager.get(config_key, str(default_ttl))
         ttl = int(ttl_str)
         if ttl > 0:
-            await crud.set_cache(self.pool, key, value, ttl, provider=self.provider_name)
+            async with self._session_factory() as session:
+                await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
 
     # 每个子类都必须覆盖这个类属性
     provider_name: str

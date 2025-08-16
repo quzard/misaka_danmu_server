@@ -7,13 +7,13 @@ from typing import Callable
 from datetime import datetime
 from opencc import OpenCC
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
 from fastapi.routing import APIRoute
 
 from . import crud, models
-from .database import get_db_pool
+from .database import get_db_session
 from .scraper_manager import ScraperManager
 from .scrapers.bilibili import BilibiliScraper
 from .scrapers.iqiyi import IqiyiScraper
@@ -289,7 +289,7 @@ class DandanBatchMatchRequest(BaseModel):
 async def _search_implementation(
     search_term: str,
     episode: Optional[str],
-    pool: aiomysql.Pool
+    session: AsyncSession
 ) -> DandanSearchEpisodesResponse:
     """搜索接口的通用实现，避免代码重复。"""
     search_term = search_term.strip()
@@ -311,7 +311,7 @@ async def _search_implementation(
 
     # 使用解析后的信息进行数据库查询
     flat_results = await crud.search_episodes_in_library(
-        pool,
+        session,
         anime_title=title_to_search,
         episode_number=final_episode_to_search,
         season_number=season_to_search
@@ -419,7 +419,7 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
 
 async def get_token_from_path(
     token: str = Path(..., description="路径中的API授权令牌"),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     request: Request = None,
 ):
     """
@@ -431,28 +431,28 @@ async def get_token_from_path(
     request_path = request.url.path
     log_path = re.sub(r'^/api/[^/]+', '', request_path) # 从路径中移除 /api/{token} 部分
 
-    token_info = await crud.validate_api_token(pool, token)
+    token_info = await crud.validate_api_token(session, token)
     if not token_info:
         # 尝试记录失败的访问
-        token_record = await crud.get_api_token_by_token_str(pool, token)
+        token_record = await crud.get_api_token_by_token_str(session, token)
         if token_record:
             is_expired = token_record.get('expires_at') and token_record['expires_at'].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
-            await crud.create_token_access_log(pool, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
+            await crud.create_token_access_log(session, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
 
     # 2. UA 过滤
-    ua_filter_mode = await crud.get_config_value(pool, 'ua_filter_mode', 'off')
+    ua_filter_mode = await crud.get_config_value(session, 'ua_filter_mode', 'off')
     user_agent = request.headers.get("user-agent", "")
 
     if ua_filter_mode != 'off':
-        ua_rules = await crud.get_ua_rules(pool)
+        ua_rules = await crud.get_ua_rules(session)
         ua_list = [rule['ua_string'] for rule in ua_rules]
         
         is_matched = any(rule in user_agent for rule in ua_list)
 
         if ua_filter_mode == 'blacklist' and is_matched:
-            await crud.create_token_access_log(pool, token_info['id'], request.client.host, user_agent, log_status='denied_ua_blacklist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_blacklist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent is blacklisted")
         
         if ua_filter_mode == 'whitelist' and not is_matched:
@@ -460,7 +460,7 @@ async def get_token_from_path(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
     # 3. 记录成功访问
-    await crud.create_token_access_log(pool, token_info['id'], request.client.host, user_agent, log_status='allowed', path=log_path)
+    await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='allowed', path=log_path)
 
     return token
 
@@ -477,14 +477,14 @@ async def search_episodes_for_dandan(
     anime: str = Query(..., description="节目名称"),
     episode: Optional[str] = Query(None, description="分集标题 (通常是数字)"),
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     模拟 dandanplay 的 /api/v2/search/episodes 接口。
     它会搜索 **本地弹幕库** 中的番剧和分集信息。
     """
     search_term = anime.strip()
-    return await _search_implementation(search_term, episode, pool)
+    return await _search_implementation(search_term, episode, session)
 
 @implementation_router.get(
     "/search/anime",
@@ -496,7 +496,7 @@ async def search_anime_for_dandan(
     anime: Optional[str] = Query(None, description="节目名称 (兼容 anime)"),
     episode: Optional[str] = Query(None, description="分集标题 (此接口中未使用)"),
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     模拟 dandanplay 的 /api/v2/search/anime 接口。
@@ -509,7 +509,7 @@ async def search_anime_for_dandan(
             detail="Missing required query parameter: 'keyword' or 'anime'"
         )
 
-    db_results = await crud.search_animes_for_dandan(pool, search_term)
+    db_results = await crud.search_animes_for_dandan(session, search_term)
     
     animes = []
     for res in db_results:
@@ -540,7 +540,7 @@ async def search_anime_for_dandan(
 async def get_bangumi_details(
     bangumiId: str = Path(..., description="作品ID, A开头的备用ID, 或真实的Bangumi ID"),
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     模拟 dandanplay 的 /api/v2/bangumi/{bangumiId} 接口。
@@ -553,7 +553,7 @@ async def get_bangumi_details(
     elif bangumiId.isdigit():
         # 格式2: 纯数字的 Bangumi ID, 例如 "148099"
         # 我们需要通过 bangumi_id 找到我们自己数据库中的 anime_id
-        anime_id_int = await crud.get_anime_id_by_bangumi_id(pool, bangumiId)
+        anime_id_int = await crud.get_anime_id_by_bangumi_id(session, bangumiId)
 
 
     if anime_id_int is None:
@@ -563,7 +563,7 @@ async def get_bangumi_details(
             errorMessage=f"找不到与标识符 '{bangumiId}' 关联的作品。"
         )
 
-    details = await crud.get_anime_details_for_dandan(pool, anime_id_int)
+    details = await crud.get_anime_details_for_dandan(session, anime_id_int)
     if not details:
         return BangumiDetailsResponse(
             success=True,
@@ -602,18 +602,18 @@ async def get_bangumi_details(
 
     return BangumiDetailsResponse(bangumi=bangumi_details)
 
-async def _process_single_batch_match(item: DandanBatchMatchRequestItem, pool: aiomysql.Pool) -> DandanMatchResponse:
+async def _process_single_batch_match(item: DandanBatchMatchRequestItem, session: AsyncSession) -> DandanMatchResponse:
     """处理批量匹配中的单个文件，仅在精确匹配（1个结果）时返回成功。"""
     parsed_info = _parse_filename_for_match(item.fileName)
     if not parsed_info:
         return DandanMatchResponse(isMatched=False)
 
     # --- 步骤 1: 尝试 TMDB 精确匹配 ---
-    potential_animes = await crud.find_animes_for_matching(pool, parsed_info["title"])
+    potential_animes = await crud.find_animes_for_matching(session, parsed_info["title"])
     for anime in potential_animes:
         if anime.get("tmdb_id") and anime.get("tmdb_episode_group_id"):
             tmdb_results = await crud.find_episode_via_tmdb_mapping(
-                pool,
+                session,
                 tmdb_id=anime["tmdb_id"],
                 group_id=anime["tmdb_episode_group_id"],
                 custom_season=parsed_info.get("season"),
@@ -632,7 +632,7 @@ async def _process_single_batch_match(item: DandanBatchMatchRequestItem, pool: a
 
     # --- 步骤 2: 回退到旧的模糊搜索逻辑 ---
     results = await crud.search_episodes_in_library(
-        pool, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
+        session, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
     )
 
     # 优先处理被精确标记的源
@@ -678,7 +678,7 @@ async def _process_single_batch_match(item: DandanBatchMatchRequestItem, pool: a
 async def match_single_file(
     request: DandanBatchMatchRequestItem,
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     通过文件名匹配弹幕库。此接口不使用文件Hash。
@@ -693,14 +693,14 @@ async def match_single_file(
         return response
 
     # --- 步骤 1: 尝试 TMDB 精确匹配 ---
-    potential_animes = await crud.find_animes_for_matching(pool, parsed_info["title"])
+    potential_animes = await crud.find_animes_for_matching(session, parsed_info["title"])
     logger.info(f"为标题 '{parsed_info['title']}' 找到 {len(potential_animes)} 个可能的库内作品进行TMDB匹配。")
 
     for anime in potential_animes:
         if anime.get("tmdb_id") and anime.get("tmdb_episode_group_id"):
             logger.info(f"正在为作品 ID {anime['anime_id']} (TMDB ID: {anime['tmdb_id']}) 尝试 TMDB 映射匹配...")
             tmdb_results = await crud.find_episode_via_tmdb_mapping(
-                pool,
+                session,
                 tmdb_id=anime["tmdb_id"],
                 group_id=anime["tmdb_episode_group_id"],
                 custom_season=parsed_info.get("season"),
@@ -723,7 +723,7 @@ async def match_single_file(
     # --- 步骤 2: 回退到旧的模糊搜索逻辑 ---
     logger.info("TMDB 映射匹配失败或无可用映射，回退到标题模糊搜索。")
     results = await crud.search_episodes_in_library(
-        pool, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
+        session, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
     )
     logger.info(f"模糊搜索为 '{parsed_info['title']}' (季:{parsed_info.get('season')} 集:{parsed_info.get('episode')}) 找到 {len(results)} 条记录")
     
@@ -829,7 +829,7 @@ async def match_single_file(
 async def match_batch_files(
     request: DandanBatchMatchRequest,
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     批量匹配文件，只返回精确匹配（1个结果）的项。
@@ -837,7 +837,7 @@ async def match_batch_files(
     if len(request.requests) > 32:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="批量匹配请求不能超过32个文件。")
 
-    tasks = [_process_single_batch_match(item, pool) for item in request.requests]
+    tasks = [_process_single_batch_match(item, session) for item in request.requests]
     results = await asyncio.gather(*tasks)
     return results
 
@@ -850,7 +850,7 @@ async def get_external_comments_from_url(
     url: str = Query(..., description="外部视频链接 (支持 Bilibili, 腾讯, 爱奇艺, 优酷, 芒果TV)"),
     chConvert: int = Query(0, description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """
@@ -858,7 +858,7 @@ async def get_external_comments_from_url(
     结果会被缓存5小时。
     """
     cache_key = f"ext_danmaku_v2_{url}"
-    cached_comments = await crud.get_cache(pool, cache_key)
+    cached_comments = await crud.get_cache(session, cache_key)
     if cached_comments is not None:
         logger.info(f"外部弹幕缓存命中: {url}")
         comments_data = cached_comments
@@ -901,7 +901,7 @@ async def get_external_comments_from_url(
             raise HTTPException(status_code=500, detail=f"获取 {provider} 弹幕失败。")
 
         # 缓存结果5小时 (18000秒)
-        await crud.set_cache(pool, cache_key, comments_data, 18000)
+        await crud.set_cache(session, cache_key, comments_data, 18000)
 
     # 处理简繁转换
     if chConvert in [1, 2]:
@@ -931,14 +931,14 @@ async def get_comments_for_dandan(
     from_time: int = Query(0, alias="from", description="弹幕开始时间(秒)"),
     with_related: bool = Query(True, alias="withRelated", description="是否包含关联弹幕"),
     token: str = Depends(get_token_from_path),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
     注意：这里的 episode_id 实际上是我们数据库中的主键 ID。
     """
     # 注意：当前实现尚未使用 from_time 和 with_related 参数。
-    comments_data = await crud.fetch_comments(pool, episode_id)
+    comments_data = await crud.fetch_comments(session, episode_id)
 
     # 如果客户端请求了繁简转换，则在此处处理
     if ch_convert in [1, 2]:

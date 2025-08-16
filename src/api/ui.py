@@ -8,7 +8,9 @@ from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
 from datetime import timedelta, datetime, timezone
-import aiomysql
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 import httpx
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
@@ -27,7 +29,7 @@ from .tmdb_api import get_tmdb_client, _get_robust_image_base_url
 from .douban_api import get_douban_client
 from .imdb_api import get_imdb_client
 from ..config import settings
-from ..database import get_db_pool
+from ..database import get_db_session
 
 router = APIRouter()
 auth_router = APIRouter()
@@ -114,7 +116,7 @@ async def get_metadata_manager(request: Request) -> MetadataSourceManager:
 
 
 async def update_tmdb_mappings(
-    pool: aiomysql.Pool,
+    session: AsyncSession,
     client: httpx.AsyncClient,
     tmdb_tv_id: int,
     group_id: str
@@ -129,7 +131,7 @@ async def update_tmdb_mappings(
         group_details = models.TMDBEpisodeGroupDetails.model_validate(response.json())
         
         await crud.save_tmdb_episode_group_mappings(
-            pool=pool,
+            session=session,
             tmdb_tv_id=tmdb_tv_id,
             group_id=group_id,
             group_details=group_details
@@ -166,9 +168,9 @@ def _get_season_from_title(title: str) -> int:
 )
 async def search_anime_local(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
-    pool=Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    db_results = await crud.search_anime(pool, keyword)
+    db_results = await crud.search_anime(session, keyword)
     animes = [
         models.AnimeInfo(animeId=item["id"], animeTitle=item["title"], type=item["type"])
         for item in db_results
@@ -188,7 +190,7 @@ async def search_anime_provider(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -213,7 +215,7 @@ async def search_anime_provider(
             detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
         )
 
-    tmdb_api_key = await crud.get_config_value(pool, "tmdb_api_key", "")
+    tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
 
     if not tmdb_api_key:
         logger.info("TMDB API Key 未配置，跳过辅助搜索，直接进行全网搜索。")
@@ -221,7 +223,7 @@ async def search_anime_provider(
         logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
     else:
         logger.info("TMDB API Key 已配置，将执行元数据辅助搜索。")
-        tmdb_domain = await crud.get_config_value(pool, "tmdb_api_base_url", "https://api.themoviedb.org")
+        tmdb_domain = await crud.get_config_value(session, "tmdb_api_base_url", "https://api.themoviedb.org")
         cleaned_domain = tmdb_domain.rstrip('/')
         base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
         params = {"api_key": tmdb_api_key}
@@ -331,7 +333,7 @@ async def search_anime_provider(
         item.currentEpisodeIndex = current_episode_index_for_this_request
 
     # 新增：根据搜索源的显示顺序和标题相似度对结果进行排序
-    source_settings = await crud.get_all_scraper_settings(pool)
+    source_settings = await crud.get_all_scraper_settings(session)
     source_order_map = {s['provider_name']: s['display_order'] for s in source_settings}
 
     def sort_key(item: models.ProviderSearchInfo):
@@ -353,13 +355,13 @@ async def search_anime_provider(
 async def get_existing_episode_indices(
     title: str = Query(..., description="要查询的作品标题"),
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     根据一个作品的标题，查询弹幕库中该作品已存在的所有分集的序号列表。
     用于在“编辑导入”界面实现增量导入。
     """
-    return await crud.get_episode_indices_by_anime_title(pool, title)
+    return await crud.get_episode_indices_by_anime_title(session, title)
 
 
 
@@ -387,10 +389,10 @@ async def get_episodes_for_search_result(
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
-    db_results = await crud.get_library_anime(pool)
+    db_results = await crud.get_library_anime(session)
     # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
     animes = [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
     return models.LibraryResponse(animes=animes)
@@ -399,10 +401,10 @@ async def get_library(
 async def get_anime_full_details(
     anime_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定番剧的完整信息，包括所有元数据ID。"""
-    details = await crud.get_anime_full_details(pool, anime_id)
+    details = await crud.get_anime_full_details(session, anime_id)
     if not details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
     return models.AnimeFullDetails.model_validate(details)
@@ -412,11 +414,11 @@ async def edit_anime_info(
     anime_id: int,
     update_data: models.AnimeDetailUpdate,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     client: httpx.AsyncClient = Depends(get_tmdb_client)
 ):
     """更新指定番剧的标题、季度和元数据。"""
-    updated = await crud.update_anime_details(pool, anime_id, update_data)
+    updated = await crud.update_anime_details(session, anime_id, update_data)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到或更新失败")
     logger.info(f"用户 '{current_user.username}' 更新了番剧 ID: {anime_id} 的详细信息。")
@@ -426,7 +428,7 @@ async def edit_anime_info(
         logger.info(f"检测到TMDB ID和剧集组ID，开始更新映射表...")
         try:
             await update_tmdb_mappings(
-                pool=pool,
+                session=session,
                 client=client,
                 tmdb_tv_id=int(update_data.tmdb_id),
                 group_id=update_data.tmdb_episode_group_id
@@ -445,20 +447,18 @@ async def refresh_anime_poster(
     anime_id: int,
     request_data: RefreshPosterRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """根据提供的URL，重新下载并缓存海报，更新数据库记录。"""
-    new_local_path = await download_image(request_data.image_url, pool)
+    new_local_path = await download_image(request_data.image_url, session)
     if not new_local_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
 
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            # 同时更新原始URL和本地路径
-            affected_rows = await cursor.execute(
-                "UPDATE anime SET image_url = %s, local_image_path = %s WHERE id = %s",
-                (request_data.image_url, new_local_path, anime_id)
-            )
+    stmt = update(models.Anime).where(models.Anime.id == anime_id).values(image_url=request_data.image_url, local_image_path=new_local_path)
+    result = await session.execute(stmt)
+    await session.commit()
+    affected_rows = result.rowcount
+
     if affected_rows == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
@@ -467,10 +467,10 @@ async def refresh_anime_poster(
 async def get_source_details(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源的详细信息，包括其提供方名称。"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     return source_info
@@ -483,13 +483,13 @@ async def reassociate_anime_sources(
     source_anime_id: int,
     request_data: ReassociationRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """将一个作品的所有数据源移动到另一个作品，并删除原作品。"""
     if source_anime_id == request_data.target_anime_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="源作品和目标作品不能相同。")
 
-    success = await crud.reassociate_anime_sources(pool, source_anime_id, request_data.target_anime_id)
+    success = await crud.reassociate_anime_sources(session, source_anime_id, request_data.target_anime_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="源作品或目标作品未找到，或操作失败。")
     logger.info(f"用户 '{current_user.username}' 将作品 ID {source_anime_id} 的源关联到了 ID {request_data.target_anime_id}。")
@@ -499,16 +499,16 @@ async def reassociate_anime_sources(
 async def delete_source_from_anime(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个数据源及其所有关联的分集和弹幕。"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['provider_name']})"
-    task_coro = lambda callback: delete_source_task(source_id, pool, callback)
+    task_coro = lambda session, callback: delete_source_task(source_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {source_id} 的任务 (Task ID: {task_id})。")
@@ -521,7 +521,6 @@ class BulkDeleteEpisodesRequest(models.BaseModel):
 async def delete_bulk_episodes(
     request_data: BulkDeleteEpisodesRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来批量删除多个分集。"""
@@ -531,7 +530,7 @@ async def delete_bulk_episodes(
     task_title = f"批量删除 {len(request_data.episode_ids)} 个分集"
     
     # 注意：这里我们将整个列表传递给任务
-    task_coro = lambda callback: delete_bulk_episodes_task(request_data.episode_ids, pool, callback)
+    task_coro = lambda session, callback: delete_bulk_episodes_task(request_data.episode_ids, session, callback)
     
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -543,10 +542,10 @@ async def delete_bulk_episodes(
 async def toggle_source_favorite(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """切换指定数据源的精确标记状态。一个作品只能有一个精确标记的源。"""
-    toggled = await crud.toggle_source_favorite_status(pool, source_id)
+    toggled = await crud.toggle_source_favorite_status(session, source_id)
     if not toggled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     return
@@ -555,10 +554,10 @@ async def toggle_source_favorite(
 async def toggle_source_incremental_refresh(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """切换指定数据源的定时增量更新的启用/禁用状态。"""
-    toggled = await crud.toggle_source_incremental_refresh(pool, source_id)
+    toggled = await crud.toggle_source_incremental_refresh(session, source_id)
     if not toggled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     logger.info(f"用户 '{current_user.username}' 切换了源 ID {source_id} 的定时增量更新状态。")
@@ -575,30 +574,30 @@ class SourceDetail(models.BaseModel):
 async def get_anime_sources_for_anime(
     anime_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定作品关联的所有数据源列表。"""
-    return await crud.get_anime_sources(pool, anime_id)
+    return await crud.get_anime_sources(session, anime_id)
 
 @router.get("/library/source/{source_id}/episodes", response_model=List[models.EpisodeDetail], summary="获取数据源的所有分集")
 async def get_source_episodes(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    return await crud.get_episodes_for_source(pool, source_id)
+    return await crud.get_episodes_for_source(session, source_id)
 
 @router.put("/library/episode/{episode_id}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
     episode_id: int,
     update_data: models.EpisodeInfoUpdate,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """更新指定分集的标题、集数和链接。"""
     try:
-        updated = await crud.update_episode_info(pool, episode_id, update_data)
+        updated = await crud.update_episode_info(session, episode_id, update_data)
         if not updated:
             logger.warning(f"尝试更新一个不存在的分集 (ID: {episode_id})，操作被拒绝。")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
@@ -611,16 +610,16 @@ async def edit_episode_info(
 async def reorder_source_episodes(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务，按当前顺序重新编号指定数据源的所有分集。"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"重整集数: {source_info['title']} ({source_info['provider_name']})"
-    task_coro = lambda callback: reorder_episodes_task(source_id, pool, callback)
+    task_coro = lambda session, callback: reorder_episodes_task(source_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {source_id} 集数的任务 (Task ID: {task_id})。")
@@ -630,17 +629,17 @@ async def reorder_source_episodes(
 async def incremental_refresh_source(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务，增量刷新指定源，抓取比当前已收录分集多一集的弹幕"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
 
     # 获取当前最新分集
-    eps = await crud.get_episodes_for_source(pool, source_id)
+    eps = await crud.get_episodes_for_source(session, source_id)
     if len(eps) > 0:
         latest_episode_index = sorted(eps, key=lambda x: x['episode_index'])[-1]['episode_index']
     else:
@@ -650,15 +649,15 @@ async def incremental_refresh_source(
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {source_id}) 启动了增量刷新任务。")
 
     # 从新集信息创建任务
-    task_coro = lambda callback: incremental_refresh_task(source_id, next_episode_index, pool, scraper_manager, task_manager, callback, source_info["title"])
+    task_coro = lambda session, callback: incremental_refresh_task(source_id, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
     task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} - 尝试获取第{next_episode_index}集")
 
     return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "task_id": task_id}
 
-async def incremental_refresh_task(source_id: int, next_episode_index: int, pool: aiomysql.Pool, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
+async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
@@ -676,7 +675,7 @@ async def incremental_refresh_task(source_id: int, next_episode_index: int, pool
             douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
             imdb_id=None, tvdb_id=None,
             progress_callback=progress_callback,
-            pool=pool,
+            session=session,
             manager=manager,
             task_manager=task_manager)
     except Exception as e:
@@ -688,16 +687,16 @@ async def incremental_refresh_task(source_id: int, next_episode_index: int, pool
 async def delete_episode_from_source(
     episode_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个分集及其所有关联的弹幕。"""
-    episode_info = await crud.get_episode_for_refresh(pool, episode_id)
+    episode_info = await crud.get_episode_for_refresh(session, episode_id)
     if not episode_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
     task_title = f"删除分集: {episode_info['title']}"
-    task_coro = lambda callback: delete_episode_task(episode_id, pool, callback)
+    task_coro = lambda session, callback: delete_episode_task(episode_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episode_id} 的任务 (Task ID: {task_id})。")
@@ -707,19 +706,19 @@ async def delete_episode_from_source(
 async def refresh_single_episode(
     episode_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """为指定分集启动一个后台任务，重新获取其弹幕。"""
     # 检查分集是否存在，以提供更友好的404错误
-    episode = await crud.get_episode_for_refresh(pool, episode_id)
+    episode = await crud.get_episode_for_refresh(session, episode_id)
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
     
     logger.info(f"用户 '{current_user.username}' 请求刷新分集 ID: {episode_id} ({episode['title']})")
     
-    task_coro = lambda callback: refresh_episode_task(episode_id, pool, scraper_manager, callback)
+    task_coro = lambda session, callback: refresh_episode_task(episode_id, session, scraper_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, f"刷新分集: {episode['title']}")
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "task_id": task_id}
@@ -728,18 +727,18 @@ async def refresh_single_episode(
 async def refresh_anime(
     source_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """为指定数据源启动一个后台任务，删除其所有旧弹幕并从源重新获取。"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
     
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {source_id}) 启动了全量刷新任务。")
     
-    task_coro = lambda callback: full_refresh_task(source_id, pool, scraper_manager, task_manager, callback)
+    task_coro = lambda session, callback: full_refresh_task(source_id, session, scraper_manager, task_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']}")
 
     return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "task_id": task_id}
@@ -748,17 +747,17 @@ async def refresh_anime(
 async def delete_anime_from_library(
     anime_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个番剧及其所有关联数据。"""
     # Get title for task name
-    anime_details = await crud.get_anime_full_details(pool, anime_id)
+    anime_details = await crud.get_anime_full_details(session, anime_id)
     if not anime_details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
     
     task_title = f"删除作品: {anime_details['title']}"
-    task_coro = lambda callback: delete_anime_task(anime_id, pool, callback)
+    task_coro = lambda session, callback: delete_anime_task(anime_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {anime_id} 的任务 (Task ID: {task_id})。")
@@ -771,7 +770,6 @@ class BulkDeleteRequest(models.BaseModel):
 async def delete_bulk_sources(
     request_data: BulkDeleteRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来批量删除多个数据源。"""
@@ -779,7 +777,7 @@ async def delete_bulk_sources(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.source_ids)} 个数据源"
-    task_coro = lambda callback: delete_bulk_sources_task(request_data.source_ids, pool, callback)
+    task_coro = lambda session, callback: delete_bulk_sources_task(request_data.source_ids, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.source_ids)} 个源的任务 (Task ID: {task_id})。")
@@ -792,11 +790,11 @@ class ScraperSettingWithConfig(models.ScraperSetting):
 @router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """获取所有可用搜索源的列表及其配置（启用状态、顺序、可配置字段）。"""
-    settings = await crud.get_all_scraper_settings(pool)
+    settings = await crud.get_all_scraper_settings(session)
     
     full_settings = []
     for s in settings:
@@ -827,23 +825,23 @@ async def get_metadata_source_settings(
 async def update_metadata_source_settings(
     settings: List[models.MetadataSourceSettingUpdate],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """批量更新元数据源的启用状态、辅助搜索状态和显示顺序。"""
     # 修正：恢复使用专用的 `metadata_sources` 表来存储设置，
     # 这将调用 `crud.py` 中正确的函数，并解决之前遇到的状态保存问题。
-    await crud.update_metadata_sources_settings(pool, settings)
+    await crud.update_metadata_sources_settings(session, settings)
     logger.info(f"用户 '{current_user.username}' 更新了元数据源设置。")
 
 @router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
 async def update_scraper_settings(
     settings: List[models.ScraperSetting],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """批量更新搜索源的启用状态和显示顺序。"""
-    await crud.update_scrapers_settings(pool, settings)
+    await crud.update_scrapers_settings(session, settings)
     # 更新数据库后，触发 ScraperManager 重新加载搜索源
     await manager.load_and_sync_scrapers()
     logger.info(f"用户 '{current_user.username}' 更新了搜索源设置，已重新加载。")
@@ -874,11 +872,11 @@ class ProxySettingsUpdate(BaseModel):
 
 async def get_proxy_settings(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取全局代理配置。"""
-    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
-    proxy_enabled_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_task = crud.get_config_value(session, "proxy_enabled", "false")
     proxy_url, proxy_enabled_str = await asyncio.gather(proxy_url_task, proxy_enabled_task)
 
     proxy_enabled = proxy_enabled_str.lower() == 'true'
@@ -909,7 +907,7 @@ async def get_proxy_settings(
 async def update_proxy_settings(
     payload: ProxySettingsUpdate,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """更新全局代理配置。"""
     proxy_url = ""
@@ -925,8 +923,8 @@ async def update_proxy_settings(
         proxy_url = f"{payload.proxy_protocol}://{userinfo}{payload.proxy_host}:{payload.proxy_port}"
 
     tasks = [
-        crud.update_config_value(pool, "proxy_url", proxy_url),
-        crud.update_config_value(pool, "proxy_enabled", str(payload.proxy_enabled).lower())
+        crud.update_config_value(session, "proxy_url", proxy_url),
+        crud.update_config_value(session, "proxy_enabled", str(payload.proxy_enabled).lower())
     ]
     await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
@@ -941,8 +939,7 @@ class FullProxyTestResponse(BaseModel):
 @router.post("/proxy/test", response_model=FullProxyTestResponse, summary="测试代理连接和延迟")
 async def test_proxy_latency(
     request: ProxyTestRequest,
-    current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    current_user: models.User = Depends(security.get_current_user)
 ):
     """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
     proxy_url = request.proxy_url
@@ -1008,7 +1005,7 @@ async def test_proxy_latency(
 async def get_scraper_config(
     provider_name: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     scraper_class = manager.get_scraper_class(provider_name)
@@ -1030,7 +1027,7 @@ async def get_scraper_config(
     config_keys.append(blacklist_key)
 
     if not config_keys: return {}
-    tasks = [crud.get_config_value(pool, key, "") for key in config_keys]
+    tasks = [crud.get_config_value(session, key, "") for key in config_keys]
     values = await asyncio.gather(*tasks)
     
     return dict(zip(config_keys, values))
@@ -1040,7 +1037,7 @@ async def update_scraper_config(
     provider_name: str,
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     scraper_class = manager.get_scraper_class(provider_name)
@@ -1059,7 +1056,7 @@ async def update_scraper_config(
     # 允许更新通用的黑名单配置
     allowed_keys.append(f"{provider_name}_episode_blacklist_regex")
 
-    tasks = [crud.update_config_value(pool, key, value or "") for key, value in payload.items() if key in allowed_keys]
+    tasks = [crud.update_config_value(session, key, value or "") for key, value in payload.items() if key in allowed_keys]
     
     if tasks:
         await asyncio.gather(*tasks)
@@ -1073,11 +1070,11 @@ async def get_server_logs(current_user: models.User = Depends(security.get_curre
 @router.get("/config/tmdb", response_model=Dict[str, str], summary="获取TMDB配置")
 async def get_tmdb_settings(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取所有TMDB相关的配置。"""
     keys = ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"]
-    tasks = [crud.get_config_value(pool, key, "") for key in keys]
+    tasks = [crud.get_config_value(session, key, "") for key in keys]
     values = await asyncio.gather(*tasks)
     return dict(zip(keys, values))
 
@@ -1109,24 +1106,24 @@ async def execute_scraper_action(
 async def update_tmdb_settings(
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """批量更新TMDB相关的配置。"""
     tasks = []
     for key, value in payload.items():
         if key in ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"]:
-            tasks.append(crud.update_config_value(pool, key, value or ""))
+            tasks.append(crud.update_config_value(session, key, value or ""))
     await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了 TMDB 配置。")
     
 @router.get("/config/bangumi", response_model=Dict[str, str], summary="获取Bangumi配置")
 async def get_bangumi_settings(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取Bangumi OAuth相关的配置。"""
     keys = ["bangumi_client_id", "bangumi_client_secret"]
-    tasks = [crud.get_config_value(pool, key, "") for key in keys]
+    tasks = [crud.get_config_value(session, key, "") for key in keys]
     values = await asyncio.gather(*tasks)
     return dict(zip(keys, values))
 
@@ -1134,13 +1131,13 @@ async def get_bangumi_settings(
 async def update_bangumi_settings(
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """批量更新Bangumi OAuth相关的配置。"""
     tasks = []
     for key, value in payload.items():
         if key in ["bangumi_client_id", "bangumi_client_secret"]:
-            tasks.append(crud.update_config_value(pool, key, value or ""))
+            tasks.append(crud.update_config_value(session, key, value or ""))
     if tasks:
         await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了 Bangumi 配置。")
@@ -1149,33 +1146,33 @@ async def update_bangumi_settings(
 
 async def clear_all_caches(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """清除数据库中存储的所有缓存数据（如搜索结果、分集列表）。"""
-    deleted_count = await crud.clear_all_cache(pool)
+    deleted_count = await crud.clear_all_cache(session)
     logger.info(f"用户 '{current_user.username}' 清除了所有缓存，共 {deleted_count} 条。")
     return {"message": f"成功清除了 {deleted_count} 条缓存记录。"}
 
 @router.get("/tasks", response_model=List[models.TaskInfo], summary="获取所有后台任务的状态")
 async def get_all_tasks(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     search: Optional[str] = Query(None, description="按标题搜索"),
     status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed")
 ):
     """获取后台任务的列表和状态，支持搜索和过滤。"""
-    tasks = await crud.get_tasks_from_history(pool, search, status)
+    tasks = await crud.get_tasks_from_history(session, search, status)
     return [models.TaskInfo.model_validate(t) for t in tasks]
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")
 async def delete_task_from_history_endpoint(
     task_id: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。"""
-    task = await crud.get_task_from_history_by_id(pool, task_id)
+    task = await crud.get_task_from_history_by_id(session, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
@@ -1189,13 +1186,13 @@ async def delete_task_from_history_endpoint(
         if not aborted:
             # 这可能是一个竞态条件：在我们检查和中止之间，任务可能已经完成。
             # 重新检查数据库中的状态以确认。
-            task_after_check = await crud.get_task_from_history_by_id(pool, task_id)
+            task_after_check = await crud.get_task_from_history_by_id(session, task_id)
             if task_after_check and task_after_check['status'] in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
                 # 如果它仍然在运行/暂停，说明中止失败，可能因为它不是当前任务。
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能它不是当前正在执行的任务。")
             logger.info(f"任务 {task_id} 在中止前已完成，将直接删除历史记录。")
 
-    deleted = await crud.delete_task_from_history(pool, task_id)
+    deleted = await crud.delete_task_from_history(session, task_id)
     if not deleted:
         # 这不是一个严重错误，可能意味着任务在处理过程中已被删除。
         logger.info(f"在尝试删除时，任务 {task_id} 已不存在于历史记录中。")
@@ -1206,37 +1203,37 @@ async def delete_task_from_history_endpoint(
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
 async def get_all_api_tokens(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取所有为第三方播放器创建的 API Token。"""
-    tokens = await crud.get_all_api_tokens(pool)
+    tokens = await crud.get_all_api_tokens(session)
     return [models.ApiTokenInfo.model_validate(t) for t in tokens]
 
 @router.post("/tokens", response_model=models.ApiTokenInfo, status_code=status.HTTP_201_CREATED, summary="创建一个新的API Token")
 async def create_new_api_token(
     token_data: models.ApiTokenCreate,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """创建一个新的、随机的 API Token。"""
     # 生成一个由大小写字母和数字组成的20位随机字符串
     alphabet = string.ascii_letters + string.digits
     new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
     token_id = await crud.create_api_token(
-        pool, token_data.name, new_token_str, token_data.validity_period
+        session, token_data.name, new_token_str, token_data.validity_period
     )
     # 重新从数据库获取以包含所有字段
-    new_token = await crud.get_api_token_by_id(pool, token_id) # 假设这个函数存在
+    new_token = await crud.get_api_token_by_id(session, token_id) # 假设这个函数存在
     return models.ApiTokenInfo.model_validate(new_token)
 
 @router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个API Token")
 async def delete_api_token(
     token_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """根据ID删除一个 API Token。"""
-    deleted = await crud.delete_api_token(pool, token_id)
+    deleted = await crud.delete_api_token(session, token_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     return
@@ -1245,10 +1242,10 @@ async def delete_api_token(
 async def toggle_api_token_status(
     token_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """切换指定 API Token 的启用/禁用状态。"""
-    toggled = await crud.toggle_api_token(pool, token_id)
+    toggled = await crud.toggle_api_token(session, token_id)
     if not toggled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     return
@@ -1257,10 +1254,10 @@ async def toggle_api_token_status(
 async def get_config_item(
     config_key: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取数据库中单个配置项的值。"""
-    value = await crud.get_config_value(pool, config_key, "") # 默认为空字符串
+    value = await crud.get_config_value(session, config_key, "") # 默认为空字符串
     return {"key": config_key, "value": value}
 
 @router.put("/config/{config_key}", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定配置项的值")
@@ -1268,34 +1265,34 @@ async def update_config_item(
     config_key: str,
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """更新数据库中单个配置项的值。"""
     value = payload.get("value")
     if value is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing 'value' in request body")
     
-    await crud.update_config_value(pool, config_key, value)
+    await crud.update_config_value(session, config_key, value)
     logger.info(f"用户 '{current_user.username}' 更新了配置项 '{config_key}'。")
 
 @router.post("/config/webhook_api_key/regenerate", response_model=Dict[str, str], summary="重新生成Webhook API Key")
 async def regenerate_webhook_api_key(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     """生成一个新的、随机的Webhook API Key并保存到数据库。"""
     alphabet = string.ascii_letters + string.digits
     new_key = ''.join(secrets.choice(alphabet) for _ in range(20))
-    await crud.update_config_value(pool, "webhook_api_key", new_key)
+    await crud.update_config_value(session, "webhook_api_key", new_key)
     logger.info(f"用户 '{current_user.username}' 重新生成了 Webhook API Key。")
     return {"key": "webhook_api_key", "value": new_key}
 
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
 async def get_ua_rules(
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    rules = await crud.get_ua_rules(pool)
+    rules = await crud.get_ua_rules(session)
     return [models.UaRule.model_validate(r) for r in rules]
 
 class UaRuleCreate(models.BaseModel):
@@ -1305,24 +1302,24 @@ class UaRuleCreate(models.BaseModel):
 async def add_ua_rule(
     rule_data: UaRuleCreate,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     try:
-        rule_id = await crud.add_ua_rule(pool, rule_data.ua_string)
+        rule_id = await crud.add_ua_rule(session, rule_data.ua_string)
         # This is a bit inefficient but ensures we return the full object
-        rules = await crud.get_ua_rules(pool)
+        rules = await crud.get_ua_rules(session)
         new_rule = next((r for r in rules if r['id'] == rule_id), None)
         return models.UaRule.model_validate(new_rule)
-    except aiomysql.IntegrityError:
+    except Exception:
         raise HTTPException(status_code=409, detail="该UA规则已存在。")
 
 @router.delete("/ua-rules/{rule_id}", status_code=204, summary="删除UA规则")
 async def delete_ua_rule(
     rule_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    deleted = await crud.delete_ua_rule(pool, rule_id)
+    deleted = await crud.delete_ua_rule(session, rule_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到指定的规则ID。")
 
@@ -1330,9 +1327,9 @@ async def delete_ua_rule(
 async def get_token_logs(
     token_id: int,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    logs = await crud.get_token_access_logs(pool, token_id)
+    logs = await crud.get_token_access_logs(session, token_id)
     return [models.TokenAccessLog.model_validate(log) for log in logs]
 
 @router.get(
@@ -1342,13 +1339,13 @@ async def get_token_logs(
 )
 async def get_comments(
     episode_id: int,
-    pool=Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     # 检查episode是否存在，如果不存在则返回404
-    if not await crud.check_episode_exists(pool, episode_id):
+    if not await crud.check_episode_exists(session, episode_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
-    comments_data = await crud.fetch_comments(pool, episode_id)
+    comments_data = await crud.fetch_comments(session, episode_id)
     
     comments = [models.Comment(cid=item["cid"], p=item["p"], m=item["m"]) for item in comments_data]
     return models.CommentResponse(count=len(comments), comments=comments)
@@ -1361,111 +1358,51 @@ async def get_available_webhook_types(
     """获取所有已成功加载的、可供用户选择的Webhook处理器类型。"""
     return webhook_manager.get_available_handlers()
 
-async def delete_anime_task(anime_id: int, pool: aiomysql.Pool, progress_callback: Callable):
+async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete an anime and all its related data."""
     await progress_callback(0, "开始删除...")
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            try:
-                await conn.begin()
+    try:
+        anime = await session.get(models.Anime, anime_id)
+        if not anime:
+            raise TaskSuccess("作品未找到，无需删除。")
 
-                # 1. 获取该作品关联的所有源ID
-                await progress_callback(10, "正在查找关联的数据源...")
-                await cursor.execute("SELECT id FROM anime_sources WHERE anime_id = %s", (anime_id,))
-                source_ids = [row[0] for row in await cursor.fetchall()]
+        await session.delete(anime)
+        await session.commit()
+        raise TaskSuccess("删除成功。")
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
+        raise
 
-                if source_ids:
-                    # 2. 获取所有源关联的所有分集ID
-                    await progress_callback(20, "正在查找关联的分集...")
-                    format_strings_sources = ','.join(['%s'] * len(source_ids))
-                    await cursor.execute(f"SELECT id FROM episode WHERE source_id IN ({format_strings_sources})", tuple(source_ids))
-                    episode_ids = [row[0] for row in await cursor.fetchall()]
-
-                    if episode_ids:
-                        # 3. 删除所有分集关联的弹幕
-                        await progress_callback(40, "正在删除弹幕...")
-                        format_strings_episodes = ','.join(['%s'] * len(episode_ids))
-                        await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings_episodes})", tuple(episode_ids))
-                        
-                        # 4. 删除所有分集
-                        await progress_callback(60, "正在删除分集...")
-                        await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings_episodes})", tuple(episode_ids))
-                    
-                    # 5. 删除所有源记录
-                    await progress_callback(80, "正在删除数据源...")
-                    await cursor.execute(f"DELETE FROM anime_sources WHERE id IN ({format_strings_sources})", tuple(source_ids))
-
-                # 6. 删除元数据 (别名表有级联删除，元数据表没有，需要手动删除)
-                await progress_callback(90, "正在删除元数据...")
-                await cursor.execute("DELETE FROM anime_metadata WHERE anime_id = %s", (anime_id,))
-
-                # 7. 删除作品本身
-                await progress_callback(95, "正在删除作品条目...")
-                affected_rows = await cursor.execute("DELETE FROM anime WHERE id = %s", (anime_id,))
-                
-                await conn.commit()
-
-                if affected_rows > 0:
-                    raise TaskSuccess("删除成功。")
-                else:
-                    raise TaskSuccess("作品未找到，无需删除。")
-            except Exception as e:
-                await conn.rollback()
-                logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
-                raise
-
-async def delete_source_task(source_id: int, pool: aiomysql.Pool, progress_callback: Callable):
+async def delete_source_task(source_id: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete a source and all its related data."""
     progress_callback(0, "开始删除...")
     try:
-        # Re-implementing crud.delete_anime_source with progress
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await conn.begin()
-                await progress_callback(10, "正在检查数据源...")
-                await cursor.execute("SELECT 1 FROM anime_sources WHERE id = %s", (source_id,))
-                if not await cursor.fetchone():
-                    raise TaskSuccess("数据源未找到，无需删除。")
-                await progress_callback(20, "正在查找关联的分集...")
-                await cursor.execute("SELECT id FROM episode WHERE source_id = %s", (source_id,))
-                episode_ids = [row[0] for row in await cursor.fetchall()]
-                if episode_ids:
-                    await progress_callback(40, "正在删除弹幕...")
-                    format_strings = ','.join(['%s'] * len(episode_ids))
-                    await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings})", tuple(episode_ids))
-                    await progress_callback(70, "正在删除分集...")
-                    await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings})", tuple(episode_ids))
-                await progress_callback(90, "正在删除数据源记录...")
-                await cursor.execute("DELETE FROM anime_sources WHERE id = %s", (source_id,))
-                await conn.commit()
+        source = await session.get(models.AnimeSource, source_id)
+        if not source:
+            raise TaskSuccess("数据源未找到，无需删除。")
+        await session.delete(source)
+        await session.commit()
         raise TaskSuccess("删除成功。")
     except Exception as e:
         logger.error(f"删除源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
         raise
 
-async def delete_episode_task(episode_id: int, pool: aiomysql.Pool, progress_callback: Callable):
+async def delete_episode_task(episode_id: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete an episode and its comments."""
     progress_callback(0, "开始删除...")
     try:
-        # Re-implementing crud.delete_episode with progress
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await conn.begin()
-                await progress_callback(20, "正在检查分集...")
-                await cursor.execute("SELECT 1 FROM episode WHERE id = %s", (episode_id,))
-                if not await cursor.fetchone():
-                    raise TaskSuccess("分集未找到，无需删除。")
-                await progress_callback(50, "正在删除弹幕...")
-                await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
-                await progress_callback(80, "正在删除分集记录...")
-                await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
-                await conn.commit()
+        episode = await session.get(models.Episode, episode_id)
+        if not episode:
+            raise TaskSuccess("分集未找到，无需删除。")
+        await session.delete(episode)
+        await session.commit()
         raise TaskSuccess("删除成功。")
     except Exception as e:
         logger.error(f"删除分集任务 (ID: {episode_id}) 失败: {e}", exc_info=True)
         raise
 
-async def delete_bulk_episodes_task(episode_ids: List[int], pool: aiomysql.Pool, progress_callback: Callable):
+async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""
     total = len(episode_ids)
     deleted_count = 0
@@ -1473,14 +1410,11 @@ async def delete_bulk_episodes_task(episode_ids: List[int], pool: aiomysql.Pool,
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id})...")
         try:
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await conn.begin()
-                    await cursor.execute("DELETE FROM comment WHERE episode_id = %s", (episode_id,))
-                    affected_rows = await cursor.execute("DELETE FROM episode WHERE id = %s", (episode_id,))
-                    await conn.commit()
-                    if affected_rows > 0:
-                        deleted_count += 1
+            episode = await session.get(models.Episode, episode_id)
+            if episode:
+                await session.delete(episode)
+                await session.commit()
+                deleted_count += 1
         except Exception as e:
             logger.error(f"批量删除分集任务中，删除分集 (ID: {episode_id}) 失败: {e}", exc_info=True)
     raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
@@ -1498,7 +1432,7 @@ async def generic_import_task(
     imdb_id: Optional[str],
     tvdb_id: Optional[str],
     progress_callback: Callable,
-    pool: aiomysql.Pool, 
+    session: AsyncSession,
     manager: ScraperManager, 
     task_manager: TaskManager
 ):
@@ -1550,20 +1484,20 @@ async def generic_import_task(
                 logger.info("首次成功获取弹幕，正在创建数据库主条目...")
                 await progress_callback(base_progress + 1, "正在创建数据库主条目...")
                 # 在创建主条目前，先下载并缓存图片
-                local_image_path = await download_image(image_url, pool, provider)
+                local_image_path = await download_image(image_url, session, provider)
                 # 修正：将 local_image_path 传递给 get_or_create_anime
-                anime_id = await crud.get_or_create_anime(pool, normalized_title, media_type, season, image_url, local_image_path)
-                await crud.update_metadata_if_empty(pool, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
-                source_id = await crud.link_source_to_anime(pool, anime_id, provider, media_id)
+                anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path)
+                await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
+                source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
                 logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
 
             # 如果主条目已创建（意味着至少有一集有弹幕），则处理当前分集
             if anime_id and source_id:
-                episode_db_id = await crud.create_episode_if_not_exists(pool, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
                 if not comments:
                     logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
                     continue
-                added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
+                added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
                 total_comments_added += added_count
                 logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
             else:
@@ -1583,7 +1517,7 @@ async def generic_import_task(
 async def edited_import_task(
     request_data: "EditedImportRequest",
     progress_callback: Callable,
-    pool: aiomysql.Pool,
+    session: AsyncSession,
     manager: ScraperManager
 ):
     """后台任务：处理编辑后的导入请求。"""
@@ -1608,15 +1542,15 @@ async def edited_import_task(
             comments = await scraper.get_comments(episode.episodeId)
 
             if comments and anime_id is None:
-                local_image_path = await download_image(request_data.image_url, pool, request_data.provider)
-                anime_id = await crud.get_or_create_anime(pool, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
-                await crud.update_metadata_if_empty(pool, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
-                source_id = await crud.link_source_to_anime(pool, anime_id, request_data.provider, request_data.media_id)
+                local_image_path = await download_image(request_data.image_url, session, request_data.provider)
+                anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
+                await crud.update_metadata_if_empty(session, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
+                source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.media_id)
 
             if anime_id and source_id:
-                episode_db_id = await crud.create_episode_if_not_exists(pool, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
                 if comments:
-                    total_comments_added += await crud.bulk_insert_comments(pool, episode_db_id, comments)
+                    total_comments_added += await crud.bulk_insert_comments(session, episode_db_id, comments)
 
         if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
         else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
@@ -1625,12 +1559,12 @@ async def edited_import_task(
         logger.error(f"编辑后导入任务发生严重错误: {e}", exc_info=True)
         raise
 
-async def full_refresh_task(source_id: int, pool: aiomysql.Pool, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
+async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
     """
     后台任务：全量刷新一个已存在的番剧。
     """
     logger.info(f"开始刷新源 ID: {source_id}")
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
@@ -1639,7 +1573,7 @@ async def full_refresh_task(source_id: int, pool: aiomysql.Pool, manager: Scrape
     anime_id = source_info["anime_id"]
     # 1. 清空旧数据
     await progress_callback(10, "正在清空旧数据...")
-    await crud.clear_source_data(pool, source_id)
+    await crud.clear_source_data(session, source_id)
     logger.info(f"已清空源 ID: {source_id} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
     # 2. 重新执行通用导入逻辑
     await generic_import_task(
@@ -1653,11 +1587,11 @@ async def full_refresh_task(source_id: int, pool: aiomysql.Pool, manager: Scrape
         douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
         imdb_id=None, tvdb_id=None,
         progress_callback=progress_callback,
-        pool=pool,
+        session=session,
         manager=manager,
         task_manager=task_manager)
 
-async def delete_bulk_sources_task(source_ids: List[int], pool: aiomysql.Pool, progress_callback: Callable):
+async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """Background task to delete multiple sources."""
     total = len(source_ids)
     deleted_count = 0
@@ -1665,38 +1599,23 @@ async def delete_bulk_sources_task(source_ids: List[int], pool: aiomysql.Pool, p
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {source_id})...")
         try:
-            # Inlined logic from delete_anime_source
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await conn.begin()
-                    await cursor.execute("SELECT 1 FROM anime_sources WHERE id = %s", (source_id,))
-                    if not await cursor.fetchone():
-                        await conn.rollback()
-                        continue # Source not found, skip
-
-                    await cursor.execute("SELECT id FROM episode WHERE source_id = %s", (source_id,))
-                    episode_ids = [row[0] for row in await cursor.fetchall()]
-
-                    if episode_ids:
-                        format_strings = ','.join(['%s'] * len(episode_ids))
-                        await cursor.execute(f"DELETE FROM comment WHERE episode_id IN ({format_strings})", tuple(episode_ids))
-                        await cursor.execute(f"DELETE FROM episode WHERE id IN ({format_strings})", tuple(episode_ids))
-
-                    await cursor.execute("DELETE FROM anime_sources WHERE id = %s", (source_id,))
-                    await conn.commit()
-                    deleted_count += 1
+            source = await session.get(models.AnimeSource, source_id)
+            if source:
+                await session.delete(source)
+                await session.commit()
+                deleted_count += 1
         except Exception as e:
             logger.error(f"批量删除源任务中，删除源 (ID: {source_id}) 失败: {e}", exc_info=True)
             # Continue to the next one
     raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
 
-async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: ScraperManager, progress_callback: Callable):
+async def refresh_episode_task(episode_id: int, session: AsyncSession, manager: ScraperManager, progress_callback: Callable):
     """后台任务：刷新单个分集的弹幕"""
     logger.info(f"开始刷新分集 ID: {episode_id}")
     try:
         await progress_callback(0, "正在获取分集信息...")
         # 1. 获取分集的源信息
-        info = await crud.get_episode_provider_info(pool, episode_id)
+        info = await crud.get_episode_provider_info(session, episode_id)
         if not info or not info.get("provider_name") or not info.get("provider_episode_id"):
             logger.error(f"刷新失败：在数据库中找不到分集 ID: {episode_id} 的源信息")
             progress_callback(100, "失败: 找不到源信息")
@@ -1717,21 +1636,21 @@ async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: Sc
         all_comments_from_source = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
 
         if not all_comments_from_source:
-            await crud.update_episode_fetch_time(pool, episode_id)
+            await crud.update_episode_fetch_time(session, episode_id)
             raise TaskSuccess("未找到任何弹幕。")
 
         # 新增：在插入前，先筛选出数据库中不存在的新弹幕，以避免产生大量的“重复条目”警告。
         await progress_callback(95, "正在比对新旧弹幕...")
-        existing_cids = await crud.get_existing_comment_cids(pool, episode_id)
+        existing_cids = await crud.get_existing_comment_cids(session, episode_id)
         new_comments = [c for c in all_comments_from_source if str(c.get('cid')) not in existing_cids]
 
         if not new_comments:
-            await crud.update_episode_fetch_time(pool, episode_id)
+            await crud.update_episode_fetch_time(session, episode_id)
             raise TaskSuccess("刷新完成，没有新增弹幕。")
 
         await progress_callback(96, f"正在写入 {len(new_comments)} 条新弹幕...")
-        added_count = await crud.bulk_insert_comments(pool, episode_id, new_comments)
-        await crud.update_episode_fetch_time(pool, episode_id)
+        added_count = await crud.bulk_insert_comments(session, episode_id, new_comments)
+        await crud.update_episode_fetch_time(session, episode_id)
         logger.info(f"分集 ID: {episode_id} 刷新完成，新增 {added_count} 条弹幕。")
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
@@ -1741,14 +1660,14 @@ async def refresh_episode_task(episode_id: int, pool: aiomysql.Pool, manager: Sc
         logger.error(f"刷新分集 ID: {episode_id} 时发生严重错误: {e}", exc_info=True)
         raise # Re-raise so the task manager catches it and marks as FAILED
 
-async def reorder_episodes_task(source_id: int, pool: aiomysql.Pool, progress_callback: Callable):
+async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_callback: Callable):
     """后台任务：重新编号一个源的所有分集。"""
     logger.info(f"开始重整源 ID: {source_id} 的分集顺序。")
     await progress_callback(0, "正在获取分集列表...")
     
     try:
         # 获取所有分集，按现有顺序排序
-        episodes = await crud.get_episodes_for_source(pool, source_id)
+        episodes = await crud.get_episodes_for_source(session, source_id)
         if not episodes:
             raise TaskSuccess("没有找到分集，无需重整。")
 
@@ -1756,21 +1675,18 @@ async def reorder_episodes_task(source_id: int, pool: aiomysql.Pool, progress_ca
         updated_count = 0
         
         # 开始事务
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await conn.begin()
-                try:
-                    for i, episode in enumerate(episodes):
-                        new_index = i + 1
-                        if episode['episode_index'] != new_index:
-                            await cursor.execute("UPDATE episode SET episode_index = %s WHERE id = %s", (new_index, episode['id']))
-                            updated_count += 1
-                        await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
-                    await conn.commit()
-                except Exception as e:
-                    await conn.rollback()
-                    logger.error(f"重整源 ID {source_id} 时数据库事务失败: {e}", exc_info=True)
-                    raise
+        try:
+            for i, episode_data in enumerate(episodes):
+                new_index = i + 1
+                if episode_data['episode_index'] != new_index:
+                    await session.execute(update(models.Episode).where(models.Episode.id == episode_data['id']).values(episode_index=new_index))
+                    updated_count += 1
+                await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
+            await session.commit()
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"重整源 ID {source_id} 时数据库事务失败: {e}", exc_info=True)
+            raise
         raise TaskSuccess(f"重整完成，共更新了 {updated_count} 个分集的集数。")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
@@ -1786,12 +1702,12 @@ async def manual_import_episode(
     source_id: int,
     request_data: ManualImportRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务，从给定的URL手动导入弹幕。"""
-    source_info = await crud.get_anime_source_info(pool, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
@@ -1806,17 +1722,17 @@ async def manual_import_episode(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {request_data.title}"
-    task_coro = lambda callback: manual_import_task(
+    task_coro = lambda session, callback: manual_import_task(
         source_id=source_id, title=request_data.title, episode_index=request_data.episode_index,
         url=request_data.url, provider_name=provider_name,
-        progress_callback=callback, pool=pool, manager=scraper_manager
+        progress_callback=callback, session=session, manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "task_id": task_id}
 
 async def manual_import_task(
     source_id: int, title: str, episode_index: int, url: str, provider_name: str,
-    progress_callback: Callable, pool: aiomysql.Pool, manager: ScraperManager
+    progress_callback: Callable, session: AsyncSession, manager: ScraperManager
 ):
     """后台任务：从URL手动导入弹幕。"""
     logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
@@ -1850,8 +1766,8 @@ async def manual_import_task(
         if not comments: raise TaskSuccess("未找到任何弹幕。")
 
         await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.get_or_create_episode(pool, source_id, episode_index, title, url, episode_id_for_comments)
-        added_count = await crud.bulk_insert_comments(pool, episode_db_id, comments)
+        episode_db_id = await crud.get_or_create_episode(session, source_id, episode_index, title, url, episode_id_for_comments)
+        added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         raise
@@ -1863,7 +1779,7 @@ async def manual_import_task(
 async def import_from_provider(
     request_data: models.ImportRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
@@ -1876,7 +1792,7 @@ async def import_from_provider(
 
     # 只有在全量导入（非单集导入）时才执行此检查
     if request_data.current_episode_index is None:
-        source_exists = await crud.check_source_exists_by_media_id(pool, request_data.provider, request_data.media_id)
+        source_exists = await crud.check_source_exists_by_media_id(session, request_data.provider, request_data.media_id)
         if source_exists:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1884,7 +1800,7 @@ async def import_from_provider(
             )
 
     # 创建一个将传递给任务管理器的协程工厂 (lambda)
-    task_coro = lambda callback: generic_import_task(
+    task_coro = lambda session, callback: generic_import_task(
         provider=request_data.provider,
         media_id=request_data.media_id,
         anime_title=request_data.anime_title,
@@ -1897,7 +1813,7 @@ async def import_from_provider(
         imdb_id=None, tvdb_id=None, # 手动导入时这些ID为空,
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
-        pool=pool,
+        session=session,
         manager=scraper_manager
     )
     
@@ -1928,16 +1844,15 @@ class EditedImportRequest(models.BaseModel):
 async def import_edited_episodes(
     request_data: EditedImportRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.anime_title}"
-    task_coro = lambda callback: edited_import_task(
+    task_coro = lambda session, callback: edited_import_task(
         request_data=request_data,
         progress_callback=callback,
-        pool=pool,
+        session=session,
         manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -1971,7 +1886,7 @@ async def resume_task(
 async def abort_running_task(
     task_id: str,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """
@@ -1979,7 +1894,7 @@ async def abort_running_task(
     如果任务是当前正在运行的任务，会尝试取消它。
     如果任务不是当前任务（例如，卡在“运行中”状态），则会强制将其状态更新为“失败”。
     """
-    task = await crud.get_task_from_history_by_id(pool, task_id)
+    task = await crud.get_task_from_history_by_id(session, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
@@ -1993,15 +1908,15 @@ async def abort_running_task(
         return {"message": "任务中止请求已发送。"}
     else:
         logger.warning(f"无法优雅地中止任务 {task_id}，将强制标记为失败。")
-        await crud.finalize_task_in_history(pool, task_id, TaskStatus.FAILED, "被用户手动中止")
+        await crud.finalize_task_in_history(session, task_id, TaskStatus.FAILED, "被用户手动中止")
         return {"message": "任务已被强制标记为失败。"}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
-    user = await crud.get_user_by_username(pool, form_data.username)
+    user = await crud.get_user_by_username(session, form_data.username)
     if not user or not security.verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2010,10 +1925,10 @@ async def login_for_access_token(
         )
 
     access_token = await security.create_access_token(
-        data={"sub": user["username"]}, pool=pool
+        data={"sub": user["username"]}, session=session
     )
     # 更新用户的登录信息
-    await crud.update_user_login_info(pool, user["username"], access_token)
+    await crud.update_user_login_info(session, user["username"], access_token)
 
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -2090,7 +2005,7 @@ class ImportFromUrlRequest(models.BaseModel):
 async def import_from_url(
     request_data: ImportFromUrlRequest,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
@@ -2149,11 +2064,11 @@ async def import_from_url(
     if not media_id_for_scraper:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法从URL '{url}' 中为提供商 '{provider}' 解析出媒体ID。")
 
-    task_coro = lambda callback: generic_import_task(
+    task_coro = lambda session, callback: generic_import_task(
         provider=provider, media_id=media_id_for_scraper, anime_title=title,
         media_type=request_data.media_type, season=request_data.season,
         current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None,
-        progress_callback=callback, pool=pool, manager=scraper_manager, task_manager=task_manager
+        progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager
     )
     
     task_title = f"URL导入: {title}"
@@ -2189,10 +2104,10 @@ async def run_scheduled_task_now(task_id: str, current_user: models.User = Depen
 async def change_current_user_password(
     password_data: models.PasswordChange,
     current_user: models.User = Depends(security.get_current_user),
-    pool: aiomysql.Pool = Depends(get_db_pool)
+    session: AsyncSession = Depends(get_db_session)
 ):
     # 1. 从数据库获取完整的用户信息，包括哈希密码
-    user_in_db = await crud.get_user_by_username(pool, current_user.username)
+    user_in_db = await crud.get_user_by_username(session, current_user.username)
     if not user_in_db:
         # 理论上不会发生，因为 get_current_user 已经验证过
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -2203,4 +2118,4 @@ async def change_current_user_password(
 
     # 3. 更新密码
     new_hashed_password = security.get_password_hash(password_data.new_password)
-    await crud.update_user_password(pool, current_user.username, new_hashed_password)
+    await crud.update_user_password(session, current_user.username, new_hashed_password)

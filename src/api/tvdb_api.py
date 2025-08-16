@@ -2,14 +2,14 @@ import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 import re
-
+from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from .. import crud, models, security
-from ..database import get_db_pool
+from ..database import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,7 +19,7 @@ router = APIRouter()
 _tvdb_token_cache: Dict[str, Any] = {"token": None, "expires_at": datetime.utcnow()}
 
 
-async def get_tvdb_token(pool, client: httpx.AsyncClient) -> str:
+async def get_tvdb_token(session: AsyncSession, client: httpx.AsyncClient) -> str:
     """获取一个有效的TVDB令牌，如果需要则刷新。"""
     global _tvdb_token_cache
     # 如果缓存中的token有效，则直接返回
@@ -27,7 +27,7 @@ async def get_tvdb_token(pool, client: httpx.AsyncClient) -> str:
         return _tvdb_token_cache["token"]
 
     logger.info("TVDB token 已过期或未找到，正在请求新的令牌。")
-    api_key = await crud.get_config_value(pool, "tvdb_api_key", "")
+    api_key = await crud.get_config_value(session, "tvdb_api_key", "")
 
     if not api_key:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TVDB API Key 未配置。")
@@ -52,13 +52,13 @@ async def get_tvdb_token(pool, client: httpx.AsyncClient) -> str:
 
 async def get_tvdb_client(
     current_user: models.User = Depends(security.get_current_user),
-    pool=Depends(get_db_pool),
+    session: AsyncSession = Depends(get_db_session),
 ) -> httpx.AsyncClient:
     """依赖项：获取一个经过认证的TVDB客户端。"""
     # --- Start of new proxy logic ---
-    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
-    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
-    metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(session)
 
     proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
         proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
@@ -71,7 +71,7 @@ async def get_tvdb_client(
     proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
     # --- End of new proxy logic ---
     client = httpx.AsyncClient(base_url="https://api4.thetvdb.com/v4", timeout=20.0, proxy=proxy_to_use)
-    token = await get_tvdb_token(pool, client)
+    token = await get_tvdb_token(session, client)
     client.headers.update(
         {"Authorization": f"Bearer {token}", "User-Agent": "DanmuApiServer/1.0"}
     )

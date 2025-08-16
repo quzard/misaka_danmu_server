@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 import asyncio
 
-import aiomysql
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from . import crud
 
@@ -15,7 +15,7 @@ IMAGE_DIR = Path(__file__).parent.parent / "config" / "image"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider_name: Optional[str] = None) -> Optional[str]:
+async def download_image(image_url: Optional[str], session: AsyncSession, provider_name: Optional[str] = None) -> Optional[str]:
     """
     从给定的URL下载图片，保存到本地，并返回其相对Web路径。
     支持代理。
@@ -29,8 +29,8 @@ async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider
         return None
 
     # --- Start of new proxy logic ---
-    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
-    proxy_enabled_globally_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
     
     tasks = [proxy_url_task, proxy_enabled_globally_task]
     
@@ -40,8 +40,8 @@ async def download_image(image_url: Optional[str], pool: aiomysql.Pool, provider
 
     if provider_name and proxy_enabled_globally:
         # Check both scrapers and metadata sources for the provider's setting
-        scraper_settings_task = crud.get_all_scraper_settings(pool)
-        metadata_settings_task = crud.get_all_metadata_source_settings(pool)
+        scraper_settings_task = crud.get_all_scraper_settings(session)
+        metadata_settings_task = crud.get_all_metadata_source_settings(session)
         scraper_settings, metadata_settings = await asyncio.gather(scraper_settings_task, metadata_settings_task)
         
         provider_setting = next((s for s in scraper_settings if s['provider_name'] == provider_name), None)

@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 aiomysql
+SQLAlchemy[asyncio]
+greenlet
 apscheduler
 pydantic-settings
 httpx>=0.23.0
