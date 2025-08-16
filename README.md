@@ -101,15 +101,14 @@
         timeout: 3s
         retries: 2
         start_period: 0s
-      networks:
-        - bridge
+      network_mode: "bridge"
 
 ```
 3.  **重要**: 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
 
-4.  在 `docker-compose.mysql.yml` 所在目录运行命令启动数据库：
+4.  在 `docker-compose.mysql.yaml` 所在目录运行命令启动数据库：
     ```bash
-    docker-compose -f docker-compose.mysql.yml up -d
+    docker-compose -f docker-compose.mysql.yaml up -d
     ```
 
 ### 步骤 2: 部署弹幕库
@@ -143,11 +142,11 @@
 
 ```
 2.  **重要**:
-    -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yml` 中设置的 `MYSQL_PASSWORD` 一致。
+    -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yaml` 中设置的 `MYSQL_PASSWORD` 一致。
 
 3.  在同一目录运行命令启动应用：
     ```bash
-    docker-compose -f docker-compose.app.yml up -d
+    docker-compose -f docker-compose.app.yaml up -d
     ```
 
 
