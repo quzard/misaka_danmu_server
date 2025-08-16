@@ -214,44 +214,49 @@
                                 
                                 <div class="form-row">
                                     <label for="edit-anime-tmdbid">TMDB ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-tmdbid" placeholder="例如: 1396">
-                                        <button type="button" id="search-tmdbid-btn" class="icon-btn" title="查找">🔍</button>
+                                        <button type="button" class="icon-btn" data-action="direct-search" data-source="tmdb" title="ID直搜">🎯</button>
+                                        <button type="button" id="search-tmdbid-btn" class="icon-btn" data-action="search" data-source="tmdb" title="名称搜索">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label for="edit-anime-egid">剧集组ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-egid" placeholder="TMDB Episode Group ID">
-                                        <button type="button" id="select-egid-btn" class="icon-btn" title="查找/选择">🔍</button>
+                                        <button type="button" id="select-egid-btn" class="icon-btn" data-action="select-egid" title="查找/选择">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label for="edit-anime-bgmid">BGM ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-bgmid" placeholder="例如: 296100">
-                                        <button type="button" id="search-bgmid-btn" class="icon-btn" title="查找">🔍</button>
+                                        <button type="button" class="icon-btn" data-action="direct-search" data-source="bangumi" title="ID直搜">🎯</button>
+                                        <button type="button" id="search-bgmid-btn" class="icon-btn" data-action="search" data-source="bangumi" title="名称搜索">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label for="edit-anime-tvdbid">TVDB ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-tvdbid" placeholder="例如: 364093">
-                                        <button type="button" id="search-tvdbid-btn" class="icon-btn" title="查找">🔍</button>
+                                        <button type="button" class="icon-btn" data-action="direct-search" data-source="tvdb" title="ID直搜">🎯</button>
+                                        <button type="button" id="search-tvdbid-btn" class="icon-btn" data-action="search" data-source="tvdb" title="名称搜索">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label for="edit-anime-doubanid">豆瓣ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-doubanid" placeholder="例如: 35297708">
-                                        <button type="button" id="search-doubanid-btn" class="icon-btn" title="查找">🔍</button>
+                                        <button type="button" class="icon-btn" data-action="direct-search" data-source="douban" title="ID直搜">🎯</button>
+                                        <button type="button" id="search-doubanid-btn" class="icon-btn" data-action="search" data-source="douban" title="名称搜索">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label for="edit-anime-imdbid">IMDB ID</label>
-                                    <div class="input-with-icon">
+                                    <div class="input-with-icons">
                                         <input type="text" id="edit-anime-imdbid" placeholder="例如: tt9140554">
-                                        <button type="button" id="search-imdbid-btn" class="icon-btn" title="查找">🔍</button>
+                                        <button type="button" class="icon-btn" data-action="direct-search" data-source="imdb" title="ID直搜">🎯</button>
+                                        <button type="button" id="search-imdbid-btn" class="icon-btn" data-action="search" data-source="imdb" title="名称搜索">🔍</button>
                                     </div>
                                 </div>
                                 <div class="form-row">
@@ -291,8 +296,9 @@
                                     </div>
                                 </div>
                                 <div class="form-actions">
-                                    <button type="submit">保存更改</button>
-                                    <button type="button" id="back-to-library-from-edit-btn">返回</button>
+                                    <button type="submit" id="save-and-return-btn">保存后返回</button>
+                                    <button type="button" id="save-and-continue-btn">保存后继续</button>
+                                    <button type="button" id="back-to-library-from-edit-btn">返回库</button>
                                 </div>
                             </form>
                         </div>

@@ -215,6 +215,38 @@ async def get_bangumi_client(
 
 # --- API Endpoints ---
 
+@router.get("/subjects/{subject_id}", response_model=Dict[str, Any], summary="获取 Bangumi 作品详情")
+async def get_bangumi_subject_details(
+    subject_id: int = Path(..., description="Bangumi 作品ID"),
+    client: httpx.AsyncClient = Depends(get_bangumi_client),
+):
+    """获取指定 Bangumi ID 的作品详情。"""
+    try:
+        details_url = f"https://api.bgm.tv/v0/subjects/{subject_id}"
+        details_response = await client.get(details_url)
+        if details_response.status_code == 404:
+            raise HTTPException(status_code=404, detail="未找到指定的 Bangumi 作品。")
+        details_response.raise_for_status()
+        
+        subject_data = details_response.json()
+        subject = BangumiSearchSubject.model_validate(subject_data)
+        aliases = subject.aliases
+        
+        return {
+            "id": subject.id,
+            "name": subject.display_name,
+            "name_jp": subject.name,
+            "image_url": subject.image_url,
+            "details": subject.details_string,
+            "name_en": aliases.get("name_en"),
+            "name_romaji": aliases.get("name_romaji"),
+            "aliases_cn": aliases.get("aliases_cn", [])
+        }
+    except Exception as e:
+        logger.error(f"获取 Bangumi subject {subject_id} 详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取 Bangumi 详情失败。")
+
+
 @router.get("/auth/url", response_model=Dict[str, str], summary="获取 Bangumi OAuth 授权链接")
 async def get_bangumi_auth_url(
     request: Request,

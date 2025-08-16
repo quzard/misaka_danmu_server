@@ -3,6 +3,7 @@ import { switchView } from '../ui.js';
 
 // --- State ---
 let _currentSearchSelectionData = null;
+let _initialAnimeDetails = null; // Store initial data to check for changes
 
 // --- Constants ---
 const typeMap = {
@@ -14,7 +15,7 @@ const typeMap = {
 
 // --- DOM Elements ---
 let editAnimeView, editAnimeForm, editAnimeTypeSelect, selectEgidBtn, editAnimeTmdbIdInput;
-let bangumiSearchView, tmdbSearchView, doubanSearchView, imdbSearchView, tvdbSearchView, egidView, reassociateView;
+let bangumiSearchView, tmdbSearchView, doubanSearchView, imdbSearchView, tvdbSearchView, egidView, reassociateView, saveAndContinueBtn;
 let backToEditAnimeFromBgmSearchBtn, backToEditAnimeFromTmdbSearchBtn, backToEditAnimeFromDoubanSearchBtn, backToEditAnimeFromImdbSearchBtn, backToEditAnimeFromTvdbSearchBtn, backToEditFromEgidBtn, backToDetailFromReassociateBtn;
 let editEpisodeView, editEpisodeForm;
 
@@ -24,6 +25,7 @@ function initializeElements() {
     editAnimeTypeSelect = document.getElementById('edit-anime-type');
     selectEgidBtn = document.getElementById('select-egid-btn');
     editAnimeTmdbIdInput = document.getElementById('edit-anime-tmdbid');
+    saveAndContinueBtn = document.getElementById('save-and-continue-btn');
 
     bangumiSearchView = document.getElementById('bangumi-search-view');
     tmdbSearchView = document.getElementById('tmdb-search-view');
@@ -60,6 +62,7 @@ async function showEditAnimeView(animeId) {
     try {
         const details = await apiFetch(`/api/ui/library/anime/${animeId}/details`);
         populateEditForm(details);
+        _initialAnimeDetails = details; // Store initial state
     } catch (error) {
         alert(`加载编辑信息失败: ${error.message}`);
         switchView('library-view');
@@ -92,7 +95,7 @@ function populateEditForm(details) {
     updateEgidSelectButtonState();
 }
 
-async function handleEditAnimeSave(e) {
+async function handleEditAnimeSave(e, navigateBackOnSuccess = true) {
     e.preventDefault();
     const animeId = document.getElementById('edit-anime-id').value;
     const sourceId = document.getElementById('edit-episode-source-id').value;
@@ -119,19 +122,25 @@ async function handleEditAnimeSave(e) {
         alias_cn_3: document.getElementById('edit-anime-alias-cn-3').value || null,
     };
 
-    const saveButton = editAnimeForm.querySelector('button[type="submit"]');
+    const saveButton = e.target;
     saveButton.disabled = true;
     saveButton.textContent = '保存中...';
 
     try {
         await apiFetch(`/api/ui/library/anime/${animeId}`, { method: 'PUT', body: JSON.stringify(payload) });
         alert("信息更新成功！");
-        document.getElementById('back-to-library-from-edit-btn').click();
+        if (navigateBackOnSuccess) {
+            document.getElementById('back-to-library-from-edit-btn').click();
+        }
+        return true; // Indicate success
     } catch (error) {
         alert(`更新失败: ${(error.message || error)}`);
+        return false; // Indicate failure
     } finally {
         saveButton.disabled = false;
-        saveButton.textContent = '保存更改';
+        // Restore original button text
+        if (saveButton.id === 'save-and-return-btn') saveButton.textContent = '保存后返回';
+        else if (saveButton.id === 'save-and-continue-btn') saveButton.textContent = '保存后继续';
     }
 }
 
@@ -202,7 +211,6 @@ function applySearchSelectionData() {
             _applyAliases(data.aliases_cn, mainTitleBgm);
             break;
         case 'tmdb':
-            const mainTitleTmdb = data.main_title_from_search;
             document.getElementById('edit-anime-tmdbid').value = data.id || '';
             updateFieldWithApplyLogic('edit-anime-imdbid', data.imdb_id);
             updateFieldWithApplyLogic('edit-anime-tvdbid', data.tvdb_id);
@@ -211,32 +219,29 @@ function applySearchSelectionData() {
                 updateFieldWithApplyLogic('edit-anime-name-jp', data.name_jp);
             }
             updateFieldWithApplyLogic('edit-anime-name-romaji', data.name_romaji);
-            _applyAliases(data.aliases_cn, mainTitleTmdb);
+            _applyAliases(data.aliases_cn, data.main_title_from_search);
             break;
         case 'imdb':
-            const mainTitleImdb = data.name_en;
             document.getElementById('edit-anime-imdbid').value = data.id || '';
             if (containsJapanese(data.name_jp)) {
                 updateFieldWithApplyLogic('edit-anime-name-jp', data.name_jp);
             }
-            _applyAliases(data.aliases_cn, mainTitleImdb);
+            _applyAliases(data.aliases_cn, data.name_en);
             break;
         case 'tvdb':
-            const mainTitleTvdb = data.name_en;
             document.getElementById('edit-anime-tvdbid').value = data.id || '';
             updateFieldWithApplyLogic('edit-anime-imdbid', data.imdb_id);
             updateFieldWithApplyLogic('edit-anime-name-en', data.name_en);
-            _applyAliases(data.aliases_cn, mainTitleTvdb);
+            _applyAliases(data.aliases_cn, data.name_en);
             break;
         case 'douban':
-            const mainTitleDouban = (data.aliases_cn && data.aliases_cn.length > 0) ? data.aliases_cn[0] : '';
             document.getElementById('edit-anime-doubanid').value = data.id || '';
             updateFieldWithApplyLogic('edit-anime-imdbid', data.imdb_id);
             updateFieldWithApplyLogic('edit-anime-name-en', data.name_en);
             if (containsJapanese(data.name_jp)) {
                 updateFieldWithApplyLogic('edit-anime-name-jp', data.name_jp);
             }
-            _applyAliases(data.aliases_cn, mainTitleDouban);
+            _applyAliases(data.aliases_cn, (data.aliases_cn && data.aliases_cn.length > 0) ? data.aliases_cn[0] : '');
             break;
     }
 }
@@ -268,14 +273,49 @@ function updateFieldWithApplyLogic(fieldId, newValue) {
     }
 }
 
-function handleSearchBgmId() {
-    const title = document.getElementById('edit-anime-title').value;
-    const animeId = document.getElementById('edit-anime-id').value;
-    bangumiSearchView.dataset.returnToAnimeId = animeId;
-    switchView('bangumi-search-view');
-    document.getElementById('bangumi-search-keyword').value = title;
-    document.getElementById('bangumi-search-view-title').textContent = `为 "${title}" 搜索 Bangumi ID`;
-    document.getElementById('bangumi-search-results-list').innerHTML = '';
+async function handleDirectSearch(source) {
+    const inputId = `edit-anime-${source}id`;
+    const input = document.getElementById(inputId);
+    const currentId = input.value.trim();
+
+    if (!currentId) {
+        alert(`请输入 ${source.toUpperCase()} ID 后再进行直搜。`);
+        return;
+    }
+
+    const initialId = _initialAnimeDetails ? String(_initialAnimeDetails[`${source}_id`] || '') : '';
+    if (currentId !== initialId) {
+        alert(`ID 已更改但尚未保存。\n请先点击“保存后继续”以保存更改，然后再进行直搜。`);
+        return;
+    }
+
+    const detailsUrlMap = {
+        bangumi: `/api/ui/bangumi/subjects/${currentId}`,
+        douban: `/api/ui/douban/details/${currentId}`,
+        tvdb: `/api/ui/tvdb/details/${currentId}`,
+        imdb: `/api/ui/imdb/details/${currentId}`
+    };
+
+    let detailsUrl = detailsUrlMap[source];
+    if (source === 'tmdb') {
+        const mediaType = document.getElementById('edit-anime-type').value === 'movie' ? 'movie' : 'tv';
+        detailsUrl = `/api/ui/tmdb/details/${mediaType}/${currentId}`;
+    }
+
+    if (!detailsUrl) {
+        alert(`不支持对 ${source} 进行直搜。`);
+        return;
+    }
+
+    try {
+        const details = await apiFetch(detailsUrl);
+        details._source = source;
+        _currentSearchSelectionData = details;
+        applySearchSelectionData();
+        alert(`${source.toUpperCase()} 信息获取成功，请检查并应用建议的别名。`);
+    } catch (error) {
+        alert(`获取 ${source.toUpperCase()} 详情失败: ${error.message}`);
+    }
 }
 
 function handleBackToEditAnime() {
@@ -609,14 +649,34 @@ function renderTvdbSearchResults(results) {
     });
 }
 
-async function handleSelectEgidBtnClick() {
-    const tmdbId = editAnimeTmdbIdInput.value.trim();
-    const animeTitle = document.getElementById('edit-anime-title').value.trim();
-    if (!tmdbId) return;
-    switchView('egid-view');
-    egidView.dataset.tmdbId = tmdbId;
-    document.getElementById('egid-view-title').textContent = `为 "${animeTitle}" 选择剧集组`;
-    await loadAndRenderEpisodeGroups(tmdbId);
+function handleSearchAction(source) {
+    const title = document.getElementById('edit-anime-title').value;
+    const animeId = document.getElementById('edit-anime-id').value;
+    let searchView, keywordInput, viewTitle;
+
+    switch (source) {
+        case 'bangumi':
+            searchView = bangumiSearchView;
+            keywordInput = document.getElementById('bangumi-search-keyword');
+            viewTitle = document.getElementById('bangumi-search-view-title');
+            break;
+        case 'tmdb':
+            searchView = tmdbSearchView;
+            keywordInput = document.getElementById('tmdb-search-keyword');
+            viewTitle = document.getElementById('tmdb-search-view-title');
+            break;
+        // ... add cases for douban, tvdb, imdb
+        case 'douban': searchView = doubanSearchView; keywordInput = document.getElementById('douban-search-keyword'); viewTitle = document.getElementById('douban-search-view-title'); break;
+        case 'tvdb': searchView = tvdbSearchView; keywordInput = document.getElementById('tvdb-search-keyword'); viewTitle = document.getElementById('tvdb-search-view-title'); break;
+        case 'imdb': searchView = imdbSearchView; keywordInput = document.getElementById('imdb-search-keyword'); viewTitle = document.getElementById('imdb-search-view-title'); break;
+        default: return;
+    }
+
+    searchView.dataset.returnToAnimeId = animeId;
+    switchView(searchView.id);
+    keywordInput.value = title;
+    viewTitle.textContent = `为 "${title}" 搜索 ${source.toUpperCase()} ID`;
+    document.getElementById(`${source}-search-results-list`).innerHTML = '';
 }
 
 async function loadAndRenderEpisodeGroups(tmdbId) {
@@ -866,12 +926,28 @@ export function setupEditAnimeEventListeners() {
         document.dispatchEvent(new CustomEvent('viewchange', { detail: { viewId: 'library-view' } }));
     });
     document.getElementById('refresh-poster-btn').addEventListener('click', handleRefreshPoster);
-    document.getElementById('search-bgmid-btn').addEventListener('click', handleSearchBgmId);
-    document.getElementById('search-tmdbid-btn').addEventListener('click', handleSearchTmdbId);
-    document.getElementById('search-doubanid-btn').addEventListener('click', handleSearchDoubanId);
-    document.getElementById('search-tvdbid-btn').addEventListener('click', handleSearchTvdbId);
-    document.getElementById('search-imdbid-btn').addEventListener('click', handleSearchImdbId);
-    document.getElementById('select-egid-btn').addEventListener('click', handleSelectEgidBtnClick);
+
+    editAnimeForm.addEventListener('click', async (e) => {
+        const button = e.target.closest('.icon-btn');
+        if (!button) return;
+
+        const action = button.dataset.action;
+        const source = button.dataset.source;
+
+        if (action === 'direct-search') {
+            await handleDirectSearch(source);
+        } else if (action === 'search') {
+            handleSearchAction(source);
+        } else if (action === 'select-egid') {
+            const tmdbId = editAnimeTmdbIdInput.value.trim();
+            const animeTitle = document.getElementById('edit-anime-title').value.trim();
+            if (!tmdbId) return;
+            switchView('egid-view');
+            egidView.dataset.tmdbId = tmdbId;
+            document.getElementById('egid-view-title').textContent = `为 "${animeTitle}" 选择剧集组`;
+            await loadAndRenderEpisodeGroups(tmdbId);
+        }
+    });
 
     backToEditAnimeFromBgmSearchBtn.addEventListener('click', handleBackToEditAnime);
     document.getElementById('bangumi-search-form').addEventListener('submit', handleBangumiSearchSubmit);
@@ -912,6 +988,15 @@ export function setupEditAnimeEventListeners() {
         const animeId = document.getElementById('edit-episode-anime-id').value;
         // Dispatch an event that library.js can listen to
         document.dispatchEvent(new CustomEvent('show:episode-list', { detail: { sourceId, animeTitle, animeId } }));
+    });
+
+    saveAndContinueBtn.addEventListener('click', async (e) => {
+        const success = await handleEditAnimeSave(e, false); // Pass false to not navigate away
+        if (success) {
+            const animeId = document.getElementById('edit-anime-id').value;
+            // Reload the view to get fresh data and update the initial state
+            await showEditAnimeView(animeId);
+        }
     });
 
     editAnimeForm.addEventListener('click', (e) => {

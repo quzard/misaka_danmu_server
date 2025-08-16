@@ -70,6 +70,42 @@
     background-color: #f5f7fa;
 }
 
+/* --- Input with multiple Icons --- */
+.input-with-icons {
+    display: flex;
+    align-items: stretch;
+    flex-grow: 1;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-color);
+    overflow: hidden;
+}
+
+.input-with-icons input {
+    flex-grow: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    padding: 10px;
+    font-size: 16px;
+}
+
+.input-with-icons .icon-btn {
+    flex-shrink: 0;
+    width: 38px;
+    border: none;
+    border-left: 1px solid var(--border-color);
+    background-color: var(--secondary-color);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    transition: background-color 0.2s;
+}
+
+.input-with-icons .icon-btn:hover {
+    background-color: #e9ecef;
+}
+
 /* --- Input with Apply Button (for suggested aliases) --- */
 
 .input-with-apply-icon {
