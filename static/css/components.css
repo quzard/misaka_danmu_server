@@ -384,3 +384,22 @@ th {
     opacity: 0.3;
     filter: grayscale(100%);
 }
+
+.bili-login-disclaimer {
+    font-size: 12px;
+    color: #909399; /* A muted grey color */
+    margin-top: 15px;
+    padding: 0 10px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.bili-login-disclaimer a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.bili-login-disclaimer a:hover {
+    text-decoration: underline;
+}
+}
