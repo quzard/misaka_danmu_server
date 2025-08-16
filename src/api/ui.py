@@ -1602,7 +1602,10 @@ async def edited_import_task(
 
         for i, episode in enumerate(episodes):
             await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
-            comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, d: None)
+            # 修正：当不需要子进度回调时，应传递 None 或不传递该参数。
+            # 之前传递的 lambda p, d: None 是一个同步函数，对其进行 await 会导致 TypeError。
+            # 直接调用而不传递 progress_callback 会使用其默认值 None，从而修复此问题。
+            comments = await scraper.get_comments(episode.episodeId)
 
             if comments and anime_id is None:
                 local_image_path = await download_image(request_data.image_url, pool, request_data.provider)
