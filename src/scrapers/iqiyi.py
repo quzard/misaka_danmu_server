@@ -7,8 +7,6 @@ from typing import ClassVar
 import zlib
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 from collections import defaultdict
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -203,16 +201,6 @@ class IqiyiMobileVideoListResult(BaseModel):
 
 class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
-    # --- 新增：嵌入私钥 ---
-    # 开发者需要将 generate_keys.py 生成的 private_key.pem 内容粘贴到这里。
-    # 为了安全，私钥不应以明文文件形式分发，而是直接嵌入代码中。
-    _PRIVATE_KEY_PEM = """
------BEGIN PRIVATE KEY-----
-!!! 在这里粘贴您的私钥内容 !!!
-!!! 例如: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD... !!!
------END PRIVATE KEY-----
-""".strip()
-
     handled_domains = ["www.iqiyi.com"]
     _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
     # 新增：合并了JS脚本中的过滤关键词，用于过滤搜索结果中的非正片内容
@@ -236,31 +224,6 @@ class IqiyiScraper(BaseScraper):
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
-
-    def sign_challenge(self, challenge: str) -> Optional[bytes]:
-        """
-        (新增) 使用嵌入的私钥对挑战进行签名。
-        """
-        if "!!! 在这里粘贴您的私钥内容 !!!" in self._PRIVATE_KEY_PEM:
-            self.logger.warning("Iqiyi源未配置有效私钥，签名失败。")
-            return None
-        try:
-            private_key = serialization.load_pem_private_key(
-                self._PRIVATE_KEY_PEM.encode('utf-8'),
-                password=None
-            )
-            signature = private_key.sign(
-                challenge.encode('utf-8'),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            return signature
-        except Exception as e:
-            self.logger.error(f"为 Iqiyi 源签名时出错: {e}", exc_info=True)
-            return None
 
     async def close(self):
         """关闭HTTP客户端"""

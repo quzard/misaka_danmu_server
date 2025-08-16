@@ -1,15 +1,13 @@
 import asyncio
 import importlib
 import pkgutil
-import secrets
 import inspect
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Type
 from urllib.parse import urlparse
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes, serialization, asymmetric
 
 from .scrapers.base import BaseScraper
 from .config_manager import ConfigManager
@@ -82,13 +80,33 @@ class ScraperManager:
         discovered_providers = []
         scraper_classes = {}
 
-        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效
-        scrapers_package_path = [str(Path(__file__).parent / "scrapers")]
-        for finder, name, ispkg in pkgutil.iter_modules(scrapers_package_path):
-            if name.startswith("_") or name == "base":
+        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
+        # 我们需要同时处理源码和编译后的情况。
+        scrapers_dir = Path(__file__).parent / "scrapers"
+        for file_path in scrapers_dir.iterdir():
+            # 我们只关心 .py 文件或已知的二进制扩展名
+            if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
+                continue
+            
+            # 忽略签名文件
+            if file_path.name.endswith(".sig"):
+                continue
+
+            module_name_stem = file_path.stem.split('.')[0] # e.g., 'bilibili.cpython-311-x86_64-linux-gnu' -> 'bilibili'
+            if module_name_stem.startswith("_") or module_name_stem == "base":
                 continue
             try:
-                module_name = f"src.scrapers.{name}"
+                # --- 新增：代码签名验证逻辑 ---
+                is_verified = self.verify_scraper_signature(file_path)
+                if self._verification_enabled and not is_verified:
+                    logging.getLogger(__name__).warning(f"❌ 搜索源 '{file_path.name}' 验证失败！该源将被禁用。")
+                else:
+                    if self._verification_enabled:
+                        logging.getLogger(__name__).info(f"✅ 搜索源 '{file_path.name}' 验证成功。")
+                    self._verified_scrapers.add(module_name_stem)
+                # --- 验证逻辑结束 ---
+
+                module_name = f"src.scrapers.{module_name_stem}"
                 module = importlib.import_module(module_name)
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     if issubclass(obj, BaseScraper) and obj is not BaseScraper:
@@ -98,23 +116,6 @@ class ScraperManager:
                         for domain in getattr(obj, 'handled_domains', []):
                             self._domain_map[domain] = provider_name
                         self._scraper_classes[provider_name] = obj
-
-                        # --- 验证逻辑 ---
-                        if self._verification_enabled:
-                            # 实例化以进行验证
-                            temp_instance = obj(self._session_factory, self.config_manager)
-                            is_verified = await self.verify_scraper(temp_instance)
-                            if is_verified:
-                                self._verified_scrapers.add(provider_name)
-                                logging.getLogger(__name__).info(f"✅ 搜索源 '{provider_name}' 验证成功。")
-                            else:
-                                logging.getLogger(__name__).warning(f"❌ 搜索源 '{provider_name}' 验证失败！该源将被禁用。")
-                            # 验证后可以立即关闭临时实例
-                            await temp_instance.close()
-                        else:
-                            # 如果验证被禁用，则将所有源视为已验证
-                            self._verified_scrapers.add(provider_name)
-                        # --- 验证逻辑结束 ---
 
             except TypeError as e:
                 if "couldn't parse file content" in str(e).lower():
@@ -267,27 +268,28 @@ class ScraperManager:
         except Exception:
             return None
 
-    async def verify_scraper(self, scraper: BaseScraper) -> bool:
-        """对单个搜索源实例执行挑战-响应签名验证。"""
+    def verify_scraper_signature(self, file_path: Path) -> bool:
+        """验证插件文件的签名。"""
+        # 如果禁用了验证，则所有插件都视为已验证
         if not self._verification_enabled:
-            return True # 如果功能被禁用，则所有源都通过验证
-
+            return True
+        # 如果没有公钥，所有需要验证的插件都失败
         if not self._public_key:
-            return False # 如果没有公钥，所有验证都失败
-        
-        challenge = secrets.token_hex(32)
+            return False
+
+        sig_path = file_path.with_suffix(file_path.suffix + ".sig")
+        if not sig_path.exists():
+            logging.warning(f"未找到签名文件: '{sig_path.name}'，'{file_path.name}' 无法被验证。")
+            return False
+
         try:
-            signature = scraper.sign_challenge(challenge)
-            if signature is None:
-                return False
-            
+            content = file_path.read_bytes()
+            signature = sig_path.read_bytes()
+
             self._public_key.verify(
                 signature,
-                challenge.encode('utf-8'),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
+                content,
+                asymmetric.padding.PSS(mgf=asymmetric.padding.MGF1(hashes.SHA256()), salt_length=asymmetric.padding.PSS.MAX_LENGTH),
                 hashes.SHA256()
             )
             return True

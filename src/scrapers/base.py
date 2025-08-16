@@ -188,14 +188,6 @@ class BaseScraper(ABC):
         """
         raise NotImplementedError
 
-    def sign_challenge(self, challenge: str) -> Optional[bytes]:
-        """
-        (新增) 使用嵌入的私钥对挑战字符串进行签名。
-        子类必须实现此方法以通过验证。
-        :return: 返回签名的 bytes，如果无法签名则返回 None。
-        """
-        return None
-
     async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
         """
         (新增) 统一的从URL解析ID的接口。

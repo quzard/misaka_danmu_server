@@ -12,8 +12,6 @@ from dataclasses import dataclass
 import uuid
 from typing import Any, Callable, Dict, List, Mapping, Optional
 from urllib.parse import urlencode, urlparse
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
@@ -203,16 +201,6 @@ class RrspDanmuItem(BaseModel):
 
 class RenrenScraper(BaseScraper):
     provider_name = "renren"
-    # --- 新增：嵌入私钥 ---
-    # 开发者需要将 generate_keys.py 生成的 private_key.pem 内容粘贴到这里。
-    # 为了安全，私钥不应以明文文件形式分发，而是直接嵌入代码中。
-    _PRIVATE_KEY_PEM = """
------BEGIN PRIVATE KEY-----
-!!! 在这里粘贴您的私钥内容 !!!
-!!! 例如: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD... !!!
------END PRIVATE KEY-----
-""".strip()
-
     handled_domains = ["www.rrsp.com.cn"]
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
@@ -221,31 +209,6 @@ class RenrenScraper(BaseScraper):
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0
         self._min_interval = 0.4
-
-    def sign_challenge(self, challenge: str) -> Optional[bytes]:
-        """
-        (新增) 使用嵌入的私钥对挑战进行签名。
-        """
-        if "!!! 在这里粘贴您的私钥内容 !!!" in self._PRIVATE_KEY_PEM:
-            self.logger.warning("Renren源未配置有效私钥，签名失败。")
-            return None
-        try:
-            private_key = serialization.load_pem_private_key(
-                self._PRIVATE_KEY_PEM.encode('utf-8'),
-                password=None
-            )
-            signature = private_key.sign(
-                challenge.encode('utf-8'),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            return signature
-        except Exception as e:
-            self.logger.error(f"为 Renren 源签名时出错: {e}", exc_info=True)
-            return None
 
     def _generate_device_id(self) -> str:
         """Generate a fresh device/session id for each request.
