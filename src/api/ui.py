@@ -934,26 +934,30 @@ async def test_proxy_latency(
     proxy_url = request.proxy_url
     # 修正：使用旧的 'proxy' 参数以兼容旧版 httpx
     proxy_to_use = proxy_url if proxy_url else None
-    
+
     # Test 1: Proxy Connectivity
     proxy_connectivity_result: ProxyTestResult
     # 使用一个已知的高可用、轻量级端点进行测试
     test_url_google = "http://www.google.com/generate_204"
-    try:
-        async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
-            start_time = time.time()
-            response = await client.get(test_url_google)
-            latency = (time.time() - start_time) * 1000
-            # 204 No Content 是成功的标志
-            if response.status_code == 204:
-                proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
-            else:
-                proxy_connectivity_result = ProxyTestResult(
-                    status="failure", 
-                    error=f"连接成功但状态码异常: {response.status_code}"
-                )
-    except Exception as e:
-        proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
+
+    if not proxy_url:
+        proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置代理，跳过测试")
+    else:
+        try:
+            async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
+                start_time = time.time()
+                response = await client.get(test_url_google)
+                latency = (time.time() - start_time) * 1000
+                # 204 No Content 是成功的标志
+                if response.status_code == 204:
+                    proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
+                else:
+                    proxy_connectivity_result = ProxyTestResult(
+                        status="failure",
+                        error=f"连接成功但状态码异常: {response.status_code}"
+                    )
+        except Exception as e:
+            proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
 
     # Test 2: Target Site Reachability
     target_sites_results: Dict[str, ProxyTestResult] = {}

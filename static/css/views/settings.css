@@ -69,6 +69,7 @@ textarea#douban-cookie {
         "user     pass";
     gap: 15px;
     align-items: center;
+    padding-right: 20px; /* 为右侧输入框增加一些视觉间距，避免贴边 */
 }
 .proxy-protocol-row { grid-area: protocol; }
 .proxy-host-row     { grid-area: host; }

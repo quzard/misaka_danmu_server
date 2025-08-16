@@ -237,10 +237,14 @@ async function handleTestProxy() {
 
         let resultsText = "--- 代理服务器连通性测试 ---\n";
         const connectivity = response.proxy_connectivity;
-        if (connectivity && connectivity.status === 'success') {
+        if (!connectivity) {
+            resultsText += `❌ 代理服务器连接测试失败: 后端未返回有效结果。\n`;
+        } else if (connectivity.status === 'success') {
             resultsText += `✅ 代理服务器连接正常，延迟: ${connectivity.latency.toFixed(0)} ms\n`;
-        } else {
-            resultsText += `❌ 代理服务器连接失败: ${connectivity ? connectivity.error : '无响应或格式错误'}\n`;
+        } else if (connectivity.status === 'skipped') {
+            resultsText += `⚪️ ${connectivity.error || '未配置代理，跳过测试'}\n`;
+        } else { // 'failure'
+            resultsText += `❌ 代理服务器连接失败: ${connectivity.error || '无响应或格式错误'}\n`;
         }
 
         resultsText += "\n--- 目标站点可用性测试 ---\n";
