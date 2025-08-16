@@ -8,13 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 import json
 from .config_manager import ConfigManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
-from .api.ui_api import router as ui_router, auth_router
-from .api.bangumi_api import router as bangumi_router
-from .api.tmdb_api import router as tmdb_router
-from .api.webhook_api import router as webhook_router
-from .api.imdb_api import router as imdb_router
-from .api.tvdb_api import router as tvdb_router
-from .api.douban_api import router as douban_router
+from .api import api_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -165,15 +159,8 @@ async def cleanup_task(app: FastAPI):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/images", StaticFiles(directory="config/image"), name="images")
 
-# 包含 v2 版本的 API 路由
-app.include_router(ui_router, prefix="/api/ui", tags=["Web UI API"])
-app.include_router(auth_router, prefix="/api/ui/auth", tags=["Auth"])
-app.include_router(bangumi_router, prefix="/api/bgm", tags=["Bangumi"])
-app.include_router(tmdb_router, prefix="/api/tmdb", tags=["TMDB"])
-app.include_router(douban_router, prefix="/api/douban", tags=["Douban"])
-app.include_router(imdb_router, prefix="/api/imdb", tags=["IMDb"])
-app.include_router(tvdb_router, prefix="/api/tvdb", tags=["TVDB"])
-app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
+# 包含所有非 dandanplay 的 API 路由
+app.include_router(api_router, prefix="/api")
 
 # 将最通用的 dandan_router 挂载在最后，以避免路径冲突。
 # 这样可以确保像 /api/ui 这样的静态路径会优先于 /api/{token} 被匹配。
