@@ -687,8 +687,8 @@
                                 <h3>代理服务器配置</h3>
                                 <p>配置一个全局代理，可用于访问受限的网络资源。支持 http, https, socks5 协议。</p>
                                 <form id="proxy-settings-form">
-                                    <div class="form-grid">
-                                        <div class="form-row">
+                                    <div class="proxy-layout">
+                                        <div class="form-row proxy-protocol-row">
                                             <label for="proxy-protocol">协议</label>
                                             <select id="proxy-protocol">
                                                 <option value="http">http</option>
@@ -696,19 +696,19 @@
                                                 <option value="socks5">socks5</option>
                                             </select>
                                         </div>
-                                        <div class="form-row">
+                                        <div class="form-row proxy-host-row">
                                             <label for="proxy-host">主机</label>
                                             <input type="text" id="proxy-host" placeholder="例如: 127.0.0.1">
                                         </div>
-                                        <div class="form-row">
+                                        <div class="form-row proxy-port-row">
                                             <label for="proxy-port">端口</label>
                                             <input type="number" id="proxy-port" placeholder="例如: 7890">
                                         </div>
-                                        <div class="form-row">
+                                        <div class="form-row proxy-user-row">
                                             <label for="proxy-username">用户名 (可选)</label>
                                             <input type="text" id="proxy-username" autocomplete="off">
                                         </div>
-                                        <div class="form-row">
+                                        <div class="form-row proxy-pass-row">
                                             <label for="proxy-password">密码 (可选)</label>
                                             <input type="password" id="proxy-password" autocomplete="new-password">
                                         </div>
