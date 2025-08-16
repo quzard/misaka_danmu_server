@@ -12,6 +12,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import httpx
+from ..config_manager import ConfigManager
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -110,6 +111,10 @@ async def get_webhook_manager(request: Request) -> WebhookManager:
 async def get_metadata_manager(request: Request) -> MetadataSourceManager:
     """依赖项：从应用状态获取元数据源管理器"""
     return request.app.state.metadata_manager
+
+async def get_config_manager(request: Request) -> ConfigManager:
+    """依赖项：从应用状态获取配置管理器"""
+    return request.app.state.config_manager
 
 
 async def update_tmdb_mappings(
@@ -856,7 +861,8 @@ async def get_proxy_settings(
 async def update_proxy_settings(
     payload: ProxySettingsUpdate,
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """更新全局代理配置。"""
     proxy_url = ""
@@ -871,11 +877,11 @@ async def update_proxy_settings(
         
         proxy_url = f"{payload.proxy_protocol}://{userinfo}{payload.proxy_host}:{payload.proxy_port}"
 
-    tasks = [
-        crud.update_config_value(session, "proxy_url", proxy_url),
-        crud.update_config_value(session, "proxy_enabled", str(payload.proxy_enabled).lower())
-    ]
-    await asyncio.gather(*tasks)
+    await crud.update_config_value(session, "proxy_url", proxy_url)
+    config_manager.invalidate("proxy_url")
+    
+    await crud.update_config_value(session, "proxy_enabled", str(payload.proxy_enabled).lower())
+    config_manager.invalidate("proxy_enabled")
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
 class ProxyTestRequest(BaseModel):
@@ -987,7 +993,8 @@ async def update_scraper_config(
     payload: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(get_scraper_manager)
+    manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     scraper_class = manager.get_scraper_class(provider_name)
     is_configurable = hasattr(scraper_class, 'configurable_fields') and scraper_class.configurable_fields
@@ -1023,6 +1030,7 @@ async def update_scraper_config(
         if key in allowed_keys:
             # crud.update_config_value 内部会提交事务
             await crud.update_config_value(session, key, str(value) or "")
+            config_manager.invalidate(key)
     
     logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{provider_name}' 的配置。")
 
@@ -1070,14 +1078,14 @@ async def execute_scraper_action(
 async def update_tmdb_settings(
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """批量更新TMDB相关的配置。"""
-    tasks = []
     for key, value in payload.items():
         if key in ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"]:
-            tasks.append(crud.update_config_value(session, key, value or ""))
-    await asyncio.gather(*tasks)
+            await crud.update_config_value(session, key, value or "")
+            config_manager.invalidate(key)
     logger.info(f"用户 '{current_user.username}' 更新了 TMDB 配置。")
     
 @router.get("/config/bangumi", response_model=Dict[str, str], summary="获取Bangumi配置")
@@ -1095,15 +1103,14 @@ async def get_bangumi_settings(
 async def update_bangumi_settings(
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """批量更新Bangumi OAuth相关的配置。"""
-    tasks = []
     for key, value in payload.items():
         if key in ["bangumi_client_id", "bangumi_client_secret"]:
-            tasks.append(crud.update_config_value(session, key, value or ""))
-    if tasks:
-        await asyncio.gather(*tasks)
+            await crud.update_config_value(session, key, value or "")
+            config_manager.invalidate(key)
     logger.info(f"用户 '{current_user.username}' 更新了 Bangumi 配置。")
 
 @router.post("/cache/clear", status_code=status.HTTP_200_OK, summary="清除所有缓存")
@@ -1229,7 +1236,8 @@ async def update_config_item(
     config_key: str,
     payload: Dict[str, str],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """更新数据库中单个配置项的值。"""
     value = payload.get("value")
@@ -1237,17 +1245,20 @@ async def update_config_item(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing 'value' in request body")
     
     await crud.update_config_value(session, config_key, value)
+    config_manager.invalidate(config_key)
     logger.info(f"用户 '{current_user.username}' 更新了配置项 '{config_key}'。")
 
 @router.post("/config/webhook_api_key/regenerate", response_model=Dict[str, str], summary="重新生成Webhook API Key")
 async def regenerate_webhook_api_key(
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """生成一个新的、随机的Webhook API Key并保存到数据库。"""
     alphabet = string.ascii_letters + string.digits
     new_key = ''.join(secrets.choice(alphabet) for _ in range(20))
     await crud.update_config_value(session, "webhook_api_key", new_key)
+    config_manager.invalidate("webhook_api_key")
     logger.info(f"用户 '{current_user.username}' 重新生成了 Webhook API Key。")
     return {"key": "webhook_api_key", "value": new_key}
 

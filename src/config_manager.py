@@ -43,6 +43,12 @@ class ConfigManager:
         async with self.session_factory() as session:
             await crud.initialize_configs(session, defaults)
 
+    def invalidate(self, key: str):
+        """从缓存中移除一个特定的键，以便下次获取时能从数据库重新加载。"""
+        if key in self._cache:
+            del self._cache[key]
+            self.logger.info(f"配置缓存已失效: '{key}'")
+
     def clear_cache(self):
         """清空内存中的配置缓存，以便下次获取时能从数据库重新加载。"""
         self._cache.clear()
