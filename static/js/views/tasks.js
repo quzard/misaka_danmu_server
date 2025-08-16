@@ -1,7 +1,7 @@
 import { apiFetch } from '../api.js';
 import { switchView } from '../ui.js';
 
-let taskListUl, taskManagerSubNav, runningTasksSearchInput, runningTasksFilterButtons, taskManagerSubViews;
+let taskListUl, taskManagerSubNav, runningTasksSearchInput, runningTasksFilterButtons, taskManagerSubViews, selectAllRunningTasksBtn;
 let deleteRunningTaskBtn, pauseResumeTaskBtn, abortRunningTaskBtn;
 let scheduledTasksTableBody, addScheduledTaskBtn, editScheduledTaskView, editScheduledTaskForm, backToTasksFromEditBtn, editScheduledTaskTitle;
 let taskLoadInterval = null;
@@ -12,6 +12,7 @@ function initializeElements() {
     taskManagerSubNav = document.querySelector('#task-manager-view .settings-sub-nav');
     runningTasksSearchInput = document.getElementById('running-tasks-search-input');
     runningTasksFilterButtons = document.getElementById('running-tasks-filter-buttons');
+    selectAllRunningTasksBtn = document.getElementById('select-all-running-tasks-btn');
     deleteRunningTaskBtn = document.getElementById('delete-running-task-btn');
     pauseResumeTaskBtn = document.getElementById('pause-resume-task-btn');
     abortRunningTaskBtn = document.getElementById('abort-running-task-btn');
@@ -159,29 +160,50 @@ function handleTaskSelection(e) {
 }
 
 function updateTaskActionButtons() {
-    const selectedTask = taskListUl.querySelector('.task-item.selected');
+    const allTasks = taskListUl.querySelectorAll('.task-item');
+    const selectedTasks = Array.from(taskListUl.querySelectorAll('.task-item.selected'));
+    const firstSelectedTask = selectedTasks.length > 0 ? selectedTasks[0] : null;
 
-    if (!selectedTask) {
+    // Handle "Select All" button
+    if (selectAllRunningTasksBtn) {
+        selectAllRunningTasksBtn.disabled = allTasks.length === 0;
+        if (allTasks.length > 0 && selectedTasks.length === allTasks.length) {
+            selectAllRunningTasksBtn.textContent = '取消全选';
+        } else {
+            selectAllRunningTasksBtn.textContent = '全选';
+        }
+    }
+
+    if (selectedTasks.length === 0) {
         deleteRunningTaskBtn.disabled = true;
         pauseResumeTaskBtn.disabled = true;
         abortRunningTaskBtn.disabled = true;
         pauseResumeTaskBtn.textContent = '暂停/恢复';
         return;
     }
+    
+    // Delete button: enabled if any selected task is deletable.
+    const anyDeletable = selectedTasks.some(task => task.dataset.status !== '运行中');
+    deleteRunningTaskBtn.disabled = !anyDeletable;
 
-    const status = selectedTask.dataset.status;
-    const isDeletable = status === '已完成' || status === '失败' || status === '已暂停' || status === '排队中';
-    const isPausable = status === '运行中';
-    const isResumable = status === '已暂停';
-    const isAbortable = status === '运行中';
+    // Other buttons: only enabled for single selection.
+    if (selectedTasks.length === 1) {
+        const status = firstSelectedTask.dataset.status;
+        const isPausable = status === '运行中';
+        const isResumable = status === '已暂停';
+        const isAbortable = status === '运行中';
 
-    deleteRunningTaskBtn.disabled = !isDeletable;
-    pauseResumeTaskBtn.disabled = !(isPausable || isResumable);
-    abortRunningTaskBtn.disabled = !isAbortable;
+        pauseResumeTaskBtn.disabled = !(isPausable || isResumable);
+        abortRunningTaskBtn.disabled = !isAbortable;
 
-    if (isPausable) pauseResumeTaskBtn.textContent = '暂停';
-    else if (isResumable) pauseResumeTaskBtn.textContent = '恢复';
-    else pauseResumeTaskBtn.textContent = '暂停/恢复';
+        if (isPausable) pauseResumeTaskBtn.textContent = '暂停';
+        else if (isResumable) pauseResumeTaskBtn.textContent = '恢复';
+        else pauseResumeTaskBtn.textContent = '暂停/恢复';
+    } else {
+        pauseResumeTaskBtn.disabled = true;
+        abortRunningTaskBtn.disabled = true;
+        pauseResumeTaskBtn.textContent = '暂停/恢复';
+    }
 }
 
 async function loadAndRenderScheduledTasks() {
@@ -303,23 +325,27 @@ async function handleScheduledTaskAction(action, taskId) {
 }
 
 async function handleDeleteRunningTask() {
-    const selectedTask = taskListUl.querySelector('.task-item.selected');
-    if (!selectedTask) {
+    const selectedTasks = Array.from(taskListUl.querySelectorAll('.task-item.selected'));
+    if (selectedTasks.length === 0) {
         alert('请先选择一个任务。');
         return;
     }
-    const taskId = selectedTask.dataset.taskId;
-    const status = selectedTask.dataset.status;
-    if (status === '运行中') {
+
+    const tasksToDelete = selectedTasks.filter(task => task.dataset.status !== '运行中');
+
+    if (tasksToDelete.length !== selectedTasks.length) {
         alert('不能删除正在运行的任务。');
         return;
     }
-    const taskTitle = selectedTask.querySelector('.task-title').textContent;
 
-    if (confirm(`您确定要从历史记录中删除任务 "${taskTitle}" 吗？`)) {
+    if (confirm(`您确定要从历史记录中删除选中的 ${tasksToDelete.length} 个任务吗？`)) {
         try {
-            await apiFetch(`/api/ui/tasks/${taskId}`, { method: 'DELETE' });
-            loadAndRenderTasks();
+            const deletePromises = tasksToDelete.map(task => {
+                const taskId = task.dataset.taskId;
+                return apiFetch(`/api/ui/tasks/${taskId}`, { method: 'DELETE' });
+            });
+            await Promise.all(deletePromises);
+            loadAndRenderTasks(); // Refresh list after deletion
         } catch (error) {
             alert(`删除任务失败: ${error.message}`);
         }
@@ -368,12 +394,27 @@ async function handleAbortRunningTask() {
     }
 }
 
+function handleSelectAllRunningTasks() {
+    const taskItems = taskListUl.querySelectorAll('.task-item');
+    if (taskItems.length === 0) return;
+
+    // If at least one item is not selected, we select all. Otherwise, we deselect all.
+    const shouldSelectAll = Array.from(taskItems).some(item => !item.classList.contains('selected'));
+
+    taskItems.forEach(item => {
+        item.classList.toggle('selected', shouldSelectAll);
+    });
+
+    updateTaskActionButtons();
+}
+
 export function setupTasksEventListeners() {
     initializeElements();
     taskManagerSubNav.addEventListener('click', handleTaskManagerSubNav);
     runningTasksSearchInput.addEventListener('input', applyTaskFilters);
     runningTasksFilterButtons.addEventListener('click', handleTaskFilterClick);
     addScheduledTaskBtn.addEventListener('click', () => showEditScheduledTaskView());
+    selectAllRunningTasksBtn.addEventListener('click', handleSelectAllRunningTasks);
     deleteRunningTaskBtn.addEventListener('click', handleDeleteRunningTask);
     pauseResumeTaskBtn.addEventListener('click', handlePauseResumeTask);
     abortRunningTaskBtn.addEventListener('click', handleAbortRunningTask);
