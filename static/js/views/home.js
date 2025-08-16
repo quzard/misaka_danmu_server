@@ -621,6 +621,8 @@ async function showEditImportModal(item) {
     }
 }
 
+let draggedItem = null; // To keep track of the item being dragged
+
 function renderEditImportModalContent(item, episodes) {
     const modalBody = document.getElementById('edit-import-modal-body');
     const confirmBtn = document.getElementById('edit-import-modal-confirm-btn');
@@ -645,6 +647,7 @@ function renderEditImportModalContent(item, episodes) {
 
     episodes.forEach(ep => {
         const li = document.createElement('li');
+        li.draggable = true; // Make the list item draggable
         li.dataset.episode = JSON.stringify(ep); // Store original episode data
         li.innerHTML = `
             <span class="ep-index">${ep.episodeIndex}.</span>
@@ -657,6 +660,48 @@ function renderEditImportModalContent(item, episodes) {
         });
         episodeListEl.appendChild(li);
     });
+
+    // Add drag-and-drop event listeners to the list container
+    episodeListEl.addEventListener('dragstart', (e) => {
+        // We only want to drag 'LI' elements
+        if (e.target.tagName === 'LI') {
+            draggedItem = e.target;
+            // Use a timeout to avoid the drag image disappearing
+            setTimeout(() => {
+                e.target.classList.add('dragging');
+            }, 0);
+        }
+    });
+
+    episodeListEl.addEventListener('dragover', (e) => {
+        e.preventDefault(); // This is necessary to allow dropping
+        if (!draggedItem) return;
+
+        const afterElement = getDragAfterElement(episodeListEl, e.clientY);
+        if (afterElement == null) {
+            episodeListEl.appendChild(draggedItem);
+        } else {
+            episodeListEl.insertBefore(draggedItem, afterElement);
+        }
+    });
+
+    episodeListEl.addEventListener('dragend', () => {
+        if (draggedItem) {
+            draggedItem.classList.remove('dragging');
+            draggedItem = null;
+            reindexEpisodes(); // Re-number the episodes after the drop is complete
+        }
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('li:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) { return { offset: offset, element: child }; } 
+        else { return closest; }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
 function reindexEpisodes() {
