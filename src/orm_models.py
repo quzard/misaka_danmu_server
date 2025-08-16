@@ -24,7 +24,7 @@ class Anime(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
-    metadata: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
+    metadata_record: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
     aliases: Mapped["AnimeAlias"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
 
     __table_args__ = (
@@ -114,7 +114,7 @@ class AnimeMetadata(Base):
     douban_id: Mapped[Optional[str]] = mapped_column(String(50))
     bangumi_id: Mapped[Optional[str]] = mapped_column(String(50))
 
-    anime: Mapped["Anime"] = relationship(back_populates="metadata")
+    anime: Mapped["Anime"] = relationship(back_populates="metadata_record")
 
 class Config(Base):
     __tablename__ = "config"

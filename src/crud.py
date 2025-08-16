@@ -74,7 +74,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
 async def update_anime_details(session: AsyncSession, anime_id: int, update_data: models.AnimeDetailUpdate) -> bool:
     """在事务中更新番剧的核心信息、元数据和别名。"""
-    anime = await session.get(Anime, anime_id, options=[selectinload(Anime.metadata), selectinload(Anime.aliases)])
+    anime = await session.get(Anime, anime_id, options=[selectinload(Anime.metadata_record), selectinload(Anime.aliases)])
     if not anime:
         return False
 
@@ -86,14 +86,14 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.image_url = update_data.image_url
 
     # Update or create AnimeMetadata
-    if not anime.metadata:
-        anime.metadata = AnimeMetadata(anime_id=anime_id)
-    anime.metadata.tmdb_id = update_data.tmdb_id
-    anime.metadata.tmdb_episode_group_id = update_data.tmdb_episode_group_id
-    anime.metadata.bangumi_id = update_data.bangumi_id
-    anime.metadata.tvdb_id = update_data.tvdb_id
-    anime.metadata.douban_id = update_data.douban_id
-    anime.metadata.imdb_id = update_data.imdb_id
+    if not anime.metadata_record:
+        anime.metadata_record = AnimeMetadata(anime_id=anime_id)
+    anime.metadata_record.tmdb_id = update_data.tmdb_id
+    anime.metadata_record.tmdb_episode_group_id = update_data.tmdb_episode_group_id
+    anime.metadata_record.bangumi_id = update_data.bangumi_id
+    anime.metadata_record.tvdb_id = update_data.tvdb_id
+    anime.metadata_record.douban_id = update_data.douban_id
+    anime.metadata_record.imdb_id = update_data.imdb_id
 
     # Update or create AnimeAlias
     if not anime.aliases:
