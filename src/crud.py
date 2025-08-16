@@ -940,6 +940,26 @@ async def update_scrapers_settings(pool: aiomysql.Pool, settings: List[models.Sc
             data_to_update = [(s.is_enabled, s.display_order, s.use_proxy, s.provider_name) for s in settings]
             await cursor.executemany(query, data_to_update)
 
+async def remove_stale_scrapers(pool: aiomysql.Pool, discovered_providers: List[str]):
+    """
+    从数据库中移除不再存在于文件系统中的搜索源。
+    """
+    # 如果由于某种原因发现列表为空，则不执行任何操作，以防意外清空整个表。
+    if not discovered_providers:
+        logging.warning("发现的搜索源列表为空，跳过清理过时源的操作。")
+        return
+
+    # 创建占位符字符串，例如: (%s, %s, %s)
+    format_strings = ','.join(['%s'] * len(discovered_providers))
+    query = f"DELETE FROM scrapers WHERE provider_name NOT IN ({format_strings})"
+    params = tuple(discovered_providers)
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            deleted_rows = await cursor.execute(query, params)
+            if deleted_rows > 0:
+                logging.info(f"已从数据库中移除了 {deleted_rows} 个过时的搜索源。")
+
 # --- Metadata Source Management ---
 
 async def sync_metadata_sources_to_db(pool: aiomysql.Pool, provider_names: List[str]):
