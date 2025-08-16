@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
-
+from typing import Set
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -187,3 +187,51 @@ async def get_douban_details(
 ):
     """获取指定豆瓣ID的作品详情，主要用于提取别名。"""
     return await _scrape_douban_details(douban_id, client)
+
+async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从豆瓣获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        movie_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "movie", "tag": keyword, "page_limit": 1, "page_start": 0})
+        tv_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "tv", "tag": keyword, "page_limit": 1, "page_start": 0})
+        movie_res, tv_res = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
+
+        best_subject_id = None
+        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+            if subjects := movie_res.json().get('subjects', []):
+                best_subject_id = subjects[0]['id']
+        if not best_subject_id and isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+            if subjects := tv_res.json().get('subjects', []):
+                best_subject_id = subjects[0]['id']
+
+        if best_subject_id:
+            details = await _scrape_douban_details(best_subject_id, client)
+            local_aliases.update(details.get('aliases_cn', []))
+        logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"豆瓣辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}
+
+async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从豆瓣获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        movie_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "movie", "tag": keyword, "page_limit": 1, "page_start": 0})
+        tv_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "tv", "tag": keyword, "page_limit": 1, "page_start": 0})
+        movie_res, tv_res = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
+
+        best_subject_id = None
+        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+            if subjects := movie_res.json().get('subjects', []):
+                best_subject_id = subjects[0]['id']
+        if not best_subject_id and isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+            if subjects := tv_res.json().get('subjects', []):
+                best_subject_id = subjects[0]['id']
+
+        if best_subject_id:
+            details = await _scrape_douban_details(best_subject_id, client)
+            local_aliases.update(details.get('aliases_cn', []))
+        logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"豆瓣辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}

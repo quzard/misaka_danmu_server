@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
-
+from typing import Set
 from urllib.parse import urlencode, quote
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
@@ -398,3 +398,71 @@ async def search_bangumi_subjects(
         await crud.set_cache(session, cache_key, final_results, int(ttl_seconds_str), provider='bangumi')
 
         return final_results
+
+async def search_bangumi_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从Bangumi获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        search_payload = {"keyword": keyword, "filter": {"type": [2]}}
+        search_response = await client.post("https://api.bgm.tv/v0/search/subjects", json=search_payload)
+        if search_response.status_code != 200:
+            return set()
+
+        search_result = BangumiSearchResponse.model_validate(search_response.json())
+        if not search_result.data:
+            return set()
+
+        best_match = search_result.data[0]
+        details_response = await client.get(f"https://api.bgm.tv/v0/subjects/{best_match.id}")
+        if details_response.status_code != 200:
+            return set()
+
+        details = details_response.json()
+        local_aliases.add(details.get('name'))
+        local_aliases.add(details.get('name_cn'))
+        for item in details.get('infobox', []):
+            if item.get('key') == '别名':
+                if isinstance(item['value'], str):
+                    local_aliases.add(item['value'])
+                elif isinstance(item['value'], list):
+                    for v_item in item['value']:
+                        if isinstance(v_item, dict) and v_item.get('v'):
+                            local_aliases.add(v_item['v'])
+        logger.info(f"Bangumi辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"Bangumi辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}
+
+async def search_bangumi_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从Bangumi获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        search_payload = {"keyword": keyword, "filter": {"type": [2]}}
+        search_response = await client.post("https://api.bgm.tv/v0/search/subjects", json=search_payload)
+        if search_response.status_code != 200:
+            return set()
+
+        search_result = BangumiSearchResponse.model_validate(search_response.json())
+        if not search_result.data:
+            return set()
+
+        best_match = search_result.data[0]
+        details_response = await client.get(f"https://api.bgm.tv/v0/subjects/{best_match.id}")
+        if details_response.status_code != 200:
+            return set()
+
+        details = details_response.json()
+        local_aliases.add(details.get('name'))
+        local_aliases.add(details.get('name_cn'))
+        for item in details.get('infobox', []):
+            if item.get('key') == '别名':
+                if isinstance(item['value'], str):
+                    local_aliases.add(item['value'])
+                elif isinstance(item['value'], list):
+                    for v_item in item['value']:
+                        if isinstance(v_item, dict) and v_item.get('v'):
+                            local_aliases.add(v_item['v'])
+        logger.info(f"Bangumi辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"Bangumi辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}

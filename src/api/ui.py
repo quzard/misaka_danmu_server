@@ -25,9 +25,6 @@ from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
 from thefuzz import fuzz
-from .tmdb_api import get_tmdb_client, _get_robust_image_base_url
-from .douban_api import get_douban_client
-from .imdb_api import get_imdb_client
 from ..config import settings
 from ..database import get_db_session
 
@@ -190,7 +187,8 @@ async def search_anime_provider(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -216,84 +214,35 @@ async def search_anime_provider(
         )
 
     tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
+    enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
 
-    if not tmdb_api_key:
-        logger.info("TMDB API Key 未配置，跳过辅助搜索，直接进行全网搜索。")
+    # 如果没有启用任何辅助搜索源，或者TMDB作为唯一的辅助源但其API Key未配置，则直接搜索
+    if not enabled_aux_sources or (len(enabled_aux_sources) == 1 and enabled_aux_sources[0]['provider_name'] == 'tmdb' and not tmdb_api_key):
+        logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
         results = await manager.search_all([search_title], episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
     else:
-        logger.info("TMDB API Key 已配置，将执行元数据辅助搜索。")
-        tmdb_domain = await crud.get_config_value(session, "tmdb_api_base_url", "https://api.themoviedb.org")
-        cleaned_domain = tmdb_domain.rstrip('/')
-        base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
-        params = {"api_key": tmdb_api_key}
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-        
-        async with httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0) as tmdb_client:
-            filter_aliases = {search_title}
+        logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
+        filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user, session)
+        filter_aliases.add(search_title)
+        logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
-            async def _get_tmdb_aliases() -> set:
-                """从TMDB获取别名。"""
-                local_aliases = set()
-                try:
-                    tv_task = tmdb_client.get("/search/tv", params={"query": search_title, "language": "zh-CN"})
-                    movie_task = tmdb_client.get("/search/movie", params={"query": search_title, "language": "zh-CN"})
-                    tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
+        logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+        all_results = await manager.search_all([search_title], episode_info=episode_info)
 
-                    tmdb_results = []
-                    if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
-                        tmdb_results.extend(tv_res.json().get("results", []))
-                    if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
-                        tmdb_results.extend(movie_res.json().get("results", []))
-
-                    if tmdb_results:
-                        best_match = tmdb_results[0]
-                        media_type = "tv" if "name" in best_match else "movie"
-                        media_id = best_match['id']
-
-                        details_cn_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
-                        details_tw_task = tmdb_client.get(f"/{media_type}/{media_id}", params={"language": "zh-TW"})
-                        details_cn_res, details_tw_res = await asyncio.gather(details_cn_task, details_tw_task, return_exceptions=True)
-
-                        if isinstance(details_cn_res, httpx.Response) and details_cn_res.status_code == 200:
-                            details = details_cn_res.json()
-                            local_aliases.add(details.get('name') or details.get('title'))
-                            local_aliases.add(details.get('original_name') or details.get('original_title'))
-                            alt_titles = details.get("alternative_titles", {}).get("titles", [])
-                            for title_info in alt_titles:
-                                local_aliases.add(title_info['title'])
-                        
-                        if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
-                            details_tw = details_tw_res.json()
-                            local_aliases.add(details_tw.get('name') or details_tw.get('title'))
-
-                        logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
-                except Exception as e:
-                    logger.warning(f"TMDB辅助搜索失败: {e}")
-                return {alias for alias in local_aliases if alias}
-
-            tasks = [_get_tmdb_aliases()]
-            results_from_helpers = await asyncio.gather(*tasks)
-            for alias_set in results_from_helpers:
-                filter_aliases.update(alias_set)
-            logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
-
-            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
-            all_results = await manager.search_all([search_title], episode_info=episode_info)
-
-            def normalize_for_filtering(title: str) -> str:
-                if not title: return ""
-                title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-                return title.lower().replace(" ", "").replace("：", ":").strip()
-            normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
-            filtered_results = []
-            for item in all_results:
-                normalized_item_title = normalize_for_filtering(item.title)
-                if not normalized_item_title: continue
-                if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
-                    filtered_results.append(item)
-            logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-            results = filtered_results
+        def normalize_for_filtering(title: str) -> str:
+            if not title: return ""
+            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+            return title.lower().replace(" ", "").replace("：", ":").strip()
+        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
+        filtered_results = []
+        for item in all_results:
+            normalized_item_title = normalize_for_filtering(item.title)
+            if not normalized_item_title: continue
+            if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+                filtered_results.append(item)
+        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        results = filtered_results
 
     # 辅助函数，用于根据标题修正媒体类型
     def is_movie_by_title(title: str) -> bool:
@@ -2111,4 +2060,3 @@ async def change_current_user_password(
     # 3. 更新密码
     new_hashed_password = security.get_password_hash(password_data.new_password)
     await crud.update_user_password(session, current_user.username, new_hashed_password)
-

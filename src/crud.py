@@ -786,6 +786,19 @@ async def update_metadata_sources_settings(session: AsyncSession, settings: List
         )
     await session.commit()
 
+async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[str, Any]]:
+    """获取所有已启用辅助搜索的元数据源。"""
+    stmt = (
+        select(MetadataSource)
+        .where(MetadataSource.is_aux_search_enabled == True)
+        .order_by(MetadataSource.display_order)
+    )
+    result = await session.execute(stmt)
+    return [
+        {"provider_name": s.provider_name, "is_enabled": s.is_enabled, "is_aux_search_enabled": s.is_aux_search_enabled, "display_order": s.display_order, "use_proxy": s.use_proxy}
+        for s in result.scalars()
+    ]
+
 # --- Config & Cache ---
 
 async def get_config_value(session: AsyncSession, key: str, default: str) -> str:

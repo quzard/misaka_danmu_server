@@ -3,7 +3,7 @@ import re
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
-
+from typing import Set
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -166,3 +166,27 @@ async def get_imdb_details(
 ):
     """获取指定 IMDb ID 的作品详情，主要用于提取别名。"""
     return await _scrape_imdb_details(imdb_id, client)
+
+
+async def search_imdb_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从 IMDb 获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        search_results = await _search_imdb_api(keyword, client)
+        if not search_results:
+            return local_aliases
+
+        best_match_id = search_results[0].id
+        details = await _scrape_imdb_details(best_match_id, client)
+
+        # The main title is usually the English name
+        if details.get("name_en"):
+            local_aliases.add(details["name_en"])
+        # Add other aliases
+        local_aliases.update(details.get("aliases_cn", []))
+
+        logger.info(f"IMDb辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"IMDb辅助搜索失败: {e}")
+
+    return {alias for alias in local_aliases if alias}

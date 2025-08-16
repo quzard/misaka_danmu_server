@@ -224,3 +224,37 @@ async def get_tvdb_details(
     except Exception as e:
         logger.error(f"获取 TVDB 详情失败 (ID: {tvdb_id}): {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取 TVDB 详情失败 (ID: {tvdb_id})。")
+
+
+async def search_tvdb_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
+    """从 TVDB 获取别名。"""
+    local_aliases: Set[str] = set()
+    try:
+        # Re-implementing the logic from the search_tvdb endpoint
+        search_response = await client.get("/search", params={"query": keyword})
+        search_response.raise_for_status()
+        search_results = TvdbSearchResponse.model_validate(search_response.json()).data
+
+        if not search_results:
+            return local_aliases
+
+        best_match_id = search_results[0].tvdb_id
+
+        # Re-implementing the logic from get_tvdb_details endpoint
+        details_response = await client.get(f"/series/{best_match_id}/extended")
+        details_response.raise_for_status()
+        details = TvdbExtendedDetailsResponse.model_validate(details_response.json()).data
+
+        # The main title from TVDB is often in English
+        if details.name:
+            local_aliases.add(details.name)
+
+        # Add Chinese name from translations if available
+        if details.translations and details.translations.get("zho"):
+            local_aliases.add(details.translations["zho"])
+
+        logger.info(f"TVDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"TVDB辅助搜索失败: {e}")
+
+    return {alias for alias in local_aliases if alias}

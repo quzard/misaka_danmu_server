@@ -297,6 +297,72 @@ async def search_tmdb_movie_subjects(
         return results
 
 
+async def search_tmdb_aliases(keyword: str, client: httpx.AsyncClient) -> set[str]:
+    """
+    从TMDB获取别名。
+    """
+    local_aliases: set[str] = set()
+    try:
+        tv_task = client.get("/search/tv", params={"query": keyword, "language": "zh-CN"})
+        movie_task = client.get("/search/movie", params={"query": keyword, "language": "zh-CN"})
+        tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
+
+        tmdb_results = []
+        if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+            tmdb_results.extend(tv_res.json().get("results", []))
+        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+            tmdb_results.extend(movie_res.json().get("results", []))
+
+        if tmdb_results:
+            best_match = tmdb_results[0]
+            media_type = "tv" if "name" in best_match else "movie"
+            media_id = best_match['id']
+
+            details_cn_res = await client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
+            if details_cn_res.status_code == 200:
+                details = details_cn_res.json()
+                local_aliases.add(details.get('name') or details.get('title'))
+                local_aliases.add(details.get('original_name') or details.get('original_title'))
+                for title_info in details.get("alternative_titles", {}).get("titles", []):
+                    local_aliases.add(title_info['title'])
+        logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"TMDB辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}
+
+async def search_tmdb_aliases(keyword: str, client: httpx.AsyncClient) -> set[str]:
+    """
+    从TMDB获取别名。
+    """
+    local_aliases: set[str] = set()
+    try:
+        tv_task = client.get("/search/tv", params={"query": keyword, "language": "zh-CN"})
+        movie_task = client.get("/search/movie", params={"query": keyword, "language": "zh-CN"})
+        tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
+
+        tmdb_results = []
+        if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+            tmdb_results.extend(tv_res.json().get("results", []))
+        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+            tmdb_results.extend(movie_res.json().get("results", []))
+
+        if tmdb_results:
+            best_match = tmdb_results[0]
+            media_type = "tv" if "name" in best_match else "movie"
+            media_id = best_match['id']
+
+            details_cn_res = await client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
+            if details_cn_res.status_code == 200:
+                details = details_cn_res.json()
+                local_aliases.add(details.get('name') or details.get('title'))
+                local_aliases.add(details.get('original_name') or details.get('original_title'))
+                for title_info in details.get("alternative_titles", {}).get("titles", []):
+                    local_aliases.add(title_info['title'])
+        logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
+    except Exception as e:
+        logger.warning(f"TMDB辅助搜索失败: {e}")
+    return {alias for alias in local_aliases if alias}
+
 @router.get("/details/{media_type}/{tmdb_id}", response_model=Dict[str, Any], summary="获取 TMDB 作品详情")
 async def get_tmdb_details(
     media_type: str = Path(..., description="媒体类型, 'tv' 或 'movie'"),
