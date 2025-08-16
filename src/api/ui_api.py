@@ -635,20 +635,28 @@ async def delete_bulk_sources(
 class ScraperSettingWithConfig(models.ScraperSetting):
     configurable_fields: Optional[Dict[str, str]] = None
     is_loggable: bool = False
+    is_verified: bool = False
 
 @router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(get_scraper_manager)
+    manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """获取所有可用搜索源的列表及其配置（启用状态、顺序、可配置字段）。"""
     settings = await crud.get_all_scraper_settings(session)
     
+    # 获取验证开关的全局状态
+    verification_enabled_str = await config_manager.get("scraper_verification_enabled", "false")
+    verification_enabled = verification_enabled_str.lower() == 'true'
+
     full_settings = []
     for s in settings:
         scraper_class = manager.get_scraper_class(s['provider_name'])
         s_with_config = ScraperSettingWithConfig.model_validate(s)
+        # 如果验证被禁用，则所有源都应显示为已验证
+        s_with_config.is_verified = True if not verification_enabled else (s['provider_name'] in manager._verified_scrapers)
         if scraper_class:
             s_with_config.is_loggable = getattr(scraper_class, "is_loggable", False)
             # 关键修复：复制类属性以避免修改共享的可变字典

@@ -6,6 +6,8 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Union, Callable
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 from collections import defaultdict
 from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -92,6 +94,16 @@ class YoukuRpcResult(BaseModel):
 
 class YoukuScraper(BaseScraper):
     provider_name = "youku"
+    # --- 新增：嵌入私钥 ---
+    # 开发者需要将 generate_keys.py 生成的 private_key.pem 内容粘贴到这里。
+    # 为了安全，私钥不应以明文文件形式分发，而是直接嵌入代码中。
+    _PRIVATE_KEY_PEM = """
+-----BEGIN PRIVATE KEY-----
+!!! 在这里粘贴您的私钥内容 !!!
+!!! 例如: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD... !!!
+-----END PRIVATE KEY-----
+""".strip()
+
     handled_domains = ["v.youku.com"]
     _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
@@ -110,6 +122,31 @@ class YoukuScraper(BaseScraper):
         # For danmaku signing
         self._cna = ""
         self._token = ""
+
+    def sign_challenge(self, challenge: str) -> Optional[bytes]:
+        """
+        (新增) 使用嵌入的私钥对挑战进行签名。
+        """
+        if "!!! 在这里粘贴您的私钥内容 !!!" in self._PRIVATE_KEY_PEM:
+            self.logger.warning("Youku源未配置有效私钥，签名失败。")
+            return None
+        try:
+            private_key = serialization.load_pem_private_key(
+                self._PRIVATE_KEY_PEM.encode('utf-8'),
+                password=None
+            )
+            signature = private_key.sign(
+                challenge.encode('utf-8'),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return signature
+        except Exception as e:
+            self.logger.error(f"为 Youku 源签名时出错: {e}", exc_info=True)
+            return None
 
     async def close(self):
         await self.client.aclose()

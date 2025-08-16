@@ -93,6 +93,14 @@ function renderDanmakuSources(settings) {
         nameSpan.textContent = setting.provider_name;
         li.appendChild(nameSpan);
 
+        // 新增：验证状态图标
+        const verifiedIcon = document.createElement('span');
+        verifiedIcon.className = 'verified-icon';
+        verifiedIcon.textContent = setting.is_verified ? '🛡️' : '⚠️';
+        verifiedIcon.title = setting.is_verified ? '已验证的源' : '未验证的源 (无法使用)';
+        if (!setting.is_verified) li.classList.add('unverified');
+        li.appendChild(verifiedIcon);
+
         // 新增：为Bilibili源添加一个专门的状态显示区域
         if (setting.provider_name === 'bilibili') {
             const biliStatusDiv = document.createElement('div');

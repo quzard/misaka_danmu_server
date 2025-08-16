@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
         'bangumi_client_secret': ('', '用于Bangumi OAuth的App Secret。'),
         'douban_cookie': ('', '用于访问豆瓣API的Cookie。'),
         # 弹幕源
+        'scraper_verification_enabled': ('false', '是否启用搜索源签名验证。'),
         'bilibili_cookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamer_cookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'gamer_user_agent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
@@ -73,7 +74,7 @@ async def lifespan(app: FastAPI):
     await app.state.config_manager.register_defaults(default_configs)
 
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
-    await app.state.scraper_manager.load_and_sync_scrapers()
+    await app.state.scraper_manager.initialize()
     # 新增：初始化元数据源管理器
     app.state.metadata_manager = MetadataSourceManager(session_factory)
     await app.state.metadata_manager.initialize()

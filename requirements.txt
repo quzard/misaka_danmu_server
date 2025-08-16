@@ -26,3 +26,5 @@ beautifulsoup4
 lxml
 # 用于简繁中文转换
 opencc-python-reimplemented
+# 用于非对称加密签名验证
+cryptography
