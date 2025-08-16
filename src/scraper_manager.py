@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import pkgutil
 import inspect
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -56,15 +57,17 @@ class ScraperManager:
         self.scraper_settings.clear()
 
         self._domain_map.clear()
-        scrapers_dir = Path(__file__).parent / "scrapers"
         discovered_providers = []
         scraper_classes = {}
 
-        for file in scrapers_dir.glob("*.py"):
-            if file.name.startswith("_") or file.name == "base.py": continue
-            module_name = f".scrapers.{file.stem}"
+        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效
+        scrapers_package_path = [str(Path(__file__).parent / "scrapers")]
+        for finder, name, ispkg in pkgutil.iter_modules(scrapers_package_path):
+            if name.startswith("_") or name == "base":
+                continue
             try:
-                module = importlib.import_module(module_name, package="src")
+                module_name = f"src.scrapers.{name}"
+                module = importlib.import_module(module_name)
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     if issubclass(obj, BaseScraper) and obj is not BaseScraper:
                         provider_name = obj.provider_name # 直接访问类属性，避免实例化
@@ -74,14 +77,14 @@ class ScraperManager:
                             self._domain_map[domain] = provider_name
                         self._scraper_classes[provider_name] = obj
             except TypeError as e:
-                if "Couldn't parse file content!" in str(e):
+                if "couldn't parse file content" in str(e).lower():
                     # 这是一个针对 protobuf 版本不兼容的特殊情况。
                     error_msg = (
                         f"加载搜索源模块 {module_name} 失败，疑似 protobuf 版本不兼容。 "
                         f"请确保已将 'protobuf' 版本固定为 '3.20.3' (在 requirements.txt 中), "
                         f"并且已经通过 'docker-compose build' 命令重新构建了您的 Docker 镜像。"
                     )
-                    logging.getLogger(__name__).error(error_msg, exc_info=True)
+                    logging.getLogger(__name__).error(error_msg)
                 else:
                     # 正常处理其他 TypeError
                     logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)

@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import pkgutil
 import inspect
 import logging
 from datetime import datetime
@@ -56,22 +57,22 @@ class SchedulerManager:
         """
         动态发现并加载 'jobs' 目录下的所有任务类。
         """
-        jobs_dir = Path(__file__).parent / "jobs"
-        for file in jobs_dir.glob("*.py"):
-            if file.name.startswith("_") or file.name == "base.py":
+        jobs_package_path = [str(Path(__file__).parent / "jobs")]
+        for finder, name, ispkg in pkgutil.iter_modules(jobs_package_path):
+            if name.startswith("_") or name == "base":
                 continue
 
-            module_name = f".jobs.{file.stem}"
             try:
-                module = importlib.import_module(module_name, package="src")
-                for name, obj in inspect.getmembers(module, inspect.isclass):
+                module_name = f"src.jobs.{name}"
+                module = importlib.import_module(module_name)
+                for class_name, obj in inspect.getmembers(module, inspect.isclass):
                     if issubclass(obj, BaseJob) and obj is not BaseJob:
                         if obj.job_type in self._job_classes:
                             logger.warning(f"发现重复的定时任务类型 '{obj.job_type}'。将被覆盖。")
                         self._job_classes[obj.job_type] = obj
-                        logger.info(f"定时任务 '{obj.job_name}' (类型: {obj.job_type}) 已加载。")
+                        logger.info(f"定时任务 '{obj.job_name}' (类型: {obj.job_type}, 来自模块 {name}) 已加载。")
             except Exception as e:
-                logger.error(f"从 {file.name} 加载定时任务失败: {e}")
+                logger.error(f"从模块 {name} 加载定时任务失败: {e}")
 
     def get_available_jobs(self) -> List[Dict[str, str]]:
         """获取所有已加载的可用任务类型及其名称。"""
