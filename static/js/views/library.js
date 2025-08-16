@@ -164,11 +164,18 @@ function renderSourceDetailTable(sources, anime) {
                     if (checkbox) checkbox.click();
                 }
             });
+            const statusIcons = [];
+            if (source.is_favorited) {
+                statusIcons.push('<span title="精确标记">🌟</span>');
+            }
+            if (source.incremental_refresh_enabled) {
+                statusIcons.push('<span title="定时追更">⏰</span>');
+            }
             row.innerHTML = `
                 <td><input type="checkbox" class="source-checkbox" value="${source.source_id}"></td>
                 <td>${source.provider_name}</td>
                 <td>${source.media_id}</td>
-                <td>${source.is_favorited ? '🌟' : ''}</td>
+                <td class="status-cell">${statusIcons.join(' ')}</td>
                 <td>${new Date(source.created_at).toLocaleString()}</td>
                 <td class="actions-cell">
                     <div class="action-buttons-wrapper" data-source-id="${source.source_id}" data-anime-title="${anime.title}" data-anime-id="${anime.animeId}">
@@ -214,8 +221,7 @@ async function handleSourceAction(e) {
         case 'toggle-incremental':
             try {
                 await apiFetch(`/api/ui/library/source/${sourceId}/toggle-incremental-refresh`, { method: 'PUT' });
-                // Toggle the visual state of the button
-                button.classList.toggle('disabled-icon');
+                showAnimeDetailView(animeId); // Refresh the view to show the new status icon
             } catch (error) {
                 alert(`操作失败: ${error.message}`);
             }

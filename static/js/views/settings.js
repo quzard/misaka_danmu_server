@@ -206,19 +206,19 @@ async function handleTestProxy() {
 
         let resultsText = "--- 代理服务器连通性测试 ---\n";
         const connectivity = response.proxy_connectivity;
-        if (connectivity.status === 'success') {
+        if (connectivity && connectivity.status === 'success') {
             resultsText += `✅ 代理服务器连接正常，延迟: ${connectivity.latency.toFixed(0)} ms\n`;
         } else {
-            resultsText += `❌ 代理服务器连接失败: ${connectivity.error}\n`;
+            resultsText += `❌ 代理服务器连接失败: ${connectivity ? connectivity.error : '无响应或格式错误'}\n`;
         }
 
         resultsText += "\n--- 目标站点可用性测试 ---\n";
-        for (const [domain, result] of Object.entries(response.target_sites)) {
+        for (const [domain, result] of Object.entries(response.target_sites || {})) {
             const friendlyDomain = new URL(domain).hostname;
-            if (result.status === 'success') {
+            if (result && result.status === 'success') {
                 resultsText += `✅ ${friendlyDomain}: 可达, 延迟: ${result.latency.toFixed(0)} ms\n`;
             } else {
-                resultsText += `❌ ${friendlyDomain}: 无法访问\n`;
+                resultsText += `❌ ${friendlyDomain}: 无法访问 (${result ? result.error : '未知错误'})\n`;
             }
         }
 
