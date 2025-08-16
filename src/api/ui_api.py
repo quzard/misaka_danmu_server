@@ -27,6 +27,7 @@ from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
+from thefuzz import fuzz
 from ..config import settings
 from ..database import get_db_session
 
