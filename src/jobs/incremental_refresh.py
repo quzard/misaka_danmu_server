@@ -47,9 +47,9 @@ class IncrementalRefreshJob(BaseJob):
                     provider=source_info["provider_name"], media_id=source_info["media_id"],
                     anime_title=anime_title, media_type=source_info["type"],
                     season=source_info.get("season", 1), current_episode_index=next_episode_index,
-                    image_url=None, douban_id=None, tmdb_id=source_info.get("tmdb_id"),
-                    imdb_id=None, tvdb_id=None, progress_callback=lambda p, d: None, # type: ignore
-                    session=session, manager=self.scraper_manager, task_manager=self.task_manager
+                    image_url=None, douban_id=None, tmdb_id=source_info.get("tmdb_id"), imdb_id=None, tvdb_id=None,
+                    progress_callback=progress_callback,  # 修正：传递主任务的回调，而不是一个同步的lambda
+                    session=session, manager=self.scraper_manager, task_manager=self.task_manager,
                 )
             except TaskSuccess as e:
                 message = str(e)

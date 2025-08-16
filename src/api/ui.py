@@ -1068,11 +1068,13 @@ async def update_scraper_config(
     # 允许更新通用的黑名单配置
     allowed_keys.append(f"{provider_name}_episode_blacklist_regex")
 
-    # 剩余的 payload 用于 config 表
-    tasks = [crud.update_config_value(session, key, str(value) or "") for key, value in payload.items() if key in allowed_keys]
+    # 修正：使用 for 循环代替 asyncio.gather 来避免并发会话错误
+    # 这样可以确保每个配置项的更新都是顺序执行的，每个更新都有自己的事务。
+    for key, value in payload.items():
+        if key in allowed_keys:
+            # crud.update_config_value 内部会提交事务
+            await crud.update_config_value(session, key, str(value) or "")
     
-    if tasks:
-        await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{provider_name}' 的配置。")
 
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")

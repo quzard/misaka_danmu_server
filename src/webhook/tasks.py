@@ -119,13 +119,13 @@ async def webhook_search_and_dispatch_task(
             task_title = f"Webhook（{webhook_source}）自动导入：{best_match.title} - S{season:02d}E{current_episode_index:02d} ({best_match.provider}) [{current_time}]"
         else: # movie
             task_title = f"Webhook（{webhook_source}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
-        task_coro = lambda cb: generic_import_task(
+        task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, media_id=best_match.mediaId,
             anime_title=best_match.title, media_type=best_match.type,
             season=season, current_episode_index=best_match.currentEpisodeIndex,
             image_url=best_match.imageUrl, douban_id=douban_id,
             tmdb_id=tmdb_id, imdb_id=imdb_id, tvdb_id=tvdb_id,
-            progress_callback=cb, session=session, manager=manager,
+            progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
             task_manager=task_manager
         )
         await task_manager.submit_task(task_coro, task_title)
