@@ -385,10 +385,31 @@ th {
     filter: grayscale(100%);
 }
 
+.bili-disclaimer-agreement {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+.bili-disclaimer-agreement label {
+    cursor: pointer;
+    color: #606266;
+}
+
+.bili-disclaimer-agreement input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
+
 .bili-login-disclaimer {
     font-size: 12px;
     color: #909399; /* A muted grey color */
-    margin-top: 15px;
+    margin-top: 10px;
     padding: 0 10px;
     line-height: 1.4;
     text-align: center;
@@ -402,4 +423,4 @@ th {
 .bili-login-disclaimer a:hover {
     text-decoration: underline;
 }
-}
+

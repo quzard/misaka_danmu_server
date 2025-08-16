@@ -556,6 +556,13 @@ async function handleBiliLoginClick() {
         return;
     }
 
+    // --- 新增：检查免责声明复选框 ---
+    const disclaimerCheckbox = document.getElementById('bili-disclaimer-checkbox');
+    if (disclaimerCheckbox && !disclaimerCheckbox.checked) {
+        alert('请先勾选同意免责声明。');
+        return;
+    }
+
     // --- 以下是登录流程 ---
     stopBiliPolling();
     loginBtn.disabled = true;
