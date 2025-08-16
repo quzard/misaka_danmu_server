@@ -9,6 +9,7 @@ from sqlalchemy import select, func, delete, update, and_, or_, text, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload, aliased
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 
 from . import models
 from .orm_models import (
@@ -122,10 +123,14 @@ async def search_anime(session: AsyncSession, keyword: str) -> List[Dict[str, An
     sanitized_keyword = re.sub(r'[+\-><()~*@"]', ' ', keyword).strip()
     if not sanitized_keyword:
         return []
-    
+
+    # 修正：使用 LIKE 代替 MATCH...AGAINST 以兼容 PostgreSQL
+    # 注意：这会比全文索引慢，但提供了跨数据库的兼容性。
+    # 对于高性能需求，可以考虑为每个数据库方言实现特定的全文搜索查询。
     stmt = select(Anime.id, Anime.title, Anime.type).where(
-        func.match(Anime.title).against(f"{sanitized_keyword}*", mode="BOOLEAN")
-    )
+        Anime.title.like(f"%{sanitized_keyword}%")
+    ).order_by(func.length(Anime.title)) # 按标题长度排序，较短的匹配更相关
+
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -486,21 +491,41 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
     """批量插入弹幕，利用 INSERT IGNORE 忽略重复弹幕"""
     if not comments:
         return 0
-    
+
+    # 1. 准备要插入的数据
     data_to_insert = [
         {"episode_id": episode_id, "cid": c['cid'], "p": c['p'], "m": c['m'], "t": c['t']}
         for c in comments
     ]
-    stmt = mysql_insert(Comment).values(data_to_insert).on_duplicate_key_update(cid=Comment.cid)
-    result = await session.execute(stmt)
+
+    # 2. 获取当前弹幕数量
+    initial_count_stmt = select(func.count()).select_from(Comment).where(Comment.episode_id == episode_id)
+    initial_count = (await session.execute(initial_count_stmt)).scalar_one()
+
+    # 3. 执行 upsert 操作
+    dialect = session.bind.dialect.name
+    if dialect == 'mysql':
+        stmt = mysql_insert(Comment).values(data_to_insert)
+        stmt = stmt.on_duplicate_key_update(cid=stmt.inserted.cid) # A no-op update to trigger IGNORE behavior
+    elif dialect == 'postgresql':
+        stmt = postgresql_insert(Comment).values(data_to_insert)
+        stmt = stmt.on_conflict_on_constraint('idx_episode_cid_unique').do_nothing()
+    else:
+        # For other dialects, we might need a slower, row-by-row approach or raise an error.
+        # For now, we focus on mysql and postgresql.
+        raise NotImplementedError(f"批量插入弹幕功能尚未为数据库类型 '{dialect}' 实现。")
     
-    affected_rows = result.rowcount
-    # rowcount for INSERT ... ON DUPLICATE KEY UPDATE is 1 for each new row, 2 for each updated row.
-    # We only care about new rows.
-    newly_inserted_count = (affected_rows - (len(data_to_insert) - affected_rows)) // 2 + (len(data_to_insert) - affected_rows)
+    await session.execute(stmt)
+    await session.flush() # 确保操作完成
+
+    # 4. 重新计算总数并更新
+    final_count_stmt = select(func.count()).select_from(Comment).where(Comment.episode_id == episode_id)
+    final_count = (await session.execute(final_count_stmt)).scalar_one()
     
+    newly_inserted_count = final_count - initial_count
+
     if newly_inserted_count > 0:
-        update_stmt = update(Episode).where(Episode.id == episode_id).values(comment_count=Episode.comment_count + newly_inserted_count)
+        update_stmt = update(Episode).where(Episode.id == episode_id).values(comment_count=final_count)
         await session.execute(update_stmt)
     
     await session.commit()
@@ -785,21 +810,43 @@ async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
 async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: int, provider: Optional[str] = None):
     json_value = json.dumps(value, ensure_ascii=False)
     expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
-    
-    stmt = mysql_insert(CacheData).values(
-        cache_provider=provider, cache_key=key, cache_value=json_value, expires_at=expires_at
-    )
-    stmt = stmt.on_duplicate_key_update(
-        cache_provider=stmt.inserted.cache_provider,
-        cache_value=stmt.inserted.cache_value,
-        expires_at=stmt.inserted.expires_at
-    )
+
+    dialect = session.bind.dialect.name
+    values_to_insert = {"cache_provider": provider, "cache_key": key, "cache_value": json_value, "expires_at": expires_at}
+
+    if dialect == 'mysql':
+        stmt = mysql_insert(CacheData).values(values_to_insert)
+        stmt = stmt.on_duplicate_key_update(
+            cache_provider=stmt.inserted.cache_provider,
+            cache_value=stmt.inserted.cache_value,
+            expires_at=stmt.inserted.expires_at
+        )
+    elif dialect == 'postgresql':
+        stmt = postgresql_insert(CacheData).values(values_to_insert)
+        stmt = stmt.on_conflict_on_constraint('cache_data_pkey').do_update(
+            set_={"cache_provider": stmt.excluded.cache_provider, "cache_value": stmt.excluded.cache_value, "expires_at": stmt.excluded.expires_at}
+        )
+    else:
+        raise NotImplementedError(f"缓存设置功能尚未为数据库类型 '{dialect}' 实现。")
+
     await session.execute(stmt)
     await session.commit()
 
 async def update_config_value(session: AsyncSession, key: str, value: str):
-    stmt = mysql_insert(Config).values(config_key=key, config_value=value)
-    stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.config_value)
+    dialect = session.bind.dialect.name
+    values_to_insert = {"config_key": key, "config_value": value}
+
+    if dialect == 'mysql':
+        stmt = mysql_insert(Config).values(values_to_insert)
+        stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.config_value)
+    elif dialect == 'postgresql':
+        stmt = postgresql_insert(Config).values(values_to_insert)
+        stmt = stmt.on_conflict_on_constraint('config_pkey').do_update(
+            set_={'config_value': stmt.excluded.config_value}
+        )
+    else:
+        raise NotImplementedError(f"配置更新功能尚未为数据库类型 '{dialect}' 实现。")
+
     await session.execute(stmt)
     await session.commit()
 

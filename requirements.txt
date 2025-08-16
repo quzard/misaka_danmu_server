@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 aiomysql
+asyncpg
 SQLAlchemy[asyncio]
 greenlet
 apscheduler

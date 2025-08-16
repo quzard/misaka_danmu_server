@@ -63,7 +63,7 @@
 
 ### 步骤 1: 部署数据库 (MySQL)
 
-1. 在一个合适的目录（例如 `./danmuku`）下，创建 `docker-compose.mysql.yaml` 文件，内容如下：
+1.  在一个合适的目录（例如 `./danmuku`）下，创建 `docker-compose.mysql.yaml` 文件，内容如下：
 
 ```shell
   mkdir danmuku
@@ -111,6 +111,43 @@
     docker-compose -f docker-compose.mysql.yaml up -d
     ```
 
+### (可选) 步骤 1: 部署数据库 (PostgreSQL)
+
+如果您更倾向于使用 PostgreSQL，请按照以下步骤操作。
+
+1.  在与上面相同的目录 (`./danmuku`) 下, 创建 `docker-compose.postgres.yaml` 文件:
+
+    ```yaml
+    services:
+      postgres:
+        image: postgres:15-alpine
+        container_name: danmu-postgres
+        restart: unless-stopped
+        environment:
+          # !!! 重要：请务必替换为您的强密码 !!!
+          POSTGRES_PASSWORD: "your_strong_postgres_password"
+          POSTGRES_USER: "danmuapi"
+          POSTGRES_DB: "danmuapi"
+          TZ: "Asia/Shanghai"
+        volumes:
+          - ./postgres-data:/var/lib/postgresql/data
+        ports:
+          - "5432:5432"
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U danmuapi -d danmuapi"]
+          interval: 5s
+          timeout: 3s
+          retries: 5
+        network_mode: "bridge"
+    ```
+
+2.  **重要**: 修改文件中的 `POSTGRES_PASSWORD` 为您自己的安全密码。
+
+3.  在 `docker-compose.postgres.yaml` 所在目录运行命令启动数据库：
+    ```bash
+    docker-compose -f docker-compose.postgres.yaml up -d
+    ```
+
 ### 步骤 2: 部署弹幕库
 1. 创建 `docker-compose.app.yaml` 文件
 
@@ -124,11 +161,15 @@
         - PUID=1000
         - PGID=1000
         - UMASK=0022
+        # --- 数据库连接配置 ---
+        # 数据库类型: 'mysql' (默认) 或 'postgresql'
+        - DANMUAPI_DATABASE__TYPE=mysql
         #  连接MySql数据库相关配置
         - DANMUAPI_DATABASE__HOST=127.0.0.1
-        - DANMUAPI_DATABASE__PORT=3306
+        # MySQL 默认端口是 3306, PostgreSQL 默认是 5432
+        - DANMUAPI_DATABASE__PORT=3306 
         - DANMUAPI_DATABASE__NAME=danmuapi
-        # !!! 重要：请使用上面mysql容器相同的用户名和密码 !!!
+        # !!! 重要：请使用与您选择的数据库容器相同的用户名和密码 !!!
         - DANMUAPI_DATABASE__USER=danmuapi
         - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
 

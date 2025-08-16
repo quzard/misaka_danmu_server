@@ -28,7 +28,7 @@ class Anime(Base):
     aliases: Mapped["AnimeAlias"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
 
     __table_args__ = (
-        Index('idx_title_fulltext', 'title', mysql_with_parser='ngram'),
+        Index('idx_title_fulltext', 'title'),
     )
 
 class AnimeSource(Base):
