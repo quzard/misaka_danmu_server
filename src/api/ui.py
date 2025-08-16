@@ -1035,7 +1035,7 @@ async def get_scraper_config(
 @router.put("/scrapers/{provider_name}/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定搜索源的配置")
 async def update_scraper_config(
     provider_name: str,
-    payload: Dict[str, str],
+    payload: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
@@ -1047,6 +1047,18 @@ async def update_scraper_config(
     if not scraper_class or not (is_configurable or is_loggable):
         raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
 
+    # --- 新增：单独处理 'use_proxy' 设置 ---
+    # 它更新的是 scrapers 表，而不是 config 表。
+    use_proxy_value = payload.pop('use_proxy', None)
+    if use_proxy_value is not None:
+        is_proxy_enabled = use_proxy_value if isinstance(use_proxy_value, bool) else str(use_proxy_value).lower() == 'true'
+        await session.execute(
+            update(orm_models.Scraper)
+            .where(orm_models.Scraper.provider_name == provider_name)
+            .values(use_proxy=is_proxy_enabled)
+        )
+        await session.commit()
+
     allowed_keys = []
     if is_configurable:
         allowed_keys.extend(scraper_class.configurable_fields.keys())
@@ -1056,11 +1068,12 @@ async def update_scraper_config(
     # 允许更新通用的黑名单配置
     allowed_keys.append(f"{provider_name}_episode_blacklist_regex")
 
-    tasks = [crud.update_config_value(session, key, value or "") for key, value in payload.items() if key in allowed_keys]
+    # 剩余的 payload 用于 config 表
+    tasks = [crud.update_config_value(session, key, str(value) or "") for key, value in payload.items() if key in allowed_keys]
     
     if tasks:
         await asyncio.gather(*tasks)
-        logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{provider_name}' 的配置。")
+    logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{provider_name}' 的配置。")
 
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")
 async def get_server_logs(current_user: models.User = Depends(security.get_current_user)):

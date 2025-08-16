@@ -444,6 +444,8 @@ async function handleSaveScraperConfig() {
     const useProxyCheckbox = document.getElementById('config-input-use-proxy');
     if (useProxyCheckbox) {
         danmakuSourcesList.querySelector(`li[data-provider-name="${currentProviderForModal}"]`).dataset.useProxy = useProxyCheckbox.checked;
+            // 新增：将代理设置添加到要发送的负载中
+            payload['use_proxy'] = useProxyCheckbox.checked;
     }
     // 获取日志开关的值
     const logCheckbox = document.getElementById('config-input-log-responses');
@@ -451,7 +453,9 @@ async function handleSaveScraperConfig() {
         payload[logCheckbox.name] = logCheckbox.checked ? 'true' : 'false';
     }
 
-    await apiFetch(`/api/ui/scrapers/${currentProviderForModal}/config`, { method: 'PUT', body: JSON.stringify(payload) });
+        // 修正：调用正确的端点来保存设置。
+        // 为了简化，我们将所有内容发送到单个端点，并让后端处理它。
+        await apiFetch(`/api/ui/scrapers/${currentProviderForModal}/config`, { method: 'PUT', body: JSON.stringify(payload) });
     hideScraperConfigModal();
     alert('配置已保存！');
 }
