@@ -650,7 +650,7 @@ async def incremental_refresh_source(
 
     # 从新集信息创建任务
     task_coro = lambda session, callback: incremental_refresh_task(source_id, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
-    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} - 尝试获取第{next_episode_index}集")
+    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['provider_name']}) - 尝试获取第{next_episode_index}集")
 
     return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "task_id": task_id}
 
@@ -739,7 +739,7 @@ async def refresh_anime(
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {source_id}) 启动了全量刷新任务。")
     
     task_coro = lambda session, callback: full_refresh_task(source_id, session, scraper_manager, task_manager, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']}")
+    task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['provider_name']})")
 
     return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "task_id": task_id}
 
@@ -1713,7 +1713,7 @@ async def manual_import_episode(
     if not expected_prefix or expected_prefix not in request_data.url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
-    task_title = f"手动导入: {request_data.title}"
+    task_title = f"手动导入: {request_data.title} ({provider_name})"
     task_coro = lambda session, callback: manual_import_task(
         source_id=source_id, title=request_data.title, episode_index=request_data.episode_index,
         url=request_data.url, provider_name=provider_name,
@@ -1810,7 +1810,7 @@ async def import_from_provider(
     )
     
     # 构造任务标题
-    task_title = f"导入: {request_data.anime_title}"
+    task_title = f"导入: {request_data.anime_title} ({request_data.provider})"
     # 如果是电视剧且指定了单集导入，则在标题中追加季和集信息
     if request_data.type == "tv_series" and request_data.current_episode_index is not None and request_data.season is not None:
         task_title += f" - S{request_data.season:02d}E{request_data.current_episode_index:02d}"
@@ -1840,7 +1840,7 @@ async def import_edited_episodes(
     scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
-    task_title = f"编辑后导入: {request_data.anime_title}"
+    task_title = f"编辑后导入: {request_data.anime_title} ({request_data.provider})"
     task_coro = lambda session, callback: edited_import_task(
         request_data=request_data,
         progress_callback=callback,
@@ -2063,7 +2063,7 @@ async def import_from_url(
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager
     )
     
-    task_title = f"URL导入: {title}"
+    task_title = f"URL导入: {title} ({provider})"
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"'{title}' 的URL导入任务已提交。", "task_id": task_id}
