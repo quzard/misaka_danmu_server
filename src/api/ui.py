@@ -931,15 +931,15 @@ async def test_proxy_latency(
 ):
     """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
     proxy_url = request.proxy_url
-    # httpx 推荐使用字典格式来指定代理
-    proxies_to_use = {"all://": proxy_url} if proxy_url else None
+    # 修正：使用旧的 'proxy' 参数以兼容旧版 httpx
+    proxy_to_use = proxy_url if proxy_url else None
     
     # Test 1: Proxy Connectivity
     proxy_connectivity_result: ProxyTestResult
     # 使用一个已知的高可用、轻量级端点进行测试
     test_url_google = "http://www.google.com/generate_204"
     try:
-        async with httpx.AsyncClient(proxies=proxies_to_use, timeout=10.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
             start_time = time.time()
             response = await client.get(test_url_google)
             latency = (time.time() - start_time) * 1000
@@ -974,7 +974,7 @@ async def test_proxy_latency(
             error_str = f"{type(e).__name__}"
             return domain, ProxyTestResult(status="failure", error=error_str)
 
-    async with httpx.AsyncClient(proxies=proxies_to_use, timeout=10.0) as client:
+    async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
         tasks = [test_domain(domain, client) for domain in test_domains]
         results = await asyncio.gather(*tasks)
         for domain, result in results:
@@ -1560,6 +1560,48 @@ async def generic_import_task(
     except Exception as e:
         logger.error(f"导入任务发生严重错误: {e}", exc_info=True)
         raise  # 重新抛出异常，以便任务管理器能捕获并标记任务为“失败”
+    
+async def edited_import_task(
+    request_data: "EditedImportRequest",
+    progress_callback: Callable,
+    pool: aiomysql.Pool,
+    manager: ScraperManager
+):
+    """后台任务：处理编辑后的导入请求。"""
+    try:
+        scraper = manager.get_scraper(request_data.provider)
+        normalized_title = request_data.anime_title.replace(":", "：")
+        
+        episodes = request_data.episodes
+        if not episodes:
+            raise TaskSuccess("没有提供任何分集，任务结束。")
+
+        anime_id: Optional[int] = None
+        source_id: Optional[int] = None
+        total_comments_added = 0
+        total_episodes = len(episodes)
+
+        for i, episode in enumerate(episodes):
+            await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
+            comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, d: None)
+
+            if comments and anime_id is None:
+                local_image_path = await download_image(request_data.image_url, pool, request_data.provider)
+                anime_id = await crud.get_or_create_anime(pool, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
+                await crud.update_metadata_if_empty(pool, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
+                source_id = await crud.link_source_to_anime(pool, anime_id, request_data.provider, request_data.media_id)
+
+            if anime_id and source_id:
+                episode_db_id = await crud.create_episode_if_not_exists(pool, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                if comments:
+                    total_comments_added += await crud.bulk_insert_comments(pool, episode_db_id, comments)
+
+        if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+        else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
+    except TaskSuccess: raise
+    except Exception as e:
+        logger.error(f"编辑后导入任务发生严重错误: {e}", exc_info=True)
+        raise
 
 async def full_refresh_task(source_id: int, pool: aiomysql.Pool, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
     """
@@ -1847,6 +1889,37 @@ async def import_from_provider(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"'{request_data.anime_title}' 的导入任务已提交。请在任务管理器中查看进度。", "task_id": task_id}
+
+class EditedImportRequest(models.BaseModel):
+    provider: str
+    media_id: str
+    anime_title: str
+    media_type: str
+    season: int
+    image_url: Optional[str] = None
+    douban_id: Optional[str] = None
+    tmdb_id: Optional[str] = None
+    # 关键区别：直接提供一个分集列表
+    episodes: List[models.ProviderEpisodeInfo]
+
+@router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
+async def import_edited_episodes(
+    request_data: EditedImportRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
+    task_title = f"编辑后导入: {request_data.anime_title}"
+    task_coro = lambda callback: edited_import_task(
+        request_data=request_data,
+        progress_callback=callback,
+        pool=pool,
+        manager=scraper_manager
+    )
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    return {"message": f"'{request_data.anime_title}' 的编辑导入任务已提交。", "task_id": task_id}
 
 @router.post("/tasks/{task_id}/pause", status_code=status.HTTP_202_ACCEPTED, summary="暂停一个正在运行的任务")
 async def pause_task(

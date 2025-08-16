@@ -96,9 +96,9 @@ class BaseScraper(ABC):
         provider_setting = next((s for s in scraper_settings if s['provider_name'] == self.provider_name), None)
         use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
-        proxies = {"all://": proxy_url} if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+        proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
 
-        client_kwargs = {"proxies": proxies, "timeout": 20.0, "follow_redirects": True, **kwargs}
+        client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:

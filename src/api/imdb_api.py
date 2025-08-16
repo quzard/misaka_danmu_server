@@ -32,13 +32,13 @@ async def get_imdb_client(
     provider_setting = next((s for s in metadata_settings if s['provider_name'] == 'imdb'), None)
     use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
-    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+    proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
     # --- End of new proxy logic ---
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7", # 优先请求英文内容以获得更规范的数据
     }
-    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxies)
+    return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
 
 class ImdbSearchResult(BaseModel):

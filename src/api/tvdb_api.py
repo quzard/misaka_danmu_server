@@ -68,9 +68,9 @@ async def get_tvdb_client(
     provider_setting = next((s for s in metadata_settings if s['provider_name'] == 'tvdb'), None)
     use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
-    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+    proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
     # --- End of new proxy logic ---
-    client = httpx.AsyncClient(base_url="https://api4.thetvdb.com/v4", timeout=20.0, proxy=proxies)
+    client = httpx.AsyncClient(base_url="https://api4.thetvdb.com/v4", timeout=20.0, proxy=proxy_to_use)
     token = await get_tvdb_token(pool, client)
     client.headers.update(
         {"Authorization": f"Bearer {token}", "User-Agent": "DanmuApiServer/1.0"}
