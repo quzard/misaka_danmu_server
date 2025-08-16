@@ -229,9 +229,15 @@ function renderScheduledTasks(tasks) {
 
     tasks.forEach(task => {
         const row = scheduledTasksTableBody.insertRow();
+        // 新增：创建一个从 job_type 到中文显示名称的映射
+        const jobTypeDisplay = {
+            'tmdb_auto_map': 'TMDB自动映射',
+            'incremental_refresh': '定时增量追更'
+        }[task.job_type] || task.job_type;
+
         row.innerHTML = `
             <td>${task.name}</td>
-            <td>${task.job_type === 'tmdb_auto_map' ? 'TMDB自动映射' : task.job_type}</td>
+            <td>${jobTypeDisplay}</td>
             <td>${task.cron_expression}</td>
             <td>${task.is_enabled ? '✅' : '❌'}</td>
             <td>${task.last_run_at ? new Date(task.last_run_at).toLocaleString() : '从未'}</td>

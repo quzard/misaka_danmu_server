@@ -75,7 +75,6 @@ function populateEditForm(details) {
     document.getElementById('edit-anime-id').value = details.anime_id;
     document.getElementById('edit-anime-title').value = details.title;
     editAnimeTypeSelect.value = details.type;
-    document.getElementById('edit-episode-original-index').value = details.episode_index;
     document.getElementById('edit-anime-poster-url').value = details.image_url || '';
     document.getElementById('edit-anime-season').value = details.season;
     document.getElementById('edit-anime-episode-count').value = details.episode_count || '';
@@ -98,8 +97,6 @@ function populateEditForm(details) {
 async function handleEditAnimeSave(e, navigateBackOnSuccess = true) {
     e.preventDefault();
     const animeId = document.getElementById('edit-anime-id').value;
-    const sourceId = document.getElementById('edit-episode-source-id').value;
-    const originalIndex = document.getElementById('edit-episode-original-index').value;
     const payload = {
         title: document.getElementById('edit-anime-title').value,
         type: document.getElementById('edit-anime-type').value,
@@ -107,8 +104,6 @@ async function handleEditAnimeSave(e, navigateBackOnSuccess = true) {
         image_url: document.getElementById('edit-anime-poster-url').value.trim() || null,
         episode_count: document.getElementById('edit-anime-episode-count').value ? parseInt(document.getElementById('edit-anime-episode-count').value, 10) : null,
         tmdb_id: document.getElementById('edit-anime-tmdbid').value || null,
-        source_id: parseInt(sourceId, 10),
-        original_episode_index: parseInt(originalIndex, 10),
         tmdb_episode_group_id: document.getElementById('edit-anime-egid').value || null,
         bangumi_id: document.getElementById('edit-anime-bgmid').value || null,
         tvdb_id: document.getElementById('edit-anime-tvdbid').value || null,
@@ -159,7 +154,7 @@ function handleAnimeTypeChange() {
 
     // --- Episode Group ID ---
     const egidInput = document.getElementById('edit-anime-egid');
-    const egidWrapper = egidInput.closest('.input-with-icon');
+    const egidWrapper = egidInput.closest('.input-with-icons');
     egidInput.disabled = isMovie;
     egidWrapper.classList.toggle('disabled', isMovie);
     if (isMovie) egidInput.value = '';
