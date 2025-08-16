@@ -1248,6 +1248,43 @@ async def toggle_source_incremental_refresh(pool: aiomysql.Pool, source_id: int)
             )
             return affected_rows > 0
 
+async def increment_incremental_refresh_failures(pool: aiomysql.Pool, source_id: int) -> int:
+    """将指定源的增量更新失败次数加一，并返回新的失败次数。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "UPDATE anime_sources SET incremental_refresh_failures = incremental_refresh_failures + 1 WHERE id = %s",
+                    (source_id,)
+                )
+                await cursor.execute("SELECT incremental_refresh_failures FROM anime_sources WHERE id = %s", (source_id,))
+                result = await cursor.fetchone()
+                await conn.commit()
+                return result[0] if result else 0
+            except Exception:
+                await conn.rollback()
+                raise
+
+async def reset_incremental_refresh_failures(pool: aiomysql.Pool, source_id: int):
+    """重置指定源的增量更新失败次数为0。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE anime_sources SET incremental_refresh_failures = 0 WHERE id = %s",
+                (source_id,)
+            )
+
+async def disable_incremental_refresh(pool: aiomysql.Pool, source_id: int) -> bool:
+    """禁用指定源的增量更新。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            affected_rows = await cursor.execute(
+                "UPDATE anime_sources SET incremental_refresh_enabled = FALSE WHERE id = %s",
+                (source_id,)
+            )
+            return affected_rows > 0
+
 # --- OAuth State Management ---
 
 async def create_oauth_state(pool: aiomysql.Pool, user_id: int) -> str:
