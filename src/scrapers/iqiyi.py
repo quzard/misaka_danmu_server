@@ -418,7 +418,14 @@ class IqiyiScraper(BaseScraper):
         新增：使用官方API将视频链接ID解码为tvid。
         这比解析HTML更可靠。
         新增：增加国内API端点作为备用，以提高连接成功率。
+        新增：增加tvid缓存，减少不必要的API请求。
         """
+        cache_key = f"tvid_{link_id}"
+        cached_tvid = await self._get_from_cache(cache_key)
+        if cached_tvid:
+            self.logger.info(f"爱奇艺: 从缓存中命中 tvid (link_id={link_id})")
+            return str(cached_tvid)
+
         endpoints = [
             f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg",  # International (main)
             f"https://pcw-api.iqiyi.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg" # Mainland China (fallback)
@@ -433,8 +440,11 @@ class IqiyiScraper(BaseScraper):
                 response.raise_for_status()
                 data = response.json()
                 if data.get("code") in ["A00000", "0"] and data.get("data"):
+                    tvid = str(data["data"])
                     self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功解码 tvid。")
-                    return str(data["data"])
+                    # 缓存结果。tvid 相对稳定，可以使用与基础信息相同的TTL。
+                    await self._set_to_cache(cache_key, tvid, 'base_info_ttl_seconds', 1800)
+                    return tvid
                 else:
                     self.logger.warning(f"爱奇艺: decode API (端点 #{i+1}) 未成功返回 tvid (link_id: {link_id})。响应: {data}")
                     # Don't return here, let it try the next endpoint

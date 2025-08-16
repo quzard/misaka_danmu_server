@@ -155,7 +155,7 @@ class SchedulerManager:
         await crud.create_scheduled_task(self.pool, task_id, name, job_type, cron, is_enabled)
         runner = self._create_job_runner(job_type)
         job = self.scheduler.add_job(runner, CronTrigger.from_crontab(cron), id=task_id, name=name)
-        if not is_enabled: job.pause()
+        if not is_enabled: job.pause()        
         await crud.update_scheduled_task_run_times(self.pool, task_id, None, job.next_run_time)
         return await crud.get_scheduled_task(self.pool, task_id)
 
