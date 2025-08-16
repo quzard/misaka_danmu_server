@@ -348,6 +348,27 @@ async def search_anime_provider(
         search_episode=episode_to_filter
     )
 
+@router.get("/search/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
+async def get_episodes_for_search_result(
+    provider: str = Query(...),
+    media_id: str = Query(...),
+    media_type: Optional[str] = Query(None), # Pass media_type to help scraper
+    manager: ScraperManager = Depends(get_scraper_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """为指定的搜索结果获取完整的分集列表。"""
+    try:
+        scraper = manager.get_scraper(provider)
+        # 将 db_media_type 传递给 get_episodes 以帮助需要它的刮削器（如 mgtv）
+        episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
+        return episodes
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取分集列表失败 (provider={provider}, media_id={media_id}): {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取分集列表失败。")
+
+
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
     current_user: models.User = Depends(security.get_current_user),
