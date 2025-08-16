@@ -527,8 +527,6 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
     if newly_inserted_count > 0:
         update_stmt = update(Episode).where(Episode.id == episode_id).values(comment_count=final_count)
         await session.execute(update_stmt)
-    
-    await session.commit()
     return newly_inserted_count
 
 # ... (rest of the file needs to be refactored similarly) ...
