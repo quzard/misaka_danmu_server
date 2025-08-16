@@ -330,28 +330,12 @@ async def manual_import_task(
     logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
     await progress_callback(10, "正在准备导入...")
     
-    try:
+    try: # type: ignore
         scraper = manager.get_scraper(provider_name)
-        
-        provider_episode_id = None
-        if hasattr(scraper, 'get_ids_from_url'): provider_episode_id = await scraper.get_ids_from_url(url)
-        elif hasattr(scraper, 'get_danmaku_id_from_url'): provider_episode_id = await scraper.get_danmaku_id_from_url(url)
-        elif hasattr(scraper, 'get_tvid_from_url'): provider_episode_id = await scraper.get_tvid_from_url(url)
-        elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
-        
+        provider_episode_id = await scraper.get_id_from_url(url)
         if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
 
-        # 修正：处理 Bilibili 和 MGTV 返回的字典ID，并将其格式化为 get_comments 期望的字符串格式。
-        episode_id_for_comments = provider_episode_id
-        if isinstance(provider_episode_id, dict):
-            if provider_name == 'bilibili':
-                episode_id_for_comments = f"{provider_episode_id.get('aid')},{provider_episode_id.get('cid')}"
-            elif provider_name == 'mgtv':
-                # MGTV 的 get_comments 期望 "cid,vid"
-                episode_id_for_comments = f"{provider_episode_id.get('cid')},{provider_episode_id.get('vid')}"
-            else:
-                # 对于其他可能的字典返回，将其字符串化
-                episode_id_for_comments = str(provider_episode_id)
+        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
         await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
         comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)

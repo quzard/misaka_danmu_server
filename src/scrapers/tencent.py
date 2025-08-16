@@ -86,6 +86,7 @@ class TencentScraper(BaseScraper):
     用于从腾讯视频抓取分集信息和弹幕的客户端。
     """
     provider_name = "tencent"
+    handled_domains = ["v.qq.com"]
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)

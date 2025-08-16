@@ -4,7 +4,7 @@ import asyncio
 import re
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type
-
+from typing import Union
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -120,6 +120,9 @@ class BaseScraper(ABC):
     # (可选) 子类可以覆盖此字典来声明其可配置的字段
     configurable_fields: Dict[str, str] = {}
 
+    # (新增) 子类应覆盖此列表，声明它们可以处理的域名
+    handled_domains: List[str] = []
+
     # (新增) 子类可以覆盖此属性，以表明其是否支持日志记录
     is_loggable: bool = True
 
@@ -184,6 +187,20 @@ class BaseScraper(ABC):
         返回的字典列表应与 crud.bulk_insert_comments 的期望格式兼容。
         """
         raise NotImplementedError
+
+    async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
+        """
+        (新增) 统一的从URL解析ID的接口。
+        子类应重写此方法以支持从URL直接导入。
+        """
+        return None
+
+    def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
+        """
+        (新增) 将 get_comments 所需的 episode_id 格式化为字符串。
+        大多数源直接返回字符串，但Bilibili和MGTV需要特殊处理。
+        """
+        return str(provider_episode_id)
 
     @abstractmethod
     async def close(self):

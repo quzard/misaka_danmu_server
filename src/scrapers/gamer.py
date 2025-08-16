@@ -19,6 +19,7 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 
 class GamerScraper(BaseScraper):
     provider_name = "gamer"
+    handled_domains = ["ani.gamer.com.tw"]
 
     # 新增：声明此源是可配置的，并定义了配置字段
     # 键 (key) 是数据库中 config 表的 config_key

@@ -145,6 +145,7 @@ class MgtvCommentSegmentResult(BaseModel):
 
 class MgtvScraper(BaseScraper):
     provider_name = "mgtv"
+    handled_domains = ["www.mgtv.com"]
 
     # English keywords that often appear as standalone acronyms or words
     _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
@@ -478,7 +479,7 @@ class MgtvScraper(BaseScraper):
             })
         return formatted_comments
 
-    async def get_ids_from_url(self, url: str) -> Optional[Dict[str, str]]:
+    async def get_id_from_url(self, url: str) -> Optional[Dict[str, str]]:
         """从芒果TV URL中提取 collection_id 和 video_id。"""
         match = re.search(r'/b/(\d+)/(\d+)\.html', url)
         if match:
@@ -487,3 +488,8 @@ class MgtvScraper(BaseScraper):
             return {"cid": cid, "vid": vid}
         self.logger.warning(f"MGTV: 无法从URL中解析出 cid 和 vid: {url}")
         return None
+
+    def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
+        if isinstance(provider_episode_id, dict):
+            return f"{provider_episode_id.get('cid')},{provider_episode_id.get('vid')}"
+        return str(provider_episode_id)

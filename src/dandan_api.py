@@ -15,11 +15,6 @@ from fastapi.routing import APIRoute
 from . import crud, models
 from .database import get_db_session
 from .scraper_manager import ScraperManager
-from .scrapers.bilibili import BilibiliScraper
-from .scrapers.iqiyi import IqiyiScraper
-from .scrapers.tencent import TencentScraper
-from .scrapers.youku import YoukuScraper
-from .scrapers.mgtv import MgtvScraper
 
 logger = logging.getLogger(__name__)
 
@@ -864,35 +859,17 @@ async def get_external_comments_from_url(
         comments_data = cached_comments
     else:
         logger.info(f"外部弹幕缓存未命中，正在从网络获取: {url}")
-        comments_data = []
-        
-        provider_map = {
-            "bilibili.com": ("bilibili", BilibiliScraper),
-            "iqiyi.com": ("iqiyi", IqiyiScraper),
-            "v.qq.com": ("tencent", TencentScraper),
-            "youku.com": ("youku", YoukuScraper),
-            "mgtv.com": ("mgtv", MgtvScraper),
-        }
-        
-        provider, scraper_class = next(((p, sc) for domain, (p, sc) in provider_map.items() if domain in url), (None, None))
-
-        if not provider:
+        scraper = manager.get_scraper_by_domain(url)
+        if not scraper:
             raise HTTPException(status_code=400, detail="不支持的URL或视频源。")
 
         try:
-            scraper = manager.get_scraper(provider)
-            if not isinstance(scraper, scraper_class):
-                raise ValueError(f"{provider} scraper not found or has wrong type.")            
-            if provider == "bilibili":
-                if ids := await scraper.get_ids_from_url(url): comments_data = await scraper.get_comments(f"{ids['aid']},{ids['cid']}")
-            elif provider == "iqiyi":
-                if tvid := await scraper.get_tvid_from_url(url): comments_data = await scraper.get_comments(tvid)
-            elif provider == "tencent":
-                if vid := await scraper.get_vid_from_url(url): comments_data = await scraper.get_comments(vid)
-            elif provider == "youku":
-                if vid := await scraper.get_vid_from_url(url): comments_data = await scraper.get_comments(vid)
-            elif provider == "mgtv":
-                if ids := await scraper.get_ids_from_url(url): comments_data = await scraper.get_comments(f"{ids['cid']},{ids['vid']}")
+            provider_episode_id = await scraper.get_id_from_url(url)
+            if not provider_episode_id:
+                raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
+            
+            episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+            comments_data = await scraper.get_comments(episode_id_for_comments)
 
             if not comments_data: logger.warning(f"未能从 {provider} URL 获取任何弹幕: {url}")
 

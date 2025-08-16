@@ -5,6 +5,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Type
+from urllib.parse import urlparse
 
 from .scrapers.base import BaseScraper
 from .config_manager import ConfigManager
@@ -17,6 +18,7 @@ class ScraperManager:
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
         self._session_factory = session_factory
+        self._domain_map: Dict[str, str] = {}
         self.config_manager = config_manager
         # 注意：加载逻辑现在是异步的，将在应用启动时调用
 
@@ -53,6 +55,7 @@ class ScraperManager:
         self._scraper_classes.clear()
         self.scraper_settings.clear()
 
+        self._domain_map.clear()
         scrapers_dir = Path(__file__).parent / "scrapers"
         discovered_providers = []
         scraper_classes = {}
@@ -66,6 +69,9 @@ class ScraperManager:
                     if issubclass(obj, BaseScraper) and obj is not BaseScraper:
                         provider_name = obj.provider_name # 直接访问类属性，避免实例化
                         discovered_providers.append(provider_name)
+                        # (新增) 注册该刮削器能处理的域名
+                        for domain in getattr(obj, 'handled_domains', []):
+                            self._domain_map[domain] = provider_name
                         self._scraper_classes[provider_name] = obj
             except TypeError as e:
                 if "Couldn't parse file content!" in str(e):
@@ -185,3 +191,14 @@ class ScraperManager:
     def get_scraper_class(self, provider_name: str) -> Optional[Type[BaseScraper]]:
         """获取刮削器的类，而不实例化它。"""
         return self._scraper_classes.get(provider_name)
+
+    def get_scraper_by_domain(self, url: str) -> Optional[BaseScraper]:
+        """
+        (新增) 通过URL的域名查找合适的刮削器实例。
+        """
+        try:
+            domain = urlparse(url).netloc
+            provider_name = self._domain_map.get(domain)
+            return self.get_scraper(provider_name) if provider_name else None
+        except Exception:
+            return None

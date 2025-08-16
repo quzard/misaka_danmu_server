@@ -92,6 +92,7 @@ class YoukuRpcResult(BaseModel):
 
 class YoukuScraper(BaseScraper):
     provider_name = "youku"
+    handled_domains = ["v.youku.com"]
     _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
@@ -443,7 +444,7 @@ class YoukuScraper(BaseScraper):
             formatted.append({"cid": str(c.id), "p": p_string, "m": c.content, "t": round(timestamp, 2)})
         return formatted
 
-    async def get_vid_from_url(self, url: str) -> Optional[str]:
+    async def get_id_from_url(self, url: str) -> Optional[str]:
         """从优酷视频URL中提取 vid。"""
         # 优酷的URL格式通常是 v.youku.com/v_show/id_XXXXXXXX.html
         # 修正：移除对 .html 后缀的强制要求，以兼容新版URL

@@ -153,6 +153,7 @@ class BuvidResponse(BaseModel):
 
 class BilibiliScraper(BaseScraper):
     provider_name = "bilibili"
+    handled_domains = ["www.bilibili.com", "b23.tv"]
 
     # English keywords that often appear as standalone acronyms or words
     _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
@@ -331,7 +332,7 @@ class BilibiliScraper(BaseScraper):
         else:
             return await super().execute_action(action_name, payload)
 
-    async def get_ids_from_url(self, url: str) -> Optional[Dict[str, int]]:
+    async def get_id_from_url(self, url: str) -> Optional[Dict[str, int]]:
         """
         从一个Bilibili视频URL中获取aid和cid。
         """
@@ -392,6 +393,11 @@ class BilibiliScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"Bilibili: 从URL {url} 获取或解析页面ID失败: {e}", exc_info=True)
             return None
+
+    def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
+        if isinstance(provider_episode_id, dict):
+            return f"{provider_episode_id.get('aid')},{provider_episode_id.get('cid')}"
+        return str(provider_episode_id)
 
     async def _get_wbi_mixin_key(self) -> str:
         """获取用于WBI签名的mixinKey，带缓存。"""
