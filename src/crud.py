@@ -1370,6 +1370,14 @@ async def get_scheduled_tasks(pool: aiomysql.Pool) -> List[Dict[str, Any]]:
             await cursor.execute("SELECT id, name, job_type, cron_expression, is_enabled, last_run_at, next_run_at FROM scheduled_tasks ORDER BY name")
             return await cursor.fetchall()
 
+async def check_scheduled_task_exists_by_type(pool: aiomysql.Pool, job_type: str) -> bool:
+    """检查指定类型的定时任务是否已存在。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT 1 FROM scheduled_tasks WHERE job_type = %s LIMIT 1", (job_type,))
+            result = await cursor.fetchone()
+            return result is not None
+
 async def get_scheduled_task(pool: aiomysql.Pool, task_id: str) -> Optional[Dict[str, Any]]:
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:

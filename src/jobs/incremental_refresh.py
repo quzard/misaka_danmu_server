@@ -12,7 +12,7 @@ from ..api.ui import generic_import_task
 
 class IncrementalRefreshJob(BaseJob):
     job_type = "incremental_refresh"
-    job_name = "自动增量更新"
+    job_name = "定时追更"
 
     async def run(self, progress_callback: Callable):
         """定时任务的核心逻辑: 按最新分集ID+1 抓取新集"""
