@@ -969,7 +969,9 @@ async def get_comments_for_dandan(
     # UA 已由 get_token_from_path 依赖项记录
     # logger.info(f"弹幕接口响应 (episode_id: {episode_id}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
 
-    comments = [models.Comment(cid=item["cid"], p=item["p"], m=item["m"]) for item in comments_data]
+    # 修正：当聚合弹幕时，原始的 cid 已经没有意义。我们为去重后的弹幕列表生成新的、连续的 cid。
+    # 这样可以确保客户端收到的 cid 是唯一的，避免潜在的渲染问题。
+    comments = [models.Comment(cid=i, p=item["p"], m=item["m"]) for i, item in enumerate(comments_data)]
     return models.CommentResponse(count=len(comments), comments=comments)
 
 # --- 路由挂载 ---
