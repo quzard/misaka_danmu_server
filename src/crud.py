@@ -300,6 +300,29 @@ async def find_episode_via_tmdb_mapping(session: AsyncSession, tmdb_id: str, gro
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
+async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_index: int) -> List[int]:
+    """
+    根据 anime_id 和 episode_index 找到所有关联源的 episode ID。
+    """
+    stmt = (
+        select(Episode.id)
+        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        .where(
+            AnimeSource.anime_id == anime_id,
+            Episode.episode_index == episode_index
+        )
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+async def fetch_comments_for_episodes(session: AsyncSession, episode_ids: List[int]) -> List[Dict[str, Any]]:
+    """
+    获取多个分集ID的所有弹幕。
+    """
+    stmt = select(Comment.id.label("cid"), Comment.p, Comment.m).where(Comment.episode_id.in_(episode_ids))
+    result = await session.execute(stmt)
+    return [dict(row) for row in result.mappings()]
+
 async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     """获取番剧的详细信息及其所有分集，用于dandanplay API。"""
     anime_stmt = (

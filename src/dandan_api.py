@@ -913,10 +913,40 @@ async def get_comments_for_dandan(
     """
     模拟 dandanplay 的弹幕获取接口。
     注意：这里的 episode_id 实际上是我们数据库中的主键 ID。
+    新增：支持 withRelated 参数，用于聚合所有源的弹幕。
     """
-    # 注意：当前实现尚未使用 from_time 和 with_related 参数。
-    comments_data = await crud.fetch_comments(session, episode_id)
+    comments_data = []
+    if with_related:
+        try:
+            # 从 episode_id 解析出 anime_id 和 episode_index
+            # 格式: 25 (固定) + anime_id (6位) + source_order (2位) + episode_index (4位)
+            episode_id_str = str(episode_id)
+            anime_id = int(episode_id_str[2:8])
+            episode_index = int(episode_id_str[10:14])
+            
+            logger.info(f"withRelated=true: 正在为 anime_id={anime_id}, episode_index={episode_index} 查找所有关联分集...")
+            related_episode_ids = await crud.get_related_episode_ids(session, anime_id, episode_index)
+            
+            if related_episode_ids:
+                logger.info(f"找到 {len(related_episode_ids)} 个关联分集，正在聚合弹幕...")
+                comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
+            else:
+                # 如果找不到关联项（不应该发生），则回退到只获取当前分集
+                logger.warning(f"未找到任何关联分集，回退到获取单个分集 (ID: {episode_id})。")
+                comments_data = await crud.fetch_comments(session, episode_id)
+        except (ValueError, IndexError) as e:
+            logger.error(f"解析 episode_id '{episode_id}' 失败: {e}。回退到获取单个分集。")
+            comments_data = await crud.fetch_comments(session, episode_id)
+    else:
+        comments_data = await crud.fetch_comments(session, episode_id)
 
+    # 新增：聚合后去重逻辑
+    unique_comments = {}
+    for comment in comments_data:
+        unique_key = (comment['p'], comment['m'])
+        if unique_key not in unique_comments:
+            unique_comments[unique_key] = comment
+    comments_data = list(unique_comments.values())
     # 如果客户端请求了繁简转换，则在此处处理
     if ch_convert in [1, 2]:
         converter = None
