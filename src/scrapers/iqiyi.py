@@ -417,22 +417,34 @@ class IqiyiScraper(BaseScraper):
         """
         新增：使用官方API将视频链接ID解码为tvid。
         这比解析HTML更可靠。
+        新增：增加国内API端点作为备用，以提高连接成功率。
         """
-        api_url = f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg"
-        try:
-            response = await self._request("GET", api_url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"iQiyi Decode API Response (link_id={link_id}): {response.text}")
-            response.raise_for_status()
-            data = response.json()
-            if data.get("code") in ["A00000", "0"] and data.get("data"):
-                return str(data["data"])
-            else:
-                self.logger.warning(f"爱奇艺: decode API 未成功返回 tvid (link_id: {link_id})。响应: {data}")
-                return None
-        except Exception as e:
-            self.logger.error(f"爱奇艺: 调用 decode API 失败 (link_id: {link_id}): {e}", exc_info=True)
-            return None
+        endpoints = [
+            f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg",  # International (main)
+            f"https://pcw-api.iqiyi.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg" # Mainland China (fallback)
+        ]
+
+        for i, api_url in enumerate(endpoints):
+            try:
+                self.logger.info(f"爱奇艺: 正在尝试从端点 #{i+1} 解码 tvid (link_id: {link_id})")
+                response = await self._request("GET", api_url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"iQiyi Decode API Response (link_id={link_id}, endpoint=#{i+1}): {response.text}")
+                response.raise_for_status()
+                data = response.json()
+                if data.get("code") in ["A00000", "0"] and data.get("data"):
+                    self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功解码 tvid。")
+                    return str(data["data"])
+                else:
+                    self.logger.warning(f"爱奇艺: decode API (端点 #{i+1}) 未成功返回 tvid (link_id: {link_id})。响应: {data}")
+                    # Don't return here, let it try the next endpoint
+            except Exception as e:
+                self.logger.warning(f"爱奇艺: 调用 decode API (端点 #{i+1}) 失败: {e}")
+                # Don't re-raise, just continue to the next endpoint
+        
+        # If all endpoints fail
+        self.logger.error(f"爱奇艺: 所有 decode API 端点均调用失败 (link_id: {link_id})。")
+        return None
 
     async def _get_video_base_info(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]:
         # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
