@@ -349,6 +349,20 @@ async def search_anime_provider(
         search_episode=episode_to_filter
     )
 
+@router.get("/library/episodes-by-title", response_model=List[int], summary="根据作品标题获取已存在的分集序号")
+async def get_existing_episode_indices(
+    title: str = Query(..., description="要查询的作品标题"),
+    current_user: models.User = Depends(security.get_current_user),
+    pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    """
+    根据一个作品的标题，查询弹幕库中该作品已存在的所有分集的序号列表。
+    用于在“编辑导入”界面实现增量导入。
+    """
+    return await crud.get_episode_indices_by_anime_title(pool, title)
+
+
+
 @router.get("/search/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
 async def get_episodes_for_search_result(
     provider: str = Query(...),

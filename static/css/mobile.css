@@ -1009,6 +1009,7 @@ main.content > .card {
  animation-delay: 0.2s;
 }
 
+
 .library-actions .library-btn:nth-child(4) {
  animation-delay: 0.25s;
 }
@@ -1200,6 +1201,7 @@ main.content > .card {
 
 /* 下拉刷新功能已移除 */
 
+
 .poster { 
  width: 48px; 
  height: 68px; 
@@ -1344,6 +1346,7 @@ button:active {
  font-weight: 600;
  position: relative;
  overflow: hidden;
+
 }
 
 .row-action::before {
@@ -1419,6 +1422,7 @@ button:active {
  justify-content: center; /* 确保垂直居中 */
  gap: 4px;
  text-align: center; /* 确保文字水平居中 */
+
 }
 
 /* 移除小圆点 */
@@ -1516,6 +1520,7 @@ button:active {
 
 .time-value-split span:last-child {
    color: var(--text-muted);
+
 }
 
 /* Token 按钮布局 - 两排设计 */
@@ -2316,4 +2321,5 @@ html {
    opacity: 1;
    transform: translate(-50%, 0);
  }
+
 }

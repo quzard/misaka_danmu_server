@@ -402,9 +402,18 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                             </div>
                         </div>
                         <div id="bili-login-status">正在检查登录状态...</div>
+                        </div>
                         <div id="bili-login-controls">
                             <button type="button" id="bili-login-btn" class="secondary-btn">扫码登录</button>
                         </div>
+                        <div class="bili-disclaimer-agreement">
+                            <input type="checkbox" id="bili-disclaimer-checkbox">
+                            <label for="bili-disclaimer-checkbox">我已阅读并同意以下免责声明</label>
+                        </div>
+                        <p class="bili-login-disclaimer">
+                            登录接口由 <a href="https://github.com/SocialSisterYi/bilibili-API-collect" target="_blank" rel="noopener noreferrer">bilibili-API-collect</a> 提供，为Blibili官方非公开接口。
+                            您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
+                        </p>
                     </div>
                 `;
                 modalBody.insertAdjacentHTML('beforeend', biliLoginSectionHTML);
@@ -495,6 +504,9 @@ async function checkBiliLoginStatus() {
     const vipSpan = document.getElementById('bili-user-vip-status');
     const statusDiv = document.getElementById('bili-login-status');
     const loginBtn = document.getElementById('bili-login-btn');
+    // 新增：获取免责声明相关的元素
+    const disclaimerAgreement = document.querySelector('.bili-disclaimer-agreement');
+    const disclaimerText = document.querySelector('.bili-login-disclaimer');
 
     if (!profileDiv || !statusDiv || !loginBtn) return;
 
@@ -521,11 +533,17 @@ async function checkBiliLoginStatus() {
                 vipSpan.className = '';
             }
             loginBtn.textContent = '注销';
+            // 新增：登录后隐藏免责声明
+            if (disclaimerAgreement) disclaimerAgreement.classList.add('hidden');
+            if (disclaimerText) disclaimerText.classList.add('hidden');
         } else {
             profileDiv.classList.add('hidden');
             statusDiv.classList.remove('hidden');
             statusDiv.textContent = '当前未登录。';
             loginBtn.textContent = '扫码登录';
+            // 新增：未登录时显示免责声明
+            if (disclaimerAgreement) disclaimerAgreement.classList.remove('hidden');
+            if (disclaimerText) disclaimerText.classList.remove('hidden');
         }
     } catch (error) {
         statusDiv.textContent = `检查状态失败: ${error.message}`;
@@ -548,6 +566,13 @@ async function handleBiliLoginClick() {
             await checkBiliLoginStatus(); // 刷新状态
             loadDanmakuSources(); // 重新加载源列表以更新主视图中的状态
         }
+        return;
+    }
+
+    // --- 新增：检查免责声明复选框 ---
+    const disclaimerCheckbox = document.getElementById('bili-disclaimer-checkbox');
+    if (disclaimerCheckbox && !disclaimerCheckbox.checked) {
+        alert('请先勾选同意免责声明。');
         return;
     }
 

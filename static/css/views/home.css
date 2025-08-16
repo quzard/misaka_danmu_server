@@ -62,12 +62,19 @@
     display: flex;
     align-items: center;
     gap: 15px;
-    padding: 8px 12px;
+    padding: 10px 12px; /* Increased padding for better touch targets */
     border-bottom: 1px solid var(--border-color);
+    cursor: grab; /* Indicate that the item is draggable */
+    transition: background-color 0.2s ease, opacity 0.2s ease;
 }
 
 .edit-import-episodes-list li:last-child {
     border-bottom: none;
+}
+
+.edit-import-episodes-list li.dragging {
+    opacity: 0.5;
+    background: #e9f5ff; /* A light blue to indicate dragging */
 }
 
 .edit-import-episodes-list .ep-index {

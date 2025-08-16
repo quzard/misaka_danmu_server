@@ -208,6 +208,16 @@ async def init_db_tables(app: FastAPI):
                     await cursor.execute("ALTER TABLE anime_sources ADD COLUMN incremental_refresh_enabled BOOLEAN NOT NULL DEFAULT FALSE;")
                     logger.info("列 'incremental_refresh_enabled' 添加成功。")
 
+                # 检查 anime_sources.incremental_refresh_failures
+                await cursor.execute("""
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'anime_sources' AND COLUMN_NAME = 'incremental_refresh_failures'
+                """, (db_name,))
+                if not await cursor.fetchone():
+                    logger.info("在 'anime_sources' 表中未找到 'incremental_refresh_failures' 列，正在添加...")
+                    await cursor.execute("ALTER TABLE anime_sources ADD COLUMN incremental_refresh_failures INT NOT NULL DEFAULT 0 AFTER incremental_refresh_enabled;")
+                    logger.info("列 'incremental_refresh_failures' 添加成功。")
+
                 # 检查 anime.local_image_path
                 await cursor.execute("""
                     SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS

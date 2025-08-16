@@ -12,7 +12,7 @@ from ..api.ui import generic_import_task
 
 class IncrementalRefreshJob(BaseJob):
     job_type = "incremental_refresh"
-    job_name = "定时追更"
+    job_name = "定时增量追更"
 
     async def run(self, progress_callback: Callable):
         """定时任务的核心逻辑: 按最新分集ID+1 抓取新集"""
@@ -49,11 +49,22 @@ class IncrementalRefreshJob(BaseJob):
                     anime_title=anime_title, media_type=source_info["type"],
                     season=source_info.get("season", 1), current_episode_index=next_episode_index,
                     image_url=None, douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
-                    imdb_id=None, tvdb_id=None, progress_callback=lambda p, d: None,
+                    imdb_id=None, tvdb_id=None, progress_callback=lambda p, d: None, # type: ignore
                     pool=self.pool, manager=self.scraper_manager, task_manager=self.task_manager
                 )
             except TaskSuccess as e:
-                self.logger.info(f"为 '{anime_title}' (源ID: {source_id}) 的增量更新成功: {e}")
+                message = str(e)
+                if "未能获取到任何分集" in message:
+                    # This is considered a "failure" for incremental refresh
+                    new_failure_count = await crud.increment_incremental_refresh_failures(self.pool, source_id)
+                    self.logger.warning(f"'{anime_title}' (源ID: {source_id}) 未找到新分集，失败次数: {new_failure_count}。")
+                    if new_failure_count >= 15:
+                        await crud.disable_incremental_refresh(self.pool, source_id)
+                        self.logger.info(f"'{anime_title}' (源ID: {source_id}) 已连续15次未找到新分集，已自动取消追更。")
+                else:
+                    # Any other success message means a new episode was found (even if with 0 comments)
+                    await crud.reset_incremental_refresh_failures(self.pool, source_id)
+                    self.logger.info(f"为 '{anime_title}' (源ID: {source_id}) 的增量更新成功: {message}")
             except Exception as e:
                 self.logger.error(f"为 '{anime_title}' (源ID: {source_id}) 的增量更新失败: {e}", exc_info=True)
 

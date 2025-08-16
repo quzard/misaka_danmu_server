@@ -128,6 +128,22 @@ async def search_episodes_in_library(pool: aiomysql.Pool, anime_title: str, epis
             await cursor.execute(query_like, tuple(like_params + params_episode + params_season))
             return await cursor.fetchall()
 
+async def get_episode_indices_by_anime_title(pool: aiomysql.Pool, title: str) -> List[int]:
+    """获取指定标题的作品已存在的所有分集序号。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # This query finds the anime by title, then joins to get all its episodes' indices.
+            # Using DISTINCT to avoid duplicates if multiple sources have the same episode index.
+            query = """
+                SELECT DISTINCT e.episode_index
+                FROM episode e
+                JOIN anime_sources s ON e.source_id = s.id
+                JOIN anime a ON s.anime_id = a.id
+                WHERE a.title = %s
+            """
+            await cursor.execute(query, (title,))
+            return [row[0] for row in await cursor.fetchall()]
+
 async def find_favorited_source_for_anime(pool: aiomysql.Pool, title: str, season: int) -> Optional[Dict[str, Any]]:
     """
     通过标题和季度查找已存在于库中且被标记为“精确”的数据源。
@@ -924,6 +940,26 @@ async def update_scrapers_settings(pool: aiomysql.Pool, settings: List[models.Sc
             data_to_update = [(s.is_enabled, s.display_order, s.use_proxy, s.provider_name) for s in settings]
             await cursor.executemany(query, data_to_update)
 
+async def remove_stale_scrapers(pool: aiomysql.Pool, discovered_providers: List[str]):
+    """
+    从数据库中移除不再存在于文件系统中的搜索源。
+    """
+    # 如果由于某种原因发现列表为空，则不执行任何操作，以防意外清空整个表。
+    if not discovered_providers:
+        logging.warning("发现的搜索源列表为空，跳过清理过时源的操作。")
+        return
+
+    # 创建占位符字符串，例如: (%s, %s, %s)
+    format_strings = ','.join(['%s'] * len(discovered_providers))
+    query = f"DELETE FROM scrapers WHERE provider_name NOT IN ({format_strings})"
+    params = tuple(discovered_providers)
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            deleted_rows = await cursor.execute(query, params)
+            if deleted_rows > 0:
+                logging.info(f"已从数据库中移除了 {deleted_rows} 个过时的搜索源。")
+
 # --- Metadata Source Management ---
 
 async def sync_metadata_sources_to_db(pool: aiomysql.Pool, provider_names: List[str]):
@@ -1228,6 +1264,43 @@ async def toggle_source_incremental_refresh(pool: aiomysql.Pool, source_id: int)
         async with conn.cursor() as cursor:
             affected_rows = await cursor.execute(
                 "UPDATE anime_sources SET incremental_refresh_enabled = NOT incremental_refresh_enabled WHERE id = %s",
+                (source_id,)
+            )
+            return affected_rows > 0
+
+async def increment_incremental_refresh_failures(pool: aiomysql.Pool, source_id: int) -> int:
+    """将指定源的增量更新失败次数加一，并返回新的失败次数。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "UPDATE anime_sources SET incremental_refresh_failures = incremental_refresh_failures + 1 WHERE id = %s",
+                    (source_id,)
+                )
+                await cursor.execute("SELECT incremental_refresh_failures FROM anime_sources WHERE id = %s", (source_id,))
+                result = await cursor.fetchone()
+                await conn.commit()
+                return result[0] if result else 0
+            except Exception:
+                await conn.rollback()
+                raise
+
+async def reset_incremental_refresh_failures(pool: aiomysql.Pool, source_id: int):
+    """重置指定源的增量更新失败次数为0。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE anime_sources SET incremental_refresh_failures = 0 WHERE id = %s",
+                (source_id,)
+            )
+
+async def disable_incremental_refresh(pool: aiomysql.Pool, source_id: int) -> bool:
+    """禁用指定源的增量更新。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            affected_rows = await cursor.execute(
+                "UPDATE anime_sources SET incremental_refresh_enabled = FALSE WHERE id = %s",
                 (source_id,)
             )
             return affected_rows > 0

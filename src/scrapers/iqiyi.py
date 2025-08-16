@@ -418,7 +418,14 @@ class IqiyiScraper(BaseScraper):
         新增：使用官方API将视频链接ID解码为tvid。
         这比解析HTML更可靠。
         新增：增加国内API端点作为备用，以提高连接成功率。
+        新增：增加tvid缓存，减少不必要的API请求。
         """
+        cache_key = f"tvid_{link_id}"
+        cached_tvid = await self._get_from_cache(cache_key)
+        if cached_tvid:
+            self.logger.info(f"爱奇艺: 从缓存中命中 tvid (link_id={link_id})")
+            return str(cached_tvid)
+
         endpoints = [
             f"https://pcw-api.iq.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg",  # International (main)
             f"https://pcw-api.iqiyi.com/api/decode/{link_id}?platformId=3&modeCode=intl&langCode=sg" # Mainland China (fallback)
@@ -433,8 +440,11 @@ class IqiyiScraper(BaseScraper):
                 response.raise_for_status()
                 data = response.json()
                 if data.get("code") in ["A00000", "0"] and data.get("data"):
+                    tvid = str(data["data"])
                     self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功解码 tvid。")
-                    return str(data["data"])
+                    # 缓存结果。tvid 相对稳定，可以使用与基础信息相同的TTL。
+                    await self._set_to_cache(cache_key, tvid, 'base_info_ttl_seconds', 1800)
+                    return tvid
                 else:
                     self.logger.warning(f"爱奇艺: decode API (端点 #{i+1}) 未成功返回 tvid (link_id: {link_id})。响应: {data}")
                     # Don't return here, let it try the next endpoint
@@ -643,9 +653,20 @@ class IqiyiScraper(BaseScraper):
                     return []
 
             self.logger.debug(f"爱奇艺: 正在为 {len(episodes)} 个分集并发获取真实标题...")
+            
+            # 修正：将并发请求分批处理，以避免因请求过多而触发API速率限制或导致连接错误。
+            # 每次处理5个分集的详情获取，并在批次之间增加1秒的延迟。
             tasks = [self._get_video_base_info(ep.link_id) for ep in episodes if ep.link_id]
-            detailed_infos = await asyncio.gather(*tasks, return_exceptions=True)
-
+            detailed_infos = []
+            batch_size = 5
+            for i in range(0, len(tasks), batch_size):
+                batch = tasks[i:i+batch_size]
+                batch_results = await asyncio.gather(*batch, return_exceptions=True)
+                detailed_infos.extend(batch_results)
+                if i + batch_size < len(tasks):
+                    self.logger.debug(f"爱奇艺: 完成一批 ({len(batch)}) 标题获取，等待1秒...")
+                    await asyncio.sleep(1)
+            
             specific_title_map = {}
             for info in detailed_infos:
                 if isinstance(info, IqiyiHtmlVideoInfo) and info.tv_id:

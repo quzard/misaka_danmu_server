@@ -621,6 +621,8 @@ async function showEditImportModal(item) {
     }
 }
 
+let draggedItem = null; // To keep track of the item being dragged
+
 function renderEditImportModalContent(item, episodes) {
     const modalBody = document.getElementById('edit-import-modal-body');
     const confirmBtn = document.getElementById('edit-import-modal-confirm-btn');
@@ -630,11 +632,13 @@ function renderEditImportModalContent(item, episodes) {
         <div class="edit-import-title-section">
             <label for="edit-import-anime-title">作品标题:</label>
             <input type="text" id="edit-import-anime-title" value="${item.title}">
+            <button type="button" id="reimport-episodes-btn" class="secondary-btn" title="根据此标题在弹幕库中查找已存在的集数，并从下方列表中移除它们。">重整导入分集</button>
         </div>
         <ul id="edit-import-episodes-list" class="edit-import-episodes-list">
         </ul>
     `;
 
+    document.getElementById('reimport-episodes-btn').addEventListener('click', handleReimportEpisodes);
     const episodeListEl = document.getElementById('edit-import-episodes-list');
     if (episodes.length === 0) {
         episodeListEl.innerHTML = '<li>未找到任何分集。</li>';
@@ -643,6 +647,7 @@ function renderEditImportModalContent(item, episodes) {
 
     episodes.forEach(ep => {
         const li = document.createElement('li');
+        li.draggable = true; // Make the list item draggable
         li.dataset.episode = JSON.stringify(ep); // Store original episode data
         li.innerHTML = `
             <span class="ep-index">${ep.episodeIndex}.</span>
@@ -655,6 +660,48 @@ function renderEditImportModalContent(item, episodes) {
         });
         episodeListEl.appendChild(li);
     });
+
+    // Add drag-and-drop event listeners to the list container
+    episodeListEl.addEventListener('dragstart', (e) => {
+        // We only want to drag 'LI' elements
+        if (e.target.tagName === 'LI') {
+            draggedItem = e.target;
+            // Use a timeout to avoid the drag image disappearing
+            setTimeout(() => {
+                e.target.classList.add('dragging');
+            }, 0);
+        }
+    });
+
+    episodeListEl.addEventListener('dragover', (e) => {
+        e.preventDefault(); // This is necessary to allow dropping
+        if (!draggedItem) return;
+
+        const afterElement = getDragAfterElement(episodeListEl, e.clientY);
+        if (afterElement == null) {
+            episodeListEl.appendChild(draggedItem);
+        } else {
+            episodeListEl.insertBefore(draggedItem, afterElement);
+        }
+    });
+
+    episodeListEl.addEventListener('dragend', () => {
+        if (draggedItem) {
+            draggedItem.classList.remove('dragging');
+            draggedItem = null;
+            reindexEpisodes(); // Re-number the episodes after the drop is complete
+        }
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('li:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) { return { offset: offset, element: child }; } 
+        else { return closest; }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
 function reindexEpisodes() {
@@ -667,6 +714,50 @@ function reindexEpisodes() {
         epData.episodeIndex = index + 1;
         li.dataset.episode = JSON.stringify(epData);
     });
+}
+
+async function handleReimportEpisodes() {
+    const titleInput = document.getElementById('edit-import-anime-title');
+    const animeTitle = titleInput.value.trim();
+    if (!animeTitle) {
+        alert('请输入要匹配的作品标题。');
+        return;
+    }
+
+    const reimportBtn = document.getElementById('reimport-episodes-btn');
+    reimportBtn.disabled = true;
+    reimportBtn.textContent = '查询中...';
+
+    try {
+        const existingIndices = await apiFetch(`/api/ui/library/episodes-by-title?title=${encodeURIComponent(animeTitle)}`);
+        
+        if (existingIndices.length === 0) {
+            alert(`在弹幕库中未找到作品 "${animeTitle}" 或该作品没有任何分集。`);
+            return;
+        }
+
+        const existingIndicesSet = new Set(existingIndices);
+        const episodeListEl = document.getElementById('edit-import-episodes-list');
+        const allEpisodeItems = Array.from(episodeListEl.querySelectorAll('li'));
+        
+        let removedCount = 0;
+        allEpisodeItems.forEach(li => {
+            const epData = JSON.parse(li.dataset.episode);
+            if (existingIndicesSet.has(epData.episodeIndex)) {
+                li.remove();
+                removedCount++;
+            }
+        });
+
+        reindexEpisodes(); // Re-number the remaining episodes
+        alert(`重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`);
+
+    } catch (error) {
+        alert(`查询已存在分集失败: ${error.message}`);
+    } finally {
+        reimportBtn.disabled = false;
+        reimportBtn.textContent = '重整导入分集';
+    }
 }
 
 async function handleConfirmEditImport() {
