@@ -75,16 +75,6 @@ async def _create_db_if_not_exists():
         raise
     finally:
         await engine.dispose()
-    db_name = settings.database.name
-    async with app.state.db_pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("SHOW DATABASES LIKE %s", (db_name,))
-            if not await cursor.fetchone():
-                logger.info(f"数据库 '{db_name}' 不存在，正在创建...")
-                await cursor.execute(f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                logger.info(f"数据库 '{db_name}' 创建成功。")
-    app.state.db_pool.close()
-    await app.state.db_pool.wait_closed()
 
 async def get_db_session(request: Request) -> AsyncSession:
     """依赖项：从应用状态获取数据库会话"""
