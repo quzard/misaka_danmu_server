@@ -296,6 +296,27 @@ async def search_tmdb_movie_subjects(
         await crud.set_cache(session, cache_key, results, int(ttl_seconds_str), provider='tmdb')
         return results
 
+async def update_tmdb_mappings_for_tv_group(
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    tmdb_tv_id: int,
+    group_id: str
+):
+    """
+    获取TMDB剧集组详情并将其映射关系存入数据库。
+    这是一个由元数据管理器调用的辅助函数。
+    """
+    response = await client.get(f"/tv/episode_group/{group_id}", params={"language": "zh-CN"})
+    response.raise_for_status()
+    
+    group_details = models.TMDBEpisodeGroupDetails.model_validate(response.json())
+    
+    await crud.save_tmdb_episode_group_mappings(
+        session=session,
+        tmdb_tv_id=tmdb_tv_id,
+        group_id=group_id,
+        group_details=group_details
+    )
 
 async def search_tmdb_aliases(keyword: str, client: httpx.AsyncClient) -> set[str]:
     """

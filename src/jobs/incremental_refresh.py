@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import crud
 from .base import BaseJob
 from ..task_manager import TaskSuccess
-from ..api.ui import generic_import_task
+from ..tasks import generic_import_task
 
 
 class IncrementalRefreshJob(BaseJob):

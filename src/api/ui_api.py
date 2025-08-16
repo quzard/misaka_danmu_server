@@ -22,75 +22,17 @@ from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
+from .. import tasks
+from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
-from thefuzz import fuzz
 from ..config import settings
 from ..database import get_db_session
 
 router = APIRouter()
 auth_router = APIRouter()
 logger = logging.getLogger(__name__)
-
-def _roman_to_int(s: str) -> int:
-    """将罗马数字字符串转换为整数。"""
-    roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    s = s.upper()
-    result = 0
-    i = 0
-    while i < len(s):
-        # 处理减法规则 (e.g., IV, IX)
-        if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
-            result += roman_map[s[i+1]] - roman_map[s[i]]
-            i += 2
-        else:
-            result += roman_map[s[i]]
-            i += 1
-    return result
-
-def parse_search_keyword(keyword: str) -> Dict[str, Any]:
-    """
-    解析搜索关键词，提取标题、季数和集数。
-    支持 "Title S01E01", "Title S01", "Title 2", "Title 第二季", "Title Ⅲ" 等格式。
-    """
-    keyword = keyword.strip()
-
-    # 1. 优先匹配 SXXEXX 格式
-    s_e_pattern = re.compile(r"^(?P<title>.+?)\s*S(?P<season>\d{1,2})E(?P<episode>\d{1,4})$", re.IGNORECASE)
-    match = s_e_pattern.match(keyword)
-    if match:
-        data = match.groupdict()
-        return {
-            "title": data["title"].strip(),
-            "season": int(data["season"]),
-            "episode": int(data["episode"]),
-        }
-
-    # 2. 匹配季度信息
-    season_patterns = [
-        (re.compile(r"^(.*?)\s*(?:S|Season)\s*(\d{1,2})$", re.I), lambda m: int(m.group(2))),
-        (re.compile(r"^(.*?)\s*第\s*([一二三四五六七八九十\d]+)\s*[季部]$", re.I), 
-         lambda m: {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}.get(m.group(2)) or int(m.group(2))),
-        (re.compile(r"^(.*?)\s*([Ⅰ-Ⅻ])$"), 
-         lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(2).upper())),
-        (re.compile(r"^(.*?)\s+([IVXLCDM]+)$", re.I), lambda m: _roman_to_int(m.group(2))),
-        (re.compile(r"^(.*?)\s+(\d{1,2})$"), lambda m: int(m.group(2))),
-    ]
-
-    for pattern, handler in season_patterns:
-        match = pattern.match(keyword)
-        if match:
-            try:
-                title = match.group(1).strip()
-                season = handler(match)
-                if season and not (len(title) > 4 and title[-4:].isdigit()): # 避免将年份误认为季度
-                    return {"title": title, "season": season, "episode": None}
-            except (ValueError, KeyError, IndexError):
-                continue
-
-    # 3. 如果没有匹配到特定格式，则返回原始标题
-    return {"title": keyword, "season": None, "episode": None}
 
 async def get_scraper_manager(request: Request) -> ScraperManager:
     """依赖项：从应用状态获取 Scraper 管理器"""
@@ -115,53 +57,6 @@ async def get_metadata_manager(request: Request) -> MetadataSourceManager:
 async def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
-
-
-async def update_tmdb_mappings(
-    session: AsyncSession,
-    client: httpx.AsyncClient,
-    tmdb_tv_id: int,
-    group_id: str
-):
-    """
-    获取TMDB剧集组详情并将其映射关系存入数据库。
-    """
-    async with client:
-        response = await client.get(f"/tv/episode_group/{group_id}", params={"language": "zh-CN"})
-        response.raise_for_status()
-        
-        group_details = models.TMDBEpisodeGroupDetails.model_validate(response.json())
-        
-        await crud.save_tmdb_episode_group_mappings(
-            session=session,
-            tmdb_tv_id=tmdb_tv_id,
-            group_id=group_id,
-            group_details=group_details
-        )
-
-def _get_season_from_title(title: str) -> int:
-    """从标题中解析季度信息，返回季度数。"""
-    if not title:
-        return 1
-    
-    # 模式的顺序很重要
-    patterns = [
-        (re.compile(r"(?:S|Season)\s*(\d+)", re.I), lambda m: int(m.group(1))),
-        (re.compile(r"第\s*([一二三四五六七八九十\d]+)\s*[季部]", re.I), 
-         lambda m: {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}.get(m.group(1)) or int(m.group(1))),
-        (re.compile(r"\s+([Ⅰ-Ⅻ])\b", re.I), 
-         lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(1).upper())),
-        (re.compile(r"\s+([IVXLCDM]+)$", re.I), lambda m: _roman_to_int(m.group(1))),
-    ]
-
-    for pattern, handler in patterns:
-        match = pattern.search(title)
-        if match:
-            try:
-                if season := handler(match): return season
-            except (ValueError, KeyError, IndexError):
-                continue
-    return 1 # Default to season 1
 
 @router.get(
     "/search/anime",
@@ -369,7 +264,7 @@ async def edit_anime_info(
     update_data: models.AnimeDetailUpdate,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    client: httpx.AsyncClient = Depends(get_tmdb_client)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """更新指定番剧的标题、季度和元数据。"""
     updated = await crud.update_anime_details(session, anime_id, update_data)
@@ -381,13 +276,12 @@ async def edit_anime_info(
     if update_data.tmdb_id and update_data.tmdb_episode_group_id:
         logger.info(f"检测到TMDB ID和剧集组ID，开始更新映射表...")
         try:
-            await update_tmdb_mappings(
-                session=session,
-                client=client,
+            await metadata_manager.update_tmdb_mappings(
                 tmdb_tv_id=int(update_data.tmdb_id),
-                group_id=update_data.tmdb_episode_group_id
+                group_id=update_data.tmdb_episode_group_id,
+                user=current_user,
+                session=session
             )
-            logger.info(f"成功更新了 TV ID {update_data.tmdb_id} 和 Group ID {update_data.tmdb_episode_group_id} 的TMDB映射。")
         except Exception as e:
             # 仅记录错误，不中断主流程，因为核心信息已保存
             logger.error(f"更新TMDB映射失败: {e}", exc_info=True)
@@ -457,7 +351,7 @@ async def delete_source_from_anime(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个数据源及其所有关联的分集和弹幕。"""
-    source_info = await crud.get_anime_source_info(session, source_id)
+    source_info = await crud.get_anime_source_info(session, source_id) # type: ignore
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
@@ -465,7 +359,7 @@ async def delete_source_from_anime(
     task_coro = lambda session, callback: delete_source_task(source_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {source_id} 的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {source_id} 的任务 (Task ID: {task_id})。") # type: ignore
     return {"message": f"删除源 '{source_info['provider_name']}' 的任务已提交。", "task_id": task_id}
 
 class BulkDeleteEpisodesRequest(models.BaseModel):
@@ -484,7 +378,7 @@ async def delete_bulk_episodes(
     task_title = f"批量删除 {len(request_data.episode_ids)} 个分集"
     
     # 注意：这里我们将整个列表传递给任务
-    task_coro = lambda session, callback: delete_bulk_episodes_task(request_data.episode_ids, session, callback)
+    task_coro = lambda session, callback: tasks.delete_bulk_episodes_task(request_data.episode_ids, session, callback)
     
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -573,7 +467,7 @@ async def reorder_source_episodes(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"重整集数: {source_info['title']} ({source_info['provider_name']})"
-    task_coro = lambda session, callback: reorder_episodes_task(source_id, session, callback)
+    task_coro = lambda session, callback: tasks.reorder_episodes_task(source_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {source_id} 集数的任务 (Task ID: {task_id})。")
@@ -645,7 +539,7 @@ async def delete_episode_from_source(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个分集及其所有关联的弹幕。"""
-    episode_info = await crud.get_episode_for_refresh(session, episode_id)
+    episode_info = await crud.get_episode_for_refresh(session, episode_id) # type: ignore
     if not episode_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
@@ -671,8 +565,8 @@ async def refresh_single_episode(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
     
     logger.info(f"用户 '{current_user.username}' 请求刷新分集 ID: {episode_id} ({episode['title']})")
-    
-    task_coro = lambda session, callback: refresh_episode_task(episode_id, session, scraper_manager, callback)
+
+    task_coro = lambda session, callback: tasks.refresh_episode_task(episode_id, session, scraper_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, f"刷新分集: {episode['title']}")
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "task_id": task_id}
@@ -692,7 +586,7 @@ async def refresh_anime(
     
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {source_id}) 启动了全量刷新任务。")
     
-    task_coro = lambda session, callback: full_refresh_task(source_id, session, scraper_manager, task_manager, callback)
+    task_coro = lambda session, callback: tasks.full_refresh_task(source_id, session, scraper_manager, task_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['provider_name']})")
 
     return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "task_id": task_id}
@@ -711,7 +605,7 @@ async def delete_anime_from_library(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
     
     task_title = f"删除作品: {anime_details['title']}"
-    task_coro = lambda session, callback: delete_anime_task(anime_id, session, callback)
+    task_coro = lambda session, callback: tasks.delete_anime_task(anime_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {anime_id} 的任务 (Task ID: {task_id})。")
@@ -731,7 +625,7 @@ async def delete_bulk_sources(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.source_ids)} 个数据源"
-    task_coro = lambda session, callback: delete_bulk_sources_task(request_data.source_ids, session, callback)
+    task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.source_ids, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.source_ids)} 个源的任务 (Task ID: {task_id})。")
@@ -1752,7 +1646,7 @@ async def import_from_provider(
             )
 
     # 创建一个将传递给任务管理器的协程工厂 (lambda)
-    task_coro = lambda session, callback: generic_import_task(
+    task_coro = lambda session, callback: tasks.generic_import_task(
         provider=request_data.provider,
         media_id=request_data.media_id,
         anime_title=request_data.anime_title,
@@ -1801,7 +1695,7 @@ async def import_edited_episodes(
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.anime_title} ({request_data.provider})"
-    task_coro = lambda session, callback: edited_import_task(
+    task_coro = lambda session, callback: tasks.edited_import_task(
         request_data=request_data,
         progress_callback=callback,
         session=session,
@@ -2017,7 +1911,7 @@ async def import_from_url(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法从URL '{url}' 中为提供商 '{provider}' 解析出媒体ID。")
 
     task_coro = lambda session, callback: generic_import_task(
-        provider=provider, media_id=media_id_for_scraper, anime_title=title,
+        provider=provider, media_id=media_id_for_scraper, anime_title=title, # type: ignore
         media_type=request_data.media_type, season=request_data.season,
         current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from . import crud, models, security
 from .api.bangumi_api import get_bangumi_client, search_bangumi_aliases
 from .api.douban_api import get_douban_client, search_douban_aliases
-from .api.tmdb_api import get_tmdb_client, search_tmdb_aliases
+from .api.tmdb_api import get_tmdb_client, search_tmdb_aliases, update_tmdb_mappings_for_tv_group
 from .api.imdb_api import get_imdb_client, search_imdb_aliases
 from .api.tvdb_api import get_tvdb_client, search_tvdb_aliases
 
@@ -52,6 +52,21 @@ class MetadataSourceManager:
     async def _douban_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
         async with await get_douban_client(user, session) as client:
             return await search_douban_aliases(keyword, client)
+
+    async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User, session: AsyncSession):
+        """
+        通过调用特定的tmdb_api函数来协调更新TMDB分集组映射。
+        """
+        self.logger.info(f"管理器: 开始为 TMDB TV ID {tmdb_tv_id} 和 Group ID {group_id} 更新映射。")
+        try:
+            # 管理器负责获取正确的客户端
+            async with await get_tmdb_client(user, session) as client:
+                # 并调用具体的实现
+                await update_tmdb_mappings_for_tv_group(session, client, tmdb_tv_id, group_id)
+            self.logger.info(f"管理器: 成功更新了 TV ID {tmdb_tv_id} 和 Group ID {group_id} 的TMDB映射。")
+        except Exception as e:
+            self.logger.error(f"管理器: 更新TMDB映射时发生错误: {e}", exc_info=True)
+            # 不重新抛出异常，只记录错误。主操作不应因此失败。
 
     async def _imdb_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
         async with await get_imdb_client(user, session) as client:

@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 import json
 from .config_manager import ConfigManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
-from .api.ui import router as ui_router, auth_router
+from .api.ui_api import router as ui_router, auth_router
 from .api.bangumi_api import router as bangumi_router
 from .api.tmdb_api import router as tmdb_router
 from .api.webhook_api import router as webhook_router

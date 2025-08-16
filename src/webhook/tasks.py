@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
 from .. import crud
-from ..api.ui import generic_import_task, parse_search_keyword
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess
+from ..tasks import generic_import_task
+from ..utils import parse_search_keyword
 
 logger = logging.getLogger(__name__)
 
