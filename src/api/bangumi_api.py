@@ -7,7 +7,7 @@ from typing import Set
 from urllib.parse import urlencode, quote
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, model_validator
 

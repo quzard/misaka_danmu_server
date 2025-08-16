@@ -151,37 +151,38 @@
 ### 步骤 2: 部署弹幕库
 1. 创建 `docker-compose.app.yaml` 文件
 
-```yaml
-    danmu-app:
-      image: l429609201/misaka_danmu_server:latest
-      container_name: misaka-danmu-server
-      restart: unless-stopped
-      environment:
-        # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
-        - PUID=1000
-        - PGID=1000
-        - UMASK=0022
-        # --- 数据库连接配置 ---
-        # 数据库类型: 'mysql' (默认) 或 'postgresql'
-        - DANMUAPI_DATABASE__TYPE=mysql
-        #  连接MySql数据库相关配置
-        - DANMUAPI_DATABASE__HOST=127.0.0.1
-        # MySQL 默认端口是 3306, PostgreSQL 默认是 5432
-        - DANMUAPI_DATABASE__PORT=3306 
-        - DANMUAPI_DATABASE__NAME=danmuapi
-        # !!! 重要：请使用与您选择的数据库容器相同的用户名和密码 !!!
-        - DANMUAPI_DATABASE__USER=danmuapi
-        - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
+    ```yaml
+    services:
+        danmu-app:
+          image: l429609201/misaka_danmu_server:latest
+          container_name: misaka-danmu-server
+          restart: unless-stopped
+          environment:
+            # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
+            - PUID=1000
+            - PGID=1000
+            - UMASK=0022
+            # --- 数据库连接配置 ---
+            # 数据库类型: 'mysql' (默认) 或 'postgresql'
+            - DANMUAPI_DATABASE__TYPE=mysql
+            #  连接MySql数据库相关配置
+            - DANMUAPI_DATABASE__HOST=127.0.0.1
+            # MySQL 默认端口是 3306, PostgreSQL 默认是 5432
+            - DANMUAPI_DATABASE__PORT=3306 
+            - DANMUAPI_DATABASE__NAME=danmuapi
+            # !!! 重要：请使用与您选择的数据库容器相同的用户名和密码 !!!
+            - DANMUAPI_DATABASE__USER=danmuapi
+            - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
 
-        # --- 初始管理员配置 ---
-        - DANMUAPI_ADMIN__INITIAL_USER=admin
-      volumes:
-        - ./config:/app/config
-      #ports:
-      #  - "7768:7768"
-      network_mode: "host"
+            # --- 初始管理员配置 ---
+            - DANMUAPI_ADMIN__INITIAL_USER=admin
+          volumes:
+            - ./config:/app/config
+          #ports:
+          #  - "7768:7768"
+          network_mode: "host"
 
-```
+    ```
 2.  **重要**:
     -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yaml` 中设置的 `MYSQL_PASSWORD` 一致。
 
@@ -281,6 +282,27 @@
   10. 保存设置。
 
 现在，当有新的电影或剧集添加到您的 Emby/Jellyfin 媒体库时，本服务将自动收到通知，并创建一个后台任务来为其搜索和导入弹幕。
+
+## 常见问题
+
+### 忘记密码怎么办？
+
+如果您忘记了管理员密码，可以通过以下步骤在服务器上重置：
+
+1.  通过 SSH 或其他方式登录到您的服务器。
+
+2.  进入您存放 `docker-compose.yml` 的目录。
+
+3.  执行以下命令来重置指定用户的密码。请将 `<username>` 替换为您要重置密码的用户名（例如 `admin`）。
+
+    ```bash
+    docker-compose exec danmu-api python -m scripts.reset_password <username>
+    ```
+
+    > **注意**: 如果您没有使用 `docker-compose`，或者您的容器名称不是 `danmu-api`，请使用 `docker exec` 命令：
+    > `docker exec <您的容器名称> python -m scripts.reset_password <username>`
+
+4.  命令执行后，终端会输出一个新的随机密码。请立即使用此密码登录，并在 "设置" -> "账户安全" 页面中修改为您自己的密码。
 
 
 ### 贡献者
