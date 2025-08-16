@@ -160,8 +160,12 @@ async function loadProxySettings() {
     proxyTestResults.classList.add('hidden');
     try {
         const data = await apiFetch('/api/ui/config/proxy');
-        document.getElementById('proxy-url').value = data.proxy_url || '';
-        document.getElementById('proxy-enabled').checked = data.proxy_enabled === 'true';
+        document.getElementById('proxy-protocol').value = data.proxy_protocol || 'http';
+        document.getElementById('proxy-host').value = data.proxy_host || '';
+        document.getElementById('proxy-port').value = data.proxy_port || '';
+        document.getElementById('proxy-username').value = data.proxy_username || '';
+        document.getElementById('proxy-password').value = data.proxy_password || '';
+        document.getElementById('proxy-enabled').checked = data.proxy_enabled;
     } catch (error) {
         proxySaveMessage.textContent = `加载代理配置失败: ${error.message}`;
         proxySaveMessage.classList.add('error');
@@ -171,8 +175,12 @@ async function loadProxySettings() {
 async function handleSaveProxySettings(e) {
     e.preventDefault();
     const payload = {
-        proxy_url: document.getElementById('proxy-url').value.trim(),
-        proxy_enabled: document.getElementById('proxy-enabled').checked.toString(),
+        proxy_protocol: document.getElementById('proxy-protocol').value,
+        proxy_host: document.getElementById('proxy-host').value.trim(),
+        proxy_port: document.getElementById('proxy-port').value ? parseInt(document.getElementById('proxy-port').value, 10) : null,
+        proxy_username: document.getElementById('proxy-username').value.trim(),
+        proxy_password: document.getElementById('proxy-password').value, // Don't trim password
+        proxy_enabled: document.getElementById('proxy-enabled').checked,
     };
     const saveBtn = e.target.querySelector('button[type="submit"]');
     saveBtn.disabled = true;
@@ -190,12 +198,35 @@ async function handleSaveProxySettings(e) {
     }
 }
 
+function _buildProxyUrlFromForm() {
+    const protocol = document.getElementById('proxy-protocol').value;
+    const host = document.getElementById('proxy-host').value.trim();
+    const port = document.getElementById('proxy-port').value.trim();
+    const username = document.getElementById('proxy-username').value.trim();
+    const password = document.getElementById('proxy-password').value;
+
+    if (!host || !port) {
+        return "";
+    }
+
+    let url = `${protocol}://`;
+    if (username) {
+        url += `${encodeURIComponent(username)}`;
+        if (password) {
+            url += `:${encodeURIComponent(password)}`;
+        }
+        url += "@";
+    }
+    url += `${host}:${port}`;
+    return url;
+}
+
 async function handleTestProxy() {
     proxyTestResults.classList.remove('hidden');
     proxyTestResults.textContent = '正在测试...';
     testProxyBtn.disabled = true;
 
-    const proxyUrl = document.getElementById('proxy-url').value.trim();
+    const proxyUrl = _buildProxyUrlFromForm();
     const payload = { proxy_url: proxyUrl };
 
     try {

@@ -3,6 +3,7 @@ from typing import Optional, List, Any, Dict, Callable
 import asyncio
 import secrets
 import string
+from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
 from datetime import timedelta, datetime, timezone
@@ -812,35 +813,96 @@ async def update_scraper_settings(
     logger.info(f"用户 '{current_user.username}' 更新了搜索源设置，已重新加载。")
     return
 
-@router.get("/config/proxy", response_model=Dict[str, str], summary="获取代理配置")
+class ProxyTestResult(BaseModel):
+    status: str  # 'success' or 'failure'
+    latency: Optional[float] = None # in ms
+    error: Optional[str] = None
+
+class ProxySettingsResponse(BaseModel):
+    proxy_protocol: str
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[int] = None
+    proxy_username: Optional[str] = None
+    proxy_password: Optional[str] = None
+    proxy_enabled: bool
+
+class ProxySettingsUpdate(BaseModel):
+    proxy_protocol: str
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[int] = None
+    proxy_username: Optional[str] = None
+    proxy_password: Optional[str] = None
+    proxy_enabled: bool
+
+@router.get("/config/proxy", response_model=ProxySettingsResponse, summary="获取代理配置")
+
 async def get_proxy_settings(
     current_user: models.User = Depends(security.get_current_user),
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """获取全局代理配置。"""
-    keys = ["proxy_url", "proxy_enabled"]
-    tasks = [crud.get_config_value(pool, key, "") for key in keys]
-    values = await asyncio.gather(*tasks)
-    return dict(zip(keys, values))
+    proxy_url_task = crud.get_config_value(pool, "proxy_url", "")
+    proxy_enabled_task = crud.get_config_value(pool, "proxy_enabled", "false")
+    proxy_url, proxy_enabled_str = await asyncio.gather(proxy_url_task, proxy_enabled_task)
+
+    proxy_enabled = proxy_enabled_str.lower() == 'true'
+    
+    # Parse the URL into components
+    protocol, host, port, username, password = "http", None, None, None, None
+    if proxy_url:
+        try:
+            p = urlparse(proxy_url)
+            protocol = p.scheme or "http"
+            host = p.hostname
+            port = p.port
+            username = unquote(p.username) if p.username else None
+            password = unquote(p.password) if p.password else None
+        except Exception as e:
+            logger.error(f"解析存储的代理URL '{proxy_url}' 失败: {e}")
+
+    return ProxySettingsResponse(
+        proxy_protocol=protocol,
+        proxy_host=host,
+        proxy_port=port,
+        proxy_username=username,
+        proxy_password=password,
+        proxy_enabled=proxy_enabled
+    )
 
 @router.put("/config/proxy", status_code=status.HTTP_204_NO_CONTENT, summary="更新代理配置")
 async def update_proxy_settings(
-    payload: Dict[str, str],
+    payload: ProxySettingsUpdate,
     current_user: models.User = Depends(security.get_current_user),
     pool: aiomysql.Pool = Depends(get_db_pool)
 ):
     """更新全局代理配置。"""
-    tasks = []
-    for key, value in payload.items():
-        if key in ["proxy_url", "proxy_enabled"]:
-            tasks.append(crud.update_config_value(pool, key, value or ""))
+    proxy_url = ""
+    if payload.proxy_host and payload.proxy_port:
+        # URL-encode username and password to handle special characters like '@'
+        userinfo = ""
+        if payload.proxy_username:
+            userinfo = quote(payload.proxy_username)
+            if payload.proxy_password:
+                userinfo += ":" + quote(payload.proxy_password)
+            userinfo += "@"
+        
+        proxy_url = f"{payload.proxy_protocol}://{userinfo}{payload.proxy_host}:{payload.proxy_port}"
+
+    tasks = [
+        crud.update_config_value(pool, "proxy_url", proxy_url),
+        crud.update_config_value(pool, "proxy_enabled", str(payload.proxy_enabled).lower())
+    ]
     await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
 class ProxyTestRequest(BaseModel):
     proxy_url: Optional[str] = None
 
-@router.post("/proxy/test", response_model=Dict[str, float], summary="测试代理延迟")
+class FullProxyTestResponse(BaseModel):
+    proxy_connectivity: ProxyTestResult
+    target_sites: Dict[str, ProxyTestResult]
+
+@router.post("/proxy/test", response_model=FullProxyTestResponse, summary="测试代理连接和延迟")
 async def test_proxy_latency(
     request: ProxyTestRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -848,23 +910,59 @@ async def test_proxy_latency(
 ):
     """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
     proxy_url = request.proxy_url
-    proxy_to_use = proxy_url if proxy_url else None
+    # httpx 推荐使用字典格式来指定代理
+    proxies_to_use = {"all://": proxy_url} if proxy_url else None
+    
+    # Test 1: Proxy Connectivity
+    proxy_connectivity_result: ProxyTestResult
+    # 使用一个已知的高可用、轻量级端点进行测试
+    test_url_google = "http://www.google.com/generate_204"
+    try:
+        async with httpx.AsyncClient(proxies=proxies_to_use, timeout=10.0, follow_redirects=False) as client:
+            start_time = time.time()
+            response = await client.get(test_url_google)
+            latency = (time.time() - start_time) * 1000
+            # 204 No Content 是成功的标志
+            if response.status_code == 204:
+                proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
+            else:
+                proxy_connectivity_result = ProxyTestResult(
+                    status="failure", 
+                    error=f"连接成功但状态码异常: {response.status_code}"
+                )
+    except Exception as e:
+        proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
 
+    # Test 2: Target Site Reachability
+    target_sites_results: Dict[str, ProxyTestResult] = {}
     test_domains = [
         "https://api.bilibili.com", "https://www.iqiyi.com", "https://v.qq.com",
         "https://youku.com", "https://www.mgtv.com", "https://ani.gamer.com.tw",
         "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
     ]
-    latencies = {}
-    async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
-        for domain in test_domains:
-            try:
-                start_time = time.time()
-                await client.get(domain)
-                latencies[domain] = (time.time() - start_time) * 1000  # ms
-            except Exception as e:
-                latencies[domain] = -1  # -1 indicates failure
-    return latencies
+    
+    async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
+        try:
+            start_time = time.time()
+            # 使用 HEAD 请求以提高效率，我们只关心连通性
+            await client.head(domain, timeout=10.0)
+            latency = (time.time() - start_time) * 1000
+            return domain, ProxyTestResult(status="success", latency=latency)
+        except Exception as e:
+            # 简化错误信息，避免在UI上显示过长的堆栈跟踪
+            error_str = f"{type(e).__name__}"
+            return domain, ProxyTestResult(status="failure", error=error_str)
+
+    async with httpx.AsyncClient(proxies=proxies_to_use, timeout=10.0) as client:
+        tasks = [test_domain(domain, client) for domain in test_domains]
+        results = await asyncio.gather(*tasks)
+        for domain, result in results:
+            target_sites_results[domain] = result
+
+    return FullProxyTestResponse(
+        proxy_connectivity=proxy_connectivity_result,
+        target_sites=target_sites_results
+    )
 
 @router.get("/scrapers/{provider_name}/config", response_model=Dict[str, str], summary="获取指定搜索源的配置")
 async def get_scraper_config(
