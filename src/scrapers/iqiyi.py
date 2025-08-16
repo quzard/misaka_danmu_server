@@ -643,9 +643,20 @@ class IqiyiScraper(BaseScraper):
                     return []
 
             self.logger.debug(f"爱奇艺: 正在为 {len(episodes)} 个分集并发获取真实标题...")
+            
+            # 修正：将并发请求分批处理，以避免因请求过多而触发API速率限制或导致连接错误。
+            # 每次处理5个分集的详情获取，并在批次之间增加1秒的延迟。
             tasks = [self._get_video_base_info(ep.link_id) for ep in episodes if ep.link_id]
-            detailed_infos = await asyncio.gather(*tasks, return_exceptions=True)
-
+            detailed_infos = []
+            batch_size = 5
+            for i in range(0, len(tasks), batch_size):
+                batch = tasks[i:i+batch_size]
+                batch_results = await asyncio.gather(*batch, return_exceptions=True)
+                detailed_infos.extend(batch_results)
+                if i + batch_size < len(tasks):
+                    self.logger.debug(f"爱奇艺: 完成一批 ({len(batch)}) 标题获取，等待1秒...")
+                    await asyncio.sleep(1)
+            
             specific_title_map = {}
             for info in detailed_infos:
                 if isinstance(info, IqiyiHtmlVideoInfo) and info.tv_id:

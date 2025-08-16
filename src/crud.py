@@ -128,6 +128,22 @@ async def search_episodes_in_library(pool: aiomysql.Pool, anime_title: str, epis
             await cursor.execute(query_like, tuple(like_params + params_episode + params_season))
             return await cursor.fetchall()
 
+async def get_episode_indices_by_anime_title(pool: aiomysql.Pool, title: str) -> List[int]:
+    """获取指定标题的作品已存在的所有分集序号。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # This query finds the anime by title, then joins to get all its episodes' indices.
+            # Using DISTINCT to avoid duplicates if multiple sources have the same episode index.
+            query = """
+                SELECT DISTINCT e.episode_index
+                FROM episode e
+                JOIN anime_sources s ON e.source_id = s.id
+                JOIN anime a ON s.anime_id = a.id
+                WHERE a.title = %s
+            """
+            await cursor.execute(query, (title,))
+            return [row[0] for row in await cursor.fetchall()]
+
 async def find_favorited_source_for_anime(pool: aiomysql.Pool, title: str, season: int) -> Optional[Dict[str, Any]]:
     """
     通过标题和季度查找已存在于库中且被标记为“精确”的数据源。
