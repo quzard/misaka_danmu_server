@@ -576,7 +576,7 @@ class TencentScraper(BaseScraper):
 
         return formatted_comments
 
-    async def get_vid_from_url(self, url: str) -> Optional[str]:
+    async def get_id_from_url(self, url: str) -> Optional[str]:
         """从腾讯视频URL中提取 vid。"""
         # 腾讯视频的URL格式多样，但通常vid是路径的最后一部分
         match = re.search(r'/([a-zA-Z0-9]+)\.html', url)

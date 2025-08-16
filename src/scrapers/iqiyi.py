@@ -857,9 +857,9 @@ class IqiyiScraper(BaseScraper):
             })
         return formatted
 
-    async def get_tvid_from_url(self, url: str) -> Optional[str]:
+    async def get_id_from_url(self, url: str) -> Optional[str]:
         """
-        从爱奇艺视频URL中提取 tvid。
+        从爱奇艺视频URL中提取 id。
         """
         link_id_match = re.search(r"v_(\w+?)\.html", url)
         if not link_id_match:
