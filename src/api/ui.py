@@ -2111,3 +2111,4 @@ async def change_current_user_password(
     # 3. 更新密码
     new_hashed_password = security.get_password_hash(password_data.new_password)
     await crud.update_user_password(session, current_user.username, new_hashed_password)
+
