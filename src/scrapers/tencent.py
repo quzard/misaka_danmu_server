@@ -295,16 +295,16 @@ class TencentScraper(BaseScraper):
                 self.logger.error(f"获取第 {page_num + 1} 页分集时出错: {e}")
                 break
         
-        final_episodes = self._process_and_format_tencent_episodes(list(all_episodes.values()), db_media_type)
+        final_episodes = await self._process_and_format_tencent_episodes(list(all_episodes.values()), db_media_type)
         await self._set_to_cache(cache_key, [e.model_dump() for e in final_episodes], 'episodes_ttl_seconds', 1800)
         return final_episodes
 
     async def _get_episodes_v1(self, media_id: str, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         """旧版分集获取逻辑，作为备用方案。"""
         tencent_episodes = await self._internal_get_episodes_v1(media_id)
-        return self._process_and_format_tencent_episodes(tencent_episodes, db_media_type)
+        return await self._process_and_format_tencent_episodes(tencent_episodes, db_media_type)
 
-    def _process_and_format_tencent_episodes(self, tencent_episodes: List[TencentEpisode], db_media_type: Optional[str]) -> List[models.ProviderEpisodeInfo]:
+    async def _process_and_format_tencent_episodes(self, tencent_episodes: List[TencentEpisode], db_media_type: Optional[str]) -> List[models.ProviderEpisodeInfo]:
         """
         将原始腾讯分集列表处理并格式化为通用格式。
         新增：过滤非正片内容，并为综艺和普通剧集应用不同的排序和重编号逻辑。
@@ -360,7 +360,7 @@ class TencentScraper(BaseScraper):
 
         # 4. 应用自定义黑名单并最终格式化
         final_episodes = []
-        custom_blacklist_pattern = asyncio.run(self.get_episode_blacklist_pattern())
+        custom_blacklist_pattern = await self.get_episode_blacklist_pattern()
 
         for i, ep in enumerate(episodes_to_format):
             display_title = ep.union_title or ep.title
