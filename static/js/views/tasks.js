@@ -51,8 +51,7 @@ function handleTaskFilterClick(e) {
 }
 
 function applyTaskFilters() {
-    loadAndRenderTasksWithDebounce();
-    updateTaskActionButtons();
+    loadAndRenderTasksWithDebounce(); // Button state will be updated after tasks are loaded.
 }
 
 async function loadAndRenderTasks() {
@@ -70,6 +69,7 @@ async function loadAndRenderTasks() {
     try {
         const tasks = await apiFetch(`/api/ui/tasks?${params.toString()}`);
         renderTasks(tasks);
+        updateTaskActionButtons(); // Update buttons after rendering the new list
     } catch (error) {
         console.error("刷新任务列表失败:", error.message);
         taskListUl.innerHTML = `<li class="error">加载任务失败: ${error.message}</li>`;
@@ -133,11 +133,8 @@ function renderTasks(tasksToRender) {
         }
     });
 
-    // After rendering, re-evaluate button states based on the currently selected task
-    const selectedTask = taskListUl.querySelector('.task-item.selected');
-    if (selectedTask) {
-        updateTaskActionButtons();
-    }
+    // The button update is now handled by the caller (loadAndRenderTasks)
+    // to ensure it runs every time, not just when a task is selected.
 }
 
 function loadAndRenderTasksWithDebounce() {

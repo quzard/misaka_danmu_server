@@ -10,7 +10,7 @@ import logging
 from datetime import timedelta, datetime, timezone
 import aiomysql
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -1911,11 +1911,11 @@ async def import_from_provider(
 
 class EditedImportRequest(models.BaseModel):
     provider: str
-    media_id: str
+    media_id: str = Field(..., alias="mediaId")
     anime_title: str
     media_type: str
     season: int
-    image_url: Optional[str] = None
+    image_url: Optional[str] = Field(None, alias="imageUrl")
     douban_id: Optional[str] = None
     tmdb_id: Optional[str] = None
     # 关键区别：直接提供一个分集列表
