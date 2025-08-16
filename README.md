@@ -136,9 +136,7 @@
         - DANMUAPI_ADMIN__INITIAL_USER=admin
       volumes:
         - ./config:/app/config
-      ports:
-        - "7768:7768"
-      networks: host
+      network_mode: "host"
 
 ```
 2.  **重要**:
