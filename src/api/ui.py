@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
-from .. import crud, models, security, scraper_manager
+from .. import crud, models, orm_models, security, scraper_manager
 from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
@@ -454,7 +454,7 @@ async def refresh_anime_poster(
     if not new_local_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
 
-    stmt = update(models.Anime).where(models.Anime.id == anime_id).values(image_url=request_data.image_url, local_image_path=new_local_path)
+    stmt = update(orm_models.Anime).where(orm_models.Anime.id == anime_id).values(image_url=request_data.image_url, local_image_path=new_local_path)
     result = await session.execute(stmt)
     await session.commit()
     affected_rows = result.rowcount
@@ -1362,7 +1362,7 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
     """Background task to delete an anime and all its related data."""
     await progress_callback(0, "开始删除...")
     try:
-        anime = await session.get(models.Anime, anime_id)
+        anime = await session.get(orm_models.Anime, anime_id)
         if not anime:
             raise TaskSuccess("作品未找到，无需删除。")
 
@@ -1378,7 +1378,7 @@ async def delete_source_task(source_id: int, session: AsyncSession, progress_cal
     """Background task to delete a source and all its related data."""
     progress_callback(0, "开始删除...")
     try:
-        source = await session.get(models.AnimeSource, source_id)
+        source = await session.get(orm_models.AnimeSource, source_id)
         if not source:
             raise TaskSuccess("数据源未找到，无需删除。")
         await session.delete(source)
@@ -1392,7 +1392,7 @@ async def delete_episode_task(episode_id: int, session: AsyncSession, progress_c
     """Background task to delete an episode and its comments."""
     progress_callback(0, "开始删除...")
     try:
-        episode = await session.get(models.Episode, episode_id)
+        episode = await session.get(orm_models.Episode, episode_id)
         if not episode:
             raise TaskSuccess("分集未找到，无需删除。")
         await session.delete(episode)
@@ -1410,7 +1410,7 @@ async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSessio
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id})...")
         try:
-            episode = await session.get(models.Episode, episode_id)
+            episode = await session.get(orm_models.Episode, episode_id)
             if episode:
                 await session.delete(episode)
                 await session.commit()
@@ -1599,7 +1599,7 @@ async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession,
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {source_id})...")
         try:
-            source = await session.get(models.AnimeSource, source_id)
+            source = await session.get(orm_models.AnimeSource, source_id)
             if source:
                 await session.delete(source)
                 await session.commit()
@@ -1679,7 +1679,7 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
             for i, episode_data in enumerate(episodes):
                 new_index = i + 1
                 if episode_data['episode_index'] != new_index:
-                    await session.execute(update(models.Episode).where(models.Episode.id == episode_data['id']).values(episode_index=new_index))
+                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episode_index=new_index))
                     updated_count += 1
                 await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
             await session.commit()

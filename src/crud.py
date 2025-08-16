@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload, aliased
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from . import models, security
+from . import models
 from .orm_models import (
     Anime, AnimeSource, Episode, Comment, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource
 )
@@ -342,6 +342,54 @@ async def get_anime_id_by_bangumi_id(session: AsyncSession, bangumi_id: str) -> 
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
+async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
+    """检查具有给定提供商和媒体ID的源是否已存在。"""
+    stmt = select(AnimeSource.id).where(
+        AnimeSource.provider_name == provider_name,
+        AnimeSource.media_id == media_id
+    ).limit(1)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_name: str, media_id: str) -> int:
+    """将一个外部数据源关联到一个番剧条目，如果关联已存在则直接返回其ID。"""
+    stmt = select(AnimeSource.id).where(
+        AnimeSource.anime_id == anime_id,
+        AnimeSource.provider_name == provider_name,
+        AnimeSource.media_id == media_id
+    )
+    result = await session.execute(stmt)
+    existing_id = result.scalar_one_or_none()
+    if existing_id:
+        return existing_id
+
+    new_source = AnimeSource(
+        anime_id=anime_id,
+        provider_name=provider_name,
+        media_id=media_id
+    )
+    session.add(new_source)
+    await session.commit()
+    return new_source.id
+
+async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id: Optional[str], imdb_id: Optional[str], tvdb_id: Optional[str], douban_id: Optional[str]):
+    """仅当字段为空时，才更新番剧的元数据ID。"""
+    stmt = select(AnimeMetadata).where(AnimeMetadata.anime_id == anime_id)
+    result = await session.execute(stmt)
+    metadata = result.scalar_one_or_none()
+
+    if not metadata:
+        return
+
+    updated = False
+    if not metadata.tmdb_id and tmdb_id: metadata.tmdb_id = tmdb_id; updated = True
+    if not metadata.imdb_id and imdb_id: metadata.imdb_id = imdb_id; updated = True
+    if not metadata.tvdb_id and tvdb_id: metadata.tvdb_id = tvdb_id; updated = True
+    if not metadata.douban_id and douban_id: metadata.douban_id = douban_id; updated = True
+
+    if updated:
+        await session.commit()
+
 # --- User & Auth ---
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[Dict[str, Any]]:
@@ -362,6 +410,7 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
 
 async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
+    from . import security
     hashed_password = security.get_password_hash(user.password)
     new_user = User(username=user.username, hashed_password=hashed_password, created_at=datetime.now())
     session.add(new_user)
