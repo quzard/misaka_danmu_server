@@ -21,7 +21,7 @@ class Anime(Base):
     season: Mapped[int] = mapped_column(Integer, default=1)
     episode_count: Mapped[Optional[int]] = mapped_column(Integer)
     source_url: Mapped[Optional[str]] = mapped_column(String(512))
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
     metadata_record: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
@@ -40,7 +40,7 @@ class AnimeSource(Base):
     is_favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     incremental_refresh_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     incremental_refresh_failures: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
 
     anime: Mapped["Anime"] = relationship(back_populates="sources")
     episodes: Mapped[List["Episode"]] = relationship(back_populates="source", cascade="all, delete-orphan")
@@ -86,7 +86,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     token: Mapped[Optional[str]] = mapped_column(TEXT)
     token_update: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
 
 class Scraper(Base):
     __tablename__ = "scrapers"
@@ -135,7 +135,7 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(String(100))
     token: Mapped[str] = mapped_column(String(50), unique=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
     expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
 
 class TokenAccessLog(Base):
@@ -154,7 +154,7 @@ class UaRule(Base):
     __tablename__ = "ua_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ua_string: Mapped[str] = mapped_column(String(255), unique=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
 
 class BangumiAuth(Base):
     __tablename__ = "bangumi_auth"
@@ -221,8 +221,8 @@ class TaskHistory(Base):
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[Optional[str]] = mapped_column(TEXT)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), default=datetime.now)
     finished_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
 
     __table_args__ = (Index('idx_created_at', 'created_at', mysql_length={'created_at': None}),)

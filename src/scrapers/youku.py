@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import base64
 import json
 import logging
 import re
@@ -327,9 +328,8 @@ class YoukuScraper(BaseScraper):
                 self.logger.error(f"Youku: 无法连接到 acs.youku.com 获取令牌 cookie。弹幕获取很可能会失败。错误: {e}")
         
         self._token = token_val.split("_")[0] if token_val else ""
-
-        if not self._cna or not self._token:
-            self.logger.warning(f"Youku: 未能获取到弹幕签名所需的全部 cookie。 cna: '{self._cna}', token: '{self._token}'")
+        if not self._token:
+            self.logger.warning("Youku: 未能获取到弹幕签名所需的 token cookie (_m_h5_tk)，弹幕获取可能会失败。")
 
     def _generate_msg_sign(self, msg_enc: str) -> str:
         s = msg_enc + "MkmC9SoIw6xCkSKHhJ7b5D2r51kBiREr"

@@ -1454,80 +1454,65 @@ async def generic_import_task(
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
     """
-    try:
-        scraper = manager.get_scraper(provider)
+    # 重构导入逻辑以避免创建空条目
+    scraper = manager.get_scraper(provider)
+    normalized_title = anime_title.replace(":", "：")
 
-        # 统一将标题中的英文冒号替换为中文冒号，作为写入数据库前的最后保障
-        normalized_title = anime_title.replace(":", "：")
+    await progress_callback(10, "正在获取分集列表...")
+    episodes = await scraper.get_episodes(
+        media_id,
+        target_episode_index=current_episode_index,
+        db_media_type=media_type
+    )
+    if not episodes:
+        msg = f"未能找到第 {current_episode_index} 集。" if current_episode_index else "未能获取到任何分集。"
+        logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
+        raise TaskSuccess(msg)
 
-        # 步骤 1: 获取所有分集信息
-        await progress_callback(10, "正在获取分集列表...")
-        episodes = await scraper.get_episodes(
-            media_id,
-            target_episode_index=current_episode_index,
-            db_media_type=media_type
-        )
-        if not episodes:
-            msg = f"未能找到第 {current_episode_index} 集。" if current_episode_index else "未能获取到任何分集。"
-            logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
-            raise TaskSuccess(msg)
+    if media_type == "movie" and episodes:
+        logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
+        episodes = episodes[:1]
 
-        # 如果是电影，即使返回了多个版本（如原声、国语），也只处理第一个
-        if media_type == "movie" and episodes:
-            logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
-            episodes = episodes[:1]
+    anime_id: Optional[int] = None
+    source_id: Optional[int] = None
+    total_comments_added = 0
+    total_episodes = len(episodes)
 
-        # 步骤 2: 循环处理分集，在首次成功获取弹幕后再创建数据库主条目
-        anime_id: Optional[int] = None
-        source_id: Optional[int] = None
-        total_comments_added = 0
-        total_episodes = len(episodes)
+    for i, episode in enumerate(episodes):
+        logger.info(f"--- 开始处理分集 {i+1}/{total_episodes}: '{episode.title}' (ID: {episode.episodeId}) ---")
+        base_progress = 10 + int((i / total_episodes) * 85)
+        await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
 
-        for i, episode in enumerate(episodes):
-            logger.info(f"--- 开始处理分集 {i+1}/{total_episodes}: '{episode.title}' (ID: {episode.episodeId}) ---")
-            base_progress = 10 + int((i / total_episodes) * 85) # 10% for setup, 85% for processing, 5% for final
-            await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
+        async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
+            current_total_progress = base_progress + (danmaku_progress / 100) * (85 / total_episodes)
+            await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
 
-            async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
-                current_total_progress = base_progress + (danmaku_progress / 100) * (85 / total_episodes)
-                await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
+        comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
-            comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+        if comments and anime_id is None:
+            logger.info("首次成功获取弹幕，正在创建数据库主条目...")
+            await progress_callback(base_progress + 1, "正在创建数据库主条目...")
+            local_image_path = await download_image(image_url, session, provider)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path)
+            await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
+            source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
+            logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
 
-            # 只有在确实有弹幕需要写入时，才创建番剧和源的记录
-            if comments and anime_id is None:
-                logger.info("首次成功获取弹幕，正在创建数据库主条目...")
-                await progress_callback(base_progress + 1, "正在创建数据库主条目...")
-                # 在创建主条目前，先下载并缓存图片
-                local_image_path = await download_image(image_url, session, provider)
-                # 修正：将 local_image_path 传递给 get_or_create_anime
-                anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path)
-                await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
-                source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
-                logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
-
-            # 如果主条目已创建（意味着至少有一集有弹幕），则处理当前分集
-            if anime_id and source_id:
-                episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-                if not comments:
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
-                    continue
-                added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-                total_comments_added += added_count
-                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
-            else:
-                # 如果 anime_id 仍然是 None，说明到目前为止还没有一集成功获取到弹幕
-                logger.info(f"分集 '{episode.title}' 未找到弹幕，跳过创建主条目。")
-
-        if total_comments_added == 0:
-            raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+        if anime_id and source_id:
+            episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+            if not comments:
+                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
+                continue
+            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+            total_comments_added += added_count
+            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
         else:
-            raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
-    except TaskSuccess:
-        raise # 重新抛出以被 TaskManager 正确处理
-    except Exception as e:
-        logger.error(f"导入任务发生严重错误: {e}", exc_info=True)
-        raise  # 重新抛出异常，以便任务管理器能捕获并标记任务为“失败”
+            logger.info(f"分集 '{episode.title}' 未找到弹幕，跳过创建主条目。")
+
+    if total_comments_added == 0:
+        raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+    else:
+        raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
     
 async def edited_import_task(
     request_data: "EditedImportRequest",
@@ -1536,43 +1521,35 @@ async def edited_import_task(
     manager: ScraperManager
 ):
     """后台任务：处理编辑后的导入请求。"""
-    try:
-        scraper = manager.get_scraper(request_data.provider)
-        normalized_title = request_data.anime_title.replace(":", "：")
-        
-        episodes = request_data.episodes
-        if not episodes:
-            raise TaskSuccess("没有提供任何分集，任务结束。")
+    scraper = manager.get_scraper(request_data.provider)
+    normalized_title = request_data.anime_title.replace(":", "：")
+    
+    episodes = request_data.episodes
+    if not episodes:
+        raise TaskSuccess("没有提供任何分集，任务结束。")
 
-        anime_id: Optional[int] = None
-        source_id: Optional[int] = None
-        total_comments_added = 0
-        total_episodes = len(episodes)
+    anime_id: Optional[int] = None
+    source_id: Optional[int] = None
+    total_comments_added = 0
+    total_episodes = len(episodes)
 
-        for i, episode in enumerate(episodes):
-            await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
-            # 修正：当不需要子进度回调时，应传递 None 或不传递该参数。
-            # 之前传递的 lambda p, d: None 是一个同步函数，对其进行 await 会导致 TypeError。
-            # 直接调用而不传递 progress_callback 会使用其默认值 None，从而修复此问题。
-            comments = await scraper.get_comments(episode.episodeId)
+    for i, episode in enumerate(episodes):
+        await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
+        comments = await scraper.get_comments(episode.episodeId)
 
-            if comments and anime_id is None:
-                local_image_path = await download_image(request_data.image_url, session, request_data.provider)
-                anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
-                await crud.update_metadata_if_empty(session, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
-                source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.media_id)
+        if comments and anime_id is None:
+            local_image_path = await download_image(request_data.image_url, session, request_data.provider)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
+            await crud.update_metadata_if_empty(session, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
+            source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.media_id)
 
-            if anime_id and source_id:
-                episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-                if comments:
-                    total_comments_added += await crud.bulk_insert_comments(session, episode_db_id, comments)
+        if anime_id and source_id:
+            episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+            if comments:
+                total_comments_added += await crud.bulk_insert_comments(session, episode_db_id, comments)
 
-        if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
-        else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
-    except TaskSuccess: raise
-    except Exception as e:
-        logger.error(f"编辑后导入任务发生严重错误: {e}", exc_info=True)
-        raise
+    if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+    else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
 
 async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
     """
