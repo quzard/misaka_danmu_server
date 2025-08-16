@@ -504,6 +504,9 @@ async function checkBiliLoginStatus() {
     const vipSpan = document.getElementById('bili-user-vip-status');
     const statusDiv = document.getElementById('bili-login-status');
     const loginBtn = document.getElementById('bili-login-btn');
+    // 新增：获取免责声明相关的元素
+    const disclaimerAgreement = document.querySelector('.bili-disclaimer-agreement');
+    const disclaimerText = document.querySelector('.bili-login-disclaimer');
 
     if (!profileDiv || !statusDiv || !loginBtn) return;
 
@@ -530,11 +533,17 @@ async function checkBiliLoginStatus() {
                 vipSpan.className = '';
             }
             loginBtn.textContent = '注销';
+            // 新增：登录后隐藏免责声明
+            if (disclaimerAgreement) disclaimerAgreement.classList.add('hidden');
+            if (disclaimerText) disclaimerText.classList.add('hidden');
         } else {
             profileDiv.classList.add('hidden');
             statusDiv.classList.remove('hidden');
             statusDiv.textContent = '当前未登录。';
             loginBtn.textContent = '扫码登录';
+            // 新增：未登录时显示免责声明
+            if (disclaimerAgreement) disclaimerAgreement.classList.remove('hidden');
+            if (disclaimerText) disclaimerText.classList.remove('hidden');
         }
     } catch (error) {
         statusDiv.textContent = `检查状态失败: ${error.message}`;
