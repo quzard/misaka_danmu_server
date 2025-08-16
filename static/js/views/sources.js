@@ -86,6 +86,7 @@ function renderDanmakuSources(settings) {
         const li = document.createElement('li');
         li.dataset.providerName = setting.provider_name;
         li.dataset.isEnabled = setting.is_enabled;
+        li.dataset.useProxy = setting.use_proxy;
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'source-name';
@@ -114,7 +115,6 @@ function renderDanmakuSources(settings) {
             configBtn.dataset.isLoggable = setting.is_loggable;
             li.appendChild(configBtn);
         }
-
         const statusIcon = document.createElement('span');
         statusIcon.className = 'status-icon';
         statusIcon.textContent = setting.is_enabled ? '✅' : '❌';
@@ -136,6 +136,7 @@ async function handleSaveDanmakuSources() {
         settingsToSave.push({
             provider_name: li.dataset.providerName,
             is_enabled: li.dataset.isEnabled === 'true',
+            use_proxy: li.dataset.useProxy === 'true',
             display_order: index + 1,
         });
     });
@@ -192,6 +193,7 @@ function renderMetadataSources(sources) {
         li.dataset.providerName = setting.provider_name;
         li.dataset.isEnabled = setting.is_enabled;
         li.dataset.isAuxSearchEnabled = setting.is_aux_search_enabled;
+        li.dataset.useProxy = setting.use_proxy;
 
         // Auxiliary Search Checkbox
         const auxSearchCheckbox = document.createElement('input');
@@ -206,6 +208,15 @@ function renderMetadataSources(sources) {
         auxSearchCheckbox.addEventListener('change', (e) => {
             li.dataset.isAuxSearchEnabled = e.target.checked;
         });
+        li.appendChild(auxSearchCheckbox);
+
+        // Proxy Checkbox
+        const proxyCheckbox = document.createElement('input');
+        proxyCheckbox.type = 'checkbox';
+        proxyCheckbox.className = 'proxy-checkbox';
+        proxyCheckbox.checked = setting.use_proxy;
+        proxyCheckbox.title = '通过代理访问此源';
+        proxyCheckbox.addEventListener('change', (e) => { li.dataset.useProxy = e.target.checked; });
         li.appendChild(auxSearchCheckbox);
 
         const nameSpan = document.createElement('span');
@@ -247,6 +258,7 @@ async function handleSaveMetadataSources() {
         settingsToSave.push({
             provider_name: li.dataset.providerName,
             is_aux_search_enabled: li.dataset.isAuxSearchEnabled === 'true',
+            use_proxy: li.dataset.useProxy === 'true',
             display_order: index + 1,
         });
     });
@@ -324,6 +336,25 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
                 });
             }
 
+            // Add proxy toggle
+            const useProxy = danmakuSourcesList.querySelector(`li[data-provider-name="${providerName}"]`).dataset.useProxy === 'true';
+            const proxySection = document.createElement('div');
+            proxySection.className = 'form-row';
+            proxySection.style.marginTop = '20px';
+
+            const proxyLabel = document.createElement('label');
+            proxyLabel.htmlFor = 'config-input-use-proxy';
+            proxyLabel.textContent = '使用代理';
+
+            const proxyInput = document.createElement('input');
+            proxyInput.type = 'checkbox';
+            proxyInput.id = 'config-input-use-proxy';
+            proxyInput.name = 'use_proxy';
+            proxyInput.checked = useProxy;
+            proxySection.appendChild(proxyLabel);
+            proxySection.appendChild(proxyInput);
+            modalBody.appendChild(proxySection);
+
             // 渲染日志开关（如果支持）
             if (isLoggable) {
                 const logKey = `scraper_${providerName}_log_responses`;
@@ -400,6 +431,11 @@ async function handleSaveScraperConfig() {
     document.getElementById('modal-body').querySelectorAll('input[type="text"], textarea').forEach(input => {
         payload[input.name] = input.value.trim();
     });
+    // Get proxy toggle value and update the list item's dataset
+    const useProxyCheckbox = document.getElementById('config-input-use-proxy');
+    if (useProxyCheckbox) {
+        danmakuSourcesList.querySelector(`li[data-provider-name="${currentProviderForModal}"]`).dataset.useProxy = useProxyCheckbox.checked;
+    }
     // 获取日志开关的值
     const logCheckbox = document.getElementById('config-input-log-responses');
     if (logCheckbox) {

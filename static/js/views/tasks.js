@@ -232,15 +232,26 @@ function showEditScheduledTaskView(task = null) {
     taskTypeSelect.innerHTML = '<option value="">加载中...</option>';
     taskTypeSelect.disabled = true;
 
-    apiFetch('/api/ui/scheduled-tasks/available').then(jobs => {
+    // 并行获取可用的任务类型和已存在的任务列表
+    Promise.all([
+        apiFetch('/api/ui/scheduled-tasks/available'),
+        apiFetch('/api/ui/scheduled-tasks')
+    ]).then(([availableJobs, existingTasks]) => {
         taskTypeSelect.innerHTML = '';
-        if (jobs.length === 0) {
+        if (availableJobs.length === 0) {
             taskTypeSelect.innerHTML = '<option value="">无可用任务</option>';
         } else {
-            jobs.forEach(job => {
+            const existingJobTypes = new Set(existingTasks.map(t => t.job_type));
+
+            availableJobs.forEach(job => {
                 const option = document.createElement('option');
                 option.value = job.type;
                 option.textContent = job.name;
+                // 如果是“定时追更”任务且已存在，则禁用该选项（仅在“添加”模式下）
+                if (job.type === 'incremental_refresh' && existingJobTypes.has('incremental_refresh') && (!task || task.job_type !== 'incremental_refresh')) {
+                    option.disabled = true;
+                    option.textContent += ' (已存在)';
+                }
                 taskTypeSelect.appendChild(option);
             });
             taskTypeSelect.disabled = false;

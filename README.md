@@ -226,4 +226,6 @@
 
  - [danmuku](https://github.com/lyz05/danmaku)
  - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
+
  - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
+

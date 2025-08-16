@@ -309,11 +309,26 @@ async function showAnimeSources(animeId, title) {
       li.style.gridTemplateColumns = '1fr auto';
       li.innerHTML = `<div><div class="title">${s.provider_name}</div><div class="meta">${s.media_id}</div></div>`;
       const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.gap = '6px'; actions.style.justifyItems = 'end';
+      
+      const scheduleBtn = document.createElement('button');
+      scheduleBtn.className = 'row-action';
+      scheduleBtn.textContent = '⏰';
+      scheduleBtn.title = '定时增量更新';
+      if (!s.incremental_refresh_enabled) {
+        scheduleBtn.style.opacity = '0.35';
+      }
+      scheduleBtn.addEventListener('click', async () => {
+          try {
+              await apiFetch(`/api/ui/library/source/${s.source_id}/toggle-incremental-refresh`, { method: 'PUT' });
+              scheduleBtn.style.opacity = scheduleBtn.style.opacity === '0.35' ? '1' : '0.35';
+          } catch (e) { alert(`操作失败: ${e.message || e}`); }
+      });
+
       const epBtn = document.createElement('button'); epBtn.className = 'row-action'; epBtn.textContent = '分集';
       epBtn.addEventListener('click', () => showEpisodes(s.source_id, title, animeId));
       const delBtn = document.createElement('button'); delBtn.className = 'row-action'; delBtn.textContent = '删除';
       delBtn.addEventListener('click', async () => { if (!confirm('删除该源？')) return; await apiFetch(`/api/ui/library/source/${s.source_id}`, { method: 'DELETE' }); showAnimeSources(animeId, title); });
-      actions.appendChild(epBtn); actions.appendChild(delBtn); li.appendChild(actions); ul.appendChild(li);
+      actions.appendChild(scheduleBtn); actions.appendChild(epBtn); actions.appendChild(delBtn); li.appendChild(actions); ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
 }
@@ -902,7 +917,7 @@ function createPosterImage(src, altText) {
   const normalized = normalizeImageUrl(src);
   img.src = normalized || '/static/placeholder.png';
   img.alt = altText || '';
-  img.referrerPolicy = 'strict-origin-when-cross-origin';
+  img.referrerPolicy = 'no-referrer';
   img.loading = 'lazy';
   img.decoding = 'async';
   img.crossOrigin = 'anonymous';
