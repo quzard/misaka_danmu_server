@@ -8,6 +8,7 @@ let episodeListView, danmakuListView;
 
 // State
 let currentEpisodes = [];
+let episodeSortOrder = 'asc'; // 'asc' or 'desc'
 let currentModalConfirmHandler = null; // 仅用于本模块控制通用模态的“确认”按钮
 
 function initializeElements() {
@@ -285,14 +286,22 @@ async function showEpisodeListView(sourceId, animeTitle, animeId) {
 
     try {
         const episodes = await apiFetch(`/api/ui/library/source/${sourceId}/episodes`);
-        currentEpisodes = episodes;
-        renderEpisodeListView(sourceId, animeTitle, episodes, animeId);
+        currentEpisodes = episodes; // Store the original, unsorted list
+        renderEpisodeListView(sourceId, animeTitle, episodes, animeId); // Pass the unsorted list
     } catch (error) {
         episodeListView.innerHTML = `<div class="error">加载分集列表失败: ${(error.message || error)}</div>`;
     }
 }
 
 function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
+    // Sort episodes based on the current sort order
+    const sortedEpisodes = [...episodes].sort((a, b) => {
+        if (episodeSortOrder === 'desc') {
+            return b.episode_index - a.episode_index;
+        }
+        return a.episode_index - b.episode_index;
+    });
+
     episodeListView.innerHTML = `
         <div class="episode-list-header">
             <h3>分集列表: ${animeTitle}</h3>
@@ -302,6 +311,13 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
             <div class="actions-left">
                 <button id="select-all-episodes-btn" class="secondary-btn">全选</button>
                 <button id="delete-selected-episodes-btn" class="secondary-btn danger">批量删除选中</button>
+                <div class="sort-switch-container">
+                    <label for="episode-sort-switch">倒序显示</label>
+                    <label class="switch">
+                        <input type="checkbox" id="episode-sort-switch" ${episodeSortOrder === 'desc' ? 'checked' : ''}>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
             </div>
             <div class="actions-right">
                 <button id="cleanup-by-average-btn" class="secondary-btn danger">正片重整</button>
@@ -319,8 +335,8 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     episodeListView.dataset.animeId = animeId;
 
     const tableBody = episodeListView.querySelector('tbody');
-    if (episodes.length > 0) {
-        episodes.forEach(ep => {
+    if (sortedEpisodes.length > 0) {
+        sortedEpisodes.forEach(ep => {
             const row = tableBody.insertRow();
             row.style.cursor = 'pointer';
             row.addEventListener('click', (e) => {
@@ -360,6 +376,13 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
     document.getElementById('manual-import-btn').addEventListener('click', () => showManualImportModal(sourceId));
     document.getElementById('back-to-detail-view-btn').addEventListener('click', () => showAnimeDetailView(animeId));
     tableBody.addEventListener('click', handleEpisodeAction);
+
+    // Add event listener for the new sort switch
+    document.getElementById('episode-sort-switch').addEventListener('change', (e) => {
+        episodeSortOrder = e.target.checked ? 'desc' : 'asc';
+        // Re-render with the new sort order. We use `currentEpisodes` which is the original unsorted list.
+        renderEpisodeListView(sourceId, animeTitle, currentEpisodes, animeId);
+    });
 }
 
 function handleSelectAllEpisodes() {
