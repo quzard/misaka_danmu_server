@@ -48,6 +48,8 @@
 .form-card {
     max-width: 1000px; /* 统一所有表单卡片宽度为1000px */
     margin: 20px auto;
+    width: 100%; /* 确保卡片在容器内撑满宽度，从而对齐 */
+    box-sizing: border-box; /* 确保 padding 不会影响总宽度 */
     padding: 20px;
     background: var(--card-bg);
     border-radius: 8px;
