@@ -238,7 +238,7 @@ class EditedImportRequest(BaseModel):
     """用于编辑后导入的请求体模型"""
     provider: str
     media_id: str = Field(..., alias="mediaId")
-    anime_title: str
+    title: str
     media_type: str
     season: int
     image_url: Optional[str] = Field(None, alias="imageUrl")

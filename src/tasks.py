@@ -162,7 +162,7 @@ async def edited_import_task(
 ):
     """后台任务：处理编辑后的导入请求。"""
     scraper = manager.get_scraper(request_data.provider)
-    normalized_title = request_data.anime_title.replace(":", "：")
+    normalized_title = request_data.title.replace(":", "：")
     
     episodes = request_data.episodes
     if not episodes:
