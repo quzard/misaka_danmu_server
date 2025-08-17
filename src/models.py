@@ -43,6 +43,10 @@ class CommentResponse(BaseModel):
     count: int = Field(..., description="弹幕总数")
     comments: List[Comment] = Field([], description="弹幕列表")
 
+class DanmakuUpdateRequest(BaseModel):
+    """用于覆盖弹幕的请求体模型"""
+    comments: List[Comment]
+
 
 # --- 通用 Provider 和 Import 模型 ---
 class ProviderSearchInfo(BaseModel):
