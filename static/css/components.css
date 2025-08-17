@@ -56,6 +56,11 @@
     box-shadow: var(--shadow);
 }
 
+/* 为编辑影视信息等需要更多空间的页面提供一个更宽的卡片 */
+.form-card-wide {
+    max-width: 1600px;
+}
+
 .form-card h2, .form-card h3 {
     border-bottom: none;
     padding-bottom: 0;

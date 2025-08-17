@@ -6,7 +6,7 @@
 #edit-anime-form {
     display: grid;
     /* 创建两列，但在窄屏上会自动变为单列 */
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(550px, 1fr));
     gap: 15px 30px; /* 行间距15px, 列间距30px */
     align-items: start; /* 垂直方向顶部对齐 */
 }
