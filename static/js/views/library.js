@@ -496,7 +496,7 @@ async function handleCleanupByAverage(sourceId, animeTitle) {
         e.preventDefault();
         try {
             // 1) 提交批量删除
-            const episodeIds = toDelete.map(ep => ep.id);
+            const episodeIds = toDelete.map(ep => ep.episodeId);
             await apiFetch('/api/ui/library/episodes/delete-bulk', {
                 method: 'POST',
                 body: JSON.stringify({ episode_ids: episodeIds })

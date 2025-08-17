@@ -186,7 +186,7 @@
                         <div class="form-card form-card-wide">
                             <form id="edit-anime-form">
                                 <input type="hidden" id="edit-anime-id">
-                                <div class="form-row">
+                                <div class="form-row form-row-full-width">
                                     <label for="edit-anime-title">影视名称</label>
                                     <input type="text" id="edit-anime-title" required>
                                 </div>
@@ -205,7 +205,7 @@
                                     <label for="edit-anime-episode-count">集数</label>
                                     <input type="number" id="edit-anime-episode-count" min="1" placeholder="留空则自动计算">
                                 </div>
-                                <div class="form-row">
+                                <div class="form-row form-row-full-width">
                                     <label for="edit-anime-poster-url">海报URL</label>
                                     <div class="input-with-icon">
                                         <input type="text" id="edit-anime-poster-url" placeholder="输入海报图片的URL">
@@ -832,7 +832,7 @@
                         </div>
 
                         <div id="bangumi-settings-subview" class="settings-subview hidden">
-                            <div class="form-card form-card-medium">
+                            <div class="form-card">
                                 <h3>Bangumi API 配置</h3>
                                 <p>请从 <a href="https://bgm.tv/dev/app" target="_blank" rel="noopener noreferrer">Bangumi开发者中心</a> 创建应用以获取您自己的 App ID 和 App Secret。</p>
                                 <form id="bangumi-settings-form">
@@ -850,7 +850,7 @@
                                 </form>
                                 <p id="bangumi-save-message" class="message"></p>
                             </div>
-                            <div class="form-card form-card-medium">
+                            <div class="form-card">
                                 <h3>Bangumi 授权</h3>
                                 <div id="bangumi-auth-state-unauthenticated">
                                     <p>当前未授权。授权后可使用更多功能。</p>
@@ -872,7 +872,7 @@
                         </div>
 
                         <div id="tmdb-settings-subview" class="settings-subview hidden">
-                            <div class="form-card form-card-medium">
+                            <div class="form-card">
                                 <h3>TMDB API 配置</h3>
                                 <p>请从 <a href="https://www.themoviedb.org/settings/api" target="_blank">TMDB官网</a> 获取您的 API Key (v3 auth)。</p>
                                 <form id="tmdb-settings-form">

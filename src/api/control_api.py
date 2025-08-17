@@ -388,7 +388,9 @@ async def favorite_source(sourceid: int, session: AsyncSession = Depends(get_db_
 
 @library_router.get("/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
 async def get_source_episodes(sourceid: int, session: AsyncSession = Depends(get_db_session)):
-    return await crud.get_episodes_for_source(session, sourceid)
+    episodes_data = await crud.get_episodes_for_source(session, sourceid)
+    # 显式使用Pydantic模型进行验证和序列化，确保字段名正确 (id -> episodeId)
+    return [models.EpisodeDetail.model_validate(ep) for ep in episodes_data]
 
 @library_router.put("/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
 async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):

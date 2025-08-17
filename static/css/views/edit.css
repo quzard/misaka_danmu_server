@@ -2,6 +2,25 @@
    Edit Anime & Episode View Styles
    ========================================================================== */
 
+/* 使用网格布局以更好地利用宽屏空间 */
+#edit-anime-form {
+    display: grid;
+    /* 创建两列，但在窄屏上会自动变为单列 */
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 15px 30px; /* 行间距15px, 列间距30px */
+    align-items: start; /* 垂直方向顶部对齐 */
+}
+
+/* 用于需要占据整行的表单项的工具类 */
+#edit-anime-form .form-row-full-width {
+    grid-column: 1 / -1;
+}
+
+/* 确保底部的操作按钮也占据整行 */
+#edit-anime-form .form-actions {
+    grid-column: 1 / -1;
+}
+
 /* --- Main Edit Form --- */
 
 #edit-anime-form input::placeholder {

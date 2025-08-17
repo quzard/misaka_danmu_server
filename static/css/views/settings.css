@@ -1,3 +1,8 @@
+/* 统一设置页面下所有卡片的宽度，以提供更宽敞的布局 */
+#settings-view .form-card {
+    max-width: 1000px;
+}
+
 .settings-sub-nav {
     display: flex;
     gap: 5px;

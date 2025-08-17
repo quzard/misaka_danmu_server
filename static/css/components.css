@@ -54,11 +54,6 @@
     box-shadow: var(--shadow);
 }
 
-/* 为设置页面提供一个中等宽度 */
-.form-card-medium {
-    max-width: 900px;
-}
-
 /* 为编辑影视信息等复杂页面提供一个更宽的布局 */
 .form-card-wide {
     max-width: 1000px;
