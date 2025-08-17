@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.routing import APIRoute
 
 from . import crud, models
+from .config_manager import ConfigManager
 from .database import get_db_session
 from .scraper_manager import ScraperManager
 
@@ -908,7 +909,8 @@ async def get_comments_for_dandan(
     from_time: int = Query(0, alias="from", description="弹幕开始时间(秒)"),
     with_related: bool = Query(True, alias="withRelated", description="是否包含关联弹幕"),
     token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(crud.get_config_manager)
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
@@ -916,13 +918,16 @@ async def get_comments_for_dandan(
     新增：支持 withRelated 参数，用于聚合所有源的弹幕。
     兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
+    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'true')
+    aggregation_enabled = aggregation_enabled_str.lower() == 'true'
+
     comments_data = []
     episode_id_str = str(episode_id)
     
     # 检查是否为新版ID格式 (14位且以25开头)，并且用户请求了关联弹幕
     is_new_format = len(episode_id_str) == 14 and episode_id_str.startswith('25')
 
-    if with_related and is_new_format:
+    if with_related and aggregation_enabled and is_new_format:
         try:
             # 从新版ID格式中解析出 anime_id 和 episode_index
             # 格式: 25 (固定) + anime_id (6位) + source_order (2位) + episode_index (4位)
@@ -942,7 +947,9 @@ async def get_comments_for_dandan(
             logger.error(f"解析新版格式的 episode_id '{episode_id}' 失败: {e}。回退到获取单个分集。")
             comments_data = await crud.fetch_comments(session, episode_id)
     else:
-        if with_related and not is_new_format:
+        if with_related and not aggregation_enabled:
+            logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
+        elif with_related and not is_new_format:
             logger.info(f"withRelated=true，但 episode_id '{episode_id}' 是旧版格式，仅获取当前分集弹幕。")
         comments_data = await crud.fetch_comments(session, episode_id)
 
@@ -953,6 +960,31 @@ async def get_comments_for_dandan(
         if unique_key not in unique_comments:
             unique_comments[unique_key] = comment
     comments_data = list(unique_comments.values())
+
+    # 应用输出数量限制
+    limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
+    try:
+        limit = int(limit_str)
+    except (ValueError, TypeError):
+        limit = -1
+
+    if limit > 0 and len(comments_data) > limit:
+        logger.info(f"弹幕数量 ({len(comments_data)}) 超出限制 ({limit})，将进行均匀采样。")
+        
+        def get_timestamp(comment):
+            try: return float(comment['p'].split(',')[0])
+            except (ValueError, IndexError): return float('inf')
+
+        comments_data.sort(key=get_timestamp)
+        
+        step = len(comments_data) / limit
+        sampled_comments = []
+        for i in range(limit):
+            index = round(i * step)
+            if index < len(comments_data): sampled_comments.append(comments_data[index])
+        comments_data = sampled_comments
+        logger.info(f"采样后弹幕数量: {len(comments_data)}")
+
     # 如果客户端请求了繁简转换，则在此处处理
     if ch_convert in [1, 2]:
         converter = None

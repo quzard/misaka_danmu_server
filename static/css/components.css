@@ -92,6 +92,15 @@
     border-top: 1px solid var(--border-color);
 }
 
+.form-help-text {
+    grid-column: 2 / -1; /* Align with the input field */
+    font-size: 13px;
+    color: #606266;
+    margin-top: -5px; /* Reduce space after the input */
+    margin-bottom: 10px;
+    line-height: 1.5;
+}
+
 input[type="text"],
 input[type="password"],
 input[type="number"],
@@ -423,4 +432,3 @@ th {
 .bili-login-disclaimer a:hover {
     text-decoration: underline;
 }
-

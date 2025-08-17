@@ -66,6 +66,8 @@ async def lifespan(app: FastAPI):
         'bangumi_client_secret': ('', '用于Bangumi OAuth的App Secret。'),
         'douban_cookie': ('', '用于访问豆瓣API的Cookie。'),
         # 弹幕源
+        'danmaku_output_limit_per_source': ('-1', '单源弹幕输出总数限制。-1为无限制。'),
+        'danmaku_aggregation_enabled': ('true', '是否启用跨源弹幕聚合功能。'),
         'scraper_verification_enabled': ('false', '是否启用搜索源签名验证。'),
         'bilibili_cookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamer_cookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
