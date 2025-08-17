@@ -110,9 +110,14 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
 
-
-app = FastAPI(title="Danmaku API", description="一个基于dandanplay API风格的弹幕服务", version="1.0.0", lifespan=lifespan)
-
+app = FastAPI(
+    title="Danmaku API",
+    description="一个基于dandanplay API风格的弹幕服务",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/api/docs",  # 为Swagger UI设置自定义路径
+    redoc_url=None         # 禁用ReDoc
+)
 @app.middleware("http")
 async def log_not_found_requests(request: Request, call_next):
     """
