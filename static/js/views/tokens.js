@@ -114,7 +114,7 @@ async function handleTokenAction(e) {
 
     if (action === 'copy') {
         const domain = customDomainInput.value.trim();
-        const textToCopy = domain ? `${domain}/api/${tokenValue}` : tokenValue;
+        const textToCopy = domain ? `${domain}/api/v1/${tokenValue}` : tokenValue;
 
         // 优先使用现代的、安全的剪贴板API
         if (navigator.clipboard && window.isSecureContext) {

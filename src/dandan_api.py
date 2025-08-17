@@ -425,7 +425,7 @@ async def get_token_from_path(
     """
     # 1. 验证 token 是否存在、启用且未过期
     request_path = request.url.path
-    log_path = re.sub(r'^/api/[^/]+', '', request_path) # 从路径中移除 /api/{token} 部分
+    log_path = re.sub(r'^/api/v1/[^/]+', '', request_path) # 从路径中移除 /api/v1/{token} 部分
 
     token_info = await crud.validate_api_token(session, token)
     if not token_info:
@@ -1015,7 +1015,7 @@ async def get_comments_for_dandan(
 # --- 路由挂载 ---
 # 将实现路由挂载到主路由上，以支持两种URL结构。
 
-# 2. 挂载以支持兼容路径: /api/{token}/api/v2/bangumi/{anime_id}
-dandan_router.include_router(implementation_router, prefix="/{token}/api/v2")
-# 1. 挂载以支持直接路径: /api/{token}/bangumi/{anime_id}
-dandan_router.include_router(implementation_router, prefix="/{token}")
+# 2. 挂载以支持兼容路径: /api/v1/{token}/api/v2/...
+dandan_router.include_router(implementation_router, prefix="/v1/{token}/api/v2")
+# 1. 挂载以支持直接路径: /api/v1/{token}/...
+dandan_router.include_router(implementation_router, prefix="/v1/{token}")

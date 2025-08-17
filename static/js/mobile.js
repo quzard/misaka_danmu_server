@@ -1432,7 +1432,7 @@ async function loadTokens() {
       const copyBtn = document.createElement('button'); copyBtn.className = 'token-btn'; copyBtn.textContent = '复制链接';
       copyBtn.addEventListener('click', async () => {
         const domain = (document.getElementById('token-custom-domain-input').value || '').trim();
-        const url = domain ? `${domain.replace(/\/$/, '')}/api/${t.token}` : t.token;
+        const url = domain ? `${domain.replace(/\/$/, '')}/api/v1/${t.token}` : t.token;
         await safeCopy(url);
         alert('已复制');
       });

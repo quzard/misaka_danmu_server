@@ -407,7 +407,7 @@ async function handleTestMatch(e) {
     testButton.disabled = true;
 
     try {
-        const data = await apiFetch(`/api/${apiToken}/match`, {
+        const data = await apiFetch(`/api/v1/${apiToken}/match`, {
             method: 'POST',
             body: JSON.stringify({ fileName: filename })
         });
