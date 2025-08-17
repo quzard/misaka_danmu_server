@@ -76,3 +76,17 @@ textarea#douban-cookie {
 .proxy-port-row     { grid-area: port; }
 .proxy-user-row     { grid-area: user; }
 .proxy-pass-row     { grid-area: pass; }
+
+/* --- API Documentation Iframe Styles --- */
+#external-api-docs-subview {
+    padding: 0; /* Remove padding to let iframe fill the space */
+    height: 100%; /* Make it fill the parent's height */
+    display: flex; /* Use flexbox to manage the iframe */
+    flex-direction: column;
+}
+
+#swagger-ui-iframe {
+    flex-grow: 1; /* Let the iframe grow to fill the container */
+    border: none;
+    width: 100%;
+}

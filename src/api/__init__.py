@@ -7,7 +7,7 @@ from .webhook_api import router as webhook_router
 from .imdb_api import router as imdb_router
 from .tvdb_api import router as tvdb_router
 from .douban_api import router as douban_router
-from .external_api import router as external_router
+from .control_api import router as control_router
 
 # This router aggregates all non-dandanplay API endpoints.
 api_router = APIRouter()
@@ -20,7 +20,7 @@ api_router.include_router(douban_router, prefix="/douban", tags=["Douban"])
 api_router.include_router(imdb_router, prefix="/imdb", tags=["IMDb"])
 api_router.include_router(tvdb_router, prefix="/tvdb", tags=["TVDB"])
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"])
-api_router.include_router(external_router, prefix="/control", tags=["External Control API"])
+api_router.include_router(control_router, prefix="/control", tags=["External Control API"])
 
 # Note: The dandan_router is handled separately in main.py because its
 # path structure (/api/{token}) is different and needs to be at the root

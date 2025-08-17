@@ -620,6 +620,7 @@
                         <div class="settings-sub-nav">
                             <button class="sub-nav-btn active" data-subview="external-api-key-subview">API密钥</button>
                             <button class="sub-nav-btn" data-subview="external-api-logs-subview">访问日志</button>
+                            <button class="sub-nav-btn" data-subview="external-api-docs-subview">API文档</button>
                         </div>
 
                         <div id="external-api-key-subview" class="settings-subview">
@@ -643,6 +644,9 @@
                                 <thead><tr><th>访问时间</th><th>IP地址</th><th>端点</th><th>状态码</th><th>消息</th></tr></thead>
                                 <tbody></tbody>
                             </table>
+                        </div>
+                        <div id="external-api-docs-subview" class="settings-subview hidden">
+                            <iframe id="swagger-ui-iframe" src="/api/docs"></iframe>
                         </div>
                     </div>
                     <div id="sources-view" class="content-view hidden">
