@@ -412,7 +412,7 @@ async function handleCopyWebhookUrl() {
 async function loadBangumiSettings() {
     bangumiSaveMessage.textContent = '';
     try {
-        const data = await apiFetch('/api/ui/config/bangumi');
+        const data = await apiFetch('/api/ui/config/provider/bangumi');
         document.getElementById('bangumi-client-id').value = data.bangumi_client_id || '';
         document.getElementById('bangumi-client-secret').value = data.bangumi_client_secret || '';
     } catch (error) {
@@ -432,7 +432,7 @@ async function handleSaveBangumiSettings(e) {
     bangumiSaveMessage.textContent = '保存中...';
     bangumiSaveMessage.className = 'message';
     try {
-        await apiFetch('/api/ui/config/bangumi', {
+        await apiFetch('/api/ui/config/provider/bangumi', {
             method: 'PUT',
             body: JSON.stringify(payload)
         });
@@ -503,7 +503,7 @@ async function handleBangumiLogout() {
 async function loadTmdbSettings() {
     tmdbSaveMessage.textContent = '';
     try {
-        const data = await apiFetch('/api/ui/config/tmdb');
+        const data = await apiFetch('/api/ui/config/provider/tmdb');
         document.getElementById('tmdb-api-key').value = data.tmdb_api_key || '';
         document.getElementById('tmdb-api-base-url').value = data.tmdb_api_base_url || '';
         document.getElementById('tmdb-image-base-url').value = data.tmdb_image_base_url || '';
@@ -525,7 +525,7 @@ async function handleSaveTmdbSettings(e) {
     tmdbSaveMessage.textContent = '保存中...';
     tmdbSaveMessage.className = 'message';
     try {
-        await apiFetch('/api/ui/config/tmdb', {
+        await apiFetch('/api/ui/config/provider/tmdb', {
             method: 'PUT',
             body: JSON.stringify(payload)
         });

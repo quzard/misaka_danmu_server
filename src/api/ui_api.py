@@ -2,6 +2,7 @@ import re
 from typing import Optional, List, Any, Dict, Callable
 import asyncio
 import secrets
+import importlib
 import string
 import time
 from urllib.parse import urlparse, urlunparse, quote, unquote
@@ -938,16 +939,29 @@ async def get_server_logs(current_user: models.User = Depends(security.get_curre
     """获取存储在内存中的最新日志条目。"""
     return get_logs()
 
-@router.get("/config/tmdb", response_model=Dict[str, str], summary="获取TMDB配置")
-async def get_tmdb_settings(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """获取所有TMDB相关的配置。"""
-    keys = ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"]
-    tasks = [crud.get_config_value(session, key, "") for key in keys]
-    values = await asyncio.gather(*tasks)
-    return dict(zip(keys, values))
+# --- Dynamic Metadata Source Router Inclusion ---
+# This approach avoids hardcoding each metadata source API, making the system more modular.
+# It dynamically discovers and registers the API routers for all available metadata sources.
+METADATA_PROVIDERS = ['bangumi', 'douban', 'imdb', 'tmdb', 'tvdb']
+
+for provider_name in METADATA_PROVIDERS:
+    try:
+        # Dynamically import the API module for the provider
+        module_name = f"src.api.{provider_name}_api"
+        api_module = importlib.import_module(module_name)
+        
+        # Check if the module has a 'router' attribute
+        if hasattr(api_module, 'router'):
+            # Include the router with a consistent prefix and tag
+            tag_name = f"UI - {provider_name.upper()}"
+            router.include_router(api_module.router, prefix=f"/{provider_name}", tags=[tag_name])
+            logger.info(f"Successfully registered API router for metadata source: {provider_name}")
+        else:
+            logger.warning(f"Metadata source API module '{module_name}' does not have a 'router' attribute.")
+    except ImportError:
+        logger.warning(f"Could not find an API module for metadata source: '{provider_name}' (expected at {module_name}.py)")
+    except Exception as e:
+        logger.error(f"Failed to register API router for metadata source '{provider_name}': {e}", exc_info=True)
 
 @router.post("/scrapers/{provider_name}/actions/{action_name}", summary="执行搜索源的自定义操作")
 async def execute_scraper_action(
@@ -972,45 +986,6 @@ async def execute_scraper_action(
     except Exception as e:
         logger.error(f"执行搜索源 '{provider_name}' 的操作 '{action_name}' 时出错: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="执行操作时发生内部错误。")
-
-@router.put("/config/tmdb", status_code=status.HTTP_204_NO_CONTENT, summary="更新TMDB配置")
-async def update_tmdb_settings(
-    payload: Dict[str, str],
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
-    """批量更新TMDB相关的配置。"""
-    for key, value in payload.items():
-        if key in ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"]:
-            await crud.update_config_value(session, key, value or "")
-            config_manager.invalidate(key)
-    logger.info(f"用户 '{current_user.username}' 更新了 TMDB 配置。")
-    
-@router.get("/config/bangumi", response_model=Dict[str, str], summary="获取Bangumi配置")
-async def get_bangumi_settings(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """获取Bangumi OAuth相关的配置。"""
-    keys = ["bangumi_client_id", "bangumi_client_secret"]
-    tasks = [crud.get_config_value(session, key, "") for key in keys]
-    values = await asyncio.gather(*tasks)
-    return dict(zip(keys, values))
-
-@router.put("/config/bangumi", status_code=status.HTTP_204_NO_CONTENT, summary="更新Bangumi配置")
-async def update_bangumi_settings(
-    payload: Dict[str, str],
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
-    """批量更新Bangumi OAuth相关的配置。"""
-    for key, value in payload.items():
-        if key in ["bangumi_client_id", "bangumi_client_secret"]:
-            await crud.update_config_value(session, key, value or "")
-            config_manager.invalidate(key)
-    logger.info(f"用户 '{current_user.username}' 更新了 Bangumi 配置。")
 
 @router.post("/cache/clear", status_code=status.HTTP_200_OK, summary="清除所有缓存")
 
@@ -1221,6 +1196,39 @@ async def delete_ua_rule(
     deleted = await crud.delete_ua_rule(session, rule_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到指定的规则ID。")
+
+@router.get("/config/provider/{provider_name}", response_model=Dict[str, str], summary="获取指定元数据源的配置")
+async def get_provider_settings(
+    provider_name: str,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """获取指定元数据源的所有相关配置。"""
+    try:
+        return await metadata_manager.get_provider_config(provider_name, session)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+@router.put("/config/provider/{provider_name}", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定元数据源的配置")
+async def update_provider_settings(
+    provider_name: str,
+    payload: Dict[str, str],
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """批量更新指定元数据源的相关配置。"""
+    try:
+        allowed_keys = metadata_manager._provider_configs.get(provider_name, [])
+        for key, value in payload.items():
+            if key in allowed_keys:
+                await crud.update_config_value(session, key, value or "")
+                config_manager.invalidate(key)
+        logger.info(f"用户 '{current_user.username}' 更新了元数据源 '{provider_name}' 的配置。")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 @router.get("/tokens/{token_id}/logs", response_model=List[models.TokenAccessLog], summary="获取Token的访问日志")
 async def get_token_logs(

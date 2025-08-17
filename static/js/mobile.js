@@ -1321,7 +1321,7 @@ function initMobileSettingsOnce() {
   // Bangumi
   (async () => {
     try {
-      const cfg = await apiFetch('/api/ui/config/bangumi');
+      const cfg = await apiFetch('/api/ui/config/provider/bangumi');
       document.getElementById('mset-bgm-client-id').value = cfg.bangumi_client_id || '';
       document.getElementById('mset-bgm-client-secret').value = cfg.bangumi_client_secret || '';
     } catch {}
@@ -1337,7 +1337,7 @@ function initMobileSettingsOnce() {
   }
   document.getElementById('mset-save-bgm').addEventListener('click', async () => {
     const payload = { bangumi_client_id: document.getElementById('mset-bgm-client-id').value.trim(), bangumi_client_secret: document.getElementById('mset-bgm-client-secret').value.trim() };
-    await apiFetch('/api/ui/config/bangumi', { method: 'PUT', body: JSON.stringify(payload) });
+    await apiFetch('/api/ui/config/provider/bangumi', { method: 'PUT', body: JSON.stringify(payload) });
     alert('已保存');
   });
   document.getElementById('mset-bgm-login').addEventListener('click', async () => {
@@ -1348,7 +1348,7 @@ function initMobileSettingsOnce() {
   // TMDB
   (async () => {
     try {
-      const cfg = await apiFetch('/api/ui/config/tmdb');
+      const cfg = await apiFetch('/api/ui/config/provider/tmdb');
       document.getElementById('mset-tmdb-key').value = cfg.tmdb_api_key || '';
       document.getElementById('mset-tmdb-api-base').value = cfg.tmdb_api_base_url || '';
       document.getElementById('mset-tmdb-img-base').value = cfg.tmdb_image_base_url || '';
@@ -1356,7 +1356,7 @@ function initMobileSettingsOnce() {
   })();
   document.getElementById('mset-save-tmdb').addEventListener('click', async () => {
     const payload = { tmdb_api_key: document.getElementById('mset-tmdb-key').value.trim(), tmdb_api_base_url: document.getElementById('mset-tmdb-api-base').value.trim(), tmdb_image_base_url: document.getElementById('mset-tmdb-img-base').value.trim() };
-    await apiFetch('/api/ui/config/tmdb', { method: 'PUT', body: JSON.stringify(payload) });
+    await apiFetch('/api/ui/config/provider/tmdb', { method: 'PUT', body: JSON.stringify(payload) });
     document.getElementById('mset-tmdb-msg').textContent = '已保存';
   });
 

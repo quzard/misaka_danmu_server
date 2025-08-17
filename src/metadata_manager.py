@@ -22,6 +22,13 @@ class MetadataSourceManager:
         self._session_factory = session_factory
         self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb']
         # Ephemeral status, checked on startup
+        self._provider_configs: Dict[str, List[str]] = {
+            "tmdb": ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"],
+            "bangumi": ["bangumi_client_id", "bangumi_client_secret"],
+            "douban": ["douban_cookie"],
+            "tvdb": ["tvdb_api_key"],
+            "imdb": [], # IMDb has no specific config keys in this system
+        }
         self.connectivity_status: Dict[str, str] = {}
         # Register the search functions
         self._search_functions: Dict[str, Callable] = {
@@ -31,6 +38,22 @@ class MetadataSourceManager:
             "imdb": self._imdb_alias_search_wrapper,
             "tvdb": self._tvdb_alias_search_wrapper,
         }
+
+    async def get_provider_config(self, provider_name: str, session: AsyncSession) -> Dict[str, str]:
+        """
+        获取指定元数据源的所有相关配置项。
+        """
+        if provider_name not in self.providers:
+            raise ValueError(f"未知的元数据源: {provider_name}")
+        
+        keys_to_fetch = self._provider_configs.get(provider_name, [])
+        if not keys_to_fetch:
+            return {}
+            
+        tasks = [crud.get_config_value(session, key, "") for key in keys_to_fetch]
+        values = await asyncio.gather(*tasks)
+        return dict(zip(keys_to_fetch, values))
+
 
     async def initialize(self):
         """Syncs providers with DB and performs initial checks."""
