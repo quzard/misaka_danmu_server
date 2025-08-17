@@ -74,6 +74,10 @@ class DandanApiRoute(APIRoute):
                 )
         return custom_route_handler
 
+async def get_config_manager(request: Request) -> ConfigManager:
+    """依赖项：从应用状态获取配置管理器"""
+    return request.app.state.config_manager
+
 # 这是将包含在 main.py 中的主路由。
 # 使用自定义的 Route 类来应用特殊的异常处理。
 dandan_router = APIRouter(route_class=DandanApiRoute)
@@ -896,6 +900,7 @@ async def get_external_comments_from_url(
     comments = [models.Comment.model_validate(c) for c in comments_data]
     return models.CommentResponse(count=len(comments), comments=comments)
 
+
 @implementation_router.get(
     "/comment/{episode_id}",
     response_model=models.CommentResponse,
@@ -910,7 +915,7 @@ async def get_comments_for_dandan(
     with_related: bool = Query(True, alias="withRelated", description="是否包含关联弹幕"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(crud.get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
