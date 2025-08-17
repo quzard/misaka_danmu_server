@@ -1,6 +1,7 @@
 import logging
 from typing import Callable, List, Optional
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, models, orm_models
@@ -19,7 +20,7 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
         if not anime:
             raise TaskSuccess("作品未找到，无需删除。")
 
-        await session.delete(anime)
+        session.delete(anime)
         await session.commit()
         raise TaskSuccess("删除成功。")
     except Exception as e:
@@ -29,12 +30,12 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
 
 async def delete_source_task(source_id: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete a source and all its related data."""
-    progress_callback(0, "开始删除...")
+    await progress_callback(0, "开始删除...")
     try:
         source = await session.get(orm_models.AnimeSource, source_id)
         if not source:
             raise TaskSuccess("数据源未找到，无需删除。")
-        await session.delete(source)
+        session.delete(source)
         await session.commit()
         raise TaskSuccess("删除成功。")
     except Exception as e:
@@ -43,12 +44,12 @@ async def delete_source_task(source_id: int, session: AsyncSession, progress_cal
 
 async def delete_episode_task(episode_id: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete an episode and its comments."""
-    progress_callback(0, "开始删除...")
+    await progress_callback(0, "开始删除...")
     try:
         episode = await session.get(orm_models.Episode, episode_id)
         if not episode:
             raise TaskSuccess("分集未找到，无需删除。")
-        await session.delete(episode)
+        session.delete(episode)
         await session.commit()
         raise TaskSuccess("删除成功。")
     except Exception as e:
@@ -65,7 +66,7 @@ async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSessio
         try:
             episode = await session.get(orm_models.Episode, episode_id)
             if episode:
-                await session.delete(episode)
+                session.delete(episode)
                 await session.commit()
                 deleted_count += 1
         except Exception as e:
@@ -309,7 +310,7 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
             for i, episode_data in enumerate(episodes):
                 new_index = i + 1
                 if episode_data['episode_index'] != new_index:
-                    await session.execute(orm_models.update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episode_index=new_index))
+                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episode_index=new_index))
                     updated_count += 1
                 await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
             await session.commit()

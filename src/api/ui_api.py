@@ -357,7 +357,7 @@ async def delete_source_from_anime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['provider_name']})"
-    task_coro = lambda session, callback: delete_source_task(source_id, session, callback)
+    task_coro = lambda session, callback: tasks.delete_source_task(source_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {source_id} 的任务 (Task ID: {task_id})。") # type: ignore
@@ -546,7 +546,7 @@ async def delete_episode_from_source(
 
     provider_name = episode_info.get('provider_name', '未知源')
     task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
-    task_coro = lambda session, callback: delete_episode_task(episode_id, session, callback)
+    task_coro = lambda session, callback: tasks.delete_episode_task(episode_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episode_id} 的任务 (Task ID: {task_id})。")
@@ -1260,50 +1260,6 @@ async def get_available_webhook_types(
 ):
     """获取所有已成功加载的、可供用户选择的Webhook处理器类型。"""
     return webhook_manager.get_available_handlers()
-
-async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete an anime and all its related data."""
-    await progress_callback(0, "开始删除...")
-    try:
-        anime = await session.get(orm_models.Anime, anime_id)
-        if not anime:
-            raise TaskSuccess("作品未找到，无需删除。")
-
-        await session.delete(anime)
-        await session.commit()
-        raise TaskSuccess("删除成功。")
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
-        raise
-
-async def delete_source_task(source_id: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete a source and all its related data."""
-    progress_callback(0, "开始删除...")
-    try:
-        source = await session.get(orm_models.AnimeSource, source_id)
-        if not source:
-            raise TaskSuccess("数据源未找到，无需删除。")
-        await session.delete(source)
-        await session.commit()
-        raise TaskSuccess("删除成功。")
-    except Exception as e:
-        logger.error(f"删除源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
-        raise
-
-async def delete_episode_task(episode_id: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete an episode and its comments."""
-    progress_callback(0, "开始删除...")
-    try:
-        episode = await session.get(orm_models.Episode, episode_id)
-        if not episode:
-            raise TaskSuccess("分集未找到，无需删除。")
-        await session.delete(episode)
-        await session.commit()
-        raise TaskSuccess("删除成功。")
-    except Exception as e:
-        logger.error(f"删除分集任务 (ID: {episode_id}) 失败: {e}", exc_info=True)
-        raise
 
 async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""

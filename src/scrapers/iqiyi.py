@@ -107,6 +107,8 @@ class IqiyiDesktopSearchAlbumInfo(BaseModel):
 class IqiyiDesktopSearchTemplate(BaseModel):
     template: int
     albumInfo: Optional[IqiyiDesktopSearchAlbumInfo] = None
+    intentAlbumInfos: Optional[List[IqiyiDesktopSearchAlbumInfo]] = None
+    intentName: Optional[str] = None
 
 class IqiyiDesktopSearchData(BaseModel):
     templates: List[IqiyiDesktopSearchTemplate] = []
@@ -274,11 +276,18 @@ class IqiyiScraper(BaseScraper):
             if not data.data or not data.data.templates:
                 return []
 
+            albums_to_process = []
             for template in data.data.templates:
-                if not template.albumInfo or template.template not in [101, 102, 103]:
-                    continue
-                
-                album = template.albumInfo
+                # 优先处理意图卡片 (template 112)
+                if template.template == 112 and template.intentAlbumInfos:
+                    self.logger.debug(f"爱奇艺 (桌面API): 找到意图卡片 (template 112)，处理 {len(template.intentAlbumInfos)} 个结果。")
+                    albums_to_process.extend(template.intentAlbumInfos)
+                # 然后处理普通结果卡片
+                elif template.template in [101, 102, 103] and template.albumInfo:
+                    self.logger.debug(f"爱奇艺 (桌面API): 找到普通结果卡片 (template {template.template})。")
+                    albums_to_process.append(template.albumInfo)
+
+            for album in albums_to_process:
                 if not album.title or not album.link_id:
                     continue
 
