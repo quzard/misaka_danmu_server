@@ -1,4 +1,5 @@
 import logging
+import secrets
 from typing import List, Optional, Dict, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -6,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud, models, tasks
+from ..config_manager import ConfigManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
@@ -27,6 +29,10 @@ def get_metadata_manager(request: Request) -> MetadataSourceManager:
 def get_task_manager(request: Request) -> TaskManager:
     """依赖项：从应用状态获取任务管理器"""
     return request.app.state.task_manager
+
+def get_config_manager(request: Request) -> ConfigManager:
+    """依赖项：从应用状态获取配置管理器"""
+    return request.app.state.config_manager
 
 async def verify_api_key(
     request: Request,
