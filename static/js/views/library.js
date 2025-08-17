@@ -346,7 +346,7 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
                 }
             });
             row.innerHTML = `
-                <td><input type="checkbox" class="episode-checkbox" value="${ep.episodeId}"></td>
+                <td><input type="checkbox" class="episode-checkbox" value="${ep.episodeId || 'undefined'}"></td>
                 <td>${ep.episodeId}</td><td>${ep.title}</td><td>${ep.episode_index}</td><td>${ep.comment_count}</td>
                 <td>${ep.fetched_at ? new Date(ep.fetched_at).toLocaleString() : 'N/A'}</td>
                 <td>${ep.source_url ? `<a href="${ep.source_url}" target="_blank">跳转</a>` : '无'}</td>

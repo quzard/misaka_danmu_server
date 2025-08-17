@@ -46,17 +46,16 @@
 }
 
 .form-card {
-    max-width: 900px; /* 为简单表单设置一个更合理的默认宽度 */
+    max-width: 1000px; /* 根据用户反馈，将所有表单卡片宽度统一设置为1000px */
     margin: 20px auto;
     padding: 20px;
     background: var(--card-bg);
     border-radius: 8px;
     box-shadow: var(--shadow);
-}
-
 /* 为编辑影视信息等复杂页面提供一个更宽的布局 */
 .form-card-wide {
     max-width: 1000px;
+}
 }
 
 .form-card h2, .form-card h3 {
