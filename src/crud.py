@@ -594,10 +594,11 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
     )
     result = await session.execute(stmt)
     # 修正：显式地将 'id' 字段映射到返回的字典中，以确保 Pydantic 模型可以找到它。
-    # 之前的实现可能因 SQLAlchemy 版本或方言的差异导致键名不一致。
+    # 修正：直接返回一个带有 'episodeId' 键的字典，以匹配前端和模型的期望。
+    # 这比在模型层使用别名更明确、更健壮。
     return [
         {
-            "id": row.id,
+            "episodeId": row.id,
             "title": row.title,
             "episode_index": row.episode_index,
             "source_url": row.source_url,

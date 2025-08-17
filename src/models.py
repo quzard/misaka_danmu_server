@@ -184,15 +184,12 @@ class LibraryResponse(BaseModel):
 
 # --- 分集管理模型 ---
 class EpisodeDetail(BaseModel):
-    episodeId: int = Field(..., alias="id") # 仅将 id 字段别名为 episodeId
+    episodeId: int
     title: str
-    episode_index: int # 保持原有蛇形命名
-    source_url: Optional[str] = None # 保持原有蛇形命名
-    fetched_at: Optional[datetime] = None # 保持原有蛇形命名
-    comment_count: int # 保持原有蛇形命名
-
-    class Config:
-        populate_by_name = True
+    episode_index: int
+    source_url: Optional[str] = None
+    fetched_at: Optional[datetime] = None
+    comment_count: int
 
 # --- 任务管理器模型 ---
 class TaskInfo(BaseModel):

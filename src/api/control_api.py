@@ -409,15 +409,13 @@ async def favorite_source(sourceId: int, session: AsyncSession = Depends(get_db_
     message = "数据源已标记为精确。" if new_status else "数据源已取消精确标记。"
     return {"message": message}
 
-@library_router.get("/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
-async def get_source_episodes(sourceId: int, session: AsyncSession = Depends(get_db_session)):
-    episodes_data = await crud.get_episodes_for_source(session, sourceId)
-    # 显式使用Pydantic模型进行验证和序列化，确保字段名正确 (id -> episodeId)
-    return [models.EpisodeDetail.model_validate(ep) for ep in episodes_data]
+@library_router.get("/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
+async def get_source_episodes(sourceid: int, session: AsyncSession = Depends(get_db_session)):
+    return await crud.get_episodes_for_source(session, sourceid)
 
-@library_router.put("/episode/{episodeId}", response_model=ControlActionResponse, summary="编辑分集信息")
-async def edit_episode(episodeId: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.update_episode_info(session, episodeId, payload):
+@library_router.put("/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
+async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.update_episode_info(session, episodeid, payload):
         raise HTTPException(404, "分集未找到")
     return {"message": "分集信息更新成功。"}
 
