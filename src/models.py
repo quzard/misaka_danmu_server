@@ -140,11 +140,11 @@ class AnimeFullDetails(BaseModel):
 class SourceInfo(BaseModel):
     """代表一个已关联的数据源的详细信息。"""
     sourceId: int = Field(..., alias="source_id")
-    provider_name: str
-    media_id: str
-    is_favorited: bool
-    incremental_refresh_enabled: bool
-    created_at: datetime
+    providerName: str = Field(..., alias="provider_name")
+    mediaId: str = Field(..., alias="media_id")
+    isFavorited: bool = Field(..., alias="is_favorited")
+    incrementalRefreshEnabled: bool = Field(..., alias="incremental_refresh_enabled")
+    createdAt: datetime = Field(..., alias="created_at")
 
     class Config:
         populate_by_name = True
@@ -167,7 +167,7 @@ class MetadataSourceSettingUpdate(BaseModel):
 class LibraryAnimeInfo(BaseModel):
     """代表媒体库中的一个番剧条目。"""
     animeId: int
-    local_image_path: Optional[str] = None
+    localImagePath: Optional[str] = Field(None, alias="local_image_path")
     imageUrl: Optional[str] = None
     title: str
     type: str
@@ -176,17 +176,20 @@ class LibraryAnimeInfo(BaseModel):
     sourceCount: int
     createdAt: datetime
 
+    class Config:
+        populate_by_name = True
+
 class LibraryResponse(BaseModel):
     animes: List[LibraryAnimeInfo]
 
 # --- 分集管理模型 ---
 class EpisodeDetail(BaseModel):
-    episodeId: int = Field(..., alias="id")
+    episodeId: int = Field(..., alias="id") # 仅将 id 字段别名为 episodeId
     title: str
-    episode_index: int
-    source_url: Optional[str] = None
-    fetched_at: Optional[datetime] = None
-    comment_count: int
+    episode_index: int # 保持原有蛇形命名
+    source_url: Optional[str] = None # 保持原有蛇形命名
+    fetched_at: Optional[datetime] = None # 保持原有蛇形命名
+    comment_count: int # 保持原有蛇形命名
 
     class Config:
         populate_by_name = True
@@ -204,9 +207,12 @@ class ApiTokenInfo(BaseModel):
     id: int
     name: str
     token: str
-    is_enabled: bool
-    expires_at: Optional[datetime] = None
-    created_at: datetime
+    isEnabled: bool = Field(..., alias="is_enabled")
+    expiresAt: Optional[datetime] = Field(None, alias="expires_at")
+    createdAt: datetime = Field(..., alias="created_at")
+
+    class Config:
+        populate_by_name = True
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
@@ -219,11 +225,14 @@ class UaRule(BaseModel):
     created_at: datetime
 
 class TokenAccessLog(BaseModel):
-    access_time: datetime
-    ip_address: str
+    accessTime: datetime = Field(..., alias="access_time")
+    ipAddress: str = Field(..., alias="ip_address")
     status: str
     path: Optional[str] = None
-    user_agent: Optional[str] = None
+    userAgent: Optional[str] = Field(None, alias="user_agent")
+
+    class Config:
+        populate_by_name = True
 
 # --- 用户和认证模型 ---
 class UserBase(BaseModel):
