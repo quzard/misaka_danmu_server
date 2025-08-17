@@ -441,7 +441,15 @@ async function showEpisodes(sourceId, title, animeId) {
   const ul = document.getElementById('library-list');
   ul.innerHTML = `<li class="small">${title} · 分集加载中...</li>`;
   try {
-    const eps = await apiFetch(`/api/ui/library/source/${sourceId}/episodes`);
+    let eps = await apiFetch(`/api/ui/library/source/${sourceId}/episodes`);
+    // 标准化数据：确保每个分集对象都有 episodeId 属性
+    // 这样可以使前端代码对后端返回 id 还是 episodeId 具有鲁棒性。
+    eps = eps.map(ep => {
+        if (ep.id && typeof ep.episodeId === 'undefined') {
+            ep.episodeId = ep.id;
+        }
+        return ep;
+    });
     ul.innerHTML = '';
     if (eps.length === 0) { ul.innerHTML = '<li class="small">无分集</li>'; return; }
     eps.forEach(ep => {

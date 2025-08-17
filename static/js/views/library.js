@@ -285,7 +285,15 @@ async function showEpisodeListView(sourceId, animeTitle, animeId) {
     episodeListView.innerHTML = '<div>加载中...</div>';
 
     try {
-        const episodes = await apiFetch(`/api/ui/library/source/${sourceId}/episodes`);
+        let episodes = await apiFetch(`/api/ui/library/source/${sourceId}/episodes`);
+        // 标准化数据：确保每个分集对象都有 episodeId 属性
+        // 这样可以使前端代码对后端返回 id 还是 episodeId 具有鲁棒性。
+        episodes = episodes.map(ep => {
+            if (ep.id && typeof ep.episodeId === 'undefined') {
+                ep.episodeId = ep.id;
+            }
+            return ep;
+        });
         currentEpisodes = episodes; // Store the original, unsorted list
         renderEpisodeListView(sourceId, animeTitle, episodes, animeId); // Pass the unsorted list
     } catch (error) {
