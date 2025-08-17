@@ -58,7 +58,7 @@
 
 /* 为编辑影视信息等需要更多空间的页面提供一个更宽的卡片 */
 .form-card-wide {
-    max-width: 1600px;
+    max-width: 1300px;
 }
 
 .form-card h2, .form-card h3 {
