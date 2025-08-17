@@ -109,6 +109,10 @@ class TencentScraper(BaseScraper):
         # 此处通过 cookies 参数传入字典，httpx 会自动将其格式化为正确的 Cookie 请求头，效果与C#代码一致
         self.client = httpx.AsyncClient(headers=self.base_headers, cookies=self.cookies, timeout=20.0)
 
+    async def close(self):
+        """关闭HTTP客户端"""
+        await self.client.aclose()
+
     async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """通过腾讯桌面搜索API查找番剧。"""
         url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.HttpMobileRecall/MbSearchHttp"
