@@ -139,12 +139,15 @@ class AnimeFullDetails(BaseModel):
 
 class SourceInfo(BaseModel):
     """代表一个已关联的数据源的详细信息。"""
-    source_id: int
+    sourceId: int = Field(..., alias="source_id")
     provider_name: str
     media_id: str
     is_favorited: bool
     incremental_refresh_enabled: bool
     created_at: datetime
+
+    class Config:
+        populate_by_name = True
 
 # --- 爬虫源管理模型 ---
 class ScraperSetting(BaseModel):

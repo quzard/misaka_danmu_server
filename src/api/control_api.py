@@ -75,11 +75,11 @@ class ControlSearchResultItem(models.ProviderSearchInfo):
     result_index: int = Field(..., description="结果在列表中的顺序索引，从0开始")
 
 class ControlSearchResponse(BaseModel):
-    search_id: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
+    searchId: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
     results: List[ControlSearchResultItem] = Field(..., description="搜索结果列表")
 
 class ControlDirectImportRequest(BaseModel):
-    search_id: str = Field(..., description="来自搜索响应的search_id")
+    searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要导入的结果的索引 (从0开始)")
     # Optional fields to override or provide metadata IDs during import
     tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
@@ -89,7 +89,7 @@ class ControlDirectImportRequest(BaseModel):
     douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
 class ControlEditedImportRequest(BaseModel):
-    search_id: str = Field(..., description="来自搜索响应的search_id")
+    searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
     tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
@@ -114,6 +114,27 @@ class ControlUrlImportRequest(BaseModel):
 class DanmakuOutputSettings(BaseModel):
     limit_per_source: int
     aggregation_enabled: bool
+
+class ControlAnimeDetailsResponse(BaseModel):
+    """用于外部API的番剧详情响应模型，不包含冗余的anime_id。"""
+    title: str
+    type: str
+    season: int
+    episode_count: Optional[int] = None
+    local_image_path: Optional[str] = None
+    image_url: Optional[str] = None
+    tmdb_id: Optional[str] = None
+    tmdb_episode_group_id: Optional[str] = None
+    bangumi_id: Optional[str] = None
+    tvdb_id: Optional[str] = None
+    douban_id: Optional[str] = None
+    imdb_id: Optional[str] = None
+    name_en: Optional[str] = None
+    name_jp: Optional[str] = None
+    name_romaji: Optional[str] = None
+    alias_cn_1: Optional[str] = None
+    alias_cn_2: Optional[str] = None
+    alias_cn_3: Optional[str] = None
 
 # --- API 路由 ---
 
@@ -168,7 +189,7 @@ async def search_media(
             
             await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。Search ID: {search_id}")
             
-            return ControlSearchResponse(search_id=search_id, results=indexed_results)
+            return ControlSearchResponse(searchId=search_id, results=indexed_results)
         except Exception as e:
             await crud.create_external_api_log(session, "N/A", "/search", 500, f"搜索 '{keyword}' 失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -184,7 +205,7 @@ async def direct_import(
     api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 从缓存的搜索结果中选择一个进行导入。"""
-    cache_key = f"control_search_{payload.search_id}"
+    cache_key = f"control_search_{payload.searchId}"
     cached_results_raw = await crud.get_cache(session, cache_key)
     
     if cached_results_raw is None:
@@ -217,14 +238,14 @@ async def direct_import(
 
 @router.get("/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
 async def get_episodes(
-    search_id: str = Query(..., description="来自/search接口的search_id"),
+    searchId: str = Query(..., description="来自/search接口的searchId"),
     result_index: int = Query(..., ge=0, description="要获取分集的结果的索引"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 获取一个搜索结果的完整分集列表，用于编辑后导入。"""
-    cache_key = f"control_search_{search_id}"
+    cache_key = f"control_search_{searchId}"
     cached_results_raw = await crud.get_cache(session, cache_key)
     
     if cached_results_raw is None:
@@ -252,7 +273,7 @@ async def edited_import(
     api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 导入一个经过编辑的分集列表。"""
-    cache_key = f"control_search_{payload.search_id}"
+    cache_key = f"control_search_{payload.searchId}"
     cached_results_raw = await crud.get_cache(session, cache_key)
     
     if cached_results_raw is None:
@@ -338,82 +359,84 @@ async def get_library(session: AsyncSession = Depends(get_db_session)):
     db_results = await crud.get_library_anime(session)
     return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
 
-@library_router.get("/anime/{animeid}", response_model=models.AnimeFullDetails, summary="获取作品详情")
-async def get_anime_details(animeid: int, session: AsyncSession = Depends(get_db_session)):
-    details = await crud.get_anime_full_details(session, animeid)
+@library_router.get("/anime/{animeId}", response_model=ControlAnimeDetailsResponse, summary="获取作品详情")
+async def get_anime_details(animeId: int, session: AsyncSession = Depends(get_db_session)):
+    details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
-    return models.AnimeFullDetails.model_validate(details)
+    return ControlAnimeDetailsResponse.model_validate(details)
 
-@library_router.get("/anime/{animeid}/sources", response_model=List[models.SourceInfo], summary="获取作品的所有数据源")
-async def get_anime_sources(animeid: int, session: AsyncSession = Depends(get_db_session)):
+@library_router.get("/anime/{animeId}/sources", response_model=List[models.SourceInfo], summary="获取作品的所有数据源")
+async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db_session)):
     """获取指定作品关联的所有数据源列表。"""
     # First, check if the anime exists to provide a proper 404.
-    anime_exists = await crud.get_anime_full_details(session, animeid)
+    anime_exists = await crud.get_anime_full_details(session, animeId)
     if not anime_exists:
         raise HTTPException(status_code=404, detail="作品未找到")
-    sources = await crud.get_anime_sources(session, animeid)
+    sources = await crud.get_anime_sources(session, animeId)
     return [models.SourceInfo.model_validate(s) for s in sources]
 
-@library_router.put("/anime/{animeid}", response_model=ControlActionResponse, summary="编辑作品信息")
-async def edit_anime(animeid: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.update_anime_details(session, animeid, payload):
+@library_router.put("/anime/{animeId}", response_model=ControlActionResponse, summary="编辑作品信息")
+async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.update_anime_details(session, animeId, payload):
         raise HTTPException(404, "作品未找到")
     return {"message": "作品信息更新成功。"}
 
-@library_router.delete("/anime/{animeid}", status_code=202, summary="删除作品")
-async def delete_anime(animeid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
-    details = await crud.get_anime_full_details(session, animeid)
+@library_router.delete("/anime/{animeId}", status_code=202, summary="删除作品")
+async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
+    details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_anime_task(animeid, s, cb),
+        lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
         f"外部API删除作品: {details['title']}"
     )
     return {"message": "删除作品任务已提交", "task_id": task_id}
 
-@library_router.delete("/source/{sourceid}", status_code=202, summary="删除数据源")
-async def delete_source(sourceid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
-    info = await crud.get_anime_source_info(session, sourceid)
+@library_router.delete("/source/{sourceId}", status_code=202, summary="删除数据源")
+async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
+    info = await crud.get_anime_source_info(session, sourceId)
     if not info: raise HTTPException(404, "数据源未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_source_task(sourceid, s, cb),
+        lambda s, cb: tasks.delete_source_task(sourceId, s, cb),
         f"外部API删除源: {info['title']} ({info['provider_name']})"
     )
     return {"message": "删除源任务已提交", "task_id": task_id}
 
-@library_router.put("/source/{sourceid}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
-async def favorite_source(sourceid: int, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.toggle_source_favorite_status(session, sourceid):
+@library_router.put("/source/{sourceId}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
+async def favorite_source(sourceId: int, session: AsyncSession = Depends(get_db_session)):
+    new_status = await crud.toggle_source_favorite_status(session, sourceId)
+    if new_status is None:
         raise HTTPException(404, "数据源未找到")
-    return {"message": "数据源精确标记状态已切换。"}
+    message = "数据源已标记为精确。" if new_status else "数据源已取消精确标记。"
+    return {"message": message}
 
-@library_router.get("/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
-async def get_source_episodes(sourceid: int, session: AsyncSession = Depends(get_db_session)):
-    episodes_data = await crud.get_episodes_for_source(session, sourceid)
+@library_router.get("/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
+async def get_source_episodes(sourceId: int, session: AsyncSession = Depends(get_db_session)):
+    episodes_data = await crud.get_episodes_for_source(session, sourceId)
     # 显式使用Pydantic模型进行验证和序列化，确保字段名正确 (id -> episodeId)
     return [models.EpisodeDetail.model_validate(ep) for ep in episodes_data]
 
-@library_router.put("/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
-async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.update_episode_info(session, episodeid, payload):
+@library_router.put("/episode/{episodeId}", response_model=ControlActionResponse, summary="编辑分集信息")
+async def edit_episode(episodeId: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.update_episode_info(session, episodeId, payload):
         raise HTTPException(404, "分集未找到")
     return {"message": "分集信息更新成功。"}
 
-@library_router.post("/episode/{episodeid}/refresh", status_code=202, summary="刷新分集弹幕")
-async def refresh_episode(episodeid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager), manager: ScraperManager = Depends(get_scraper_manager)):
-    info = await crud.get_episode_for_refresh(session, episodeid)
+@library_router.post("/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕")
+async def refresh_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager), manager: ScraperManager = Depends(get_scraper_manager)):
+    info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.refresh_episode_task(episodeid, s, manager, cb),
+        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, cb),
         f"外部API刷新分集: {info['title']}"
     )
     return {"message": "刷新分集任务已提交", "task_id": task_id}
 
-@library_router.delete("/episode/{episodeid}", status_code=202, summary="删除分集")
-async def delete_episode(episodeid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
-    info = await crud.get_episode_for_refresh(session, episodeid)
+@library_router.delete("/episode/{episodeId}", status_code=202, summary="删除分集")
+async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
+    info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_episode_task(episodeid, s, cb),
+        lambda s, cb: tasks.delete_episode_task(episodeId, s, cb),
         f"外部API删除分集: {info['title']}"
     )
     return {"message": "删除分集任务已提交", "task_id": task_id}
@@ -421,21 +444,21 @@ async def delete_episode(episodeid: int, session: AsyncSession = Depends(get_db_
 # --- 弹幕管理 ---
 danmaku_router = APIRouter(prefix="/danmaku", dependencies=[Depends(verify_api_key)])
 
-@danmaku_router.get("/{episodeid}", response_model=models.CommentResponse, summary="获取弹幕")
-async def get_danmaku(episodeid: int, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.check_episode_exists(session, episodeid): raise HTTPException(404, "分集未找到")
-    comments = await crud.fetch_comments(session, episodeid)
+@danmaku_router.get("/{episodeId}", response_model=models.CommentResponse, summary="获取弹幕")
+async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.check_episode_exists(session, episodeId): raise HTTPException(404, "分集未找到")
+    comments = await crud.fetch_comments(session, episodeId)
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
 
-@danmaku_router.post("/{episodeid}", status_code=202, summary="覆盖弹幕")
-async def overwrite_danmaku(episodeid: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
+@danmaku_router.post("/{episodeId}", status_code=202, summary="覆盖弹幕")
+async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
     async def overwrite_task(session: AsyncSession, cb: Callable):
         await cb(10, "清空中...")
-        await crud.clear_episode_comments(session, episodeid)
+        await crud.clear_episode_comments(session, episodeId)
         await cb(50, f"插入 {len(payload.comments)} 条新弹幕...")
-        added = await crud.bulk_insert_comments(session, episodeid, [c.model_dump() for c in payload.comments])
+        added = await crud.bulk_insert_comments(session, episodeId, [c.model_dump() for c in payload.comments])
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
-    task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeid})")
+    task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
     return {"message": "弹幕覆盖任务已提交", "task_id": task_id}
 
 # --- Token 管理 ---
@@ -456,26 +479,26 @@ async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = D
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@token_router.get("/{tokenid}", response_model=models.ApiTokenInfo, summary="获取单个Token详情")
-async def get_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):
-    token = await crud.get_api_token_by_id(session, tokenid)
+@token_router.get("/{tokenId}", response_model=models.ApiTokenInfo, summary="获取单个Token详情")
+async def get_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
+    token = await crud.get_api_token_by_id(session, tokenId)
     if not token: raise HTTPException(404, "Token未找到")
     return models.ApiTokenInfo.model_validate(token)
 
-@token_router.get("/{tokenid}/logs", response_model=List[models.TokenAccessLog], summary="获取Token访问日志")
-async def get_token_logs(tokenid: int, session: AsyncSession = Depends(get_db_session)):
-    logs = await crud.get_token_access_logs(session, tokenid)
+@token_router.get("/{tokenId}/logs", response_model=List[models.TokenAccessLog], summary="获取Token访问日志")
+async def get_token_logs(tokenId: int, session: AsyncSession = Depends(get_db_session)):
+    logs = await crud.get_token_access_logs(session, tokenId)
     return [models.TokenAccessLog.model_validate(log) for log in logs]
 
-@token_router.put("/{tokenid}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
-async def toggle_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.toggle_api_token(session, tokenid):
+@token_router.put("/{tokenId}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
+async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.toggle_api_token(session, tokenId):
         raise HTTPException(404, "Token未找到")
     return {"message": "Token 状态已切换。"}
 
-@token_router.delete("/{tokenid}", response_model=ControlActionResponse, summary="删除Token")
-async def delete_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):
-    if not await crud.delete_api_token(session, tokenid):
+@token_router.delete("/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
+async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
+    if not await crud.delete_api_token(session, tokenId):
         raise HTTPException(404, "Token未找到")
     return {"message": "Token 删除成功。"}
 

@@ -93,21 +93,23 @@ function renderDanmakuSources(settings) {
         nameSpan.textContent = setting.provider_name;
         li.appendChild(nameSpan);
 
-        // 新增：验证状态图标
+        // 创建验证状态图标，但稍后根据源类型决定其位置
         const verifiedIcon = document.createElement('span');
         verifiedIcon.className = 'verified-icon';
         verifiedIcon.textContent = setting.is_verified ? '🛡️' : '⚠️';
         verifiedIcon.title = setting.is_verified ? '已验证的源' : '未验证的源 (无法使用)';
         if (!setting.is_verified) li.classList.add('unverified');
-        li.appendChild(verifiedIcon);
 
-        // 新增：为Bilibili源添加一个专门的状态显示区域
+        // 根据源类型调整布局
         if (setting.provider_name === 'bilibili') {
             const biliStatusDiv = document.createElement('div');
             biliStatusDiv.id = 'bili-status-on-source-list';
             biliStatusDiv.className = 'source-login-status';
             biliStatusDiv.textContent = '正在检查...';
             li.appendChild(biliStatusDiv);
+            li.appendChild(verifiedIcon); // 对于B站，将盾牌图标放在登录信息之后
+        } else {
+            li.appendChild(verifiedIcon); // 对于其他源，直接放在名称后面
         }
 
         // 如果源有可配置字段或支持日志记录，则显示配置按钮

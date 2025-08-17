@@ -395,10 +395,10 @@ async def toggle_source_favorite(
     session: AsyncSession = Depends(get_db_session)
 ):
     """切换指定数据源的精确标记状态。一个作品只能有一个精确标记的源。"""
-    toggled = await crud.toggle_source_favorite_status(session, source_id)
-    if not toggled:
+    new_status = await crud.toggle_source_favorite_status(session, source_id)
+    if new_status is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
-    return
+    return # 204 No Content, so no body is needed
 
 @router.put("/library/source/{source_id}/toggle-incremental-refresh", status_code=status.HTTP_204_NO_CONTENT, summary="切换数据源的定时增量更新状态")
 async def toggle_source_incremental_refresh(

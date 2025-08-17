@@ -1024,11 +1024,15 @@ async def get_token_access_logs(session: AsyncSession, token_id: int) -> List[Di
         for log in result.scalars()
     ]
 
-async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -> bool:
+async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -> Optional[bool]:
+    """
+    Toggles the favorite status of a source.
+    Returns the new favorite status (True/False) on success, or None if not found.
+    """
     source = await session.get(AnimeSource, source_id)
     if not source:
-        return False
-    
+        return None
+
     # Toggle the target source
     source.is_favorited = not source.is_favorited
     
@@ -1042,7 +1046,7 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
         await session.execute(stmt)
     
     await session.commit()
-    return True
+    return source.is_favorited
 
 async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> bool:
     source = await session.get(AnimeSource, source_id)
