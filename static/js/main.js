@@ -3,7 +3,6 @@ import { setupHomeEventListeners } from './views/home.js';
 import { setupLibraryEventListeners } from './views/library.js';
 import { setupEditAnimeEventListeners } from './views/editAnime.js';
 import { setupTasksEventListeners } from './views/tasks.js';
-import { setupDanmakuControlEventsListeners } from './views/danmakuControl.js';
 import { setupTokensEventListeners } from './views/tokens.js';
 import { setupSourcesEventListeners } from './views/sources.js';
 import { setupExternalApiEventListeners } from './views/externalApi.js';
@@ -17,7 +16,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setupLibraryEventListeners();
     setupEditAnimeEventListeners();
     setupTasksEventListeners();
-    setupDanmakuControlEventsListeners();
     setupTokensEventListeners();
     setupSourcesEventListeners();
     setupExternalApiEventListeners();
