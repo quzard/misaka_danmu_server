@@ -2,6 +2,7 @@ import { apiFetch } from '../api.js';
 
 // DOM Elements
 let danmakuOutputForm, limitInput, aggregationToggle, saveMessage;
+let isListenerAttached = false; // Flag to prevent adding the same listener multiple times
 
 function initializeElements() {
     danmakuOutputForm = document.getElementById('danmaku-output-form');
@@ -11,6 +12,11 @@ function initializeElements() {
 }
 
 async function loadSettings() {
+    // Defensive check in case the view is not fully rendered
+    if (!saveMessage || !limitInput || !aggregationToggle) {
+        console.error("Danmaku control view elements not found. Cannot load settings.");
+        return;
+    }
     saveMessage.textContent = '';
     saveMessage.className = 'message';
     
@@ -31,6 +37,11 @@ async function loadSettings() {
 
 async function handleSaveSettings(e) {
     e.preventDefault();
+    // Defensive check
+    if (!danmakuOutputForm || !saveMessage || !limitInput || !aggregationToggle) {
+        console.error("Danmaku control view elements not found. Cannot save settings.");
+        return;
+    }
     saveMessage.textContent = '保存中...';
     saveMessage.className = 'message';
 
@@ -64,13 +75,19 @@ async function handleSaveSettings(e) {
 }
 
 export function setupDanmakuControlEventsListeners() {
-    initializeElements();
-    // 确保元素存在后再添加事件监听，防止在页面加载异常时报错
-    if (danmakuOutputForm) { 
-        danmakuOutputForm.addEventListener('submit', handleSaveSettings);
-    }
+    // This function is called once on page load.
+    // We set up a listener that will initialize elements and attach event handlers
+    // only when the specific view is shown.
     document.addEventListener('viewchange', (e) => {
         if (e.detail.viewId === 'danmaku-control-view') {
+            initializeElements();
+
+            // Add the submit listener only once to avoid duplicates.
+            if (danmakuOutputForm && !isListenerAttached) {
+                danmakuOutputForm.addEventListener('submit', handleSaveSettings);
+                isListenerAttached = true;
+            }
+
             loadSettings();
         }
     });
