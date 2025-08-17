@@ -180,6 +180,14 @@ class BaseScraper(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
+        """
+        (新增) 统一的从URL解析ID的接口。
+        子类应重写此方法以支持从URL直接导入。
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         """
         获取给定媒体ID的所有分集。

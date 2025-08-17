@@ -204,6 +204,12 @@ class GamerScraper(BaseScraper):
         self.logger.warning(f"从URL导入功能尚未为 {self.provider_name} 实现。")
         raise NotImplementedError(f"从URL导入功能尚未为 {self.provider_name} 实现。")
 
+    async def get_id_from_url(self, url: str) -> Optional[str]:
+        """从动画疯URL中提取sn号。"""
+        sn_match = re.search(r"sn=(\d+)", url)
+        if sn_match: return sn_match.group(1)
+        return None
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         await self._ensure_config()
         self.logger.info(f"Gamer: 正在为 media_id={media_id} 获取分集列表...")

@@ -337,24 +337,24 @@ async def manual_import_task(
     progress_callback: Callable, session: AsyncSession, manager: ScraperManager
 ):
     """后台任务：从URL手动导入弹幕。"""
-    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
-    await progress_callback(10, "正在准备导入...")
+    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'") # type: ignore
+    await progress_callback(10, "正在准备导入...") # type: ignore
     
-    try: # type: ignore
+    try:
         scraper = manager.get_scraper(provider_name)
-        provider_episode_id = await scraper.get_id_from_url(url)
-        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
+        provider_episode_id = await scraper.get_id_from_url(url) # type: ignore
+        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。") # type: ignore
 
-        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id) # type: ignore
 
-        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
-        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
-        if not comments: raise TaskSuccess("未找到任何弹幕。")
+        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}") # type: ignore
+        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback) # type: ignore
+        if not comments: raise TaskSuccess("未找到任何弹幕。") # type: ignore
 
-        await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.get_or_create_episode(session, source_id, episode_index, title, url, episode_id_for_comments)
+        await progress_callback(90, "正在写入数据库...") # type: ignore
+        episode_db_id = await crud.create_episode_if_not_exists(session, source_id, episode_index, title, url, episode_id_for_comments) # type: ignore
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
+        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。") # type: ignore
     except TaskSuccess:
         raise
     except Exception as e:

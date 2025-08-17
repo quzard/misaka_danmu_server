@@ -436,6 +436,29 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺 (移动API): 搜索 '{keyword}' 失败: {e}", exc_info=True)
         return results
 
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """从爱奇艺URL中提取作品信息。"""
+        self.logger.info(f"爱奇艺: 正在从URL提取信息: {url}")
+        link_id_match = re.search(r"v_(\w+?)\.html", url)
+        if not link_id_match:
+            self.logger.warning(f"爱奇艺: 无法从URL中解析出link_id: {url}")
+            return None
+        
+        link_id = link_id_match.group(1)
+        base_info = await self._get_video_base_info(link_id)
+        if not base_info:
+            return None
+
+        channel = base_info.channel_name or ""
+        media_type = "movie" if channel == "电影" else "tv_series"
+
+        return models.ProviderSearchInfo(
+            provider=self.provider_name,
+            mediaId=link_id,
+            title=base_info.video_name,
+            type=media_type,
+            season=get_season_from_title(base_info.video_name)
+        )
     async def _get_tvid_from_link_id(self, link_id: str) -> Optional[str]:
         """
         新增：使用官方API将视频链接ID解码为tvid。
