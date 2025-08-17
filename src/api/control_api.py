@@ -4,6 +4,7 @@ import uuid
 from typing import List, Optional, Dict, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security import APIKeyQuery
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,25 +36,34 @@ def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
 
+# 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
+api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
+
 async def verify_api_key(
     request: Request,
-    api_key: str = Query(..., description="外部访问API密钥"),
+    api_key: str = Depends(api_key_scheme),
     session: AsyncSession = Depends(get_db_session),
-):
-    """依赖项：验证API密钥并记录请求。"""
+) -> str:
+    """依赖项：验证API密钥并记录请求。如果验证成功，返回 API Key。"""
     endpoint = request.url.path
     ip_address = request.client.host
+
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated: API Key is missing.",
+        )
+
     stored_key = await crud.get_config_value(session, "external_api_key", "")
 
-    if not stored_key or api_key != stored_key:
+    if not stored_key or not secrets.compare_digest(api_key, stored_key):
         await crud.create_external_api_log(
             session, ip_address, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的API密钥"
         )
-    # 验证成功，在请求处理完成后记录
-    yield
+    return api_key
 
 # --- Pydantic 模型 ---
 
@@ -99,13 +109,12 @@ class DanmakuOutputSettings(BaseModel):
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
-    api_key: str = Query(..., description="外部访问API密钥"),
     season: Optional[int] = Query(None, description="要搜索的季度 (可选)"),
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     media_type: Optional[str] = Query(None, description="媒体类型过滤 ('tv_series' 或 'movie')"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
-    _: Any = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ):
     """
     根据关键词从所有启用的源搜索媒体。
@@ -155,7 +164,7 @@ async def direct_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    _: Any = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 从缓存的搜索结果中选择一个进行导入。"""
     cache_key = f"control_search_{payload.search_id}"
@@ -195,7 +204,7 @@ async def get_episodes(
     result_index: int = Query(..., ge=0, description="要获取分集的结果的索引"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
-    _: Any = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 获取一个搜索结果的完整分集列表，用于编辑后导入。"""
     cache_key = f"control_search_{search_id}"
@@ -223,7 +232,7 @@ async def edited_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    _: Any = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ):
     """通过 search_id 和 result_index 导入一个经过编辑的分集列表。"""
     cache_key = f"control_search_{payload.search_id}"
@@ -271,7 +280,7 @@ async def url_import(
     payload: ControlUrlImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    _: Any = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ):
     """从视频URL直接导入弹幕。"""
     scraper = manager.get_scraper_by_domain(payload.url)
