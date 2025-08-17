@@ -593,7 +593,19 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
         .order_by(Episode.episode_index)
     )
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    # 修正：显式地将 'id' 字段映射到返回的字典中，以确保 Pydantic 模型可以找到它。
+    # 之前的实现可能因 SQLAlchemy 版本或方言的差异导致键名不一致。
+    return [
+        {
+            "id": row.id,
+            "title": row.title,
+            "episode_index": row.episode_index,
+            "source_url": row.source_url,
+            "fetched_at": row.fetched_at,
+            "comment_count": row.comment_count,
+        }
+        for row in result.mappings()
+    ]
 
 async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (

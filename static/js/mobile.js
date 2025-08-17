@@ -450,9 +450,9 @@ async function showEpisodes(sourceId, title, animeId) {
       li.innerHTML = `<div><div class="title">${ep.title}</div><div class="meta">集 ${ep.episode_index} · 弹幕 ${ep.comment_count}</div></div>`;
       const actions = document.createElement('div'); actions.style.display = 'grid'; actions.style.gap = '6px'; actions.style.justifyItems = 'end';
       const refreshBtn = document.createElement('button'); refreshBtn.className = 'row-action'; refreshBtn.textContent = '刷新';
-      refreshBtn.addEventListener('click', async () => { await apiFetch(`/api/ui/library/episode/${ep.id}/refresh`, { method: 'POST' }); alert('已触发刷新'); });
+      refreshBtn.addEventListener('click', async () => { await apiFetch(`/api/ui/library/episode/${ep.episodeId}/refresh`, { method: 'POST' }); alert('已触发刷新'); });
       const delBtn = document.createElement('button'); delBtn.className = 'row-action'; delBtn.textContent = '删除';
-      delBtn.addEventListener('click', async () => { if (!confirm('删除该分集？')) return; await apiFetch(`/api/ui/library/episode/${ep.id}`, { method: 'DELETE' }); showEpisodes(sourceId, title, animeId); });
+      delBtn.addEventListener('click', async () => { if (!confirm('删除该分集？')) return; await apiFetch(`/api/ui/library/episode/${ep.episodeId}`, { method: 'DELETE' }); showEpisodes(sourceId, title, animeId); });
       actions.appendChild(refreshBtn); actions.appendChild(delBtn); li.appendChild(actions); ul.appendChild(li);
     });
   } catch (e) { ul.innerHTML = `<li class=\"small\">加载失败: ${e.message || e}</li>`; }
