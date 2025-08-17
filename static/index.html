@@ -589,6 +589,32 @@
                             </div>
                         </form>
                     </div>
+                    <div id="danmaku-control-view" class="content-view hidden">
+                        <h2>弹幕控制</h2>
+                        <div class="settings-sub-nav">
+                            <button class="sub-nav-btn active" data-subview="output-control-subview">输出控制</button>
+                        </div>
+                        <div id="output-control-subview" class="settings-subview">
+                            <div class="form-card">
+                                <h3>弹幕输出控制</h3>
+                                <p>在这里调整弹幕API的输出行为。</p>
+                                <form id="danmaku-output-form">
+                                    <div class="form-row">
+                                        <label for="danmaku-limit-input">单源输出总数</label>
+                                        <input type="number" id="danmaku-limit-input" min="-1">
+                                    </div>
+                                    <p class="form-help-text">设置从单个数据源（或聚合后）返回的弹幕最大数量。-1 表示无限制。为防止客户端卡顿，建议设置一个合理的数值（如 3000-5000）。弹幕将从视频时长中均匀采样。</p>
+                                    <div class="form-row">
+                                        <label for="danmaku-aggregation-toggle">启用弹幕聚合</label>
+                                        <input type="checkbox" id="danmaku-aggregation-toggle">
+                                    </div>
+                                    <p class="form-help-text">开启后，当播放器请求关联弹幕时（withRelated=true），系统将聚合所有源的弹幕。关闭则只返回当前源的弹幕。</p>
+                                    <div class="form-actions"><button type="submit">保存设置</button></div>
+                                    <p id="danmaku-control-save-message" class="message"></p>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
                     <div id="sources-view" class="content-view hidden">
                         <div class="settings-sub-nav">
                             <button class="sub-nav-btn active" data-subview="danmaku-sources-subview">弹幕搜索源</button>
