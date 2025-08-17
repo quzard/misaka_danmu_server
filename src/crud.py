@@ -937,6 +937,12 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
     return None
 
 async def create_api_token(session: AsyncSession, name: str, token: str, validity_period: str) -> int:
+    """创建新的API Token，如果名称已存在则会失败。"""
+    # 检查名称是否已存在
+    existing_token = await session.execute(select(ApiToken).where(ApiToken.name == name))
+    if existing_token.scalar_one_or_none():
+        raise ValueError(f"名称为 '{name}' 的Token已存在。")
+    
     expires_at = None
     if validity_period != "permanent":
         days = int(validity_period.replace('d', ''))

@@ -241,6 +241,41 @@ class TencentScraper(BaseScraper):
         await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return unique_results
 
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """从腾讯视频URL中提取作品信息。"""
+        self.logger.info(f"Tencent: 正在从URL提取信息: {url}")
+        cid_match = re.search(r'/cover/([^/]+?)(/|\.html|$)', url)
+        if not cid_match:
+            self.logger.warning(f"Tencent: 无法从URL中解析出cid: {url}")
+            return None
+        
+        cid = cid_match.group(1)
+        
+        try:
+            response = await self.client.get(url)
+            response.raise_for_status()
+            html_content = response.text
+
+            title_match = re.search(r'<title>(.*?)</title>', html_content)
+            title = title_match.group(1).split('-')[0].strip() if title_match else "未知标题"
+
+            # 尝试从页面JSON中获取更精确的信息
+            json_match = re.search(r'window\.video_next_list\s*=\s*({.*?});', html_content)
+            media_type = "tv_series" # 默认
+            if json_match:
+                try:
+                    data = json.loads(json_match.group(1))
+                    if data.get("type") == "1": media_type = "movie"
+                except json.JSONDecodeError:
+                    pass
+
+            return models.ProviderSearchInfo(
+                provider=self.provider_name, mediaId=cid, title=title, type=media_type, season=get_season_from_title(title)
+            )
+        except Exception as e:
+            self.logger.error(f"Tencent: 从URL '{url}' 提取信息失败: {e}", exc_info=True)
+            return None
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         """
         获取分集列表。

@@ -536,6 +536,57 @@ class BilibiliScraper(BaseScraper):
         
         return results
 
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """从B站URL中提取作品信息。"""
+        self.logger.info(f"Bilibili: 正在从URL提取信息: {url}")
+        await self._ensure_config_and_cookie()
+
+        # 尝试从URL中解析 season_id 或 bvid
+        ss_match = re.search(r'season/ss(\d+)', url)
+        ep_match = re.search(r'play/ep(\d+)', url)
+        bv_match = re.search(r'video/(BV[a-zA-Z0-9]+)', url)
+
+        media_info = None
+
+        if ss_match or ep_match:
+            # 处理番剧 (PGC)
+            season_id = None
+            if ss_match:
+                season_id = ss_match.group(1)
+            elif ep_match:
+                # 如果是分集链接，需要访问页面获取 season_id
+                try:
+                    page_res = await self._request_with_rate_limit("GET", url)
+                    page_res.raise_for_status()
+                    season_match_from_page = re.search(r'"season_id":(\d+)', page_res.text)
+                    if season_match_from_page:
+                        season_id = season_match_from_page.group(1)
+                except Exception as e:
+                    self.logger.error(f"Bilibili: 从ep链接获取season_id失败: {e}")
+            
+            if season_id:
+                api_url = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
+                response = await self._request_with_rate_limit("GET", api_url)
+                response.raise_for_status()
+                data = response.json().get("result", {})
+                media_info = BiliSearchMedia.model_validate(data)
+
+        elif bv_match:
+            # 处理普通视频 (UGC)
+            bvid = bv_match.group(1)
+            api_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+            response = await self._request_with_rate_limit("GET", api_url)
+            response.raise_for_status()
+            data = response.json().get("data", {})
+            media_info = BiliSearchMedia(title=data.get("title"), bvid=bvid, cover=data.get("pic"))
+
+        if not media_info:
+            return None
+
+        # 将获取到的信息转换为 ProviderSearchInfo
+        return self._bili_media_to_provider_info(media_info)
+
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         if media_id.startswith("ss"):
             return await self._get_pgc_episodes(media_id, target_episode_index)

@@ -1096,12 +1096,15 @@ async def create_new_api_token(
     # 生成一个由大小写字母和数字组成的20位随机字符串
     alphabet = string.ascii_letters + string.digits
     new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
-    token_id = await crud.create_api_token(
-        session, token_data.name, new_token_str, token_data.validity_period
-    )
-    # 重新从数据库获取以包含所有字段
-    new_token = await crud.get_api_token_by_id(session, token_id) # 假设这个函数存在
-    return models.ApiTokenInfo.model_validate(new_token)
+    try:
+        token_id = await crud.create_api_token(
+            session, token_data.name, new_token_str, token_data.validity_period
+        )
+        # 重新从数据库获取以包含所有字段
+        new_token = await crud.get_api_token_by_id(session, token_id)
+        return models.ApiTokenInfo.model_validate(new_token)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个API Token")
 async def delete_api_token(

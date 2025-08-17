@@ -254,6 +254,11 @@ class MgtvScraper(BaseScraper):
             self.logger.error(f"MGTV: 搜索 '{keyword}' 失败: {e}", exc_info=True)
             return []
 
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """(未实现) 从URL中提取作品信息。"""
+        self.logger.warning(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+        raise NotImplementedError(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         self.logger.info(f"MGTV: 正在为 media_id={media_id} 获取分集列表...")
         

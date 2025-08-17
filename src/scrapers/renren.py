@@ -289,6 +289,11 @@ class RenrenScraper(BaseScraper):
         await self._set_to_cache(cache_key, [r.model_dump() for r in results], 'search_ttl_seconds', 300)
         return results
 
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """(未实现) 从URL中提取作品信息。"""
+        self.logger.warning(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+        raise NotImplementedError(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+
     async def _fetch_drama_detail(self, drama_id: str) -> Optional[RrspDramaDetailEnvelope]:
         url = f"{BASE_API}/m-station/drama/page"
         params = {

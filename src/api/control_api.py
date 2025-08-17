@@ -97,8 +97,15 @@ class ControlEditedImportRequest(BaseModel):
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
 class ControlUrlImportRequest(BaseModel):
-    url: str
-    provider: str
+    url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
+    # Optional fields to override or provide metadata IDs during import
+    title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
+    season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
+    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
+    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
 class DanmakuOutputSettings(BaseModel):
     limit_per_source: int
@@ -281,23 +288,40 @@ async def edited_import(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": "编辑后导入任务已提交", "task_id": task_id}
 
-@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入")
+@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入整个作品")
 async def url_import(
     payload: ControlUrlImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     api_key: str = Depends(verify_api_key),
 ):
-    """从视频URL直接导入弹幕。"""
+    """从一个作品的URL（例如B站番剧主页）导入其所有分集的弹幕。"""
     scraper = manager.get_scraper_by_domain(payload.url)
     if not scraper:
         raise HTTPException(status_code=400, detail="不支持的URL或视频源。")
+
+    # This is the new method we need to implement for each scraper
+    media_info = await scraper.get_info_from_url(payload.url)
+    if not media_info:
+        raise HTTPException(status_code=404, detail="无法从提供的URL中获取有效的作品信息。")
+
+    # Allow user to override scraped info
+    final_title = payload.title or media_info.title
+    final_season = payload.season if payload.season is not None else media_info.season
+
+    task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})"
     
-    task_title = f"外部API URL导入: {payload.url}"
-    task_coro = lambda session, cb: tasks.manual_import_task(
-        source_id=0, # This will be determined inside the task
-        title="从URL导入", episode_index=1, url=payload.url, provider_name=scraper.provider_name,
-        progress_callback=cb, session=session, manager=manager
+    task_coro = lambda session, cb: tasks.generic_import_task(
+        provider=scraper.provider_name,
+        media_id=media_info.mediaId,
+        anime_title=final_title,
+        media_type=media_info.type,
+        season=final_season,
+        current_episode_index=None, # Import all episodes
+        image_url=media_info.imageUrl,
+        douban_id=payload.douban_id, tmdb_id=payload.tmdb_id, imdb_id=payload.imdb_id,
+        tvdb_id=payload.tvdb_id, bangumi_id=payload.bangumi_id,
+        progress_callback=cb, session=session, manager=manager, task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": "URL导入任务已提交", "task_id": task_id}
@@ -406,9 +430,12 @@ async def get_tokens(session: AsyncSession = Depends(get_db_session)):
 @token_router.post("", response_model=models.ApiTokenInfo, status_code=201, summary="创建Token")
 async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = Depends(get_db_session)):
     token_str = secrets.token_urlsafe(16)
-    token_id = await crud.create_api_token(session, payload.name, token_str, payload.validity_period)
-    new_token = await crud.get_api_token_by_id(session, token_id)
-    return models.ApiTokenInfo.model_validate(new_token)
+    try:
+        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validity_period)
+        new_token = await crud.get_api_token_by_id(session, token_id)
+        return models.ApiTokenInfo.model_validate(new_token)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @token_router.get("/{tokenid}", response_model=models.ApiTokenInfo, summary="获取单个Token详情")
 async def get_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):

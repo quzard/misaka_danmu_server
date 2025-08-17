@@ -172,6 +172,14 @@ class BaseScraper(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """
+        (新增) 从一个作品的URL中提取信息，并返回一个 ProviderSearchInfo 对象。
+        这用于支持从URL直接导入整个作品。
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         """
         获取给定媒体ID的所有分集。
