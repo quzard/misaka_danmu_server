@@ -544,7 +544,8 @@ async def delete_episode_from_source(
     if not episode_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
-    task_title = f"删除分集: {episode_info['title']}"
+    provider_name = episode_info.get('provider_name', '未知源')
+    task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
     task_coro = lambda session, callback: delete_episode_task(episode_id, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -567,8 +568,10 @@ async def refresh_single_episode(
     
     logger.info(f"用户 '{current_user.username}' 请求刷新分集 ID: {episode_id} ({episode['title']})")
 
+    provider_name = episode.get('provider_name', '未知源')
+    task_title = f"刷新分集: {episode['title']} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.refresh_episode_task(episode_id, session, scraper_manager, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, f"刷新分集: {episode['title']}")
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "task_id": task_id}
 
@@ -1576,7 +1579,7 @@ async def manual_import_episode(
     if not expected_prefix or expected_prefix not in request_data.url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
-    task_title = f"手动导入: {request_data.title} ({provider_name})"
+    task_title = f"手动导入: {source_info['title']} - {request_data.title} - [{provider_name}]"
     task_coro = lambda session, callback: manual_import_task(
         source_id=source_id, title=request_data.title, episode_index=request_data.episode_index,
         url=request_data.url, provider_name=provider_name,

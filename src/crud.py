@@ -594,7 +594,11 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
     return [dict(row) for row in result.mappings()]
 
 async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
-    stmt = select(Episode.id, Episode.title).where(Episode.id == episode_id)
+    stmt = (
+        select(Episode.id, Episode.title, AnimeSource.provider_name)
+        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        .where(Episode.id == episode_id)
+    )
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
