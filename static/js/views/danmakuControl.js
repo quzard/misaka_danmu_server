@@ -36,6 +36,7 @@ async function handleSaveSettings(e) {
 
     const saveBtn = danmakuOutputForm.querySelector('button[type="submit"]');
     saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
 
     const limitPayload = { value: limitInput.value };
     const aggregationPayload = { value: aggregationToggle.checked.toString() };
@@ -58,12 +59,16 @@ async function handleSaveSettings(e) {
         saveMessage.classList.add('error');
     } finally {
         saveBtn.disabled = false;
+        saveBtn.textContent = '保存设置';
     }
 }
 
 export function setupDanmakuControlEventsListeners() {
     initializeElements();
-    danmakuOutputForm.addEventListener('submit', handleSaveSettings);
+    // 确保元素存在后再添加事件监听，防止在页面加载异常时报错
+    if (danmakuOutputForm) { 
+        danmakuOutputForm.addEventListener('submit', handleSaveSettings);
+    }
     document.addEventListener('viewchange', (e) => {
         if (e.detail.viewId === 'danmaku-control-view') {
             loadSettings();
