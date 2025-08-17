@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, model_validator
@@ -9,11 +9,23 @@ from .. import crud, models, tasks
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
-from ..task_manager import TaskManager
+from ..task_manager import TaskManager, TaskSuccess
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def get_scraper_manager(request: Request) -> ScraperManager:
+    """依赖项：从应用状态获取 Scraper 管理器"""
+    return request.app.state.scraper_manager
+
+def get_metadata_manager(request: Request) -> MetadataSourceManager:
+    """依赖项：从应用状态获取元数据源管理器"""
+    return request.app.state.metadata_manager
+
+def get_task_manager(request: Request) -> TaskManager:
+    """依赖项：从应用状态获取任务管理器"""
+    return request.app.state.task_manager
 
 async def verify_api_key(
     request: Request,
@@ -54,9 +66,9 @@ async def external_import(
     request: Request,
     payload: ExternalImportRequest,
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(crud.get_scraper_manager),
-    metadata_manager: MetadataSourceManager = Depends(crud.get_metadata_manager),
-    task_manager: TaskManager = Depends(crud.get_task_manager),
+    manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
     _: Any = Depends(verify_api_key),
 ):
     """
@@ -131,7 +143,7 @@ async def overwrite_danmaku(
     episode_id: int,
     payload: DanmakuUpdateRequest,
     session: AsyncSession = Depends(get_db_session),
-    task_manager: TaskManager = Depends(crud.get_task_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
     _: Any = Depends(verify_api_key),
 ):
     """
