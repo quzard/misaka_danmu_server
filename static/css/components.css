@@ -46,7 +46,7 @@
 }
 
 .form-card {
-    max-width: 700px;
+    max-width: 900px; /* 根据用户反馈，将所有表单卡片宽度统一设置为900px */
     margin: 20px auto;
     padding: 20px;
     background: var(--card-bg);

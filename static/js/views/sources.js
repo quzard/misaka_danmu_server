@@ -294,6 +294,19 @@ async function handleDanmakuSourceAction(e) {
     showScraperConfigModal(providerName, fields, isLoggable);
 }
 
+function _attachModalListeners() {
+    document.getElementById('modal-close-btn').addEventListener('click', hideScraperConfigModal);
+    document.getElementById('modal-cancel-btn').addEventListener('click', hideScraperConfigModal);
+    document.getElementById('modal-save-btn').addEventListener('click', handleSaveScraperConfig);
+}
+
+function _detachModalListeners() {
+    // Important: To remove an event listener, the function reference must be identical.
+    document.getElementById('modal-close-btn').removeEventListener('click', hideScraperConfigModal);
+    document.getElementById('modal-cancel-btn').removeEventListener('click', hideScraperConfigModal);
+    document.getElementById('modal-save-btn').removeEventListener('click', handleSaveScraperConfig);
+}
+
 let currentProviderForModal = null;
 
 function showScraperConfigModal(providerName, fields, isLoggable) {
@@ -304,6 +317,7 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
 
     modalTitle.textContent = `配置: ${providerName}`;
     modalBody.innerHTML = '<p>加载中...</p>';
+    _attachModalListeners();
     modal.classList.remove('hidden');
 
     apiFetch(`/api/ui/scrapers/${providerName}/config`)
@@ -438,6 +452,7 @@ function showScraperConfigModal(providerName, fields, isLoggable) {
 
 function hideScraperConfigModal() {
     document.getElementById('generic-modal').classList.add('hidden');
+    _detachModalListeners();
     currentProviderForModal = null;
 }
 
@@ -694,11 +709,6 @@ export function setupSourcesEventListeners() {
     saveMetadataSourcesBtn.addEventListener('click', handleSaveMetadataSources);
     moveMetadataSourceUpBtn.addEventListener('click', () => handleMetadataSourceAction('up'));
     moveMetadataSourceDownBtn.addEventListener('click', () => handleMetadataSourceAction('down'));
-
-    // Modal event listeners
-    document.getElementById('modal-close-btn').addEventListener('click', hideScraperConfigModal);
-    document.getElementById('modal-cancel-btn').addEventListener('click', hideScraperConfigModal);
-    document.getElementById('modal-save-btn').addEventListener('click', handleSaveScraperConfig);
 
     document.addEventListener('viewchange', (e) => {
         if (e.detail.viewId === 'sources-view') {

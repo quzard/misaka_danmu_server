@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -15,6 +16,7 @@ class ConfigManager:
         self.session_factory = session_factory
         self._cache: Dict[str, Any] = {}
         self._lock = asyncio.Lock()
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     async def get(self, key: str, default: Optional[Any] = None) -> Any:
         """
@@ -35,7 +37,7 @@ class ConfigManager:
             self._cache[key] = value
             return value
 
-    async def register_defaults(self, defaults: Dict[str, tuple[Any, str]]):
+    async def register_defaults(self, defaults: Dict[str, Tuple[Any, str]]):
         """
         注册默认配置项。
         此方法会检查数据库，如果配置项不存在，则使用提供的默认值和描述创建它。
@@ -52,3 +54,4 @@ class ConfigManager:
     def clear_cache(self):
         """清空内存中的配置缓存，以便下次获取时能从数据库重新加载。"""
         self._cache.clear()
+        self.logger.info("所有配置缓存已清空。")
