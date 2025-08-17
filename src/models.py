@@ -266,6 +266,9 @@ class ExternalApiLogInfo(BaseModel):
     status_code: int
     message: Optional[str] = None
 
+    class Config:
+        from_attributes = True
+
 
 # --- TMDB API Models ---
 

@@ -1266,10 +1266,10 @@ async def create_external_api_log(session: AsyncSession, ip_address: str, endpoi
     session.add(new_log)
     await session.commit()
 
-async def get_external_api_logs(session: AsyncSession, limit: int = 100) -> List[Dict[str, Any]]:
+async def get_external_api_logs(session: AsyncSession, limit: int = 100) -> List[ExternalApiLog]:
     stmt = select(ExternalApiLog).order_by(ExternalApiLog.access_time.desc()).limit(limit)
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    return result.scalars().all()
 
 async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[Any, str]]):
     if not defaults: return

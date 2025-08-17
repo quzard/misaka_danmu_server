@@ -1188,7 +1188,7 @@ async def get_external_api_logs(
     session: AsyncSession = Depends(get_db_session)
 ):
     logs = await crud.get_external_api_logs(session)
-    return [models.ExternalApiLogInfo.model_validate(log) for log in logs]
+    return logs
 
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
 async def get_ua_rules(
