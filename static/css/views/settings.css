@@ -86,11 +86,25 @@ textarea#douban-cookie {
 
 /* --- API Documentation Iframe Styles --- */
 #external-api-docs-subview {
-    padding: 0; /* Remove padding to let iframe fill the space */
+    /* Re-add padding and use flexbox for layout */
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.api-docs-actions {
+    flex-shrink: 0; /* Prevent this container from shrinking */
+}
+
+.api-docs-actions .action-btn-link {
+    text-decoration: none;
 }
 
 #swagger-ui-iframe {
     flex-grow: 1; /* Let the iframe grow to fill the container */
     border: none;
     width: 100%;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
 }
