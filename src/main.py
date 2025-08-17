@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
         # API 和 Webhook
         'custom_api_domain': ('', '用于拼接弹幕API地址的自定义域名。'),
         'webhook_api_key': ('', '用于Webhook调用的安全密钥。'),
+        'external_api_key': ('', '用于外部API调用的安全密钥。'),
         'webhook_custom_domain': ('', '用于拼接Webhook URL的自定义域名。'),
         # 认证
         # 代理
@@ -164,6 +165,9 @@ app.mount("/images", StaticFiles(directory="config/image"), name="images")
 
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
+
+# 包含新增的外部API路由
+app.include_router(external_api.router, prefix="/api/v1/external", tags=["External API"])
 
 # 将最通用的 dandan_router 挂载在最后，以避免路径冲突。
 # 这样可以确保像 /api/ui 这样的静态路径会优先于 /api/{token} 被匹配。

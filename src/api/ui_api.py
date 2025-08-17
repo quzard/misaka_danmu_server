@@ -1168,6 +1168,28 @@ async def regenerate_webhook_api_key(
     logger.info(f"用户 '{current_user.username}' 重新生成了 Webhook API Key。")
     return {"key": "webhook_api_key", "value": new_key}
 
+@router.post("/config/external_api_key/regenerate", response_model=Dict[str, str], summary="重新生成外部API Key")
+async def regenerate_external_api_key(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """生成一个新的、随机的外部API Key并保存到数据库。"""
+    alphabet = string.ascii_letters + string.digits
+    new_key = ''.join(secrets.choice(alphabet) for _ in range(32)) # 增加长度以提高安全性
+    await crud.update_config_value(session, "external_api_key", new_key)
+    config_manager.invalidate("external_api_key")
+    logger.info(f"用户 '{current_user.username}' 重新生成了外部 API Key。")
+    return {"key": "external_api_key", "value": new_key}
+
+@router.get("/external-logs", response_model=List[models.ExternalApiLogInfo], summary="获取最新的外部API访问日志")
+async def get_external_api_logs(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    logs = await crud.get_external_api_logs(session)
+    return [models.ExternalApiLogInfo.model_validate(log) for log in logs]
+
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
 async def get_ua_rules(
     current_user: models.User = Depends(security.get_current_user),

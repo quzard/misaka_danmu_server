@@ -6,6 +6,7 @@ import { setupTasksEventListeners } from './views/tasks.js';
 import { setupDanmakuControlEventsListeners } from './views/danmakuControl.js';
 import { setupTokensEventListeners } from './views/tokens.js';
 import { setupSourcesEventListeners } from './views/sources.js';
+import { setupExternalApiEventListeners } from './views/externalApi.js';
 import { setupSettingsEventListeners } from './views/settings.js';
 import { switchView, setActiveSidebar } from './ui.js';
 
@@ -19,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDanmakuControlEventsListeners();
     setupTokensEventListeners();
     setupSourcesEventListeners();
+    setupExternalApiEventListeners();
     setupSettingsEventListeners();
 
     // Sidebar navigation

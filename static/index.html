@@ -56,6 +56,7 @@
                         <li><a href="#" class="nav-link" data-view="token-manager-view">弹幕Token</a></li>
                         <li><a href="#" class="nav-link" data-view="danmaku-control-view">弹幕控制</a></li>
                         <li><a href="#" class="nav-link" data-view="sources-view">搜索源</a></li>
+                        <li><a href="#" class="nav-link" data-view="external-api-view">外部控制</a></li>
                         <li><a href="#" class="nav-link" data-view="settings-view">设置</a></li>
                     </ul>
                 </nav>
@@ -613,6 +614,36 @@
                                     <p id="danmaku-control-save-message" class="message"></p>
                                 </form>
                             </div>
+                        </div>
+                    </div>
+                    <div id="external-api-view" class="content-view hidden">
+                        <h2>外部API控制</h2>
+                        <div class="settings-sub-nav">
+                            <button class="sub-nav-btn active" data-subview="external-api-key-subview">API密钥</button>
+                            <button class="sub-nav-btn" data-subview="external-api-logs-subview">访问日志</button>
+                        </div>
+
+                        <div id="external-api-key-subview" class="settings-subview">
+                            <div class="form-card">
+                                <h3>外部API密钥</h3>
+                                <p>此密钥用于所有 <code>/api/v1/external/*</code> 接口的鉴权。请妥善保管，不要泄露。</p>
+                                <div class="form-row">
+                                    <label for="external-api-key-input">API Key</label>
+                                    <div class="input-with-icon">
+                                        <input type="text" id="external-api-key-input" readonly>
+                                        <button type="button" id="regenerate-external-key-btn" class="icon-btn" title="重新生成">🔄</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="external-api-logs-subview" class="settings-subview hidden">
+                            <h3>API访问日志</h3>
+                            <p>这里显示最近100条通过外部API的访问记录。</p>
+                            <table id="external-api-log-table">
+                                <thead><tr><th>访问时间</th><th>IP地址</th><th>端点</th><th>状态码</th><th>消息</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
                     <div id="sources-view" class="content-view hidden">

@@ -231,6 +231,13 @@ class PasswordChange(BaseModel):
     old_password: str = Field(..., description="当前密码")
     new_password: str = Field(..., min_length=8, description="新密码 (至少8位)")
 
+class ExternalApiLogInfo(BaseModel):
+    access_time: datetime
+    ip_address: str
+    endpoint: str
+    status_code: int
+    message: Optional[str] = None
+
 
 # --- TMDB API Models ---
 

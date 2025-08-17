@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 
 from . import models
 from .orm_models import (
-    Anime, AnimeSource, Episode, Comment, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource
+    Anime, AnimeSource, Episode, Comment, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 )
 
 # --- Anime & Library ---
@@ -1250,6 +1250,24 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount
+
+# --- External API Logging ---
+
+async def create_external_api_log(session: AsyncSession, ip_address: str, endpoint: str, status_code: int, message: Optional[str] = None):
+    """创建一个外部API访问日志。"""
+    new_log = ExternalApiLog(
+        ip_address=ip_address,
+        endpoint=endpoint,
+        status_code=status_code,
+        message=message
+    )
+    session.add(new_log)
+    await session.commit()
+
+async def get_external_api_logs(session: AsyncSession, limit: int = 100) -> List[Dict[str, Any]]:
+    stmt = select(ExternalApiLog).order_by(ExternalApiLog.access_time.desc()).limit(limit)
+    result = await session.execute(stmt)
+    return [dict(row) for row in result.mappings()]
 
 async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[Any, str]]):
     if not defaults: return
