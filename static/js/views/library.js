@@ -346,12 +346,12 @@ function renderEpisodeListView(sourceId, animeTitle, episodes, animeId) {
                 }
             });
             row.innerHTML = `
-                <td><input type="checkbox" class="episode-checkbox" value="${ep.id}"></td>
-                <td>${ep.id}</td><td>${ep.title}</td><td>${ep.episode_index}</td><td>${ep.comment_count}</td>
+                <td><input type="checkbox" class="episode-checkbox" value="${ep.episodeId}"></td>
+                <td>${ep.episodeId}</td><td>${ep.title}</td><td>${ep.episode_index}</td><td>${ep.comment_count}</td>
                 <td>${ep.fetched_at ? new Date(ep.fetched_at).toLocaleString() : 'N/A'}</td>
                 <td>${ep.source_url ? `<a href="${ep.source_url}" target="_blank">跳转</a>` : '无'}</td>
                 <td class="actions-cell">
-                    <div class="action-buttons-wrapper" data-episode-id="${ep.id}" data-episode-title="${ep.title}">
+                    <div class="action-buttons-wrapper" data-episode-id="${ep.episodeId}" data-episode-title="${ep.title}">
                         <button class="action-btn" data-action="edit" title="编辑剧集">✏️</button>
                         <button class="action-btn" data-action="refresh" title="刷新剧集">🔄</button>
                         <button class="action-btn" data-action="view_danmaku" title="查看具体弹幕">💬</button>
@@ -622,7 +622,7 @@ async function handleEpisodeAction(e) {
 
     switch (action) {
         case 'edit':
-            const episode = currentEpisodes.find(ep => ep.id === episodeId);
+            const episode = currentEpisodes.find(ep => ep.episodeId === episodeId);
             if (episode) {
                 document.dispatchEvent(new CustomEvent('show:edit-episode', { detail: { episode, sourceId, animeTitle, animeId } }));
             }

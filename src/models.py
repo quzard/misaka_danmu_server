@@ -178,12 +178,15 @@ class LibraryResponse(BaseModel):
 
 # --- 分集管理模型 ---
 class EpisodeDetail(BaseModel):
-    id: int
+    episodeId: int = Field(..., alias="id")
     title: str
     episode_index: int
     source_url: Optional[str] = None
     fetched_at: Optional[datetime] = None
     comment_count: int
+
+    class Config:
+        populate_by_name = True
 
 # --- 任务管理器模型 ---
 class TaskInfo(BaseModel):

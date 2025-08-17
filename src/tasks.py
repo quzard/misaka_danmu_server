@@ -1,7 +1,7 @@
 import logging
 from typing import Callable, List, Optional
 
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, models, orm_models
@@ -16,13 +16,48 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
     """Background task to delete an anime and all its related data."""
     await progress_callback(0, "开始删除...")
     try:
-        anime = await session.get(orm_models.Anime, anime_id)
-        if not anime:
+        # 检查作品是否存在
+        anime_exists = await session.get(orm_models.Anime, anime_id)
+        if not anime_exists:
             raise TaskSuccess("作品未找到，无需删除。")
 
-        session.delete(anime)
+        # 1. 找到所有关联的源ID
+        source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.anime_id == anime_id))
+        source_ids = source_ids_res.scalars().all()
+
+        if source_ids:
+            # 2. 找到所有关联的分集ID
+            await progress_callback(20, "正在查找关联数据...")
+            episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.source_id.in_(source_ids)))
+            episode_ids = episode_ids_res.scalars().all()
+
+            if episode_ids:
+                # 3. 删除所有弹幕
+                await progress_callback(40, "正在删除弹幕...")
+                await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+                
+                # 4. 删除所有分集
+                await progress_callback(60, "正在删除分集...")
+                await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
+
+            # 5. 删除所有源
+            await progress_callback(70, "正在删除数据源...")
+            await session.execute(delete(orm_models.AnimeSource).where(orm_models.AnimeSource.id.in_(source_ids)))
+
+        # 6. 删除元数据和别名
+        await progress_callback(80, "正在删除元数据...")
+        await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.anime_id == anime_id))
+        await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.anime_id == anime_id))
+
+        # 7. 删除作品本身
+        await progress_callback(90, "正在删除主作品记录...")
+        await session.delete(anime_exists)
+        
         await session.commit()
         raise TaskSuccess("删除成功。")
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
     except Exception as e:
         await session.rollback()
         logger.error(f"删除作品任务 (ID: {anime_id}) 失败: {e}", exc_info=True)
@@ -32,13 +67,35 @@ async def delete_source_task(source_id: int, session: AsyncSession, progress_cal
     """Background task to delete a source and all its related data."""
     await progress_callback(0, "开始删除...")
     try:
-        source = await session.get(orm_models.AnimeSource, source_id)
-        if not source:
+        # 检查源是否存在
+        source_exists = await session.get(orm_models.AnimeSource, source_id)
+        if not source_exists:
             raise TaskSuccess("数据源未找到，无需删除。")
-        session.delete(source)
+
+        # 1. 找到所有关联的分集ID
+        episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.source_id == source_id))
+        episode_ids = episode_ids_res.scalars().all()
+
+        if episode_ids:
+            # 2. 删除所有这些分集关联的弹幕
+            await progress_callback(30, f"正在删除 {len(episode_ids)} 个分集的弹幕...")
+            await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+            
+            # 3. 删除所有这些分集
+            await progress_callback(60, "正在删除分集记录...")
+            await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
+
+        # 4. 删除源本身
+        await progress_callback(90, "正在删除源记录...")
+        await session.delete(source_exists)
+        
         await session.commit()
         raise TaskSuccess("删除成功。")
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
     except Exception as e:
+        await session.rollback()
         logger.error(f"删除源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
         raise
 
@@ -46,32 +103,49 @@ async def delete_episode_task(episode_id: int, session: AsyncSession, progress_c
     """Background task to delete an episode and its comments."""
     await progress_callback(0, "开始删除...")
     try:
-        episode = await session.get(orm_models.Episode, episode_id)
-        if not episode:
+        # 检查分集是否存在
+        episode_exists = await session.get(orm_models.Episode, episode_id)
+        if not episode_exists:
             raise TaskSuccess("分集未找到，无需删除。")
-        session.delete(episode)
+
+        # 1. 显式删除关联的弹幕
+        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id == episode_id))
+        
+        # 2. 删除分集本身
+        await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id == episode_id))
+        
         await session.commit()
         raise TaskSuccess("删除成功。")
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
     except Exception as e:
+        await session.rollback()
         logger.error(f"删除分集任务 (ID: {episode_id}) 失败: {e}", exc_info=True)
         raise
 
 async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""
     total = len(episode_ids)
-    deleted_count = 0
-    for i, episode_id in enumerate(episode_ids):
-        progress = int((i / total) * 100)
-        await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id})...")
-        try:
-            episode = await session.get(orm_models.Episode, episode_id)
-            if episode:
-                session.delete(episode)
-                await session.commit()
-                deleted_count += 1
-        except Exception as e:
-            logger.error(f"批量删除分集任务中，删除分集 (ID: {episode_id}) 失败: {e}", exc_info=True)
-    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
+    await progress_callback(5, f"准备删除 {total} 个分集...")
+    try:
+        # 1. 一次性删除所有关联的弹幕
+        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+        await progress_callback(50, "关联弹幕已删除，正在删除分集记录...")
+
+        # 2. 一次性删除所有分集
+        result = await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
+        deleted_count = result.rowcount
+        
+        await session.commit()
+        raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"批量删除分集任务失败: {e}", exc_info=True)
+        raise
 
 async def generic_import_task(
     provider: str, # noqa: F821

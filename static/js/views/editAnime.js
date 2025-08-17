@@ -838,7 +838,7 @@ async function handleReassociateConfirm() {
 
 function showEditEpisodeView({ episode, sourceId, animeTitle, animeId }) {
     switchView('edit-episode-view');
-    document.getElementById('edit-episode-id').value = episode.id;
+    document.getElementById('edit-episode-id').value = episode.episodeId;
     document.getElementById('edit-episode-title').value = episode.title;
     document.getElementById('edit-episode-original-index').value = episode.episode_index;
     document.getElementById('edit-episode-index').value = episode.episode_index;
