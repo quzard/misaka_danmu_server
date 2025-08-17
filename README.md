@@ -115,6 +115,7 @@
 1. 创建 `docker-compose.app.yaml` 文件
 
 ```yaml
+  services:
     danmu-app:
       image: l429609201/misaka_danmu_server:latest
       container_name: misaka-danmu-server
@@ -137,7 +138,6 @@
       volumes:
         - ./config:/app/config
       network_mode: "host"
-
 ```
 2.  **重要**:
     -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yaml` 中设置的 `MYSQL_PASSWORD` 一致。
