@@ -67,6 +67,10 @@ async def verify_api_key(
 
 # --- Pydantic 模型 ---
 
+class ControlActionResponse(BaseModel):
+    """通用操作成功响应模型"""
+    message: str
+
 class ControlSearchResultItem(models.ProviderSearchInfo):
     result_index: int = Field(..., description="结果在列表中的顺序索引，从0开始")
 
@@ -340,10 +344,11 @@ async def get_anime_details(animeid: int, session: AsyncSession = Depends(get_db
     if not details: raise HTTPException(404, "作品未找到")
     return models.AnimeFullDetails.model_validate(details)
 
-@library_router.put("/anime/{animeid}", status_code=204, summary="编辑作品信息")
+@library_router.put("/anime/{animeid}", response_model=ControlActionResponse, summary="编辑作品信息")
 async def edit_anime(animeid: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):
     if not await crud.update_anime_details(session, animeid, payload):
         raise HTTPException(404, "作品未找到")
+    return {"message": "作品信息更新成功。"}
 
 @library_router.delete("/anime/{animeid}", status_code=202, summary="删除作品")
 async def delete_anime(animeid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
@@ -365,19 +370,21 @@ async def delete_source(sourceid: int, session: AsyncSession = Depends(get_db_se
     )
     return {"message": "删除源任务已提交", "task_id": task_id}
 
-@library_router.put("/source/{sourceid}/favorite", status_code=204, summary="精确标记数据源")
+@library_router.put("/source/{sourceid}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
 async def favorite_source(sourceid: int, session: AsyncSession = Depends(get_db_session)):
     if not await crud.toggle_source_favorite_status(session, sourceid):
         raise HTTPException(404, "数据源未找到")
+    return {"message": "数据源精确标记状态已切换。"}
 
 @library_router.get("/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
 async def get_source_episodes(sourceid: int, session: AsyncSession = Depends(get_db_session)):
     return await crud.get_episodes_for_source(session, sourceid)
 
-@library_router.put("/episode/{episodeid}", status_code=204, summary="编辑分集信息")
+@library_router.put("/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
 async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
     if not await crud.update_episode_info(session, episodeid, payload):
         raise HTTPException(404, "分集未找到")
+    return {"message": "分集信息更新成功。"}
 
 @library_router.post("/episode/{episodeid}/refresh", status_code=202, summary="刷新分集弹幕")
 async def refresh_episode(episodeid: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager), manager: ScraperManager = Depends(get_scraper_manager)):
@@ -448,15 +455,17 @@ async def get_token_logs(tokenid: int, session: AsyncSession = Depends(get_db_se
     logs = await crud.get_token_access_logs(session, tokenid)
     return [models.TokenAccessLog.model_validate(log) for log in logs]
 
-@token_router.put("/{tokenid}/toggle", status_code=204, summary="启用/禁用Token")
+@token_router.put("/{tokenid}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
 async def toggle_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):
     if not await crud.toggle_api_token(session, tokenid):
         raise HTTPException(404, "Token未找到")
+    return {"message": "Token 状态已切换。"}
 
-@token_router.delete("/{tokenid}", status_code=204, summary="删除Token")
+@token_router.delete("/{tokenid}", response_model=ControlActionResponse, summary="删除Token")
 async def delete_token(tokenid: int, session: AsyncSession = Depends(get_db_session)):
     if not await crud.delete_api_token(session, tokenid):
         raise HTTPException(404, "Token未找到")
+    return {"message": "Token 删除成功。"}
 
 # --- 设置管理 ---
 settings_router = APIRouter(prefix="/settings", dependencies=[Depends(verify_api_key)])
@@ -467,12 +476,13 @@ async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_ses
     enabled = await crud.get_config_value(session, 'danmaku_aggregation_enabled', 'true')
     return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
 
-@settings_router.put("/danmaku-output", status_code=204, summary="更新弹幕输出设置")
+@settings_router.put("/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
     await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limit_per_source))
     await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregation_enabled).lower())
     config_manager.invalidate('danmaku_output_limit_per_source')
     config_manager.invalidate('danmaku_aggregation_enabled')
+    return {"message": "弹幕输出设置已更新。"}
 
 # --- 注册所有子路由 ---
 router.include_router(library_router)
