@@ -89,6 +89,14 @@ async def get_tmdb_client(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="TMDB API Key not configured. Please set it in the settings page."
         )
+    
+    # 新增：检查用户是否错误地配置了 v4 令牌
+    if api_key.startswith("eyJ"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="配置的TMDB API Key似乎是v4访问令牌（JWT）。此应用需要v3 API Key，请在设置中更正。"
+        )
+    
     if not domain:
         domain = "https://api.themoviedb.org" # Fallback to default domain
         logger.warning("TMDB API 域名未配置，将使用默认域名。")

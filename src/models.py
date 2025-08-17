@@ -235,6 +235,18 @@ class PasswordChange(BaseModel):
     old_password: str = Field(..., description="当前密码")
     new_password: str = Field(..., min_length=8, description="新密码 (至少8位)")
 
+class EditedImportRequest(BaseModel):
+    """用于编辑后导入的请求体模型"""
+    provider: str
+    media_id: str = Field(..., alias="mediaId")
+    anime_title: str
+    media_type: str
+    season: int
+    image_url: Optional[str] = Field(None, alias="imageUrl")
+    douban_id: Optional[str] = None
+    tmdb_id: Optional[str] = None
+    episodes: List[ProviderEpisodeInfo]
+
 class ControlDirectImportRequest(BaseModel):
     provider: str
     media_id: str

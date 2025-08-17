@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud, models, tasks
-from ..api.ui_api import EditedImportRequest
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
@@ -120,7 +119,7 @@ async def get_episodes(
 
 @router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
 async def edited_import(
-    payload: EditedImportRequest,
+    payload: models.EditedImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
