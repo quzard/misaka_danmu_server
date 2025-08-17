@@ -22,6 +22,7 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 
 class IqiyiVideoLibMeta(BaseModel):
     douban_id: Optional[int] = Field(None, alias="douban_id")
+    filmtv_update_strategy: Optional[str] = Field(None, alias="filmtv_update_strategy")
 
 class IqiyiSearchVideoInfo(BaseModel):
     item_link: str = Field(alias="itemLink")
@@ -77,6 +78,7 @@ class IqiyiDesktopSearchVideo(BaseModel):
 class IqiyiDesktopSearchAlbumInfo(BaseModel):
     qipuId: Optional[str] = None
     playQipuId: Optional[str] = None
+    subscriptContent: Optional[str] = None
     title: Optional[str] = None
     channel: Optional[str] = None
     pageUrl: Optional[str] = None
@@ -307,6 +309,12 @@ class IqiyiScraper(BaseScraper):
                 year_str = (album.year or {}).get("value") or (album.year or {}).get("name")
                 year = int(year_str) if isinstance(year_str, str) and year_str.isdigit() and len(year_str) == 4 else None
 
+                episode_count = len(album.videos) if album.videos else None
+                if album.subscriptContent:
+                    count_match = re.search(r'(\d+)', album.subscriptContent)
+                    if count_match:
+                        episode_count = int(count_match.group(1))
+
                 cleaned_title = re.sub(r'<[^>]+>', '', album.title).replace(":", "：")
                 
                 provider_search_info = models.ProviderSearchInfo(
@@ -316,8 +324,8 @@ class IqiyiScraper(BaseScraper):
                     type=media_type,
                     season=get_season_from_title(cleaned_title),
                     year=year,
-                    imageUrl=album.img or album.imgH,
-                    episodeCount=len(album.videos) if album.videos else None,
+                    imageUrl=album.img or album.imgH, # Use the correct image field
+                    episodeCount=episode_count,
                     currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
                 )
                 results.append(provider_search_info)
@@ -403,6 +411,12 @@ class IqiyiScraper(BaseScraper):
                 channel_name = album.channel.split(',')[0] if album.channel else ""
                 media_type = "movie" if channel_name == "电影" else "tv_series"
 
+                episode_count = album.item_total_number
+                if album.video_lib_meta and album.video_lib_meta.filmtv_update_strategy:
+                    count_match = re.search(r'(\d+)', album.video_lib_meta.filmtv_update_strategy)
+                    if count_match:
+                        episode_count = int(count_match.group(1))
+
                 current_episode = episode_info.get("episode") if episode_info else None
                 cleaned_title = re.sub(r'<[^>]+>', '', album.album_title).replace(":", "：") if album.album_title else "未知标题"
                 provider_search_info = models.ProviderSearchInfo(
@@ -414,7 +428,7 @@ class IqiyiScraper(BaseScraper):
                     year=album.year,
                     imageUrl=album.album_img,
                     douban_id=douban_id,
-                    episodeCount=album.item_total_number,
+                    episodeCount=episode_count,
                     currentEpisodeIndex=current_episode,
                 )
                 self.logger.debug(f"爱奇艺: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
