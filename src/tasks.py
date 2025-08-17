@@ -85,6 +85,7 @@ async def generic_import_task(
     tmdb_id: Optional[str],
     imdb_id: Optional[str],
     tvdb_id: Optional[str],
+    bangumi_id: Optional[str],
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager, 
@@ -132,8 +133,8 @@ async def generic_import_task(
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
             local_image_path = await download_image(image_url, session, provider)
-            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path)
-            await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path) # type: ignore
+            await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id, bangumi_id)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
             logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
 
@@ -351,4 +352,3 @@ async def manual_import_task(
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
-

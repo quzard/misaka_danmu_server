@@ -246,18 +246,6 @@ class EditedImportRequest(BaseModel):
     douban_id: Optional[str] = None
     tmdb_id: Optional[str] = None
     episodes: List[ProviderEpisodeInfo]
-
-class ControlDirectImportRequest(BaseModel):
-    provider: str
-    media_id: str
-    anime_title: str
-    media_type: str
-    season: int
-    image_url: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
-
 class ControlUrlImportRequest(BaseModel):
     url: str
     provider: str

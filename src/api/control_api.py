@@ -1,5 +1,6 @@
 import logging
 import secrets
+import uuid
 from typing import List, Optional, Dict, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -56,16 +57,30 @@ async def verify_api_key(
 
 # --- Pydantic 模型 ---
 
+class ControlSearchResultItem(models.ProviderSearchInfo):
+    result_index: int = Field(..., description="结果在列表中的顺序索引，从0开始")
+
+class ControlSearchResponse(BaseModel):
+    search_id: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
+    results: List[ControlSearchResultItem] = Field(..., description="搜索结果列表")
+
 class ControlDirectImportRequest(BaseModel):
-    provider: str
-    media_id: str
-    anime_title: str
-    media_type: str
-    season: int
-    image_url: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
+    search_id: str = Field(..., description="来自搜索响应的search_id")
+    result_index: int = Field(..., ge=0, description="要导入的结果的索引 (从0开始)")
+    # Optional fields to override or provide metadata IDs during import
+    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
+    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+
+class ControlEditedImportRequest(BaseModel):
+    search_id: str = Field(..., description="来自搜索响应的search_id")
+    result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
+    anime_title: Optional[str] = Field(None, description="覆盖原始标题")
+    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
+    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
 class ControlUrlImportRequest(BaseModel):
     url: str
@@ -77,18 +92,40 @@ class DanmakuOutputSettings(BaseModel):
 
 # --- API 路由 ---
 
-@router.get("/search", response_model=List[models.ProviderSearchInfo], summary="搜索媒体")
+@router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
+    season: Optional[int] = Query(None, description="要搜索的季度 (可选)"),
+    episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
 ):
-    """根据关键词从所有启用的源搜索媒体。"""
+    """
+    根据关键词从所有启用的源搜索媒体。
+    返回一个包含 search_id 和结果列表的响应，用于后续的导入操作。
+    """
     try:
-        results = await manager.search_all([keyword])
-        await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。")
-        return results
+        episode_info = None
+        if season is not None or episode is not None:
+            episode_info = {"season": season, "episode": episode}
+
+        results = await manager.search_all([keyword], episode_info=episode_info)
+        
+        search_id = str(uuid.uuid4())
+        
+        # Add index to each result
+        indexed_results = [
+            ControlSearchResultItem(**r.model_dump(), result_index=i)
+            for i, r in enumerate(results)
+        ]
+        
+        # Cache the full results with the search_id. Use a short TTL.
+        await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in results], 600) # 10 minutes TTL
+        
+        await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。Search ID: {search_id}")
+        
+        return ControlSearchResponse(search_id=search_id, results=indexed_results)
     except Exception as e:
         await crud.create_external_api_log(session, "N/A", "/search", 500, f"搜索 '{keyword}' 失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -96,18 +133,39 @@ async def search_media(
 @router.post("/import/direct", status_code=status.HTTP_202_ACCEPTED, summary="直接导入搜索结果")
 async def direct_import(
     payload: ControlDirectImportRequest,
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
 ):
-    """直接导入一个指定的搜索结果。"""
-    task_title = f"外部API导入: {payload.anime_title} ({payload.provider})"
+    """通过 search_id 和 result_index 从缓存的搜索结果中选择一个进行导入。"""
+    cache_key = f"control_search_{payload.search_id}"
+    cached_results_raw = await crud.get_cache(session, cache_key)
+    
+    if cached_results_raw is None:
+        raise HTTPException(status_code=404, detail="搜索会话已过期或无效，请重新搜索。")
+    
+    try:
+        cached_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results_raw]
+    except Exception:
+        raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
+
+    if not (0 <= payload.result_index < len(cached_results)):
+        raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
+        
+    item_to_import = cached_results[payload.result_index]
+
+    task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
     task_coro = lambda session, cb: tasks.generic_import_task(
-        provider=payload.provider, media_id=payload.media_id,
-        anime_title=payload.anime_title, media_type=payload.media_type,
-        season=payload.season, current_episode_index=None,
-        image_url=payload.image_url, douban_id=None,
-        tmdb_id=payload.tmdb_id, imdb_id=None, tvdb_id=payload.tvdb_id,
+        provider=item_to_import.provider, media_id=item_to_import.mediaId,
+        anime_title=item_to_import.title, media_type=item_to_import.type,
+        season=item_to_import.season, current_episode_index=item_to_import.currentEpisodeIndex,
+        image_url=item_to_import.imageUrl,
+        douban_id=payload.douban_id or item_to_import.douban_id,
+        tmdb_id=payload.tmdb_id,
+        imdb_id=payload.imdb_id,
+        tvdb_id=payload.tvdb_id,
+        bangumi_id=payload.bangumi_id,
         progress_callback=cb, session=session, manager=manager, task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -115,25 +173,73 @@ async def direct_import(
 
 @router.get("/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
 async def get_episodes(
-    provider: str, media_id: str, media_type: str,
+    search_id: str = Query(..., description="来自/search接口的search_id"),
+    result_index: int = Query(..., ge=0, description="要获取分集的结果的索引"),
+    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
 ):
-    """获取一个搜索结果的完整分集列表，用于编辑后导入。"""
-    scraper = manager.get_scraper(provider)
-    return await scraper.get_episodes(media_id, db_media_type=media_type)
+    """通过 search_id 和 result_index 获取一个搜索结果的完整分集列表，用于编辑后导入。"""
+    cache_key = f"control_search_{search_id}"
+    cached_results_raw = await crud.get_cache(session, cache_key)
+    
+    if cached_results_raw is None:
+        raise HTTPException(status_code=404, detail="搜索会话已过期或无效，请重新搜索。")
+    
+    try:
+        cached_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results_raw]
+    except Exception:
+        raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
+
+    if not (0 <= result_index < len(cached_results)):
+        raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
+        
+    item_to_fetch = cached_results[result_index]
+    
+    scraper = manager.get_scraper(item_to_fetch.provider)
+    return await scraper.get_episodes(item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
 
 @router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
 async def edited_import(
-    payload: models.EditedImportRequest,
+    payload: ControlEditedImportRequest,
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
 ):
-    """导入一个经过编辑的分集列表。"""
-    task_title = f"外部API编辑后导入: {payload.anime_title} ({payload.provider})"
+    """通过 search_id 和 result_index 导入一个经过编辑的分集列表。"""
+    cache_key = f"control_search_{payload.search_id}"
+    cached_results_raw = await crud.get_cache(session, cache_key)
+    
+    if cached_results_raw is None:
+        raise HTTPException(status_code=404, detail="搜索会话已过期或无效，请重新搜索。")
+    
+    try:
+        cached_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results_raw]
+    except Exception:
+        raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
+
+    if not (0 <= payload.result_index < len(cached_results)):
+        raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
+        
+    item_info = cached_results[payload.result_index]
+
+    # Construct the full EditedImportRequest for the task
+    task_payload = models.EditedImportRequest(
+        provider=item_info.provider,
+        mediaId=item_info.mediaId,
+        anime_title=payload.anime_title or item_info.title,
+        media_type=item_info.type,
+        season=item_info.season,
+        image_url=item_info.imageUrl,
+        douban_id=payload.douban_id or item_info.douban_id,
+        tmdb_id=payload.tmdb_id,
+        episodes=payload.episodes
+    )
+
+    task_title = f"外部API编辑后导入: {task_payload.anime_title} ({task_payload.provider})"
     task_coro = lambda session, cb: tasks.edited_import_task(
-        request_data=payload, progress_callback=cb, session=session, manager=manager
+        request_data=task_payload, progress_callback=cb, session=session, manager=manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": "编辑后导入任务已提交", "task_id": task_id}

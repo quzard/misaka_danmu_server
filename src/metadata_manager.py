@@ -64,6 +64,12 @@ class MetadataSourceManager:
                 # 并调用具体的实现
                 await update_tmdb_mappings_for_tv_group(session, client, tmdb_tv_id, group_id)
             self.logger.info(f"管理器: 成功更新了 TV ID {tmdb_tv_id} 和 Group ID {group_id} 的TMDB映射。")
+        except httpx.TimeoutException:
+            self.logger.error(f"管理器: 更新TMDB映射时发生超时错误 (ID: {tmdb_tv_id})。请检查您的网络连接、代理设置或TMDB服务器状态。")
+        except httpx.ConnectError as e:
+            self.logger.error(f"管理器: 更新TMDB映射时发生连接错误 (ID: {tmdb_tv_id})。请检查TMDB服务器是否可达或您的网络/代理设置。错误: {e}")
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"管理器: 更新TMDB映射时收到非2xx的HTTP状态码 (ID: {tmdb_tv_id}): {e.response.status_code} - 响应: {e.response.text}")
         except Exception as e:
             self.logger.error(f"管理器: 更新TMDB映射时发生错误: {e}", exc_info=True)
             # 不重新抛出异常，只记录错误。主操作不应因此失败。

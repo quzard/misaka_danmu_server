@@ -400,7 +400,7 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
     await session.commit()
     return new_source.id
 
-async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id: Optional[str], imdb_id: Optional[str], tvdb_id: Optional[str], douban_id: Optional[str]):
+async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id: Optional[str], imdb_id: Optional[str], tvdb_id: Optional[str], douban_id: Optional[str], bangumi_id: Optional[str] = None):
     """仅当字段为空时，才更新番剧的元数据ID。"""
     stmt = select(AnimeMetadata).where(AnimeMetadata.anime_id == anime_id)
     result = await session.execute(stmt)
@@ -414,6 +414,7 @@ async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id
     if not metadata.imdb_id and imdb_id: metadata.imdb_id = imdb_id; updated = True
     if not metadata.tvdb_id and tvdb_id: metadata.tvdb_id = tvdb_id; updated = True
     if not metadata.douban_id and douban_id: metadata.douban_id = douban_id; updated = True
+    if not metadata.bangumi_id and bangumi_id: metadata.bangumi_id = bangumi_id; updated = True
 
     if updated:
         await session.commit()

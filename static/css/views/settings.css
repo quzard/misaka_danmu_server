@@ -19,6 +19,13 @@
     top: 1px;
     transition: all 0.2s ease;
 }
+    
+    .settings-subview {
+        /* 新增：让子视图可以填充父容器的剩余空间 */
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+    }
 
 .sub-nav-btn:hover {
     background-color: var(--secondary-color);
@@ -80,9 +87,6 @@ textarea#douban-cookie {
 /* --- API Documentation Iframe Styles --- */
 #external-api-docs-subview {
     padding: 0; /* Remove padding to let iframe fill the space */
-    height: 100%; /* Make it fill the parent's height */
-    display: flex; /* Use flexbox to manage the iframe */
-    flex-direction: column;
 }
 
 #swagger-ui-iframe {
