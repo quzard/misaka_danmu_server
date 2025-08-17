@@ -344,6 +344,16 @@ async def get_anime_details(animeid: int, session: AsyncSession = Depends(get_db
     if not details: raise HTTPException(404, "作品未找到")
     return models.AnimeFullDetails.model_validate(details)
 
+@library_router.get("/anime/{animeid}/sources", response_model=List[models.SourceInfo], summary="获取作品的所有数据源")
+async def get_anime_sources(animeid: int, session: AsyncSession = Depends(get_db_session)):
+    """获取指定作品关联的所有数据源列表。"""
+    # First, check if the anime exists to provide a proper 404.
+    anime_exists = await crud.get_anime_full_details(session, animeid)
+    if not anime_exists:
+        raise HTTPException(status_code=404, detail="作品未找到")
+    sources = await crud.get_anime_sources(session, animeid)
+    return [models.SourceInfo.model_validate(s) for s in sources]
+
 @library_router.put("/anime/{animeid}", response_model=ControlActionResponse, summary="编辑作品信息")
 async def edit_anime(animeid: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):
     if not await crud.update_anime_details(session, animeid, payload):
@@ -489,4 +499,3 @@ router.include_router(library_router)
 router.include_router(danmaku_router)
 router.include_router(token_router)
 router.include_router(settings_router)
-
