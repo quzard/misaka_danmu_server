@@ -523,47 +523,6 @@
                             </form>
                         </div>
                     </div>
-                    <div id="token-manager-view" class="content-view hidden">
-                        <div class="library-header">
-                            <h2>弹幕Token管理</h2>
-                            <button id="add-token-btn">添加Token</button>
-                        </div>
-                        <p>本项目参考了<a href="https://api.dandanplay.net/swagger/index.html" target="_blank">dandanplayapi</a>，同时增加了使用访问令牌管理弹幕api,支持<a href="https://t.me/yamby_release" target="_blank">yamby</a>、<a href="https://play.google.com/store/search?q=hills&c=apps" target="_blank">hills</a>、<a href="https://apps.microsoft.com/detail/9NB0H051M4V4" target="_blank">小幻影视</a>。</p>
-                        <div class="domain-config-section">
-                            <h3>自定义域名设置</h3>
-                            <p>设置后，复制按钮将自动拼接 "http(s)://域名(ip):端口(port)/api/v1/Token值" 格式的完整URL。</p>
-                            <div class="form-row">
-                                <label for="custom-domain-input">自定义域名</label>
-                                <input type="text" id="custom-domain-input" placeholder="例如: https://danmu.example.com">
-                                <button id="save-domain-btn">保存域名</button>
-                            </div>
-                            <p id="domain-save-message" class="message"></p>
-                        </div>
-                        <div class="ua-filter-section">
-                            <h3>全局 User-Agent 过滤</h3>
-                            <p>对所有通过Token的访问请求进行UA过滤。模式为 "off" 时不过滤。</p>
-                            <div class="form-row">
-                                <label for="ua-filter-mode">过滤模式</label>
-                                <select id="ua-filter-mode">
-                                    <option value="off">关闭 (Off)</option>
-                                    <option value="blacklist">黑名单 (Blacklist)</option>
-                                    <option value="whitelist">白名单 (Whitelist)</option>
-                                </select>
-                                <button id="save-ua-mode-btn">保存模式</button>
-                                <button id="manage-ua-list-btn">管理名单</button>
-                            </div>
-                            <p id="ua-mode-save-message" class="message"></p>
-                        </div>
-                        <table id="token-table">
-                            <thead>
-                                <tr>
-                                    <th>名称</th><th>Token</th><th>状态</th><th>创建时间</th><th>有效期</th><th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            </tbody>
-                        </table>
-                    </div>
                     <div id="add-token-view" class="content-view hidden">
                         <h2>添加新Token</h2>
                         <form id="add-token-form">
@@ -589,12 +548,53 @@
                             </div>
                         </form>
                     </div>
-                    <div id="danmaku-control-view" class="content-view hidden">
-                        <h2>弹幕控制</h2>
+                    <div id="token-manager-view" class="content-view hidden">
+                        <h2>弹幕</h2>
                         <div class="settings-sub-nav">
-                            <button class="sub-nav-btn active" data-subview="output-control-subview">输出控制</button>
+                            <button class="sub-nav-btn active" data-subview="token-management-subview">Token管理</button>
+                            <button class="sub-nav-btn" data-subview="danmaku-output-subview">弹幕输出控制</button>
                         </div>
-                        <div id="output-control-subview" class="settings-subview">
+
+                        <div id="token-management-subview" class="settings-subview">
+                            <div class="library-header">
+                                <h3>Token管理</h3>
+                                <button id="add-token-btn">添加Token</button>
+                            </div>
+                            <p>本项目参考了<a href="https://api.dandanplay.net/swagger/index.html" target="_blank">dandanplayapi</a>，同时增加了使用访问令牌管理弹幕api,支持<a href="https://t.me/yamby_release" target="_blank">yamby</a>、<a href="https://play.google.com/store/search?q=hills&c=apps" target="_blank">hills</a>、<a href="https://apps.microsoft.com/detail/9NB0H051M4V4" target="_blank">小幻影视</a>。</p>
+                            <div class="domain-config-section">
+                                <h3>自定义域名设置</h3>
+                                <p>设置后，复制按钮将自动拼接 "http(s)://域名(ip):端口(port)/api/v1/Token值" 格式的完整URL。</p>
+                                <div class="form-row">
+                                    <label for="custom-domain-input">自定义域名</label>
+                                    <input type="text" id="custom-domain-input" placeholder="例如: https://danmu.example.com">
+                                    <button id="save-domain-btn">保存域名</button>
+                                </div>
+                                <p id="domain-save-message" class="message"></p>
+                            </div>
+                            <div class="ua-filter-section">
+                                <h3>全局 User-Agent 过滤</h3>
+                                <p>对所有通过Token的访问请求进行UA过滤。模式为 "off" 时不过滤。</p>
+                                <div class="form-row">
+                                    <label for="ua-filter-mode">过滤模式</label>
+                                    <select id="ua-filter-mode">
+                                        <option value="off">关闭 (Off)</option>
+                                        <option value="blacklist">黑名单 (Blacklist)</option>
+                                        <option value="whitelist">白名单 (Whitelist)</option>
+                                    </select>
+                                    <button id="save-ua-mode-btn">保存模式</button>
+                                    <button id="manage-ua-list-btn">管理名单</button>
+                                </div>
+                                <p id="ua-mode-save-message" class="message"></p>
+                            </div>
+                            <table id="token-table">
+                                <thead>
+                                    <tr><th>名称</th><th>Token</th><th>状态</th><th>创建时间</th><th>有效期</th><th>操作</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <div id="danmaku-output-subview" class="settings-subview hidden">
                             <div class="form-card">
                                 <h3>弹幕输出控制</h3>
                                 <p>在这里调整弹幕API的输出行为。</p>
