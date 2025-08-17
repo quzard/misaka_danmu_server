@@ -111,11 +111,11 @@ async def lifespan(app: FastAPI):
         await app.state.scheduler_manager.stop()
 
 app = FastAPI(
-    title="Danmaku API",
-    description="一个基于dandanplay API风格的弹幕服务",
+    title="Misaka Danmaku External Control API",
+    description="用于外部自动化和集成的API。所有端点都需要通过 `?api_key=` 进行鉴权。",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/api/docs",  # 为Swagger UI设置自定义路径
+    docs_url="/api/control/docs",  # 为外部控制API设置专用的文档路径
     redoc_url=None         # 禁用ReDoc
 )
 @app.middleware("http")
@@ -171,7 +171,7 @@ app.mount("/images", StaticFiles(directory="config/image"), name="images")
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
 
-app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"])
+app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
 # 根路径返回前端页面
 @app.get("/", include_in_schema=False)
