@@ -226,3 +226,12 @@ class TaskHistory(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
 
     __table_args__ = (Index('idx_created_at', 'created_at', mysql_length={'created_at': None}),)
+
+class ExternalApiLog(Base):
+    __tablename__ = "external_api_logs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    access_time: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    ip_address: Mapped[str] = mapped_column(String(45))
+    endpoint: Mapped[str] = mapped_column(String(255))
+    status_code: Mapped[int] = mapped_column(Integer)
+    message: Mapped[Optional[str]] = mapped_column(TEXT)

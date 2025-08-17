@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse # noqa: F401
 import json
 from .config_manager import ConfigManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
@@ -166,12 +166,7 @@ app.mount("/images", StaticFiles(directory="config/image"), name="images")
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
 
-# 包含新增的外部API路由
-app.include_router(external_api.router, prefix="/api/v1/external", tags=["External API"])
-
-# 将最通用的 dandan_router 挂载在最后，以避免路径冲突。
-# 这样可以确保像 /api/ui 这样的静态路径会优先于 /api/{token} 被匹配。
-app.include_router(dandan_router, prefix="/api", tags=["DanDanPlay Compatible"])
+app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"])
 
 # 根路径返回前端页面
 @app.get("/", include_in_schema=False)
