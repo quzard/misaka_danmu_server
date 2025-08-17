@@ -180,7 +180,15 @@ async def edited_import_task(
         if comments and anime_id is None:
             local_image_path = await download_image(request_data.image_url, session, request_data.provider)
             anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
-            await crud.update_metadata_if_empty(session, anime_id, request_data.tmdb_id, None, None, request_data.douban_id)
+            await crud.update_metadata_if_empty(
+                session, anime_id, 
+                tmdb_id=request_data.tmdb_id, 
+                imdb_id=request_data.imdb_id, 
+                tvdb_id=request_data.tvdb_id, 
+                douban_id=request_data.douban_id,
+                bangumi_id=request_data.bangumi_id,
+                tmdb_episode_group_id=request_data.tmdb_episode_group_id
+            )
             source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.media_id)
 
         if anime_id and source_id:

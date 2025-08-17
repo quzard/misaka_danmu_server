@@ -58,7 +58,6 @@ class ProviderSearchInfo(BaseModel):
     season: int = Field(1, description="季度, 默认为1")
     year: Optional[int] = Field(None, description="发行年份")
     imageUrl: Optional[str] = Field(None, description="封面图片URL")
-    douban_id: Optional[str] = Field(None, description="豆瓣ID (如果可用)")
     episodeCount: Optional[int] = Field(None, description="总集数")
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索词指定了集数，则为当前集数")
 
@@ -245,7 +244,12 @@ class EditedImportRequest(BaseModel):
     image_url: Optional[str] = Field(None, alias="imageUrl")
     douban_id: Optional[str] = None
     tmdb_id: Optional[str] = None
+    imdb_id: Optional[str] = None
+    tvdb_id: Optional[str] = None
+    bangumi_id: Optional[str] = None
+    tmdb_episode_group_id: Optional[str] = None
     episodes: List[ProviderEpisodeInfo]
+
 class ControlUrlImportRequest(BaseModel):
     url: str
     provider: str

@@ -79,6 +79,10 @@ class ControlEditedImportRequest(BaseModel):
     result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
     anime_title: Optional[str] = Field(None, description="覆盖原始标题")
     tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tmdb_episode_group_id: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
+    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
     douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
@@ -97,6 +101,7 @@ async def search_media(
     keyword: str,
     season: Optional[int] = Query(None, description="要搜索的季度 (可选)"),
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
+    media_type: Optional[str] = Query(None, description="媒体类型过滤 ('tv_series' 或 'movie')"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     _: Any = Depends(verify_api_key),
@@ -112,6 +117,11 @@ async def search_media(
 
         results = await manager.search_all([keyword], episode_info=episode_info)
         
+        # 新增：根据用户指定的类型过滤结果
+        if media_type and media_type in ["tv_series", "movie"]:
+            results = [r for r in results if r.type == media_type]
+            logger.info(f"已将结果过滤为类型: '{media_type}'，剩余 {len(results)} 个结果。")
+
         search_id = str(uuid.uuid4())
         
         # Add index to each result
@@ -160,8 +170,7 @@ async def direct_import(
         provider=item_to_import.provider, media_id=item_to_import.mediaId,
         anime_title=item_to_import.title, media_type=item_to_import.type,
         season=item_to_import.season, current_episode_index=item_to_import.currentEpisodeIndex,
-        image_url=item_to_import.imageUrl,
-        douban_id=payload.douban_id or item_to_import.douban_id,
+        image_url=item_to_import.imageUrl, douban_id=payload.douban_id,
         tmdb_id=payload.tmdb_id,
         imdb_id=payload.imdb_id,
         tvdb_id=payload.tvdb_id,
@@ -232,8 +241,12 @@ async def edited_import(
         media_type=item_info.type,
         season=item_info.season,
         image_url=item_info.imageUrl,
-        douban_id=payload.douban_id or item_info.douban_id,
+        douban_id=payload.douban_id,
         tmdb_id=payload.tmdb_id,
+        imdb_id=payload.imdb_id,
+        tvdb_id=payload.tvdb_id,
+        bangumi_id=payload.bangumi_id,
+        tmdb_episode_group_id=payload.tmdb_episode_group_id,
         episodes=payload.episodes
     )
 

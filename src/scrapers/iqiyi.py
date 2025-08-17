@@ -427,7 +427,6 @@ class IqiyiScraper(BaseScraper):
                     season=get_season_from_title(cleaned_title),
                     year=album.year,
                     imageUrl=album.album_img,
-                    douban_id=douban_id,
                     episodeCount=episode_count,
                     currentEpisodeIndex=current_episode,
                 )
