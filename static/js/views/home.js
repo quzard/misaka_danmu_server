@@ -2,6 +2,7 @@ import { apiFetch } from '../api.js';
 import { toggleLoader, switchView } from '../ui.js';
 
 let logRefreshInterval = null;
+let isSearchInProgress = false; // 新增：用于跟踪搜索任务状态的标志
 let currentSearchData = { results: [], searchSeason: null, keyword: '' };
 let itemsForBulkImport = [];
 
@@ -177,6 +178,12 @@ async function handleSearch(e) {
         return;
     }
 
+    // 新增：检查是否已有搜索任务在运行
+    if (isSearchInProgress) {
+        alert('上一个搜索任务正在运行中，请稍后再试。');
+        return;
+    }
+
     // --- 新增：前端缓存逻辑 ---
     const { title: newTitle, season: newSeason, episode: newEpisode } = parseSearchKeyword(keyword);
     const { title: lastTitle, season: lastSeason, episode: lastEpisode } = parseSearchKeyword(currentSearchData.keyword);
@@ -204,6 +211,11 @@ async function handleSearch(e) {
 
     document.getElementById('results-list').innerHTML = '';
     toggleLoader(true);
+    isSearchInProgress = true; // 设置标志位
+    const searchButton = e.target.querySelector('button[type="submit"]');
+    if (searchButton) {
+        searchButton.disabled = true;
+    }
 
     try {
         const data = await apiFetch(`/api/ui/search/provider?keyword=${encodeURIComponent(keyword)}`);
@@ -216,6 +228,10 @@ async function handleSearch(e) {
         alert(`搜索失败: ${(error.message || error)}`);
     } finally {
         toggleLoader(false);
+        isSearchInProgress = false; // 释放标志位
+        if (searchButton) {
+            searchButton.disabled = false;
+        }
     }
 }
 

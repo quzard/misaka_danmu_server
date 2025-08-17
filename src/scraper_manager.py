@@ -22,10 +22,28 @@ class ScraperManager:
         self._session_factory = session_factory
         self._domain_map: Dict[str, str] = {}
         self._public_key = None
+        self._search_locks: set[str] = set()
+        self._lock = asyncio.Lock()
         self._verified_scrapers: set[str] = set()
         self._verification_enabled: bool = False
         self.config_manager = config_manager
         # 注意：加载逻辑现在是异步的，将在应用启动时调用
+
+    async def acquire_search_lock(self, api_key: str) -> bool:
+        """Acquires a search lock for a given API key. Returns False if already locked."""
+        async with self._lock:
+            if api_key in self._search_locks:
+                logging.getLogger(__name__).warning(f"API key '{api_key[:8]}...' tried to start a new search while another was running.")
+                return False
+            self._search_locks.add(api_key)
+            logging.getLogger(__name__).info(f"Search lock acquired for API key '{api_key[:8]}...'.")
+            return True
+
+    async def release_search_lock(self, api_key: str):
+        """Releases the search lock for a given API key."""
+        async with self._lock:
+            self._search_locks.discard(api_key)
+            logging.getLogger(__name__).info(f"Search lock released for API key '{api_key[:8]}...'.")
 
     def _load_public_key(self):
         """从 src/public_key.pem 加载公钥。"""

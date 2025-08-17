@@ -99,6 +99,7 @@ class DanmakuOutputSettings(BaseModel):
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
+    api_key: str = Query(..., description="外部访问API密钥"),
     season: Optional[int] = Query(None, description="要搜索的季度 (可选)"),
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     media_type: Optional[str] = Query(None, description="媒体类型过滤 ('tv_series' 或 'movie')"),
@@ -110,35 +111,43 @@ async def search_media(
     根据关键词从所有启用的源搜索媒体。
     返回一个包含 search_id 和结果列表的响应，用于后续的导入操作。
     """
+    if not await manager.acquire_search_lock(api_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="A search is already in progress for this API key. Please wait for it to complete."
+        )
     try:
-        episode_info = None
-        if season is not None or episode is not None:
-            episode_info = {"season": season, "episode": episode}
+        try:
+            episode_info = None
+            if season is not None or episode is not None:
+                episode_info = {"season": season, "episode": episode}
 
-        results = await manager.search_all([keyword], episode_info=episode_info)
-        
-        # 新增：根据用户指定的类型过滤结果
-        if media_type and media_type in ["tv_series", "movie"]:
-            results = [r for r in results if r.type == media_type]
-            logger.info(f"已将结果过滤为类型: '{media_type}'，剩余 {len(results)} 个结果。")
+            results = await manager.search_all([keyword], episode_info=episode_info)
+            
+            # 新增：根据用户指定的类型过滤结果
+            if media_type and media_type in ["tv_series", "movie"]:
+                results = [r for r in results if r.type == media_type]
+                logger.info(f"已将结果过滤为类型: '{media_type}'，剩余 {len(results)} 个结果。")
 
-        search_id = str(uuid.uuid4())
-        
-        # Add index to each result
-        indexed_results = [
-            ControlSearchResultItem(**r.model_dump(), result_index=i)
-            for i, r in enumerate(results)
-        ]
-        
-        # Cache the full results with the search_id. Use a short TTL.
-        await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in results], 600) # 10 minutes TTL
-        
-        await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。Search ID: {search_id}")
-        
-        return ControlSearchResponse(search_id=search_id, results=indexed_results)
-    except Exception as e:
-        await crud.create_external_api_log(session, "N/A", "/search", 500, f"搜索 '{keyword}' 失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            search_id = str(uuid.uuid4())
+            
+            # Add index to each result
+            indexed_results = [
+                ControlSearchResultItem(**r.model_dump(), result_index=i)
+                for i, r in enumerate(results)
+            ]
+            
+            # Cache the full results with the search_id. Use a short TTL.
+            await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in results], 600) # 10 minutes TTL
+            
+            await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。Search ID: {search_id}")
+            
+            return ControlSearchResponse(search_id=search_id, results=indexed_results)
+        except Exception as e:
+            await crud.create_external_api_log(session, "N/A", "/search", 500, f"搜索 '{keyword}' 失败: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await manager.release_search_lock(api_key)
 
 @router.post("/import/direct", status_code=status.HTTP_202_ACCEPTED, summary="直接导入搜索结果")
 async def direct_import(
