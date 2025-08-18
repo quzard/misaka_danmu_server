@@ -406,6 +406,34 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
         raise
 
+async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
+    """后台任务：增量刷新一个已存在的番剧。"""
+    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
+    source_info = await crud.get_anime_source_info(session, source_id)
+    if not source_info:
+        progress_callback(100, "失败: 找不到源信息")
+        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
+        return
+    try:
+        # 重新执行通用导入逻辑, 只导入指定的一集
+        await generic_import_task(
+            provider=source_info["providerName"],
+            media_id=source_info["mediaId"],
+            anime_title=anime_title,
+            media_type=source_info["type"],
+            season=source_info.get("season", 1),
+            current_episode_index=next_episode_index,
+            image_url=None,
+            douban_id=None, tmdb_id=source_info.get("tmdbId"),
+            imdb_id=None, tvdb_id=None, bangumi_id=source_info.get("bangumiId"),
+            progress_callback=progress_callback,
+            session=session,
+            manager=manager,
+            task_manager=task_manager)
+    except Exception as e:
+        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
+        raise
+
 async def manual_import_task(
     source_id: int, title: str, episode_index: int, url: str, provider_name: str,
     progress_callback: Callable, session: AsyncSession, manager: ScraperManager

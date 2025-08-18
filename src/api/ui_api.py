@@ -390,7 +390,7 @@ async def delete_bulk_episodes(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episodeIds)} 个分集的任务 (Task ID: {task_id})。")
-    return {"message": task_title + "的任务已提交。", "task_id": task_id}
+    return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
 
 @router.put("/library/source/{sourceId}/favorite", status_code=status.HTTP_204_NO_CONTENT, summary="切换数据源的精确标记状态")
@@ -469,7 +469,7 @@ async def reorder_source_episodes(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {sourceId} 集数的任务 (Task ID: {task_id})。")
-    return {"message": f"重整集数任务 '{task_title}' 已提交。", "task_id": task_id}
+    return {"message": f"重整集数任务 '{task_title}' 已提交。", "taskId": task_id}
 
 @router.post("/library/source/{sourceId}/incremental-refresh", status_code=status.HTTP_202_ACCEPTED, summary="增量刷新指定源")
 async def incremental_refresh_source(
@@ -495,38 +495,10 @@ async def incremental_refresh_source(
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
 
     # 从新集信息创建任务
-    task_coro = lambda session, callback: incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
+    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
     task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['provider_name']}) - 尝试获取第{next_episode_index}集")
 
-    return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "task_id": task_id}
-
-async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
-    """后台任务：增量刷新一个已存在的番剧。"""
-    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
-    source_info = await crud.get_anime_source_info(session, source_id)
-    if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
-        return
-    try:
-        # 重新执行通用导入逻辑, 只导入指定的一集
-        await tasks.generic_import_task(
-            provider=source_info["providerName"],
-            media_id=source_info["mediaId"],
-            anime_title=anime_title,
-            media_type=source_info["type"],
-            season=source_info.get("season", 1),
-            current_episode_index=next_episode_index,
-            image_url=None,
-            douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
-            imdb_id=None, tvdb_id=None,
-            progress_callback=progress_callback,
-            session=session,
-            manager=manager,
-            task_manager=task_manager)
-    except Exception as e:
-        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
-        raise
+    return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "taskId": task_id}
 
 
 @router.delete("/library/episode/{episodeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务")
@@ -547,7 +519,7 @@ async def delete_episode_from_source(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})。")
-    return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "task_id": task_id}
+    return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "taskId": task_id}
 
 @router.post("/library/episode/{episodeId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新单个分集的弹幕")
 async def refresh_single_episode(
@@ -570,7 +542,7 @@ async def refresh_single_episode(
     task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "task_id": task_id}
+    return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
 
 @router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="全量刷新指定源的弹幕")
 async def refresh_anime(
@@ -590,7 +562,7 @@ async def refresh_anime(
     task_coro = lambda session, callback: tasks.full_refresh_task(sourceId, session, scraper_manager, task_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['provider_name']})")
 
-    return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "task_id": task_id}
+    return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "taskId": task_id}
 
 @router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务")
 async def delete_anime_from_library(
@@ -633,7 +605,7 @@ async def delete_bulk_sources(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
-    return {"message": task_title + "的任务已提交。", "task_id": task_id}
+    return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
 @router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
@@ -1667,7 +1639,7 @@ async def import_from_provider(
     # 提交任务并获取任务ID
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    return {"message": f"'{request_data.anime_title}' 的导入任务已提交。", "task_id": task_id}
+    return {"message": f"'{request_data.anime_title}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
 @router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
 async def import_edited_episodes(
@@ -1685,7 +1657,7 @@ async def import_edited_episodes(
         manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "task_id": task_id}
+    return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
 async def login_for_access_token(

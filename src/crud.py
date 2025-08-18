@@ -564,7 +564,7 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
     stmt = (
         select(
             AnimeSource.id.label("sourceId"), AnimeSource.anime_id.label("animeId"), AnimeSource.provider_name.label("providerName"), AnimeSource.media_id.label("mediaId"),
-            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdb_id.label("tmdbId")
+            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdb_id.label("tmdbId"), AnimeMetadata.bangumi_id.label("bangumiId")
         )
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
