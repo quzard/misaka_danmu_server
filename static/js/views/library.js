@@ -174,8 +174,8 @@ function renderSourceDetailTable(sources, anime) {
             }
             row.innerHTML = `
                 <td><input type="checkbox" class="source-checkbox" value="${source.sourceId}"></td>
-                <td>${source.provider_name}</td>
-                <td>${source.media_id}</td>
+                <td>${source.providerName}</td>
+                <td>${source.mediaId}</td>
                 <td class="status-cell">${statusIcons.join(' ')}</td>
                 <td>${new Date(source.createdAt).toLocaleString()}</td>
                 <td class="actions-cell">
