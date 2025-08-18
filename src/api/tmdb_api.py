@@ -64,58 +64,13 @@ async def get_tmdb_client(
     session: AsyncSession = Depends(get_db_session),
 ) -> httpx.AsyncClient:
     """依赖项：创建一个带有 TMDB 授权的 httpx 客户端。"""
-    # Proxy logic
-    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
-    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
-    metadata_settings_task = crud.get_all_metadata_source_settings(session)
-
-    proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
-        proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
-    )
-    proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
-
-    tmdb_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
-    use_proxy_for_tmdb = tmdb_setting.get('use_proxy', False) if tmdb_setting else False
-
-    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_tmdb and proxy_url else None
-
-    # Fetch all configs in parallel
-    keys = ["tmdb_api_key", "tmdb_api_base_url"]
-    tasks = [crud.get_config_value(session, key, "") for key in keys]
-    api_key, domain = await asyncio.gather(*tasks)
-
-    if not api_key:
+    try:
+        return await _create_tmdb_client(session)
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="TMDB API Key not configured. Please set it in the settings page."
+            detail=str(e)
         )
-    
-    # 新增：检查用户是否错误地配置了 v4 令牌
-    if api_key.startswith("eyJ"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="配置的TMDB API Key似乎是v4访问令牌（JWT）。此应用需要v3 API Key，请在设置中更正。"
-        )
-    
-    if not domain:
-        domain = "https://api.themoviedb.org" # Fallback to default domain
-        logger.warning("TMDB API 域名未配置，将使用默认域名。")
-
-    # 从域名构建完整的 API 基础 URL
-    # 增加健壮性：如果用户输入的域名已经包含了 /3，则不再重复添加
-    cleaned_domain = domain.rstrip('/')
-    if cleaned_domain.endswith('/3'):
-        base_url = cleaned_domain
-    else:
-        base_url = f"{cleaned_domain}/3"
-
-    # TMDB v3 API 使用 api_key 查询参数进行身份验证
-    params = {"api_key": api_key}
-    headers = {
-        # 使用一个更通用的 User-Agent
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0, proxy=proxies)
 
 # --- Pydantic Models for TMDB API ---
 # Most models have been moved to src/models.py.
@@ -421,9 +376,9 @@ async def get_tmdb_details(
             # Handle potential 401/404 from the main request
             if isinstance(details_cn_res, httpx.Response):
                 if details_cn_res.status_code == 401:
-                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TMDB API Key 无效或未授权。")
+                    raise ValueError("TMDB API Key 无效或未授权。")
                 if details_cn_res.status_code == 404:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到 TMDB 条目。")
+                    raise ValueError("未找到 TMDB 条目。")
             
             logger.error(f"获取 TMDB 中文详情失败 (ID: {tmdb_id}): {details_cn_res}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取 TMDB 详情失败 (ID: {tmdb_id})。")
@@ -496,15 +451,27 @@ async def get_tmdb_details(
         
         cleaned_aliases_cn = [_clean_movie_title(alias) for alias in aliases_cn if alias]
 
-        return {
-            "id": details.id,
-            "imdb_id": imdb_id,
-            "tvdb_id": tvdb_id,
-            "name_en": _clean_movie_title(name_en),
-            "name_jp": _clean_movie_title(name_jp),
-            "name_romaji": _clean_movie_title(name_romaji),
-            "aliases_cn": list(dict.fromkeys(cleaned_aliases_cn)) # Deduplicate
-        }
+        return models.MetadataDetailsResponse(
+            id=str(details.id), tmdbId=str(details.id), title=main_title_cn,
+            imdbId=imdb_id,
+            tvdbId=str(tvdb_id) if tvdb_id else None,
+            nameEn=_clean_movie_title(name_en),
+            nameJp=_clean_movie_title(name_jp),
+            nameRomaji=_clean_movie_title(name_romaji),
+            aliasesCn=list(dict.fromkeys(cleaned_aliases_cn))
+        )
+
+@router.get("/details/{media_type}/{tmdb_id}", response_model=models.MetadataDetailsResponse, summary="获取 TMDB 作品详情")
+async def get_tmdb_details(
+    media_type: str = Path(..., description="媒体类型, 'tv' 或 'movie'"),
+    tmdb_id: int = Path(..., description="TMDB ID"),
+    season: Optional[int] = Query(None, description="要专门为其获取别名的季度号"),
+    client: httpx.AsyncClient = Depends(get_tmdb_client),
+):
+    try:
+        return await get_tmdb_details_logic(client=client, media_type=media_type, tmdb_id=tmdb_id, season=season)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 @router.get("/tv/{tmdb_id}/episode_groups", response_model=List[TMDBEpisodeGroup], summary="获取电视剧的所有剧集组")
 async def get_tmdb_episode_groups(

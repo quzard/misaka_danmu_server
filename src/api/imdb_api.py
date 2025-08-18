@@ -14,13 +14,8 @@ from ..database import get_db_session
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-async def get_imdb_client(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> httpx.AsyncClient:
-    """依赖项：创建一个带有特定请求头的 httpx 客户端，以模拟浏览器访问。"""
-    # --- Start of new proxy logic ---
+async def _create_imdb_client(session: AsyncSession) -> httpx.AsyncClient:
+    """Creates an httpx.AsyncClient with IMDb headers and proxy settings."""
     proxy_url_task = crud.get_config_value(session, "proxy_url", "")
     proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
     metadata_settings_task = crud.get_all_metadata_source_settings(session)
@@ -34,12 +29,19 @@ async def get_imdb_client(
     use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
     proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
-    # --- End of new proxy logic ---
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7", # 优先请求英文内容以获得更规范的数据
+        "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
     }
     return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
+
+async def get_imdb_client(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> httpx.AsyncClient:
+    """依赖项：创建一个带有特定请求头的 httpx 客户端，以模拟浏览器访问。"""
+    return await _create_imdb_client(session)
 
 
 class ImdbSearchResult(BaseModel):
@@ -101,7 +103,7 @@ async def search_imdb(
     return await _search_imdb_api(keyword, client)
 
 
-async def _scrape_imdb_details(imdb_id: str, client: httpx.AsyncClient) -> Dict[str, Any]:
+async def get_imdb_details_logic(imdb_id: str, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
     """从 IMDb 详情页抓取作品信息。"""
     details_url = f"https://www.imdb.com/title/{imdb_id}/"
     try:
@@ -132,11 +134,11 @@ async def _scrape_imdb_details(imdb_id: str, client: httpx.AsyncClient) -> Dict[
                 if name_en != original_title:
                     aliases_cn.append(original_title)
 
-                return {
-                    "id": imdb_id, "imdb_id": imdb_id,
-                    "name_en": name_en, "name_jp": None,
-                    "aliases_cn": list(dict.fromkeys(filter(None, aliases_cn))) # 去重并移除空值
-                }
+                return models.MetadataDetailsResponse(
+                    id=imdb_id, imdbId=imdb_id, title=name_en,
+                    nameEn=name_en,
+                    aliasesCn=list(dict.fromkeys(filter(None, aliases_cn)))
+                )
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning(f"解析 IMDb __NEXT_DATA__ 失败，将回退到正则匹配。错误: {e}")
 
@@ -149,23 +151,26 @@ async def _scrape_imdb_details(imdb_id: str, client: httpx.AsyncClient) -> Dict[
             alias_matches = re.findall(r'<li.*?<a.*?>(.*?)</a>', akas_section_match.group(1), re.DOTALL)
             aliases_cn = [alias.strip() for alias in alias_matches]
 
-        return {
-            "id": imdb_id, "imdb_id": imdb_id,
-            "name_en": name_en, "name_jp": None,
-            "aliases_cn": list(dict.fromkeys(filter(None, aliases_cn))),
-        }
+        return models.MetadataDetailsResponse(
+            id=imdb_id, imdbId=imdb_id, title=name_en,
+            nameEn=name_en,
+            aliasesCn=list(dict.fromkeys(filter(None, aliases_cn)))
+        )
 
     except Exception as e:
         logger.error(f"解析 IMDb 详情页时发生错误: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="解析 IMDb 详情页失败。")
+        raise ValueError("解析 IMDb 详情页失败。")
 
 
-@router.get("/details/{imdb_id}", response_model=Dict[str, Any], summary="获取 IMDb 作品详情")
+@router.get("/details/{imdb_id}", response_model=models.MetadataDetailsResponse, summary="获取 IMDb 作品详情")
 async def get_imdb_details(
     imdb_id: str = Path(...), client: httpx.AsyncClient = Depends(get_imdb_client)
 ):
     """获取指定 IMDb ID 的作品详情，主要用于提取别名。"""
-    return await _scrape_imdb_details(imdb_id, client)
+    try:
+        return await get_imdb_details_logic(imdb_id, client)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def search_imdb_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
@@ -177,7 +182,7 @@ async def search_imdb_aliases(keyword: str, client: httpx.AsyncClient) -> Set[st
             return local_aliases
 
         best_match_id = search_results[0].id
-        details = await _scrape_imdb_details(best_match_id, client)
+        details = await get_imdb_details_logic(best_match_id, client)
 
         # The main title is usually the English name
         if details.get("name_en"):

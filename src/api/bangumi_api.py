@@ -167,19 +167,14 @@ class BangumiAuthState(BaseModel):
 
 # --- Helper Function ---
 
-async def get_bangumi_client(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
-) -> httpx.AsyncClient:
-    """依赖项：创建一个带有 Bangumi 授权的 httpx 客户端。"""
-    auth_info = await crud.get_bangumi_auth(session, current_user.id)
+async def _create_bangumi_client(session: AsyncSession, user_id: int) -> httpx.AsyncClient:
+    """Creates an httpx.AsyncClient with Bangumi auth."""
+    auth_info = await crud.get_bangumi_auth(session, user_id)
     if not auth_info or not auth_info.get("access_token"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bangumi not authenticated")
+        raise ValueError("Bangumi not authenticated")
 
-    # 检查 token 是否过期
     expires_at = auth_info.get("expires_at")
     if expires_at and datetime.now() >= expires_at:
-        # 尝试刷新 token
         try:
             client_id_task = crud.get_config_value(session, "bangumi_client_id", "")
             client_secret_task = crud.get_config_value(session, "bangumi_client_secret", "")
@@ -189,10 +184,8 @@ async def get_bangumi_client(
 
             async with httpx.AsyncClient() as client:
                 token_data = {
-                    "grant_type": "refresh_token",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "refresh_token": auth_info["refresh_token"],
+                    "grant_type": "refresh_token", "client_id": client_id,
+                    "client_secret": client_secret, "refresh_token": auth_info["refresh_token"],
                 }
                 response = await client.post("https://bgm.tv/oauth/access_token", data=token_data)
                 response.raise_for_status()
@@ -201,47 +194,61 @@ async def get_bangumi_client(
                 auth_info["access_token"] = new_token_info.access_token
                 auth_info["refresh_token"] = new_token_info.refresh_token
                 auth_info["expires_at"] = datetime.now() + timedelta(seconds=new_token_info.expires_in)
-                await crud.save_bangumi_auth(session, current_user.id, auth_info)
-                logger.info(f"用户 '{current_user.username}' 的 Bangumi token 已成功刷新。")
+                await crud.save_bangumi_auth(session, user_id, auth_info)
         except Exception as e:
             logger.error(f"刷新 Bangumi token 失败: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bangumi token 已过期且刷新失败")
+            raise ValueError("Bangumi token 已过期且刷新失败")
 
-    headers = {
-        "Authorization": f"Bearer {auth_info['access_token']}",
-        "User-Agent": "l429609201/misaka_danmu_server(https://github.com/l429609201/misaka_danmu_server)",
-    }
+    headers = {"Authorization": f"Bearer {auth_info['access_token']}", "User-Agent": "l429609201/misaka_danmu_server(https://github.com/l429609201/misaka_danmu_server)"}
     return httpx.AsyncClient(headers=headers, timeout=20.0)
+
+async def get_bangumi_client(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+) -> httpx.AsyncClient:
+    """依赖项：创建一个带有 Bangumi 授权的 httpx 客户端。"""
+    auth_info = await crud.get_bangumi_auth(session, current_user.id)
+    if not auth_info or not auth_info.get("access_token"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bangumi not authenticated")
+    try:
+        return await _create_bangumi_client(session, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
 # --- API Endpoints ---
 
-@router.get("/subjects/{subject_id}", response_model=Dict[str, Any], summary="获取 Bangumi 作品详情")
+async def get_bangumi_subject_details_logic(subject_id: int, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
+    """获取指定 Bangumi ID 的作品详情。"""
+    details_url = f"https://api.bgm.tv/v0/subjects/{subject_id}"
+    details_response = await client.get(details_url)
+    if details_response.status_code == 404:
+        raise ValueError("未找到指定的 Bangumi 作品。")
+    details_response.raise_for_status()
+
+    subject_data = details_response.json()
+    subject = BangumiSearchSubject.model_validate(subject_data)
+    aliases = subject.aliases
+
+    return models.MetadataDetailsResponse(
+        id=str(subject.id),
+        bangumiId=str(subject.id),
+        title=subject.display_name,
+        nameJp=subject.name,
+        imageUrl=subject.image_url,
+        details=subject.details_string,
+        nameEn=aliases.get("name_en"),
+        nameRomaji=aliases.get("name_romaji"),
+        aliasesCn=aliases.get("aliases_cn", [])
+    )
+
+@router.get("/subjects/{subject_id}", response_model=models.MetadataDetailsResponse, summary="获取 Bangumi 作品详情")
 async def get_bangumi_subject_details(
     subject_id: int = Path(..., description="Bangumi 作品ID"),
     client: httpx.AsyncClient = Depends(get_bangumi_client),
 ):
     """获取指定 Bangumi ID 的作品详情。"""
     try:
-        details_url = f"https://api.bgm.tv/v0/subjects/{subject_id}"
-        details_response = await client.get(details_url)
-        if details_response.status_code == 404:
-            raise HTTPException(status_code=404, detail="未找到指定的 Bangumi 作品。")
-        details_response.raise_for_status()
-        
-        subject_data = details_response.json()
-        subject = BangumiSearchSubject.model_validate(subject_data)
-        aliases = subject.aliases
-        
-        return {
-            "id": subject.id,
-            "name": subject.display_name,
-            "name_jp": subject.name,
-            "image_url": subject.image_url,
-            "details": subject.details_string,
-            "name_en": aliases.get("name_en"),
-            "name_romaji": aliases.get("name_romaji"),
-            "aliases_cn": aliases.get("aliases_cn", [])
-        }
+        return await get_bangumi_subject_details_logic(subject_id, client)
     except Exception as e:
         logger.error(f"获取 Bangumi subject {subject_id} 详情失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取 Bangumi 详情失败。")

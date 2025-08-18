@@ -14,13 +14,8 @@ from ..database import get_db_session
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-async def get_douban_client(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> httpx.AsyncClient:
-    """依赖项：创建一个带有可选豆瓣Cookie的httpx客户端。"""
-    # --- Start of new proxy logic ---
+async def _create_douban_client(session: AsyncSession) -> httpx.AsyncClient:
+    """Creates an httpx.AsyncClient with Douban cookie and proxy settings."""
     proxy_url_task = crud.get_config_value(session, "proxy_url", "")
     proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
     metadata_settings_task = crud.get_all_metadata_source_settings(session)
@@ -34,16 +29,19 @@ async def get_douban_client(
     use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
     proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
-    # --- End of new proxy logic ---
+    
     cookie = await crud.get_config_value(session, "douban_cookie", "")
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     if cookie:
         headers["Cookie"] = cookie
-
     return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxies)
+
+async def get_douban_client(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> httpx.AsyncClient:
+    """依赖项：创建一个带有可选豆瓣Cookie的httpx客户端。"""
+    return await _create_douban_client(session)
 
 
 class DoubanSearchResult(BaseModel):
@@ -121,9 +119,9 @@ async def search_douban(
     client: httpx.AsyncClient = Depends(get_douban_client),
 ):
     """通过关键词在豆瓣网站上搜索影视作品。"""
-    return await _search_douban_json_api(keyword, client)
+    return await _search_douban_json_api(keyword, client) # This function is already good
 
-async def _scrape_douban_details(douban_id: str, client: httpx.AsyncClient) -> Dict[str, Any]:
+async def get_douban_details_logic(douban_id: str, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
     """从豆瓣详情页抓取作品信息。"""
     details_url = f"https://movie.douban.com/subject/{douban_id}/"
     try:
@@ -181,7 +179,7 @@ async def _scrape_douban_details(douban_id: str, client: httpx.AsyncClient) -> D
         logger.error(f"解析豆瓣详情页时发生错误: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="解析豆瓣详情页失败。")
 
-@router.get("/details/{douban_id}", response_model=Dict[str, Any], summary="获取豆瓣作品详情")
+@router.get("/details/{douban_id}", response_model=models.MetadataDetailsResponse, summary="获取豆瓣作品详情")
 async def get_douban_details(
     douban_id: str = Path(...), client: httpx.AsyncClient = Depends(get_douban_client)
 ):
@@ -229,7 +227,7 @@ async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[
                 best_subject_id = subjects[0]['id']
 
         if best_subject_id:
-            details = await _scrape_douban_details(best_subject_id, client)
+            details = await get_douban_details_logic(best_subject_id, client)
             local_aliases.update(details.get('aliases_cn', []))
         logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
     except Exception as e:

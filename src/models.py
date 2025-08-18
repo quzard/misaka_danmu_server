@@ -90,6 +90,22 @@ class ImportRequest(BaseModel):
     class Config:
         populate_by_name = True
 
+class MetadataDetailsResponse(BaseModel):
+    """所有元数据源详情接口的统一响应模型。"""
+    id: str
+    title: str
+    tmdbId: Optional[str] = None
+    imdbId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    doubanId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    nameEn: Optional[str] = None
+    nameJp: Optional[str] = None
+    nameRomaji: Optional[str] = None
+    aliasesCn: List[str] = []
+    imageUrl: Optional[str] = None
+    details: Optional[str] = None
+
 class AnimeDetailUpdate(BaseModel):
     """用于更新番剧详细信息的模型"""
     title: str = Field(..., min_length=1, description="新的影视名称")

@@ -1,5 +1,6 @@
 import logging
 from typing import Callable, List, Optional
+import traceback
 
 from thefuzz import fuzz
 from sqlalchemy import delete, select, update
@@ -461,7 +462,7 @@ async def manual_import_task(
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
-
+        
 async def auto_search_and_import_task(
     payload: "models.ControlAutoImportRequest",
     progress_callback: Callable,
@@ -473,18 +474,18 @@ async def auto_search_and_import_task(
     """
     全自动搜索并导入的核心任务逻辑。
     """
-    from .api.tmdb_api import get_tmdb_details
-    from .api.bangumi_api import get_bangumi_subject_details
-    from .api.douban_api import get_douban_details
-    from .api.tvdb_api import get_tvdb_details
-    from .api.imdb_api import get_imdb_details
+    # 修正：导入重构后的逻辑函数和客户端创建函数
+    from .api.tmdb_api import get_tmdb_details_logic, _create_tmdb_client
+    from .api.bangumi_api import get_bangumi_subject_details_logic, _create_bangumi_client
+    from .api.douban_api import get_douban_details_logic, _create_douban_client
+    from .api.tvdb_api import get_tvdb_details_logic, _create_tvdb_client
+    from .api.imdb_api import get_imdb_details_logic, _create_imdb_client
 
     search_type = payload.searchType
     search_term = payload.searchTerm
     
     await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
 
-    # 1. 获取元数据和别名
     aliases = {search_term}
     main_title = search_term
     media_type = payload.mediaType
@@ -492,45 +493,52 @@ async def auto_search_and_import_task(
     image_url = None
     tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
-    id_fetch_map = {
-        "tmdb": (get_tmdb_details, {"media_type": media_type, "tmdb_id": search_term}),
-        "bangumi": (get_bangumi_subject_details, {"subject_id": search_term}),
-        "douban": (get_douban_details, {"douban_id": search_term}),
-        "tvdb": (get_tvdb_details, {"tvdb_id": search_term}),
-        "imdb": (get_imdb_details, {"imdb_id": search_term}),
-    }
-
+    # 1. 获取元数据和别名
     if search_type != "keyword":
-        await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
-        fetch_func, params = id_fetch_map[search_type]
-        # We need a dummy user and a client for these functions
-        # This part is a bit tricky as we are outside of a request context.
-        # A better long-term solution might be to refactor the detail getters
-        # to not depend on FastAPI's Depends. For now, we create them manually.
-        # Note: This part assumes no user-specific logic in the clients.
-        from .api.tmdb_api import get_tmdb_client
-        from .api.bangumi_api import get_bangumi_client
-        from .api.douban_api import get_douban_client
-        from .api.tvdb_api import get_tvdb_client
-        from .api.imdb_api import get_imdb_client
-        
-        client_map = {
-            "tmdb": get_tmdb_client, "bangumi": get_bangumi_client, "douban": get_douban_client,
-            "tvdb": get_tvdb_client, "imdb": get_imdb_client
-        }
-        async with await client_map[search_type](None, session) as client:
-            details = await fetch_func(client=client, **params)
-        
-        main_title = details.get("title") or details.get("name") or main_title
-        image_url = details.get("image_url")
-        aliases.add(main_title)
-        aliases.update(details.get("aliases_cn", []))
-        aliases.add(details.get("name_en"))
-        aliases.add(details.get("name_jp"))
-        tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
-            details.get("tmdb_id"), details.get("bangumi_id"), details.get("douban_id"),
-            details.get("tvdb_id"), details.get("imdb_id")
-        )
+        try:
+            await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
+            details: Optional[models.MetadataDetailsResponse] = None
+            if search_type == "tmdb":
+                async with await _create_tmdb_client(session) as client:
+                    types_to_try = [payload.mediaType] if payload.mediaType else ["tv", "movie"]
+                    for m_type in types_to_try:
+                        if not m_type: continue
+                        try:
+                            details = await get_tmdb_details_logic(client=client, media_type=m_type, tmdb_id=int(search_term))
+                            media_type = m_type
+                            break
+                        except ValueError:
+                            logger.info(f"TMDB ID {search_term} not found as type '{m_type}', trying next type...")
+                    if not details: raise ValueError(f"Could not find TMDB entry for ID {search_term} as either TV or Movie.")
+            elif search_type == "bangumi":
+                # Bangumi auth requires a user_id. We'll use the admin user (ID 1) as a fallback.
+                # This might fail if the token is expired, which is an acceptable limitation for background tasks.
+                async with await _create_bangumi_client(session, user_id=1) as client:
+                    details = await get_bangumi_subject_details_logic(subject_id=int(search_term), client=client)
+            elif search_type == "douban":
+                async with await _create_douban_client(session) as client:
+                    details = await get_douban_details_logic(douban_id=search_term, client=client)
+            elif search_type == "tvdb":
+                async with await _create_tvdb_client(session) as client:
+                    details = await get_tvdb_details_logic(tvdb_id=search_term, client=client)
+            elif search_type == "imdb":
+                async with await _create_imdb_client(session) as client:
+                    details = await get_imdb_details_logic(imdb_id=search_term, client=client)
+            
+            if details:
+                main_title = details.title or main_title
+                image_url = details.imageUrl
+                aliases.add(main_title)
+                aliases.update(details.aliasesCn or [])
+                aliases.add(details.nameEn)
+                aliases.add(details.nameJp)
+                tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
+                    details.tmdbId, details.bangumiId, details.doubanId,
+                    details.tvdbId, details.imdbId
+                )
+        except Exception as e:
+            logger.error(f"从 {search_type.upper()} 获取元数据失败: {e}\n{traceback.format_exc()}")
+            # Don't fail the whole task, just proceed with the original search term
 
     # 2. 检查媒体库中是否已存在
     await progress_callback(20, "正在检查媒体库...")
@@ -539,7 +547,7 @@ async def auto_search_and_import_task(
         favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
         if favorited_source:
             source_to_use = favorited_source
-            logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['provider_name']}")
+            logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['providerName']}")
         else:
             all_sources = await crud.get_anime_sources(session, existing_anime['id'])
             if all_sources:
