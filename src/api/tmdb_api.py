@@ -605,13 +605,13 @@ async def get_tmdb_episode_group_details(
             enriched_episodes = []
             for episode in group.episodes:
                 still_path = image_map.get(episode.id)
-                enriched_episodes.append(models.EnrichedTMDBEpisodeInGroupDetail(
-                    id=episode.id, name=episode.name, episode_number=episode.episode_number,
-                    season_number=episode.season_number, air_date=episode.air_date,
-                    overview=episode.overview, order=episode.order,
-                    name_jp=ja_name_map.get(episode.id),
-                    image_url=f"{image_base_url.rstrip('/')}{still_path}" if still_path else None
-                ))
+                enriched_episodes.append(models.EnrichedTMDBEpisodeInGroupDetail.model_validate({
+                    "id": episode.id, "name": episode.name, "episodeNumber": episode.episodeNumber,
+                    "seasonNumber": episode.seasonNumber, "airDate": episode.airDate,
+                    "overview": episode.overview, "order": episode.order,
+                    "nameJp": ja_name_map.get(episode.id),
+                    "imageUrl": f"{image_base_url.rstrip('/')}{still_path}" if still_path else None
+                }))
             enriched_groups.append(models.EnrichedTMDBGroupInGroupDetail(
                 id=group.id, name=group.name, order=group.order, episodes=enriched_episodes
             ))

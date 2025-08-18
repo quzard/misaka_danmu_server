@@ -106,15 +106,15 @@ class JellyfinWebhook(BaseWebhook):
 
         # 使用新的、专门的 webhook 任务
         task_coro = lambda callback: webhook_search_and_dispatch_task(
-            anime_title=anime_title,
-            media_type=media_type,
+            animeTitle=anime_title,
+            mediaType=media_type,
             season=season_number,
-            current_episode_index=episode_number,
-            search_keyword=search_keyword,
-            douban_id=str(douban_id) if douban_id else None,
-            tmdb_id=str(tmdb_id) if tmdb_id else None,
-            imdb_id=str(imdb_id) if imdb_id else None,
-            tvdb_id=str(tvdb_id) if tvdb_id else None,
+            currentEpisodeIndex=episode_number,
+            searchKeyword=search_keyword,
+            doubanId=str(douban_id) if douban_id else None,
+            tmdbId=str(tmdb_id) if tmdb_id else None,
+            imdbId=str(imdb_id) if imdb_id else None,
+            tvdbId=str(tvdb_id) if tvdb_id else None,
             webhook_source='jellyfin',
             progress_callback=callback,
             session=session,

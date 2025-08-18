@@ -83,28 +83,28 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.title = update_data.title
     anime.type = update_data.type
     anime.season = update_data.season
-    anime.episode_count = update_data.episode_count
-    anime.image_url = update_data.image_url
+    anime.episode_count = update_data.episodeCount
+    anime.image_url = update_data.imageUrl
 
     # Update or create AnimeMetadata
     if not anime.metadata_record:
         anime.metadata_record = AnimeMetadata(anime_id=anime_id)
-    anime.metadata_record.tmdb_id = update_data.tmdb_id
-    anime.metadata_record.tmdb_episode_group_id = update_data.tmdb_episode_group_id
-    anime.metadata_record.bangumi_id = update_data.bangumi_id
-    anime.metadata_record.tvdb_id = update_data.tvdb_id
-    anime.metadata_record.douban_id = update_data.douban_id
-    anime.metadata_record.imdb_id = update_data.imdb_id
+    anime.metadata_record.tmdb_id = update_data.tmdbId
+    anime.metadata_record.tmdb_episode_group_id = update_data.tmdbEpisodeGroupId
+    anime.metadata_record.bangumi_id = update_data.bangumiId
+    anime.metadata_record.tvdb_id = update_data.tvdbId
+    anime.metadata_record.douban_id = update_data.doubanId
+    anime.metadata_record.imdb_id = update_data.imdbId
 
     # Update or create AnimeAlias
     if not anime.aliases:
         anime.aliases = AnimeAlias(anime_id=anime_id)
-    anime.aliases.name_en = update_data.name_en
-    anime.aliases.name_jp = update_data.name_jp
-    anime.aliases.name_romaji = update_data.name_romaji
-    anime.aliases.alias_cn_1 = update_data.alias_cn_1
-    anime.aliases.alias_cn_2 = update_data.alias_cn_2
-    anime.aliases.alias_cn_3 = update_data.alias_cn_3
+    anime.aliases.name_en = update_data.nameEn
+    anime.aliases.name_jp = update_data.nameJp
+    anime.aliases.name_romaji = update_data.nameRomaji
+    anime.aliases.alias_cn_1 = update_data.aliasCn1
+    anime.aliases.alias_cn_2 = update_data.aliasCn2
+    anime.aliases.alias_cn_3 = update_data.aliasCn3
 
     await session.commit()
     return True
@@ -400,7 +400,7 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
     await session.commit()
     return new_source.id
 
-async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id: Optional[str], imdb_id: Optional[str], tvdb_id: Optional[str], douban_id: Optional[str], bangumi_id: Optional[str] = None, tmdb_episode_group_id: Optional[str] = None):
+async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId: Optional[str], imdbId: Optional[str], tvdbId: Optional[str], doubanId: Optional[str], bangumiId: Optional[str] = None, tmdbEpisodeGroupId: Optional[str] = None):
     """仅当字段为空时，才更新番剧的元数据ID。"""
     stmt = select(AnimeMetadata).where(AnimeMetadata.anime_id == anime_id)
     result = await session.execute(stmt)
@@ -410,12 +410,12 @@ async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdb_id
         return
 
     updated = False
-    if not metadata.tmdb_id and tmdb_id: metadata.tmdb_id = tmdb_id; updated = True
-    if not metadata.tmdb_episode_group_id and tmdb_episode_group_id: metadata.tmdb_episode_group_id = tmdb_episode_group_id; updated = True
-    if not metadata.imdb_id and imdb_id: metadata.imdb_id = imdb_id; updated = True
-    if not metadata.tvdb_id and tvdb_id: metadata.tvdb_id = tvdb_id; updated = True
-    if not metadata.douban_id and douban_id: metadata.douban_id = douban_id; updated = True
-    if not metadata.bangumi_id and bangumi_id: metadata.bangumi_id = bangumi_id; updated = True
+    if not metadata.tmdb_id and tmdbId: metadata.tmdb_id = tmdbId; updated = True
+    if not metadata.tmdb_episode_group_id and tmdbEpisodeGroupId: metadata.tmdb_episode_group_id = tmdbEpisodeGroupId; updated = True
+    if not metadata.imdb_id and imdbId: metadata.imdb_id = imdbId; updated = True
+    if not metadata.tvdb_id and tvdbId: metadata.tvdb_id = tvdbId; updated = True
+    if not metadata.douban_id and doubanId: metadata.douban_id = doubanId; updated = True
+    if not metadata.bangumi_id and bangumiId: metadata.bangumi_id = bangumiId; updated = True
 
     if updated:
         await session.commit()
@@ -713,7 +713,7 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     episode = await session.get(Episode, episode_id)
     if not episode:
         # Fallback logic
-        stmt = select(Episode).where(Episode.source_id == update_data.source_id, Episode.episode_index == update_data.original_episode_index)
+        stmt = select(Episode).where(Episode.source_id == update_data.sourceId, Episode.episode_index == update_data.originalEpisodeIndex)
         result = await session.execute(stmt)
         episode = result.scalar_one_or_none()
         if not episode:
@@ -722,15 +722,15 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     # Check for conflict
     conflict_stmt = select(Episode.id).where(
         Episode.source_id == episode.source_id,
-        Episode.episode_index == update_data.episode_index,
+        Episode.episode_index == update_data.episodeIndex,
         Episode.id != episode.id
     )
     if (await session.execute(conflict_stmt)).scalar_one_or_none():
         raise ValueError("该集数已存在，请使用其他集数。")
 
     episode.title = update_data.title
-    episode.episode_index = update_data.episode_index
-    episode.source_url = update_data.source_url
+    episode.episode_index = update_data.episodeIndex
+    episode.source_url = update_data.sourceUrl
     await session.commit()
     return True
 
@@ -810,7 +810,7 @@ async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[s
 
 async def update_metadata_sources_settings(session: AsyncSession, settings: List['models.MetadataSourceSettingUpdate']):
     for s in settings:
-        is_aux_enabled = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
+        is_aux_enabled = True if s.providerName == 'tmdb' else s.isAuxSearchEnabled
         await session.execute(
             update(MetadataSource)
             .where(MetadataSource.provider_name == s.providerName)

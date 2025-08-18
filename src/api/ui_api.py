@@ -274,12 +274,12 @@ async def edit_anime_info(
     logger.info(f"用户 '{current_user.username}' 更新了番剧 ID: {animeId} 的详细信息。")
 
     # 新增：如果提供了TMDB ID和剧集组ID，则更新映射表
-    if update_data.tmdb_id and update_data.tmdb_episode_group_id:
+    if update_data.tmdbId and update_data.tmdbEpisodeGroupId:
         logger.info(f"检测到TMDB ID和剧集组ID，开始更新映射表...")
         try:
             await metadata_manager.update_tmdb_mappings(
-                tmdb_tv_id=int(update_data.tmdb_id),
-                group_id=update_data.tmdb_episode_group_id,
+                tmdb_tv_id=int(update_data.tmdbId),
+                group_id=update_data.tmdbEpisodeGroupId,
                 user=current_user,
                 session=session
             )
@@ -1038,9 +1038,7 @@ async def create_new_api_token(
     alphabet = string.ascii_letters + string.digits
     new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
     try:
-        token_id = await crud.create_api_token(
-            session, token_data.name, new_token_str, token_data.validity_period
-        )
+        token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod)
         # 重新从数据库获取以包含所有字段
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
@@ -1132,7 +1130,7 @@ async def get_external_api_logs(
     session: AsyncSession = Depends(get_db_session)
 ):
     logs = await crud.get_external_api_logs(session)
-    return logs
+    return [models.ExternalApiLogInfo.model_validate(log) for log in logs]
 
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
 async def get_ua_rules(
@@ -1152,7 +1150,7 @@ async def add_ua_rule(
     session: AsyncSession = Depends(get_db_session)
 ):
     try:
-        rule_id = await crud.add_ua_rule(session, rule_data.uaString)
+        rule_id = await crud.add_ua_rule(session, rule_data.ua_string)
         # This is a bit inefficient but ensures we return the full object
         rules = await crud.get_ua_rules(session)
         new_rule = next((r for r in rules if r['id'] == rule_id), None)
@@ -1615,14 +1613,14 @@ async def import_from_provider(
     # 创建一个将传递给任务管理器的协程工厂 (lambda)
     task_coro = lambda session, callback: tasks.generic_import_task(
         provider=request_data.provider,
-        media_id=request_data.media_id,
-        anime_title=request_data.anime_title,
-        media_type=request_data.type,
+        mediaId=request_data.mediaId,
+        animeTitle=request_data.animeTitle,
+        mediaType=request_data.type,
         season=request_data.season,
-        current_episode_index=request_data.current_episode_index,
-        image_url=request_data.image_url,
-        douban_id=request_data.douban_id,
-        tmdb_id=request_data.tmdb_id,
+        currentEpisodeIndex=request_data.currentEpisodeIndex,
+        imageUrl=request_data.imageUrl,
+        doubanId=request_data.doubanId,
+        tmdbId=request_data.tmdbId,
         imdb_id=None, tvdb_id=None, # 手动导入时这些ID为空,
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
@@ -1631,10 +1629,10 @@ async def import_from_provider(
     )
     
     # 构造任务标题
-    task_title = f"导入: {request_data.anime_title} ({request_data.provider})"
+    task_title = f"导入: {request_data.animeTitle} ({request_data.provider})"
     # 如果是电视剧且指定了单集导入，则在标题中追加季和集信息
-    if request_data.type == "tv_series" and request_data.current_episode_index is not None and request_data.season is not None:
-        task_title += f" - S{request_data.season:02d}E{request_data.current_episode_index:02d}"
+    if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
+        task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
 
     # 提交任务并获取任务ID
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -1649,7 +1647,7 @@ async def import_edited_episodes(
     scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
-    task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
+    task_title = f"编辑后导入: {request_data.anime_title} ({request_data.provider})"
     task_coro = lambda session, callback: tasks.edited_import_task(
         request_data=request_data,
         progress_callback=callback,
@@ -1657,7 +1655,7 @@ async def import_edited_episodes(
         manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
+    return {"message": f"'{request_data.anime_title}' 的编辑导入任务已提交。", "taskId": task_id}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
 async def login_for_access_token(

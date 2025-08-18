@@ -378,13 +378,16 @@ class TMDBEpisodeGroupDetails(BaseModel):
 class EnrichedTMDBEpisodeInGroupDetail(BaseModel):
     id: int
     name: str # This will be the Chinese name
-    episode_number: int
-    season_number: int
-    air_date: Optional[str] = None
+    episodeNumber: int = Field(..., alias="episode_number")
+    seasonNumber: int = Field(..., alias="season_number")
+    airDate: Optional[str] = Field(None, alias="air_date")
     overview: Optional[str] = ""
     order: int
-    name_jp: Optional[str] = None
-    image_url: Optional[str] = None
+    nameJp: Optional[str] = Field(None, alias="name_jp")
+    imageUrl: Optional[str] = Field(None, alias="image_url")
+
+    class Config:
+        populate_by_name = True
 
 class EnrichedTMDBGroupInGroupDetail(BaseModel):
     id: str

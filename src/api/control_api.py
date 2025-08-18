@@ -81,12 +81,11 @@ class ControlSearchResponse(BaseModel):
 class ControlDirectImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要导入的结果的索引 (从0开始)")
-    # Optional fields to override or provide metadata IDs during import
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="强制指定TMDB ID")
-    tvdbId: Optional[str] = Field(None, alias="tvdb_id", description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, alias="bangumi_id", description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, alias="imdb_id", description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, alias="douban_id", description="强制指定豆瓣 ID")
+    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
+    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
     class Config:
         populate_by_name = True
@@ -95,12 +94,12 @@ class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="强制指定TMDB ID")
-    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id", description="强制指定TMDB剧集组ID")
-    tvdbId: Optional[str] = Field(None, alias="tvdb_id", description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, alias="bangumi_id", description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, alias="imdb_id", description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, alias="douban_id", description="强制指定豆瓣 ID")
+    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tmdbEpisodeGroupId: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
+    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
+    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
     class Config:
@@ -108,14 +107,13 @@ class ControlEditedImportRequest(BaseModel):
 
 class ControlUrlImportRequest(BaseModel):
     url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
-    # Optional fields to override or provide metadata IDs during import
     title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
     season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
-    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
-    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
+    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
+    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
+    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
+    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
 class DanmakuOutputSettings(BaseModel):
     limit_per_source: int
@@ -229,14 +227,14 @@ async def direct_import(
 
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
     task_coro = lambda session, cb: tasks.generic_import_task(
-        provider=item_to_import.provider, media_id=item_to_import.mediaId,
-        anime_title=item_to_import.title, media_type=item_to_import.type,
-        season=item_to_import.season, current_episode_index=item_to_import.currentEpisodeIndex,
-        image_url=item_to_import.imageUrl, douban_id=payload.doubanId,
-        tmdb_id=payload.tmdbId,
-        imdb_id=payload.imdbId,
-        tvdb_id=payload.tvdbId,
-        bangumi_id=payload.bangumiId,
+        provider=item_to_import.provider, mediaId=item_to_import.mediaId,
+        animeTitle=item_to_import.title, mediaType=item_to_import.type,
+        season=item_to_import.season, currentEpisodeIndex=item_to_import.currentEpisodeIndex,
+        imageUrl=item_to_import.imageUrl, doubanId=payload.doubanId,
+        tmdbId=payload.tmdbId,
+        imdbId=payload.imdbId,
+        tvdbId=payload.tvdbId,
+        bangumiId=payload.bangumiId,
         progress_callback=cb, session=session, manager=manager, task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -299,7 +297,7 @@ async def edited_import(
     task_payload = models.EditedImportRequest(
         provider=item_info.provider,
         mediaId=item_info.mediaId,
-        animeTitle=payload.title or item_info.title,
+        animeTitle=payload.title or item_info.title, # type: ignore
         mediaType=item_info.type,
         season=item_info.season,
         imageUrl=item_info.imageUrl,
@@ -344,14 +342,14 @@ async def url_import(
     
     task_coro = lambda session, cb: tasks.generic_import_task(
         provider=scraper.provider_name,
-        media_id=media_info.mediaId,
-        anime_title=final_title,
-        media_type=media_info.type,
+        mediaId=media_info.mediaId,
+        animeTitle=final_title,
+        mediaType=media_info.type,
         season=final_season,
-        current_episode_index=None, # Import all episodes
-        image_url=media_info.imageUrl,
-        douban_id=payload.douban_id, tmdb_id=payload.tmdb_id, imdb_id=payload.imdb_id,
-        tvdb_id=payload.tvdb_id, bangumi_id=payload.bangumi_id,
+        currentEpisodeIndex=None,  # Import all episodes
+        imageUrl=media_info.imageUrl,
+        doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
+        tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
         progress_callback=cb, session=session, manager=manager, task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -512,12 +510,12 @@ settings_router = APIRouter(prefix="/settings", dependencies=[Depends(verify_api
 async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_session)):
     limit = await crud.get_config_value(session, 'danmaku_output_limit_per_source', '-1')
     enabled = await crud.get_config_value(session, 'danmaku_aggregation_enabled', 'true')
-    return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
+    return DanmakuOutputSettings(limitPerSource=int(limit), aggregationEnabled=(enabled.lower() == 'true'))
 
 @settings_router.put("/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
-    await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limit_per_source))
-    await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregation_enabled).lower())
+    await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limitPerSource))
+    await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregationEnabled).lower())
     config_manager.invalidate('danmaku_output_limit_per_source')
     config_manager.invalidate('danmaku_aggregation_enabled')
     return {"message": "弹幕输出设置已更新。"}

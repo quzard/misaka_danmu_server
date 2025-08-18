@@ -148,18 +148,18 @@ async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSessio
         raise
 
 async def generic_import_task(
-    provider: str, # noqa: F821
-    media_id: str,
-    anime_title: str,
-    media_type: str,
+    provider: str,
+    mediaId: str,
+    animeTitle: str,
+    mediaType: str,
     season: int,
-    current_episode_index: Optional[int],
-    image_url: Optional[str],
-    douban_id: Optional[str],
-    tmdb_id: Optional[str],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
-    bangumi_id: Optional[str],
+    currentEpisodeIndex: Optional[int],
+    imageUrl: Optional[str],
+    doubanId: Optional[str],
+    tmdbId: Optional[str],
+    imdbId: Optional[str],
+    tvdbId: Optional[str],
+    bangumiId: Optional[str],
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager, 
@@ -170,20 +170,20 @@ async def generic_import_task(
     """
     # 重构导入逻辑以避免创建空条目
     scraper = manager.get_scraper(provider)
-    normalized_title = anime_title.replace(":", "：")
+    normalized_title = animeTitle.replace(":", "：")
 
     await progress_callback(10, "正在获取分集列表...")
     episodes = await scraper.get_episodes(
-        media_id,
-        target_episode_index=current_episode_index,
-        db_media_type=media_type
+        mediaId,
+        target_episode_index=currentEpisodeIndex,
+        db_media_type=mediaType
     )
     if not episodes:
-        msg = f"未能找到第 {current_episode_index} 集。" if current_episode_index else "未能获取到任何分集。"
-        logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{media_id}')")
+        msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
+        logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{mediaId}')")
         raise TaskSuccess(msg)
 
-    if media_type == "movie" and episodes:
+    if mediaType == "movie" and episodes:
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
         episodes = episodes[:1]
 
@@ -206,10 +206,10 @@ async def generic_import_task(
         if comments and anime_id is None:
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
-            local_image_path = await download_image(image_url, session, provider)
-            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path) # type: ignore
-            await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id, bangumi_id)
-            source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
+            local_image_path = await download_image(imageUrl, session, provider)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path) # type: ignore
+            await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
+            source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
             logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
 
         if anime_id and source_id:
@@ -255,13 +255,13 @@ async def edited_import_task(
             local_image_path = await download_image(request_data.image_url, session, request_data.provider)
             anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
             await crud.update_metadata_if_empty(
-                session, anime_id, 
-                tmdb_id=request_data.tmdb_id, 
-                imdb_id=request_data.imdb_id, 
-                tvdb_id=request_data.tvdb_id, 
-                douban_id=request_data.douban_id,
-                bangumi_id=request_data.bangumi_id,
-                tmdb_episode_group_id=request_data.tmdb_episode_group_id
+                session, anime_id,
+                tmdbId=request_data.tmdbId,
+                imdbId=request_data.imdbId,
+                tvdbId=request_data.tvdbId,
+                doubanId=request_data.doubanId,
+                bangumiId=request_data.bangumiId,
+                tmdbEpisodeGroupId=request_data.tmdbEpisodeGroupId
             )
             source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
 
@@ -291,15 +291,15 @@ async def full_refresh_task(source_id: int, session: AsyncSession, manager: Scra
     logger.info(f"已清空源 ID: {source_id} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
     # 2. 重新执行通用导入逻辑
     await generic_import_task(
-        provider=source_info["provider_name"],
-        media_id=source_info["media_id"],
-        anime_title=source_info["title"],
-        media_type=source_info["type"],
+        provider=source_info["providerName"],
+        mediaId=source_info["mediaId"],
+        animeTitle=source_info["title"],
+        mediaType=source_info["type"],
         season=source_info.get("season", 1),
-        current_episode_index=None,
-        image_url=None,
-        douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
-        imdb_id=None, tvdb_id=None,
+        currentEpisodeIndex=None,
+        imageUrl=None,
+        doubanId=None, tmdbId=source_info.get("tmdbId"),
+        imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
         progress_callback=progress_callback,
         session=session,
         manager=manager,
@@ -417,71 +417,12 @@ async def incremental_refresh_task(source_id: int, next_episode_index: int, sess
     try:
         # 重新执行通用导入逻辑, 只导入指定的一集
         await generic_import_task(
-            provider=source_info["providerName"],
-            media_id=source_info["mediaId"],
-            anime_title=anime_title,
-            media_type=source_info["type"],
+            provider=source_info["providerName"], mediaId=source_info["mediaId"],
+            animeTitle=anime_title, mediaType=source_info["type"],
             season=source_info.get("season", 1),
-            current_episode_index=next_episode_index,
-            image_url=None,
-            douban_id=None, tmdb_id=source_info.get("tmdbId"),
-            imdb_id=None, tvdb_id=None, bangumi_id=source_info.get("bangumiId"),
-            progress_callback=progress_callback,
-            session=session,
-            manager=manager,
-            task_manager=task_manager)
-    except Exception as e:
-        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
-        raise
-
-async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
-    """后台任务：增量刷新一个已存在的番剧。"""
-    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
-    source_info = await crud.get_anime_source_info(session, source_id)
-    if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
-        return
-    try:
-        # 重新执行通用导入逻辑, 只导入指定的一集
-        await generic_import_task(
-            provider=source_info["providerName"],
-            media_id=source_info["mediaId"],
-            anime_title=anime_title,
-            media_type=source_info["type"],
-            season=source_info.get("season", 1),
-            current_episode_index=next_episode_index,
-            image_url=None,
-            douban_id=None, tmdb_id=source_info.get("tmdbId"),
-            imdb_id=None, tvdb_id=None, bangumi_id=source_info.get("bangumiId"),
-            progress_callback=progress_callback,
-            session=session,
-            manager=manager,
-            task_manager=task_manager)
-    except Exception as e:
-        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
-        raise
-
-async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
-    """后台任务：增量刷新一个已存在的番剧。"""
-    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
-    source_info = await crud.get_anime_source_info(session, source_id)
-    if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
-        return
-    try:
-        # 重新执行通用导入逻辑, 只导入指定的一集
-        await generic_import_task(
-            provider=source_info["providerName"],
-            media_id=source_info["mediaId"],
-            anime_title=anime_title,
-            media_type=source_info["type"],
-            season=source_info.get("season", 1),
-            current_episode_index=next_episode_index,
-            image_url=None,
-            douban_id=None, tmdb_id=source_info.get("tmdbId"),
-            imdb_id=None, tvdb_id=None, bangumi_id=source_info.get("bangumiId"),
+            currentEpisodeIndex=next_episode_index, imageUrl=None,
+            doubanId=None, tmdbId=source_info.get("tmdbId"),
+            imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
             session=session,
             manager=manager,
