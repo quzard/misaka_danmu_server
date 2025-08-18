@@ -208,13 +208,16 @@ async def auto_import(
             -   提供 `season` 和 `episode`: 只导入指定的单集。
             -   `episode` 不可单独使用，必须与 `season` 一同提供。
     """
-    payload = ControlAutoImportRequest (
+    payload = ControlAutoImportRequest(
         searchType=searchType,
         searchTerm=searchTerm,
         season=season,
         episode=episode,
         mediaType=mediaType
     )
+
+    if payload.searchType != AutoImportSearchType.KEYWORD:  # 特定平台ID搜索 mediaType 应为 None
+        payload.mediaType = None
 
     if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
         raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
