@@ -479,14 +479,13 @@ async def url_import(
             mediaType=media_info.type, # type: ignore
             currentEpisodeIndex=payload.episodeIndex,
             season=final_season,
-            currentEpisodeIndex=None,  # Import all episodes
             imageUrl=media_info.imageUrl,
             doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": f"'{title}' 的URL单集导入任务已提交。", "taskId": task_id}
+        return {"message": f"'{final_title}' 的URL单集导入任务已提交。", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
