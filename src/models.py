@@ -77,14 +77,18 @@ class ProviderEpisodeInfo(BaseModel):
 
 class ImportRequest(BaseModel):
     provider: str = Field(..., description="要导入的数据源, e.g., 'tencent'")
-    media_id: str = Field(..., description="数据源中的媒体ID (e.g., tencent的cid)")
-    anime_title: str = Field(..., description="要存储在数据库中的番剧标题")
+    mediaId: str = Field(..., alias="media_id", description="数据源中的媒体ID (e.g., tencent的cid)")
+    animeTitle: str = Field(..., alias="anime_title", description="要存储在数据库中的番剧标题")
     type: str = Field(..., description="媒体类型, e.g., 'tv_series', 'movie'")
     season: Optional[int] = Field(1, description="季度数，默认为1")
-    tmdb_id: Optional[str] = Field(None, description="关联的TMDB ID (可选)")
-    image_url: Optional[str] = Field(None, description="封面图片URL")
-    douban_id: Optional[str] = None
-    current_episode_index: Optional[int] = Field(None, description="如果搜索时指定了集数，则只导入此分集")
+    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="关联的TMDB ID (可选)")
+    imageUrl: Optional[str] = Field(None, alias="image_url", description="封面图片URL")
+    doubanId: Optional[str] = Field(None, alias="douban_id")
+    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
+    currentEpisodeIndex: Optional[int] = Field(None, alias="current_episode_index", description="如果搜索时指定了集数，则只导入此分集")
+
+    class Config:
+        populate_by_name = True
 
 class AnimeDetailUpdate(BaseModel):
     """用于更新番剧详细信息的模型"""

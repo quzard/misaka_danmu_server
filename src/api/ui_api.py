@@ -185,7 +185,7 @@ async def search_anime_provider(
 
     # 新增：根据搜索源的显示顺序和标题相似度对结果进行排序
     source_settings = await crud.get_all_scraper_settings(session)
-    source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
+    source_order_map = {s['provider_name']: s['display_order'] for s in source_settings}
 
     def sort_key(item: models.ProviderSearchInfo):
         provider_order = source_order_map.get(item.provider, 999)
@@ -1597,13 +1597,13 @@ async def import_from_provider(
     try:
         # 在启动任务前检查provider是否存在
         scraper_manager.get_scraper(request_data.provider)
-        logger.info(f"用户 '{current_user.username}' 正在从 '{request_data.provider}' 导入 '{request_data.anime_title}' (media_id={request_data.media_id})")
+        logger.info(f"用户 '{current_user.username}' 正在从 '{request_data.provider}' 导入 '{request_data.animeTitle}' (media_id={request_data.mediaId})")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     # 只有在全量导入（非单集导入）时才执行此检查
-    if request_data.current_episode_index is None:
-        source_exists = await crud.check_source_exists_by_media_id(session, request_data.provider, request_data.media_id)
+    if request_data.currentEpisodeIndex is None:
+        source_exists = await crud.check_source_exists_by_media_id(session, request_data.provider, request_data.mediaId)
         if source_exists:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1623,6 +1623,7 @@ async def import_from_provider(
         tmdbId=request_data.tmdbId,
         imdbId=None, 
         tvdbId=None, # 手动导入时这些ID为空,
+        bangumiId=request_data.bangumiId,
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
         session=session,
@@ -1638,7 +1639,7 @@ async def import_from_provider(
     # 提交任务并获取任务ID
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    return {"message": f"'{request_data.anime_title}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
+    return {"message": f"'{request_data.animeTitle}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
 @router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
 async def import_edited_episodes(
@@ -1648,7 +1649,7 @@ async def import_edited_episodes(
     scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
-    task_title = f"编辑后导入: {request_data.anime_title} ({request_data.provider})"
+    task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
     task_coro = lambda session, callback: tasks.edited_import_task(
         request_data=request_data,
         progress_callback=callback,
@@ -1656,7 +1657,7 @@ async def import_edited_episodes(
         manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": f"'{request_data.anime_title}' 的编辑导入任务已提交。", "taskId": task_id}
+    return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
 async def login_for_access_token(
