@@ -206,7 +206,7 @@ async def generic_import_task(
         if comments and anime_id is None:
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
-            local_image_path = await download_image(imageUrl, session, provider)
+            local_image_path = await download_image(imageUrl, session, manager, provider)
             anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path) # type: ignore
             await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
@@ -251,8 +251,8 @@ async def edited_import_task(
         await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
         comments = await scraper.get_comments(episode.episodeId)
 
-        if comments and anime_id is None:
-            local_image_path = await download_image(request_data.image_url, session, request_data.provider)
+        if comments and anime_id is None: # type: ignore
+            local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
             anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
             await crud.update_metadata_if_empty(
                 session, anime_id,

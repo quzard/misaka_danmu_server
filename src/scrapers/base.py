@@ -123,6 +123,9 @@ class BaseScraper(ABC):
     # (新增) 子类应覆盖此列表，声明它们可以处理的域名
     handled_domains: List[str] = []
 
+    # (新增) 子类可以覆盖此属性，以提供一个默认的 Referer
+    referer: Optional[str] = None
+
     # (新增) 子类可以覆盖此属性，以表明其是否支持日志记录
     is_loggable: bool = True
 

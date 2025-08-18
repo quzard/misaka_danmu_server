@@ -155,6 +155,7 @@ class BuvidResponse(BaseModel):
 class BilibiliScraper(BaseScraper):
     provider_name = "bilibili"
     handled_domains = ["www.bilibili.com", "b23.tv"]
+    referer = "https://www.bilibili.com/"
 
     # English keywords that often appear as standalone acronyms or words
     _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'

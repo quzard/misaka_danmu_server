@@ -296,10 +296,11 @@ async def refresh_anime_poster(
     animeId: int,
     request_data: RefreshPosterRequest,
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """根据提供的URL，重新下载并缓存海报，更新数据库记录。"""
-    new_local_path = await download_image(request_data.image_url, session)
+    new_local_path = await download_image(request_data.image_url, session, scraper_manager)
     if not new_local_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
 
@@ -623,19 +624,31 @@ async def get_scraper_settings(
 
     full_settings = []
     for s in settings:
-        scraper_class = manager.get_scraper_class(s['providerName'])
-        s_with_config = models.ScraperSettingWithConfig.model_validate(s)
+        provider_name = s['providerName']
+        scraper_class = manager.get_scraper_class(provider_name)
+        
+        # Create a new dictionary with all required fields before validation
+        full_setting_data = s.copy()
+        
         # 如果验证被禁用，则所有源都应显示为已验证
-        s_with_config.is_verified = True if not verification_enabled else (s['providerName'] in manager._verified_scrapers)
+        full_setting_data['isVerified'] = True if not verification_enabled else (provider_name in manager._verified_scrapers)
+        
         if scraper_class:
-            s_with_config.is_loggable = getattr(scraper_class, "is_loggable", False)
+            full_setting_data['isLoggable'] = getattr(scraper_class, "is_loggable", False)
             # 关键修复：复制类属性以避免修改共享的可变字典
             base_fields = getattr(scraper_class, "configurable_fields", None)
-            s_with_config.configurable_fields = base_fields.copy() if base_fields is not None else {}
+            configurable_fields = base_fields.copy() if base_fields is not None else {}
 
             # 为当前源动态添加其专属的黑名单配置字段
-            blacklist_key = f"{s['providerName']}_episode_blacklist_regex"
-            s_with_config.configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
+            blacklist_key = f"{provider_name}_episode_blacklist_regex"
+            configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
+            full_setting_data['configurableFields'] = configurable_fields
+        else:
+            # Provide defaults if scraper_class is not found to prevent validation errors
+            full_setting_data['isLoggable'] = False
+            full_setting_data['configurableFields'] = {}
+
+        s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
         full_settings.append(s_with_config)
             
     return full_settings

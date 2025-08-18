@@ -206,6 +206,7 @@ class IqiyiMobileVideoListResult(BaseModel):
 class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
     handled_domains = ["www.iqiyi.com"]
+    referer = "https://www.iqiyi.com/"
     _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
     # 新增：合并了JS脚本中的过滤关键词，用于过滤搜索结果中的非正片内容
     _SEARCH_JUNK_TITLE_PATTERN = re.compile(

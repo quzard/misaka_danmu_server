@@ -146,6 +146,7 @@ class MgtvCommentSegmentResult(BaseModel):
 class MgtvScraper(BaseScraper):
     provider_name = "mgtv"
     handled_domains = ["www.mgtv.com"]
+    referer = "https://www.mgtv.com/"
 
     # English keywords that often appear as standalone acronyms or words
     _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'

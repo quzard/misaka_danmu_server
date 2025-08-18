@@ -202,6 +202,7 @@ class RrspDanmuItem(BaseModel):
 class RenrenScraper(BaseScraper):
     provider_name = "renren"
     handled_domains = ["www.rrsp.com.cn"]
+    referer = "https://rrsp.com.cn/"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)

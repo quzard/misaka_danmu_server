@@ -93,6 +93,7 @@ class YoukuRpcResult(BaseModel):
 class YoukuScraper(BaseScraper):
     provider_name = "youku"
     handled_domains = ["v.youku.com"]
+    referer = "https://v.youku.com"
     _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
