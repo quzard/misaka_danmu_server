@@ -115,7 +115,7 @@ class MetadataSourceManager:
 
         tasks = []
         for source_setting in enabled_sources:
-            provider = source_setting['provider_name']
+            provider = source_setting['providerName']
             if provider == 'tmdb' and not tmdb_api_key:
                 continue # Skip TMDB if key is not set
 

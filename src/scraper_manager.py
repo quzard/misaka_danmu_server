@@ -159,7 +159,7 @@ class ScraperManager:
         async with self._session_factory() as session:
             await crud.sync_scrapers_to_db(session, discovered_providers)
             settings_list = await crud.get_all_scraper_settings(session)
-        self.scraper_settings = {s['provider_name']: s for s in settings_list}
+        self.scraper_settings = {s['providerName']: s for s in settings_list}
 
         # Instantiate all discovered scrapers
         for provider_name, scraper_class in self._scraper_classes.items():
@@ -168,13 +168,13 @@ class ScraperManager:
             
             # 如果源未通过验证，则强制禁用它
             is_verified = provider_name in self._verified_scrapers
-            is_enabled_by_user = setting.get('is_enabled', True)
+            is_enabled_by_user = setting.get('isEnabled', True)
             
             final_status = "已启用" if is_enabled_by_user and is_verified else "已禁用"
             verification_status = "已验证" if is_verified else "未验证"
             
             if setting:
-                order = setting.get('display_order', 'N/A')
+                order = setting.get('displayOrder', 'N/A')
                 logging.getLogger(__name__).info(f"已加载搜索源 '{provider_name}' (状态: {final_status}, 顺序: {order}, 验证: {verification_status})。")
             else:
                 logging.getLogger(__name__).warning(f"已加载搜索源 '{provider_name}'，但在数据库中未找到其设置。")
@@ -194,8 +194,8 @@ class ScraperManager:
 
     @property
     def has_enabled_scrapers(self) -> bool:
-        """检查是否有任何已启用的爬虫。"""
-        return any(s.get('is_enabled') for s in self.scraper_settings.values())
+        """检查是否有任何已启用的搜索源。"""
+        return any(s.get('isEnabled') for s in self.scraper_settings.values())
 
     async def search_all(self, keywords: List[str], episode_info: Optional[Dict[str, Any]] = None) -> List[ProviderSearchInfo]:
         """
@@ -203,7 +203,7 @@ class ScraperManager:
         """
         enabled_scrapers = [
             scraper for name, scraper in self.scrapers.items()
-            if self.scraper_settings.get(name, {}).get('is_enabled') and name in self._verified_scrapers
+            if self.scraper_settings.get(name, {}).get('isEnabled') and name in self._verified_scrapers
         ]
 
         if not enabled_scrapers:
@@ -243,8 +243,8 @@ class ScraperManager:
         # 使用缓存的设置来获取有序且已启用的搜索源列表
         ordered_providers = sorted(
             # 修正：只有已启用且已验证的源才能参与顺序搜索
-            [p for p, s in self.scraper_settings.items() if s.get('is_enabled') and p in self._verified_scrapers],
-            key=lambda p: self.scraper_settings[p].get('display_order', 99)
+            [p for p, s in self.scraper_settings.items() if s.get('isEnabled') and p in self._verified_scrapers],
+            key=lambda p: self.scraper_settings[p].get('displayOrder', 99)
         )
 
         for provider_name in ordered_providers:
