@@ -1621,7 +1621,8 @@ async def import_from_provider(
         imageUrl=request_data.imageUrl,
         doubanId=request_data.doubanId,
         tmdbId=request_data.tmdbId,
-        imdb_id=None, tvdb_id=None, # 手动导入时这些ID为空,
+        imdbId=None, 
+        tvdbId=None, # 手动导入时这些ID为空,
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
         session=session,

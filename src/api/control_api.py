@@ -227,15 +227,22 @@ async def direct_import(
 
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
     task_coro = lambda session, cb: tasks.generic_import_task(
-        provider=item_to_import.provider, mediaId=item_to_import.mediaId,
-        animeTitle=item_to_import.title, mediaType=item_to_import.type,
-        season=item_to_import.season, currentEpisodeIndex=item_to_import.currentEpisodeIndex,
-        imageUrl=item_to_import.imageUrl, doubanId=payload.doubanId,
+        provider=item_to_import.provider,
+        mediaId=item_to_import.mediaId,
+        animeTitle=item_to_import.title, 
+        mediaType=item_to_import.type,
+        season=item_to_import.season, 
+        currentEpisodeIndex=item_to_import.currentEpisodeIndex,
+        imageUrl=item_to_import.imageUrl, 
+        doubanId=payload.doubanId,
         tmdbId=payload.tmdbId,
         imdbId=payload.imdbId,
         tvdbId=payload.tvdbId,
         bangumiId=payload.bangumiId,
-        progress_callback=cb, session=session, manager=manager, task_manager=task_manager
+        progress_callback=cb, 
+        session=session, 
+        manager=manager, 
+        task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": "导入任务已提交", "task_id": task_id}
