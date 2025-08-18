@@ -82,23 +82,29 @@ class ControlDirectImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要导入的结果的索引 (从0开始)")
     # Optional fields to override or provide metadata IDs during import
-    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
-    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="强制指定TMDB ID")
+    tvdbId: Optional[str] = Field(None, alias="tvdb_id", description="强制指定TVDB ID")
+    bangumiId: Optional[str] = Field(None, alias="bangumi_id", description="强制指定Bangumi ID")
+    imdbId: Optional[str] = Field(None, alias="imdb_id", description="强制指定IMDb ID")
+    doubanId: Optional[str] = Field(None, alias="douban_id", description="强制指定豆瓣 ID")
+
+    class Config:
+        populate_by_name = True
 
 class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
-    tmdb_id: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tmdb_episode_group_id: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
-    tvdb_id: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumi_id: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdb_id: Optional[str] = Field(None, description="强制指定IMDb ID")
-    douban_id: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="强制指定TMDB ID")
+    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id", description="强制指定TMDB剧集组ID")
+    tvdbId: Optional[str] = Field(None, alias="tvdb_id", description="强制指定TVDB ID")
+    bangumiId: Optional[str] = Field(None, alias="bangumi_id", description="强制指定Bangumi ID")
+    imdbId: Optional[str] = Field(None, alias="imdb_id", description="强制指定IMDb ID")
+    doubanId: Optional[str] = Field(None, alias="douban_id", description="强制指定豆瓣 ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
+
+    class Config:
+        populate_by_name = True
 
 class ControlUrlImportRequest(BaseModel):
     url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
@@ -226,11 +232,11 @@ async def direct_import(
         provider=item_to_import.provider, media_id=item_to_import.mediaId,
         anime_title=item_to_import.title, media_type=item_to_import.type,
         season=item_to_import.season, current_episode_index=item_to_import.currentEpisodeIndex,
-        image_url=item_to_import.imageUrl, douban_id=payload.douban_id,
-        tmdb_id=payload.tmdb_id,
-        imdb_id=payload.imdb_id,
-        tvdb_id=payload.tvdb_id,
-        bangumi_id=payload.bangumi_id,
+        image_url=item_to_import.imageUrl, douban_id=payload.doubanId,
+        tmdb_id=payload.tmdbId,
+        imdb_id=payload.imdbId,
+        tvdb_id=payload.tvdbId,
+        bangumi_id=payload.bangumiId,
         progress_callback=cb, session=session, manager=manager, task_manager=task_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -293,20 +299,20 @@ async def edited_import(
     task_payload = models.EditedImportRequest(
         provider=item_info.provider,
         mediaId=item_info.mediaId,
-        title=payload.title or item_info.title,
-        media_type=item_info.type,
+        animeTitle=payload.title or item_info.title,
+        mediaType=item_info.type,
         season=item_info.season,
-        image_url=item_info.imageUrl,
-        douban_id=payload.douban_id,
-        tmdb_id=payload.tmdb_id,
-        imdb_id=payload.imdb_id,
-        tvdb_id=payload.tvdb_id,
-        bangumi_id=payload.bangumi_id,
-        tmdb_episode_group_id=payload.tmdb_episode_group_id,
+        imageUrl=item_info.imageUrl,
+        doubanId=payload.doubanId,
+        tmdbId=payload.tmdbId,
+        imdbId=payload.imdbId,
+        tvdbId=payload.tvdbId,
+        bangumiId=payload.bangumiId,
+        tmdbEpisodeGroupId=payload.tmdbEpisodeGroupId,
         episodes=payload.episodes
     )
 
-    task_title = f"外部API编辑后导入: {task_payload.title} ({task_payload.provider})"
+    task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
     task_coro = lambda session, cb: tasks.edited_import_task(
         request_data=task_payload, progress_callback=cb, session=session, manager=manager
     )

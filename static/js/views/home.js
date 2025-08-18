@@ -788,7 +788,7 @@ async function handleConfirmEditImport() {
         return { ...originalEpisode, title: li.querySelector('.ep-title-input').value.trim(), episodeIndex: parseInt(li.querySelector('.ep-index').textContent, 10) };
     });
 
-    const payload = { ...originalItem, anime_title: finalAnimeTitle, media_type: originalItem.type, episodes: finalEpisodes };
+    const payload = { ...originalItem, animeTitle: finalAnimeTitle, mediaType: originalItem.type, episodes: finalEpisodes };
     delete payload.currentEpisodeIndex; // Not needed for this endpoint
 
     confirmBtn.disabled = true;

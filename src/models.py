@@ -254,6 +254,10 @@ class EditedImportRequest(BaseModel):
     imageUrl: Optional[str] = None
     doubanId: Optional[str] = None
     tmdbId: Optional[str] = None
+    imdbId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    tmdbEpisodeGroupId: Optional[str] = None
     episodes: List[ProviderEpisodeInfo]
 
 class ControlUrlImportRequest(BaseModel):
