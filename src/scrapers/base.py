@@ -93,7 +93,7 @@ class BaseScraper(ABC):
             )
         proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
 
-        provider_setting = next((s for s in scraper_settings if s['provider_name'] == self.provider_name), None)
+        provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
         use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
         proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
