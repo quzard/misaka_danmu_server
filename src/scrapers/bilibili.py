@@ -479,7 +479,8 @@ class BilibiliScraper(BaseScraper):
         if final_results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in final_results])
             self.logger.info(f"Bilibili: 搜索结果列表:\n{log_results}")
-        await self._set_to_cache(cache_key, [r.model_dump() for r in final_results], 'search_ttl_seconds', 300)
+        if final_results:
+            await self._set_to_cache(cache_key, [r.model_dump() for r in final_results], 'search_ttl_seconds', 300)
         return final_results
 
     async def _search_by_type(self, keyword: str, search_type: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:

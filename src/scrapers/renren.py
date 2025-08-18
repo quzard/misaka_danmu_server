@@ -287,7 +287,8 @@ class RenrenScraper(BaseScraper):
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
             self.logger.info(f"renren: 搜索结果列表:\n{log_results}")
 
-        await self._set_to_cache(cache_key, [r.model_dump() for r in results], 'search_ttl_seconds', 300)
+        if results:
+            await self._set_to_cache(cache_key, [r.model_dump() for r in results], 'search_ttl_seconds', 300)
         return results
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
