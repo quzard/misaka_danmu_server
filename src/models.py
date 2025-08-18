@@ -320,6 +320,11 @@ class BulkDeleteEpisodesRequest(BaseModel):
 class BulkDeleteRequest(BaseModel):
     sourceIds: List[int]
 
+class ScheduledTaskInfo(ScheduledTaskCreate):
+    id: str
+    lastRunAt: Optional[datetime] = None
+    nextRunAt: Optional[datetime] = None
+
 class ScheduledTaskCreate(BaseModel):
     name: str
     jobType: str
@@ -330,11 +335,6 @@ class ScheduledTaskUpdate(BaseModel):
     name: str
     cronExpression: str
     isEnabled: bool
-
-class ScheduledTaskInfo(ScheduledTaskCreate):
-    id: str
-    lastRunAt: Optional[datetime] = None
-    nextRunAt: Optional[datetime] = None
 
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str

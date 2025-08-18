@@ -245,8 +245,7 @@ async def get_library(
     """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
     db_results = await crud.get_library_anime(session)
     # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
-    animes = [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
-    return models.LibraryResponse(animes=animes)
+    return models.LibraryResponse(animes=[models.LibraryAnimeInfo.model_validate(item) for item in db_results])
 
 @router.get("/library/anime/{animeId}/details", response_model=models.AnimeFullDetails, summary="获取影视完整详情")
 async def get_anime_full_details(
@@ -323,7 +322,7 @@ async def get_source_details(
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
-    return SourceDetailsResponse.model_validate(source_info)
+    return models.SourceDetailsResponse.model_validate(source_info)
 
 class ReassociationRequest(models.BaseModel):
     targetAnimeId: int = Field(..., alias="target_anime_id")
