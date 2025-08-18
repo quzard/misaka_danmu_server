@@ -105,7 +105,7 @@ class JellyfinWebhook(BaseWebhook):
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
 
         # 使用新的、专门的 webhook 任务
-        task_coro = lambda callback: webhook_search_and_dispatch_task(
+        task_coro = lambda session, callback: webhook_search_and_dispatch_task(
             animeTitle=anime_title,
             mediaType=media_type,
             season=season_number,

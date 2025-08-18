@@ -143,18 +143,17 @@ class BaseScraper(ABC):
         获取并编译此源的自定义分集黑名单正则表达式。
         结果会被缓存以提高性能。
         """
-        if hasattr(self, '_blacklist_pattern_cache'):
-            return self._blacklist_pattern_cache
-
+        # 移除实例级别的缓存，直接依赖 ConfigManager 的缓存机制。
+        # ConfigManager 的缓存会在配置更新时被正确地失效。
         key = f"{self.provider_name}_episode_blacklist_regex"
         regex_str = await self.config_manager.get(key, "")
         if regex_str:
             try:
-                self._blacklist_pattern_cache = re.compile(regex_str, re.IGNORECASE)
-                return self._blacklist_pattern_cache
+                # 每次调用都重新编译，因为 ConfigManager 会缓存 regex_str，
+                # 这里的开销很小。
+                return re.compile(regex_str, re.IGNORECASE)
             except re.error as e:
-                self.logger.error(f"无效的黑名单正则表达式: {e}")
-        self._blacklist_pattern_cache = None
+                self.logger.error(f"无效的黑名单正则表达式: '{regex_str}' - {e}")
         return None
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any]) -> Any:

@@ -735,12 +735,12 @@ async def get_proxy_settings(
             logger.error(f"解析存储的代理URL '{proxy_url}' 失败: {e}")
 
     return models.ProxySettingsResponse(
-        proxy_protocol=protocol,
-        proxy_host=host,
-        proxy_port=port,
-        proxy_username=username,
-        proxy_password=password,
-        proxy_enabled=proxy_enabled
+        proxyProtocol=protocol,
+        proxyHost=host,
+        proxyPort=port,
+        proxyUsername=username,
+        proxyPassword=password,
+        proxyEnabled=proxy_enabled
     )
 
 @router.put("/config/proxy", status_code=status.HTTP_204_NO_CONTENT, summary="更新代理配置")
