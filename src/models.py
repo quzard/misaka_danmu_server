@@ -320,17 +320,6 @@ class BulkDeleteEpisodesRequest(BaseModel):
 class BulkDeleteRequest(BaseModel):
     sourceIds: List[int]
 
-class ProxySettingsUpdate(BaseModel):
-    proxyProtocol: str
-    proxyHost: Optional[str] = None
-    proxyPort: Optional[int] = None
-    proxyUsername: Optional[str] = None
-    proxyPassword: Optional[str] = None
-    proxyEnabled: bool
-
-class UaRuleCreate(BaseModel):
-    uaString: str
-
 class ScheduledTaskCreate(BaseModel):
     name: str
     jobType: str
@@ -341,6 +330,22 @@ class ScheduledTaskUpdate(BaseModel):
     name: str
     cronExpression: str
     isEnabled: bool
+
+class ScheduledTaskInfo(ScheduledTaskCreate):
+    id: str
+    lastRunAt: Optional[datetime] = None
+    nextRunAt: Optional[datetime] = None
+
+class ProxySettingsUpdate(BaseModel):
+    proxyProtocol: str
+    proxyHost: Optional[str] = None
+    proxyPort: Optional[int] = None
+    proxyUsername: Optional[str] = None
+    proxyPassword: Optional[str] = None
+    proxyEnabled: bool
+
+class UaRuleCreate(BaseModel):
+    uaString: str
 
 
 # --- TMDB API Models ---
