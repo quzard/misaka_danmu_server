@@ -23,7 +23,7 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = (
         select(
             Anime.id.label("animeId"),
-            Anime.local_image_path,
+            Anime.local_image_path.label("localImagePath"),
             Anime.image_url.label("imageUrl"),
             Anime.title,
             Anime.type,
@@ -563,8 +563,8 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
 async def get_anime_source_info(session: AsyncSession, source_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("source_id"), AnimeSource.anime_id, AnimeSource.provider_name, AnimeSource.media_id,
-            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdb_id
+            AnimeSource.id.label("sourceId"), AnimeSource.anime_id.label("animeId"), AnimeSource.provider_name.label("providerName"), AnimeSource.media_id.label("mediaId"),
+            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdb_id.label("tmdbId")
         )
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
@@ -577,8 +577,8 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
 async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("sourceId"), AnimeSource.provider_name, AnimeSource.media_id,
-            AnimeSource.is_favorited, AnimeSource.incremental_refresh_enabled, AnimeSource.created_at
+            AnimeSource.id.label("sourceId"), AnimeSource.provider_name.label("providerName"), AnimeSource.media_id.label("mediaId"),
+            AnimeSource.is_favorited.label("isFavorited"), AnimeSource.incremental_refresh_enabled.label("incrementalRefreshEnabled"), AnimeSource.created_at.label("createdAt")
         )
         .where(AnimeSource.anime_id == anime_id)
         .order_by(AnimeSource.created_at)
@@ -588,25 +588,15 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
 
 async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
     stmt = (
-        select(Episode.id, Episode.title, Episode.episode_index, Episode.source_url, Episode.fetched_at, Episode.comment_count)
+        select(
+            Episode.id.label("episodeId"), Episode.title, Episode.episode_index.label("episodeIndex"),
+            Episode.source_url.label("sourceUrl"), Episode.fetched_at.label("fetchedAt"), Episode.comment_count.label("commentCount")
+        )
         .where(Episode.source_id == source_id)
         .order_by(Episode.episode_index)
     )
     result = await session.execute(stmt)
-    # 修正：显式地将 'id' 字段映射到返回的字典中，以确保 Pydantic 模型可以找到它。
-    # 修正：直接返回一个带有 'episodeId' 键的字典，以匹配前端和模型的期望。
-    # 这比在模型层使用别名更明确、更健壮。
-    return [
-        {
-            "episodeId": row.id,
-            "title": row.title,
-            "episode_index": row.episode_index,
-            "source_url": row.source_url,
-            "fetched_at": row.fetched_at,
-            "comment_count": row.comment_count,
-        }
-        for row in result.mappings()
-    ]
+    return [dict(row) for row in result.mappings()]
 
 async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
@@ -644,11 +634,11 @@ async def clear_episode_comments(session: AsyncSession, episode_id: int):
 async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            Anime.id.label("anime_id"), Anime.title, Anime.type, Anime.season, Anime.local_image_path,
-            Anime.episode_count, Anime.image_url, AnimeMetadata.tmdb_id, AnimeMetadata.tmdb_episode_group_id,
-            AnimeMetadata.bangumi_id, AnimeMetadata.tvdb_id, AnimeMetadata.douban_id, AnimeMetadata.imdb_id,
-            AnimeAlias.name_en, AnimeAlias.name_jp, AnimeAlias.name_romaji, AnimeAlias.alias_cn_1,
-            AnimeAlias.alias_cn_2, AnimeAlias.alias_cn_3
+            Anime.id.label("animeId"), Anime.title, Anime.type, Anime.season, Anime.local_image_path.label("localImagePath"),
+            Anime.episode_count.label("episodeCount"), Anime.image_url.label("imageUrl"), AnimeMetadata.tmdb_id.label("tmdbId"), AnimeMetadata.tmdb_episode_group_id.label("tmdbEpisodeGroupId"),
+            AnimeMetadata.bangumi_id.label("bangumiId"), AnimeMetadata.tvdb_id.label("tvdbId"), AnimeMetadata.douban_id.label("doubanId"), AnimeMetadata.imdb_id.label("imdbId"),
+            AnimeAlias.name_en.label("nameEn"), AnimeAlias.name_jp.label("nameJp"), AnimeAlias.name_romaji.label("nameRomaji"), AnimeAlias.alias_cn_1.label("aliasCn1"),
+            AnimeAlias.alias_cn_2.label("aliasCn2"), AnimeAlias.alias_cn_3.label("aliasCn3")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
@@ -766,7 +756,7 @@ async def get_all_scraper_settings(session: AsyncSession) -> List[Dict[str, Any]
     stmt = select(Scraper).order_by(Scraper.display_order)
     result = await session.execute(stmt)
     return [
-        {"provider_name": s.provider_name, "is_enabled": s.is_enabled, "display_order": s.display_order, "use_proxy": s.use_proxy}
+        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
         for s in result.scalars()
     ]
 
@@ -774,8 +764,8 @@ async def update_scrapers_settings(session: AsyncSession, settings: List[models.
     for s in settings:
         await session.execute(
             update(Scraper)
-            .where(Scraper.provider_name == s.provider_name)
-            .values(is_enabled=s.is_enabled, display_order=s.display_order, use_proxy=s.use_proxy)
+            .where(Scraper.provider_name == s.providerName)
+            .values(is_enabled=s.isEnabled, display_order=s.displayOrder, use_proxy=s.useProxy)
         )
     await session.commit()
 
@@ -814,7 +804,7 @@ async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[s
     stmt = select(MetadataSource).order_by(MetadataSource.display_order)
     result = await session.execute(stmt)
     return [
-        {"provider_name": s.provider_name, "is_enabled": s.is_enabled, "is_aux_search_enabled": s.is_aux_search_enabled, "display_order": s.display_order, "use_proxy": s.use_proxy}
+        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "isAuxSearchEnabled": s.is_aux_search_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
         for s in result.scalars()
     ]
 
@@ -823,8 +813,8 @@ async def update_metadata_sources_settings(session: AsyncSession, settings: List
         is_aux_enabled = True if s.provider_name == 'tmdb' else s.is_aux_search_enabled
         await session.execute(
             update(MetadataSource)
-            .where(MetadataSource.provider_name == s.provider_name)
-            .values(is_aux_search_enabled=is_aux_enabled, display_order=s.display_order, use_proxy=s.use_proxy)
+            .where(MetadataSource.provider_name == s.providerName)
+            .values(is_aux_search_enabled=is_aux_enabled, display_order=s.displayOrder, use_proxy=s.useProxy)
         )
     await session.commit()
 
@@ -837,7 +827,7 @@ async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[s
     )
     result = await session.execute(stmt)
     return [
-        {"provider_name": s.provider_name, "is_enabled": s.is_enabled, "is_aux_search_enabled": s.is_aux_search_enabled, "display_order": s.display_order, "use_proxy": s.use_proxy}
+        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "isAuxSearchEnabled": s.is_aux_search_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
         for s in result.scalars()
     ]
 
@@ -931,14 +921,14 @@ async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(ApiToken).order_by(ApiToken.created_at.desc())
     result = await session.execute(stmt)
     return [
-        {"id": t.id, "name": t.name, "token": t.token, "is_enabled": t.is_enabled, "expires_at": t.expires_at, "created_at": t.created_at}
+        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.is_enabled, "expiresAt": t.expires_at, "createdAt": t.created_at}
         for t in result.scalars()
     ]
 
 async def get_api_token_by_id(session: AsyncSession, token_id: int) -> Optional[Dict[str, Any]]:
     token = await session.get(ApiToken, token_id)
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "is_enabled": token.is_enabled, "expires_at": token.expires_at, "created_at": token.created_at}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.is_enabled, "expiresAt": token.expires_at, "createdAt": token.created_at}
     return None
 
 async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> Optional[Dict[str, Any]]:
@@ -946,7 +936,7 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
     result = await session.execute(stmt)
     token = result.scalar_one_or_none()
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "is_enabled": token.is_enabled, "expires_at": token.expires_at, "created_at": token.created_at}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.is_enabled, "expiresAt": token.expires_at, "createdAt": token.created_at}
     return None
 
 async def create_api_token(session: AsyncSession, name: str, token: str, validity_period: str) -> int:
@@ -996,7 +986,7 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
 async def get_ua_rules(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(UaRule).order_by(UaRule.created_at.desc())
     result = await session.execute(stmt)
-    return [{"id": r.id, "ua_string": r.ua_string, "created_at": r.created_at} for r in result.scalars()]
+    return [{"id": r.id, "uaString": r.ua_string, "createdAt": r.created_at} for r in result.scalars()]
 
 async def add_ua_rule(session: AsyncSession, ua_string: str) -> int:
     new_rule = UaRule(ua_string=ua_string)
@@ -1021,7 +1011,7 @@ async def get_token_access_logs(session: AsyncSession, token_id: int) -> List[Di
     stmt = select(TokenAccessLog).where(TokenAccessLog.token_id == token_id).order_by(TokenAccessLog.access_time.desc()).limit(200)
     result = await session.execute(stmt)
     return [
-        {"ip_address": log.ip_address, "user_agent": log.user_agent, "access_time": log.access_time, "status": log.status, "path": log.path}
+        {"ipAddress": log.ip_address, "userAgent": log.user_agent, "accessTime": log.access_time, "status": log.status, "path": log.path}
         for log in result.scalars()
     ]
 
@@ -1248,7 +1238,7 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
     stmt = stmt.order_by(TaskHistory.created_at.desc()).limit(100)
     result = await session.execute(stmt)
     return [
-        {"task_id": t.id, "title": t.title, "status": t.status, "progress": t.progress, "description": t.description, "created_at": t.created_at}
+        {"taskId": t.id, "title": t.title, "status": t.status, "progress": t.progress, "description": t.description, "createdAt": t.created_at}
         for t in result.scalars()
     ]
 

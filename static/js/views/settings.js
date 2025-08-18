@@ -160,12 +160,12 @@ async function loadProxySettings() {
     proxyTestResults.classList.add('hidden');
     try {
         const data = await apiFetch('/api/ui/config/proxy');
-        document.getElementById('proxy-protocol').value = data.proxy_protocol || 'http';
-        document.getElementById('proxy-host').value = data.proxy_host || '';
-        document.getElementById('proxy-port').value = data.proxy_port || '';
-        document.getElementById('proxy-username').value = data.proxy_username || '';
-        document.getElementById('proxy-password').value = data.proxy_password || '';
-        document.getElementById('proxy-enabled').checked = data.proxy_enabled;
+        document.getElementById('proxy-protocol').value = data.proxyProtocol || 'http';
+        document.getElementById('proxy-host').value = data.proxyHost || '';
+        document.getElementById('proxy-port').value = data.proxyPort || '';
+        document.getElementById('proxy-username').value = data.proxyUsername || '';
+        document.getElementById('proxy-password').value = data.proxyPassword || '';
+        document.getElementById('proxy-enabled').checked = data.proxyEnabled;
     } catch (error) {
         proxySaveMessage.textContent = `加载代理配置失败: ${error.message}`;
         proxySaveMessage.classList.add('error');
@@ -175,12 +175,12 @@ async function loadProxySettings() {
 async function handleSaveProxySettings(e) {
     e.preventDefault();
     const payload = {
-        proxy_protocol: document.getElementById('proxy-protocol').value,
-        proxy_host: document.getElementById('proxy-host').value.trim(),
-        proxy_port: document.getElementById('proxy-port').value ? parseInt(document.getElementById('proxy-port').value, 10) : null,
-        proxy_username: document.getElementById('proxy-username').value.trim(),
-        proxy_password: document.getElementById('proxy-password').value, // Don't trim password
-        proxy_enabled: document.getElementById('proxy-enabled').checked,
+        proxyProtocol: document.getElementById('proxy-protocol').value,
+        proxyHost: document.getElementById('proxy-host').value.trim(),
+        proxyPort: document.getElementById('proxy-port').value ? parseInt(document.getElementById('proxy-port').value, 10) : null,
+        proxyUsername: document.getElementById('proxy-username').value.trim(),
+        proxyPassword: document.getElementById('proxy-password').value, // Don't trim password
+        proxyEnabled: document.getElementById('proxy-enabled').checked,
     };
     const saveBtn = e.target.querySelector('button[type="submit"]');
     saveBtn.disabled = true;

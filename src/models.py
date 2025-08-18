@@ -117,63 +117,54 @@ class EpisodeInfoUpdate(BaseModel):
 
 class AnimeFullDetails(BaseModel):
     """用于返回番剧完整信息的模型"""
-    animeId: int = Field(..., alias="anime_id")
+    animeId: int
     title: str
     type: str
     season: int
-    episodeCount: Optional[int] = Field(None, alias="episode_count")
-    localImagePath: Optional[str] = Field(None, alias="local_image_path")
-    imageUrl: Optional[str] = Field(None, alias="image_url")
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id")
-    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id")
-    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
-    tvdbId: Optional[str] = Field(None, alias="tvdb_id")
-    doubanId: Optional[str] = Field(None, alias="douban_id")
-    imdbId: Optional[str] = Field(None, alias="imdb_id")
-    nameEn: Optional[str] = Field(None, alias="name_en")
-    nameJp: Optional[str] = Field(None, alias="name_jp")
-    nameRomaji: Optional[str] = Field(None, alias="name_romaji")
-    aliasCn1: Optional[str] = Field(None, alias="alias_cn_1")
-    aliasCn2: Optional[str] = Field(None, alias="alias_cn_2")
-    aliasCn3: Optional[str] = Field(None, alias="alias_cn_3")
-
-    class Config:
-        populate_by_name = True
+    episodeCount: Optional[int] = None
+    localImagePath: Optional[str] = None
+    imageUrl: Optional[str] = None
+    tmdbId: Optional[str] = None
+    tmdbEpisodeGroupId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    doubanId: Optional[str] = None
+    imdbId: Optional[str] = None
+    nameEn: Optional[str] = None
+    nameJp: Optional[str] = None
+    nameRomaji: Optional[str] = None
+    aliasCn1: Optional[str] = None
+    aliasCn2: Optional[str] = None
+    aliasCn3: Optional[str] = None
 
 class SourceInfo(BaseModel):
     """代表一个已关联的数据源的详细信息。"""
     sourceId: int
-    providerName: str = Field(..., alias="provider_name")
-    mediaId: str = Field(..., alias="media_id")
-    isFavorited: bool = Field(..., alias="is_favorited")
-    incrementalRefreshEnabled: bool = Field(..., alias="incremental_refresh_enabled")
-    createdAt: datetime = Field(..., alias="created_at")
-
-    class Config:
-        populate_by_name = True
+    providerName: str
+    mediaId: str
+    isFavorited: bool
+    incrementalRefreshEnabled: bool
+    createdAt: datetime
 
 # --- 爬虫源管理模型 ---
 class ScraperSetting(BaseModel):
-    providerName: str = Field(..., alias="provider_name")
-    isEnabled: bool = Field(..., alias="is_enabled")
-    useProxy: bool = Field(..., alias="use_proxy")
-    displayOrder: int = Field(..., alias="display_order")
-
-    class Config:
-        populate_by_name = True
+    providerName: str
+    isEnabled: bool
+    useProxy: bool
+    displayOrder: int
 
 class MetadataSourceSettingUpdate(BaseModel):
-    provider_name: str
-    is_aux_search_enabled: bool
-    use_proxy: bool
-    display_order: int
+    providerName: str
+    isAuxSearchEnabled: bool
+    useProxy: bool
+    displayOrder: int
 
 
 # --- 媒体库（弹幕情况）模型 ---
 class LibraryAnimeInfo(BaseModel):
     """代表媒体库中的一个番剧条目。"""
     animeId: int
-    localImagePath: Optional[str] = Field(None, alias="local_image_path")
+    localImagePath: Optional[str] = None
     imageUrl: Optional[str] = None
     title: str
     type: str
@@ -182,9 +173,6 @@ class LibraryAnimeInfo(BaseModel):
     sourceCount: int
     createdAt: datetime
 
-    class Config:
-        populate_by_name = True
-
 class LibraryResponse(BaseModel):
     animes: List[LibraryAnimeInfo]
 
@@ -192,37 +180,28 @@ class LibraryResponse(BaseModel):
 class EpisodeDetail(BaseModel):
     episodeId: int
     title: str
-    episodeIndex: int = Field(..., alias="episode_index")
-    sourceUrl: Optional[str] = Field(None, alias="source_url")
-    fetchedAt: Optional[datetime] = Field(None, alias="fetched_at")
-    commentCount: int = Field(..., alias="comment_count")
-
-    class Config:
-        populate_by_name = True
+    episodeIndex: int
+    sourceUrl: Optional[str] = None
+    fetchedAt: Optional[datetime] = None
+    commentCount: int
 
 # --- 任务管理器模型 ---
 class TaskInfo(BaseModel):
-    taskId: str = Field(..., alias="task_id")
+    taskId: str
     title: str
     status: str
     progress: int
     description: str
-    createdAt: datetime = Field(..., alias="created_at")
-
-    class Config:
-        populate_by_name = True
+    createdAt: datetime
 
 # --- API Token 管理模型 ---
 class ApiTokenInfo(BaseModel):
     id: int
     name: str
     token: str
-    isEnabled: bool = Field(..., alias="is_enabled")
-    expiresAt: Optional[datetime] = Field(None, alias="expires_at")
-    createdAt: datetime = Field(..., alias="created_at")
-
-    class Config:
-        populate_by_name = True
+    isEnabled: bool
+    expiresAt: Optional[datetime] = None
+    createdAt: datetime
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
@@ -231,21 +210,15 @@ class ApiTokenCreate(BaseModel):
 # --- UA Filter Models ---
 class UaRule(BaseModel):
     id: int
-    uaString: str = Field(..., alias="ua_string")
-    createdAt: datetime = Field(..., alias="created_at")
-
-    class Config:
-        populate_by_name = True
+    uaString: str
+    createdAt: datetime
 
 class TokenAccessLog(BaseModel):
-    accessTime: datetime = Field(..., alias="access_time")
-    ipAddress: str = Field(..., alias="ip_address")
+    accessTime: datetime
+    ipAddress: str
     status: str
     path: Optional[str] = None
-    userAgent: Optional[str] = Field(None, alias="user_agent")
-
-    class Config:
-        populate_by_name = True
+    userAgent: Optional[str] = None
 
 # --- 用户和认证模型 ---
 class UserBase(BaseModel):
@@ -274,17 +247,13 @@ class PasswordChange(BaseModel):
 class EditedImportRequest(BaseModel):
     """用于编辑后导入的请求体模型"""
     provider: str
-    media_id: str = Field(..., alias="mediaId")
-    title: str
-    media_type: str
+    mediaId: str
+    animeTitle: str
+    mediaType: str
     season: int
-    image_url: Optional[str] = Field(None, alias="imageUrl")
-    douban_id: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
-    tmdb_episode_group_id: Optional[str] = None
+    imageUrl: Optional[str] = None
+    doubanId: Optional[str] = None
+    tmdbId: Optional[str] = None
     episodes: List[ProviderEpisodeInfo]
 
 class ControlUrlImportRequest(BaseModel):
@@ -305,6 +274,47 @@ class ExternalApiLogInfo(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- UI API Specific Models ---
+
+class SourceDetailsResponse(BaseModel):
+    sourceId: int
+    animeId: int
+    providerName: str
+    mediaId: str
+    title: str
+    type: str
+    season: int
+    tmdbId: Optional[str] = None
+
+class MetadataSourceStatusResponse(BaseModel):
+    providerName: str
+    isAuxSearchEnabled: bool
+    displayOrder: int
+    status: str
+    useProxy: bool
+
+class ScraperSettingWithConfig(ScraperSetting):
+    configurableFields: Optional[Dict[str, str]] = None
+    isLoggable: bool
+    isVerified: bool
+
+class ProxySettingsResponse(BaseModel):
+    proxyProtocol: str
+    proxyHost: Optional[str] = None
+    proxyPort: Optional[int] = None
+    proxyUsername: Optional[str] = None
+    proxyPassword: Optional[str] = None
+    proxyEnabled: bool
+
+class ReassociationRequest(BaseModel):
+    targetAnimeId: int
+
+class BulkDeleteEpisodesRequest(BaseModel):
+    episodeIds: List[int]
+
+class BulkDeleteRequest(BaseModel):
+    sourceIds: List[int]
 
 
 # --- TMDB API Models ---

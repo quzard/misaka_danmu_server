@@ -59,7 +59,6 @@ async def get_metadata_manager(request: Request) -> MetadataSourceManager:
 async def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
-
 @router.get(
     "/search/anime",
     response_model=models.AnimeSearchResponse,
@@ -244,9 +243,7 @@ async def get_library(
 ):
     """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
     db_results = await crud.get_library_anime(session)
-    # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
-    animes = [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
-    return models.LibraryResponse(animes=animes)
+    return models.LibraryResponse(animes=db_results)
 
 @router.get("/library/anime/{animeId}/details", response_model=models.AnimeFullDetails, summary="获取影视完整详情")
 async def get_anime_full_details(
@@ -258,7 +255,7 @@ async def get_anime_full_details(
     details = await crud.get_anime_full_details(session, animeId)
     if not details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
-    return models.AnimeFullDetails.model_validate(details)
+    return details
 
 @router.put("/library/anime/{animeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑影视信息")
 async def edit_anime_info(
@@ -313,7 +310,7 @@ async def refresh_anime_poster(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
 
-@router.get("/library/source/{sourceId}/details", response_model=SourceDetailsResponse, summary="获取单个数据源的详情")
+@router.get("/library/source/{sourceId}/details", response_model=models.SourceDetailsResponse, summary="获取单个数据源的详情")
 async def get_source_details(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -323,18 +320,12 @@ async def get_source_details(
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
-    return SourceDetailsResponse.model_validate(source_info)
-
-class ReassociationRequest(models.BaseModel):
-    targetAnimeId: int = Field(..., alias="target_anime_id")
-
-    class Config:
-        populate_by_name = True
+    return source_info
 
 @router.post("/library/anime/{sourceAnimeId}/reassociate", status_code=status.HTTP_204_NO_CONTENT, summary="重新关联作品的数据源")
 async def reassociate_anime_sources(
     sourceAnimeId: int,
-    request_data: ReassociationRequest,
+    request_data: models.ReassociationRequest,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
@@ -367,15 +358,9 @@ async def delete_source_from_anime(
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。") # type: ignore
     return {"message": f"删除源 '{source_info['provider_name']}' 的任务已提交。", "task_id": task_id}
 
-class BulkDeleteEpisodesRequest(models.BaseModel):
-    episodeIds: List[int] = Field(..., alias="episode_ids")
-
-    class Config:
-        populate_by_name = True
-
 @router.post("/library/episodes/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除分集的任务")
 async def delete_bulk_episodes(
-    request_data: BulkDeleteEpisodesRequest,
+    request_data: models.BulkDeleteEpisodesRequest,
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
@@ -613,15 +598,9 @@ async def delete_anime_from_library(
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "task_id": task_id}
 
-class BulkDeleteRequest(models.BaseModel):
-    sourceIds: List[int] = Field(..., alias="source_ids")
-
-    class Config:
-        populate_by_name = True
-
 @router.post("/library/sources/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除数据源的任务")
 async def delete_bulk_sources(
-    request_data: BulkDeleteRequest,
+    request_data: models.BulkDeleteRequest,
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
@@ -636,7 +615,7 @@ async def delete_bulk_sources(
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "task_id": task_id}
 
-@router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
+@router.get("/scrapers", response_model=List[models.ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
@@ -652,24 +631,24 @@ async def get_scraper_settings(
 
     full_settings = []
     for s in settings:
-        scraper_class = manager.get_scraper_class(s['provider_name'])
-        s_with_config = ScraperSettingWithConfig.model_validate(s)
+        scraper_class = manager.get_scraper_class(s['providerName'])
+        s_with_config = models.ScraperSettingWithConfig.model_validate(s)
         # 如果验证被禁用，则所有源都应显示为已验证
-        s_with_config.is_verified = True if not verification_enabled else (s['provider_name'] in manager._verified_scrapers)
+        s_with_config.isVerified = True if not verification_enabled else (s['providerName'] in manager._verified_scrapers)
         if scraper_class:
-            s_with_config.is_loggable = getattr(scraper_class, "is_loggable", False)
+            s_with_config.isLoggable = getattr(scraper_class, "is_loggable", False)
             # 关键修复：复制类属性以避免修改共享的可变字典
             base_fields = getattr(scraper_class, "configurable_fields", None)
-            s_with_config.configurable_fields = base_fields.copy() if base_fields is not None else {}
+            s_with_config.configurableFields = base_fields.copy() if base_fields is not None else {}
 
             # 为当前源动态添加其专属的黑名单配置字段
-            blacklist_key = f"{s['provider_name']}_episode_blacklist_regex"
-            s_with_config.configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
+            blacklist_key = f"{s['providerName']}_episode_blacklist_regex"
+            s_with_config.configurableFields[blacklist_key] = "分集标题黑名单 (正则)"
         full_settings.append(s_with_config)
             
     return full_settings
 
-@router.get("/metadata-sources", response_model=List[MetadataSourceStatusResponse], summary="获取所有元数据源的设置")
+@router.get("/metadata-sources", response_model=List[models.MetadataSourceStatusResponse], summary="获取所有元数据源的设置")
 async def get_metadata_source_settings(
     current_user: models.User = Depends(security.get_current_user),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
@@ -686,7 +665,7 @@ async def update_metadata_source_settings(
     """批量更新元数据源的启用状态、辅助搜索状态和显示顺序。"""
     # 修正：恢复使用专用的 `metadata_sources` 表来存储设置，
     # 这将调用 `crud.py` 中正确的函数，并解决之前遇到的状态保存问题。
-    await crud.update_metadata_sources_settings(session, settings)
+    await crud.update_metadata_sources_settings(session, [s.model_dump() for s in settings])
     logger.info(f"用户 '{current_user.username}' 更新了元数据源设置。")
 
 @router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
@@ -708,23 +687,18 @@ class ProxyTestResult(BaseModel):
     latency: Optional[float] = None # in ms
     error: Optional[str] = None
 
-class ProxySettingsResponse(BaseModel):
-    proxy_protocol: str
-    proxy_host: Optional[str] = None
-    proxy_port: Optional[int] = None
-    proxy_username: Optional[str] = None
-    proxy_password: Optional[str] = None
-    proxy_enabled: bool
+
 
 class ProxySettingsUpdate(BaseModel):
-    proxy_protocol: str
-    proxy_host: Optional[str] = None
-    proxy_port: Optional[int] = None
-    proxy_username: Optional[str] = None
-    proxy_password: Optional[str] = None
-    proxy_enabled: bool
+    proxyProtocol: str
+    proxyHost: Optional[str] = None
+    proxyPort: Optional[int] = None
+    proxyUsername: Optional[str] = None
+    proxyPassword: Optional[str] = None
+    proxyEnabled: bool
 
-@router.get("/config/proxy", response_model=ProxySettingsResponse, summary="获取代理配置")
+@router.get("/config/proxy", response_model=models.ProxySettingsResponse, summary="获取代理配置")
+
 
 async def get_proxy_settings(
     current_user: models.User = Depends(security.get_current_user),
@@ -750,13 +724,13 @@ async def get_proxy_settings(
         except Exception as e:
             logger.error(f"解析存储的代理URL '{proxy_url}' 失败: {e}")
 
-    return ProxySettingsResponse(
-        proxy_protocol=protocol,
-        proxy_host=host,
-        proxy_port=port,
-        proxy_username=username,
-        proxy_password=password,
-        proxy_enabled=proxy_enabled
+    return models.ProxySettingsResponse(
+        proxyProtocol=protocol,
+        proxyHost=host,
+        proxyPort=port,
+        proxyUsername=username,
+        proxyPassword=password,
+        proxyEnabled=proxy_enabled
     )
 
 @router.put("/config/proxy", status_code=status.HTTP_204_NO_CONTENT, summary="更新代理配置")
@@ -1009,7 +983,7 @@ async def get_all_tasks(
 ):
     """获取后台任务的列表和状态，支持搜索和过滤。"""
     tasks = await crud.get_tasks_from_history(session, search, status)
-    return [models.TaskInfo.model_validate(t) for t in tasks]
+    return tasks
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")
 async def delete_task_from_history_endpoint(
@@ -1072,7 +1046,7 @@ async def create_new_api_token(
         )
         # 重新从数据库获取以包含所有字段
         new_token = await crud.get_api_token_by_id(session, token_id)
-        return models.ApiTokenInfo.model_validate(new_token)
+        return new_token
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -1185,7 +1159,7 @@ async def add_ua_rule(
         # This is a bit inefficient but ensures we return the full object
         rules = await crud.get_ua_rules(session)
         new_rule = next((r for r in rules if r['id'] == rule_id), None)
-        return models.UaRule.model_validate(new_rule)
+        return new_rule
     except Exception:
         raise HTTPException(status_code=409, detail="该UA规则已存在。")
 
@@ -1239,7 +1213,7 @@ async def get_token_logs(
     session: AsyncSession = Depends(get_db_session)
 ):
     logs = await crud.get_token_access_logs(session, tokenId)
-    return [models.TokenAccessLog.model_validate(log) for log in logs]
+    return logs
 
 @router.get(
     "/comment/{episodeId}",
@@ -1672,17 +1646,14 @@ async def import_from_provider(
 
 class EditedImportRequest(models.BaseModel):
     provider: str
-    mediaId: str = Field(..., alias="media_id")
-    animeTitle: str = Field(..., alias="anime_title")
-    mediaType: str = Field(..., alias="media_type")
+    mediaId: str
+    animeTitle: str
+    mediaType: str
     season: int
-    imageUrl: Optional[str] = Field(None, alias="image_url")
-    doubanId: Optional[str] = Field(None, alias="douban_id")
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id")
+    imageUrl: Optional[str] = None
+    doubanId: Optional[str] = None
+    tmdbId: Optional[str] = None
     episodes: List[models.ProviderEpisodeInfo]
-
-    class Config:
-        populate_by_name = True
 
 @router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
 async def import_edited_episodes(
@@ -1748,28 +1719,19 @@ async def get_available_job_types(
 
 class ScheduledTaskCreate(models.BaseModel):
     name: str
-    jobType: str = Field(..., alias="job_type")
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(True, alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
+    jobType: str
+    cronExpression: str
+    isEnabled: bool = True
 
 class ScheduledTaskUpdate(models.BaseModel):
     name: str
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(..., alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
+    cronExpression: str
+    isEnabled: bool
 
 class ScheduledTaskInfo(ScheduledTaskCreate):
     id: str
-    lastRunAt: Optional[datetime] = Field(None, alias="last_run_at")
-    nextRunAt: Optional[datetime] = Field(None, alias="next_run_at")
-
-    class Config:
-        populate_by_name = True
+    lastRunAt: Optional[datetime] = None
+    nextRunAt: Optional[datetime] = None
 
 @router.get("/scheduled-tasks", response_model=List[ScheduledTaskInfo], summary="获取所有定时任务")
 async def get_scheduled_tasks(
@@ -1777,7 +1739,7 @@ async def get_scheduled_tasks(
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
     tasks = await scheduler.get_all_tasks()
-    return [ScheduledTaskInfo.model_validate(t) for t in tasks]
+    return tasks
 
 @router.post("/scheduled-tasks", response_model=ScheduledTaskInfo, status_code=201, summary="创建定时任务")
 async def create_scheduled_task(
@@ -1786,8 +1748,8 @@ async def create_scheduled_task(
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
     try:
-        new_task = await scheduler.add_task(task_data.name, task_data.job_type, task_data.cron_expression, task_data.is_enabled)
-        return ScheduledTaskInfo.model_validate(new_task)
+        new_task = await scheduler.add_task(task_data.name, task_data.jobType, task_data.cronExpression, task_data.isEnabled)
+        return new_task
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1886,7 +1848,7 @@ async def update_scheduled_task(
     updated_task = await scheduler.update_task(task_id, task_data.name, task_data.cron_expression, task_data.is_enabled)
     if not updated_task:
         raise HTTPException(status_code=404, detail="找不到指定的任务ID")
-    return ScheduledTaskInfo.model_validate(updated_task)
+    return updated_task
 
 @router.delete("/scheduled-tasks/{task_id}", status_code=204, summary="删除定时任务")
 async def delete_scheduled_task(task_id: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):

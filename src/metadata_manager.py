@@ -170,7 +170,7 @@ class MetadataSourceManager:
         
         full_status_list = []
         for s in settings:
-            provider = s['provider_name']
+            provider = s['providerName']
             status_text = "可访问" # 默认状态
             if provider == 'tmdb':
                 status_text = "已配置" if tmdb_key else "未配置"
@@ -182,11 +182,11 @@ class MetadataSourceManager:
                 status_text = self.connectivity_status[provider]
             
             full_status_list.append({
-                "provider_name": provider,
-                "is_aux_search_enabled": s['is_aux_search_enabled'],
-                "display_order": s['display_order'],
+                "providerName": provider,
+                "isAuxSearchEnabled": s['isAuxSearchEnabled'],
+                "displayOrder": s['displayOrder'],
                 "status": status_text,
-                "use_proxy": s['use_proxy']
+                "useProxy": s['useProxy']
             })
             
         return full_status_list
