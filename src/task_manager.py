@@ -38,6 +38,8 @@ class TaskManager:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
         self._current_task: Optional[Task] = None
+        self._pending_titles: set[str] = set()
+        self._lock = asyncio.Lock()
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def start(self):
@@ -62,6 +64,9 @@ class TaskManager:
         while True:
             self._current_task = None # 清理上一个任务
             task: Task = await self._queue.get()
+            # 从待处理集合中移除
+            async with self._lock:
+                self._pending_titles.discard(task.title)
             self._current_task = task
             self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id})")
 
@@ -111,6 +116,14 @@ class TaskManager:
 
     async def submit_task(self, coro_factory: Callable[[AsyncSession, Callable], Coroutine], title: str) -> Tuple[str, asyncio.Event]:
         """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。"""
+        async with self._lock:
+            # 检查是否有同名任务正在排队或运行
+            if title in self._pending_titles:
+                raise ValueError(f"任务 '{title}' 已在队列中，请勿重复提交。")
+            if self._current_task and self._current_task.title == title:
+                raise ValueError(f"任务 '{title}' 已在运行中，请勿重复提交。")
+            self._pending_titles.add(title)
+
         task_id = str(uuid4())
         task = Task(task_id, title, coro_factory)
         

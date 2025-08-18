@@ -72,7 +72,10 @@ class ControlActionResponse(BaseModel):
     message: str
 
 class ControlSearchResultItem(models.ProviderSearchInfo):
-    result_index: int = Field(..., description="结果在列表中的顺序索引，从0开始")
+    resultIndex: int = Field(..., alias="result_index", description="结果在列表中的顺序索引，从0开始")
+
+    class Config:
+        populate_by_name = True
 
 class ControlSearchResponse(BaseModel):
     searchId: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
@@ -80,7 +83,7 @@ class ControlSearchResponse(BaseModel):
 
 class ControlDirectImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
-    result_index: int = Field(..., ge=0, description="要导入的结果的索引 (从0开始)")
+    resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
     tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
     tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
     bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
@@ -92,7 +95,7 @@ class ControlDirectImportRequest(BaseModel):
 
 class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
-    result_index: int = Field(..., ge=0, description="要编辑的结果的索引 (从0开始)")
+    resultIndex: int = Field(..., alias="result_index", ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
     tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
     tmdbEpisodeGroupId: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
@@ -116,8 +119,11 @@ class ControlUrlImportRequest(BaseModel):
     doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
 class DanmakuOutputSettings(BaseModel):
-    limit_per_source: int
-    aggregation_enabled: bool
+    limitPerSource: int = Field(..., alias="limit_per_source")
+    aggregationEnabled: bool = Field(..., alias="aggregation_enabled")
+
+    class Config:
+        populate_by_name = True
 
 class ControlAnimeDetailsResponse(BaseModel):
     """用于外部API的番剧详情响应模型，不包含冗余的anime_id。"""
@@ -184,7 +190,7 @@ async def search_media(
             
             # Add index to each result
             indexed_results = [
-                ControlSearchResultItem(**r.model_dump(), result_index=i)
+                ControlSearchResultItem(**r.model_dump(), resultIndex=i)
                 for i, r in enumerate(results)
             ]
             
@@ -220,32 +226,29 @@ async def direct_import(
     except Exception:
         raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
 
-    if not (0 <= payload.result_index < len(cached_results)):
+    if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_to_import = cached_results[payload.result_index]
+    item_to_import = cached_results[payload.resultIndex]
 
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
-    task_coro = lambda session, cb: tasks.generic_import_task(
-        provider=item_to_import.provider,
-        mediaId=item_to_import.mediaId,
-        animeTitle=item_to_import.title, 
-        mediaType=item_to_import.type,
-        season=item_to_import.season, 
-        currentEpisodeIndex=item_to_import.currentEpisodeIndex,
-        imageUrl=item_to_import.imageUrl, 
-        doubanId=payload.doubanId,
-        tmdbId=payload.tmdbId,
-        imdbId=payload.imdbId,
-        tvdbId=payload.tvdbId,
-        bangumiId=payload.bangumiId,
-        progress_callback=cb, 
-        session=session, 
-        manager=manager, 
-        task_manager=task_manager
-    )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": "导入任务已提交", "task_id": task_id}
+    try:
+        task_coro = lambda session, cb: tasks.generic_import_task(
+            provider=item_to_import.provider,
+            mediaId=item_to_import.mediaId,
+            animeTitle=item_to_import.title, 
+            mediaType=item_to_import.type,
+            season=item_to_import.season, 
+            currentEpisodeIndex=item_to_import.currentEpisodeIndex,
+            imageUrl=item_to_import.imageUrl, 
+            doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
+            tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
+            progress_callback=cb, session=session, manager=manager, task_manager=task_manager
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        return {"message": "导入任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.get("/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
 async def get_episodes(
@@ -267,10 +270,10 @@ async def get_episodes(
     except Exception:
         raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
 
-    if not (0 <= result_index < len(cached_results)):
+    if not (0 <= resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_to_fetch = cached_results[result_index]
+    item_to_fetch = cached_results[resultIndex]
     
     scraper = manager.get_scraper(item_to_fetch.provider)
     return await scraper.get_episodes(item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
@@ -295,10 +298,10 @@ async def edited_import(
     except Exception:
         raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
 
-    if not (0 <= payload.result_index < len(cached_results)):
+    if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_info = cached_results[payload.result_index]
+    item_info = cached_results[payload.resultIndex]
 
     # Construct the full EditedImportRequest for the task
     task_payload = models.EditedImportRequest(
@@ -318,11 +321,14 @@ async def edited_import(
     )
 
     task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
-    task_coro = lambda session, cb: tasks.edited_import_task(
-        request_data=task_payload, progress_callback=cb, session=session, manager=manager
-    )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": "编辑后导入任务已提交", "task_id": task_id}
+    try:
+        task_coro = lambda session, cb: tasks.edited_import_task(
+            request_data=task_payload, progress_callback=cb, session=session, manager=manager
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        return {"message": "编辑后导入任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入整个作品")
 async def url_import(
@@ -346,21 +352,23 @@ async def url_import(
     final_season = payload.season if payload.season is not None else media_info.season
 
     task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})"
-    
-    task_coro = lambda session, cb: tasks.generic_import_task(
-        provider=scraper.provider_name,
-        mediaId=media_info.mediaId,
-        animeTitle=final_title,
-        mediaType=media_info.type,
-        season=final_season,
-        currentEpisodeIndex=None,  # Import all episodes
-        imageUrl=media_info.imageUrl,
-        doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
-        tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
-        progress_callback=cb, session=session, manager=manager, task_manager=task_manager
-    )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": "URL导入任务已提交", "task_id": task_id}
+    try:
+        task_coro = lambda session, cb: tasks.generic_import_task(
+            provider=scraper.provider_name,
+            mediaId=media_info.mediaId,
+            animeTitle=final_title,
+            mediaType=media_info.type,
+            season=final_season,
+            currentEpisodeIndex=None,  # Import all episodes
+            imageUrl=media_info.imageUrl,
+            doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
+            tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
+            progress_callback=cb, session=session, manager=manager, task_manager=task_manager
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        return {"message": "URL导入任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- 媒体库管理 ---
 library_router = APIRouter(prefix="/library", dependencies=[Depends(verify_api_key)])
@@ -395,21 +403,27 @@ async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: A
 async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
-    task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
-        f"外部API删除作品: {details['title']}"
-    )
-    return {"message": "删除作品任务已提交", "task_id": task_id}
+    try:
+        task_id, _ = await task_manager.submit_task(
+            lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
+            f"外部API删除作品: {details['title']}"
+        )
+        return {"message": "删除作品任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @library_router.delete("/source/{sourceId}", status_code=202, summary="删除数据源")
 async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     info = await crud.get_anime_source_info(session, sourceId)
     if not info: raise HTTPException(404, "数据源未找到")
-    task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_source_task(sourceId, s, cb),
-        f"外部API删除源: {info['title']} ({info['provider_name']})"
-    )
-    return {"message": "删除源任务已提交", "task_id": task_id}
+    try:
+        task_id, _ = await task_manager.submit_task(
+            lambda s, cb: tasks.delete_source_task(sourceId, s, cb),
+            f"外部API删除源: {info['title']} ({info['providerName']})"
+        )
+        return {"message": "删除源任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @library_router.put("/source/{sourceId}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
 async def favorite_source(sourceId: int, session: AsyncSession = Depends(get_db_session)):
@@ -443,11 +457,14 @@ async def refresh_episode(episodeId: int, session: AsyncSession = Depends(get_db
 async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
-    task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.delete_episode_task(episodeId, s, cb),
-        f"外部API删除分集: {info['title']}"
-    )
-    return {"message": "删除分集任务已提交", "task_id": task_id}
+    try:
+        task_id, _ = await task_manager.submit_task(
+            lambda s, cb: tasks.delete_episode_task(episodeId, s, cb),
+            f"外部API删除分集: {info['title']}"
+        )
+        return {"message": "删除分集任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- 弹幕管理 ---
 danmaku_router = APIRouter(prefix="/danmaku", dependencies=[Depends(verify_api_key)])
@@ -466,8 +483,11 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
         await cb(50, f"插入 {len(payload.comments)} 条新弹幕...")
         added = await crud.bulk_insert_comments(session, episodeId, [c.model_dump() for c in payload.comments])
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
-    task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
-    return {"message": "弹幕覆盖任务已提交", "task_id": task_id}
+    try:
+        task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
+        return {"message": "弹幕覆盖任务已提交", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- Token 管理 ---
 token_router = APIRouter(prefix="/tokens", dependencies=[Depends(verify_api_key)])
@@ -517,12 +537,12 @@ settings_router = APIRouter(prefix="/settings", dependencies=[Depends(verify_api
 async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_session)):
     limit = await crud.get_config_value(session, 'danmaku_output_limit_per_source', '-1')
     enabled = await crud.get_config_value(session, 'danmaku_aggregation_enabled', 'true')
-    return DanmakuOutputSettings(limitPerSource=int(limit), aggregationEnabled=(enabled.lower() == 'true'))
+    return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
 
 @settings_router.put("/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
-    await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limitPerSource))
-    await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregationEnabled).lower())
+    await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limitPerSource)) # type: ignore
+    await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregationEnabled).lower()) # type: ignore
     config_manager.invalidate('danmaku_output_limit_per_source')
     config_manager.invalidate('danmaku_aggregation_enabled')
     return {"message": "弹幕输出设置已更新。"}
