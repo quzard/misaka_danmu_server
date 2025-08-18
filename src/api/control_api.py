@@ -171,7 +171,6 @@ class ControlAutoImportRequest(BaseModel):
 
 @router.post("/import/auto", status_code=status.HTTP_202_ACCEPTED, summary="全自动搜索并导入", response_model=ControlTaskResponse)
 async def auto_import(
-    payload: ControlAutoImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
@@ -201,6 +200,14 @@ async def auto_import(
             -   提供 `season` 和 `episode`: 只导入指定的单集。
             -   `episode` 不可单独使用，必须与 `season` 一同提供。
     """
+    payload = ControlAutoImportRequest (
+        searchType=searchType,
+        searchTerm=searchTerm,
+        mediaType=mediaType,
+        season=season,
+        episode=episode
+    )
+
     if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
         raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
 

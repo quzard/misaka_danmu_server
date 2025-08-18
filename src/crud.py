@@ -54,7 +54,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
             update_values["local_image_path"] = local_image_path
         if update_values:
             await session.execute(update(Anime).where(Anime.id == anime.id).values(**update_values))
-            await session.commit()
+            await session.flush() # 使用 flush 代替 commit，以在事务中保持对象状态
         return anime.id
 
     # Create new anime
@@ -70,7 +70,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     new_alias = AnimeAlias(anime_id=new_anime.id)
     session.add_all([new_metadata, new_alias])
     
-    await session.commit()
+    await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_anime.id
 
 async def update_anime_details(session: AsyncSession, anime_id: int, update_data: models.AnimeDetailUpdate) -> bool:
@@ -397,7 +397,7 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
         media_id=media_id
     )
     session.add(new_source)
-    await session.commit()
+    await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_source.id
 
 async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId: Optional[str], imdbId: Optional[str], tvdbId: Optional[str], doubanId: Optional[str], bangumiId: Optional[str] = None, tmdbEpisodeGroupId: Optional[str] = None):
@@ -509,7 +509,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
         provider_episode_id=provider_episode_id, title=title, source_url=url, fetched_at=datetime.now()
     )
     session.add(new_episode)
-    await session.commit()
+    await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_episode_id
 
 async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments: List[Dict[str, Any]]) -> int:
