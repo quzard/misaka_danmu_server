@@ -115,6 +115,8 @@ class ControlEditedImportRequest(BaseModel):
         populate_by_name = True
 
 class ControlUrlImportRequest(BaseModel):
+    """用于外部API通过URL导入的请求模型"""
+    provider: str = Field(..., description="要导入的源，例如 'bilibili'")
     url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
     title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
     season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
@@ -123,6 +125,7 @@ class ControlUrlImportRequest(BaseModel):
     bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
     imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
     doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    episodeIndex: int = Field(..., alias="episode_index", description="要导入的集数", gt=0)
 
 class DanmakuOutputSettings(BaseModel):
     limitPerSource: int = Field(..., alias="limit_per_source")
@@ -460,7 +463,7 @@ async def url_import(
     if not media_info:
         raise HTTPException(status_code=404, detail="无法从提供的URL中获取有效的作品信息。")
 
-    # Allow user to override scraped info
+       # 获取指定分集的progress_callback
     final_title = payload.title or media_info.title
     final_season = payload.season if payload.season is not None else media_info.season
 
@@ -470,7 +473,8 @@ async def url_import(
             provider=scraper.provider_name,
             mediaId=media_info.mediaId,
             animeTitle=final_title,
-            mediaType=media_info.type,
+            mediaType=media_info.type, # type: ignore
+            currentEpisodeIndex=payload.episodeIndex,
             season=final_season,
             currentEpisodeIndex=None,  # Import all episodes
             imageUrl=media_info.imageUrl,
@@ -479,7 +483,7 @@ async def url_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": "URL导入任务已提交", "taskId": task_id}
+        return {"message": f"'{title}' 的URL单集导入任务已提交。", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
