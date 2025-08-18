@@ -124,21 +124,21 @@ class ControlAnimeDetailsResponse(BaseModel):
     title: str
     type: str
     season: int
-    episode_count: Optional[int] = None
-    local_image_path: Optional[str] = None
-    image_url: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    tmdb_episode_group_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    douban_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    name_en: Optional[str] = None
-    name_jp: Optional[str] = None
-    name_romaji: Optional[str] = None
-    alias_cn_1: Optional[str] = None
-    alias_cn_2: Optional[str] = None
-    alias_cn_3: Optional[str] = None
+    episodeCount: Optional[int] = None
+    localImagePath: Optional[str] = None
+    imageUrl: Optional[str] = None
+    tmdbId: Optional[str] = None
+    tmdbEpisodeGroupId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    doubanId: Optional[str] = None
+    imdbId: Optional[str] = None
+    nameEn: Optional[str] = None
+    nameJp: Optional[str] = None
+    nameRomaji: Optional[str] = None
+    aliasCn1: Optional[str] = None
+    aliasCn2: Optional[str] = None
+    aliasCn3: Optional[str] = None
 
 # --- API 路由 ---
 

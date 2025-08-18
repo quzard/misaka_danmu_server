@@ -185,7 +185,7 @@ async def search_anime_provider(
 
     # 新增：根据搜索源的显示顺序和标题相似度对结果进行排序
     source_settings = await crud.get_all_scraper_settings(session)
-    source_order_map = {s['provider_name']: s['display_order'] for s in source_settings}
+    source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
 
     def sort_key(item: models.ProviderSearchInfo):
         provider_order = source_order_map.get(item.provider, 999)

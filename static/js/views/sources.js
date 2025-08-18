@@ -90,7 +90,7 @@ function renderDanmakuSources(settings) {
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'source-name';
-        nameSpan.textContent = setting.provider_name;
+        nameSpan.textContent = setting.providerName;
         li.appendChild(nameSpan);
 
         // 创建验证状态图标，但稍后根据源类型决定其位置
