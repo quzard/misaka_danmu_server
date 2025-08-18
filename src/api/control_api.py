@@ -1,6 +1,7 @@
 import logging
 import secrets
 import uuid
+from enum import Enum
 from typing import List, Optional, Dict, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -150,6 +151,21 @@ class ControlAnimeDetailsResponse(BaseModel):
     aliasCn1: Optional[str] = None
     aliasCn2: Optional[str] = None
     aliasCn3: Optional[str] = None
+
+class AutoImportSearchType(str, Enum):
+    KEYWORD = "keyword"
+    TMDB = "tmdb"
+    TVDB = "tvdb"
+    DOUBAN = "douban"
+    IMDB = "imdb"
+    BANGUMI = "bangumi"
+
+class ControlAutoImportRequest(BaseModel):
+    searchType: AutoImportSearchType
+    searchTerm: str
+    season: Optional[int] = 1
+    episode: Optional[int] = None
+    mediaType: Optional[str] = None # 'tv_series' or 'movie'
 
 # --- API 路由 ---
 
@@ -332,6 +348,32 @@ async def edited_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+@router.post("/import/auto", status_code=status.HTTP_202_ACCEPTED, summary="全自动搜索并导入", response_model=ControlTaskResponse)
+async def auto_import(
+    payload: ControlAutoImportRequest,
+    task_manager: TaskManager = Depends(get_task_manager),
+    manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    全自动搜索并导入弹幕。
+    - 根据 searchType 和 searchTerm 自动查找元数据和别名。
+    - 根据智能规则选择最佳源进行导入。
+    """
+    if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
+        raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
+
+    task_title = f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"
+    try:
+        task_coro = lambda session, cb: tasks.auto_search_and_import_task(
+            payload, cb, session, manager, metadata_manager, task_manager
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        return {"message": "自动导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 

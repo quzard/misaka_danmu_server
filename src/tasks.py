@@ -1,12 +1,14 @@
 import logging
 from typing import Callable, List, Optional
 
+from thefuzz import fuzz
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, models, orm_models
 from .image_utils import download_image
 from .scraper_manager import ScraperManager
+from .metadata_manager import MetadataSourceManager
 from .task_manager import TaskManager, TaskSuccess
 
 logger = logging.getLogger(__name__)
@@ -459,3 +461,129 @@ async def manual_import_task(
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
+
+async def auto_search_and_import_task(
+    payload: "models.ControlAutoImportRequest",
+    progress_callback: Callable,
+    session: AsyncSession,
+    scraper_manager: ScraperManager,
+    metadata_manager: MetadataSourceManager,
+    task_manager: TaskManager,
+):
+    """
+    全自动搜索并导入的核心任务逻辑。
+    """
+    from .api.tmdb_api import get_tmdb_details
+    from .api.bangumi_api import get_bangumi_subject_details
+    from .api.douban_api import get_douban_details
+    from .api.tvdb_api import get_tvdb_details
+    from .api.imdb_api import get_imdb_details
+
+    search_type = payload.searchType
+    search_term = payload.searchTerm
+    
+    await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
+
+    # 1. 获取元数据和别名
+    aliases = {search_term}
+    main_title = search_term
+    media_type = payload.mediaType
+    season = payload.season
+    image_url = None
+    tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
+
+    id_fetch_map = {
+        "tmdb": (get_tmdb_details, {"media_type": media_type, "tmdb_id": search_term}),
+        "bangumi": (get_bangumi_subject_details, {"subject_id": search_term}),
+        "douban": (get_douban_details, {"douban_id": search_term}),
+        "tvdb": (get_tvdb_details, {"tvdb_id": search_term}),
+        "imdb": (get_imdb_details, {"imdb_id": search_term}),
+    }
+
+    if search_type != "keyword":
+        await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
+        fetch_func, params = id_fetch_map[search_type]
+        # We need a dummy user and a client for these functions
+        # This part is a bit tricky as we are outside of a request context.
+        # A better long-term solution might be to refactor the detail getters
+        # to not depend on FastAPI's Depends. For now, we create them manually.
+        # Note: This part assumes no user-specific logic in the clients.
+        from .api.tmdb_api import get_tmdb_client
+        from .api.bangumi_api import get_bangumi_client
+        from .api.douban_api import get_douban_client
+        from .api.tvdb_api import get_tvdb_client
+        from .api.imdb_api import get_imdb_client
+        
+        client_map = {
+            "tmdb": get_tmdb_client, "bangumi": get_bangumi_client, "douban": get_douban_client,
+            "tvdb": get_tvdb_client, "imdb": get_imdb_client
+        }
+        async with await client_map[search_type](None, session) as client:
+            details = await fetch_func(client=client, **params)
+        
+        main_title = details.get("title") or details.get("name") or main_title
+        image_url = details.get("image_url")
+        aliases.add(main_title)
+        aliases.update(details.get("aliases_cn", []))
+        aliases.add(details.get("name_en"))
+        aliases.add(details.get("name_jp"))
+        tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
+            details.get("tmdb_id"), details.get("bangumi_id"), details.get("douban_id"),
+            details.get("tvdb_id"), details.get("imdb_id")
+        )
+
+    # 2. 检查媒体库中是否已存在
+    await progress_callback(20, "正在检查媒体库...")
+    existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+    if existing_anime:
+        favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
+        if favorited_source:
+            source_to_use = favorited_source
+            logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['provider_name']}")
+        else:
+            all_sources = await crud.get_anime_sources(session, existing_anime['id'])
+            if all_sources:
+                ordered_settings = await crud.get_all_scraper_settings(session)
+                provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
+                all_sources.sort(key=lambda s: provider_order.get(s['providerName'], 999))
+                source_to_use = all_sources[0]
+                logger.info(f"媒体库中已存在作品，选择优先级最高的源: {source_to_use['providerName']}")
+            else: source_to_use = None
+        
+        if source_to_use:
+            await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
+            task_coro = lambda s, cb: generic_import_task(
+                provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
+                animeTitle=main_title, mediaType=media_type, season=season,
+                currentEpisodeIndex=payload.episode, imageUrl=image_url,
+                doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
+                progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager
+            )
+            await task_manager.submit_task(task_coro, f"自动导入 (库内): {main_title}")
+            raise TaskSuccess("作品已在库中，已为已有源创建导入任务。")
+
+    # 3. 如果库中不存在，则进行全网搜索
+    await progress_callback(40, "媒体库未找到，开始全网搜索...")
+    search_keywords = list(filter(None, aliases))
+    episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
+    all_results = await scraper_manager.search_all(search_keywords, episode_info=episode_info)
+
+    if not all_results:
+        raise TaskSuccess("全网搜索未找到任何结果。")
+
+    # 4. 选择最佳源
+    ordered_settings = await crud.get_all_scraper_settings(session)
+    provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
+    all_results.sort(key=lambda item: provider_order.get(item.provider, 999))
+    best_match = all_results[0]
+
+    await progress_callback(80, f"选择最佳源: {best_match.provider}")
+    task_coro = lambda s, cb: generic_import_task(
+        provider=best_match.provider, mediaId=best_match.mediaId,
+        animeTitle=main_title, mediaType=media_type, season=season,
+        currentEpisodeIndex=payload.episode, imageUrl=image_url,
+        doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
+        progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager
+    )
+    await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}")
+    raise TaskSuccess("已为最佳匹配源创建导入任务。")
