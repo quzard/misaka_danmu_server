@@ -369,6 +369,10 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
     lastRunAt: Optional[datetime] = Field(None, alias="last_run_at")
     nextRunAt: Optional[datetime] = Field(None, alias="next_run_at")
 
+    class Config:
+        # 确保子模型也能正确处理别名
+        populate_by_name = True
+
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str
     proxyHost: Optional[str] = None

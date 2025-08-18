@@ -372,7 +372,7 @@ async def deauthorize_bangumi(
 ):
     await crud.delete_bangumi_auth(session, current_user.id)
 
-@router.get("/search", response_model=List[Dict[str, Any]], summary="搜索 Bangumi 作品")
+@router.get("/search", response_model=List[BangumiApiSearchResult], summary="搜索 Bangumi 作品")
 async def search_bangumi_subjects(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_bangumi_client),

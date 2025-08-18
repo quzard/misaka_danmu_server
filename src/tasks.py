@@ -193,6 +193,7 @@ async def generic_import_task(
     anime_id: Optional[int] = None
     source_id: Optional[int] = None
     total_comments_added = 0
+    image_download_failed = False
     total_episodes = len(episodes)
 
     for i, episode in enumerate(episodes):
@@ -210,6 +211,8 @@ async def generic_import_task(
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
             local_image_path = await download_image(imageUrl, session, manager, provider)
+            if imageUrl and not local_image_path:
+                image_download_failed = True
             anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path) # type: ignore
             await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
@@ -226,10 +229,14 @@ async def generic_import_task(
         else:
             logger.info(f"分集 '{episode.title}' 未找到弹幕，跳过创建主条目。")
 
+    final_message = ""
     if total_comments_added == 0:
-        raise TaskSuccess("导入完成，但未找到任何新弹幕。")
+        final_message = "导入完成，但未找到任何新弹幕。"
     else:
-        raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
+        final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
+    if image_download_failed:
+        final_message += " (警告：海报图片下载失败)"
+    raise TaskSuccess(final_message)
     
 async def edited_import_task(
     request_data: "models.EditedImportRequest",
@@ -248,6 +255,7 @@ async def edited_import_task(
     anime_id: Optional[int] = None
     source_id: Optional[int] = None
     total_comments_added = 0
+    image_download_failed = False
     total_episodes = len(episodes)
 
     for i, episode in enumerate(episodes):
@@ -256,6 +264,8 @@ async def edited_import_task(
 
         if comments and anime_id is None: # type: ignore
             local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
+            if request_data.imageUrl and not local_image_path:
+                image_download_failed = True
             anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
             await crud.update_metadata_if_empty(
                 session, anime_id,
@@ -273,8 +283,14 @@ async def edited_import_task(
             if comments:
                 total_comments_added += await crud.bulk_insert_comments(session, episode_db_id, comments)
 
-    if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
-    else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
+    final_message = ""
+    if total_comments_added == 0:
+        final_message = "导入完成，但未找到任何新弹幕。"
+    else:
+        final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
+    if image_download_failed:
+        final_message += " (警告：海报图片下载失败)"
+    raise TaskSuccess(final_message)
 
 async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
     """

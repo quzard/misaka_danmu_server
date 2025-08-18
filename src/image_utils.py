@@ -55,6 +55,10 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
     if image_url.startswith('//'):
         image_url = 'https:' + image_url
 
+    # 新增：对于爱奇艺的图片，总是尝试使用 HTTPS
+    if 'iqiyipic.com' in image_url:
+        image_url = image_url.replace('http://', 'https://', 1)
+
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxy=proxy_to_use) as client:
             referer = "https://www.google.com/"  # 默认值
@@ -66,7 +70,12 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
                 except ValueError:
                     logger.warning(f"下载图片时未找到提供方为 '{provider_name}' 的搜索源，将使用通用 Referer。")
             
-            response = await client.get(image_url, headers={"Referer": referer})
+            # 新增：对于爱奇艺的图片，不发送 Referer，因为它们的CDN可能不允许
+            headers = {}
+            if 'iqiyipic.com' not in image_url:
+                headers["Referer"] = referer
+            
+            response = await client.get(image_url, headers=headers)
             response.raise_for_status()
 
             content_type = response.headers.get("content-type", "")

@@ -348,152 +348,101 @@ async def search_tmdb_aliases(keyword: str, client: httpx.AsyncClient) -> set[st
         logger.warning(f"TMDB辅助搜索失败: {e}")
     return {alias for alias in local_aliases if alias}
 
-async def search_tmdb_aliases(keyword: str, client: httpx.AsyncClient) -> set[str]:
+async def get_tmdb_details_logic(
+    client: httpx.AsyncClient,
+    media_type: str,
+    tmdb_id: int,
+    season: Optional[int] = None
+) -> models.MetadataDetailsResponse:
     """
-    从TMDB获取别名。
+    获取TMDB作品详情的核心逻辑。
+    这是一个内部函数，以便被其他部分（如自动导入任务）复用。
     """
-    local_aliases: set[str] = set()
-    try:
-        tv_task = client.get("/search/tv", params={"query": keyword, "language": "zh-CN"})
-        movie_task = client.get("/search/movie", params={"query": keyword, "language": "zh-CN"})
-        tv_res, movie_res = await asyncio.gather(tv_task, movie_task, return_exceptions=True)
-
-        tmdb_results = []
-        if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
-            tmdb_results.extend(tv_res.json().get("results", []))
-        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
-            tmdb_results.extend(movie_res.json().get("results", []))
-
-        if tmdb_results:
-            best_match = tmdb_results[0]
-            media_type = "tv" if "name" in best_match else "movie"
-            media_id = best_match['id']
-
-            details_cn_res = await client.get(f"/{media_type}/{media_id}", params={"append_to_response": "alternative_titles", "language": "zh-CN"})
-            if details_cn_res.status_code == 200:
-                details = details_cn_res.json()
-                local_aliases.add(details.get('name') or details.get('title'))
-                local_aliases.add(details.get('original_name') or details.get('original_title'))
-                for title_info in details.get("alternative_titles", {}).get("titles", []):
-                    local_aliases.add(title_info['title'])
-        logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
-    except Exception as e:
-        logger.warning(f"TMDB辅助搜索失败: {e}")
-    return {alias for alias in local_aliases if alias}
-
-@router.get("/details/{media_type}/{tmdb_id}", response_model=Dict[str, Any], summary="获取 TMDB 作品详情")
-async def get_tmdb_details(
-    media_type: str = Path(..., description="媒体类型, 'tv' 或 'movie'"),
-    tmdb_id: int = Path(..., description="TMDB ID"),
-    season: Optional[int] = Query(None, description="要专门为其获取别名的季度号"),
-    client: httpx.AsyncClient = Depends(get_tmdb_client),
-):
     if media_type not in ["tv", "movie"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的媒体类型，必须是 'tv' 或 'movie'。")
 
-    async with client:
-        # --- New parallel fetching logic ---
-        details_cn_task = client.get(f"/{media_type}/{tmdb_id}", params={"append_to_response": "alternative_titles,external_ids", "language": "zh-CN"})
-        details_en_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "en-US"})
-        details_ja_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "ja-JP"})
-        details_tw_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "zh-TW"})
+    # --- New parallel fetching logic ---
+    details_cn_task = client.get(f"/{media_type}/{tmdb_id}", params={"append_to_response": "alternative_titles,external_ids", "language": "zh-CN"})
+    details_en_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "en-US"})
+    details_ja_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "ja-JP"})
+    details_tw_task = client.get(f"/{media_type}/{tmdb_id}", params={"language": "zh-TW"})
 
-        responses = await asyncio.gather(
-            details_cn_task, details_en_task, details_ja_task, details_tw_task,
-            return_exceptions=True
-        )
+    responses = await asyncio.gather(
+        details_cn_task, details_en_task, details_ja_task, details_tw_task,
+        return_exceptions=True
+    )
+    
+    details_cn_res, details_en_res, details_ja_res, details_tw_res = responses
+
+    # --- Process Chinese (main) response ---
+    if isinstance(details_cn_res, Exception) or details_cn_res.status_code != 200:
+        if isinstance(details_cn_res, httpx.Response):
+            if details_cn_res.status_code == 401:
+                raise ValueError("TMDB API Key 无效或未授权。")
+            if details_cn_res.status_code == 404:
+                raise ValueError("未找到 TMDB 条目。")
         
-        details_cn_res, details_en_res, details_ja_res, details_tw_res = responses
+        logger.error(f"获取 TMDB 中文详情失败 (ID: {tmdb_id}): {details_cn_res}")
+        raise ValueError(f"获取 TMDB 详情失败 (ID: {tmdb_id})。")
+    
+    details_json = details_cn_res.json()
 
-        # --- Process Chinese (main) response ---
-        if isinstance(details_cn_res, Exception) or details_cn_res.status_code != 200:
-            # Handle potential 401/404 from the main request
-            if isinstance(details_cn_res, httpx.Response):
-                if details_cn_res.status_code == 401:
-                    raise ValueError("TMDB API Key 无效或未授权。")
-                if details_cn_res.status_code == 404:
-                    raise ValueError("未找到 TMDB 条目。")
-            
-            logger.error(f"获取 TMDB 中文详情失败 (ID: {tmdb_id}): {details_cn_res}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取 TMDB 详情失败 (ID: {tmdb_id})。")
-        
-        details_json = details_cn_res.json()
+    # Initialize variables
+    name_en, name_jp, name_romaji, aliases_cn = None, None, None, []
+    imdb_id, tvdb_id = None, None
+    
+    if media_type == "tv":
+        details = TMDBTVDetails.model_validate(details_json)
+        main_title_cn = details.name
+    else: # movie
+        details = TMDBMovieDetails.model_validate(details_json)
+        main_title_cn = details.title
 
-        # Initialize variables
-        name_en = None
-        name_jp = None
-        name_romaji = None
-        aliases_cn = []
-        imdb_id = None
-        tvdb_id = None
-        
-        # Get base details
-        if media_type == "tv":
-            details = TMDBTVDetails.model_validate(details_json)
-            main_title_cn = details.name
-        else: # movie
-            details = TMDBMovieDetails.model_validate(details_json)
-            main_title_cn = details.title
+    if details.external_ids:
+        imdb_id = details.external_ids.imdb_id
+        tvdb_id = details.external_ids.tvdb_id
 
-        # Extract external IDs
-        if details.external_ids:
-            imdb_id = details.external_ids.imdb_id
-            tvdb_id = details.external_ids.tvdb_id
+    if details.alternative_titles:
+        for alt_title in details.alternative_titles.titles:
+            title_text, alt_type, alt_country = alt_title.title, alt_title.type or "", alt_title.iso_3166_1
+            if not title_text: continue
 
-        # Process alternative titles from Chinese response
-        if details.alternative_titles:
-            for alt_title in details.alternative_titles.titles: # type: ignore
-                title_text = alt_title.title
-                alt_type = alt_title.type or ""
-                alt_country = alt_title.iso_3166_1
+            if alt_country == "JP" and alt_type == "Romaji" and not name_romaji and not _is_cjk(title_text):
+                name_romaji = title_text
+                continue
 
-                if not title_text: continue
+            if alt_country in ["CN", "HK", "TW"]:
+                season_match = re.match(r'Season\s*(\d+)', alt_type, re.IGNORECASE)
+                if season_match and season and season == int(season_match.group(1)) and _is_cjk(title_text):
+                    aliases_cn.append(title_text)
+                elif not alt_type and _is_cjk(title_text):
+                    aliases_cn.append(title_text)
 
-                # Get Romaji from JP region with type "Romaji"
-                if alt_country == "JP" and alt_type == "Romaji":
-                    if not name_romaji and not _is_cjk(title_text):
-                        name_romaji = title_text
-                    continue
+    if isinstance(details_en_res, httpx.Response) and details_en_res.status_code == 200:
+        en_json = details_en_res.json()
+        name_en = en_json.get('name') or en_json.get('title')
 
-                # Handle Chinese Aliases
-                if alt_country in ["CN", "HK", "TW"]:
-                    season_match = re.match(r'Season\s*(\d+)', alt_type, re.IGNORECASE)
-                    if season_match:
-                        title_season = int(season_match.group(1))
-                        if season and season == title_season and _is_cjk(title_text):
-                            aliases_cn.append(title_text)
-                    # Add generic aliases (no type)
-                    elif not alt_type and _is_cjk(title_text):
-                        aliases_cn.append(title_text)
+    if isinstance(details_ja_res, httpx.Response) and details_ja_res.status_code == 200:
+        ja_json = details_ja_res.json()
+        name_jp = ja_json.get('name') or ja_json.get('title')
 
-        # --- Process other language responses ---
-        if isinstance(details_en_res, httpx.Response) and details_en_res.status_code == 200:
-            en_json = details_en_res.json()
-            name_en = en_json.get('name') or en_json.get('title')
+    if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
+        tw_json = details_tw_res.json()
+        name_tw = tw_json.get('name') or tw_json.get('title')
+        if name_tw and _is_cjk(name_tw):
+            aliases_cn.append(name_tw)
+    
+    if main_title_cn: aliases_cn.append(main_title_cn)
+    
+    cleaned_aliases_cn = [_clean_movie_title(alias) for alias in aliases_cn if alias]
 
-        if isinstance(details_ja_res, httpx.Response) and details_ja_res.status_code == 200:
-            ja_json = details_ja_res.json()
-            name_jp = ja_json.get('name') or ja_json.get('title')
-
-        if isinstance(details_tw_res, httpx.Response) and details_tw_res.status_code == 200:
-            tw_json = details_tw_res.json()
-            name_tw = tw_json.get('name') or tw_json.get('title')
-            if name_tw and _is_cjk(name_tw):
-                aliases_cn.append(name_tw)
-        
-        if main_title_cn: aliases_cn.append(main_title_cn)
-        
-        cleaned_aliases_cn = [_clean_movie_title(alias) for alias in aliases_cn if alias]
-
-        return models.MetadataDetailsResponse(
-            id=str(details.id), tmdbId=str(details.id), title=main_title_cn,
-            imdbId=imdb_id,
-            tvdbId=str(tvdb_id) if tvdb_id else None,
-            nameEn=_clean_movie_title(name_en),
-            nameJp=_clean_movie_title(name_jp),
-            nameRomaji=_clean_movie_title(name_romaji),
-            aliasesCn=list(dict.fromkeys(cleaned_aliases_cn))
-        )
+    return models.MetadataDetailsResponse(
+        id=str(details.id), tmdbId=str(details.id), title=main_title_cn,
+        imdbId=imdb_id, tvdbId=str(tvdb_id) if tvdb_id else None,
+        nameEn=_clean_movie_title(name_en), nameJp=_clean_movie_title(name_jp),
+        nameRomaji=_clean_movie_title(name_romaji),
+        aliasesCn=list(dict.fromkeys(cleaned_aliases_cn))
+    )
 
 @router.get("/details/{media_type}/{tmdb_id}", response_model=models.MetadataDetailsResponse, summary="获取 TMDB 作品详情")
 async def get_tmdb_details(
@@ -503,7 +452,8 @@ async def get_tmdb_details(
     client: httpx.AsyncClient = Depends(get_tmdb_client),
 ):
     try:
-        return await get_tmdb_details_logic(client=client, media_type=media_type, tmdb_id=tmdb_id, season=season)
+        async with client:
+            return await get_tmdb_details_logic(client=client, media_type=media_type, tmdb_id=tmdb_id, season=season)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 

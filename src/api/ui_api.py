@@ -695,24 +695,7 @@ class ProxyTestResult(BaseModel):
     status: str  # 'success' or 'failure'
     latency: Optional[float] = None # in ms
     error: Optional[str] = None
-
-class ProxySettingsResponse(BaseModel):
-    proxy_protocol: str
-    proxy_host: Optional[str] = None
-    proxy_port: Optional[int] = None
-    proxy_username: Optional[str] = None
-    proxy_password: Optional[str] = None
-    proxy_enabled: bool
-
-class ProxySettingsUpdate(BaseModel):
-    proxy_protocol: str
-    proxy_host: Optional[str] = None
-    proxy_port: Optional[int] = None
-    proxy_username: Optional[str] = None
-    proxy_password: Optional[str] = None
-    proxy_enabled: bool
-
-@router.get("/config/proxy", response_model=ProxySettingsResponse, summary="获取代理配置")
+@router.get("/config/proxy", response_model=models.ProxySettingsResponse, summary="获取代理配置")
 
 async def get_proxy_settings(
     current_user: models.User = Depends(security.get_current_user),
