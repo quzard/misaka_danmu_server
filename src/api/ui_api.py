@@ -732,7 +732,7 @@ async def get_proxy_settings(
 
 @router.put("/config/proxy", status_code=status.HTTP_204_NO_CONTENT, summary="更新代理配置")
 async def update_proxy_settings(
-    payload: ProxySettingsUpdate,
+    payload: models.ProxySettingsUpdate,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
