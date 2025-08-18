@@ -434,7 +434,8 @@ async def search_bangumi_subjects(
         
         # 缓存结果
         ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
-        await crud.set_cache(session, cache_key, final_results, int(ttl_seconds_str), provider='bangumi')
+        results_to_cache = [r.model_dump() for r in final_results]
+        await crud.set_cache(session, cache_key, results_to_cache, int(ttl_seconds_str), provider='bangumi')
 
         return final_results
 
