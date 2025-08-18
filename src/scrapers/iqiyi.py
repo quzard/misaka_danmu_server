@@ -122,21 +122,21 @@ class IqiyiDesktopSearchTemplate(BaseModel):
 class IqiyiDesktopSearchData(BaseModel):
     templates: List[IqiyiDesktopSearchTemplate] = []
 
-class IqiyiBaseInfoVideoItem(BaseModel):
-    tv_id: int = Field(alias="tvId")
+class IqiyiV3EpisodeItem(BaseModel):
+    tv_id: int = Field(alias="tv_id")
     name: str
     order: int
-    play_url: str = Field(alias="playUrl")
+    play_url: str = Field(alias="play_url")
 
-class IqiyiBaseInfoData(BaseModel):
-    video_list: List[IqiyiBaseInfoVideoItem] = Field(alias="videoList")
+class IqiyiV3AlbumData(BaseModel):
+    video_list: List[IqiyiV3EpisodeItem] = Field(alias="video_list")
 
-class IqiyiBaseInfoResponseData(BaseModel):
-    base_data: IqiyiBaseInfoData = Field(alias="baseData")
+class IqiyiV3ResponseData(BaseModel):
+    base_data: IqiyiV3AlbumData = Field(alias="base_data")
 
-class IqiyiBaseInfoResponse(BaseModel):
-    status_code: int = Field(alias="status_code")
-    data: Optional[IqiyiBaseInfoResponseData] = None
+class IqiyiV3ApiResponse(BaseModel):
+    status_code: int
+    data: Optional[IqiyiV3ResponseData] = None
 
 class IqiyiDesktopSearchResult(BaseModel):
     data: Optional[IqiyiDesktopSearchData] = None
@@ -144,8 +144,7 @@ class IqiyiDesktopSearchResult(BaseModel):
 class IqiyiHtmlAlbumInfo(BaseModel):
     video_count: Optional[int] = Field(None, alias="videoCount")
 
-# 修正：此模型现在用于解析新的 baseinfo API 响应
-class IqiyiHtmlVideoInfo(BaseModel):
+class IqiyiLegacyVideoInfo(BaseModel):
     # 新增：允许模型通过字段名或别名进行填充，以兼容新旧缓存格式
     model_config = ConfigDict(populate_by_name=True)
 
@@ -161,7 +160,7 @@ class IqiyiHtmlVideoInfo(BaseModel):
     video_count: int = 0 
 
     @model_validator(mode='after')
-    def merge_ids(self) -> 'IqiyiHtmlVideoInfo':
+    def merge_ids(self) -> 'IqiyiLegacyVideoInfo':
         if self.tv_id is None and self.video_id is not None:
             self.tv_id = self.video_id
         return self
@@ -571,7 +570,7 @@ class IqiyiScraper(BaseScraper):
             return None
         
         link_id = link_id_match.group(1)
-        return await self._get_video_base_info(link_id)
+        return await self._get_legacy_video_base_info(link_id)
 
     async def _get_episodes_v3(self, media_id: str) -> List[models.ProviderEpisodeInfo]:
         """方案 #1: 使用新的 base_info API 获取分集列表。"""
@@ -599,8 +598,8 @@ class IqiyiScraper(BaseScraper):
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"iQiyi BaseInfo API Response (entity_id={entity_id}): {response.text}")
             response.raise_for_status()
-            
-            result = IqiyiBaseInfoResponse.model_validate(response.json())
+
+            result = IqiyiV3ApiResponse.model_validate(response.json())
             if result.status_code != 0 or not result.data or not result.data.base_data.video_list:
                 self.logger.warning(f"爱奇艺 (v3): API未成功返回分集数据。状态码: {result.status_code}")
                 return []
@@ -617,8 +616,8 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺 (v3): 获取分集时发生错误: {e}", exc_info=True)
             return []
 
-    async def _get_video_base_info_v2(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]:
-        base_info = await self._get_video_base_info(link_id)
+    async def _get_legacy_video_base_info_v2(self, link_id: str) -> Optional[IqiyiLegacyVideoInfo]:
+        base_info = await self._get_legacy_video_base_info(link_id)
         if not base_info:
             return None
 
@@ -675,14 +674,14 @@ class IqiyiScraper(BaseScraper):
         self.logger.error(f"爱奇艺: 所有 decode API 端点均调用失败 (link_id: {link_id})。")
         return None
 
-    async def _get_video_base_info(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]: # This is the old v2
+    async def _get_legacy_video_base_info(self, link_id: str) -> Optional[IqiyiLegacyVideoInfo]: # This is the old v2
         # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
         cache_key = f"base_info_{link_id}"
         cached_info = await self._get_from_cache(cache_key)
         if cached_info is not None:
             self.logger.info(f"爱奇艺: 从缓存中命中基础信息 (link_id={link_id})")
             try:
-                return IqiyiHtmlVideoInfo.model_validate(cached_info)
+                return IqiyiLegacyVideoInfo.model_validate(cached_info)
             except ValidationError as e:
                 self.logger.error(f"爱奇艺: 缓存的基础信息 (link_id={link_id}) 验证失败。这可能是一个陈旧或损坏的缓存。")
                 self.logger.error(f"导致验证失败的数据: {cached_info}")
@@ -705,7 +704,7 @@ class IqiyiScraper(BaseScraper):
                 self.logger.warning(f"爱奇艺: baseinfo API 未成功返回数据 (tvid: {tvid})。响应: {data}")
                 return None
             
-            video_info = IqiyiHtmlVideoInfo.model_validate(data["data"])
+            video_info = IqiyiLegacyVideoInfo.model_validate(data["data"])
 
             info_to_cache = video_info.model_dump()
             await self._set_to_cache(cache_key, info_to_cache, 'base_info_ttl_seconds', 1800)
@@ -725,7 +724,7 @@ class IqiyiScraper(BaseScraper):
             match = self.reg_video_info.search(html_content)
             if match:
                 video_json_str = match.group(1)
-                video_info = IqiyiHtmlVideoInfo.model_validate(json.loads(video_json_str))
+                video_info = IqiyiLegacyVideoInfo.model_validate(json.loads(video_json_str))
                 self.logger.info(f"爱奇艺: 备用方案成功解析到视频信息 (link_id={link_id})")
                 info_to_cache = video_info.model_dump()
                 await self._set_to_cache(cache_key, info_to_cache, 'base_info_ttl_seconds', 1800)
