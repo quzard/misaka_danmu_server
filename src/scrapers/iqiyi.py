@@ -2,6 +2,8 @@ import asyncio
 import logging
 import re
 import json
+import hashlib
+import time
 from datetime import datetime
 from typing import ClassVar
 import zlib
@@ -9,6 +11,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
 from collections import defaultdict
 import httpx
+from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
 
@@ -119,6 +122,22 @@ class IqiyiDesktopSearchTemplate(BaseModel):
 class IqiyiDesktopSearchData(BaseModel):
     templates: List[IqiyiDesktopSearchTemplate] = []
 
+class IqiyiBaseInfoVideoItem(BaseModel):
+    tv_id: int = Field(alias="tvId")
+    name: str
+    order: int
+    play_url: str = Field(alias="playUrl")
+
+class IqiyiBaseInfoData(BaseModel):
+    video_list: List[IqiyiBaseInfoVideoItem] = Field(alias="videoList")
+
+class IqiyiBaseInfoResponseData(BaseModel):
+    base_data: IqiyiBaseInfoData = Field(alias="baseData")
+
+class IqiyiBaseInfoResponse(BaseModel):
+    status_code: int = Field(alias="status_code")
+    data: Optional[IqiyiBaseInfoResponseData] = None
+
 class IqiyiDesktopSearchResult(BaseModel):
     data: Optional[IqiyiDesktopSearchData] = None
 
@@ -227,7 +246,11 @@ class IqiyiScraper(BaseScraper):
         r'抢先看|抢先版|试看版|即将上线',
         re.IGNORECASE
     )
-
+    
+    # --- 新增：用于新API的签名和ID转换 ---
+    _xor_key: ClassVar[int] = 0x75706971676c
+    _secret_key: ClassVar[str] = "howcuteitis"
+    _key_name: ClassVar[str] = "secret_key"
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
@@ -250,6 +273,57 @@ class IqiyiScraper(BaseScraper):
         if self.client:
             await self.client.aclose()
             self.client = None
+
+    def _xor_operation(self, num: int) -> int:
+        """实现JavaScript中的异或运算函数"""
+        num_binary = bin(num)[2:]
+        key_binary = bin(self._xor_key)[2:]
+        num_bits = list(num_binary[::-1])
+        key_bits = list(key_binary[::-1])
+        result_bits = []
+        max_len = max(len(num_bits), len(key_bits))
+        for i in range(max_len):
+            num_bit = num_bits[i] if i < len(num_bits) else '0'
+            key_bit = key_bits[i] if i < len(key_bits) else '0'
+            if num_bit == '1' and key_bit == '1':
+                result_bits.append('0')
+            elif num_bit == '1' or key_bit == '1':
+                result_bits.append('1')
+            else:
+                result_bits.append('0')
+        result_binary = ''.join(result_bits[::-1])
+        return int(result_binary, 2) if result_binary else 0
+
+    def _video_id_to_entity_id(self, video_id: str) -> Optional[str]:
+        """将视频ID (v_...中的部分) 转换为entity_id"""
+        try:
+            base36_decoded = int(video_id, 36)
+            xor_result = self._xor_operation(base36_decoded)
+            if xor_result < 900000:
+                final_result = 100 * (xor_result + 900000)
+            else:
+                final_result = xor_result
+            return str(final_result)
+        except Exception as e:
+            self.logger.error(f"将 video_id '{video_id}' 转换为 entity_id 时出错: {e}")
+            return None
+
+    def _create_sign(self, params: Dict[str, Any]) -> str:
+        """为新API生成签名"""
+        clean_params = {k: v for k, v in params.items() if k != 'sign'}
+        sorted_keys = sorted(clean_params.keys())
+        param_parts = []
+        for key in sorted_keys:
+            value = clean_params[key]
+            if value is None:
+                value = ""
+            param_parts.append(f"{key}={value}")
+        
+        param_string = "&".join(param_parts)
+        sign_string = f"{param_string}&{self._key_name}={self._secret_key}"
+        md5_hash = hashlib.md5(sign_string.encode('utf-8')).hexdigest().upper()
+        
+        return md5_hash
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """
@@ -497,6 +571,53 @@ class IqiyiScraper(BaseScraper):
             return None
         
         link_id = link_id_match.group(1)
+        return await self._get_video_base_info(link_id)
+
+    async def _get_episodes_v3(self, media_id: str) -> List[models.ProviderEpisodeInfo]:
+        """方案 #1: 使用新的 base_info API 获取分集列表。"""
+        self.logger.info(f"爱奇艺: 正在尝试使用新版API (v3) 获取分集 (media_id={media_id})")
+        entity_id = self._video_id_to_entity_id(media_id)
+        if not entity_id:
+            self.logger.warning(f"爱奇艺 (v3): 无法将 media_id '{media_id}' 转换为 entity_id。")
+            return []
+
+        params = {
+            'entity_id': entity_id,
+            'device_id': 'qd5fwuaj4hunxxdgzwkcqmefeb3ww5hx',
+            'auth_cookie': '', 'user_id': '0', 'vip_type': '-1', 'vip_status': '0',
+            'conduit_id': '', 'pcv': '13.082.22866', 'app_version': '13.082.22866',
+            'ext': '', 'app_mode': 'standard', 'scale': '100',
+            'timestamp': str(int(time.time() * 1000)),
+            'src': 'pca_tvg', 'os': '',
+            'ad_ext': '{"r":"2.2.0-ares6-pure"}'
+        }
+        params['sign'] = self._create_sign(params)
+        url = f"https://www.iqiyi.com/prelw/tvg/v2/lw/base_info?{urlencode(params)}"
+
+        try:
+            response = await self._request("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi BaseInfo API Response (entity_id={entity_id}): {response.text}")
+            response.raise_for_status()
+            
+            result = IqiyiBaseInfoResponse.model_validate(response.json())
+            if result.status_code != 0 or not result.data or not result.data.base_data.video_list:
+                self.logger.warning(f"爱奇艺 (v3): API未成功返回分集数据。状态码: {result.status_code}")
+                return []
+
+            episodes = [
+                models.ProviderEpisodeInfo(
+                    provider=self.provider_name, episodeId=str(ep.tv_id),
+                    title=ep.name, episodeIndex=ep.order, url=ep.play_url
+                ) for ep in result.data.base_data.video_list
+            ]
+            self.logger.info(f"爱奇艺 (v3): 成功获取 {len(episodes)} 个分集。")
+            return episodes
+        except Exception as e:
+            self.logger.error(f"爱奇艺 (v3): 获取分集时发生错误: {e}", exc_info=True)
+            return []
+
+    async def _get_video_base_info_v2(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]:
         base_info = await self._get_video_base_info(link_id)
         if not base_info:
             return None
@@ -554,7 +675,7 @@ class IqiyiScraper(BaseScraper):
         self.logger.error(f"爱奇艺: 所有 decode API 端点均调用失败 (link_id: {link_id})。")
         return None
 
-    async def _get_video_base_info(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]:
+    async def _get_video_base_info(self, link_id: str) -> Optional[IqiyiHtmlVideoInfo]: # This is the old v2
         # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
         cache_key = f"base_info_{link_id}"
         cached_info = await self._get_from_cache(cache_key)
@@ -707,6 +828,23 @@ class IqiyiScraper(BaseScraper):
             return []
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
+        provider_episodes = []
+        try:
+            # 方案 #1: 使用新的 base_info API
+            provider_episodes = await self._get_episodes_v3(media_id)
+        except Exception as e:
+            self.logger.warning(f"爱奇艺: 新版API (v3) 获取分集时发生错误: {e}", exc_info=True)
+
+        if not provider_episodes:
+            self.logger.warning("爱奇艺: 新版API (v3) 未返回分集或失败，正在回退到旧版API...")
+            # --- Fallback logic (existing code) ---
+            provider_episodes = await self._get_episodes_fallback(media_id, target_episode_index, db_media_type)
+
+        # --- 对所有策略的结果应用通用过滤逻辑 ---
+        return await self._filter_and_finalize_episodes(provider_episodes, target_episode_index)
+
+    async def _get_episodes_fallback(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
+        """旧的分集获取逻辑，现在作为备用方案。"""
         cache_key = f"episodes_{media_id}"
         # 仅当不是强制模式（即初次导入）且请求完整列表时才使用缓存
         if target_episode_index is None and db_media_type is None:
@@ -786,25 +924,7 @@ class IqiyiScraper(BaseScraper):
             ) for ep in episodes if ep.link_id
         ]
 
-        # 应用自定义黑名单和内置黑名单
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
-        if blacklist_pattern:
-            original_count = len(provider_episodes)
-            provider_episodes = [ep for ep in provider_episodes if not blacklist_pattern.search(ep.title)]
-            filtered_count = original_count - len(provider_episodes)
-            if filtered_count > 0:
-                self.logger.info(f"Iqiyi: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
-        
-        # 根据黑名单过滤分集
-        if self._EPISODE_BLACKLIST_PATTERN:
-            original_count = len(provider_episodes)
-            provider_episodes = [ep for ep in provider_episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
-            filtered_count = original_count - len(provider_episodes)
-            if filtered_count > 0:
-                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
-
-        # 仅当不是强制模式且获取完整列表时才进行缓存
-        if target_episode_index is None and db_media_type is None and provider_episodes:
+        if provider_episodes:
             episodes_to_cache = [e.model_dump() for e in provider_episodes]
             await self._set_to_cache(cache_key, episodes_to_cache, 'episodes_ttl_seconds', 1800)
         return provider_episodes
@@ -821,6 +941,27 @@ class IqiyiScraper(BaseScraper):
         except Exception as e:
             self.logger.warning(f"爱奇艺: 获取视频时长失败 (tvid={tvid}): {e}")
         return None
+
+    async def _filter_and_finalize_episodes(self, episodes: List[models.ProviderEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
+        """对分集列表应用黑名单过滤并返回最终结果。"""
+        # 应用自定义黑名单
+        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        if blacklist_pattern:
+            original_count = len(episodes)
+            episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
+            if original_count > len(episodes):
+                self.logger.info(f"Iqiyi: 根据自定义黑名单规则过滤掉了 {original_count - len(episodes)} 个分集。")
+        
+        # 应用内置黑名单
+        if self._EPISODE_BLACKLIST_PATTERN:
+            original_count = len(episodes)
+            episodes = [ep for ep in episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
+            if original_count > len(episodes):
+                self.logger.info(f"Iqiyi: 根据内置黑名单规则过滤掉了 {original_count - len(episodes)} 个分集。")
+
+        if target_episode_index:
+            return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
+        return episodes
 
     async def _get_danmu_content_by_mat(self, tv_id: str, mat: int) -> List[IqiyiComment]:
         if len(tv_id) < 4: return []
