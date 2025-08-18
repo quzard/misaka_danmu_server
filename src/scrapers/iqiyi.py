@@ -129,7 +129,7 @@ class IqiyiV3EpisodeItem(BaseModel):
     play_url: str = Field(alias="play_url")
 
 class IqiyiV3AlbumData(BaseModel):
-    video_list: List[IqiyiV3EpisodeItem] = Field(alias="video_list")
+    video_list: List[IqiyiV3EpisodeItem] = Field(default_factory=list, alias="video_list")
 
 class IqiyiV3ResponseData(BaseModel):
     base_data: IqiyiV3AlbumData = Field(alias="base_data")
@@ -851,8 +851,7 @@ class IqiyiScraper(BaseScraper):
             if cached_episodes is not None:
                 self.logger.info(f"爱奇艺: 从缓存中命中分集列表 (media_id={media_id})")
                 return [models.ProviderEpisodeInfo.model_validate(e) for e in cached_episodes]
-
-        base_info = await self._get_video_base_info(media_id)
+        base_info = await self._get_legacy_video_base_info(media_id)
         if base_info is None:
             return []
 
@@ -891,7 +890,7 @@ class IqiyiScraper(BaseScraper):
             
             # 修正：将并发请求分批处理，以避免因请求过多而触发API速率限制或导致连接错误。
             # 每次处理5个分集的详情获取，并在批次之间增加1秒的延迟。
-            tasks = [self._get_video_base_info(ep.link_id) for ep in episodes if ep.link_id]
+            tasks = [self._get_legacy_video_base_info(ep.link_id) for ep in episodes if ep.link_id]
             detailed_infos = []
             batch_size = 5
             for i in range(0, len(tasks), batch_size):
@@ -904,7 +903,7 @@ class IqiyiScraper(BaseScraper):
             
             specific_title_map = {}
             for info in detailed_infos:
-                if isinstance(info, IqiyiHtmlVideoInfo) and info.tv_id:
+                if isinstance(info, IqiyiLegacyVideoInfo) and info.tv_id:
                     specific_title_map[info.tv_id] = info.video_name
 
             for ep in episodes:
