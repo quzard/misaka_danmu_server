@@ -13,7 +13,7 @@ from ..config_manager import ConfigManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scraper_manager import ScraperManager
-from ..task_manager import TaskManager, TaskSuccess
+from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -263,7 +263,7 @@ async def get_episodes(
     manager: ScraperManager = Depends(get_scraper_manager),
     api_key: str = Depends(verify_api_key),
 ):
-    """通过 search_id 和 result_index 获取一个搜索结果的完整分集列表，用于编辑后导入。"""
+    """通过 searchId 和 resultIndex 获取一个搜索结果的完整分集列表，用于编辑后导入。"""
     cache_key = f"control_search_{searchId}"
     cached_results_raw = await crud.get_cache(session, cache_key)
     
@@ -276,7 +276,7 @@ async def get_episodes(
         raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
 
     if not (0 <= resultIndex < len(cached_results)):
-        raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
+        raise HTTPException(status_code=400, detail="提供的 resultIndex 无效。")
         
     item_to_fetch = cached_results[resultIndex]
     
@@ -557,3 +557,79 @@ router.include_router(library_router)
 router.include_router(danmaku_router)
 router.include_router(token_router)
 router.include_router(settings_router)
+
+# --- 任务管理 ---
+tasks_router = APIRouter(prefix="/tasks", dependencies=[Depends(verify_api_key)])
+
+@tasks_router.get("", response_model=List[models.TaskInfo], summary="获取后台任务列表")
+async def get_tasks(
+    search: Optional[str] = Query(None, description="按标题搜索"),
+    status: str = Query("all", description="按状态过滤: all, in_progress, completed"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """获取后台任务的列表和状态，支持搜索和过滤。"""
+    tasks_from_db = await crud.get_tasks_from_history(session, search, status)
+    return [models.TaskInfo.model_validate(t) for t in tasks_from_db]
+
+@tasks_router.get("/{taskId}", response_model=models.TaskInfo, summary="获取单个任务状态")
+async def get_task_status(
+    taskId: str,
+    session: AsyncSession = Depends(get_db_session),
+    api_key: str = Depends(verify_api_key),
+):
+    """获取指定ID的后台任务的详细状态。"""
+    task_details = await crud.get_task_details_from_history(session, taskId)
+    if not task_details:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到。")
+    return models.TaskInfo.model_validate(task_details)
+
+@tasks_router.delete("/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
+async def delete_task(
+    taskId: str,
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+):
+    """
+    从历史记录中删除一个任务。
+    - 如果任务正在排队，它将被从队列中移除。
+    - 如果任务正在运行或已暂停，会先尝试中止它。
+    - 如果任务已完成或失败，它将仅从历史记录中删除。
+    """
+    task = await crud.get_task_from_history_by_id(session, taskId)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到。")
+
+    task_status = task['status']
+
+    if task_status == TaskStatus.PENDING:
+        if await task_manager.cancel_pending_task(taskId):
+            logger.info(f"已从队列中取消待处理任务 {taskId}。")
+    elif task_status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+        if await task_manager.abort_current_task(taskId):
+            logger.info(f"已发送中止信号到任务 {taskId}。")
+
+    if await crud.delete_task_from_history(session, taskId):
+        return {"message": f"删除任务 {taskId} 的请求已处理。"}
+    else:
+        return {"message": "任务可能已被处理或不存在于历史记录中。"}
+
+@tasks_router.post("/{taskId}/abort", response_model=ControlActionResponse, summary="中止正在运行的任务")
+async def abort_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
+    """尝试中止一个当前正在运行或已暂停的任务。此操作会向任务发送一个取消信号。"""
+    if not await task_manager.abort_current_task(taskId):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
+    return {"message": "中止任务的请求已发送。"}
+
+@tasks_router.post("/{taskId}/pause", response_model=ControlActionResponse, summary="暂停正在运行的任务")
+async def pause_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
+    if not await task_manager.pause_task(taskId):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="暂停任务失败，可能任务未在运行。")
+    return {"message": "任务已暂停。"}
+
+@tasks_router.post("/{taskId}/resume", response_model=ControlActionResponse, summary="恢复已暂停的任务")
+async def resume_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
+    if not await task_manager.resume_task(taskId):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="恢复任务失败，可能任务未被暂停。")
+    return {"message": "任务已恢复。"}
+
+router.include_router(tasks_router)

@@ -36,6 +36,10 @@ router = APIRouter()
 auth_router = APIRouter()
 logger = logging.getLogger(__name__)
 
+class UITaskResponse(BaseModel):
+    message: str
+    taskId: str
+
 async def get_scraper_manager(request: Request) -> ScraperManager:
     """依赖项：从应用状态获取 Scraper 管理器"""
     return request.app.state.scraper_manager
@@ -313,7 +317,7 @@ async def refresh_anime_poster(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
 
-@router.get("/library/source/{sourceId}/details", response_model=models.SourceDetailsResponse, summary="获取单个数据源的详情")
+@router.delete("/library/source/{sourceId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定数据源的任务", response_model=UITaskResponse)
 async def get_source_details(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -360,12 +364,12 @@ async def delete_source_from_anime(
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    task_title = f"删除源: {source_info['title']} ({source_info['provider_name']})"
+    task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
     task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。") # type: ignore
-    return {"message": f"删除源 '{source_info['provider_name']}' 的任务已提交。", "task_id": task_id}
+    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。")
+    return {"message": f"删除源 '{source_info['providerName']}' 的任务已提交。", "taskId": task_id}
 
 class BulkDeleteEpisodesRequest(models.BaseModel):
     episodeIds: List[int] = Field(..., alias="episode_ids")
@@ -373,7 +377,7 @@ class BulkDeleteEpisodesRequest(models.BaseModel):
     class Config:
         populate_by_name = True
 
-@router.post("/library/episodes/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除分集的任务")
+@router.post("/library/episodes/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除分集的任务", response_model=UITaskResponse)
 async def delete_bulk_episodes(
     request_data: BulkDeleteEpisodesRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -472,7 +476,7 @@ async def reorder_source_episodes(
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {sourceId} 集数的任务 (Task ID: {task_id})。")
     return {"message": f"重整集数任务 '{task_title}' 已提交。", "taskId": task_id}
 
-@router.post("/library/source/{sourceId}/incremental-refresh", status_code=status.HTTP_202_ACCEPTED, summary="增量刷新指定源")
+@router.post("/library/source/{sourceId}/incremental-refresh", status_code=status.HTTP_202_ACCEPTED, summary="增量刷新指定源", response_model=UITaskResponse)
 async def incremental_refresh_source(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -496,13 +500,13 @@ async def incremental_refresh_source(
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
 
     # 从新集信息创建任务
-    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
-    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['provider_name']}) - 尝试获取第{next_episode_index}集")
+    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"]) # type: ignore
+    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试获取第{next_episode_index}集")
 
     return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "taskId": task_id}
 
 
-@router.delete("/library/episode/{episodeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务")
+@router.delete("/library/episode/{episodeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务", response_model=UITaskResponse)
 async def delete_episode_from_source(
     episodeId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -510,7 +514,7 @@ async def delete_episode_from_source(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个分集及其所有关联的弹幕。"""
-    episode_info = await crud.get_episode_for_refresh(session, episodeId) # type: ignore
+    episode_info = await crud.get_episode_for_refresh(session, episodeId)
     if not episode_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
@@ -522,7 +526,7 @@ async def delete_episode_from_source(
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "taskId": task_id}
 
-@router.post("/library/episode/{episodeId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新单个分集的弹幕")
+@router.post("/library/episode/{episodeId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新单个分集的弹幕", response_model=UITaskResponse)
 async def refresh_single_episode(
     episodeId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -545,7 +549,7 @@ async def refresh_single_episode(
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
 
-@router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="全量刷新指定源的弹幕")
+@router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="全量刷新指定源的弹幕", response_model=UITaskResponse)
 async def refresh_anime(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -560,12 +564,12 @@ async def refresh_anime(
     
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
     
-    task_coro = lambda session, callback: tasks.full_refresh_task(sourceId, session, scraper_manager, task_manager, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['provider_name']})")
+    task_coro = lambda session, callback: tasks.full_refresh_task(sourceId, session, scraper_manager, task_manager, callback) # type: ignore
+    task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['providerName']})")
 
     return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "taskId": task_id}
 
-@router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务")
+@router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务", response_model=UITaskResponse)
 async def delete_anime_from_library(
     animeId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -583,7 +587,7 @@ async def delete_anime_from_library(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
-    return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "task_id": task_id}
+    return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "taskId": task_id}
 
 class BulkDeleteRequest(models.BaseModel):
     sourceIds: List[int] = Field(..., alias="source_ids")
@@ -591,7 +595,7 @@ class BulkDeleteRequest(models.BaseModel):
     class Config:
         populate_by_name = True
 
-@router.post("/library/sources/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除数据源的任务")
+@router.post("/library/sources/delete-bulk", status_code=status.HTTP_202_ACCEPTED, summary="提交批量删除数据源的任务", response_model=UITaskResponse)
 async def delete_bulk_sources(
     request_data: BulkDeleteRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -1552,7 +1556,7 @@ async def manual_import_episode(
         progress_callback=callback, session=session, manager=scraper_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
-    return {"message": f"手动导入任务 '{task_title}' 已提交。", "task_id": task_id}
+    return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
 
 async def manual_import_task(
     source_id: int, title: str, episode_index: int, url: str, provider_name: str,
@@ -1599,7 +1603,7 @@ async def manual_import_task(
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
 
-@router.post("/import", status_code=status.HTTP_202_ACCEPTED, summary="从指定数据源导入弹幕")
+@router.post("/import", status_code=status.HTTP_202_ACCEPTED, summary="从指定数据源导入弹幕", response_model=UITaskResponse)
 async def import_from_provider(
     request_data: models.ImportRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -1654,7 +1658,7 @@ async def import_from_provider(
 
     return {"message": f"'{request_data.animeTitle}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
-@router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
+@router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表", response_model=UITaskResponse)
 async def import_edited_episodes(
     request_data: models.EditedImportRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -1716,48 +1720,23 @@ async def get_available_job_types(
 
 # --- Scheduled Tasks API ---
 
-class ScheduledTaskCreate(models.BaseModel):
-    name: str
-    jobType: str = Field(..., alias="job_type")
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(True, alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
-
-class ScheduledTaskUpdate(models.BaseModel):
-    name: str
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(..., alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
-
-class ScheduledTaskInfo(ScheduledTaskCreate):
-    id: str
-    lastRunAt: Optional[datetime] = Field(None, alias="last_run_at")
-    nextRunAt: Optional[datetime] = Field(None, alias="next_run_at")
-
-    class Config:
-        populate_by_name = True
-
-@router.get("/scheduled-tasks", response_model=List[ScheduledTaskInfo], summary="获取所有定时任务")
+@router.get("/scheduled-tasks", response_model=List[models.ScheduledTaskInfo], summary="获取所有定时任务")
 async def get_scheduled_tasks(
     current_user: models.User = Depends(security.get_current_user),
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
     tasks = await scheduler.get_all_tasks()
-    return [ScheduledTaskInfo.model_validate(t) for t in tasks]
+    return [models.ScheduledTaskInfo.model_validate(t) for t in tasks]
 
-@router.post("/scheduled-tasks", response_model=ScheduledTaskInfo, status_code=201, summary="创建定时任务")
+@router.post("/scheduled-tasks", response_model=models.ScheduledTaskInfo, status_code=201, summary="创建定时任务")
 async def create_scheduled_task(
-    task_data: ScheduledTaskCreate,
+    task_data: models.ScheduledTaskCreate,
     current_user: models.User = Depends(security.get_current_user),
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
     try:
-        new_task = await scheduler.add_task(task_data.name, task_data.job_type, task_data.cron_expression, task_data.is_enabled)
-        return ScheduledTaskInfo.model_validate(new_task)
+        new_task = await scheduler.add_task(task_data.name, task_data.jobType, task_data.cronExpression, task_data.isEnabled)
+        return models.ScheduledTaskInfo.model_validate(new_task)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1771,7 +1750,7 @@ class ImportFromUrlRequest(models.BaseModel):
     media_type: str
     season: int
 
-@router.post("/import-from-url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入弹幕")
+@router.post("/import-from-url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入弹幕", response_model=UITaskResponse)
 async def import_from_url(
     request_data: ImportFromUrlRequest,
     current_user: models.User = Depends(security.get_current_user),
@@ -1844,9 +1823,9 @@ async def import_from_url(
     task_title = f"URL导入: {title} ({provider})"
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
-    return {"message": f"'{title}' 的URL导入任务已提交。", "task_id": task_id}
+    return {"message": f"'{title}' 的URL导入任务已提交。", "taskId": task_id}
 
-@router.put("/scheduled-tasks/{task_id}", response_model=ScheduledTaskInfo, summary="更新定时任务")
+@router.put("/scheduled-tasks/{task_id}", response_model=models.ScheduledTaskInfo, summary="更新定时任务")
 async def update_scheduled_task(
     task_id: str,
     task_data: ScheduledTaskUpdate,
@@ -1856,7 +1835,7 @@ async def update_scheduled_task(
     updated_task = await scheduler.update_task(task_id, task_data.name, task_data.cron_expression, task_data.is_enabled)
     if not updated_task:
         raise HTTPException(status_code=404, detail="找不到指定的任务ID")
-    return ScheduledTaskInfo.model_validate(updated_task)
+    return models.ScheduledTaskInfo.model_validate(updated_task)
 
 @router.delete("/scheduled-tasks/{task_id}", status_code=204, summary="删除定时任务")
 async def delete_scheduled_task(task_id: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):

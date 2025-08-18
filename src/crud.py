@@ -1236,6 +1236,20 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         for t in result.scalars()
     ]
 
+async def get_task_details_from_history(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
+    """获取单个任务的详细信息。"""
+    task = await session.get(TaskHistory, task_id)
+    if task:
+        return {
+            "taskId": task.id,
+            "title": task.title,
+            "status": task.status,
+            "progress": task.progress,
+            "description": task.description,
+            "createdAt": task.created_at,
+        }
+    return None
+
 async def get_task_from_history_by_id(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     task = await session.get(TaskHistory, task_id)
     if task:
