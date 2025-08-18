@@ -140,14 +140,12 @@ class AnimeFullDetails(BaseModel):
 class SourceInfo(BaseModel):
     """代表一个已关联的数据源的详细信息。"""
     sourceId: int = Field(..., alias="source_id")
-    providerName: str = Field(..., alias="provider_name")
-    mediaId: str = Field(..., alias="media_id")
-    isFavorited: bool = Field(..., alias="is_favorited")
-    incrementalRefreshEnabled: bool = Field(..., alias="incremental_refresh_enabled")
-    createdAt: datetime = Field(..., alias="created_at")
-
-    class Config:
-        populate_by_name = True
+    sourceId: int
+    provider_name: str
+    media_id: str
+    is_favorited: bool
+    incremental_refresh_enabled: bool
+    created_at: datetime
 
 # --- 爬虫源管理模型 ---
 class ScraperSetting(BaseModel):

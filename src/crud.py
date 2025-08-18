@@ -584,7 +584,17 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
         .order_by(AnimeSource.created_at)
     )
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    return [
+        {
+            "sourceId": row.source_id,
+            "provider_name": row.provider_name,
+            "media_id": row.media_id,
+            "is_favorited": row.is_favorited,
+            "incremental_refresh_enabled": row.incremental_refresh_enabled,
+            "created_at": row.created_at,
+        }
+        for row in result.mappings()
+    ]
 
 async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
     stmt = (
