@@ -312,7 +312,7 @@ async def refresh_anime_poster(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
 
-@router.get("/library/source/{sourceId}/details", response_model=SourceDetailsResponse, summary="获取单个数据源的详情")
+@router.get("/library/source/{sourceId}/details", response_model=models.SourceDetailsResponse, summary="获取单个数据源的详情")
 async def get_source_details(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
@@ -607,7 +607,7 @@ async def delete_bulk_sources(
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
-@router.get("/scrapers", response_model=List[ScraperSettingWithConfig], summary="获取所有搜索源的设置")
+@router.get("/scrapers", response_model=List[models.ScraperSettingWithConfig], summary="获取所有搜索源的设置")
 async def get_scraper_settings(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
@@ -623,10 +623,10 @@ async def get_scraper_settings(
 
     full_settings = []
     for s in settings:
-        scraper_class = manager.get_scraper_class(s['provider_name'])
-        s_with_config = ScraperSettingWithConfig.model_validate(s)
+        scraper_class = manager.get_scraper_class(s['providerName'])
+        s_with_config = models.ScraperSettingWithConfig.model_validate(s)
         # 如果验证被禁用，则所有源都应显示为已验证
-        s_with_config.is_verified = True if not verification_enabled else (s['provider_name'] in manager._verified_scrapers)
+        s_with_config.is_verified = True if not verification_enabled else (s['providerName'] in manager._verified_scrapers)
         if scraper_class:
             s_with_config.is_loggable = getattr(scraper_class, "is_loggable", False)
             # 关键修复：复制类属性以避免修改共享的可变字典
@@ -634,13 +634,13 @@ async def get_scraper_settings(
             s_with_config.configurable_fields = base_fields.copy() if base_fields is not None else {}
 
             # 为当前源动态添加其专属的黑名单配置字段
-            blacklist_key = f"{s['provider_name']}_episode_blacklist_regex"
+            blacklist_key = f"{s['providerName']}_episode_blacklist_regex"
             s_with_config.configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
         full_settings.append(s_with_config)
             
     return full_settings
 
-@router.get("/metadata-sources", response_model=List[MetadataSourceStatusResponse], summary="获取所有元数据源的设置")
+@router.get("/metadata-sources", response_model=List[models.MetadataSourceStatusResponse], summary="获取所有元数据源的设置")
 async def get_metadata_source_settings(
     current_user: models.User = Depends(security.get_current_user),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
@@ -721,7 +721,7 @@ async def get_proxy_settings(
         except Exception as e:
             logger.error(f"解析存储的代理URL '{proxy_url}' 失败: {e}")
 
-    return ProxySettingsResponse(
+    return models.ProxySettingsResponse(
         proxy_protocol=protocol,
         proxy_host=host,
         proxy_port=port,
