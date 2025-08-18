@@ -44,9 +44,9 @@ async def download_image(image_url: Optional[str], session: AsyncSession, provid
         metadata_settings_task = crud.get_all_metadata_source_settings(session)
         scraper_settings, metadata_settings = await asyncio.gather(scraper_settings_task, metadata_settings_task)
         
-        provider_setting = next((s for s in scraper_settings if s['provider_name'] == provider_name), None)
+        provider_setting = next((s for s in scraper_settings if s['providerName'] == provider_name), None)
         if not provider_setting:
-            provider_setting = next((s for s in metadata_settings if s['provider_name'] == provider_name), None)
+            provider_setting = next((s for s in metadata_settings if s['providerName'] == provider_name), None)
         
         if provider_setting:
             use_proxy_for_this_provider = provider_setting.get('use_proxy', False)

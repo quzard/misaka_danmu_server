@@ -20,6 +20,7 @@ class MetadataSourceManager:
     """
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb']
         # Ephemeral status, checked on startup
         self._provider_configs: Dict[str, List[str]] = {

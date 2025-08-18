@@ -30,7 +30,7 @@ async def get_douban_client(
     )
     proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
 
-    provider_setting = next((s for s in metadata_settings if s['provider_name'] == 'douban'), None)
+    provider_setting = next((s for s in metadata_settings if s['providerName'] == 'douban'), None)
     use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
     proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None

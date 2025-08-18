@@ -74,7 +74,7 @@ async def get_tmdb_client(
     )
     proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
 
-    tmdb_setting = next((s for s in metadata_settings if s['provider_name'] == 'tmdb'), None)
+    tmdb_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
     use_proxy_for_tmdb = tmdb_setting.get('use_proxy', False) if tmdb_setting else False
 
     proxies = proxy_url if proxy_enabled_globally and use_proxy_for_tmdb and proxy_url else None
