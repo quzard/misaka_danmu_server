@@ -303,6 +303,7 @@ class SourceDetailsResponse(BaseModel):
     type: str
     season: int
     tmdbId: Optional[str] = None
+    bangumiId: Optional[str] = None
 
 class MetadataSourceStatusResponse(BaseModel):
     providerName: str
@@ -335,19 +336,25 @@ class BulkDeleteRequest(BaseModel):
 
 class ScheduledTaskCreate(BaseModel):
     name: str
-    jobType: str
-    cronExpression: str
-    isEnabled: bool = True
+    jobType: str = Field(..., alias="job_type")
+    cronExpression: str = Field(..., alias="cron_expression")
+    isEnabled: bool = Field(True, alias="is_enabled")
+
+    class Config:
+        populate_by_name = True
 
 class ScheduledTaskUpdate(BaseModel):
     name: str
-    cronExpression: str
-    isEnabled: bool
+    cronExpression: str = Field(..., alias="cron_expression")
+    isEnabled: bool = Field(..., alias="is_enabled")
+
+    class Config:
+        populate_by_name = True
 
 class ScheduledTaskInfo(ScheduledTaskCreate):
     id: str
-    lastRunAt: Optional[datetime] = None
-    nextRunAt: Optional[datetime] = None
+    lastRunAt: Optional[datetime] = Field(None, alias="last_run_at")
+    nextRunAt: Optional[datetime] = Field(None, alias="next_run_at")
 
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str

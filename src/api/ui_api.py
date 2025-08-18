@@ -360,7 +360,7 @@ async def delete_source_from_anime(
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    task_title = f"删除源: {source_info['title']} ({source_info['provider_name']})"
+    task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
     task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -465,7 +465,7 @@ async def reorder_source_episodes(
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    task_title = f"重整集数: {source_info['title']} ({source_info['provider_name']})"
+    task_title = f"重整集数: {source_info['title']} ({source_info['providerName']})"
     task_coro = lambda session, callback: tasks.reorder_episodes_task(sourceId, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -496,8 +496,8 @@ async def incremental_refresh_source(
     logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
 
     # 从新集信息创建任务
-    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"])
-    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['provider_name']}) - 尝试获取第{next_episode_index}集")
+    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"]) # type: ignore
+    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试获取第{next_episode_index}集")
 
     return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "taskId": task_id}
 
