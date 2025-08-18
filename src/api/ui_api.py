@@ -512,8 +512,8 @@ async def incremental_refresh_task(source_id: int, next_episode_index: int, sess
     try:
         # 重新执行通用导入逻辑, 只导入指定的一集
         await generic_import_task(
-            provider=source_info["provider_name"],
-            media_id=source_info["media_id"],
+            provider=source_info["providerName"],
+            media_id=source_info["mediaId"],
             anime_title=anime_title,
             media_type=source_info["type"],
             season=source_info.get("season", 1),

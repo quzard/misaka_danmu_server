@@ -236,7 +236,7 @@ async def edited_import_task(
 ):
     """后台任务：处理编辑后的导入请求。"""
     scraper = manager.get_scraper(request_data.provider)
-    normalized_title = request_data.title.replace(":", "：")
+    normalized_title = request_data.animeTitle.replace(":", "：")
     
     episodes = request_data.episodes
     if not episodes:
@@ -263,7 +263,7 @@ async def edited_import_task(
                 bangumi_id=request_data.bangumi_id,
                 tmdb_episode_group_id=request_data.tmdb_episode_group_id
             )
-            source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.media_id)
+            source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
 
         if anime_id and source_id:
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
