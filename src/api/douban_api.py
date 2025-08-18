@@ -48,7 +48,7 @@ class DoubanSearchResult(BaseModel):
     id: str
     title: str
     details: str
-    image_url: Optional[str] = None
+    imageUrl: Optional[str] = None
 
 # --- 新增：用于解析豆瓣JSON API响应的模型 ---
 class DoubanJsonSearchSubject(BaseModel):
@@ -103,7 +103,7 @@ async def _search_douban_json_api(keyword: str, client: httpx.AsyncClient) -> Li
                         id=subject.id,
                         title=subject.title,
                         details=f"评分: {subject.rate}",
-                        image_url=subject.cover,
+                        imageUrl=subject.cover,
                     )
                 )
                 seen_ids.add(subject.id)
@@ -228,7 +228,7 @@ async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[
 
         if best_subject_id:
             details = await get_douban_details_logic(best_subject_id, client)
-            local_aliases.update(details.get('aliases_cn', []))
+            local_aliases.update(details.aliasesCn or [])
         logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
     except Exception as e:
         logger.warning(f"豆瓣辅助搜索失败: {e}")

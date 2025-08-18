@@ -50,6 +50,12 @@ class BangumiUser(BaseModel):
     nickname: str
     avatar: Dict[str, str]
 
+class BangumiApiSearchResult(BaseModel):
+    id: str
+    title: str
+    details: Optional[str] = None
+    imageUrl: Optional[str] = None
+
 class InfoboxItem(BaseModel):
     key: str
     value: Any
@@ -416,19 +422,13 @@ async def search_bangumi_subjects(
         for subject_data in detailed_results:
             if subject_data:
                 try:
-                    # 使用我们扩展后的模型来验证和处理数据
                     subject = BangumiSearchSubject.model_validate(subject_data)
-                    aliases = subject.aliases
-                    final_results.append({
-                        "id": subject.id,
-                        "name": subject.display_name,
-                        "name_jp": subject.name, # 原始名称，通常是日文名
-                        "image_url": subject.image_url,
-                        "details": subject.details_string,
-                        "name_en": aliases.get("name_en"),
-                        "name_romaji": aliases.get("name_romaji"),
-                        "aliases_cn": aliases.get("aliases_cn", [])
-                    })
+                    final_results.append(BangumiApiSearchResult(
+                        id=str(subject.id),
+                        title=subject.display_name,
+                        imageUrl=subject.image_url,
+                        details=subject.details_string,
+                    ))
                 except ValidationError as e:
                     logger.error(f"验证 Bangumi subject 详情失败: {e}")
         

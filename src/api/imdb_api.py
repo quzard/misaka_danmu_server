@@ -48,7 +48,7 @@ class ImdbSearchResult(BaseModel):
     id: str
     title: str
     details: str
-    image_url: Optional[str] = None
+    imageUrl: Optional[str] = None
 
 
 async def _search_imdb_api(keyword: str, client: httpx.AsyncClient) -> List[ImdbSearchResult]:
@@ -85,7 +85,7 @@ async def _search_imdb_api(keyword: str, client: httpx.AsyncClient) -> List[Imdb
                     id=item.get("id"),
                     title=item.get("l"),
                     details=" / ".join(details_parts),
-                    image_url=item.get("i", {}).get("imageUrl")
+                    imageUrl=item.get("i", {}).get("imageUrl")
                 )
             )
         return results
@@ -185,10 +185,10 @@ async def search_imdb_aliases(keyword: str, client: httpx.AsyncClient) -> Set[st
         details = await get_imdb_details_logic(best_match_id, client)
 
         # The main title is usually the English name
-        if details.get("name_en"):
-            local_aliases.add(details["name_en"])
+        if details.nameEn:
+            local_aliases.add(details.nameEn)
         # Add other aliases
-        local_aliases.update(details.get("aliases_cn", []))
+        local_aliases.update(details.aliasesCn or [])
 
         logger.info(f"IMDb辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
     except Exception as e:

@@ -59,6 +59,40 @@ async def _get_robust_image_base_url(session: AsyncSession) -> str:
     
     return image_base_url_config
 
+async def _create_tmdb_client(session: AsyncSession) -> httpx.AsyncClient:
+    """Non-FastAPI dependent version of get_tmdb_client."""
+    # Proxy logic
+    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
+    proxy_enabled_globally_task = crud.get_config_value(session, "proxy_enabled", "false")
+    metadata_settings_task = crud.get_all_metadata_source_settings(session)
+
+    proxy_url, proxy_enabled_str, metadata_settings = await asyncio.gather(
+        proxy_url_task, proxy_enabled_globally_task, metadata_settings_task
+    )
+    proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
+
+    tmdb_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
+    use_proxy_for_tmdb = tmdb_setting.get('use_proxy', False) if tmdb_setting else False
+
+    proxies = proxy_url if proxy_enabled_globally and use_proxy_for_tmdb and proxy_url else None
+
+    # Fetch all configs in parallel
+    keys = ["tmdb_api_key", "tmdb_api_base_url"]
+    tasks = [crud.get_config_value(session, key, "") for key in keys]
+    api_key, domain = await asyncio.gather(*tasks)
+
+    if not api_key:
+        raise ValueError("TMDB API Key not configured.")
+    if api_key.startswith("eyJ"):
+        raise ValueError("配置的TMDB API Key似乎是v4访问令牌（JWT）。此应用需要v3 API Key。")
+    
+    cleaned_domain = (domain or "https://api.themoviedb.org").rstrip('/')
+    base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
+
+    params = {"api_key": api_key}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    return httpx.AsyncClient(base_url=base_url, params=params, headers=headers, timeout=20.0, proxy=proxies)
+
 async def get_tmdb_client(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
@@ -107,7 +141,7 @@ class TMDBEpisodeGroup(BaseModel):
 class TMDBSearchResponseItem(BaseModel):
     id: int
     name: str
-    image_url: Optional[str] = None
+    imageUrl: Optional[str] = None
 
 class TMDBExternalIDs(BaseModel):
     imdb_id: Optional[str] = None
@@ -190,12 +224,11 @@ async def search_tmdb_subjects(
         for subject in search_result.results:
             image_url = f"{image_base_url.rstrip('/')}{subject.poster_path}" if subject.poster_path else None
             try:
-                final_results.append(
-                    {
-                        "id": subject.id,
-                        "name": subject.name,
-                        "image_url": image_url,
-                    }
+                final_results.append(TMDBSearchResponseItem(
+                    id=subject.id,
+                    name=subject.name,
+                    imageUrl=image_url,
+                )
                 )
             except ValidationError as e:
                 logger.error(f"验证 TMDB subject 详情失败: {e}")
@@ -247,12 +280,11 @@ async def search_tmdb_movie_subjects(
         image_base_url = await _get_robust_image_base_url(session)
 
         results = [
-            {
-                "id": subject.id,
-                "name": subject.title,
-                "image_url": f"{image_base_url.rstrip('/')}{subject.poster_path}" if subject.poster_path else None
-            }
-            for subject in search_result.results
+            TMDBSearchResponseItem(
+                id=subject.id,
+                name=subject.title,
+                imageUrl=f"{image_base_url.rstrip('/')}{subject.poster_path}" if subject.poster_path else None
+            ) for subject in search_result.results
         ]
         # 缓存结果
         ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')

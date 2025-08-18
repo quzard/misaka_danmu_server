@@ -346,7 +346,7 @@ function renderBangumiSearchResults(results) {
         const li = document.createElement('li');
         li.innerHTML = `
             <div class="result-item-left">
-                <img class="poster" src="${result.image_url || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.name}">
+                <img class="poster" src="${result.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.name}">
                 <div class="info">
                     <div class="title-container">
                         <span class="id-tag">ID: ${result.id}</span>
@@ -408,7 +408,7 @@ function renderTmdbSearchResults(results) {
         const li = document.createElement('li');
         li.innerHTML = `
             <div class="result-item-left">
-                <img class="poster" src="${result.image_url || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.name}">
+                <img class="poster" src="${result.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.name}">
                 <div class="info">
                     <div class="title-container">
                         <span class="id-tag">ID: ${result.id}</span>
@@ -487,7 +487,7 @@ function renderDoubanSearchResults(results) {
         const li = document.createElement('li');
         li.innerHTML = `
             <div class="result-item-left">
-                <img class="poster" src="${result.image_url || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
+                <img class="poster" src="${result.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
                 <div class="info">
                     <div class="title-container">
                         <span class="id-tag">ID: ${result.id}</span>
@@ -553,7 +553,7 @@ function renderImdbSearchResults(results) {
         // Re-use the same structure as Douban/Bangumi
         li.innerHTML = `
             <div class="result-item-left">
-                <img class="poster" src="${result.image_url || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
+                <img class="poster" src="${result.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
                 <div class="info">
                     <div class="title-container">
                         <span class="id-tag">ID: ${result.id}</span>
@@ -618,7 +618,7 @@ function renderTvdbSearchResults(results) {
         const li = document.createElement('li');
         li.innerHTML = `
             <div class="result-item-left">
-                <img class="poster" src="${result.image_url || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
+                <img class="poster" src="${result.imageUrl || '/static/placeholder.png'}" referrerpolicy="no-referrer" alt="${result.title}">
                 <div class="info">
                     <div class="title-container">
                         <span class="id-tag">ID: ${result.id}</span>

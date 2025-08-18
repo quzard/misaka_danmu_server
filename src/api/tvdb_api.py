@@ -100,6 +100,12 @@ class TvdbAlias(BaseModel):
     language: str
     name: str
 
+class TvdbApiSearchResult(BaseModel):
+    id: str
+    title: str
+    details: str
+    imageUrl: Optional[str] = None
+
 class TvdbRemoteId(BaseModel):
     id: str
     type: int
@@ -121,7 +127,7 @@ class TvdbExtendedDetailsResponse(BaseModel):
     data: TvdbDetailsResponse
 
 # --- API Endpoints ---
-@router.get("/search", response_model=List[Dict[str, Any]], summary="搜索 TVDB 作品")
+@router.get("/search", response_model=List[TvdbApiSearchResult], summary="搜索 TVDB 作品")
 async def search_tvdb(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_tvdb_client),
@@ -148,18 +154,18 @@ async def search_tvdb(
                 details += f" / {item.overview[:100]}..."
 
             formatted_results.append(
-                {
-                    "id": item.tvdb_id,
-                    "title": item.name,
-                    "details": details,
-                    "image_url": item.image_url,
-                }
+                TvdbApiSearchResult(
+                    id=item.tvdb_id,
+                    title=item.name,
+                    details=details,
+                    imageUrl=item.image_url,
+                )
             )
         return formatted_results
     except Exception as e:
         logger.error(f"TVDB 搜索失败: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TVDB 搜索失败。")
-async def get_tvdb_details_logic(tvdb_id: str, client: httpx.AsyncClient) -> models.MetadataDetailsResponse:
+async def get_tvdb_details_logic(tvdb_id: str, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
     """获取指定 TVDB ID 的作品详情，主要用于提取别名和IMDb ID。"""
     try:
         response = await client.get(f"/series/{tvdb_id}/extended")
