@@ -939,7 +939,7 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
         return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.is_enabled, "expiresAt": token.expires_at, "createdAt": token.created_at}
     return None
 
-async def create_api_token(session: AsyncSession, name: str, token: str, validity_period: str) -> int:
+async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str) -> int:
     """创建新的API Token，如果名称已存在则会失败。"""
     # 检查名称是否已存在
     existing_token = await session.execute(select(ApiToken).where(ApiToken.name == name))
@@ -947,8 +947,8 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
         raise ValueError(f"名称为 '{name}' 的Token已存在。")
     
     expires_at = None
-    if validity_period != "permanent":
-        days = int(validity_period.replace('d', ''))
+    if validityPeriod != "permanent":
+        days = int(validityPeriod.replace('d', ''))
         expires_at = datetime.now(timezone.utc) + timedelta(days=days)
     new_token = ApiToken(name=name, token=token, expires_at=expires_at)
     session.add(new_token)

@@ -95,29 +95,35 @@ class AnimeDetailUpdate(BaseModel):
     title: str = Field(..., min_length=1, description="新的影视名称")
     type: str
     season: int = Field(..., ge=0, description="新的季度")
-    episode_count: Optional[int] = Field(None, ge=1, description="新的集数")
-    image_url: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    tmdb_episode_group_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    douban_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    name_en: Optional[str] = None
-    name_jp: Optional[str] = None
-    name_romaji: Optional[str] = None
-    alias_cn_1: Optional[str] = None
-    alias_cn_2: Optional[str] = None
-    alias_cn_3: Optional[str] = None
+    episodeCount: Optional[int] = Field(None, alias="episode_count", ge=1, description="新的集数")
+    imageUrl: Optional[str] = Field(None, alias="image_url")
+    tmdbId: Optional[str] = Field(None, alias="tmdb_id")
+    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id")
+    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
+    tvdbId: Optional[str] = Field(None, alias="tvdb_id")
+    doubanId: Optional[str] = Field(None, alias="douban_id")
+    imdbId: Optional[str] = Field(None, alias="imdb_id")
+    nameEn: Optional[str] = Field(None, alias="name_en")
+    nameJp: Optional[str] = Field(None, alias="name_jp")
+    nameRomaji: Optional[str] = Field(None, alias="name_romaji")
+    aliasCn1: Optional[str] = Field(None, alias="alias_cn_1")
+    aliasCn2: Optional[str] = Field(None, alias="alias_cn_2")
+    aliasCn3: Optional[str] = Field(None, alias="alias_cn_3")
+
+    class Config:
+        populate_by_name = True
 
 class EpisodeInfoUpdate(BaseModel):
     """用于更新分集信息的模型"""
     title: str = Field(..., min_length=1, description="新的分集标题")
-    episode_index: int = Field(..., ge=1, description="新的集数")
-    source_url: Optional[str] = Field(None, description="新的官方链接")
+    episodeIndex: int = Field(..., alias="episode_index", ge=1, description="新的集数")
+    sourceUrl: Optional[str] = Field(None, alias="source_url", description="新的官方链接")
     # Add these for resilient update
-    source_id: int
-    original_episode_index: int
+    sourceId: int = Field(..., alias="source_id")
+    originalEpisodeIndex: int = Field(..., alias="original_episode_index")
+
+    class Config:
+        populate_by_name = True
 
 class AnimeFullDetails(BaseModel):
     """用于返回番剧完整信息的模型"""
@@ -209,7 +215,10 @@ class ApiTokenInfo(BaseModel):
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
-    validity_period: str = Field("permanent", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
+    validityPeriod: str = Field("permanent", alias="validity_period", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
+
+    class Config:
+        populate_by_name = True
 
 # --- UA Filter Models ---
 class UaRule(BaseModel):
