@@ -72,24 +72,24 @@ async function showEditAnimeView(animeId) {
 }
 
 function populateEditForm(details) {
-    document.getElementById('edit-anime-id').value = details.anime_id;
+    document.getElementById('edit-anime-id').value = details.animeId;
     document.getElementById('edit-anime-title').value = details.title;
     editAnimeTypeSelect.value = details.type;
-    document.getElementById('edit-anime-poster-url').value = details.image_url || '';
+    document.getElementById('edit-anime-poster-url').value = details.imageUrl || '';
     document.getElementById('edit-anime-season').value = details.season;
-    document.getElementById('edit-anime-episode-count').value = details.episode_count || '';
-    editAnimeTmdbIdInput.value = details.tmdb_id || '';
-    document.getElementById('edit-anime-egid').value = details.tmdb_episode_group_id || '';
-    document.getElementById('edit-anime-bgmid').value = details.bangumi_id || '';
-    document.getElementById('edit-anime-tvdbid').value = details.tvdb_id || '';
-    document.getElementById('edit-anime-doubanid').value = details.douban_id || '';
-    document.getElementById('edit-anime-imdbid').value = details.imdb_id || '';
-    document.getElementById('edit-anime-name-en').value = details.name_en || '';
-    document.getElementById('edit-anime-name-jp').value = details.name_jp || '';
-    document.getElementById('edit-anime-name-romaji').value = details.name_romaji || '';
-    document.getElementById('edit-anime-alias-cn-1').value = details.alias_cn_1 || '';
-    document.getElementById('edit-anime-alias-cn-2').value = details.alias_cn_2 || '';
-    document.getElementById('edit-anime-alias-cn-3').value = details.alias_cn_3 || '';
+    document.getElementById('edit-anime-episode-count').value = details.episodeCount || '';
+    editAnimeTmdbIdInput.value = details.tmdbId || '';
+    document.getElementById('edit-anime-egid').value = details.tmdbEpisodeGroupId || '';
+    document.getElementById('edit-anime-bgmid').value = details.bangumiId || '';
+    document.getElementById('edit-anime-tvdbid').value = details.tvdbId || '';
+    document.getElementById('edit-anime-doubanid').value = details.doubanId || '';
+    document.getElementById('edit-anime-imdbid').value = details.imdbId || '';
+    document.getElementById('edit-anime-name-en').value = details.nameEn || '';
+    document.getElementById('edit-anime-name-jp').value = details.nameJp || '';
+    document.getElementById('edit-anime-name-romaji').value = details.nameRomaji || '';
+    document.getElementById('edit-anime-alias-cn-1').value = details.aliasCn1 || '';
+    document.getElementById('edit-anime-alias-cn-2').value = details.aliasCn2 || '';
+    document.getElementById('edit-anime-alias-cn-3').value = details.aliasCn3 || '';
     handleAnimeTypeChange();
     updateEgidSelectButtonState();
 }
@@ -101,20 +101,20 @@ async function handleEditAnimeSave(e, navigateBackOnSuccess = true) {
         title: document.getElementById('edit-anime-title').value,
         type: document.getElementById('edit-anime-type').value,
         season: parseInt(document.getElementById('edit-anime-season').value, 10),
-        image_url: document.getElementById('edit-anime-poster-url').value.trim() || null,
-        episode_count: document.getElementById('edit-anime-episode-count').value ? parseInt(document.getElementById('edit-anime-episode-count').value, 10) : null,
-        tmdb_id: document.getElementById('edit-anime-tmdbid').value || null,
-        tmdb_episode_group_id: document.getElementById('edit-anime-egid').value || null,
-        bangumi_id: document.getElementById('edit-anime-bgmid').value || null,
-        tvdb_id: document.getElementById('edit-anime-tvdbid').value || null,
-        douban_id: document.getElementById('edit-anime-doubanid').value || null,
-        imdb_id: document.getElementById('edit-anime-imdbid').value || null,
-        name_en: document.getElementById('edit-anime-name-en').value || null,
-        name_jp: document.getElementById('edit-anime-name-jp').value || null,
-        name_romaji: document.getElementById('edit-anime-name-romaji').value || null,
-        alias_cn_1: document.getElementById('edit-anime-alias-cn-1').value || null,
-        alias_cn_2: document.getElementById('edit-anime-alias-cn-2').value || null,
-        alias_cn_3: document.getElementById('edit-anime-alias-cn-3').value || null,
+        imageUrl: document.getElementById('edit-anime-poster-url').value.trim() || null,
+        episodeCount: document.getElementById('edit-anime-episode-count').value ? parseInt(document.getElementById('edit-anime-episode-count').value, 10) : null,
+        tmdbId: document.getElementById('edit-anime-tmdbid').value || null,
+        tmdbEpisodeGroupId: document.getElementById('edit-anime-egid').value || null,
+        bangumiId: document.getElementById('edit-anime-bgmid').value || null,
+        tvdbId: document.getElementById('edit-anime-tvdbid').value || null,
+        doubanId: document.getElementById('edit-anime-doubanid').value || null,
+        imdbId: document.getElementById('edit-anime-imdbid').value || null,
+        nameEn: document.getElementById('edit-anime-name-en').value || null,
+        nameJp: document.getElementById('edit-anime-name-jp').value || null,
+        nameRomaji: document.getElementById('edit-anime-name-romaji').value || null,
+        aliasCn1: document.getElementById('edit-anime-alias-cn-1').value || null,
+        aliasCn2: document.getElementById('edit-anime-alias-cn-2').value || null,
+        aliasCn3: document.getElementById('edit-anime-alias-cn-3').value || null,
     };
 
     const saveButton = e.target;
@@ -278,7 +278,7 @@ async function handleDirectSearch(source) {
         return;
     }
 
-    const initialId = _initialAnimeDetails ? String(_initialAnimeDetails[`${source}_id`] || '') : '';
+    const initialId = _initialAnimeDetails ? String(_initialAnimeDetails[`${source}Id`] || '') : '';
     if (currentId !== initialId) {
         alert(`ID 已更改但尚未保存。\n请先点击“保存后继续”以保存更改，然后再进行直搜。`);
         return;
@@ -826,7 +826,7 @@ async function handleReassociateConfirm() {
         try {
             await apiFetch(`/api/ui/library/anime/${sourceAnimeId}/reassociate`, {
                 method: 'POST',
-                body: JSON.stringify({ target_anime_id: targetAnimeId })
+                body: JSON.stringify({ targetAnimeId: targetAnimeId })
             });
             alert("关联成功！");
             document.querySelector('.nav-link[data-view="library-view"]').click();
@@ -840,9 +840,9 @@ function showEditEpisodeView({ episode, sourceId, animeTitle, animeId }) {
     switchView('edit-episode-view');
     document.getElementById('edit-episode-id').value = episode.episodeId;
     document.getElementById('edit-episode-title').value = episode.title;
-    document.getElementById('edit-episode-original-index').value = episode.episode_index;
-    document.getElementById('edit-episode-index').value = episode.episode_index;
-    document.getElementById('edit-episode-url').value = episode.source_url || '';
+    document.getElementById('edit-episode-original-index').value = episode.episodeIndex;
+    document.getElementById('edit-episode-index').value = episode.episodeIndex;
+    document.getElementById('edit-episode-url').value = episode.sourceUrl || '';
     document.getElementById('edit-episode-source-id').value = sourceId;
     document.getElementById('edit-episode-anime-title').value = animeTitle;
     document.getElementById('edit-episode-anime-id').value = animeId;
@@ -855,10 +855,10 @@ async function handleEditEpisodeSave(e) {
     const originalIndex = document.getElementById('edit-episode-original-index').value;
     const payload = {
         title: document.getElementById('edit-episode-title').value,
-        episode_index: parseInt(document.getElementById('edit-episode-index').value, 10),
-        source_url: document.getElementById('edit-episode-url').value,
-        source_id: parseInt(sourceId, 10),
-        original_episode_index: parseInt(originalIndex, 10)
+        episodeIndex: parseInt(document.getElementById('edit-episode-index').value, 10),
+        sourceUrl: document.getElementById('edit-episode-url').value,
+        sourceId: parseInt(sourceId, 10),
+        originalEpisodeIndex: parseInt(originalIndex, 10)
     };
     const saveButton = e.target.querySelector('button[type="submit"]');
     saveButton.disabled = true;

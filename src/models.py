@@ -117,42 +117,50 @@ class EpisodeInfoUpdate(BaseModel):
 
 class AnimeFullDetails(BaseModel):
     """用于返回番剧完整信息的模型"""
-    anime_id: int
+    animeId: int = Field(..., alias="anime_id")
     title: str
     type: str
     season: int
-    episode_count: Optional[int] = None
-    local_image_path: Optional[str] = None
-    image_url: Optional[str] = None
-    tmdb_id: Optional[str] = None
-    tmdb_episode_group_id: Optional[str] = None
-    bangumi_id: Optional[str] = None
-    tvdb_id: Optional[str] = None
-    douban_id: Optional[str] = None
-    imdb_id: Optional[str] = None
-    name_en: Optional[str] = None
-    name_jp: Optional[str] = None
-    name_romaji: Optional[str] = None
-    alias_cn_1: Optional[str] = None
-    alias_cn_2: Optional[str] = None
-    alias_cn_3: Optional[str] = None
+    episodeCount: Optional[int] = Field(None, alias="episode_count")
+    localImagePath: Optional[str] = Field(None, alias="local_image_path")
+    imageUrl: Optional[str] = Field(None, alias="image_url")
+    tmdbId: Optional[str] = Field(None, alias="tmdb_id")
+    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id")
+    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
+    tvdbId: Optional[str] = Field(None, alias="tvdb_id")
+    doubanId: Optional[str] = Field(None, alias="douban_id")
+    imdbId: Optional[str] = Field(None, alias="imdb_id")
+    nameEn: Optional[str] = Field(None, alias="name_en")
+    nameJp: Optional[str] = Field(None, alias="name_jp")
+    nameRomaji: Optional[str] = Field(None, alias="name_romaji")
+    aliasCn1: Optional[str] = Field(None, alias="alias_cn_1")
+    aliasCn2: Optional[str] = Field(None, alias="alias_cn_2")
+    aliasCn3: Optional[str] = Field(None, alias="alias_cn_3")
+
+    class Config:
+        populate_by_name = True
 
 class SourceInfo(BaseModel):
     """代表一个已关联的数据源的详细信息。"""
-    sourceId: int = Field(..., alias="source_id")
     sourceId: int
-    provider_name: str
-    media_id: str
-    is_favorited: bool
-    incremental_refresh_enabled: bool
-    created_at: datetime
+    providerName: str = Field(..., alias="provider_name")
+    mediaId: str = Field(..., alias="media_id")
+    isFavorited: bool = Field(..., alias="is_favorited")
+    incrementalRefreshEnabled: bool = Field(..., alias="incremental_refresh_enabled")
+    createdAt: datetime = Field(..., alias="created_at")
+
+    class Config:
+        populate_by_name = True
 
 # --- 爬虫源管理模型 ---
 class ScraperSetting(BaseModel):
-    provider_name: str
-    is_enabled: bool
-    use_proxy: bool
-    display_order: int
+    providerName: str = Field(..., alias="provider_name")
+    isEnabled: bool = Field(..., alias="is_enabled")
+    useProxy: bool = Field(..., alias="use_proxy")
+    displayOrder: int = Field(..., alias="display_order")
+
+    class Config:
+        populate_by_name = True
 
 class MetadataSourceSettingUpdate(BaseModel):
     provider_name: str
@@ -184,18 +192,25 @@ class LibraryResponse(BaseModel):
 class EpisodeDetail(BaseModel):
     episodeId: int
     title: str
-    episode_index: int
-    source_url: Optional[str] = None
-    fetched_at: Optional[datetime] = None
-    comment_count: int
+    episodeIndex: int = Field(..., alias="episode_index")
+    sourceUrl: Optional[str] = Field(None, alias="source_url")
+    fetchedAt: Optional[datetime] = Field(None, alias="fetched_at")
+    commentCount: int = Field(..., alias="comment_count")
+
+    class Config:
+        populate_by_name = True
 
 # --- 任务管理器模型 ---
 class TaskInfo(BaseModel):
-    task_id: str
+    taskId: str = Field(..., alias="task_id")
     title: str
     status: str
     progress: int
     description: str
+    createdAt: datetime = Field(..., alias="created_at")
+
+    class Config:
+        populate_by_name = True
 
 # --- API Token 管理模型 ---
 class ApiTokenInfo(BaseModel):
@@ -216,8 +231,11 @@ class ApiTokenCreate(BaseModel):
 # --- UA Filter Models ---
 class UaRule(BaseModel):
     id: int
-    ua_string: str
-    created_at: datetime
+    uaString: str = Field(..., alias="ua_string")
+    createdAt: datetime = Field(..., alias="created_at")
+
+    class Config:
+        populate_by_name = True
 
 class TokenAccessLog(BaseModel):
     accessTime: datetime = Field(..., alias="access_time")

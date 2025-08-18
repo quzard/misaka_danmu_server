@@ -70,11 +70,11 @@ function renderTokens(tokens) {
     tokens.forEach(token => {
         const row = tokenTableBody.insertRow();
 
-        const createdDate = new Date(token.created_at);
+        const createdDate = new Date(token.createdAt);
         const createdHtml = `${createdDate.toLocaleDateString()}<br><span class="time-part">${createdDate.toLocaleTimeString()}</span>`;
 
-        const expiresHtml = token.expires_at 
-            ? `${new Date(token.expires_at).toLocaleDateString()}<br><span class="time-part">${new Date(token.expires_at).toLocaleTimeString()}</span>`
+        const expiresHtml = token.expiresAt 
+            ? `${new Date(token.expiresAt).toLocaleDateString()}<br><span class="time-part">${new Date(token.expiresAt).toLocaleTimeString()}</span>`
             : '永久有效';
         
         const hiddenTokenText = '*'.repeat(token.token.length);
@@ -88,14 +88,14 @@ function renderTokens(tokens) {
                     <span class="token-visibility-toggle" data-action="toggle-visibility" title="显示/隐藏">👁️</span>
                 </span>
             </td>
-            <td class="token-status ${token.is_enabled ? '' : 'disabled'}">${token.is_enabled ? '✅' : '❌'}</td>
+            <td class="token-status ${token.isEnabled ? '' : 'disabled'}">${token.isEnabled ? '✅' : '❌'}</td>
             <td class="date-cell">${createdHtml}</td>
             <td class="date-cell">${expiresHtml}</td>
             <td class="actions-cell">
                 <div class="action-buttons-wrapper">
                     <button class="action-btn" data-action="copy" data-token-id="${token.id}" data-token-value="${token.token}" title="复制链接">📋</button>
                     <button class="action-btn" data-action="view-log" data-token-id="${token.id}" data-token-name="${token.name}" title="查看日志">📜</button>
-                    <button class="action-btn" data-action="toggle" data-token-id="${token.id}" title="${enabledText}">${token.is_enabled ? '⏸️' : '▶️'}</button>
+                    <button class="action-btn" data-action="toggle" data-token-id="${token.id}" title="${enabledText}">${token.isEnabled ? '⏸️' : '▶️'}</button>
                     <button class="action-btn" data-action="delete" data-token-id="${token.id}" title="删除">🗑️</button>
                 </div>
             </td>
@@ -285,8 +285,8 @@ async function loadAndRenderUaRules() {
         rules.forEach(rule => {
             const row = uaRulesTableBody.insertRow();
             row.innerHTML = `
-                <td>${rule.ua_string}</td>
-                <td>${new Date(rule.created_at).toLocaleString()}</td>
+                <td>${rule.uaString}</td>
+                <td>${new Date(rule.createdAt).toLocaleString()}</td>
                 <td class="actions-cell">
                     <button class="action-btn" data-rule-id="${rule.id}" title="删除">🗑️</button>
                 </td>
@@ -305,7 +305,7 @@ async function handleAddUaRule(e) {
     try {
         await apiFetch('/api/ui/ua-rules', {
             method: 'POST',
-            body: JSON.stringify({ ua_string: uaString })
+            body: JSON.stringify({ uaString: uaString })
         });
         input.value = '';
         loadAndRenderUaRules();
@@ -342,11 +342,11 @@ async function showTokenLogView(tokenId, tokenName) {
         logs.forEach(log => {
             const row = tokenLogTableBody.insertRow();
             row.innerHTML = `
-                <td>${new Date(log.access_time).toLocaleString()}</td>
-                <td>${log.ip_address}</td>
+                <td>${new Date(log.accessTime).toLocaleString()}</td>
+                <td>${log.ipAddress}</td>
                 <td>${log.status}</td>
                 <td>${log.path || ''}</td>
-                <td>${log.user_agent}</td>
+                <td>${log.userAgent}</td>
             `;
         });
     } catch (error) {

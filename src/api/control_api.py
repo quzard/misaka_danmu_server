@@ -372,7 +372,7 @@ async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db
     anime_exists = await crud.get_anime_full_details(session, animeId)
     if not anime_exists:
         raise HTTPException(status_code=404, detail="作品未找到")
-    return await crud.get_anime_sources(session, animeid)
+    return await crud.get_anime_sources(session, animeId)
 
 @library_router.put("/anime/{animeId}", response_model=ControlActionResponse, summary="编辑作品信息")
 async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):

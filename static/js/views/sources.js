@@ -84,9 +84,9 @@ function renderDanmakuSources(settings) {
     danmakuSourcesList.innerHTML = '';
     settings.forEach(setting => {
         const li = document.createElement('li');
-        li.dataset.providerName = setting.provider_name;
-        li.dataset.isEnabled = setting.is_enabled;
-        li.dataset.useProxy = setting.use_proxy;
+        li.dataset.providerName = setting.providerName;
+        li.dataset.isEnabled = setting.isEnabled;
+        li.dataset.useProxy = setting.useProxy;
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'source-name';
@@ -96,12 +96,12 @@ function renderDanmakuSources(settings) {
         // 创建验证状态图标，但稍后根据源类型决定其位置
         const verifiedIcon = document.createElement('span');
         verifiedIcon.className = 'verified-icon';
-        verifiedIcon.textContent = setting.is_verified ? '🛡️' : '⚠️';
-        verifiedIcon.title = setting.is_verified ? '已验证的源' : '未验证的源 (无法使用)';
-        if (!setting.is_verified) li.classList.add('unverified');
+        verifiedIcon.textContent = setting.isVerified ? '🛡️' : '⚠️';
+        verifiedIcon.title = setting.isVerified ? '已验证的源' : '未验证的源 (无法使用)';
+        if (!setting.isVerified) li.classList.add('unverified');
 
         // 根据源类型调整布局
-        if (setting.provider_name === 'bilibili') {
+        if (setting.providerName === 'bilibili') {
             const biliStatusDiv = document.createElement('div');
             biliStatusDiv.id = 'bili-status-on-source-list';
             biliStatusDiv.className = 'source-login-status';
@@ -113,21 +113,21 @@ function renderDanmakuSources(settings) {
         }
 
         // 如果源有可配置字段或支持日志记录，则显示配置按钮
-        if ((setting.configurable_fields && Object.keys(setting.configurable_fields).length > 0) || setting.is_loggable) {
+        if ((setting.configurableFields && Object.keys(setting.configurableFields).length > 0) || setting.isLoggable) {
             const configBtn = document.createElement('button');
             configBtn.className = 'action-btn config-btn';
-            configBtn.title = `配置 ${setting.provider_name}`;
+            configBtn.title = `配置 ${setting.providerName}`;
             configBtn.textContent = '⚙️';
             configBtn.dataset.action = 'configure';
-            configBtn.dataset.providerName = setting.provider_name;
+            configBtn.dataset.providerName = setting.providerName;
             // 将字段信息存储为JSON字符串以便后续使用
-            configBtn.dataset.fields = JSON.stringify(setting.configurable_fields);
-            configBtn.dataset.isLoggable = setting.is_loggable;
+            configBtn.dataset.fields = JSON.stringify(setting.configurableFields);
+            configBtn.dataset.isLoggable = setting.isLoggable;
             li.appendChild(configBtn);
         }
         const statusIcon = document.createElement('span');
         statusIcon.className = 'status-icon';
-        statusIcon.textContent = setting.is_enabled ? '✅' : '❌';
+        statusIcon.textContent = setting.isEnabled ? '✅' : '❌';
         li.appendChild(statusIcon);
 
         li.addEventListener('click', (e) => {
@@ -144,10 +144,10 @@ async function handleSaveDanmakuSources() {
     const settingsToSave = [];
     danmakuSourcesList.querySelectorAll('li').forEach((li, index) => {
         settingsToSave.push({
-            provider_name: li.dataset.providerName,
-            is_enabled: li.dataset.isEnabled === 'true',
-            use_proxy: li.dataset.useProxy === 'true',
-            display_order: index + 1,
+            providerName: li.dataset.providerName,
+            isEnabled: li.dataset.isEnabled === 'true',
+            useProxy: li.dataset.useProxy === 'true',
+            displayOrder: index + 1,
         });
     });
     try {
@@ -200,18 +200,18 @@ function renderMetadataSources(sources) {
     metadataSourcesList.innerHTML = '';
     sources.forEach(setting => {
         const li = document.createElement('li');
-        li.dataset.providerName = setting.provider_name;
-        li.dataset.isEnabled = setting.is_enabled;
-        li.dataset.isAuxSearchEnabled = setting.is_aux_search_enabled;
-        li.dataset.useProxy = setting.use_proxy;
+        li.dataset.providerName = setting.providerName;
+        li.dataset.isEnabled = setting.isEnabled;
+        li.dataset.isAuxSearchEnabled = setting.isAuxSearchEnabled;
+        li.dataset.useProxy = setting.useProxy;
 
         // Auxiliary Search Checkbox
         const auxSearchCheckbox = document.createElement('input');
         auxSearchCheckbox.type = 'checkbox';
         auxSearchCheckbox.className = 'aux-search-checkbox';
-        auxSearchCheckbox.checked = setting.is_aux_search_enabled;
+        auxSearchCheckbox.checked = setting.isAuxSearchEnabled;
         auxSearchCheckbox.title = '启用作为辅助搜索源';
-        if (setting.provider_name === 'tmdb') {
+        if (setting.providerName === 'tmdb') {
             auxSearchCheckbox.disabled = true;
             auxSearchCheckbox.title = 'TMDB 是必需的辅助搜索源';
         }
@@ -231,7 +231,7 @@ function renderMetadataSources(sources) {
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'source-name';
-        nameSpan.textContent = setting.provider_name.toUpperCase();
+        nameSpan.textContent = setting.providerName.toUpperCase();
         li.appendChild(nameSpan);
 
         const statusText = document.createElement('span');
@@ -266,10 +266,10 @@ async function handleSaveMetadataSources() {
     const settingsToSave = [];
     metadataSourcesList.querySelectorAll('li').forEach((li, index) => {
         settingsToSave.push({
-            provider_name: li.dataset.providerName,
-            is_aux_search_enabled: li.dataset.isAuxSearchEnabled === 'true',
-            use_proxy: li.dataset.useProxy === 'true',
-            display_order: index + 1,
+            providerName: li.dataset.providerName,
+            isAuxSearchEnabled: li.dataset.isAuxSearchEnabled === 'true',
+            useProxy: li.dataset.useProxy === 'true',
+            displayOrder: index + 1,
         });
     });
     try {
@@ -470,7 +470,7 @@ async function handleSaveScraperConfig() {
     if (useProxyCheckbox) {
         danmakuSourcesList.querySelector(`li[data-provider-name="${currentProviderForModal}"]`).dataset.useProxy = useProxyCheckbox.checked;
             // 新增：将代理设置添加到要发送的负载中
-            payload['use_proxy'] = useProxyCheckbox.checked;
+            payload['useProxy'] = useProxyCheckbox.checked;
     }
     // 获取日志开关的值
     const logCheckbox = document.getElementById('config-input-log-responses');
