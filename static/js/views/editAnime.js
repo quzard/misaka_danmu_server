@@ -851,14 +851,10 @@ function showEditEpisodeView({ episode, sourceId, animeTitle, animeId }) {
 async function handleEditEpisodeSave(e) {
     e.preventDefault();
     const episodeId = document.getElementById('edit-episode-id').value;
-    const sourceId = document.getElementById('edit-episode-source-id').value;
-    const originalIndex = document.getElementById('edit-episode-original-index').value;
     const payload = {
         title: document.getElementById('edit-episode-title').value,
         episodeIndex: parseInt(document.getElementById('edit-episode-index').value, 10),
         sourceUrl: document.getElementById('edit-episode-url').value,
-        sourceId: parseInt(sourceId, 10),
-        originalEpisodeIndex: parseInt(originalIndex, 10)
     };
     const saveButton = e.target.querySelector('button[type="submit"]');
     saveButton.disabled = true;

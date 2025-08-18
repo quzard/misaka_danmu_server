@@ -118,9 +118,6 @@ class EpisodeInfoUpdate(BaseModel):
     title: str = Field(..., min_length=1, description="新的分集标题")
     episodeIndex: int = Field(..., alias="episode_index", ge=1, description="新的集数")
     sourceUrl: Optional[str] = Field(None, alias="source_url", description="新的官方链接")
-    # Add these for resilient update
-    sourceId: int = Field(..., alias="source_id")
-    originalEpisodeIndex: int = Field(..., alias="original_episode_index")
 
     class Config:
         populate_by_name = True

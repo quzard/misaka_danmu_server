@@ -711,13 +711,7 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
 
 async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:
     episode = await session.get(Episode, episode_id)
-    if not episode:
-        # Fallback logic
-        stmt = select(Episode).where(Episode.source_id == update_data.sourceId, Episode.episode_index == update_data.originalEpisodeIndex)
-        result = await session.execute(stmt)
-        episode = result.scalar_one_or_none()
-        if not episode:
-            return False
+    if not episode: return False
 
     # Check for conflict
     conflict_stmt = select(Episode.id).where(

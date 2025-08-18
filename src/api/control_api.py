@@ -71,6 +71,11 @@ class ControlActionResponse(BaseModel):
     """通用操作成功响应模型"""
     message: str
 
+class ControlTaskResponse(BaseModel):
+    """任务提交成功响应模型"""
+    message: str
+    taskId: str
+
 class ControlSearchResultItem(models.ProviderSearchInfo):
     resultIndex: int = Field(..., alias="result_index", description="结果在列表中的顺序索引，从0开始")
 
@@ -206,7 +211,7 @@ async def search_media(
     finally:
         await manager.release_search_lock(api_key)
 
-@router.post("/import/direct", status_code=status.HTTP_202_ACCEPTED, summary="直接导入搜索结果")
+@router.post("/import/direct", status_code=status.HTTP_202_ACCEPTED, summary="直接导入搜索结果", response_model=ControlTaskResponse)
 async def direct_import(
     payload: ControlDirectImportRequest,
     session: AsyncSession = Depends(get_db_session),
@@ -246,7 +251,7 @@ async def direct_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": "导入任务已提交", "task_id": task_id}
+        return {"message": "导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -278,7 +283,7 @@ async def get_episodes(
     scraper = manager.get_scraper(item_to_fetch.provider)
     return await scraper.get_episodes(item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
 
-@router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表")
+@router.post("/import/edited", status_code=status.HTTP_202_ACCEPTED, summary="导入编辑后的分集列表", response_model=ControlTaskResponse)
 async def edited_import(
     payload: ControlEditedImportRequest,
     session: AsyncSession = Depends(get_db_session),
@@ -326,11 +331,11 @@ async def edited_import(
             request_data=task_payload, progress_callback=cb, session=session, manager=manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": "编辑后导入任务已提交", "task_id": task_id}
+        return {"message": "编辑后导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入整个作品")
+@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入整个作品", response_model=ControlTaskResponse)
 async def url_import(
     payload: ControlUrlImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
@@ -366,7 +371,7 @@ async def url_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": "URL导入任务已提交", "task_id": task_id}
+        return {"message": "URL导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -399,7 +404,7 @@ async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: A
         raise HTTPException(404, "作品未找到")
     return {"message": "作品信息更新成功。"}
 
-@library_router.delete("/anime/{animeId}", status_code=202, summary="删除作品")
+@library_router.delete("/anime/{animeId}", status_code=202, summary="删除作品", response_model=ControlTaskResponse)
 async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
@@ -408,11 +413,11 @@ async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_sess
             lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
             f"外部API删除作品: {details['title']}"
         )
-        return {"message": "删除作品任务已提交", "task_id": task_id}
+        return {"message": "删除作品任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@library_router.delete("/source/{sourceId}", status_code=202, summary="删除数据源")
+@library_router.delete("/source/{sourceId}", status_code=202, summary="删除数据源", response_model=ControlTaskResponse)
 async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     info = await crud.get_anime_source_info(session, sourceId)
     if not info: raise HTTPException(404, "数据源未找到")
@@ -421,7 +426,7 @@ async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_se
             lambda s, cb: tasks.delete_source_task(sourceId, s, cb),
             f"外部API删除源: {info['title']} ({info['providerName']})"
         )
-        return {"message": "删除源任务已提交", "task_id": task_id}
+        return {"message": "删除源任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -443,7 +448,7 @@ async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, sessio
         raise HTTPException(404, "分集未找到")
     return {"message": "分集信息更新成功。"}
 
-@library_router.post("/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕")
+@library_router.post("/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕", response_model=ControlTaskResponse)
 async def refresh_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager), manager: ScraperManager = Depends(get_scraper_manager)):
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
@@ -451,9 +456,9 @@ async def refresh_episode(episodeId: int, session: AsyncSession = Depends(get_db
         lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, cb),
         f"外部API刷新分集: {info['title']}"
     )
-    return {"message": "刷新分集任务已提交", "task_id": task_id}
+    return {"message": "刷新分集任务已提交", "taskId": task_id}
 
-@library_router.delete("/episode/{episodeId}", status_code=202, summary="删除分集")
+@library_router.delete("/episode/{episodeId}", status_code=202, summary="删除分集", response_model=ControlTaskResponse)
 async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
@@ -462,7 +467,7 @@ async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_
             lambda s, cb: tasks.delete_episode_task(episodeId, s, cb),
             f"外部API删除分集: {info['title']}"
         )
-        return {"message": "删除分集任务已提交", "task_id": task_id}
+        return {"message": "删除分集任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -475,7 +480,7 @@ async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_ses
     comments = await crud.fetch_comments(session, episodeId)
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
 
-@danmaku_router.post("/{episodeId}", status_code=202, summary="覆盖弹幕")
+@danmaku_router.post("/{episodeId}", status_code=202, summary="覆盖弹幕", response_model=ControlTaskResponse)
 async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
     async def overwrite_task(session: AsyncSession, cb: Callable):
         await cb(10, "清空中...")
@@ -485,7 +490,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
-        return {"message": "弹幕覆盖任务已提交", "task_id": task_id}
+        return {"message": "弹幕覆盖任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
