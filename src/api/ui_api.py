@@ -360,7 +360,7 @@ async def delete_source_from_anime(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """提交一个后台任务来删除一个数据源及其所有关联的分集和弹幕。"""
-    source_info = await crud.get_anime_source_info(session, sourceId) # type: ignore
+    source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
@@ -469,7 +469,7 @@ async def reorder_source_episodes(
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    task_title = f"重整集数: {source_info['title']} ({source_info['provider_name']})"
+    task_title = f"重整集数: {source_info['title']} ({source_info['providerName']})"
     task_coro = lambda session, callback: tasks.reorder_episodes_task(sourceId, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
@@ -1825,26 +1825,26 @@ async def import_from_url(
 
     return {"message": f"'{title}' 的URL导入任务已提交。", "taskId": task_id}
 
-@router.put("/scheduled-tasks/{task_id}", response_model=models.ScheduledTaskInfo, summary="更新定时任务")
+@router.put("/scheduled-tasks/{taskId}", response_model=models.ScheduledTaskInfo, summary="更新定时任务")
 async def update_scheduled_task(
-    task_id: str,
-    task_data: ScheduledTaskUpdate,
+    taskId: str,
+    task_data: models.ScheduledTaskUpdate,
     current_user: models.User = Depends(security.get_current_user),
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
-    updated_task = await scheduler.update_task(task_id, task_data.name, task_data.cron_expression, task_data.is_enabled)
+    updated_task = await scheduler.update_task(taskId, task_data.name, task_data.cronExpression, task_data.isEnabled)
     if not updated_task:
         raise HTTPException(status_code=404, detail="找不到指定的任务ID")
     return models.ScheduledTaskInfo.model_validate(updated_task)
 
-@router.delete("/scheduled-tasks/{task_id}", status_code=204, summary="删除定时任务")
-async def delete_scheduled_task(task_id: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):
-    await scheduler.delete_task(task_id)
+@router.delete("/scheduled-tasks/{taskId}", status_code=204, summary="删除定时任务")
+async def delete_scheduled_task(taskId: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):
+    await scheduler.delete_task(taskId)
 
-@router.post("/scheduled-tasks/{task_id}/run", status_code=202, summary="立即运行一次定时任务")
-async def run_scheduled_task_now(task_id: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):
+@router.post("/scheduled-tasks/{taskId}/run", status_code=202, summary="立即运行一次定时任务")
+async def run_scheduled_task_now(taskId: str, current_user: models.User = Depends(security.get_current_user), scheduler: SchedulerManager = Depends(get_scheduler_manager)):
     try:
-        await scheduler.run_task_now(task_id)
+        await scheduler.run_task_now(taskId)
         return {"message": "任务已触发运行"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
