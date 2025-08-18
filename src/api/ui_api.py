@@ -317,11 +317,11 @@ async def refresh_anime_poster(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
 
-@router.delete("/library/source/{sourceId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定数据源的任务", response_model=UITaskResponse)
+@router.get("/library/source/{sourceId}/details", response_model=models.SourceDetailsResponse, summary="获取单个数据源的详情")
 async def get_source_details(
     sourceId: int,
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
 ):
     """获取指定数据源的详细信息，包括其提供方名称。"""
     source_info = await crud.get_anime_source_info(session, sourceId)
