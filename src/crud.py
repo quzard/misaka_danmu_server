@@ -187,6 +187,23 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
+async def find_anime_by_title_and_season(session: AsyncSession, title: str, season: int) -> Optional[Dict[str, Any]]:
+    """
+    通过标题和季度查找番剧，返回一个简化的字典或None。
+    """
+    stmt = (
+        select(
+            Anime.id,
+            Anime.title,
+            Anime.season
+        )
+        .where(Anime.title == title, Anime.season == season)
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
+
 async def get_episode_indices_by_anime_title(session: AsyncSession, title: str) -> List[int]:
     """获取指定标题的作品已存在的所有分集序号。"""
     stmt = (
