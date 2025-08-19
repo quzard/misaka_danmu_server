@@ -32,6 +32,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY src/ ./src/
+# 新增：复制构建好的前端静态文件到镜像中
+COPY web/dist/ ./web/dist/
 COPY static/ ./static/
 COPY config/ ./config/
 COPY exec.sh /exec.sh
