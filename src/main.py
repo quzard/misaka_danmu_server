@@ -183,30 +183,23 @@ async def cleanup_task(app: FastAPI):
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
 
-# 挂载静态文件目录（适配Vite构建产物）
-if settings.environment == "development":
-    # 开发环境：不挂载静态文件（由 Vite 开发服务器提供）
-    print("开发环境：跳过静态文件挂载")
-else:
-    # 生产环境：挂载构建后的静态文件
-    app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    print("生产环境：已挂载静态文件")
-
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
-# 前端入口路由（适配Vite+React SPA）
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_react_app(request: Request, full_path: str):
-    # 开发环境重定向到Vite服务器
-    if settings.environment == "development":
+# --- 前端服务 ---
+# 根据环境提供不同的前端服务方式
+if settings.environment == "development":
+    # 开发环境：所有非API请求都重定向到Vite开发服务器
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_react_app_dev(request: Request, full_path: str):
         base_url = f"http://{settings.client.host}:{settings.client.port}"
         return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-    
-    # 生产环境返回构建好的index.html
-    return FileResponse("web/dist/index.html")
+else:
+    # 生产环境：挂载整个 'dist' 目录，并启用SPA模式 (html=True)
+    # 这会为所有未匹配到文件的路径返回 index.html
+    app.mount("/", StaticFiles(directory="web/dist", html=True), name="static-spa")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
