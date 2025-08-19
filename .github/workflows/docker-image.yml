@@ -24,26 +24,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          # 调整缓存路径到web目录，因为package.json在这里
-          cache: "npm"
-          cache-dependency-path: "web/package-lock.json"
+          node-version: "20" # 与 .nvmrc 保持一致
+          cache: "yarn" # 使用 yarn 进行缓存
+          cache-dependency-path: "web/yarn.lock" # 指定 yarn.lock 文件的位置
 
       - name: Install dependencies and build frontend
         run: |
           cd web
-          # 清除npm缓存
-          npm cache clean --force
-          # 删除可能损坏的node_modules
-          rm -rf node_modules
-          # 安装所有依赖，强制重新安装并包含可选依赖
-          npm install --force --include=optional
-          # 专门安装SWC的Linux平台依赖
-          npm install @swc/core-linux-x64-gnu --save-dev --force
-          # 确保Rollup的Linux依赖也正确安装
-          npm install @rollup/rollup-linux-x64-gnu --save-dev --force
+          # 使用 yarn 安装依赖，--frozen-lockfile 确保严格使用锁文件
+          yarn install --frozen-lockfile
           # 执行Vite构建
-          npm run build
+          yarn build
 
       # 步骤2: 准备 Docker 镜像标签
       # 根据触发事件（分支或标签）动态生成镜像标签
