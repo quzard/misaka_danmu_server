@@ -211,7 +211,7 @@ app.include_router(api_router, prefix="/api")
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
 # --- 前端服务 (生产环境) ---
-# 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录（通常是 'assets'）
+# 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
 # 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
 if settings.environment == "development":
     # 开发环境：所有非API请求都重定向到Vite开发服务器
@@ -220,9 +220,10 @@ if settings.environment == "development":
         base_url = f"http://{settings.client.host}:{settings.client.port}"
         return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
 else:
-    # 生产环境：先挂载 /assets 目录
+    # 生产环境：显式挂载静态资源目录
     app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    # 然后，为所有其他路径提供 index.html
+    app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
+    # 然后，为所有其他路径提供 index.html 以支持前端路由
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(request: Request, full_path: str):
         return FileResponse("web/dist/index.html")

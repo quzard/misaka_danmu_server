@@ -98,19 +98,16 @@ export const Bangumi = () => {
 
   useEffect(() => {
     getInfo()
-    window.addEventListener('message', event => {
+    const handleMessage = event => {
       if (event.data === 'BANGUMI-OAUTH-COMPLETE') {
         if (oauthPopup.current) oauthPopup.current?.close?.()
         getInfo()
       }
-    })
+    }
+    window.addEventListener('message', handleMessage)
     return () => {
-      window.removeEventListener('message', event => {
-        if (event.data === 'BANGUMI-OAUTH-COMPLETE') {
-          if (oauthPopup.current) oauthPopup.current?.close?.()
-          getInfo()
-        }
-      })
+      // 正确地移除之前添加的同一个函数引用
+      window.removeEventListener('message', handleMessage)
     }
   }, [])
 
