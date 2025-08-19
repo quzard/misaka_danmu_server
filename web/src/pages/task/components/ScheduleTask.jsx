@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import {
   deleteScheduledTask,
   editScheduledTask,
+  addScheduledTask,
   getScheduledTaskList,
   runTask,
 } from '../../../apis'
@@ -167,7 +168,7 @@ export const ScheduleTask = () => {
       }
     } else {
       try {
-        await addTask(values)
+        await addScheduledTask(values)
         message.success('任务添加成功。')
         form.resetFields()
         refreshTasks()
