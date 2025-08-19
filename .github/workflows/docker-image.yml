@@ -1,4 +1,3 @@
-# .github/workflows/docker-publish.yml
 name: Publish to Docker Hub
 
 # 触发条件：
@@ -25,13 +24,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22" #
-          cache: "npm" # 缓存npm依赖以加快构建速度
+          node-version: "22"
+          # 调整缓存路径到web目录，因为package.json在这里
+          cache: "npm"
+          cache-dependency-path: "web/package-lock.json"
 
       - name: Install dependencies and build frontend
         run: |
           cd web
-          # 安装依赖
+          # 安装依赖并生成锁文件
           npm install
           # 执行Vite构建
           npm run build

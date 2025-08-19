@@ -38,12 +38,12 @@ export const ImportTask = () => {
 
   const [canPause, isPause, canStop] = useMemo(() => {
     return [
-      (selectList.every(item => item.status === '进行中') &&
+      (selectList.every(item => item.status === '运行中') &&
         !!selectList.length) ||
         (selectList.every(item => item.status === '已暂停') &&
           !!selectList.length),
       selectList.every(item => item.status === '已暂停'),
-      selectList.every(item => item.status === '进行中'),
+      selectList.every(item => item.status === '运行中') && !!selectList.length,
     ]
   }, [selectList])
 
@@ -128,7 +128,7 @@ export const ImportTask = () => {
           refreshTasks()
           message.success('中止成功')
         } catch (error) {
-          alert(`中止任务失败: ${error.message}`)
+          message.error(`中止任务失败: ${error.message}`)
         }
       },
     })
