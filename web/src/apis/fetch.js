@@ -3,7 +3,6 @@ import Cookies from 'js-cookie'
 
 const getURL = url => {
   return {
-    baseURL: 'http://0.0.0.0:7768',
     url: url,
   }
 }
