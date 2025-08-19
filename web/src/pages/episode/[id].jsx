@@ -257,7 +257,7 @@ export const EpisodeDetail = () => {
       onOk: async () => {
         try {
           const res = await refreshEpisodeDanmaku({
-            id: record.id,
+            id: record.episodeId,
           })
           message.success(res.message || '刷新任务已开始。')
         } catch (error) {

@@ -1096,17 +1096,22 @@ async def consume_oauth_state(session: AsyncSession, state: str) -> Optional[int
         return user_id
     return None
 
-# --- Bangumi 授权服务 ---
-
-async def get_bangumi_auth(session: AsyncSession, user_id: int) -> Optional[Dict[str, Any]]:
+async def get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, Any]:
+    """
+    获取用户的Bangumi授权状态。
+    注意：此函数现在返回一个为UI定制的字典，而不是完整的认证对象。
+    """
     auth = await session.get(BangumiAuth, user_id)
     if auth:
         return {
-            "user_id": auth.user_id, "bangumi_user_id": auth.bangumi_user_id, "nickname": auth.nickname,
-            "avatar_url": auth.avatar_url, "access_token": auth.access_token, "refresh_token": auth.refresh_token,
-            "expires_at": auth.expires_at, "authorized_at": auth.authorized_at
+            "isAuthenticated": True,
+            "nickname": auth.nickname,
+            "avatarUrl": auth.avatar_url,
+            "bangumiUserId": auth.bangumi_user_id,
+            "authorizedAt": auth.authorized_at,
+            "expiresAt": auth.expires_at,
         }
-    return None
+    return {"isAuthenticated": False}
 
 async def save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict[str, Any]):
     auth = await session.get(BangumiAuth, user_id)

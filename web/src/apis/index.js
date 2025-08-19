@@ -288,12 +288,12 @@ export const toggleSourceIncremental = data =>
   api.put(`/api/ui/library/source/${data.sourceId}/toggle-incremental-refresh`)
 
 /** 增量更新 */
-export const incrementalUpdate = data =>
-  api.post(`/api/ui/library/source/${data.sourceId}/refresh`)
+export const incrementalUpdate = (data) =>
+  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=incremental`);
 
 /** 全量刷新 */
-export const fullSourceUpdate = data =>
-  api.post(`/api/ui/library/source/${data.sourceId}/refresh`)
+export const fullSourceUpdate = (data) =>
+  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=full`);
 
 /** 获取分集 */
 export const getEpisodes = data =>
