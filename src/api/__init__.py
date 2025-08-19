@@ -22,7 +22,6 @@ api_router.include_router(tvdb_router, prefix="/tvdb", tags=["TVDB"], include_in
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"], include_in_schema=False)
 api_router.include_router(control_router, prefix="/control", tags=["External Control API"])
 
-# Note: The dandan_router is handled separately in main.py because its
-# path structure (/api/{token}) is different and needs to be at the root
-# of the /api prefix, while these other routers are nested under it
-# (e.g., /api/ui, /api/tmdb).
+# 注意：dandan_router 在 main.py 中被单独处理，因为它的路径结构
+# (/api/v1/{token}) 与其他嵌套在 /api 前缀下的路由 (例如 /api/ui, /api/tmdb) 不同，
+# 需要位于 /api 前缀的根部。
