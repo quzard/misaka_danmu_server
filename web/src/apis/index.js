@@ -192,7 +192,7 @@ export const getBangumiAuthUrl = () => api.get('/api/bgm/auth/url')
 /** 注销授权 */
 export const logoutBangumiAuth = () => api.delete('/api/bgm/auth')
 
-/** ---------------------------------------------- 豆瓣、tmdb、tvdb配置----------------------------------------------  */
+/** ------------------------------------------ 豆瓣、tmdb、tvdb配置、代理------------------------------------------  */
 /** 获取tmdb配置 */
 export const getTmdbConfig = () => api.get('/api/ui/config/tmdb')
 /** 设置tmdb配置 */
@@ -207,6 +207,11 @@ export const getTvdbConfig = () => api.get('/api/ui/config/tvdb_api_key')
 /** 设置tvdb配置 */
 export const setTvdbConfig = data =>
   api.put('/api/ui/config/tvdb_api_key', data)
+
+/** 获取代理配置 */
+export const getProxyConfig = () => api.get('/api/ui/config/proxy')
+/** 设置代理配置 */
+export const setProxyConfig = data => api.put('/api/ui/config/proxy', data)
 
 /** ---------------------------------------------- 搜索源配置----------------------------------------------  */
 /** 获取刮削器配置 */

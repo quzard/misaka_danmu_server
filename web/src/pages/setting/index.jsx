@@ -6,9 +6,10 @@ import { Bangumi } from './components/Bangumi'
 import { TMDB } from './components/TMDB'
 import { Douban } from './components/Douban'
 import { TVDB } from './components/TVDB'
+import { Proxy } from './components/Proxy'
 
 export const Setting = () => {
-  const [activeKey, setActiveKey] = useState('security')
+  const [activeKey, setActiveKey] = useState('proxy')
   return (
     <Tabs
       defaultActiveKey={activeKey}
@@ -17,6 +18,11 @@ export const Setting = () => {
           label: '账户安全',
           key: 'security',
           children: <Security />,
+        },
+        {
+          label: '代理设置',
+          key: 'proxy',
+          children: <Proxy />,
         },
         {
           label: 'Webhook',

@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     bangumi: BangumiConfig = BangumiConfig()
     log: LogConfig = LogConfig()
     douban: DoubanConfig = DoubanConfig()
+    # 新增：环境标识和客户端配置
+    environment: str = "production"
+    # environment: str = "development"
+    client: ClientConfig = ClientConfig()
     class Config:
         # 为环境变量设置前缀，避免与系统变量冲突
         # 例如，在容器中设置环境变量 DANMUAPI_SERVER__PORT=8080

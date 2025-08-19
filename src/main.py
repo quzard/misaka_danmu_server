@@ -121,6 +121,21 @@ app = FastAPI(
     docs_url="/api/control/docs",  # 为外部控制API设置专用的文档路径
     redoc_url=None         # 禁用ReDoc
 )
+
+# 新增：配置CORS，允许前端开发服务器访问API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        f"http://{settings.client.host}:{settings.client.port}",  # 前端开发服务器
+        "http://localhost:5173",  # 默认Vite开发端口
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.middleware("http")
 async def log_not_found_requests(request: Request, call_next):
     """
