@@ -3,9 +3,10 @@ import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
+import httpx
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse # noqa: F401
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
@@ -16,7 +17,7 @@ from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .webhook_manager import WebhookManager
-from .scheduler import SchedulerManager
+from .scheduler import SchedulerManager, status
 from .config import settings
 from . import crud, security
 from .log_manager import setup_logging
@@ -136,6 +137,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 新增：全局异常处理器，以优雅地处理网络错误
+@app.exception_handler(httpx.ConnectError)
+async def httpx_connect_error_handler(request: Request, exc: httpx.ConnectError):
+    """处理无法连接到外部服务的错误。"""
+    logger.error(f"网络连接错误: 无法连接到 {exc.request.url}。错误: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"无法连接到外部服务 ({exc.request.url.host})。请检查您的网络连接、代理设置，或确认目标服务未屏蔽您的服务器IP。"},
+    )
+
+@app.exception_handler(httpx.TimeoutException)
+async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutException):
+    """处理外部服务请求超时的错误。"""
+    logger.error(f"网络超时错误: 请求 {exc.request.url} 超时。错误: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={"detail": f"连接外部服务 ({exc.request.url.host}) 超时。请稍后重试。"},
+    )
+
+
 
 
 @app.middleware("http")
