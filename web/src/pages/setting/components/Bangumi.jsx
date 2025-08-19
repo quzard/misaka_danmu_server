@@ -19,7 +19,6 @@ export const Bangumi = () => {
   const [loading, setLoading] = useState(true)
   const [isSaveLoading, setIsSaveLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [configInfo, setConfigInfo] = useState({})
   const [authInfo, setAuthInfo] = useState({})
   const oauthPopup = useRef()
 
@@ -36,7 +35,7 @@ export const Bangumi = () => {
     try {
       setLoading(true)
       const [config, auth] = await Promise.all([getConfig(), getAuth()])
-      setConfigInfo(config)
+      form.setFieldsValue(config)
       setAuthInfo(auth)
       setLoading(false)
     } catch (error) {
@@ -134,10 +133,6 @@ export const Bangumi = () => {
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
-          initialValues={{
-            bangumiClientId: configInfo?.bangumiClientId,
-            bangumiClientSecret: configInfo?.bangumiClientSecret,
-          }}
         >
           {/* 用户名输入 */}
           <Form.Item

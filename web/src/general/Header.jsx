@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAtom, useAtomValue } from 'jotai'
 import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx'
-import { MyIcon } from '@/components/MyIcon.jsx'
+import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { Dropdown } from 'antd'
 import { logout } from '../apis/index.js'
@@ -159,6 +159,12 @@ const MobileHeader = ({ activeKey }) => {
 const DesktopHeader = ({ activeKey }) => {
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
+
+  const onLogout = async () => {
+    await logout()
+    clearStorage(DANMU_API_TOKEN_KEY)
+    navigate(RoutePaths.LOGIN)
+  }
   return (
     <div className="fixed top-0 left-0 w-full shadow-box z-50 py-2 bg-base-bg">
       <div className="flex justify-between items-center max-w-[1200px] mx-auto w-full px-6">
@@ -187,12 +193,17 @@ const DesktopHeader = ({ activeKey }) => {
               items: [
                 {
                   key: 'logout',
-                  label: '退出',
+                  label: (
+                    <div onClick={onLogout} className="text-base">
+                      退出登录
+                    </div>
+                  ),
                 },
               ],
             }}
           >
-            <div className="text-primary font-medium cursor-pointer">
+            <div className="text-primary font-medium cursor-pointer flex items-center gap-1">
+              <MyIcon icon="user" size={18} />
               {userinfo?.username}
             </div>
           </Dropdown>

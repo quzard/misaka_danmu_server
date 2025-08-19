@@ -4,19 +4,19 @@ import { getDoubanConfig, setDoubanConfig } from '../../../apis'
 
 export const Douban = () => {
   const [loading, setLoading] = useState(true)
-  const [cookie, setCookie] = useState('')
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     getDoubanConfig()
       .then(res => {
-        setCookie(res.data?.value ?? '')
+        form.setFieldsValue({ cookie: res.data?.value ?? '' })
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [])
+  }, [form])
 
   const handleSave = async () => {
     try {
@@ -45,9 +45,6 @@ export const Douban = () => {
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
-          initialValues={{
-            cookie: cookie,
-          }}
         >
           <Form.Item
             name="cookie"

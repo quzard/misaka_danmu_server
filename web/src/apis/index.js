@@ -173,8 +173,8 @@ export const refreshWebhookApikey = () =>
 /** 获取webhook 域名 */
 export const getWebhookDomain = () =>
   api.get('/api/ui/config/webhook_custom_domain')
-/** 设置webhook自定义域名 value */
-export const setWebhookApikey = data =>
+/** 设置webhook自定义域名 */
+export const setWebhookDomain = data =>
   api.put('/api/ui/config/webhook_custom_domain', data)
 /** webhook可用服务 */
 export const getWebhookServices = () => api.get('/api/ui/webhooks/available')

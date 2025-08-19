@@ -14,19 +14,18 @@ import { getProxyConfig, setProxyConfig } from '../../../apis'
 
 export const Proxy = () => {
   const [loading, setLoading] = useState(true)
-  const [config, setConfig] = useState({})
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
 
   useEffect(() => {
     getProxyConfig()
       .then(res => {
-        setConfig(res.data ?? {})
+        form.setFieldsValue(res.data ?? {})
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [])
+  }, [form])
 
   const handleSave = async () => {
     try {
@@ -54,14 +53,6 @@ export const Proxy = () => {
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
-          initialValues={{
-            proxyProtocol: config.proxyProtocol,
-            proxyHost: config.proxyHost,
-            proxyPort: config.proxyPort,
-            proxyUsername: config.proxyUsername,
-            proxyPassword: config.proxyPassword,
-            proxyEnabled: config.proxyEnabled,
-          }}
         >
           <Form.Item name="proxyProtocol" label="协议" className="mb-6">
             <Select

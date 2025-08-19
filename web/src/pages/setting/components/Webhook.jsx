@@ -5,7 +5,7 @@ import {
   getWebhookDomain,
   getWebhookServices,
   refreshWebhookApikey,
-  setWebhookApikey,
+  setWebhookDomain,
 } from '../../../apis'
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import copy from 'copy-to-clipboard'
@@ -54,7 +54,7 @@ export const Webhook = () => {
 
   const onSaveDoamin = async () => {
     try {
-      await setWebhookApikey(JSON.stringify({ value: domain }))
+      await setWebhookDomain({ value: domain })
       message.success('保存成功')
     } catch (error) {
       message.error('保存失败')
