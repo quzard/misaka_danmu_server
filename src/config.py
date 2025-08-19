@@ -16,6 +16,7 @@ class ClientConfig(BaseModel):
     port: int = 5173
     
 class DatabaseConfig(BaseModel):
+    type: str = "mysql"
     host: str = "127.0.0.1"
     port: int = 3306
     user: str = "root"
