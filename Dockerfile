@@ -1,9 +1,22 @@
-# 使用官方的 Python 3.11 slim 版本作为基础镜像
+# --- 阶段 1: 构建前端 ---
+# 使用 Node.js 20 Alpine 镜像作为前端构建环境
+FROM node:20-alpine AS frontend-builder
+
+# 设置前端工作目录
+WORKDIR /app/web
+
+# 复制前端依赖定义文件并安装依赖
+COPY web/package.json web/yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+# 复制所有前端代码并执行构建
+COPY web/ ./
+RUN yarn build
+
+# --- 阶段 2: 构建最终的 Python 应用镜像 ---
 FROM l429609201/su-exec:su-exec
 
-
-# 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
-# 设置时区为亚洲/上海，以确保日志等时间正确显示
+# 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV TZ=Asia/Shanghai
@@ -26,17 +39,20 @@ RUN set -ex \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件并安装
+# 复制 Python 依赖文件并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制应用代码
+# 复制后端应用代码
 COPY src/ ./src/
 COPY static/ ./static/
 COPY config/ ./config/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
+
+# 从前端构建阶段复制构建好的静态文件到最终镜像
+COPY --from=frontend-builder /app/web/dist ./web/dist
 
 # 更改工作目录所有权为新创建的用户
 RUN chown -R appuser:appgroup /app
