@@ -8,10 +8,10 @@ name: Publish to Docker Hub
 on:
   push:
     branches:
-      - 'test'
-      - 'beta'
+      - "test"
+      - "beta"
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 jobs:
   build-and-push:
@@ -21,6 +21,20 @@ jobs:
       # 步骤1: 检出代码，以便 workflow 可以访问它
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22" #
+          cache: "npm" # 缓存npm依赖以加快构建速度
+
+      - name: Install dependencies and build frontend
+        run: |
+          cd web
+          # 安装依赖
+          npm install
+          # 执行Vite构建
+          npm run build
 
       # 步骤2: 准备 Docker 镜像标签
       # 根据触发事件（分支或标签）动态生成镜像标签
