@@ -1,0 +1,130 @@
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  message,
+  Row,
+  Select,
+  Switch,
+} from 'antd'
+import { useEffect, useState } from 'react'
+import { getProxyConfig, setProxyConfig } from '../../../apis'
+
+export const Proxy = () => {
+  const [loading, setLoading] = useState(true)
+  const [config, setConfig] = useState({})
+  const [form] = Form.useForm()
+  const [isSaveLoading, setIsSaveLoading] = useState(false)
+
+  useEffect(() => {
+    getProxyConfig()
+      .then(res => {
+        setConfig(res.data ?? {})
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }, [])
+
+  const handleSave = async () => {
+    try {
+      setIsSaveLoading(true)
+      const values = await form.validateFields()
+      await setProxyConfig(values)
+      setIsSaveLoading(false)
+      message.success('保存成功')
+    } catch (error) {
+      message.error('保存失败')
+    } finally {
+      setIsSaveLoading(false)
+    }
+  }
+
+  return (
+    <div className="my-6">
+      <Card loading={loading} title="代理配置">
+        <div className="mb-4">
+          配置一个全局代理，可用于访问受限的网络资源。支持 http, https, socks5
+          协议。
+        </div>
+        <Form
+          form={form}
+          layout="horizontal"
+          onFinish={handleSave}
+          className="px-6 pb-6"
+          initialValues={{
+            proxyProtocol: config.proxyProtocol,
+            proxyHost: config.proxyHost,
+            proxyPort: config.proxyPort,
+            proxyUsername: config.proxyUsername,
+            proxyPassword: config.proxyPassword,
+            proxyEnabled: config.proxyEnabled,
+          }}
+        >
+          <Form.Item name="proxyProtocol" label="协议" className="mb-6">
+            <Select
+              options={[
+                {
+                  value: 'http',
+                  label: 'http',
+                },
+                {
+                  value: 'https',
+                  label: 'https',
+                },
+                {
+                  value: 'socks5',
+                  label: 'socks5',
+                },
+              ]}
+            />
+          </Form.Item>
+          <Row gutter={[12, 12]}>
+            <Col md={12} xs={24}>
+              <Form.Item name="proxyHost" label="主机" className="mb-4">
+                <Input placeholder="例如：127.0.0.1" />
+              </Form.Item>
+            </Col>
+            <Col md={12} xs={24}>
+              <Form.Item name="proxyPort" label="端口" className="mb-4">
+                <Input placeholder="例如：7890" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={[12, 12]}>
+            <Col md={12} xs={24}>
+              <Form.Item
+                name="proxyUsername"
+                label="用户名(可选)"
+                className="mb-4"
+              >
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col md={12} xs={24}>
+              <Form.Item
+                name="proxyPassword"
+                label="密码(可选)"
+                className="mb-4"
+              >
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="proxyEnabled" label="开启全局代理" className="mb-4">
+            <Switch />
+          </Form.Item>
+          <Form.Item>
+            <div className="flex justify-end">
+              <Button type="primary" htmlType="submit" loading={isSaveLoading}>
+                保存修改
+              </Button>
+            </div>
+          </Form.Item>
+        </Form>
+      </Card>
+    </div>
+  )
+}
