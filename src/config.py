@@ -10,6 +10,11 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 7768
 
+# 新增：前端客户端配置模型
+class ClientConfig(BaseModel):
+    host: str = "localhost"
+    port: int = 5173
+    
 class DatabaseConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 3306
