@@ -40,6 +40,28 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
+async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> Optional[Dict[str, Any]]:
+    """获取指定源的最后一个分集。"""
+    stmt = (
+        select(Episode.episode_index.label("episodeIndex"))
+        .where(Episode.source_id == sourceId)
+        .order_by(Episode.episode_index.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Optional[Dict[str, Any]]:
+    """获取用于刷新的分集信息。"""
+    stmt = (
+        select(Episode.id, Episode.title)
+        .where(Episode.id == episodeId)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
+
 async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str]) -> int:
     """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
     stmt = select(Anime).where(Anime.title == title, Anime.season == season)

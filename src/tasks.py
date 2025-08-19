@@ -342,15 +342,15 @@ async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession,
             # Continue to the next one
     raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
 
-async def refresh_episode_task(episode_id: int, session: AsyncSession, manager: ScraperManager, progress_callback: Callable):
+async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: ScraperManager, progress_callback: Callable):
     """后台任务：刷新单个分集的弹幕"""
-    logger.info(f"开始刷新分集 ID: {episode_id}")
+    logger.info(f"开始刷新分集 ID: {episodeId}")
     try:
         await progress_callback(0, "正在获取分集信息...")
         # 1. 获取分集的源信息
-        info = await crud.get_episode_provider_info(session, episode_id)
+        info = await crud.get_episode_provider_info(session, episodeId)
         if not info or not info.get("provider_name") or not info.get("provider_episode_id"):
-            logger.error(f"刷新失败：在数据库中找不到分集 ID: {episode_id} 的源信息")
+            logger.error(f"刷新失败：在数据库中找不到分集 ID: {episodeId} 的源信息")
             progress_callback(100, "失败: 找不到源信息")
             return
 
@@ -360,7 +360,7 @@ async def refresh_episode_task(episode_id: int, session: AsyncSession, manager: 
 
         # 3. 获取新弹幕并插入
         await progress_callback(30, "正在从源获取新弹幕...")
-        
+
         async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
             # 30% for setup, 65% for download, 5% for db write
             current_total_progress = 30 + (danmaku_progress / 100) * 65
@@ -369,28 +369,28 @@ async def refresh_episode_task(episode_id: int, session: AsyncSession, manager: 
         all_comments_from_source = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
 
         if not all_comments_from_source:
-            await crud.update_episode_fetch_time(session, episode_id)
+            await crud.update_episode_fetch_time(session, episodeId)
             raise TaskSuccess("未找到任何弹幕。")
 
         # 新增：在插入前，先筛选出数据库中不存在的新弹幕，以避免产生大量的“重复条目”警告。
         await progress_callback(95, "正在比对新旧弹幕...")
-        existing_cids = await crud.get_existing_comment_cids(session, episode_id)
+        existing_cids = await crud.get_existing_comment_cids(session, episodeId)
         new_comments = [c for c in all_comments_from_source if str(c.get('cid')) not in existing_cids]
 
         if not new_comments:
-            await crud.update_episode_fetch_time(session, episode_id)
+            await crud.update_episode_fetch_time(session, episodeId)
             raise TaskSuccess("刷新完成，没有新增弹幕。")
 
         await progress_callback(96, f"正在写入 {len(new_comments)} 条新弹幕...")
-        added_count = await crud.bulk_insert_comments(session, episode_id, new_comments)
-        await crud.update_episode_fetch_time(session, episode_id)
-        logger.info(f"分集 ID: {episode_id} 刷新完成，新增 {added_count} 条弹幕。")
+        added_count = await crud.bulk_insert_comments(session, episodeId, new_comments)
+        await crud.update_episode_fetch_time(session, episodeId)
+        logger.info(f"分集 ID: {episodeId} 刷新完成，新增 {added_count} 条弹幕。")
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         # 任务成功完成，直接重新抛出，由 TaskManager 处理
         raise
     except Exception as e:
-        logger.error(f"刷新分集 ID: {episode_id} 时发生严重错误: {e}", exc_info=True)
+        logger.error(f"刷新分集 ID: {episodeId} 时发生严重错误: {e}", exc_info=True)
         raise # Re-raise so the task manager catches it and marks as FAILED
 
 async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_callback: Callable):
@@ -425,21 +425,21 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(source_id: int, next_episode_index: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, anime_title: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, animeTitle: str):
     """后台任务：增量刷新一个已存在的番剧。"""
-    logger.info(f"开始增量刷新源 ID: {source_id}，尝试获取第{next_episode_index}集")
-    source_info = await crud.get_anime_source_info(session, source_id)
+    logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
+    source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
+        logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
         return
     try:
         # 重新执行通用导入逻辑, 只导入指定的一集
         await generic_import_task(
             provider=source_info["providerName"], mediaId=source_info["mediaId"],
-            animeTitle=anime_title, mediaType=source_info["type"],
+            animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1),
-            currentEpisodeIndex=next_episode_index, imageUrl=None,
+            currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
             doubanId=None, tmdbId=source_info.get("tmdbId"),
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
@@ -447,7 +447,7 @@ async def incremental_refresh_task(source_id: int, next_episode_index: int, sess
             manager=manager,
             task_manager=task_manager)
     except Exception as e:
-        logger.error(f"增量刷新源任务 (ID: {source_id}) 失败: {e}", exc_info=True)
+        logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
 async def manual_import_task(
