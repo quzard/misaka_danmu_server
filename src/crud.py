@@ -241,12 +241,12 @@ async def find_favorited_source_for_anime(session: AsyncSession, title: str, sea
     """通过标题和季度查找已存在于库中且被标记为“精确”的数据源。"""
     stmt = (
         select(
-            AnimeSource.provider_name,
-            AnimeSource.media_id,
-            Anime.id.label("anime_id"),
-            Anime.title.label("anime_title"),
-            Anime.type.label("media_type"),
-            Anime.image_url
+            AnimeSource.provider_name.label("providerName"),
+            AnimeSource.media_id.label("mediaId"),
+            Anime.id.label("animeId"),
+            Anime.title.label("animeTitle"),
+            Anime.type.label("mediaType"),
+            Anime.image_url.label("imageUrl")
         )
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .where(Anime.title == title, Anime.season == season, AnimeSource.is_favorited == True)

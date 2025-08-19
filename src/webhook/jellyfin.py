@@ -115,7 +115,7 @@ class JellyfinWebhook(BaseWebhook):
             tmdbId=str(tmdb_id) if tmdb_id else None,
             imdbId=str(imdb_id) if imdb_id else None,
             tvdbId=str(tvdb_id) if tvdb_id else None,
-            webhook_source='jellyfin',
+            webhookSource='jellyfin',
             progress_callback=callback,
             session=session,
             manager=self.scraper_manager,
