@@ -111,7 +111,7 @@ export const SearchBar = () => {
 
       const res = await getSearchResult(
         {
-          keyword: encodeURIComponent(values.keyword),
+          keyword: values.keyword,
         },
         onProgress
       )
