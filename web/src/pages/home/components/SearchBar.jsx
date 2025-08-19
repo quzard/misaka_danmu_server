@@ -61,7 +61,7 @@ export const SearchBar = () => {
       setLoading(true)
       setSearchHistory(history => {
         if (history.includes(values.keyword)) return history
-        return [...history, values.keyword]
+        return [...history, values.keyword].slice(0, 10)
       })
       const {
         title: newTitle,
