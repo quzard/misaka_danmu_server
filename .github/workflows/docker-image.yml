@@ -22,20 +22,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20" # 与 .nvmrc 保持一致
-          cache: "npm" # 使用 npm 进行缓存
-          cache-dependency-path: "web/package-lock.json" # 明确指定锁文件路径
-
-      - name: Install dependencies and build frontend
-        run: |
-          cd web
-          # 使用 npm ci 在 CI 环境中进行干净、快速的安装
-          npm ci
-          npm run build
-
       # 步骤2: 准备 Docker 镜像标签
       # 根据触发事件（分支或标签）动态生成镜像标签
       - name: Prepare Docker tags
