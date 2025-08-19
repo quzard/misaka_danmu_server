@@ -158,6 +158,7 @@ class SourceInfo(BaseModel):
     mediaId: str
     isFavorited: bool
     incrementalRefreshEnabled: bool
+    episodeCount: int
     createdAt: datetime
 
 # --- 爬虫源管理模型 ---

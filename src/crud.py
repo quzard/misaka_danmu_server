@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any, Type
 
-from sqlalchemy import select, func, delete, update, and_, or_, text, distinct
+from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload, aliased
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -29,7 +29,10 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
             Anime.type,
             Anime.season,
             Anime.created_at.label("createdAt"),
-            func.count(distinct(Episode.id)).label("episodeCount"),
+            case(
+                (Anime.type == 'movie', 1),
+                else_=func.coalesce(func.max(Episode.episode_index), 0)
+            ).label("episodeCount"),
             func.count(distinct(AnimeSource.id)).label("sourceCount")
         )
         .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
@@ -616,10 +619,17 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
 async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("sourceId"), AnimeSource.provider_name.label("providerName"), AnimeSource.media_id.label("mediaId"),
-            AnimeSource.is_favorited.label("isFavorited"), AnimeSource.incremental_refresh_enabled.label("incrementalRefreshEnabled"), AnimeSource.created_at.label("createdAt")
+            AnimeSource.id.label("sourceId"),
+            AnimeSource.provider_name.label("providerName"),
+            AnimeSource.media_id.label("mediaId"),
+            AnimeSource.is_favorited.label("isFavorited"),
+            AnimeSource.incremental_refresh_enabled.label("incrementalRefreshEnabled"),
+            AnimeSource.created_at.label("createdAt"),
+            func.count(Episode.id).label("episodeCount")
         )
+        .outerjoin(Episode, AnimeSource.id == Episode.source_id)
         .where(AnimeSource.anime_id == anime_id)
+        .group_by(AnimeSource.id)
         .order_by(AnimeSource.created_at)
     )
     result = await session.execute(stmt)
@@ -784,6 +794,13 @@ async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
         for i, name in enumerate(new_providers)
     ])
     await session.commit()
+
+async def update_scraper_proxy(session: AsyncSession, provider_name: str, use_proxy: bool) -> bool:
+    """更新单个搜索源的代理设置。"""
+    stmt = update(Scraper).where(Scraper.provider_name == provider_name).values(use_proxy=use_proxy)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
 
 async def get_all_scraper_settings(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(Scraper).order_by(Scraper.display_order)

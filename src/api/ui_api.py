@@ -836,29 +836,43 @@ async def get_scraper_config(
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
+    """
+    获取单个搜索源的详细配置，包括其在 `scrapers` 表中的设置（如 useProxy）
+    和在 `config` 表中的键值对（如 cookie）。
+    """
     scraper_class = manager.get_scraper_class(providerName)
-    is_configurable = hasattr(scraper_class, 'configurable_fields') and scraper_class.configurable_fields
-    is_loggable = getattr(scraper_class, 'is_loggable', False)
+    if not scraper_class:
+        raise HTTPException(status_code=404, detail="该搜索源不存在。")
 
-    if not scraper_class or not (is_configurable or is_loggable):
-        raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
-    
-    config_keys = []
-    if is_configurable:
-        config_keys.extend(scraper_class.configurable_fields.keys())
-    # 如果源是可记录日志的，也获取其日志配置
-    if is_loggable:
-        config_keys.append(f"scraper_{providerName}_log_responses")
-    
-    # 新增：总是获取该源的自定义黑名单配置
-    blacklist_key = f"{providerName}_episode_blacklist_regex"
-    config_keys.append(blacklist_key)
+    response_data = {}
 
-    if not config_keys: return {}
-    tasks = [crud.get_config_value(session, key, "") for key in config_keys]
-    values = await asyncio.gather(*tasks)
-    
-    return dict(zip(config_keys, values))
+    # 1. 从 scrapers 表获取 useProxy 设置
+    scraper_settings = await crud.get_scraper_setting_by_name(session, providerName)
+    response_data['useProxy'] = scraper_settings.get('useProxy', False) if scraper_settings else False
+
+    # 2. 从 config 表获取其他可配置字段
+    config_keys_snake = []
+    if hasattr(scraper_class, 'configurable_fields'):
+        config_keys_snake.extend(scraper_class.configurable_fields.keys())
+    if getattr(scraper_class, 'is_loggable', False):
+        config_keys_snake.append(f"scraper_{providerName}_log_responses")
+    config_keys_snake.append(f"{providerName}_episode_blacklist_regex")
+
+    # 辅助函数，用于将 snake_case 转换为 camelCase
+    def to_camel(snake_str):
+        components = snake_str.split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
+
+    for db_key in config_keys_snake:
+        value = await crud.get_config_value(session, db_key, "")
+        camel_key = to_camel(db_key)
+        # 对布尔值进行特殊处理，以匹配前端Switch组件的期望
+        if "log_responses" in db_key:
+            response_data[camel_key] = value.lower() == 'true'
+        else:
+            response_data[camel_key] = value
+
+    return response_data
 
 @router.put("/scrapers/{providerName}/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定搜索源的配置")
 async def update_scraper_config(
@@ -866,46 +880,29 @@ async def update_scraper_config(
     payload: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(get_scraper_manager),
+
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
-    scraper_class = manager.get_scraper_class(providerName)
-    is_configurable = hasattr(scraper_class, 'configurable_fields') and scraper_class.configurable_fields
-    is_loggable = getattr(scraper_class, 'is_loggable', False)
+    # 1. 单独处理 useProxy 字段，它更新的是 scrapers 表
+    if 'useProxy' in payload:
+        use_proxy_value = bool(payload.pop('useProxy', False))
+        await crud.update_scraper_proxy(session, providerName, use_proxy_value)
 
-    if not scraper_class or not (is_configurable or is_loggable):
-        raise HTTPException(status_code=404, detail="该搜索源不可配置或不存在。")
+    # 辅助函数，用于将 camelCase 转换为 snake_case
+    def to_snake(camel_str):
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
-    # --- 新增：单独处理 'use_proxy' 设置 ---
-    # 它更新的是 scrapers 表，而不是 config 表。
-    use_proxy_value = payload.pop('use_proxy', None)
-    if use_proxy_value is not None:
-        is_proxy_enabled = use_proxy_value if isinstance(use_proxy_value, bool) else str(use_proxy_value).lower() == 'true'
-        await session.execute(
-            update(orm_models.Scraper)
-            .where(orm_models.Scraper.provider_name == providerName)
-            .values(use_proxy=is_proxy_enabled)
-        )
-        await session.commit()
-
-    allowed_keys = []
-    if is_configurable:
-        allowed_keys.extend(scraper_class.configurable_fields.keys())
-    # 如果源是可记录日志的，也允许更新其日志配置
-    if is_loggable:
-        allowed_keys.append(f"scraper_{providerName}_log_responses")
-    # 允许更新通用的黑名单配置
-    allowed_keys.append(f"{providerName}_episode_blacklist_regex")
-
-    # 修正：使用 for 循环代替 asyncio.gather 来避免并发会话错误
-    # 这样可以确保每个配置项的更新都是顺序执行的，每个更新都有自己的事务。
-    for key, value in payload.items():
-        if key in allowed_keys:
-            # crud.update_config_value 内部会提交事务
-            await crud.update_config_value(session, key, str(value) or "")
-            config_manager.invalidate(key)
+    # 2. 处理其他所有键值对配置，它们更新的是 config 表
+    for camel_key, value in payload.items():
+        db_key = to_snake(camel_key)
+        # 对布尔值进行特殊处理
+        value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
+        await crud.update_config_value(session, db_key, value_to_save)
+        config_manager.invalidate(db_key)
     
     logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置。")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")
 async def get_server_logs(current_user: models.User = Depends(security.get_current_user)):

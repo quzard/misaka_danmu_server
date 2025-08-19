@@ -226,6 +226,7 @@ export const Scrapers = () => {
         res.data?.[`${item.providerName}Cookie`] ?? undefined,
       [`${item.providerName}UserAgent`]:
         res.data?.[`${item.providerName}UserAgent`] ?? undefined,
+      useProxy: res.data?.useProxy ?? false,
     })
   }
 
@@ -393,6 +394,14 @@ export const Scrapers = () => {
       >
         <Form form={form} layout="vertical">
           <div className="mb-4">请为 {setname} 源填写以下配置信息。</div>
+          <Form.Item
+            name="useProxy"
+            label="使用代理"
+            valuePropName="checked"
+            className="mb-4"
+          >
+            <Switch />
+          </Form.Item>
           {/* gamer ua cookie */}
           {setname === 'gamer' && (
             <>
