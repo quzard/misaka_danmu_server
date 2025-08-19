@@ -37,7 +37,8 @@ async def _get_user_from_token(token: str, session: AsyncSession) -> models.User
         raise credentials_exception
 
     try:
-        payload = jwt.decode(token, settings.jwt.secret_key, algorithms=[settings.jwt.algorithm])
+        secret_key = await crud.get_config_value(session, 'jwt_secret_key', settings.jwt.secret_key)
+        payload = jwt.decode(token, secret_key, algorithms=[settings.jwt.algorithm])
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
@@ -63,6 +64,7 @@ async def create_access_token(data: dict, session: AsyncSession, expires_delta: 
         "jti": str(uuid.uuid4()), # JWT ID: 每个令牌的唯一标识符，可用于防止重放攻击
     })
 
+    secret_key = await crud.get_config_value(session, 'jwt_secret_key', settings.jwt.secret_key)
     expire_minutes_str = await crud.get_config_value(session, 'jwt_expire_minutes', str(settings.jwt.access_token_expire_minutes))
     expire_minutes = int(expire_minutes_str)
     # 如果有效期不为-1，则设置过期时间
@@ -70,7 +72,7 @@ async def create_access_token(data: dict, session: AsyncSession, expires_delta: 
         expire = now + timedelta(minutes=expire_minutes)
         to_encode.update({"exp": expire})
     # 如果是-1，则不添加 "exp" 字段，令牌将永不过期
-    encoded_jwt = jwt.encode(to_encode, settings.jwt.secret_key, algorithm=settings.jwt.algorithm)
+    encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=settings.jwt.algorithm)
     return encoded_jwt
 
 async def get_current_user(
