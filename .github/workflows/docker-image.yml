@@ -32,8 +32,14 @@ jobs:
       - name: Install dependencies and build frontend
         run: |
           cd web
-          # 安装依赖并生成锁文件
-          npm install
+          # 清除npm缓存
+          npm cache clean --force
+          # 删除可能损坏的node_modules
+          rm -rf node_modules
+          # 安装所有依赖
+          npm install --include=optional
+          # 专门安装Rollup的Linux平台依赖
+          npm install @rollup/rollup-linux-x64-gnu --save-dev
           # 执行Vite构建
           npm run build
 
