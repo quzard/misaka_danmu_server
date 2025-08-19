@@ -80,7 +80,7 @@ export const Ua = () => {
 
   const handleEdit = async () => {
     try {
-      await setUaMode({ value: ua })
+      await setUaMode({ value: mode })
       message.success('保存成功')
     } catch (error) {
       message.error('保存失败')

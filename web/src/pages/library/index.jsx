@@ -330,7 +330,9 @@ export const Library = () => {
         message.error('没有找到相关内容')
       }
     } catch (error) {
-      message.error(`IMDB搜索失败:${error.message}`)
+      message.error(
+        error.detail || `IMDB搜索失败: ${error.message || '未知错误'}`
+      )
     } finally {
       setSearchImdbLoading(false)
     }

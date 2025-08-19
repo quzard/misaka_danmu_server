@@ -9,20 +9,20 @@ import {
 
 export const TVDB = () => {
   const [loading, setLoading] = useState(true)
-  const [apikey, setApikey] = useState('')
   const [form] = Form.useForm()
   const [showPassword, setShowPassword] = useState(false)
   const [isSaveLoading, setIsSaveLoading] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     getTvdbConfig()
       .then(res => {
-        setApikey(res.data?.value ?? '')
+        form.setFieldsValue({ tvdbApiKey: res.data?.value ?? '' })
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [])
+  }, [form])
 
   const handleSave = async () => {
     try {
@@ -59,9 +59,6 @@ export const TVDB = () => {
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
-          initialValues={{
-            tvdbApiKey: apikey,
-          }}
         >
           <Form.Item name="tvdbApiKey" label="API Key" className="mb-6">
             <Input.Password

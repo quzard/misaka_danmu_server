@@ -69,8 +69,8 @@ export const EpisodeDetail = () => {
   const columns = [
     {
       title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
+      dataIndex: 'episodeId',
+      key: 'episodeId',
       width: 150,
     },
     {
@@ -138,7 +138,7 @@ export const EpisodeDetail = () => {
               onClick={() => {
                 form.setFieldsValue({
                   ...record,
-                  episodeId: record.id,
+                  episodeId: record.episodeId,
                   originalEpisodeIndex: record.episodeIndex,
                 })
                 setEditOpen(true)
@@ -157,7 +157,7 @@ export const EpisodeDetail = () => {
             <span
               className="cursor-pointer hover:text-primary"
               onClick={() => {
-                navigate(`/comment/${record.id}?episodeId=${id}`)
+                navigate(`/comment/${record.episodeId}?episodeId=${id}`)
               }}
             >
               <MyIcon icon="comment" size={20}></MyIcon>
@@ -211,7 +211,7 @@ export const EpisodeDetail = () => {
       onOk: async () => {
         try {
           const res = await deleteAnimeEpisode({
-            episodeIds: selectedRows?.map(it => it.id),
+            episodeIds: selectedRows?.map(it => it.episodeId),
           })
           goTask(res)
         } catch (error) {
@@ -237,7 +237,7 @@ export const EpisodeDetail = () => {
       onOk: async () => {
         try {
           const res = await deleteAnimeEpisodeSingle({
-            id: record.id,
+            id: record.episodeId,
           })
           goTask(res)
         } catch (error) {
@@ -452,7 +452,7 @@ export const EpisodeDetail = () => {
             size="small"
             dataSource={episodeList}
             columns={columns}
-            rowKey={'id'}
+            rowKey={'episodeId'}
             scroll={{ x: '100%' }}
           />
         ) : (

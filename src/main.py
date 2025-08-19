@@ -2,10 +2,11 @@ import uvicorn
 import asyncio
 import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, status
+import httpx
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse # noqa: F401
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
@@ -137,6 +138,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 新增：全局异常处理器，以优雅地处理网络错误
+@app.exception_handler(httpx.ConnectError)
+async def httpx_connect_error_handler(request: Request, exc: httpx.ConnectError):
+    """处理无法连接到外部服务的错误。"""
+    logger.error(f"网络连接错误: 无法连接到 {exc.request.url}。错误: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"无法连接到外部服务 ({exc.request.url.host})。请检查您的网络连接、代理设置，或确认目标服务未屏蔽您的服务器IP。"},
+    )
+
+@app.exception_handler(httpx.TimeoutException)
+async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutException):
+    """处理外部服务请求超时的错误。"""
+    logger.error(f"网络超时错误: 请求 {exc.request.url} 超时。错误: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={"detail": f"连接外部服务 ({exc.request.url.host}) 超时。请稍后重试。"},
+    )
+
+
+
 
 @app.middleware("http")
 async def log_not_found_requests(request: Request, call_next):
@@ -183,30 +205,23 @@ async def cleanup_task(app: FastAPI):
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
 
-# 挂载静态文件目录（适配Vite构建产物）
-if settings.environment == "development":
-    # 开发环境：不挂载静态文件（由 Vite 开发服务器提供）
-    print("开发环境：跳过静态文件挂载")
-else:
-    # 生产环境：挂载构建后的静态文件
-    app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    print("生产环境：已挂载静态文件")
-
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
-# 前端入口路由（适配Vite+React SPA）
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_react_app(request: Request, full_path: str):
-    # 开发环境重定向到Vite服务器
-    if settings.environment == "development":
+# --- 前端服务 ---
+# 根据环境提供不同的前端服务方式
+if settings.environment == "development":
+    # 开发环境：所有非API请求都重定向到Vite开发服务器
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_react_app_dev(request: Request, full_path: str):
         base_url = f"http://{settings.client.host}:{settings.client.port}"
         return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-    
-    # 生产环境返回构建好的index.html
-    return FileResponse("web/dist/index.html")
+else:
+    # 生产环境：挂载整个 'dist' 目录，并启用SPA模式 (html=True)
+    # 这会为所有未匹配到文件的路径返回 index.html
+    app.mount("/", StaticFiles(directory="web/dist", html=True), name="static-spa")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机

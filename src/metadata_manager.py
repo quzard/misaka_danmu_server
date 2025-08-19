@@ -14,6 +14,11 @@ from .api.tvdb_api import get_tvdb_client, search_tvdb_aliases
 
 logger = logging.getLogger(__name__)
 
+def _to_camel(snake_str: str) -> str:
+    """Converts a snake_case string to camelCase."""
+    components = snake_str.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
 class MetadataSourceManager:
     """
     Manages the state and status of metadata sources, and orchestrates auxiliary searches.
@@ -53,7 +58,9 @@ class MetadataSourceManager:
             
         tasks = [crud.get_config_value(session, key, "") for key in keys_to_fetch]
         values = await asyncio.gather(*tasks)
-        return dict(zip(keys_to_fetch, values))
+        
+        snake_case_dict = dict(zip(keys_to_fetch, values))
+        return {_to_camel(k): v for k, v in snake_case_dict.items()}
 
 
     async def initialize(self):

@@ -9,20 +9,20 @@ import {
 
 export const TMDB = () => {
   const [loading, setLoading] = useState(true)
-  const [info, setInfo] = useState({})
   const [form] = Form.useForm()
   const [showPassword, setShowPassword] = useState(false)
   const [isSaveLoading, setIsSaveLoading] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     getTmdbConfig()
       .then(res => {
-        setInfo(res.data)
+        form.setFieldsValue(res.data ?? {})
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [])
+  }, [form])
 
   const handleSave = async () => {
     try {
@@ -57,11 +57,6 @@ export const TMDB = () => {
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
-          initialValues={{
-            tmdbApiBaseUrl: info?.tmdbApiBaseUrl,
-            tmdbImageBaseUrl: info?.tmdbImageBaseUrl,
-            tmdbApiKey: info?.tmdbApiKey,
-          }}
         >
           <Form.Item
             name="tmdbApiKey"
