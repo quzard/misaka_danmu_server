@@ -907,12 +907,11 @@ async def get_external_comments_from_url(
     summary="[dandanplay兼容] 获取弹幕"
 )
 async def get_comments_for_dandan(
-    episode_id: int = Path(..., description="分集ID (来自 /search/episodes 响应中的 episodeId)"),
-    # 修正：使用 alias 来匹配 dandanplay API 的 'chConvert' (驼峰命名) 参数。
-    ch_convert: int = Query(0, alias="chConvert", description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
-    # 新增：添加 'from' 和 'withRelated' 参数以提高兼容性，尽管当前实现尚未使用它们。
-    from_time: int = Query(0, alias="from", description="弹幕开始时间(秒)"),
-    with_related: bool = Query(True, alias="withRelated", description="是否包含关联弹幕"),
+    episodeId: int = Path(..., description="分集ID (来自 /search/episodes 响应中的 episodeId)"),
+    chConvert: int = Query(0, description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
+    # 'from' 是 Python 的关键字，所以我们必须使用别名
+    fromTime: int = Query(0, alias="from", description="弹幕开始时间(秒)"),
+    withRelated: bool = Query(True, description="是否包含关联弹幕"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
@@ -927,12 +926,12 @@ async def get_comments_for_dandan(
     aggregation_enabled = aggregation_enabled_str.lower() == 'true'
 
     comments_data = []
-    episode_id_str = str(episode_id)
+    episode_id_str = str(episodeId)
     
     # 检查是否为新版ID格式 (14位且以25开头)，并且用户请求了关联弹幕
     is_new_format = len(episode_id_str) == 14 and episode_id_str.startswith('25')
 
-    if with_related and aggregation_enabled and is_new_format:
+    if withRelated and aggregation_enabled and is_new_format:
         try:
             # 从新版ID格式中解析出 anime_id 和 episode_index
             # 格式: 25 (固定) + anime_id (6位) + source_order (2位) + episode_index (4位)
@@ -946,17 +945,17 @@ async def get_comments_for_dandan(
                 logger.info(f"找到 {len(related_episode_ids)} 个关联分集，正在聚合弹幕...")
                 comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
             else:
-                logger.warning(f"未找到任何关联分集，回退到获取单个分集 (ID: {episode_id})。")
-                comments_data = await crud.fetch_comments(session, episode_id)
+                logger.warning(f"未找到任何关联分集，回退到获取单个分集 (ID: {episodeId})。")
+                comments_data = await crud.fetch_comments(session, episodeId)
         except (ValueError, IndexError) as e:
-            logger.error(f"解析新版格式的 episode_id '{episode_id}' 失败: {e}。回退到获取单个分集。")
-            comments_data = await crud.fetch_comments(session, episode_id)
+            logger.error(f"解析新版格式的 episode_id '{episodeId}' 失败: {e}。回退到获取单个分集。")
+            comments_data = await crud.fetch_comments(session, episodeId)
     else:
-        if with_related and not aggregation_enabled:
+        if withRelated and not aggregation_enabled:
             logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
-        elif with_related and not is_new_format:
-            logger.info(f"withRelated=true，但 episode_id '{episode_id}' 是旧版格式，仅获取当前分集弹幕。")
-        comments_data = await crud.fetch_comments(session, episode_id)
+        elif withRelated and not is_new_format:
+            logger.info(f"withRelated=true，但 episode_id '{episodeId}' 是旧版格式，仅获取当前分集弹幕。")
+        comments_data = await crud.fetch_comments(session, episodeId)
 
     # 新增：聚合后去重逻辑
     unique_comments = {}
@@ -991,11 +990,11 @@ async def get_comments_for_dandan(
         logger.info(f"采样后弹幕数量: {len(comments_data)}")
 
     # 如果客户端请求了繁简转换，则在此处处理
-    if ch_convert in [1, 2]:
+    if chConvert in [1, 2]:
         converter = None
-        if ch_convert == 1:
+        if chConvert == 1:
             converter = OpenCC('t2s')  # Traditional to Simplified
-        elif ch_convert == 2:
+        elif chConvert == 2:
             converter = OpenCC('s2t')  # Simplified to Traditional
         
         if converter:
@@ -1010,7 +1009,7 @@ async def get_comments_for_dandan(
         "comments_sample": comments_to_log
     }
     # UA 已由 get_token_from_path 依赖项记录
-    # logger.info(f"弹幕接口响应 (episode_id: {episode_id}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
+    # logger.info(f"弹幕接口响应 (episodeId: {episodeId}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
 
     # 修正：当聚合弹幕时，原始的 cid 已经没有意义。我们为去重后的弹幕列表生成新的、连续的 cid。
     # 这样可以确保客户端收到的 cid 是唯一的，避免潜在的渲染问题。

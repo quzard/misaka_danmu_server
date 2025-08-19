@@ -146,13 +146,13 @@ class SchedulerManager:
         if job_type not in self._job_classes:
             raise ValueError(f"未知的任务类型: {job_type}")
         # 确保增量更新任务的轮询间隔不低于3小时
-        if job_type == "incremental_refresh" and not cron_is_valid(cron, 3):
+        if job_type == "incrementalRefresh" and not cron_is_valid(cron, 3):
             raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
         
         # 新增：确保“定时追更”任务只能创建一个
         async with self._session_factory() as session:
-            if job_type == "incremental_refresh":
-                exists = await crud.check_scheduled_task_exists_by_type(session, "incremental_refresh")
+            if job_type == "incrementalRefresh":
+                exists = await crud.check_scheduled_task_exists_by_type(session, "incrementalRefresh")
                 if exists:
                     raise ValueError("“定时追更”任务已存在，无法重复创建。")
 
@@ -174,7 +174,7 @@ class SchedulerManager:
             job_type = task_info['job_type']
 
             # 确保增量更新任务的轮询间隔不低于3小时
-            if job_type == "incremental_refresh" and not cron_is_valid(cron, 3):
+            if job_type == "incrementalRefresh" and not cron_is_valid(cron, 3):
                 raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
             await crud.update_scheduled_task(session, task_id, name, cron, is_enabled)
             job.modify(name=name)

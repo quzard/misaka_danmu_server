@@ -456,15 +456,15 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         raise
 
 async def manual_import_task(
-    source_id: int, title: str, episode_index: int, url: str, provider_name: str,
+    sourceId: int, title: str, episodeIndex: int, url: str, providerName: str,
     progress_callback: Callable, session: AsyncSession, manager: ScraperManager
 ):
     """后台任务：从URL手动导入弹幕。"""
-    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'") # type: ignore
+    logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title}', url='{url}'") # type: ignore
     await progress_callback(10, "正在准备导入...") # type: ignore
     
     try:
-        scraper = manager.get_scraper(provider_name)
+        scraper = manager.get_scraper(providerName)
         provider_episode_id = await scraper.get_id_from_url(url) # type: ignore
         if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。") # type: ignore
 
@@ -475,7 +475,7 @@ async def manual_import_task(
         if not comments: raise TaskSuccess("未找到任何弹幕。") # type: ignore
 
         await progress_callback(90, "正在写入数据库...") # type: ignore
-        episode_db_id = await crud.create_episode_if_not_exists(session, source_id, episode_index, title, url, episode_id_for_comments) # type: ignore
+        episode_db_id = await crud.create_episode_if_not_exists(session, sourceId, episodeIndex, title, url, episode_id_for_comments) # type: ignore
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
         await session.commit()
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。") # type: ignore

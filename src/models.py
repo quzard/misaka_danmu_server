@@ -77,18 +77,15 @@ class ProviderEpisodeInfo(BaseModel):
 
 class ImportRequest(BaseModel):
     provider: str = Field(..., description="要导入的数据源, e.g., 'tencent'")
-    mediaId: str = Field(..., alias="media_id", description="数据源中的媒体ID (e.g., tencent的cid)")
-    animeTitle: str = Field(..., alias="anime_title", description="要存储在数据库中的番剧标题")
+    mediaId: str = Field(..., description="数据源中的媒体ID (e.g., tencent的cid)")
+    animeTitle: str = Field(..., description="要存储在数据库中的番剧标题")
     type: str = Field(..., description="媒体类型, e.g., 'tv_series', 'movie'")
     season: Optional[int] = Field(1, description="季度数，默认为1")
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id", description="关联的TMDB ID (可选)")
-    imageUrl: Optional[str] = Field(None, alias="image_url", description="封面图片URL")
-    doubanId: Optional[str] = Field(None, alias="douban_id")
-    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
-    currentEpisodeIndex: Optional[int] = Field(None, alias="current_episode_index", description="如果搜索时指定了集数，则只导入此分集")
-
-    class Config:
-        populate_by_name = True
+    tmdbId: Optional[str] = Field(None, description="关联的TMDB ID (可选)")
+    imageUrl: Optional[str] = Field(None, description="封面图片URL")
+    doubanId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索时指定了集数，则只导入此分集")
 
 class MetadataDetailsResponse(BaseModel):
     """所有元数据源详情接口的统一响应模型。"""
@@ -111,32 +108,26 @@ class AnimeDetailUpdate(BaseModel):
     title: str = Field(..., min_length=1, description="新的影视名称")
     type: str
     season: int = Field(..., ge=0, description="新的季度")
-    episodeCount: Optional[int] = Field(None, alias="episode_count", ge=1, description="新的集数")
-    imageUrl: Optional[str] = Field(None, alias="image_url")
-    tmdbId: Optional[str] = Field(None, alias="tmdb_id")
-    tmdbEpisodeGroupId: Optional[str] = Field(None, alias="tmdb_episode_group_id")
-    bangumiId: Optional[str] = Field(None, alias="bangumi_id")
-    tvdbId: Optional[str] = Field(None, alias="tvdb_id")
-    doubanId: Optional[str] = Field(None, alias="douban_id")
-    imdbId: Optional[str] = Field(None, alias="imdb_id")
-    nameEn: Optional[str] = Field(None, alias="name_en")
-    nameJp: Optional[str] = Field(None, alias="name_jp")
-    nameRomaji: Optional[str] = Field(None, alias="name_romaji")
-    aliasCn1: Optional[str] = Field(None, alias="alias_cn_1")
-    aliasCn2: Optional[str] = Field(None, alias="alias_cn_2")
-    aliasCn3: Optional[str] = Field(None, alias="alias_cn_3")
-
-    class Config:
-        populate_by_name = True
+    episodeCount: Optional[int] = Field(None, ge=1, description="新的集数")
+    imageUrl: Optional[str] = None
+    tmdbId: Optional[str] = None
+    tmdbEpisodeGroupId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    doubanId: Optional[str] = None
+    imdbId: Optional[str] = None
+    nameEn: Optional[str] = None
+    nameJp: Optional[str] = None
+    nameRomaji: Optional[str] = None
+    aliasCn1: Optional[str] = None
+    aliasCn2: Optional[str] = None
+    aliasCn3: Optional[str] = None
 
 class EpisodeInfoUpdate(BaseModel):
     """用于更新分集信息的模型"""
     title: str = Field(..., min_length=1, description="新的分集标题")
-    episodeIndex: int = Field(..., alias="episode_index", ge=1, description="新的集数")
-    sourceUrl: Optional[str] = Field(None, alias="source_url", description="新的官方链接")
-
-    class Config:
-        populate_by_name = True
+    episodeIndex: int = Field(..., ge=1, description="新的集数")
+    sourceUrl: Optional[str] = Field(None, description="新的官方链接")
 
 class AnimeFullDetails(BaseModel):
     """用于返回番剧完整信息的模型"""
@@ -228,10 +219,7 @@ class ApiTokenInfo(BaseModel):
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
-    validityPeriod: str = Field("permanent", alias="validity_period", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
-
-    class Config:
-        populate_by_name = True
+    validityPeriod: str = Field("permanent", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
 
 # --- UA Filter Models ---
 class UaRule(BaseModel):
@@ -388,9 +376,9 @@ class UaRuleCreate(BaseModel):
 class TMDBEpisodeInGroupDetail(BaseModel):
     id: int
     name: str
-    episode_number: int
-    season_number: int
-    air_date: Optional[str] = None
+    episodeNumber: int
+    seasonNumber: int
+    airDate: Optional[str] = None
     overview: Optional[str] = ""
     order: int
 
@@ -404,8 +392,8 @@ class TMDBEpisodeGroupDetails(BaseModel):
     id: str
     name: str
     description: Optional[str] = ""
-    episode_count: int
-    group_count: int
+    episodeCount: int
+    groupCount: int
     groups: List[TMDBGroupInGroupDetail]
     network: Optional[Dict[str, Any]] = None
     type: int
@@ -413,16 +401,13 @@ class TMDBEpisodeGroupDetails(BaseModel):
 class EnrichedTMDBEpisodeInGroupDetail(BaseModel):
     id: int
     name: str # This will be the Chinese name
-    episodeNumber: int = Field(..., alias="episode_number")
-    seasonNumber: int = Field(..., alias="season_number")
-    airDate: Optional[str] = Field(None, alias="air_date")
+    episodeNumber: int
+    seasonNumber: int
+    airDate: Optional[str] = None
     overview: Optional[str] = ""
     order: int
-    nameJp: Optional[str] = Field(None, alias="name_jp")
-    imageUrl: Optional[str] = Field(None, alias="image_url")
-
-    class Config:
-        populate_by_name = True
+    nameJp: Optional[str] = None
+    imageUrl: Optional[str] = None
 
 class EnrichedTMDBGroupInGroupDetail(BaseModel):
     id: str
