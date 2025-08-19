@@ -236,6 +236,7 @@ async def generic_import_task(
         final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
     if image_download_failed:
         final_message += " (警告：海报图片下载失败)"
+    await session.commit()
     raise TaskSuccess(final_message)
     
 async def edited_import_task(
@@ -290,6 +291,7 @@ async def edited_import_task(
         final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
     if image_download_failed:
         final_message += " (警告：海报图片下载失败)"
+    await session.commit()
     raise TaskSuccess(final_message)
 
 async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
@@ -340,6 +342,7 @@ async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession,
         except Exception as e:
             logger.error(f"批量删除源任务中，删除源 (ID: {source_id}) 失败: {e}", exc_info=True)
             # Continue to the next one
+    await session.commit()
     raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
 
 async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: ScraperManager, progress_callback: Callable):
@@ -385,6 +388,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         added_count = await crud.bulk_insert_comments(session, episodeId, new_comments)
         await crud.update_episode_fetch_time(session, episodeId)
         logger.info(f"分集 ID: {episodeId} 刷新完成，新增 {added_count} 条弹幕。")
+        await session.commit()
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         # 任务成功完成，直接重新抛出，由 TaskManager 处理
@@ -420,6 +424,7 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
             await session.rollback()
             logger.error(f"重整源 ID {source_id} 时数据库事务失败: {e}", exc_info=True)
             raise
+        await session.commit()
         raise TaskSuccess(f"重整完成，共更新了 {updated_count} 个分集的集数。")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
@@ -472,6 +477,7 @@ async def manual_import_task(
         await progress_callback(90, "正在写入数据库...") # type: ignore
         episode_db_id = await crud.create_episode_if_not_exists(session, source_id, episode_index, title, url, episode_id_for_comments) # type: ignore
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+        await session.commit()
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。") # type: ignore
     except TaskSuccess:
         raise
