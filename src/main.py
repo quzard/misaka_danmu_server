@@ -2,7 +2,7 @@ import uvicorn
 import asyncio
 import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, status
 import httpx
 import logging
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +17,7 @@ from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .webhook_manager import WebhookManager
-from .scheduler import SchedulerManager, status
+from .scheduler import SchedulerManager
 from .config import settings
 from . import crud, security
 from .log_manager import setup_logging
