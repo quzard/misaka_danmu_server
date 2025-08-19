@@ -233,7 +233,7 @@ function renderScheduledTasks(tasks) {
         const jobTypeDisplay = {
             'tmdb_auto_map': 'TMDB自动映射',
             'incremental_refresh': '定时增量追更'
-        }[task.job_type] || task.job_type;
+        }[task.jobType] || task.jobType;
 
         row.innerHTML = `
             <td>${task.name}</td>

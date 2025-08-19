@@ -37,7 +37,7 @@ async function handleLogin(e) {
         }
 
         const data = await response.json();
-        token = data.access_token;
+        token = data.accessToken;
         localStorage.setItem('danmu_api_token', token);
         document.getElementById('login-form').reset();
         await checkLogin();

@@ -1,5 +1,6 @@
 import uvicorn
 import asyncio
+import secrets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
 import logging
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
     # 新增：集中定义所有默认配置
     default_configs = {
         # 缓存 TTL
+        'jwt_secret_key': (secrets.token_hex(32), '用于签名JWT令牌的密钥，在首次启动时自动生成。'),
         'search_ttl_seconds': (10800, '搜索结果的缓存时间（秒），最低3小时。'),
         'episodes_ttl_seconds': (10800, '分集列表的缓存时间（秒），最低3小时。'),
         'base_info_ttl_seconds': (10800, '基础媒体信息（如爱奇艺）的缓存时间（秒），最低3小时。'),

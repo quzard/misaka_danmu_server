@@ -1678,7 +1678,7 @@ async def login_for_access_token(
     # 更新用户的登录信息
     await crud.update_user_login_info(session, user["username"], access_token)
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"accessToken": access_token, "tokenType": "bearer"}
 
 
 @auth_router.get("/users/me", response_model=models.User, summary="获取当前用户信息")
