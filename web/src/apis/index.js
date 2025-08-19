@@ -21,8 +21,8 @@ export const changePassword = data =>
   api.put(
     '/api/ui/auth/users/me/password',
     JSON.stringify({
-      old_password: data.oldPassword,
-      new_password: data.newPassword,
+      oldPassword: data.oldPassword,
+      newPassword: data.newPassword,
     })
   )
 
