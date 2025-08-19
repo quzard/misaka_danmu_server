@@ -9,7 +9,7 @@ import { TVDB } from './components/TVDB'
 import { Proxy } from './components/Proxy'
 
 export const Setting = () => {
-  const [activeKey, setActiveKey] = useState('proxy')
+  const [activeKey, setActiveKey] = useState('security')
   return (
     <Tabs
       defaultActiveKey={activeKey}
