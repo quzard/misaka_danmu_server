@@ -39,7 +39,7 @@ async function handleLogin(e) {
       throw new Error(msg);
     }
     const data = await res.json();
-    localStorage.setItem('danmu_api_token', data.access_token);
+    localStorage.setItem('danmu_api_token', data.accessToken);
     await checkLogin();
   } catch (err) {
     errorEl.textContent = `登录失败: ${err.message || err}`;

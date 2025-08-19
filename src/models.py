@@ -257,11 +257,15 @@ class User(UserBase):
     id: int
 
     class Config:
-        from_attributes = True
+        from_attributes = True # 允许从ORM对象创建模型
 
 class Token(BaseModel):
-    access_token: str
-    token_type: str
+    accessToken: str = Field(..., alias="access_token")
+    tokenType: str = Field(..., alias="token_type")
+
+    class Config:
+        populate_by_name = True # 允许在创建模型实例时使用别名
+        from_attributes = True
 
 class TokenData(BaseModel):
     username: Optional[str] = None
