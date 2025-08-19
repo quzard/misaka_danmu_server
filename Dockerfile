@@ -1,4 +1,19 @@
-# 使用官方的 Python 3.11 slim 版本作为基础镜像
+# --- Stage 1: Build Frontend ---
+FROM node:20-alpine AS builder
+
+WORKDIR /app/web
+
+# 仅复制 package.json 和 package-lock.json 以利用Docker缓存
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+# 复制前端源代码
+COPY web/ ./
+
+# 执行构建
+RUN npm run build
+
+# --- Stage 2: Final Python Application ---
 FROM l429609201/su-exec:su-exec
 
 
@@ -32,13 +47,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY src/ ./src/
-# 新增：复制构建好的前端静态文件到镜像中
-COPY web/dist/ ./web/dist/
 COPY static/ ./static/
 COPY config/ ./config/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
+
+# 从 'builder' 阶段复制构建好的前端静态文件
+COPY --from=builder /app/web/dist ./web/dist/
 
 # 更改工作目录所有权为新创建的用户
 RUN chown -R appuser:appgroup /app
