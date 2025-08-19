@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ImportTask } from './components/importTask'
-import { ScheduleTask } from './components/scheduleTask'
+import { ImportTask } from './components/ImportTask'
+import { ScheduleTask } from './components/ScheduleTask'
 import { Tabs } from 'antd'
 
 export const Task = () => {
