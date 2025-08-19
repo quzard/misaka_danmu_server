@@ -117,6 +117,8 @@ export const resumeTask = data =>
   api.post(`/api/ui/tasks/${data.taskId}/resume`, data)
 /** 删除任务 */
 export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
+/** 中止任务 */
+export const stopTask = data => api.post(`/api/ui/tasks/${data.taskId}/abort`)
 /** 定时任务列表 */
 export const getScheduledTaskList = data =>
   api.get('/api/ui/scheduled-tasks', data)
@@ -179,12 +181,13 @@ export const getWebhookServices = () => api.get('/api/ui/webhooks/available')
 
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */
-export const getBangumiConfig = () => api.get('/api/ui/config/bangumi')
+export const getBangumiConfig = () => api.get('/api/ui/config/provider/bangumi')
 /** 设置bangumi api配置
  * bangumi_client_id
  * bangumi_client_secret
  */
-export const setBangumiConfig = data => api.put('/api/ui/config/bangumi', data)
+export const setBangumiConfig = data =>
+  api.put('/api/ui/config/provider/bangumi', data)
 /** 获取授权信息 */
 export const getBangumiAuth = () => api.get('/api/bgm/auth/state')
 /** 获取授权链接 */
@@ -194,9 +197,10 @@ export const logoutBangumiAuth = () => api.delete('/api/bgm/auth')
 
 /** ------------------------------------------ 豆瓣、tmdb、tvdb配置、代理------------------------------------------  */
 /** 获取tmdb配置 */
-export const getTmdbConfig = () => api.get('/api/ui/config/tmdb')
+export const getTmdbConfig = () => api.get('/api/ui/config/provider/tmdb')
 /** 设置tmdb配置 */
-export const setTmdbConfig = data => api.put('/api/ui/config/tmdb', data)
+export const setTmdbConfig = data =>
+  api.put('/api/ui/config/provider/tmdb', data)
 /** 获取豆瓣配置 */
 export const getDoubanConfig = () => api.get('/api/ui/config/douban_cookie')
 /** 设置豆瓣配置 */

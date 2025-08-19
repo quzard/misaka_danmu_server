@@ -1,5 +1,11 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { deleteTask, getTaskList, pauseTask, resumeTask } from '@/apis'
+import {
+  deleteTask,
+  getTaskList,
+  pauseTask,
+  resumeTask,
+  stopTask,
+} from '@/apis'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
@@ -18,6 +24,7 @@ import {
   DeleteOutlined,
   PauseOutlined,
   StepBackwardOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import classNames from 'classnames'
 
@@ -29,13 +36,14 @@ export const ImportTask = () => {
 
   const navigate = useNavigate()
 
-  const [canPause, isPause] = useMemo(() => {
+  const [canPause, isPause, canStop] = useMemo(() => {
     return [
       (selectList.every(item => item.status === '进行中') &&
         !!selectList.length) ||
         (selectList.every(item => item.status === '已暂停') &&
           !!selectList.length),
       selectList.every(item => item.status === '已暂停'),
+      selectList.every(item => item.status === '进行中'),
     ]
   }, [selectList])
 
@@ -91,6 +99,39 @@ export const ImportTask = () => {
     }
     refreshTasks()
     setSelectList([])
+  }
+
+  const handleStop = () => {
+    Modal.confirm({
+      title: '中止任务',
+      zIndex: 1002,
+      content: (
+        <div>
+          您确定要中止任务任务吗？
+          <br />
+          此操作会尝试停止任务，如果无法停止，则会将其强制标记为“失败”状态。
+          {selectList.map((it, i) => (
+            <div>
+              {i + 1}、{it.title}
+            </div>
+          ))}
+        </div>
+      ),
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await Promise.all(
+            selectList.map(it => stopTask({ taskId: it.taskId }))
+          )
+          setSelectList([])
+          refreshTasks()
+          message.success('中止成功')
+        } catch (error) {
+          alert(`中止任务失败: ${error.message}`)
+        }
+      },
+    })
   }
 
   const handleDelete = () => {
@@ -153,6 +194,13 @@ export const ImportTask = () => {
               shape="circle"
               icon={<DeleteOutlined />}
               onClick={handleDelete}
+            />
+            <Button
+              disabled={!canStop}
+              type="default"
+              shape="circle"
+              icon={<StopOutlined />}
+              onClick={handleStop}
             />
             <Input.Search
               placeholder="按任务标题搜索"
