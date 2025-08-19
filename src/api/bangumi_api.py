@@ -354,16 +354,10 @@ async def get_bangumi_auth_state(
     session: AsyncSession = Depends(get_db_session)
 ):
     auth_info = await crud.get_bangumi_auth(session, current_user.id)
-    if not auth_info:
-        return BangumiAuthState(is_authenticated=False)
-    return BangumiAuthState(
-        is_authenticated=True,
-        nickname=auth_info.get("nickname"),
-        avatar_url=auth_info.get("avatar_url"),
-        bangumi_user_id=auth_info.get("bangumi_user_id"),
-        authorized_at=auth_info.get("authorized_at"),
-        expires_at=auth_info.get("expires_at")
-    )
+    # crud.get_bangumi_auth 返回的字典键已是驼峰式，
+    # 并且与 BangumiAuthState 模型的字段完全匹配。
+    # 因此，我们可以直接解包字典来创建模型实例。
+    return models.BangumiAuthState(**auth_info)
 
 @router.delete("/auth", status_code=status.HTTP_204_NO_CONTENT, summary="注销 Bangumi 授权")
 async def deauthorize_bangumi(
