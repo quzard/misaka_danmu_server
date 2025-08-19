@@ -780,8 +780,8 @@ async def match_single_file(
         return response
 
     # 如果没有精确标记，检查所有匹配项是否都指向同一个番剧ID
-    first_anime_id = results[0]['animeId']
-    all_from_same_anime = all(res['animeId'] == first_anime_id for res in results)
+    first_animeId = results[0]['animeId']
+    all_from_same_anime = all(res['animeId'] == first_animeId for res in results)
 
     if all_from_same_anime:
         # 结果已由数据库按 标题长度和源顺序 排序，直接取第一个

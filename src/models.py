@@ -270,6 +270,14 @@ class PasswordChange(BaseModel):
     old_password: str = Field(..., description="当前密码")
     new_password: str = Field(..., min_length=8, description="新密码 (至少8位)")
 
+class BangumiAuthStatus(BaseModel):
+    isAuthenticated: bool
+    nickname: Optional[str] = None
+    avatarUrl: Optional[str] = None
+    bangumiUserId: Optional[int] = None
+    authorizedAt: Optional[datetime] = None
+    expiresAt: Optional[datetime] = None
+
 class EditedImportRequest(BaseModel):
     """用于编辑后导入的请求体模型"""
     provider: str
@@ -299,7 +307,7 @@ class ExternalApiLogInfo(BaseModel):
     access_time: datetime
     ip_address: str
     endpoint: str
-    status_code: int
+    statusCode: int
     message: Optional[str] = None
 
     class Config:
