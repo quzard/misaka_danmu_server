@@ -8,8 +8,7 @@ import {
 } from '@ant-design/icons'
 import { login } from '../../apis'
 import { useNavigate } from 'react-router-dom'
-import { setStorage } from '../../utils'
-import { DANMU_API_TOKEN_KEY } from '../../configs'
+import Cookies from 'js-cookie'
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -24,7 +23,7 @@ export const Login = () => {
       const res = await login(values)
 
       if (res.data.accessToken) {
-        setStorage(DANMU_API_TOKEN_KEY, res.data.accessToken)
+        Cookies.set('token', res.data.accessToken)
         message.success('登录成功！')
         navigate('/')
       } else {

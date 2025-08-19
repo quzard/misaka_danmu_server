@@ -8,8 +8,7 @@ import { MyIcon } from '@/components/MyIcon.jsx'
 import classNames from 'classnames'
 import { Dropdown } from 'antd'
 import { logout } from '../apis/index.js'
-import { clearStorage } from '../utils/localstroage.js'
-import { DANMU_API_TOKEN_KEY } from '../configs/index.js'
+import Cookies from 'js-cookie'
 
 const navItems = [
   { key: RoutePaths.HOME, label: '首页', icon: 'home' },
@@ -72,7 +71,7 @@ const MobileHeader = ({ activeKey }) => {
 
   const onLogout = async () => {
     await logout()
-    clearStorage(DANMU_API_TOKEN_KEY)
+    Cookies.remove('token')
     navigate(RoutePaths.LOGIN)
   }
 
