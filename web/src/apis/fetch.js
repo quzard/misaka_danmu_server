@@ -4,7 +4,6 @@ import { DANMU_API_TOKEN_KEY } from '../configs'
 
 const getURL = url => {
   return {
-    baseURL: 'http://0.0.0.0:7768',
     url: url,
   }
 }
