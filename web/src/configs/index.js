@@ -1,3 +1,5 @@
+export const DANMU_API_TOKEN_KEY = 'danmu_api_token'
+
 export const DANDAN_TYPE_MAPPING = {
   tvseries: 'tv_series',
   movie: 'movie',
@@ -9,8 +11,4 @@ export const DANDAN_TYPE_DESC_MAPPING = {
   movie: '电影/剧场版',
   ova: 'OVA',
   other: '其他',
-}
-
-export const SCHEDULED_TYPE_MAPPING = {
-  tmdbAutoMap: 'TMDB自动映射',
 }

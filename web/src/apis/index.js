@@ -135,6 +135,10 @@ export const deleteScheduledTask = data =>
 export const runTask = data =>
   api.post(`/api/ui/scheduled-tasks/${data.id}/run`)
 
+/** 获取可用的定时任务类型 */
+export const getAvailableScheduledJobs = () =>
+  api.get('/api/ui/scheduled-tasks/available-jobs')
+
 /** ---------------------------------------------------token相关开始------------------------------------------------ */
 /** 获取token列表 */
 export const getTokenList = () => api.get('/api/ui/tokens')

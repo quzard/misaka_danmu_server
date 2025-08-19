@@ -348,16 +348,16 @@ async def bangumi_auth_callback(
         logger.error(f"Bangumi OAuth 回调处理失败: {e}", exc_info=True)
         return HTMLResponse(f"<h1>认证失败: {e}</h1>", status_code=500)
 
-@router.get("/auth/state", response_model=BangumiAuthState, summary="获取 Bangumi 授权状态")
+@router.get("/auth/state", response_model=models.BangumiAuthStatus, summary="获取 Bangumi 授权状态")
 async def get_bangumi_auth_state(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     auth_info = await crud.get_bangumi_auth(session, current_user.id)
     # crud.get_bangumi_auth 返回的字典键已是驼峰式，
-    # 并且与 BangumiAuthState 模型的字段完全匹配。
+    # 并且与 BangumiAuthStatus 模型的字段完全匹配。
     # 因此，我们可以直接解包字典来创建模型实例。
-    return models.BangumiAuthState(**auth_info)
+    return models.BangumiAuthStatus(**auth_info)
 
 @router.delete("/auth", status_code=status.HTTP_204_NO_CONTENT, summary="注销 Bangumi 授权")
 async def deauthorize_bangumi(

@@ -10,23 +10,24 @@ import {
   Table,
   Tag,
 } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   deleteScheduledTask,
   editScheduledTask,
   addScheduledTask,
   getScheduledTaskList,
   runTask,
+  getAvailableScheduledJobs,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon.jsx'
 import dayjs from 'dayjs'
-import { SCHEDULED_TYPE_MAPPING } from '../../../configs'
 
 export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
   const [scheduleTaskList, setScheduleTaskList] = useState([])
   const [addOpen, setAddOpen] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [availableJobs, setAvailableJobs] = useState([])
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('id', form)
@@ -42,8 +43,25 @@ export const ScheduleTask = () => {
     }
   }
 
+  const jobTypeMapping = useMemo(() => {
+    return availableJobs.reduce((acc, job) => {
+      acc[job.jobType] = job.name
+      return acc
+    }, {})
+  }, [availableJobs])
+
+  const fetchAvailableJobs = async () => {
+    try {
+      const res = await getAvailableScheduledJobs()
+      setAvailableJobs(res.data || [])
+    } catch (error) {
+      message.error('获取可用任务类型失败')
+    }
+  }
+
   useEffect(() => {
     refreshTasks()
+    fetchAvailableJobs()
   }, [])
 
   const columns = [
@@ -59,7 +77,7 @@ export const ScheduleTask = () => {
       key: 'jobType',
       width: 200,
       render: (_, record) => {
-        return <>{SCHEDULED_TYPE_MAPPING[record.jobType]}</>
+        return <>{jobTypeMapping[record.jobType] || record.jobType}</>
       },
     },
     {
@@ -254,16 +272,14 @@ export const ScheduleTask = () => {
           <Form.Item
             name="jobType"
             label="任务类型"
-            rules={[{ required: true, message: '请选择有效期' }]}
+            rules={[{ required: true, message: '请选择任务类型' }]}
             className="mb-4"
           >
             <Select
-              options={[
-                {
-                  value: 'tmdbAutoMap',
-                  label: SCHEDULED_TYPE_MAPPING['tmdbAutoMap'],
-                },
-              ]}
+              options={availableJobs.map(job => ({
+                value: job.jobType,
+                label: job.name,
+              }))}
             />
           </Form.Item>
           <Form.Item

@@ -359,6 +359,10 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
     lastRunAt: Optional[datetime] = None
     nextRunAt: Optional[datetime] = None
 
+class AvailableJobInfo(BaseModel):
+    jobType: str
+    name: str
+
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str
     proxyHost: Optional[str] = None
