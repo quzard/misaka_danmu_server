@@ -284,12 +284,12 @@ class BilibiliScraper(BaseScraper):
         data = response.json().get("data", {})
         if not data.get("qrcode_key") or not data.get("url"):
             raise ValueError("未能从B站API获取有效的二维码信息。")
-        return {"qrcode_key": data["qrcode_key"], "url": data["url"]}
+        return {"qrcodeKey": data["qrcode_key"], "url": data["url"]}
 
-    async def poll_login_status(self, qrcode_key: str) -> Dict[str, Any]:
+    async def poll_login_status(self, qrcodeKey: str) -> Dict[str, Any]:
         """轮询扫码登录状态。"""
         url = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-        response = await self._request_with_rate_limit("GET", url, params={"qrcode_key": qrcode_key})
+        response = await self._request_with_rate_limit("GET", url, params={"qrcode_key": qrcodeKey})
         response.raise_for_status()
         poll_data = response.json().get("data", {})
 
@@ -321,10 +321,10 @@ class BilibiliScraper(BaseScraper):
         elif action_name == "generate_qrcode":
             return await self.generate_login_qrcode()
         elif action_name == "poll_login":
-            qrcode_key = payload.get("qrcode_key")
-            if not qrcode_key:
-                raise ValueError("轮询登录状态需要 'qrcode_key'。")
-            return await self.poll_login_status(qrcode_key)
+            qrcodeKey = payload.get("qrcodeKey")
+            if not qrcodeKey:
+                raise ValueError("轮询登录状态需要 'qrcodeKey'。")
+            return await self.poll_login_status(qrcodeKey)
         elif action_name == "logout":
             # 从数据库中清除cookie
             async with self._session_factory() as session:
