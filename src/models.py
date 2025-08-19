@@ -357,29 +357,19 @@ class BulkDeleteRequest(BaseModel):
 
 class ScheduledTaskCreate(BaseModel):
     name: str
-    jobType: str = Field(..., alias="job_type")
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(True, alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
+    jobType: str
+    cronExpression: str
+    isEnabled: bool = True
 
 class ScheduledTaskUpdate(BaseModel):
     name: str
-    cronExpression: str = Field(..., alias="cron_expression")
-    isEnabled: bool = Field(..., alias="is_enabled")
-
-    class Config:
-        populate_by_name = True
+    cronExpression: str
+    isEnabled: bool
 
 class ScheduledTaskInfo(ScheduledTaskCreate):
     id: str
-    lastRunAt: Optional[datetime] = Field(None, alias="last_run_at")
-    nextRunAt: Optional[datetime] = Field(None, alias="next_run_at")
-
-    class Config:
-        # 确保子模型也能正确处理别名
-        populate_by_name = True
+    lastRunAt: Optional[datetime] = None
+    nextRunAt: Optional[datetime] = None
 
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str
