@@ -1,12 +1,12 @@
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   deleteTask,
   getTaskList,
   pauseTask,
   resumeTask,
   stopTask,
-} from '@/apis'
-import { useEffect, useMemo, useRef, useState } from 'react'
+} from '@/apis';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -18,15 +18,15 @@ import {
   Progress,
   Space,
   Tag,
-} from 'antd'
+} from 'antd';
 import {
   CheckOutlined,
   DeleteOutlined,
   PauseOutlined,
   StepBackwardOutlined,
   StopOutlined,
-} from '@ant-design/icons'
-import classNames from 'classnames'
+} from '@ant-design/icons';
+import classNames from 'classnames';
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
@@ -35,6 +35,11 @@ export const ImportTask = () => {
   const [selectList, setSelectList] = useState([])
 
   const navigate = useNavigate()
+
+  const allSelected = useMemo(() => {
+    if (!taskList.length) return false
+    return selectList.length === taskList.length
+  }, [selectList, taskList])
 
   const [canPause, isPause, canStop] = useMemo(() => {
     return [
@@ -165,6 +170,15 @@ export const ImportTask = () => {
     })
   }
 
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectList([])
+    } else {
+      // Select all currently displayed tasks
+      setSelectList([...taskList])
+    }
+  }
+
   useEffect(() => {
     refreshTasks()
     setSelectList([])
@@ -181,6 +195,13 @@ export const ImportTask = () => {
         title="任务管理器"
         extra={
           <Space>
+            <Button
+              type="primary"
+              onClick={handleSelectAll}
+              disabled={!taskList.length}
+            >
+              {allSelected ? '取消全选' : '全选'}
+            </Button>
             <Button
               disabled={!canPause}
               type="default"
