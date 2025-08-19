@@ -1,5 +1,3 @@
-export const DANMU_API_TOKEN_KEY = 'danmu_api_token'
-
 export const DANDAN_TYPE_MAPPING = {
   tvseries: 'tv_series',
   movie: 'movie',

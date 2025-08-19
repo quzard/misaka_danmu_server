@@ -1,9 +1,9 @@
 import axios from 'axios'
-import { getStorage } from '../utils'
-import { DANMU_API_TOKEN_KEY } from '../configs'
+import Cookies from 'js-cookie'
 
 const getURL = url => {
   return {
+    baseURL: 'http://0.0.0.0:7768',
     url: url,
   }
 }
@@ -16,7 +16,7 @@ const instance = axios.create({
 
 instance.interceptors.request.use(
   async config => {
-    const token = getStorage(DANMU_API_TOKEN_KEY)
+    const token = Cookies.get('token')
     if (config.headers && !!token) {
       config.headers['Authorization'] = `Bearer ${token}`
     }

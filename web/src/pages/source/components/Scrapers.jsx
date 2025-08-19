@@ -122,6 +122,7 @@ export const Scrapers = () => {
   const [biliUserinfo, setBiliUserinfo] = useState({})
   console.log(biliUserinfo, 'biliUserinfo')
   const [biliLoginOpen, setBiliLoginOpen] = useState(false)
+  const [biliQrcodeChecked, setBiliQrcodeChecked] = useState(false)
   /** 扫码登录轮训 */
   const timer = useRef(0)
 
@@ -459,7 +460,27 @@ export const Scrapers = () => {
               ) : (
                 <div className="text-center">
                   <div className="mb-4">当前未登录。</div>
+                  <div class="flex items-center justify-start">
+                    <Checkbox
+                      checked={biliQrcodeChecked}
+                      onChange={() => setBiliQrcodeChecked(v => !v)}
+                    />
+                    <span className="ml-2">我已阅读并同意以下免责声明</span>
+                  </div>
+                  <div className="my-3">
+                    登录接口由{' '}
+                    <a
+                      href="https://github.com/SocialSisterYi/bilibili-API-collect"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      bilibili-API-collect
+                    </a>{' '}
+                    提供，为Blibili官方非公开接口。
+                    您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
+                  </div>
                   <Button
+                    disabled={!biliQrcodeChecked}
                     type="primary"
                     loading={biliQrcodeLoading}
                     onClick={handleBiliQrcode}
@@ -486,6 +507,7 @@ export const Scrapers = () => {
               fgColor="#000"
               level="M"
             />
+
             {biliQrcodeStatus === 'expire' && (
               <div
                 className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 cursor-pointer"

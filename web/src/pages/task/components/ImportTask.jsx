@@ -22,6 +22,7 @@ import {
 import {
   CheckOutlined,
   DeleteOutlined,
+  MinusOutlined,
   PauseOutlined,
   StepBackwardOutlined,
   StopOutlined,
@@ -60,7 +61,7 @@ export const ImportTask = () => {
   const [search, status] = useMemo(() => {
     return [
       searchParams.get('search') ?? '',
-      searchParams.get('status') ?? 'inProgress',
+      searchParams.get('status') ?? 'in_progress',
     ]
   }, [searchParams])
 
@@ -182,6 +183,24 @@ export const ImportTask = () => {
         extra={
           <Space>
             <Button
+              type="default"
+              shape="circle"
+              icon={
+                selectList.length === taskList.length ? (
+                  <CheckOutlined />
+                ) : (
+                  <MinusOutlined />
+                )
+              }
+              onClick={() => {
+                if (selectList.length === taskList.length) {
+                  setSelectList([])
+                } else {
+                  setSelectList(taskList)
+                }
+              }}
+            />
+            <Button
               disabled={!canPause}
               type="default"
               shape="circle"
@@ -242,10 +261,10 @@ export const ImportTask = () => {
           </div>
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'inProgress',
+              'bg-primary': status === 'in_progress',
             })}
             onClick={() => {
-              navigate(`/task?search=${search}&status=inProgress`, {
+              navigate(`/task?search=${search}&status=in_progress`, {
                 replace: true,
               })
             }}
