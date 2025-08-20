@@ -1221,23 +1221,35 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
         logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(ScheduledTask).order_by(ScheduledTask.name)
+    stmt = select(
+        ScheduledTask.id.label("id"),
+        ScheduledTask.name.label("name"),
+        ScheduledTask.job_type.label("jobType"),
+        ScheduledTask.cron_expression.label("cronExpression"),
+        ScheduledTask.is_enabled.label("isEnabled"),
+        ScheduledTask.last_run_at.label("lastRunAt"),
+        ScheduledTask.next_run_at.label("nextRunAt")
+    ).order_by(ScheduledTask.name)
     result = await session.execute(stmt)
-    return [
-        {"id": t.id, "name": t.name, "jobType": t.job_type, "cronExpression": t.cron_expression, "isEnabled": t.is_enabled, "lastRunAt": t.last_run_at, "nextRunAt": t.next_run_at}
-        for t in result.scalars()
-    ]
-
+    return [dict(row) for row in result.mappings()]
 async def check_scheduled_task_exists_by_type(session: AsyncSession, job_type: str) -> bool:
     stmt = select(ScheduledTask.id).where(ScheduledTask.job_type == job_type).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
 async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
-    task = await session.get(ScheduledTask, task_id)
-    if task:
-        return {"id": task.id, "name": task.name, "jobType": task.job_type, "cronExpression": task.cron_expression, "isEnabled": task.is_enabled, "lastRunAt": task.last_run_at, "nextRunAt": task.next_run_at}
-    return None
+    stmt = select(
+        ScheduledTask.id.label("id"), 
+        ScheduledTask.name.label("name"),
+        ScheduledTask.job_type.label("jobType"), 
+        ScheduledTask.cron_expression.label("cronExpression"),
+        ScheduledTask.is_enabled.label("isEnabled"),
+        ScheduledTask.last_run_at.label("lastRunAt"),
+        ScheduledTask.next_run_at.label("nextRunAt")
+    ).where(ScheduledTask.id == task_id)
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
 
 async def create_scheduled_task(session: AsyncSession, task_id: str, name: str, job_type: str, cron: str, is_enabled: bool):
     new_task = ScheduledTask(id=task_id, name=name, job_type=job_type, cron_expression=cron, is_enabled=is_enabled)

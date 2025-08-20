@@ -88,7 +88,7 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
             save_path = IMAGE_DIR / filename
             save_path.write_bytes(response.content)
             logger.info(f"图片已成功缓存到: {save_path}")
-            return f"/images/{filename}"  # 返回Web可访问的相对路径
+            return f"/data/images/{filename}"  # 返回Web可访问的相对路径
     except Exception as e:
         logger.error(f"下载图片失败 (URL: {image_url}): {e}", exc_info=True)
         return None

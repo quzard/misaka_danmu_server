@@ -109,8 +109,10 @@ export const ScheduleTask = () => {
       key: 'lastRunAt',
       width: 200,
       render: (_, record) => {
-        return (
+        return record.lastRunAt ? (
           <div>{dayjs(record.lastRunAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+        ) : (
+          '-'
         )
       },
     },
@@ -120,8 +122,10 @@ export const ScheduleTask = () => {
       key: 'nextRunAt',
       width: 200,
       render: (_, record) => {
-        return (
+        return record.nextRunAt ? (
           <div>{dayjs(record.nextRunAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+        ) : (
+          '-'
         )
       },
     },
