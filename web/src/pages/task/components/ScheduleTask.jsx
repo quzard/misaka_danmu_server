@@ -35,10 +35,11 @@ export const ScheduleTask = () => {
   const refreshTasks = async () => {
     try {
       const res = await getScheduledTaskList()
-      setScheduleTaskList(res.data)
+      setScheduleTaskList(res.data || [])
       setLoading(false)
     } catch (error) {
       console.error(error)
+      setScheduleTaskList([])
       setLoading(false)
     }
   }

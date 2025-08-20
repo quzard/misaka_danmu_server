@@ -1689,13 +1689,18 @@ async def logout():
     """
     return
 
-@router.get("/scheduled-tasks/available", response_model=List[Dict[str, str]], summary="获取所有可用的定时任务类型")
-async def get_available_job_types(
-    current_user: models.User = Depends(security.get_current_user),
-    scheduler: SchedulerManager = Depends(get_scheduler_manager)
+@router.get("/scheduled-tasks", response_model=List[models.ScheduledTaskInfo], summary="获取所有定时任务")
+async def get_all_scheduled_tasks(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
 ):
-    """获取所有已成功加载的、可供用户选择的定时任务类型。"""
-    return scheduler.get_available_jobs()
+    """
+    获取所有已配置的定时任务列表。
+    此实现确保即使没有任务，也总是返回一个空的JSON数组 `[]`，而不是 `null` 或空白响应。
+    """
+    tasks = await crud.get_scheduled_tasks(session)
+    # 关键修复：确保在没有任务时返回一个空列表，而不是 None
+    return tasks or []
 
 
 # --- Scheduled Tasks API ---
