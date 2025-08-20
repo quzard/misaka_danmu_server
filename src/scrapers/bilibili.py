@@ -451,15 +451,6 @@ class BilibiliScraper(BaseScraper):
         return params
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        self.logger.info(f"Bilibili: 正在搜索 '{keyword}'...")
-        cache_key_suffix = f"_s{episode_info['season']}e{episode_info['episode']}" if episode_info else ""
-        cache_key = f"search_{self.provider_name}_{keyword}{cache_key_suffix}"
-        cached_results = await self._get_from_cache(cache_key)
-        if cached_results is not None:
-            self.logger.info(f"Bilibili: 从缓存中命中搜索结果 '{keyword}{cache_key_suffix}'")
-            return [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
-
-        self.logger.debug(f"Bilibili: 缓存未命中，正在从网络获取...")
         await self._ensure_config_and_cookie()
 
         search_types = ["media_bangumi", "media_ft"]
@@ -479,8 +470,6 @@ class BilibiliScraper(BaseScraper):
         if final_results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in final_results])
             self.logger.info(f"Bilibili: 搜索结果列表:\n{log_results}")
-        if final_results:
-            await self._set_to_cache(cache_key, [r.model_dump() for r in final_results], 'search_ttl_seconds', 300)
         return final_results
 
     async def _search_by_type(self, keyword: str, search_type: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:

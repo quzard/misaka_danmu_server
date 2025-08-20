@@ -79,8 +79,11 @@ export const Library = () => {
       key: 'imageUrl',
       width: 100,
       render: (_, record) => {
-        // 优先使用本地缓存图片，否则回退到原始URL
-        const imageSrc = record.localImagePath || record.imageUrl
+        let imageSrc = record.localImagePath || record.imageUrl
+        // 兼容旧的、错误的缓存路径
+        if (imageSrc && imageSrc.startsWith('/images/')) {
+          imageSrc = imageSrc.replace('/images/', '/data/images/')
+        }
         // 如果两个地址都为空，则不渲染img标签，避免出现损坏的图片图标
         return imageSrc ? <img src={imageSrc} className="w-12" /> : null
       },
