@@ -116,14 +116,6 @@ class YoukuScraper(BaseScraper):
         await self.client.aclose()
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
-        cache_key_suffix = f"_s{episode_info['season']}e{episode_info['episode']}" if episode_info else ""
-        cache_key = f"search_{self.provider_name}_{keyword}{cache_key_suffix}"
-        cached_results = await self._get_from_cache(cache_key)
-        if cached_results is not None:
-            self.logger.info(f"Youku: 从缓存中命中搜索结果 '{keyword}{cache_key_suffix}'")
-            return [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
-
         self.logger.info(f"Youku: 正在搜索 '{keyword}'...")
 
         ua_encoded = urlencode({"userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
@@ -179,9 +171,6 @@ class YoukuScraper(BaseScraper):
         if results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
             self.logger.info(f"Youku: 搜索结果列表:\n{log_results}")
-        if results:
-            results_to_cache = [r.model_dump() for r in results]
-            await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return results
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:

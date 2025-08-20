@@ -459,13 +459,6 @@ class IqiyiScraper(BaseScraper):
         return results
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        # 修正：缓存键必须包含分集信息，以区分对同一标题的不同分集搜索
-        cache_key_suffix = f"_s{episode_info['season']}e{episode_info['episode']}" if episode_info else ""
-        cache_key = f"search_{self.provider_name}_{keyword}{cache_key_suffix}"
-        cached_results = await self._get_from_cache(cache_key)
-        if cached_results is not None:
-            self.logger.info(f"爱奇艺 (合并): 从缓存中命中搜索结果 '{keyword}{cache_key_suffix}'")
-            return [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
 
         # 并行执行两个搜索API
         desktop_task = self._search_desktop_api(keyword, episode_info)
@@ -489,9 +482,6 @@ class IqiyiScraper(BaseScraper):
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in unique_results])
             self.logger.info(f"爱奇艺 (合并): 搜索结果列表:\n{log_results}")
 
-        if unique_results:
-            results_to_cache = [r.model_dump() for r in unique_results]
-            await self._set_to_cache(cache_key, results_to_cache, 'search_ttl_seconds', 300)
         return unique_results
 
     async def _search_mobile_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:

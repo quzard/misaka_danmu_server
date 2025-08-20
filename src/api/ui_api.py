@@ -84,11 +84,7 @@ class UIProviderSearchResponse(models.ProviderSearchResponse):
     """扩展了 ProviderSearchResponse 以包含原始搜索的上下文。"""
     search_season: Optional[int] = None
     search_episode: Optional[int] = None
-@router.get(
-    "/search/provider",
-    response_model=UIProviderSearchResponse,
-    summary="从外部数据源搜索节目",
-)
+@router.get("/search/provider", response_model=UIProviderSearchResponse, summary="从外部数据源搜索节目")
 async def search_anime_provider(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
@@ -98,14 +94,33 @@ async def search_anime_provider(
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
-    支持 "标题 SXXEXX" 格式来指定集数。
-    如果配置了TMDB API Key，会先用关键词搜索TMDB获取别名，然后用原始关键词搜索所有弹幕源，最后用获取到的别名集对搜索结果进行过滤。
-    如果未配置，则直接使用关键词进行搜索。
+    此接口实现了智能的按季缓存机制，并保留了原有的别名搜索、过滤和排序逻辑。
     """
     parsed_keyword = parse_search_keyword(keyword)
     search_title = parsed_keyword["title"]
     season_to_filter = parsed_keyword["season"]
     episode_to_filter = parsed_keyword["episode"]
+
+    # --- 新增：按季缓存逻辑 ---
+    # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
+    cache_key = f"provider_search_{search_title}_{season_to_filter or 'all'}"
+    cached_results_data = await crud.get_cache(session, cache_key)
+
+    if cached_results_data is not None:
+        logger.info(f"搜索缓存命中: '{cache_key}'")
+        # 缓存数据已排序和过滤，只需更新当前请求的集数信息
+        results = [models.ProviderSearchInfo.model_validate(item) for item in cached_results_data]
+        for item in results:
+            item.currentEpisodeIndex = episode_to_filter
+        
+        return UIProviderSearchResponse(
+            results=results,
+            search_season=season_to_filter,
+            search_episode=episode_to_filter
+        )
+    
+    logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
+    # --- 缓存逻辑结束 ---
 
     episode_info = {
         "season": season_to_filter,
@@ -119,10 +134,10 @@ async def search_anime_provider(
             detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
         )
 
+    # --- 原有的复杂搜索流程开始 ---
     tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
     enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
 
-    # 如果没有启用任何辅助搜索源，或者TMDB作为唯一的辅助源但其API Key未配置，则直接搜索
     if not enabled_aux_sources or (len(enabled_aux_sources) == 1 and enabled_aux_sources[0]['providerName'] == 'tmdb' and not tmdb_api_key):
         logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
         results = await manager.search_all([search_title], episode_info=episode_info)
@@ -199,6 +214,18 @@ async def search_anime_provider(
         return (provider_order, -similarity_score)
 
     sorted_results = sorted(results, key=sort_key)
+
+    # --- 新增：在返回前缓存最终结果 ---
+    # 我们缓存的是整季的结果，所以在存入前清除特定集数的信息
+    results_to_cache = []
+    for item in sorted_results:
+        item_copy = item.model_copy(deep=True)
+        item_copy.currentEpisodeIndex = None
+        results_to_cache.append(item_copy.model_dump())
+
+    if sorted_results:
+        await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800) # 缓存3小时
+    # --- 缓存逻辑结束 ---
 
     return UIProviderSearchResponse(
         results=sorted_results,

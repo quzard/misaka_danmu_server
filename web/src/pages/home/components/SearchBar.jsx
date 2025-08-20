@@ -61,49 +61,8 @@ export const SearchBar = () => {
       setLoading(true)
       setSearchHistory(history => {
         if (history.includes(values.keyword)) return history
-        return [...history, values.keyword].slice(0, 10)
+        return [...history, values.keyword]
       })
-      const {
-        title: newTitle,
-        season: newSeason,
-        episode: newEpisode,
-      } = parseSearchKeyword(values.keyword)
-
-      const {
-        title: lastTitle,
-        season: lastSeason,
-        episode: lastEpisode,
-      } = parseSearchKeyword(lastSearchResultData.keyword)
-
-      console.log(
-        lastSearchResultData.results,
-        newTitle,
-        lastTitle,
-        newEpisode,
-        lastEpisode
-      )
-
-      if (
-        lastSearchResultData.results.length > 0 &&
-        newTitle === lastTitle &&
-        newEpisode !== null &&
-        lastEpisode === null
-      ) {
-        console.log('前端缓存命中：正在使用上次的搜索结果。')
-        const updatedResults = lastSearchResultData.results
-        updatedResults.forEach(item => {
-          item.currentEpisodeIndex = newEpisode
-        })
-
-        const seasonForDisplay = newSeason || lastSeason || 1
-
-        setLastSearchResultData({
-          results: updatedResults,
-          searchSeason: seasonForDisplay,
-          keyword: values.keyword,
-        })
-        return // 避免网络请求
-      }
 
       timer.current = window.setInterval(() => {
         setPercent(p => (p <= 90 ? p + Math.ceil(Math.random() * 5) : 95))
