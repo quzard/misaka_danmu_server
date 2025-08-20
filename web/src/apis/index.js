@@ -71,6 +71,17 @@ export const getDoubanDetail = data =>
 /** 导入弹幕  */
 export const importDanmu = data => api.post('/api/ui/import', data)
 
+/** 编辑导入获取集 */
+export const getEditEpisodes = data => api.get('/api/ui/search/episodes', data)
+/** 获取已存在集数 */
+export const getInLibraryEpisodes = data =>
+  api.get('/api/ui/library/episodes-by-title', {
+    title: data.title,
+  })
+
+/** 提交编辑导入 */
+export const importEdit = data => api.post('/api/ui/import/edited', data)
+
 /** 搜索tmdb */
 export const getTmdbSearch = data =>
   api.get(`/api/tmdb/search/${data.mediaType}`, {
@@ -328,3 +339,7 @@ export const resetEpisode = data =>
 
 /** 获取弹幕详情 */
 export const getDanmakuDetail = data => api.get(`/api/ui/comment/${data.id}`)
+
+/** 刷新海报 */
+export const refreshPoster = data =>
+  api.post(`/api/ui/library/anime/${data.animeId}/refresh-poster`, data)

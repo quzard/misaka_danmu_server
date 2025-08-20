@@ -127,7 +127,7 @@ export const ScheduleTask = () => {
     },
     {
       title: '操作',
-      width: 120,
+      width: 100,
       fixed: 'right',
       render: (_, record) => {
         return (

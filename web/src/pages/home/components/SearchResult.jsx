@@ -1,5 +1,11 @@
-import { getTmdbSearch, importDanmu } from '../../../apis'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  getEditEpisodes,
+  getInLibraryEpisodes,
+  getTmdbSearch,
+  importDanmu,
+  importEdit,
+} from '../../../apis'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -17,9 +23,14 @@ import {
 } from 'antd'
 import { useAtom } from 'jotai'
 import { lastSearchResultAtom, searchLoadingAtom } from '../../../../store'
-import { CheckOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
+
+import { MyIcon } from '@/components/MyIcon'
+import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { SortableContext, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const IMPORT_MODE = [
   {
@@ -45,7 +56,15 @@ export const SearchResult = () => {
 
   const [selectList, setSelectList] = useState([])
 
-  console.log(selectList, 'selectList')
+  /** 编辑导入相关 */
+  const [editImportOpen, setEditImportOpen] = useState(false)
+  const [editEpisodeList, setEditEpisodeList] = useState([])
+  const [editLoading, setEditLoading] = useState(false)
+  const [editItem, setEditItem] = useState({})
+  const [editAnimeTitle, setEditAnimeTitle] = useState('')
+  const [activeItem, setActiveItem] = useState(null)
+  const dragOverlayRef = useRef(null)
+  const [editConfirmLoading, setEditConfirmLoading] = useState(false)
 
   const searchSeason = lastSearchResultData?.season
 
@@ -133,6 +152,38 @@ export const SearchResult = () => {
     }
   }
 
+  const handleImportEdit = async () => {
+    try {
+      if (editConfirmLoading) return
+      setEditConfirmLoading(true)
+      const res = await importEdit(
+        JSON.stringify({
+          provider: editItem.provider,
+          mediaId: editItem.mediaId,
+          animeTitle: editItem.title,
+          mediaType: editItem.type,
+          // 关键修正：如果用户搜索时指定了季度，则优先使用该季度
+          // 否则，使用从单个结果中解析出的季度
+          season: searchSeason !== null ? searchSeason : editItem.season,
+          imageUrl: editItem.imageUrl,
+          doubanId: editItem.doubanId,
+          currentEpisodeIndex: editItem.currentEpisodeIndex,
+          ...editItem,
+          episodes: editEpisodeList ?? [],
+        })
+      )
+      message.success(res.data?.message || '编辑导入任务已提交。')
+    } catch (error) {
+      message.error(`提交导入任务失败: ${error.message}`)
+    } finally {
+      setEditConfirmLoading(false)
+      setEditImportOpen(false)
+      setEditEpisodeList([])
+      setEditItem({})
+      setEditAnimeTitle('')
+    }
+  }
+
   const handleBatchImport = () => {
     let tmdbparams = {}
     if (importMode === 'merge') {
@@ -213,6 +264,102 @@ export const SearchResult = () => {
     }
   }
 
+  const handleDragEnd = event => {
+    const { active, over } = event
+    // 拖拽无效或未改变位置
+    if (!over || active.id === over.id) {
+      setActiveItem(null)
+      return
+    }
+
+    // 找到原位置和新位置
+    const activeIndex = editEpisodeList.findIndex(
+      item => item.episodeId === active.data.current.item.episodeId
+    )
+    const overIndex = editEpisodeList.findIndex(
+      item => item.episodeId === over.data.current.item.episodeId
+    )
+
+    if (activeIndex !== -1 && overIndex !== -1) {
+      // 1. 重新排列数组
+      const newList = [...editEpisodeList]
+      const [movedItem] = newList.splice(activeIndex, 1)
+      newList.splice(overIndex, 0, movedItem)
+
+      // 2. 重新计算所有项的display_order（从1开始连续编号）
+      const updatedList = newList.map((item, index) => ({
+        ...item,
+        episodeIndex: index + 1, // 排序值从1开始
+      }))
+
+      // 3. 更新状态
+      console.log(updatedList, 'updatedList')
+      setEditEpisodeList(updatedList)
+    }
+
+    setActiveItem(null)
+  }
+
+  // 处理拖拽开始
+  const handleDragStart = event => {
+    const { active } = event
+    // 找到当前拖拽的项
+    const item = editEpisodeList.find(item => item.episodeId === active.id)
+    setActiveItem(item)
+  }
+
+  const handleDelete = item => {
+    console.log(item, 'item')
+    const activeIndex = editEpisodeList.findIndex(
+      o => o.episodeId === item.episodeId
+    )
+    const newList = [...editEpisodeList]
+    newList.splice(activeIndex, 1)
+
+    // 2. 重新计算所有项的display_order（从1开始连续编号）
+    const updatedList = newList.map((item, index) => ({
+      ...item,
+      episodeIndex: index + 1, // 排序值从1开始
+    }))
+
+    // 3. 更新状态
+    setEditEpisodeList(updatedList)
+  }
+
+  const renderDragOverlay = () => {
+    if (!activeItem) return null
+
+    return (
+      <div ref={dragOverlayRef} style={{ width: '100%', maxWidth: '100%' }}>
+        <List.Item
+          style={{
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            opacity: 0.9,
+          }}
+        >
+          <div className="w-full flex items-center justify-between">
+            <div>
+              <MyIcon icon="drag" size={24} />
+            </div>
+            <div className="w-full flex items-center justify-between gap-3">
+              <div>{activeItem.episodeIndex}</div>
+              <Input
+                style={{
+                  width: '100%',
+                }}
+                value={activeItem.title}
+                onChange={e => {}}
+              />
+              <div>
+                <CloseCircleOutlined />
+              </div>
+            </div>
+          </div>
+        </List.Item>
+      </div>
+    )
+  }
+
   return (
     <div className="my-4">
       <Card title="搜索结果" loading={searchLoading}>
@@ -282,8 +429,8 @@ export const SearchResult = () => {
                 const isActive = selectList.includes(item)
                 return (
                   <List.Item key={index}>
-                    <Row gutter={12}>
-                      <Col md={20} xs={24}>
+                    <Row gutter={[12, 12]}>
+                      <Col md={16} xs={24}>
                         <div
                           className="flex items-center justify-start relative cursor-pointer"
                           onClick={() =>
@@ -318,9 +465,37 @@ export const SearchResult = () => {
                           </div>
                         </div>
                       </Col>
-                      <Col md={4} xs={24}>
+                      <Col md={4} xs={12}>
                         <Button
                           block
+                          type="default"
+                          className="mt-3"
+                          loading={editLoading}
+                          onClick={async () => {
+                            try {
+                              if (editLoading) return
+                              setEditLoading(true)
+                              const res = await getEditEpisodes({
+                                provider: item.provider,
+                                media_id: item.mediaId,
+                                media_type: item.type,
+                              })
+                              setEditEpisodeList(res.data)
+                              setEditImportOpen(true)
+                              setEditItem(item)
+                            } catch (error) {
+                            } finally {
+                              setEditLoading(false)
+                            }
+                          }}
+                        >
+                          编辑导入
+                        </Button>
+                      </Col>
+                      <Col md={4} xs={12}>
+                        <Button
+                          block
+                          loading={loading}
                           type="primary"
                           className="mt-3"
                           onClick={() => {
@@ -450,6 +625,142 @@ export const SearchResult = () => {
           }}
         />
       </Modal>
+      <Modal
+        title={`编辑导入: ${editItem.title}`}
+        open={editImportOpen}
+        onOk={() => {
+          handleImportEdit()
+        }}
+        confirmLoading={editConfirmLoading}
+        cancelText="取消"
+        okText="确认导入"
+        onCancel={() => setEditImportOpen(false)}
+      >
+        <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+          <div className="shrink-0">作品标题:</div>
+          <div className="w-full">
+            <Input
+              value={editItem.title}
+              placeholder="请输入作品标题"
+              onChange={e => {
+                setEditAnimeTitle(e.target.value)
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <Button
+              type="default"
+              onClick={async () => {
+                try {
+                  const res = await getInLibraryEpisodes({
+                    title: editAnimeTitle || editItem.title,
+                  })
+                  if (!res.data?.length) {
+                    message.error(
+                      `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+                    )
+                    return
+                  }
+                  setEditEpisodeList(list => {
+                    return list.filter(
+                      it => !(res.data ?? []).includes(it.episodeIndex)
+                    )
+                  })
+                  const removedCount = editEpisodeList.reduce((total, item) => {
+                    return (
+                      total +
+                      (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                    )
+                  }, 0)
+
+                  message.success(
+                    `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+                  )
+                } catch (error) {
+                  message.error(`查询已存在分集失败: ${error.message}`)
+                }
+              }}
+            >
+              重整分集导入
+            </Button>
+          </div>
+        </div>
+        <div>
+          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <SortableContext
+              items={editEpisodeList.map(item => item.episodeId)}
+            >
+              <List
+                itemLayout="vertical"
+                size="large"
+                dataSource={editEpisodeList}
+                renderItem={(item, index) => (
+                  <SortableItem
+                    key={item.id || index}
+                    item={item}
+                    index={index}
+                    handleDelete={() => handleDelete(item)}
+                  />
+                )}
+              />
+            </SortableContext>
+
+            {/* 拖拽覆盖层 */}
+            <DragOverlay>{renderDragOverlay()}</DragOverlay>
+          </DndContext>
+        </div>
+      </Modal>
     </div>
+  )
+}
+
+const SortableItem = ({ item, index, handleDelete }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: item.episodeId,
+    data: {
+      item,
+      index,
+    },
+  })
+
+  // 拖拽样式
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: 'grab',
+    ...(isDragging && { cursor: 'grabbing' }),
+  }
+
+  return (
+    <List.Item ref={setNodeRef} style={style} {...attributes}>
+      {/* 保留你原有的列表项渲染逻辑 */}
+      <div className="w-full flex items-center justify-between">
+        <div {...listeners} style={{ cursor: 'grab' }}>
+          <MyIcon icon="drag" size={24} />
+        </div>
+        <div className="w-full flex items-center justify-start gap-3">
+          <div>{item.episodeIndex}</div>
+          <Input
+            style={{
+              width: '100%',
+            }}
+            value={item.title}
+            onChange={e => {}}
+          />
+          <div onClick={() => handleDelete(item)}>
+            <CloseCircleOutlined />
+          </div>
+        </div>
+      </div>
+    </List.Item>
   )
 }

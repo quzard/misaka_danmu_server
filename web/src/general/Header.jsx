@@ -18,6 +18,7 @@ const navItems = [
   { key: RoutePaths.SOURCE, label: '搜索源', icon: 'yuan' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
+const version = 'v1.0.13'
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
@@ -49,7 +50,14 @@ export const Header = () => {
       {isMobile ? (
         <>
           <div className="fixed top-0 left-0 w-full z-50 py-2 bg-base-bg">
-            <div className="flex justify-end px-2">
+            <div className="flex justify-between items-center px-2">
+              <div
+                className="flex items-center justify-start gap-2"
+                onClick={() => navigate(RoutePaths.HOME)}
+              >
+                <img src="/images/logo.png" className="h-6 cursor-pointer" />
+                <span className="text-sm">{version}</span>
+              </div>
               <DarkModeToggle />
             </div>
           </div>
@@ -167,8 +175,12 @@ const DesktopHeader = ({ activeKey }) => {
   return (
     <div className="fixed top-0 left-0 w-full shadow-box z-50 py-2 bg-base-bg">
       <div className="flex justify-between items-center max-w-[1200px] mx-auto w-full px-6">
-        <div onClick={() => navigate(RoutePaths.HOME)}>
+        <div
+          className="flex items-center justify-start gap-2"
+          onClick={() => navigate(RoutePaths.HOME)}
+        >
           <img src="/images/logo.png" className="h-12 cursor-pointer" />
+          <span className="text-sm">{version}</span>
         </div>
         <div className="flex items-center justify-center">
           {navItems.map(it => (

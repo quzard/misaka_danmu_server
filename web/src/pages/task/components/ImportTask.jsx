@@ -1,12 +1,12 @@
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   deleteTask,
   getTaskList,
   pauseTask,
   resumeTask,
   stopTask,
-} from '@/apis';
-import { useEffect, useMemo, useRef, useState } from 'react';
+} from '@/apis'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -18,7 +18,7 @@ import {
   Progress,
   Space,
   Tag,
-} from 'antd';
+} from 'antd'
 import {
   CheckOutlined,
   DeleteOutlined,
@@ -26,8 +26,8 @@ import {
   PauseOutlined,
   StepBackwardOutlined,
   StopOutlined,
-} from '@ant-design/icons';
-import classNames from 'classnames';
+} from '@ant-design/icons'
+import classNames from 'classnames'
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
@@ -238,7 +238,7 @@ export const ImportTask = () => {
             <Input.Search
               placeholder="按任务标题搜索"
               allowClear
-              enterButton="Search"
+              enterButton
               onSearch={value => {
                 navigate(`/task?search=${value}&status=${status}`, {
                   replace: true,
