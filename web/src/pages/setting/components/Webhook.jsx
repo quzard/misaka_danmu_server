@@ -108,14 +108,14 @@ export const Webhook = () => {
                 <Input
                   block
                   readOnly
-                  value={`${domain || window.location.href}/api/webhook/${it}?api_key=${apiKey}`}
+                  value={`${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`}
                 />
                 <Button
                   type="primary"
                   icon={<CopyOutlined />}
                   onClick={() => {
                     copy(
-                      `${domain || window.location.href}/api/webhook/${it}?api_key=${apiKey}`
+                      `${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`
                     )
                   }}
                 />
