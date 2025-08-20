@@ -60,22 +60,29 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
         image_url = image_url.replace('http://', 'https://', 1)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxy=proxy_to_use) as client:
-            referer = "https://www.google.com/"  # 默认值
-            if provider_name:
-                try:
-                    scraper = scraper_manager.get_scraper(provider_name)
-                    if scraper.referer:
-                        referer = scraper.referer
-                except ValueError:
-                    logger.warning(f"下载图片时未找到提供方为 '{provider_name}' 的搜索源，将使用通用 Referer。")
-            
-            # 新增：对于爱奇艺的图片，不发送 Referer，因为它们的CDN可能不允许
-            headers = {}
-            if 'iqiyipic.com' not in image_url:
-                headers["Referer"] = referer
-            
-            response = await client.get(image_url, headers=headers)
+        # 修正：为下载客户端设置一个通用的浏览器User-Agent，以提高成功率
+        client_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        # 修正：简化并修正Referer逻辑
+        # 默认不发送Referer，但如果提供了provider_name，则使用该源的Referer
+        if provider_name:
+            try:
+                scraper = scraper_manager.get_scraper(provider_name)
+                if scraper.referer:
+                    client_headers["Referer"] = scraper.referer
+            except ValueError:
+                logger.warning(f"下载图片时未找到提供方为 '{provider_name}' 的搜索源，将不发送 Referer。")
+        
+        # 针对特定源的特殊处理：确保Referer是正确的，即使provider_name不是该源（例如从TMDB获取的图片链接）
+        if 'iqiyipic.com' in image_url:
+            client_headers["Referer"] = "https://www.iqiyi.com/"
+        elif 'hdslb.com' in image_url:
+            client_headers["Referer"] = "https://www.bilibili.com/"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, proxy=proxy_to_use, headers=client_headers) as client:
+            response = await client.get(image_url)
             response.raise_for_status()
 
             content_type = response.headers.get("content-type", "")
