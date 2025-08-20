@@ -36,7 +36,7 @@ export const getLogs = (options = {}) =>
 /** 匹配测试 */
 export const getMatchTest = data =>
   api.post(
-    `/api/${data.apiToken}/match`,
+    `/api/v1/${data.apiToken}/match`,
     JSON.stringify({ fileName: data.fileName })
   )
 
@@ -292,12 +292,12 @@ export const toggleSourceIncremental = data =>
   api.put(`/api/ui/library/source/${data.sourceId}/toggle-incremental-refresh`)
 
 /** 增量更新 */
-export const incrementalUpdate = (data) =>
-  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=incremental`);
+export const incrementalUpdate = data =>
+  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=incremental`)
 
 /** 全量刷新 */
-export const fullSourceUpdate = (data) =>
-  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=full`);
+export const fullSourceUpdate = data =>
+  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=full`)
 
 /** 获取分集 */
 export const getEpisodes = data =>

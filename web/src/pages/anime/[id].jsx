@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   deleteAnimeSource,
@@ -30,11 +30,12 @@ import { RoutePaths } from '../../general/RoutePaths'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
+import { padStart } from 'lodash'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
   const [loading, setLoading] = useState(true)
-  const [soueceList, setSourceList] = useState([])
+  const [sourceList, setSourceList] = useState([])
   const [animeDetail, setAnimeDetail] = useState({})
   const [libraryList, setLibraryList] = useState([])
   const [renderList, setRenderList] = useState([])
@@ -44,7 +45,13 @@ export const AnimeDetail = () => {
 
   const navigate = useNavigate()
 
-  console.log(soueceList, 'soueceList')
+  console.log(sourceList, 'sourceList')
+
+  const totalEpisodeCount = useMemo(() => {
+    return sourceList.reduce((total, item) => {
+      return total + item.episodeCount
+    }, 0)
+  }, [sourceList])
 
   const getDetail = async () => {
     setLoading(true)
@@ -409,15 +416,19 @@ export const AnimeDetail = () => {
             <div className="flex items-center justify-start gap-4">
               {/* 优先使用本地缓存图片，否则回退到原始URL */}
               {(animeDetail.localImagePath || animeDetail.imageUrl) && (
-                <img src={animeDetail.localImagePath || animeDetail.imageUrl} className="h-[100px]" />
+                <img
+                  src={animeDetail.localImagePath || animeDetail.imageUrl}
+                  className="h-[100px]"
+                />
               )}
               <div>
                 <div className="text-xl font-bold mb-3">
-                  {animeDetail.title}
+                  {animeDetail.title}（Season{' '}
+                  {padStart(String(animeDetail.season), 2, '0')}）
                 </div>
                 <div className="flex items-center justify-start gap-2">
-                  <span>季: {animeDetail.season}</span>|<span>总集数: 1</span>|
-                  <span>已关联 {soueceList.length} 个源</span>
+                  <span>总集数: {totalEpisodeCount}</span>|
+                  <span>已关联 {sourceList.length} 个源</span>
                 </div>
               </div>
             </div>
@@ -447,12 +458,12 @@ export const AnimeDetail = () => {
           >
             删除选中
           </Button>
-          {!!soueceList?.length ? (
+          {!!sourceList?.length ? (
             <Table
               rowSelection={{ type: 'checkbox', ...rowSelection }}
               pagination={false}
               size="small"
-              dataSource={soueceList}
+              dataSource={sourceList}
               columns={columns}
               rowKey={'sourceId'}
               scroll={{ x: '100%' }}

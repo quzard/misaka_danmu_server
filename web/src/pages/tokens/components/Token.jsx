@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import {
   addToken,
   deleteToken,
+  getCustomDomain,
   getTokenList,
   getTokenLog,
   toggleTokenStatus,
@@ -31,11 +32,16 @@ export const Token = () => {
   const [form] = Form.useForm()
   const [tokenLogs, setTokenLogs] = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
+  const [domain, setDomain] = useState('')
 
   const getTokens = async () => {
     try {
-      const res = await getTokenList()
-      setTokenList(res.data)
+      const [tokenRes, domainRes] = await Promise.all([
+        getTokenList(),
+        getCustomDomain(),
+      ])
+      setTokenList(tokenRes.data)
+      setDomain(domainRes.data?.value ?? '')
       setLoading(false)
     } catch (error) {
       console.error(error)
@@ -114,8 +120,7 @@ export const Token = () => {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      fixed: 'left',
-      width: 150,
+      width: 100,
     },
     {
       title: 'Token',
@@ -187,7 +192,7 @@ export const Token = () => {
             <span
               className="cursor-pointer hover:text-primary"
               onClick={() => {
-                copy(record.token)
+                copy(`${domain || window.location.href}/api/v1/${record.token}`)
                 message.success('复制成功')
               }}
             >
