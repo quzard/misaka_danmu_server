@@ -401,15 +401,20 @@ export const AnimeDetail = () => {
     getDetail()
   }, [])
 
+  let imageSrc = animeDetail.localImagePath || animeDetail.imageUrl
+  // 兼容旧的、错误的缓存路径
+  if (imageSrc && imageSrc.startsWith('/images/')) {
+    imageSrc = imageSrc.replace('/images/', '/data/images/')
+  }
+
   return (
     <div className="my-6">
       <Card loading={loading} title={null}>
         <Row gutter={[12, 12]}>
           <Col md={20} xs={24}>
             <div className="flex items-center justify-start gap-4">
-              {/* 优先使用本地缓存图片，否则回退到原始URL */}
-              {(animeDetail.localImagePath || animeDetail.imageUrl) && (
-                <img src={animeDetail.localImagePath || animeDetail.imageUrl} className="h-[100px]" />
+              {imageSrc && (
+                <img src={imageSrc} className="h-[100px]" />
               )}
               <div>
                 <div className="text-xl font-bold mb-3">
