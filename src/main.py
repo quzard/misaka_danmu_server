@@ -222,8 +222,8 @@ if settings.environment == "development":
 else:
     # 生产环境：显式挂载静态资源目录
     app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    # 挂载前端的静态图片 (如 logo)
-    app.mount("/images", StaticFiles(directory="config/image"), name="images")
+    # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
+    app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
     # 挂载用户缓存的图片 (如海报)
     app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
     # 然后，为所有其他路径提供 index.html 以支持前端路由
