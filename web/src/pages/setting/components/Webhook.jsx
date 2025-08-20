@@ -75,7 +75,7 @@ export const Webhook = () => {
         </div>
         <div className="mb-4">{`URL 格式为：http(s)://域名(ip):端口(port)/api/webhook/{服务名}?api_key={你的API Key}`}</div>
         <div className="flex items-center justify-start gap-3 mb-4">
-          <div className="shrink-0 w-[120px]">API Key:</div>
+          <div className="shrink-0 w-auto md:w-[120px]">API Key:</div>
           <div className="w-full">
             <Space.Compact style={{ width: '100%' }}>
               <Input block readOnly value={apiKey} />
@@ -87,7 +87,7 @@ export const Webhook = () => {
             </Space.Compact>
           </div>
         </div>
-        <div className="flex items-center justify-start gap-3 mb-4">
+        <div className="flex items-center justify-start gap-3 mb-4 flex-wrap md:flex-nowrap">
           <div className="shrink-0 w-[120px]">自定义域名(可选):</div>
           <div className="w-full">
             <Input
@@ -96,13 +96,22 @@ export const Webhook = () => {
               onChange={e => setDomain(e.target.value)}
             />
           </div>
-          <Button type="primary" className="w-[120px]" onClick={onSaveDoamin}>
+          <Button
+            type="primary"
+            className="w-full md:w-[120px]"
+            onClick={onSaveDoamin}
+          >
             保存域名
           </Button>
         </div>
         {services.map(it => (
-          <div key={it} className="flex items-center justify-start gap-3 mb-4">
-            <div className="shrink-0 w-[120px]">{it} Webhook地址:</div>
+          <div
+            key={it}
+            className="flex items-center justify-start gap-3 mb-4 flex-wrap md:flex-nowrap"
+          >
+            <div className="shrink-0 w-auto md:w-[120px]">
+              {it} Webhook地址:
+            </div>
             <div className="w-full">
               <Space.Compact style={{ width: '100%' }}>
                 <Input
