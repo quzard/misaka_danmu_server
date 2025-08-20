@@ -3,6 +3,8 @@ import Cookies from 'js-cookie'
 
 const getURL = url => {
   return {
+    baseURL:
+      process.env.NODE_ENV === 'development' ? 'http://0.0.0.0:7768' : '/',
     url: url,
   }
 }
