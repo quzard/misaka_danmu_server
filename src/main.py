@@ -49,36 +49,36 @@ async def lifespan(app: FastAPI):
     # 新增：集中定义所有默认配置
     default_configs = {
         # 缓存 TTL
-        'jwt_secret_key': (secrets.token_hex(32), '用于签名JWT令牌的密钥，在首次启动时自动生成。'),
-        'search_ttl_seconds': (10800, '搜索结果的缓存时间（秒），最低3小时。'),
-        'episodes_ttl_seconds': (10800, '分集列表的缓存时间（秒），最低3小时。'),
-        'base_info_ttl_seconds': (10800, '基础媒体信息（如爱奇艺）的缓存时间（秒），最低3小时。'),
-        'metadata_search_ttl_seconds': (10800, '元数据（如TMDB, Bangumi）搜索结果的缓存时间（秒），最低3小时。'),
+        'jwtSecretKey': (secrets.token_hex(32), '用于签名JWT令牌的密钥，在首次启动时自动生成。'),
+        'searchTtlSeconds': (10800, '搜索结果的缓存时间（秒），最低3小时。'),
+        'episodesTtlSeconds': (10800, '分集列表的缓存时间（秒），最低3小时。'),
+        'baseInfoTtlSeconds': (10800, '基础媒体信息（如爱奇艺）的缓存时间（秒），最低3小时。'),
+        'metadataSearchTtlSeconds': (10800, '元数据（如TMDB, Bangumi）搜索结果的缓存时间（秒），最低3小时。'),
         # API 和 Webhook
-        'custom_api_domain': ('', '用于拼接弹幕API地址的自定义域名。'),
-        'webhook_api_key': ('', '用于Webhook调用的安全密钥。'),
-        'external_api_key': ('', '用于外部API调用的安全密钥。'),
-        'webhook_custom_domain': ('', '用于拼接Webhook URL的自定义域名。'),
+        'customApiDomain': ('', '用于拼接弹幕API地址的自定义域名。'),
+        'webhookApiKey': ('', '用于Webhook调用的安全密钥。'),
+        'externalApiKey': ('', '用于外部API调用的安全密钥。'),
+        'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
         # 认证
         # 代理
-        'proxy_url': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),
-        'proxy_enabled': ('false', '是否全局启用代理。'),
-        'jwt_expire_minutes': (settings.jwt.access_token_expire_minutes, 'JWT令牌的有效期（分钟）。-1 表示永不过期。'),
+        'proxyUrl': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),
+        'proxyEnabled': ('false', '是否全局启用代理。'),
+        'jwtExpireMinutes': (settings.jwt.access_token_expire_minutes, 'JWT令牌的有效期（分钟）。-1 表示永不过期。'),
         # 元数据源
-        'tmdb_api_key': ('', '用于访问 The Movie Database API 的密钥。'),
-        'tmdb_api_base_url': ('https://api.themoviedb.org', 'TMDB API 的基础域名。'),
-        'tmdb_image_base_url': ('https://image.tmdb.org', 'TMDB 图片服务的基础 URL。'),
-        'tvdb_api_key': ('', '用于访问 TheTVDB API 的密钥。'),
-        'bangumi_client_id': ('', '用于Bangumi OAuth的App ID。'),
-        'bangumi_client_secret': ('', '用于Bangumi OAuth的App Secret。'),
-        'douban_cookie': ('', '用于访问豆瓣API的Cookie。'),
+        'tmdbApiKey': ('', '用于访问 The Movie Database API 的密钥。'),
+        'tmdbApiBaseUrl': ('https://api.themoviedb.org', 'TMDB API 的基础域名。'),
+        'tmdbImageBaseUrl': ('https://image.tmdb.org', 'TMDB 图片服务的基础 URL。'),
+        'tvdbApiKey': ('', '用于访问 TheTVDB API 的密钥。'),
+        'bangumiClientId': ('', '用于Bangumi OAuth的App ID。'),
+        'bangumiClientSecret': ('', '用于Bangumi OAuth的App Secret。'),
+        'doubanCookie': ('', '用于访问豆瓣API的Cookie。'),
         # 弹幕源
-        'danmaku_output_limit_per_source': ('-1', '单源弹幕输出总数限制。-1为无限制。'),
-        'danmaku_aggregation_enabled': ('true', '是否启用跨源弹幕聚合功能。'),
-        'scraper_verification_enabled': ('false', '是否启用搜索源签名验证。'),
-        'bilibili_cookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
-        'gamer_cookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
-        'gamer_user_agent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
+        'danmakuOutputLimitPerSource': ('-1', '单源弹幕输出总数限制。-1为无限制。'),
+        'danmakuAggregationEnabled': ('true', '是否启用跨源弹幕聚合功能。'),
+        'scraperVerificationEnabled': ('false', '是否启用搜索源签名验证。'),
+        'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
+        'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
+        'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
     }
     await app.state.config_manager.register_defaults(default_configs)
 

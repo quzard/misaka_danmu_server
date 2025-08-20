@@ -30,8 +30,8 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
         return None
 
     # --- Start of new proxy logic ---
-    proxy_url = await crud.get_config_value(session, "proxy_url", "")
-    proxy_enabled_str = await crud.get_config_value(session, "proxy_enabled", "false")
+    proxy_url = await crud.get_config_value(session, "proxyUrl", "")
+    proxy_enabled_str = await crud.get_config_value(session, "proxyEnabled", "false")
     proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
     use_proxy_for_this_provider = False
 

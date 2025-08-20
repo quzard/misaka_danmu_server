@@ -48,8 +48,8 @@ class GamerScraper(BaseScraper):
             return
         
         async with self._session_factory() as session:
-            self._cookie = await crud.get_config_value(session, "gamer_cookie", "")
-            user_agent = await crud.get_config_value(session, "gamer_user_agent", "")
+            self._cookie = await crud.get_config_value(session, "gamerCookie", "")
+            user_agent = await crud.get_config_value(session, "gamerUserAgent", "")
 
         if self._cookie:
             self.client.headers["Cookie"] = self._cookie
@@ -77,7 +77,7 @@ class GamerScraper(BaseScraper):
             if new_cookie_str and new_cookie_str != self._cookie:
                 self.logger.info("Gamer: Cookie 刷新成功，正在更新数据库...")
                 async with self._session_factory() as session:
-                    await crud.update_config_value(session, "gamer_cookie", new_cookie_str)
+                    await crud.update_config_value(session, "gamerCookie", new_cookie_str)
                 self._cookie = new_cookie_str # 更新内部状态
                 return True
             else:
