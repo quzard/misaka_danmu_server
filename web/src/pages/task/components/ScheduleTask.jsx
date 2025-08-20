@@ -35,11 +35,10 @@ export const ScheduleTask = () => {
   const refreshTasks = async () => {
     try {
       const res = await getScheduledTaskList()
-      setScheduleTaskList(res.data || [])
+      setScheduleTaskList(res.data)
       setLoading(false)
     } catch (error) {
       console.error(error)
-      setScheduleTaskList([])
       setLoading(false)
     }
   }
@@ -110,10 +109,8 @@ export const ScheduleTask = () => {
       key: 'lastRunAt',
       width: 200,
       render: (_, record) => {
-        return record.lastRunAt ? (
+        return (
           <div>{dayjs(record.lastRunAt).format('YYYY-MM-DD HH:mm:ss')}</div>
-        ) : (
-          '-'
         )
       },
     },
@@ -123,10 +120,8 @@ export const ScheduleTask = () => {
       key: 'nextRunAt',
       width: 200,
       render: (_, record) => {
-        return record.nextRunAt ? (
+        return (
           <div>{dayjs(record.nextRunAt).format('YYYY-MM-DD HH:mm:ss')}</div>
-        ) : (
-          '-'
         )
       },
     },
