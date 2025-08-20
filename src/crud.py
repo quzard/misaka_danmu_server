@@ -795,6 +795,18 @@ async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     ])
     await session.commit()
 
+async def get_scraper_setting_by_name(session: AsyncSession, provider_name: str) -> Optional[Dict[str, Any]]:
+    """获取单个搜索源的设置。"""
+    scraper = await session.get(Scraper, provider_name)
+    if scraper:
+        return {
+            "providerName": scraper.provider_name,
+            "isEnabled": scraper.is_enabled,
+            "displayOrder": scraper.display_order,
+            "useProxy": scraper.use_proxy
+        }
+    return None
+
 async def update_scraper_proxy(session: AsyncSession, provider_name: str, use_proxy: bool) -> bool:
     """更新单个搜索源的代理设置。"""
     stmt = update(Scraper).where(Scraper.provider_name == provider_name).values(use_proxy=use_proxy)
