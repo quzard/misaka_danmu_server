@@ -856,7 +856,7 @@ async def test_proxy_latency(
         target_sites=target_sites_results
     )
 
-@router.get("/scrapers/{providerName}/config", response_model=Dict[str, str], summary="获取指定搜索源的配置")
+@router.get("/scrapers/{providerName}/config", response_model=Dict[str, Any], summary="获取指定搜索源的配置")
 async def get_scraper_config(
     providerName: str,
     current_user: models.User = Depends(security.get_current_user),
