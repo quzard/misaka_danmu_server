@@ -27,6 +27,7 @@ import {
   getTmdbSearch,
   getTvdbDetail,
   getTvdbSearch,
+  refreshPoster,
   setAnimeDetail,
 } from '../../apis'
 import { useEffect, useState } from 'react'
@@ -49,6 +50,8 @@ export const Library = () => {
   const title = Form.useWatch('title', form)
   const tmdbId = Form.useWatch('tmdbId', form)
   const type = Form.useWatch('type', form)
+  const animeId = Form.useWatch('animeId', form)
+  const imageUrl = Form.useWatch('imageUrl', form)
 
   const getList = async () => {
     try {
@@ -134,7 +137,7 @@ export const Library = () => {
     },
     {
       title: '操作',
-      width: 120,
+      width: 100,
       fixed: 'right',
       render: (_, record) => {
         return (
@@ -496,6 +499,28 @@ export const Library = () => {
             <InputNumber
               style={{ width: '100%' }}
               placeholder="留空则自动计算"
+            />
+          </Form.Item>
+          <Form.Item name="imageUrl" label="海报URL">
+            <Input
+              addonAfter={
+                <div
+                  className="cursor-pointer"
+                  onClick={async () => {
+                    try {
+                      await refreshPoster({
+                        animeId,
+                        image_url: imageUrl,
+                      })
+                      message.success('海报已刷新并缓存成功！')
+                    } catch (error) {
+                      message.error(`刷新海报失败: ${error.message}`)
+                    }
+                  }}
+                >
+                  <MyIcon icon="refresh" size={20} />
+                </div>
+              }
             />
           </Form.Item>
           <Form.Item name="tmdbId" label="TMDB ID">

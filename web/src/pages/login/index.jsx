@@ -23,7 +23,7 @@ export const Login = () => {
       const res = await login(values)
 
       if (res.data.accessToken) {
-        Cookies.set('token', res.data.accessToken)
+        Cookies.set('token', res.data.accessToken, { expires: 7 })
         message.success('登录成功！')
         navigate('/')
       } else {

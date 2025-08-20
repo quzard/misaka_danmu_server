@@ -902,7 +902,7 @@ async def get_external_comments_from_url(
 
 
 @implementation_router.get(
-    "/comment/{episode_id}",
+    "/comment/{episodeId}",
     response_model=models.CommentResponse,
     summary="[dandanplay兼容] 获取弹幕"
 )

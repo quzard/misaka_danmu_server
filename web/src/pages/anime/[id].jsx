@@ -31,6 +31,7 @@ import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
+
 export const AnimeDetail = () => {
   const { id } = useParams()
   const [loading, setLoading] = useState(true)

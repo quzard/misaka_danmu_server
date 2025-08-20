@@ -31,7 +31,7 @@ async def create_db_engine_and_session(app: FastAPI):
         logger.error(f"=== 错误详情: {e}")
         logger.error("---")
         logger.error("--- 可能的原因与排查建议: ---")
-        logger.error("--- 1. 数据库服务未运行: 请确认您的 MySQL/MariaDB 服务正在运行。")
+        logger.error("--- 1. 数据库服务未运行: 请确认您的 数据库 服务正在运行。")
         logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
         logger.error(f"---    - 主机 (Host): {settings.database.host}")
         logger.error(f"---    - 端口 (Port): {settings.database.port}")

@@ -32,6 +32,7 @@ export const Token = () => {
   const [form] = Form.useForm()
   const [tokenLogs, setTokenLogs] = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
+  const [domain, setDomain] = useState('')
 
   const getTokens = async () => {
     try {
@@ -191,9 +192,7 @@ export const Token = () => {
             <span
               className="cursor-pointer hover:text-primary"
               onClick={() => {
-                copy(
-                  `${domain || window.location.origin}/api/v1/${record.token}`
-                )
+                copy(`${domain || window.location.href}/api/v1/${record.token}`)
                 message.success('复制成功')
               }}
             >
