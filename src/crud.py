@@ -1380,7 +1380,7 @@ async def get_external_api_logs(session: AsyncSession, limit: int = 100) -> List
 async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[Any, str]]):
     if not defaults: return
     
-    existing_stmt = select(Config.config_key)
+    existing_stmt = select(Config.configKey)
     existing_keys = set((await session.execute(existing_stmt)).scalars().all())
     
     new_configs = [
