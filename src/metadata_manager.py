@@ -12,7 +12,6 @@ from fastapi import HTTPException, status
 
 from . import crud, models
 from .config_manager import ConfigManager
-from .metadata_sources.base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
 import httpx
