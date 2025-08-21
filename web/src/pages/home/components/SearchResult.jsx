@@ -20,6 +20,7 @@ import {
   Radio,
   Form,
   Empty,
+  InputNumber,
 } from 'antd'
 import { useAtom } from 'jotai'
 import { lastSearchResultAtom, searchLoadingAtom } from '../../../../store'
@@ -314,13 +315,13 @@ export const SearchResult = () => {
         const [movedItem] = newList.splice(activeIndex, 1)
         newList.splice(overIndex, 0, movedItem)
 
-        // 2. 重新计算所有项的display_order（从1开始连续编号）
-        const updatedList = newList.map((item, index) => ({
-          ...item,
-          episodeIndex: index + 1, // 排序值从1开始
-        }))
+        // // 2. 重新计算所有项的display_order（从1开始连续编号）
+        // const updatedList = newList.map((item, index) => ({
+        //   ...item,
+        //   episodeIndex: index + 1, // 排序值从1开始
+        // }))
 
-        return updatedList
+        return newList
       }
       return list
     })
@@ -343,11 +344,11 @@ export const SearchResult = () => {
       const newList = [...list]
       newList.splice(activeIndex, 1)
 
-      const updatedList = newList.map((item, index) => ({
-        ...item,
-        episodeIndex: index + 1, // 排序值从1开始
-      }))
-      return updatedList
+      // const updatedList = newList.map((item, index) => ({
+      //   ...item,
+      //   episodeIndex: index + 1, // 排序值从1开始
+      // }))
+      return newList
     })
   }
 
@@ -358,6 +359,21 @@ export const SearchResult = () => {
           return {
             ...it,
             title: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
+  }
+
+  const handleEditIndex = (item, value) => {
+    setEditEpisodeList(list => {
+      return list.map(it => {
+        if (it.episodeId === item.episodeId) {
+          return {
+            ...it,
+            episodeIndex: value,
           }
         } else {
           return it
@@ -748,6 +764,7 @@ export const SearchResult = () => {
                     index={index}
                     handleDelete={() => handleDelete(item)}
                     handleEditTitle={value => handleEditTitle(item, value)}
+                    handleEditIndex={value => handleEditIndex(item, value)}
                   />
                 )}
               />
@@ -762,7 +779,13 @@ export const SearchResult = () => {
   )
 }
 
-const SortableItem = ({ item, index, handleDelete, handleEditTitle }) => {
+const SortableItem = ({
+  item,
+  index,
+  handleDelete,
+  handleEditTitle,
+  handleEditIndex,
+}) => {
   const {
     attributes,
     listeners,
@@ -780,12 +803,20 @@ const SortableItem = ({ item, index, handleDelete, handleEditTitle }) => {
 
   const inputRef = useRef(null)
   const [isFocused, setIsFocused] = useState(false)
+  const inputNumberRef = useRef(null)
+  const [isNumberFocused, setIsNumberFocused] = useState(false)
 
   useEffect(() => {
     if (isFocused && inputRef.current) {
       inputRef.current.focus()
     }
   }, [isFocused, item.title])
+
+  useEffect(() => {
+    if (isNumberFocused && inputNumberRef.current) {
+      inputNumberRef.current.focus()
+    }
+  }, [isNumberFocused, item.episodeIndex])
 
   // 拖拽样式
   const style = {
@@ -806,7 +837,15 @@ const SortableItem = ({ item, index, handleDelete, handleEditTitle }) => {
           <MyIcon icon="drag" size={24} />
         </div>
         <div className="w-full flex items-center justify-start gap-3">
-          <div>{item.episodeIndex}</div>
+          <InputNumber
+            ref={inputNumberRef}
+            value={item.episodeIndex}
+            onChange={value => {
+              handleEditIndex(value)
+            }}
+            onFocus={() => setIsNumberFocused(true)}
+            onBlur={() => setIsNumberFocused(false)}
+          />
           <Input
             ref={inputRef}
             style={{
