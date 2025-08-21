@@ -37,6 +37,15 @@ class ConfigManager:
             self._cache[key] = value
             return value
 
+    async def setValue(self, configKey: str, configValue: str):
+        """
+        更新一个配置项的值，并使缓存失效。
+        """
+        # 直接在管理器中处理数据库更新和缓存失效
+        async with self.session_factory() as session:
+            await crud.update_config_value(session, configKey, configValue)
+        self.invalidate(configKey)
+
     async def register_defaults(self, defaults: Dict[str, Tuple[Any, str]]):
         """
         注册默认配置项。

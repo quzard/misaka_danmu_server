@@ -146,6 +146,35 @@ class MetadataSourceManager:
         
         return sorted(full_status_list, key=lambda x: x['displayOrder'])
 
+    async def getProviderConfig(self, providerName: str) -> Dict[str, Any]:
+        """
+        获取特定元数据提供商的配置。
+        """
+        if providerName not in self.sources:
+            raise HTTPException(status_code=404, detail=f"未找到元数据源: {providerName}")
+
+        # 将提供商名称映射到其在数据库中的配置键
+        config_keys_map = {
+            "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
+            "bangumi": ["bangumiClientId", "bangumiClientSecret"],
+            "douban": ["doubanCookie"],
+            "tvdb": ["tvdbApiKey"],
+            "imdb": []  # IMDb 目前没有特定配置
+        }
+
+        keys_to_fetch = config_keys_map.get(providerName)
+        if keys_to_fetch is None:
+            self.logger.warning(f"提供商 '{providerName}' 已加载，但没有定义的配置键。")
+            return {}
+
+        config_values = {key: await self._config_manager.get(key, "") for key in keys_to_fetch}
+
+        # 为单值配置提供特殊处理，以匹配前端期望的格式
+        if providerName in ["douban", "tvdb"]:
+            return {"value": next(iter(config_values.values()), "")}
+
+        return config_values
+
     async def get_details(self, provider: str, id: str, user: models.User) -> Optional[models.MetadataDetailsResponse]:
         """从特定提供商获取详细信息。此方法将调用委托给相应的已加载源插件。"""
         if source_instance := self.sources.get(provider):

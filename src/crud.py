@@ -35,8 +35,8 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
             ).label("episodeCount"),
             func.count(distinct(AnimeSource.id)).label("sourceCount")
         )
-        .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
-        .join(Episode, AnimeSource.id == Episode.source_id, isouter=True)
+        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
+        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
         .group_by(Anime.id)
         .order_by(Anime.createdAt.desc())
     )
@@ -91,8 +91,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     await session.flush()  # Flush to get the new anime's ID
     
     # Create associated metadata and alias records
-    new_metadata = AnimeMetadata(anime_id=new_anime.id)
-    new_alias = AnimeAlias(anime_id=new_anime.id)
+    new_metadata = AnimeMetadata(animeId=new_anime.id)
+    new_alias = AnimeAlias(animeId=new_anime.id)
     session.add_all([new_metadata, new_alias])
     
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -174,7 +174,7 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             Anime.imageUrl.label("imageUrl"),
             Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"),
-            func.if_(Anime.type == 'movie', func.concat(Scraper.provider_name, ' 源'), Episode.title).label("episodeTitle"),
+            func.if_(Anime.type == 'movie', func.concat(Scraper.providerName, ' 源'),Episode.title).label("episodeTitle"),
             AnimeAlias.nameEn,
             AnimeAlias.nameJp,
             AnimeAlias.nameRomaji,
@@ -185,11 +185,11 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             AnimeSource.isFavorited.label("isFavorited"),
             AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(AnimeSource, Anime.id == AnimeSource.anime_id)
-        .join(Episode, AnimeSource.id == Episode.source_id)
+        .join(AnimeSource, Anime.id == AnimeSource.animeId)
+        .join(Episode, AnimeSource.id == Episode.sourceId)
         .join(Scraper, AnimeSource.providerName == Scraper.providerName)
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
-        .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
     )
 
     # Add conditions
@@ -232,9 +232,9 @@ async def find_anime_by_title_and_season(session: AsyncSession, title: str, seas
 async def get_episode_indices_by_anime_title(session: AsyncSession, title: str) -> List[int]:
     """获取指定标题的作品已存在的所有分集序号。"""
     stmt = (
-        select(distinct(Episode.episode_index))
+        select(distinct(Episode.episodeIndex))
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
-        .join(Anime, AnimeSource.anime_id == Anime.id)
+        .join(Anime, AnimeSource.animeId == Anime.id)
         .where(Anime.title == title)
     )
     result = await session.execute(stmt)
@@ -251,8 +251,8 @@ async def find_favorited_source_for_anime(session: AsyncSession, title: str, sea
             Anime.type.label("mediaType"),
             Anime.imageUrl.label("imageUrl")
         )
-        .join(Anime, AnimeSource.anime_id == Anime.id)
-        .where(Anime.title == title, Anime.season == season, AnimeSource.is_favorited == True)
+        .join(Anime, AnimeSource.animeId == Anime.id)
+        .where(Anime.title == title, Anime.season == season, AnimeSource.isFavorited == True)
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -275,11 +275,11 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
             func.count(distinct(Episode.id)).label("episodeCount"),
             AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
-        .join(Episode, AnimeSource.id == Episode.source_id, isouter=True)
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
-        .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
-        .group_by(Anime.id, AnimeMetadata.bangumi_id)
+        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
+        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
+        .group_by(Anime.id, AnimeMetadata.bangumiId)
         .order_by(Anime.id)
     )
 
@@ -303,8 +303,8 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
             AnimeMetadata.tmdbEpisodeGroupId,
             Anime.title
         )
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
-        .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
     )
     
     normalized_like_title = f"%{title.replace('：', ':').replace(' ', '')}%"
@@ -327,8 +327,8 @@ async def find_episode_via_tmdb_mapping(session: AsyncSession, tmdb_id: str, gro
             AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(AnimeMetadata, and_(TmdbEpisodeMapping.tmdbTvId == AnimeMetadata.tmdbId, TmdbEpisodeMapping.tmdbEpisodeGroupId == AnimeMetadata.tmdbEpisodeGroupId))
-        .join(Anime, AnimeMetadata.anime_id == Anime.id)
-        .join(AnimeSource, Anime.id == AnimeSource.anime_id)
+        .join(Anime, AnimeMetadata.animeId == Anime.id)
+        .join(AnimeSource, Anime.id == AnimeSource.animeId)
         .join(Episode, and_(AnimeSource.id == Episode.sourceId, Episode.episodeIndex == TmdbEpisodeMapping.absoluteEpisodeNumber))
         .join(Scraper, AnimeSource.providerName == Scraper.providerName)
         .where(TmdbEpisodeMapping.tmdbTvId == tmdb_id, TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id)
@@ -348,9 +348,9 @@ async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_
     """
     stmt = (
         select(Episode.id)
-        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(
-            AnimeSource.anime_id == anime_id,
+            AnimeSource.animeId == anime_id,
             Episode.episodeIndex == episode_index
         )
     )
@@ -359,9 +359,9 @@ async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_
 
 async def fetch_comments_for_episodes(session: AsyncSession, episode_ids: List[int]) -> List[Dict[str, Any]]:
     """
-    获取多个分集ID的所有弹幕。
+    获取一个或多个分集ID的所有弹幕。
     """
-    stmt = select(Comment.id.label("cid"), Comment.p, Comment.m).where(Comment.episode_id.in_(episode_ids))
+    stmt = select(Comment.p, Comment.m).where(Comment.episodeId.in_(episode_ids))
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -373,9 +373,9 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
             Anime.createdAt.label("startDate"), Anime.sourceUrl.label("bangumiUrl"),
             func.count(distinct(Episode.id)).label("episodeCount"), AnimeMetadata.bangumi_id.label("bangumiId")
         )
-        .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
-        .join(Episode, AnimeSource.id == Episode.source_id, isouter=True)
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
+        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
+        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .where(Anime.id == anime_id)
         .group_by(Anime.id, AnimeMetadata.bangumi_id)
     )
@@ -388,17 +388,17 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
     if anime_details['type'] == 'movie':
         ep_stmt = (
             select(Episode.id.label("episodeId"), func.concat(AnimeSource.providerName, ' 源').label("episodeTitle"), Scraper.displayOrder.label("episodeNumber"))
-            .join(AnimeSource, Episode.source_id == AnimeSource.id)
+            .join(AnimeSource, Episode.sourceId == AnimeSource.id)
             .join(Scraper, AnimeSource.providerName == Scraper.providerName)
-            .where(AnimeSource.anime_id == anime_id)
+            .where(AnimeSource.animeId == anime_id)
             .order_by(Scraper.displayOrder)
         )
     else:
         ep_stmt = (
             select(Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Episode.episodeIndex.label("episodeNumber"))
-            .join(AnimeSource, Episode.source_id == AnimeSource.id)
-            .where(AnimeSource.anime_id == anime_id)
-            .order_by(Episode.episode_index)
+            .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+            .where(AnimeSource.animeId == anime_id)
+            .order_by(Episode.episodeIndex)
         )
     
     episodes_res = await session.execute(ep_stmt)
@@ -517,9 +517,7 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
 
 async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
     """获取指定分集的所有弹幕"""
-    stmt = select(Comment.id.label("cid"), Comment.p, Comment.m).where(Comment.episodeId == episode_id)
-    result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    return await fetch_comments_for_episodes(session, [episode_id])
 
 async def get_existing_comment_cids(session: AsyncSession, episode_id: int) -> set:
     """获取指定分集已存在的所有弹幕 cid。"""
@@ -608,8 +606,8 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
             AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"), AnimeSource.mediaId.label("mediaId"),
             Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(Anime, AnimeSource.anime_id == Anime.id)
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
+        .join(Anime, AnimeSource.animeId == Anime.id)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .where(AnimeSource.id == source_id)
     )
     result = await session.execute(stmt)
@@ -627,8 +625,8 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
             AnimeSource.createdAt.label("createdAt"),
             func.count(Episode.id).label("episodeCount")
         )
-        .outerjoin(Episode, AnimeSource.id == Episode.source_id)
-        .where(AnimeSource.anime_id == anime_id)
+        .outerjoin(Episode, AnimeSource.id == Episode.sourceId)
+        .where(AnimeSource.animeId == anime_id)
         .group_by(AnimeSource.id)
         .order_by(AnimeSource.createdAt)
     )
@@ -689,8 +687,8 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
             AnimeAlias.nameEn.label("nameEn"), AnimeAlias.nameJp.label("nameJp"), AnimeAlias.nameRomaji.label("nameRomaji"), AnimeAlias.aliasCn1.label("aliasCn1"),
             AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3")
         )
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
-        .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
         .where(Anime.id == anime_id)
     )
     result = await session.execute(stmt)
@@ -745,14 +743,14 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
         existing_target_source = await session.execute(
             select(AnimeSource).where(
                 AnimeSource.animeId == target_anime_id,
-                AnimeSource.providerName == src.provider_name,
-                AnimeSource.mediaId == src.media_id
+                AnimeSource.providerName == src.providerName,
+                AnimeSource.mediaId == src.mediaId
             )
         )
         if existing_target_source.scalar_one_or_none():
             await session.delete(src) # Delete the duplicate from the source anime
         else:
-            src.anime_id = target_anime_id # Re-parent
+            src.animeId = target_anime_id
     
     await session.delete(source_anime)
     await session.commit()
@@ -786,7 +784,7 @@ async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     new_providers = [name for name in provider_names if name not in existing_providers]
     if not new_providers: return
 
-    max_order_stmt = select(func.max(Scraper.display_order))
+    max_order_stmt = select(func.max(Scraper.displayOrder))
     max_order = (await session.execute(max_order_stmt)).scalar_one_or_none() or 0
     
     session.add_all([
@@ -855,8 +853,8 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
     
     session.add_all([
         MetadataSource(
-            provider_name=name, display_order=max_order + i + 1,
-            is_aux_search_enabled=(name == 'tmdb'), use_proxy=False
+            providerName=name, displayOrder=max_order + i + 1,
+            isAuxSearchEnabled=(name == 'tmdb'), useProxy=False
         )
         for i, name in enumerate(new_providers)
     ])
@@ -980,7 +978,7 @@ async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
 # --- API Token Management ---
 
 async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(ApiToken).order_by(ApiToken.created_at.desc())
+    stmt = select(ApiToken).order_by(ApiToken.createdAt.desc())
     result = await session.execute(stmt)
     return [
         {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}
@@ -1046,7 +1044,7 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
 # --- UA Filter and Log Services ---
 
 async def get_ua_rules(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(UaRule).order_by(UaRule.created_at.desc())
+    stmt = select(UaRule).order_by(UaRule.createdAt.desc())
     result = await session.execute(stmt)
     return [{"id": r.id, "uaString": r.uaString, "createdAt": r.createdAt} for r in result.scalars()]
 
@@ -1070,7 +1068,7 @@ async def create_token_access_log(session: AsyncSession, token_id: int, ip_addre
     await session.commit()
 
 async def get_token_access_logs(session: AsyncSession, token_id: int) -> List[Dict[str, Any]]:
-    stmt = select(TokenAccessLog).where(TokenAccessLog.token_id == token_id).order_by(TokenAccessLog.access_time.desc()).limit(200)
+    stmt = select(TokenAccessLog).where(TokenAccessLog.tokenId == token_id).order_by(TokenAccessLog.accessTime.desc()).limit(200)
     result = await session.execute(stmt)
     return [
         {"ipAddress": log.ipAddress, "userAgent": log.userAgent, "accessTime": log.accessTime, "status": log.status, "path": log.path}
@@ -1093,8 +1091,8 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
     if source.isFavorited:
         stmt = (
             update(AnimeSource)
-            .where(AnimeSource.anime_id == source.anime_id, AnimeSource.id != source_id)
-            .values(is_favorited=False)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(isFavorited=False)
         )
         await session.execute(stmt)
     
@@ -1198,8 +1196,8 @@ async def get_sources_with_incremental_refresh_enabled(session: AsyncSession) ->
 async def get_animes_with_tmdb_id(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = (
         select(Anime.id.label("animeId"), Anime.title, AnimeMetadata.tmdbId, AnimeMetadata.tmdbEpisodeGroupId)
-        .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id)
-        .where(Anime.type == 'tv_series', AnimeMetadata.tmdb_id != None, AnimeMetadata.tmdb_id != '')
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId)
+        .where(Anime.type == 'tv_series', AnimeMetadata.tmdbId != None, AnimeMetadata.tmdbId != '')
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]

@@ -990,7 +990,7 @@ async def execute_scraper_action(
 async def clear_all_caches(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
-):
+): #noqa
     """清除数据库中存储的所有缓存数据（如搜索结果、分集列表）。"""
     deleted_count = await crud.clear_all_cache(session)
     logger.info(f"用户 '{current_user.username}' 清除了所有缓存，共 {deleted_count} 条。")
@@ -1151,15 +1151,15 @@ async def regenerate_external_api_key(
 
 @router.get("/external-logs", response_model=List[models.ExternalApiLogInfo], summary="获取最新的外部API访问日志")
 async def get_external_api_logs(
-    current_user: models.User = Depends(security.get_current_user),
+    currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     logs = await crud.get_external_api_logs(session)
     return [models.ExternalApiLogInfo.model_validate(log) for log in logs]
 
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
-async def get_ua_rules(
-    current_user: models.User = Depends(security.get_current_user),
+async def getUaRules(
+    currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     rules = await crud.get_ua_rules(session)
@@ -1170,14 +1170,14 @@ class UaRuleCreate(models.BaseModel):
 
 @router.post("/ua-rules", response_model=models.UaRule, status_code=201, summary="添加UA规则")
 async def add_ua_rule(
-    rule_data: UaRuleCreate,
-    current_user: models.User = Depends(security.get_current_user),
+    ruleData: UaRuleCreate,
+    currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     try:
-        rule_id = await crud.add_ua_rule(session, rule_data.ua_string)
+        rule_id = await crud.add_ua_rule(session, ruleData.uaString)
         # This is a bit inefficient but ensures we return the full object
-        rules = await crud.get_ua_rules(session)
+        rules = await crud.getUaRules(session)
         new_rule = next((r for r in rules if r['id'] == rule_id), None)
         return models.UaRule.model_validate(new_rule)
     except Exception:
@@ -1185,8 +1185,8 @@ async def add_ua_rule(
 
 @router.delete("/ua-rules/{ruleId}", status_code=204, summary="删除UA规则")
 async def delete_ua_rule(
-    ruleId: int,
-    current_user: models.User = Depends(security.get_current_user),
+    ruleId: str,
+    currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     deleted = await crud.delete_ua_rule(session, ruleId)
