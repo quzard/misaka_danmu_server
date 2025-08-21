@@ -343,3 +343,14 @@ export const getDanmakuDetail = data => api.get(`/api/ui/comment/${data.id}`)
 /** 刷新海报 */
 export const refreshPoster = data =>
   api.post(`/api/ui/library/anime/${data.animeId}/refresh-poster`, data)
+
+/** ----------------------------------------------外部控制----------------------------------------------  */
+/** 获取apikey */
+export const getControlApiKey = () => api.get('/api/ui/config/external_api_key')
+
+/** 刷新apikey */
+export const refreshControlApiKey = () =>
+  api.post('/api/ui/config/external_api_key/regenerate')
+
+/** apikey 访问日志 */
+export const getControlApiKeyLog = () => api.get('api/ui/external-logs')

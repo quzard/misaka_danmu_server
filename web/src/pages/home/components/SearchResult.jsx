@@ -273,29 +273,31 @@ export const SearchResult = () => {
     }
 
     // 找到原位置和新位置
-    const activeIndex = editEpisodeList.findIndex(
-      item => item.episodeId === active.data.current.item.episodeId
-    )
-    const overIndex = editEpisodeList.findIndex(
-      item => item.episodeId === over.data.current.item.episodeId
-    )
 
-    if (activeIndex !== -1 && overIndex !== -1) {
-      // 1. 重新排列数组
-      const newList = [...editEpisodeList]
-      const [movedItem] = newList.splice(activeIndex, 1)
-      newList.splice(overIndex, 0, movedItem)
+    setEditEpisodeList(list => {
+      const activeIndex = list.findIndex(
+        item => item.episodeId === active.data.current.item.episodeId
+      )
+      const overIndex = list.findIndex(
+        item => item.episodeId === over.data.current.item.episodeId
+      )
 
-      // 2. 重新计算所有项的display_order（从1开始连续编号）
-      const updatedList = newList.map((item, index) => ({
-        ...item,
-        episodeIndex: index + 1, // 排序值从1开始
-      }))
+      if (activeIndex !== -1 && overIndex !== -1) {
+        // 1. 重新排列数组
+        const newList = [...editEpisodeList]
+        const [movedItem] = newList.splice(activeIndex, 1)
+        newList.splice(overIndex, 0, movedItem)
 
-      // 3. 更新状态
-      console.log(updatedList, 'updatedList')
-      setEditEpisodeList(updatedList)
-    }
+        // 2. 重新计算所有项的display_order（从1开始连续编号）
+        const updatedList = newList.map((item, index) => ({
+          ...item,
+          episodeIndex: index + 1, // 排序值从1开始
+        }))
+
+        return updatedList
+      }
+      return list
+    })
 
     setActiveItem(null)
   }
@@ -309,21 +311,33 @@ export const SearchResult = () => {
   }
 
   const handleDelete = item => {
-    console.log(item, 'item')
-    const activeIndex = editEpisodeList.findIndex(
-      o => o.episodeId === item.episodeId
-    )
-    const newList = [...editEpisodeList]
-    newList.splice(activeIndex, 1)
-
-    // 2. 重新计算所有项的display_order（从1开始连续编号）
-    const updatedList = newList.map((item, index) => ({
-      ...item,
-      episodeIndex: index + 1, // 排序值从1开始
-    }))
-
     // 3. 更新状态
-    setEditEpisodeList(updatedList)
+    setEditEpisodeList(list => {
+      const activeIndex = list.findIndex(o => o.episodeId === item.episodeId)
+      const newList = [...list]
+      newList.splice(activeIndex, 1)
+
+      const updatedList = newList.map((item, index) => ({
+        ...item,
+        episodeIndex: index + 1, // 排序值从1开始
+      }))
+      return updatedList
+    })
+  }
+
+  const handleEditTitle = (item, value) => {
+    setEditEpisodeList(list => {
+      return list.map(it => {
+        if (it.episodeId === item.episodeId) {
+          return {
+            ...it,
+            title: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
   }
 
   const renderDragOverlay = () => {
@@ -697,10 +711,11 @@ export const SearchResult = () => {
                 dataSource={editEpisodeList}
                 renderItem={(item, index) => (
                   <SortableItem
-                    key={item.id || index}
+                    key={item.episodeId}
                     item={item}
                     index={index}
                     handleDelete={() => handleDelete(item)}
+                    handleEditTitle={value => handleEditTitle(item, value)}
                   />
                 )}
               />
@@ -715,7 +730,7 @@ export const SearchResult = () => {
   )
 }
 
-const SortableItem = ({ item, index, handleDelete }) => {
+const SortableItem = ({ item, index, handleDelete, handleEditTitle }) => {
   const {
     attributes,
     listeners,
@@ -730,6 +745,15 @@ const SortableItem = ({ item, index, handleDelete }) => {
       index,
     },
   })
+
+  const inputRef = useRef(null)
+  const [isFocused, setIsFocused] = useState(false)
+
+  useEffect(() => {
+    if (isFocused && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isFocused, item.title])
 
   // 拖拽样式
   const style = {
@@ -750,11 +774,18 @@ const SortableItem = ({ item, index, handleDelete }) => {
         <div className="w-full flex items-center justify-start gap-3">
           <div>{item.episodeIndex}</div>
           <Input
+            ref={inputRef}
             style={{
               width: '100%',
             }}
+            key={item.title}
             value={item.title}
-            onChange={e => {}}
+            onChange={e => {
+              console.log(e.target.value, 'e.target.value')
+              handleEditTitle(e.target.value)
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
           <div onClick={() => handleDelete(item)}>
             <CloseCircleOutlined />

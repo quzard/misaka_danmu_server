@@ -15,6 +15,7 @@ import { Tokens } from '../pages/tokens/index.jsx'
 import { AnimeDetail } from '../pages/anime/[id].jsx'
 import { EpisodeDetail } from '../pages/episode/[id].jsx'
 import { CommentDetail } from '../pages/comment/[id].jsx'
+import { Control } from '../pages/control/index.jsx'
 
 export const router = createBrowserRouter([
   {
@@ -44,6 +45,10 @@ export const router = createBrowserRouter([
       {
         path: RoutePaths.SOURCE,
         element: <Source />,
+      },
+      {
+        path: RoutePaths.CONTROL,
+        element: <Control />,
       },
       {
         path: 'anime/:id',

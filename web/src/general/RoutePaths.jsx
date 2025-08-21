@@ -6,4 +6,5 @@ export const RoutePaths = {
   TOKEN: '/tokens',
   SOURCE: '/source',
   SETTING: '/setting',
+  CONTROL: '/control',
 }
