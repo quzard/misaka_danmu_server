@@ -1,0 +1,90 @@
+[2025-08-21 15:42:10] [root:112] [INFO] - 日志系统已初始化，日志将输出到控制台和 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/app.log
+[2025-08-21 15:42:10] [root:123] [INFO] - 已清空旧的搜索源响应日志: /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:42:10] [root:140] [INFO] - 专用的搜索源响应日志已初始化，将输出到 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:42:11] [src.database:76] [INFO] - 数据库 'danmuapi' 已存在，跳过创建。
+[2025-08-21 15:42:11] [src.database:26] [INFO] - 数据库引擎和会话工厂创建成功。
+[2025-08-21 15:42:12] [src.database:160] [INFO] - ORM 模型已同步到数据库。
+[2025-08-21 15:42:12] [src.crud:1395] [INFO] - 默认配置检查完成。
+[2025-08-21 15:42:12] [src.scraper_manager:53] [WARNING] - 公钥文件 'src/public_key.pem' 未找到。所有搜索源都将无法通过验证。
+[2025-08-21 15:42:12] [src.scraper_manager:191] [INFO] - 搜索源签名验证已禁用。所有搜索源将被视为已验证。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'gamer' (状态: 已启用, 顺序: 5, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'iqiyi' (状态: 已启用, 顺序: 4, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'mgtv' (状态: 已启用, 顺序: 6, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'bilibili' (状态: 已启用, 顺序: 2, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'tencent' (状态: 已启用, 顺序: 1, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'youku' (状态: 已启用, 顺序: 3, 验证: 已验证)。
+[2025-08-21 15:42:13] [src.scraper_manager:178] [INFO] - 已加载搜索源 'renren' (状态: 已启用, 顺序: 7, 验证: 已验证)。
+[2025-08-21 15:42:14] [httpx:1740] [INFO] - HTTP Request: GET https://movie.douban.com/ "HTTP/1.1 200 OK"
+[2025-08-21 15:42:17] [httpx:1740] [INFO] - HTTP Request: GET https://www.imdb.com/ "HTTP/1.1 200 OK"
+[2025-08-21 15:42:17] [src.metadata_manager:188] [INFO] - 元数据源连接状态检查完成: {'douban': '可访问', 'imdb': '可访问'}
+[2025-08-21 15:42:17] [src.metadata_manager:72] [INFO] - 元数据源管理器已初始化。
+[2025-08-21 15:42:17] [src.webhook_manager:42] [INFO] - Webhook 处理器 'emby' (来自模块 emby) 已加载。
+[2025-08-21 15:42:17] [src.webhook_manager:42] [INFO] - Webhook 处理器 'jellyfin' (来自模块 jellyfin) 已加载。
+[2025-08-21 15:42:17] [TaskManager:49] [INFO] - 任务管理器已启动。
+[2025-08-21 15:42:17] [src.scheduler:73] [INFO] - 定时任务 '定时增量追更' (类型: incremental_refresh, 来自模块 incremental_refresh) 已加载。
+[2025-08-21 15:42:17] [src.scheduler:73] [INFO] - 定时任务 'TMDB自动映射与更新' (类型: tmdb_auto_map, 来自模块 tmdb_auto_map) 已加载。
+[2025-08-21 15:42:17] [apscheduler.scheduler:214] [INFO] - Scheduler started
+[2025-08-21 15:42:17] [apscheduler.scheduler:1090] [INFO] - Added job "每日更新" to job store "default"
+[2025-08-21 15:42:17] [src.scheduler:121] [INFO] - 定时任务调度器已启动。
+[2025-08-21 15:47:21] [src.database:108] [INFO] - 数据库引擎已关闭。
+[2025-08-21 15:47:21] [TaskManager:60] [INFO] - 任务管理器已停止。
+[2025-08-21 15:47:21] [apscheduler.scheduler:245] [INFO] - Scheduler has been shut down
+[2025-08-21 15:47:22] [root:112] [INFO] - 日志系统已初始化，日志将输出到控制台和 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/app.log
+[2025-08-21 15:47:22] [root:123] [INFO] - 已清空旧的搜索源响应日志: /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:47:22] [root:140] [INFO] - 专用的搜索源响应日志已初始化，将输出到 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:47:22] [src.database:76] [INFO] - 数据库 'danmuapi' 已存在，跳过创建。
+[2025-08-21 15:47:22] [src.database:26] [INFO] - 数据库引擎和会话工厂创建成功。
+[2025-08-21 15:47:30] [src.database:160] [INFO] - ORM 模型已同步到数据库。
+[2025-08-21 15:47:30] [src.crud:1395] [INFO] - 默认配置检查完成。
+[2025-08-21 15:47:30] [src.scraper_manager:53] [WARNING] - 公钥文件 'src/public_key.pem' 未找到。所有搜索源都将无法通过验证。
+[2025-08-21 15:47:30] [src.scraper_manager:191] [INFO] - 搜索源签名验证已禁用。所有搜索源将被视为已验证。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'gamer' (状态: 已启用, 顺序: 5, 验证: 已验证)。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'iqiyi' (状态: 已启用, 顺序: 4, 验证: 已验证)。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'mgtv' (状态: 已启用, 顺序: 6, 验证: 已验证)。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'bilibili' (状态: 已启用, 顺序: 2, 验证: 已验证)。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'tencent' (状态: 已启用, 顺序: 1, 验证: 已验证)。
+[2025-08-21 15:47:31] [src.scraper_manager:178] [INFO] - 已加载搜索源 'youku' (状态: 已启用, 顺序: 3, 验证: 已验证)。
+[2025-08-21 15:47:32] [src.scraper_manager:178] [INFO] - 已加载搜索源 'renren' (状态: 已启用, 顺序: 7, 验证: 已验证)。
+[2025-08-21 15:47:32] [httpx:1740] [INFO] - HTTP Request: GET https://movie.douban.com/ "HTTP/1.1 200 OK"
+[2025-08-21 15:47:34] [httpx:1740] [INFO] - HTTP Request: GET https://www.imdb.com/ "HTTP/1.1 200 OK"
+[2025-08-21 15:47:41] [src.metadata_manager:188] [INFO] - 元数据源连接状态检查完成: {'douban': '可访问', 'imdb': '可访问'}
+[2025-08-21 15:47:41] [src.metadata_manager:72] [INFO] - 元数据源管理器已初始化。
+[2025-08-21 15:47:41] [src.webhook_manager:42] [INFO] - Webhook 处理器 'emby' (来自模块 emby) 已加载。
+[2025-08-21 15:47:41] [src.webhook_manager:42] [INFO] - Webhook 处理器 'jellyfin' (来自模块 jellyfin) 已加载。
+[2025-08-21 15:47:41] [TaskManager:49] [INFO] - 任务管理器已启动。
+[2025-08-21 15:47:41] [src.scheduler:73] [INFO] - 定时任务 '定时增量追更' (类型: incremental_refresh, 来自模块 incremental_refresh) 已加载。
+[2025-08-21 15:47:41] [src.scheduler:73] [INFO] - 定时任务 'TMDB自动映射与更新' (类型: tmdb_auto_map, 来自模块 tmdb_auto_map) 已加载。
+[2025-08-21 15:47:41] [apscheduler.scheduler:214] [INFO] - Scheduler started
+[2025-08-21 15:47:41] [apscheduler.scheduler:1090] [INFO] - Added job "每日更新" to job store "default"
+[2025-08-21 15:47:41] [src.scheduler:121] [INFO] - 定时任务调度器已启动。
+[2025-08-21 15:48:11] [root:112] [INFO] - 日志系统已初始化，日志将输出到控制台和 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/app.log
+[2025-08-21 15:48:11] [root:123] [INFO] - 已清空旧的搜索源响应日志: /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:48:11] [root:140] [INFO] - 专用的搜索源响应日志已初始化，将输出到 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 15:48:18] [src.database:76] [INFO] - 数据库 'danmuapi' 已存在，跳过创建。
+[2025-08-21 15:48:18] [src.database:26] [INFO] - 数据库引擎和会话工厂创建成功。
+[2025-08-21 15:48:29] [src.database:160] [INFO] - ORM 模型已同步到数据库。
+[2025-08-21 15:48:29] [src.crud:1395] [INFO] - 默认配置检查完成。
+[2025-08-21 15:48:29] [src.scraper_manager:53] [WARNING] - 公钥文件 'src/public_key.pem' 未找到。所有搜索源都将无法通过验证。
+[2025-08-21 15:48:29] [src.scraper_manager:191] [INFO] - 搜索源签名验证已禁用。所有搜索源将被视为已验证。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'gamer' (状态: 已启用, 顺序: 5, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'iqiyi' (状态: 已启用, 顺序: 4, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'mgtv' (状态: 已启用, 顺序: 6, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'bilibili' (状态: 已启用, 顺序: 2, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'tencent' (状态: 已启用, 顺序: 1, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'youku' (状态: 已启用, 顺序: 3, 验证: 已验证)。
+[2025-08-21 15:48:30] [src.scraper_manager:178] [INFO] - 已加载搜索源 'renren' (状态: 已启用, 顺序: 7, 验证: 已验证)。
+[2025-08-21 15:48:30] [httpx:1740] [INFO] - HTTP Request: GET https://movie.douban.com/ "HTTP/1.1 200 OK"
+[2025-08-21 15:48:33] [httpx:1740] [INFO] - HTTP Request: GET https://www.imdb.com/ "HTTP/1.1 202 Accepted"
+[2025-08-21 15:48:33] [src.metadata_manager:188] [INFO] - 元数据源连接状态检查完成: {'douban': '可访问', 'imdb': '可访问'}
+[2025-08-21 15:48:33] [src.metadata_manager:72] [INFO] - 元数据源管理器已初始化。
+[2025-08-21 15:48:33] [src.webhook_manager:42] [INFO] - Webhook 处理器 'emby' (来自模块 emby) 已加载。
+[2025-08-21 15:48:33] [src.webhook_manager:42] [INFO] - Webhook 处理器 'jellyfin' (来自模块 jellyfin) 已加载。
+[2025-08-21 15:48:33] [TaskManager:49] [INFO] - 任务管理器已启动。
+[2025-08-21 15:48:33] [src.scheduler:73] [INFO] - 定时任务 '定时增量追更' (类型: incremental_refresh, 来自模块 incremental_refresh) 已加载。
+[2025-08-21 15:48:33] [src.scheduler:73] [INFO] - 定时任务 'TMDB自动映射与更新' (类型: tmdb_auto_map, 来自模块 tmdb_auto_map) 已加载。
+[2025-08-21 15:48:33] [apscheduler.scheduler:214] [INFO] - Scheduler started
+[2025-08-21 15:48:33] [apscheduler.scheduler:1090] [INFO] - Added job "每日更新" to job store "default"
+[2025-08-21 15:48:34] [src.scheduler:121] [INFO] - 定时任务调度器已启动。
+[2025-08-21 16:46:06] [src.api.ui_api:1121] [INFO] - 用户 'admin' 更新了配置项 'danmaku_aggregation_enabled'。
+[2025-08-21 16:48:22] [src.api.ui_api:1121] [INFO] - 用户 'admin' 更新了配置项 'danmaku_aggregation_enabled'。
+[2025-08-21 16:48:22] [src.api.ui_api:1121] [INFO] - 用户 'admin' 更新了配置项 'danmaku_output_limit_per_source'。

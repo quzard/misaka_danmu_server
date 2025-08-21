@@ -12,9 +12,9 @@ import Cookies from 'js-cookie'
 
 const navItems = [
   { key: RoutePaths.HOME, label: '首页', icon: 'home' },
-  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'danmukaiqi' },
+  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary' },
   { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu' },
-  { key: RoutePaths.TOKEN, label: '弹幕token', icon: 'key' },
+  { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmukaiqi' },
   { key: RoutePaths.SOURCE, label: '搜索源', icon: 'yuan' },
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
