@@ -11,11 +11,11 @@ import { Task } from '@/pages/task'
 import { Library } from '../pages/library/index.jsx'
 import { Setting } from '../pages/setting/index.jsx'
 import { Source } from '../pages/source/index.jsx'
-import { Tokens } from '../pages/tokens/index.jsx'
 import { AnimeDetail } from '../pages/anime/[id].jsx'
 import { EpisodeDetail } from '../pages/episode/[id].jsx'
 import { CommentDetail } from '../pages/comment/[id].jsx'
 import { Control } from '../pages/control/index.jsx'
+import { Bullet } from '../pages/bullet/index.jsx'
 
 export const router = createBrowserRouter([
   {
@@ -31,8 +31,8 @@ export const router = createBrowserRouter([
         element: <Task />,
       },
       {
-        path: RoutePaths.TOKEN,
-        element: <Tokens />,
+        path: RoutePaths.BULLET,
+        element: <Bullet />,
       },
       {
         path: RoutePaths.LIBRARY,

@@ -1,8 +1,8 @@
-import { Token } from './components/Token'
-import { Domain } from './components/Domain'
-import { Ua } from './components/Ua'
+import { Domain } from './Domain'
+import { Token } from './Token'
+import { Ua } from './Ua'
 
-export const Tokens = () => {
+export const TokenManage = () => {
   return (
     <>
       <Token />

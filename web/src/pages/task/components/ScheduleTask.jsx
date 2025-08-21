@@ -15,7 +15,6 @@ import {
   deleteScheduledTask,
   editScheduledTask,
   addScheduledTask,
-  getScheduledTaskList,
   runTask,
   getAvailableScheduledJobs,
 } from '../../../apis'
@@ -24,24 +23,12 @@ import dayjs from 'dayjs'
 
 export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
-  const [scheduleTaskList, setScheduleTaskList] = useState([])
   const [addOpen, setAddOpen] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [availableJobs, setAvailableJobs] = useState([])
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('id', form)
-
-  const refreshTasks = async () => {
-    try {
-      const res = await getScheduledTaskList()
-      setScheduleTaskList(res.data)
-      setLoading(false)
-    } catch (error) {
-      console.error(error)
-      setLoading(false)
-    }
-  }
 
   const jobTypeMapping = useMemo(() => {
     return availableJobs.reduce((acc, job) => {
@@ -54,13 +41,14 @@ export const ScheduleTask = () => {
     try {
       const res = await getAvailableScheduledJobs()
       setAvailableJobs(res.data || [])
+      setLoading(false)
     } catch (error) {
       message.error('获取可用任务类型失败')
+      setLoading(false)
     }
   }
 
   useEffect(() => {
-    refreshTasks()
     fetchAvailableJobs()
   }, [])
 
@@ -176,10 +164,11 @@ export const ScheduleTask = () => {
     const values = await form.validateFields()
     if (!!values.id) {
       try {
+        setConfirmLoading(true)
         await editScheduledTask(values)
         message.success('任务编辑成功。')
         form.resetFields()
-        refreshTasks()
+        fetchAvailableJobs()
         setAddOpen(false)
       } catch (error) {
         message.error('任务编辑失败，请稍后重试。')
@@ -189,7 +178,7 @@ export const ScheduleTask = () => {
         await addScheduledTask(values)
         message.success('任务添加成功。')
         form.resetFields()
-        refreshTasks()
+        fetchAvailableJobs()
         setAddOpen(false)
       } catch (error) {
         message.error('任务添加失败，请稍后重试。')
@@ -208,7 +197,7 @@ export const ScheduleTask = () => {
         try {
           await deleteScheduledTask({ id: record.id })
           message.success('任务删除成功。')
-          refreshTasks()
+          fetchAvailableJobs()
         } catch (error) {
           message.error('任务删除失败，请稍后重试。')
         }
@@ -238,7 +227,7 @@ export const ScheduleTask = () => {
         <Table
           pagination={false}
           size="small"
-          dataSource={scheduleTaskList}
+          dataSource={availableJobs}
           columns={columns}
           rowKey={'id'}
           scroll={{ x: '100%' }}
