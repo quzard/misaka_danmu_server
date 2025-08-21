@@ -121,11 +121,10 @@ export const getImdbSearch = data =>
 /** 任务列表 */
 export const getTaskList = data => api.get('/api/ui/tasks', data)
 /** 暂停任务 */
-export const pauseTask = data =>
-  api.post(`/api/ui/tasks/${data.taskId}/pause`, data)
+export const pauseTask = data => api.post(`/api/ui/tasks/${data.taskId}/pause`)
 /** 继续任务 */
 export const resumeTask = data =>
-  api.post(`/api/ui/tasks/${data.taskId}/resume`, data)
+  api.post(`/api/ui/tasks/${data.taskId}/resume`)
 /** 删除任务 */
 export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
 /** 中止任务 */
