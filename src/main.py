@@ -24,6 +24,8 @@ from .log_manager import setup_logging
 
 print(f"当前环境: {settings.environment}") 
 
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
