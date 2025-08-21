@@ -10,13 +10,14 @@ import {
   Table,
   Tag,
 } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   deleteScheduledTask,
   editScheduledTask,
   addScheduledTask,
   runTask,
   getAvailableScheduledJobs,
+  getScheduledTaskList,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon.jsx'
 import dayjs from 'dayjs'
@@ -25,31 +26,30 @@ export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
-  const [availableJobs, setAvailableJobs] = useState([])
+  const [tasks, setTasks] = useState([])
+  const [availableJobTypes, setAvailableJobTypes] = useState([])
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('id', form)
 
-  const jobTypeMapping = useMemo(() => {
-    return availableJobs.reduce((acc, job) => {
-      acc[job.jobType] = job.name
-      return acc
-    }, {})
-  }, [availableJobs])
-
-  const fetchAvailableJobs = async () => {
+  const fetchData = async () => {
     try {
-      const res = await getAvailableScheduledJobs()
-      setAvailableJobs(res.data || [])
-      setLoading(false)
+      setLoading(true)
+      const [tasksRes, jobsRes] = await Promise.all([
+        getScheduledTaskList(),
+        getAvailableScheduledJobs(),
+      ])
+      setTasks(tasksRes.data || [])
+      setAvailableJobTypes(jobsRes.data || [])
     } catch (error) {
-      message.error('获取可用任务类型失败')
+      message.error('获取定时任务信息失败')
+    } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchAvailableJobs()
+    fetchData()
   }, [])
 
   const columns = [
@@ -65,7 +65,10 @@ export const ScheduleTask = () => {
       key: 'jobType',
       width: 200,
       render: (_, record) => {
-        return <>{jobTypeMapping[record.jobType] || record.jobType}</>
+        const jobType = availableJobTypes.find(
+          job => job.jobType === record.jobType
+        )
+        return <>{jobType?.name || record.jobType}</>
       },
     },
     {
@@ -168,7 +171,7 @@ export const ScheduleTask = () => {
         await editScheduledTask(values)
         message.success('任务编辑成功。')
         form.resetFields()
-        fetchAvailableJobs()
+        fetchData()
         setAddOpen(false)
       } catch (error) {
         message.error('任务编辑失败，请稍后重试。')
@@ -178,7 +181,7 @@ export const ScheduleTask = () => {
         await addScheduledTask(values)
         message.success('任务添加成功。')
         form.resetFields()
-        fetchAvailableJobs()
+        fetchData()
         setAddOpen(false)
       } catch (error) {
         message.error('任务添加失败，请稍后重试。')
@@ -197,7 +200,7 @@ export const ScheduleTask = () => {
         try {
           await deleteScheduledTask({ id: record.id })
           message.success('任务删除成功。')
-          fetchAvailableJobs()
+          fetchData()
         } catch (error) {
           message.error('任务删除失败，请稍后重试。')
         }
@@ -227,7 +230,7 @@ export const ScheduleTask = () => {
         <Table
           pagination={false}
           size="small"
-          dataSource={availableJobs}
+          dataSource={tasks}
           columns={columns}
           rowKey={'id'}
           scroll={{ x: '100%' }}
@@ -265,7 +268,7 @@ export const ScheduleTask = () => {
             className="mb-4"
           >
             <Select
-              options={availableJobs.map(job => ({
+              options={availableJobTypes.map(job => ({
                 value: job.jobType,
                 label: job.name,
               }))}

@@ -12,7 +12,7 @@ from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
 
 class TmdbAutoMapJob(BaseJob):
-    job_type = "tmdb_auto_map"
+    job_type = "tmdbAutoMap"
     job_name = "TMDB自动映射与更新"
 
     # Add this __init__ to match the base class

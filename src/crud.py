@@ -980,7 +980,7 @@ async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
 # --- API Token Management ---
 
 async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(ApiToken).order_by(ApiToken.created_at.desc())
+    stmt = select(ApiToken).order_by(ApiToken.createdAt.desc())
     result = await session.execute(stmt)
     return [
         {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}
@@ -1034,7 +1034,7 @@ async def toggle_api_token(session: AsyncSession, token_id: int) -> bool:
     return False
 
 async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict[str, Any]]:
-    stmt = select(ApiToken).where(ApiToken.token == token, ApiToken.is_enabled == True)
+    stmt = select(ApiToken).where(ApiToken.token == token, ApiToken.isEnabled == True)
     result = await session.execute(stmt)
     token_info = result.scalar_one_or_none()
     if not token_info:

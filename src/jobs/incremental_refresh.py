@@ -10,7 +10,7 @@ from ..tasks import generic_import_task
 
 
 class IncrementalRefreshJob(BaseJob):
-    job_type = "incremental_refresh"
+    job_type = "incrementalRefresh"
     job_name = "定时增量追更"
 
     async def run(self, session: AsyncSession, progress_callback: Callable):
