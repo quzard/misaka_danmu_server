@@ -121,11 +121,10 @@ export const getImdbSearch = data =>
 /** 任务列表 */
 export const getTaskList = data => api.get('/api/ui/tasks', data)
 /** 暂停任务 */
-export const pauseTask = data =>
-  api.post(`/api/ui/tasks/${data.taskId}/pause`, data)
+export const pauseTask = data => api.post(`/api/ui/tasks/${data.taskId}/pause`)
 /** 继续任务 */
 export const resumeTask = data =>
-  api.post(`/api/ui/tasks/${data.taskId}/resume`, data)
+  api.post(`/api/ui/tasks/${data.taskId}/resume`)
 /** 删除任务 */
 export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
 /** 中止任务 */
@@ -343,3 +342,14 @@ export const getDanmakuDetail = data => api.get(`/api/ui/comment/${data.id}`)
 /** 刷新海报 */
 export const refreshPoster = data =>
   api.post(`/api/ui/library/anime/${data.animeId}/refresh-poster`, data)
+
+/** ----------------------------------------------外部控制----------------------------------------------  */
+/** 获取apikey */
+export const getControlApiKey = () => api.get('/api/ui/config/external_api_key')
+
+/** 刷新apikey */
+export const refreshControlApiKey = () =>
+  api.post('/api/ui/config/external_api_key/regenerate')
+
+/** apikey 访问日志 */
+export const getControlApiKeyLog = () => api.get('api/ui/external-logs')

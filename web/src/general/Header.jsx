@@ -16,6 +16,7 @@ const navItems = [
   { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu' },
   { key: RoutePaths.TOKEN, label: '弹幕token', icon: 'key' },
   { key: RoutePaths.SOURCE, label: '搜索源', icon: 'yuan' },
+  { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
 const version = 'v1.0.13'
