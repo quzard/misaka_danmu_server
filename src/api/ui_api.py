@@ -1151,15 +1151,15 @@ async def regenerate_external_api_key(
 
 @router.get("/external-logs", response_model=List[models.ExternalApiLogInfo], summary="获取最新的外部API访问日志")
 async def get_external_api_logs(
-    currentUser: models.User = Depends(security.get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     logs = await crud.get_external_api_logs(session)
     return [models.ExternalApiLogInfo.model_validate(log) for log in logs]
 
 @router.get("/ua-rules", response_model=List[models.UaRule], summary="获取所有UA规则")
-async def getUaRules(
-    currentUser: models.User = Depends(security.get_current_user),
+async def get_ua_rules(
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     rules = await crud.get_ua_rules(session)
@@ -1193,38 +1193,46 @@ async def delete_ua_rule(
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到指定的规则ID。")
 
-@router.get("/config/provider/{providerName}", response_model=Dict[str, str], summary="获取指定元数据源的配置")
+@router.get("/config/provider/{providerName}", response_model=Dict[str, Any], summary="获取指定元数据源的配置")
 async def get_provider_settings(
     providerName: str,
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """获取指定元数据源的所有相关配置。"""
     try:
-        return await metadata_manager.get_provider_config(providerName, session)
+        return await metadata_manager.getProviderConfig(providerName)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 @router.put("/config/provider/{providerName}", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定元数据源的配置")
-async def update_provider_settings(
+async def set_provider_settings(
     providerName: str,
-    payload: Dict[str, str],
+    settings: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """批量更新指定元数据源的相关配置。"""
-    try:
-        allowed_keys = metadata_manager._provider_configs.get(providerName, [])
-        for key, value in payload.items():
-            if key in allowed_keys:
-                await crud.update_config_value(session, key, value or "")
-                config_manager.invalidate(key)
-        logger.info(f"用户 '{current_user.username}' 更新了元数据源 '{providerName}' 的配置。")
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    config_keys_map = {
+        "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
+        "bangumi": ["bangumiClientId", "bangumiClientSecret"],
+        "douban": "doubanCookie", # 单值配置
+        "tvdb": "tvdbApiKey",   # 单值配置
+    }
+
+    if providerName in ["douban", "tvdb"]:
+        key = config_keys_map.get(providerName)
+        if key:
+            await config_manager.setValue(configKey=key, configValue=settings.get("value", ""))
+    else:
+        keys_to_update = config_keys_map.get(providerName, [])
+        tasks = [
+            config_manager.setValue(configKey=key, configValue=settings[key])
+            for key in keys_to_update if key in settings
+        ]
+        if tasks:
+            await asyncio.gather(*tasks)
+    logger.info(f"用户 '{current_user.username}' 更新了元数据源 '{providerName}' 的配置。")
 
 @router.get("/tokens/{tokenId}/logs", response_model=List[models.TokenAccessLog], summary="获取Token的访问日志")
 async def get_token_logs(

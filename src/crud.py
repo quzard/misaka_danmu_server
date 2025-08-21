@@ -811,7 +811,6 @@ async def update_scraper_proxy(session: AsyncSession, provider_name: str, use_pr
     """更新单个搜索源的代理设置。"""
     stmt = update(Scraper).where(Scraper.providerName == provider_name).values(useProxy=use_proxy)
     result = await session.execute(stmt)
-    await session.commit()
     return result.rowcount > 0
 
 async def get_all_scraper_settings(session: AsyncSession) -> List[Dict[str, Any]]:
@@ -953,7 +952,6 @@ async def update_config_value(session: AsyncSession, key: str, value: str):
         raise NotImplementedError(f"配置更新功能尚未为数据库类型 '{dialect}' 实现。")
 
     await session.execute(stmt)
-    await session.commit()
 
 async def clear_expired_cache(session: AsyncSession):
     await session.execute(delete(CacheData).where(CacheData.expiresAt <= func.now()))

@@ -293,8 +293,8 @@ class DanmakuOutputSettings(BaseModel):
 
 
 class ExternalApiLogInfo(BaseModel):
-    access_time: datetime
-    ip_address: str
+    accessTime: datetime
+    ipAddress: str
     endpoint: str
     statusCode: int
     message: Optional[str] = None
