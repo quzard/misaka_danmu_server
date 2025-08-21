@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, R
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .. import crud, models, orm_models, security, scraper_manager
-from . import models as api_models
+from src import models as api_models
 from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
