@@ -229,15 +229,15 @@ export const getTmdbConfig = () => api.get('/api/ui/config/provider/tmdb')
 export const setTmdbConfig = data =>
   api.put('/api/ui/config/provider/tmdb', data)
 /** 获取豆瓣配置 */
-export const getDoubanConfig = () => api.get('/api/ui/config/douban_cookie')
+export const getDoubanConfig = () => api.get('/api/ui/config/provider/douban')
 /** 设置豆瓣配置 */
 export const setDoubanConfig = data =>
-  api.put('/api/ui/config/douban_cookie', data)
+  api.put('/api/ui/config/provider/douban', data)
 /** 获取tvdb配置 */
-export const getTvdbConfig = () => api.get('/api/ui/config/tvdb_api_key')
+export const getTvdbConfig = () => api.get('/api/ui/config/provider/tvdb')
 /** 设置tvdb配置 */
 export const setTvdbConfig = data =>
-  api.put('/api/ui/config/tvdb_api_key', data)
+  api.put('/api/ui/config/provider/tvdb', data)
 
 /** 获取代理配置 */
 export const getProxyConfig = () => api.get('/api/ui/config/proxy')
