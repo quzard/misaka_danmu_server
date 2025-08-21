@@ -922,14 +922,14 @@ async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: in
     if dialect == 'mysql':
         stmt = mysql_insert(CacheData).values(values_to_insert)
         stmt = stmt.on_duplicate_key_update(
-            cache_provider=stmt.inserted.cacheProvider,
-            cache_value=stmt.inserted.cacheValue,
-            expires_at=stmt.inserted.expiresAt
+            cache_provider=stmt.inserted.cache_provider,
+            cache_value=stmt.inserted.cache_value,
+            expires_at=stmt.inserted.expires_at
         )
     elif dialect == 'postgresql':
         stmt = postgresql_insert(CacheData).values(values_to_insert)
         stmt = stmt.on_conflict_on_constraint('cache_data_pkey').do_update(
-            set_={"cacheProvider": stmt.excluded.cacheProvider, "cacheValue": stmt.excluded.cacheValue, "expiresAt": stmt.excluded.expiresAt}
+            set_={"cache_provider": stmt.excluded.cache_provider, "cache_value": stmt.excluded.cache_value, "expires_at": stmt.excluded.expires_at}
         )
     else:
         raise NotImplementedError(f"缓存设置功能尚未为数据库类型 '{dialect}' 实现。")
@@ -943,11 +943,11 @@ async def update_config_value(session: AsyncSession, key: str, value: str):
 
     if dialect == 'mysql':
         stmt = mysql_insert(Config).values(values_to_insert)
-        stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.configValue)
+        stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.config_value)
     elif dialect == 'postgresql':
         stmt = postgresql_insert(Config).values(values_to_insert)
         stmt = stmt.on_conflict_on_constraint('config_pkey').do_update(
-            set_={'configValue': stmt.excluded.configValue}
+            set_={'config_value': stmt.excluded.config_value}
         )
     else:
         raise NotImplementedError(f"配置更新功能尚未为数据库类型 '{dialect}' 实现。")

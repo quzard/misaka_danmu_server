@@ -76,7 +76,7 @@ class SchedulerManager:
 
     def get_available_jobs(self) -> List[Dict[str, str]]:
         """获取所有已加载的可用任务类型及其名称。"""
-        return [{"type": job.job_type, "name": job.job_name} for job in self._job_classes.values()]
+        return [{"jobType": job.job_type, "name": job.job_name} for job in self._job_classes.values()]
 
     def _create_job_runner(self, job_type: str) -> Callable:
         """创建一个包装器，用于在 TaskManager 中运行任务，并等待其完成。"""
