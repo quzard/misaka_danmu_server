@@ -278,8 +278,13 @@ class BilibiliScraper(BaseScraper):
 
     async def generate_login_qrcode(self) -> Dict[str, str]:
         """生成用于扫码登录的二维码信息。"""
+        # 新增：为二维码生成请求添加WBI签名
         url = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-        response = await self._request_with_rate_limit("GET", url)
+        mixin_key = await self._get_wbi_mixin_key()
+        # The generate endpoint has no parameters, so we sign an empty dict
+        signed_params = self._get_wbi_signed_params({}, mixin_key)
+        
+        response = await self._request_with_rate_limit("GET", url, params=signed_params)
         response.raise_for_status()
         data = response.json().get("data", {})
         if not data.get("qrcode_key") or not data.get("url"):
@@ -288,8 +293,13 @@ class BilibiliScraper(BaseScraper):
 
     async def poll_login_status(self, qrcodeKey: str) -> Dict[str, Any]:
         """轮询扫码登录状态。"""
+        # 新增：为轮询请求添加WBI签名
         url = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-        response = await self._request_with_rate_limit("GET", url, params={"qrcode_key": qrcodeKey})
+        params = {"qrcode_key": qrcodeKey}
+        mixin_key = await self._get_wbi_mixin_key()
+        signed_params = self._get_wbi_signed_params(params, mixin_key)
+        
+        response = await self._request_with_rate_limit("GET", url, params=signed_params)
         response.raise_for_status()
         poll_data = response.json().get("data", {})
 
@@ -305,8 +315,10 @@ class BilibiliScraper(BaseScraper):
                 cookie_string = "; ".join(all_cookies)
                 async with self._session_factory() as session:
                     await crud.update_config_value(session, "bilibiliCookie", cookie_string)
+                    await session.commit()
                 self.logger.info("Bilibili: 新的登录Cookie已保存到数据库。")
-                self._config_loaded = False
+                # 新增：强制刷新配置和cookie，以立即应用新的登录状态
+                await self._ensure_config_and_cookie(force_refresh=True)
             else:
                 self.logger.error("Bilibili: 登录轮询成功，但响应中未找到SESSDATA。")
 

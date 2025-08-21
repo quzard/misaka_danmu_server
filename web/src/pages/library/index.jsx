@@ -510,7 +510,7 @@ export const Library = () => {
                     try {
                       await refreshPoster({
                         animeId,
-                        image_url: imageUrl,
+                        imageUrl: imageUrl,
                       })
                       message.success('海报已刷新并缓存成功！')
                     } catch (error) {

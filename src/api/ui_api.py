@@ -321,7 +321,7 @@ async def edit_anime_info(
     return
 
 class RefreshPosterRequest(models.BaseModel):
-    image_url: str
+    imageUrl: str
 
 @router.post("/library/anime/{animeId}/refresh-poster", summary="刷新并缓存影视海报")
 async def refresh_anime_poster(
@@ -332,11 +332,11 @@ async def refresh_anime_poster(
     scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """根据提供的URL，重新下载并缓存海报，更新数据库记录。"""
-    new_local_path = await download_image(request_data.image_url, session, scraper_manager)
+    new_local_path = await download_image(request_data.imageUrl, session, scraper_manager)
     if not new_local_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片下载失败，请检查URL或服务器日志。")
 
-    stmt = update(orm_models.Anime).where(orm_models.Anime.id == animeId).values(image_url=request_data.image_url, local_image_path=new_local_path)
+    stmt = update(orm_models.Anime).where(orm_models.Anime.id == animeId).values(imageUrl=request_data.imageUrl, localImagePath=new_local_path)
     result = await session.execute(stmt)
     await session.commit()
     affected_rows = result.rowcount
