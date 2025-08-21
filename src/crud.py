@@ -980,7 +980,7 @@ async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
 # --- API Token Management ---
 
 async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(ApiToken).order_by(ApiToken.createdAt.desc())
+    stmt = select(ApiToken).order_by(ApiToken.created_at.desc())
     result = await session.execute(stmt)
     return [
         {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}

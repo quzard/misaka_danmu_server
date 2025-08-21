@@ -256,8 +256,8 @@ class TokenData(BaseModel):
     username: Optional[str] = None
 
 class PasswordChange(BaseModel):
-    old_password: str = Field(..., description="当前密码")
-    new_password: str = Field(..., min_length=8, description="新密码 (至少8位)")
+    oldPassword: str = Field(..., description="当前密码")
+    newPassword: str = Field(..., min_length=8, description="新密码 (至少8位)")
 
 class BangumiAuthStatus(BaseModel):
     isAuthenticated: bool

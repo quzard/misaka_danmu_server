@@ -1690,7 +1690,7 @@ async def login_for_access_token(
     session: AsyncSession = Depends(get_db_session)
 ):
     user = await crud.get_user_by_username(session, form_data.username)
-    if not user or not security.verify_password(form_data.password, user["hashed_password"]):
+    if not user or not security.verify_password(form_data.password, user["hashedPassword"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -1882,9 +1882,9 @@ async def change_current_user_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # 2. 验证旧密码是否正确
-    if not security.verify_password(password_data.old_password, user_in_db["hashed_password"]):
+    if not security.verify_password(password_data.oldPassword, user_in_db["hashedPassword"]):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect old password")
 
     # 3. 更新密码
-    new_hashed_password = security.get_password_hash(password_data.new_password)
+    new_hashed_password = security.get_password_hash(password_data.newPassword)
     await crud.update_user_password(session, current_user.username, new_hashed_password)
