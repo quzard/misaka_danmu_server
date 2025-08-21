@@ -65,6 +65,7 @@ class JellyfinWebhook(BaseWebhook):
         imdb_id = payload.get("Provider_imdb")
         tvdb_id = payload.get("Provider_tvdb")
         douban_id = payload.get("Provider_doubanid")
+        bangumi_id = payload.get("Provider_bangumi")
         
         # 根据媒体类型分别处理
         if item_type == "Episode":
@@ -115,6 +116,7 @@ class JellyfinWebhook(BaseWebhook):
             tmdbId=str(tmdb_id) if tmdb_id else None,
             imdbId=str(imdb_id) if imdb_id else None,
             tvdbId=str(tvdb_id) if tvdb_id else None,
+            bangumiId=str(bangumi_id) if bangumi_id else None,
             webhookSource='jellyfin',
             progress_callback=callback,
             session=session,

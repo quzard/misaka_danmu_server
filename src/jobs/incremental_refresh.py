@@ -36,7 +36,7 @@ class IncrementalRefreshJob(BaseJob):
 
             # 获取当前最新分集
             episodes = await crud.get_episodes_for_source(session, source_id)
-            latest_episode_index = max(ep['episode_index'] for ep in episodes) if episodes else 0
+            latest_episode_index = max(ep['episodeIndex'] for ep in episodes) if episodes else 0
             
             next_episode_index = latest_episode_index + 1
             self.logger.info(f"为 '{anime_title}' (源ID: {source_id}) 尝试获取第 {next_episode_index} 集...")
@@ -44,7 +44,7 @@ class IncrementalRefreshJob(BaseJob):
             try:
                 # 调用导入任务，只导入指定的一集
                 await generic_import_task(
-                    provider=source_info["provider_name"], media_id=source_info["media_id"],
+                    provider=source_info["providerName"], media_id=source_info["mediaId"],
                     anime_title=anime_title, media_type=source_info["type"],
                     season=source_info.get("season", 1), current_episode_index=next_episode_index,
                     image_url=None, douban_id=None, tmdb_id=source_info.get("tmdb_id"), imdb_id=None, tvdb_id=None,

@@ -181,7 +181,7 @@ class SchedulerManager:
             job.reschedule(trigger=CronTrigger.from_crontab(cron))
             if is_enabled: job.resume()
             else: job.pause()
-            await crud.update_scheduled_task_run_times(session, task_id, task_info['last_run_at'], job.next_run_time)
+            await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], job.next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
     async def delete_task(self, task_id: str):

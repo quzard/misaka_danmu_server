@@ -25,19 +25,19 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
             raise TaskSuccess("作品未找到，无需删除。")
 
         # 1. 找到所有关联的源ID
-        source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.anime_id == anime_id))
+        source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == anime_id))
         source_ids = source_ids_res.scalars().all()
 
         if source_ids:
             # 2. 找到所有关联的分集ID
             await progress_callback(20, "正在查找关联数据...")
-            episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.source_id.in_(source_ids)))
+            episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId.in_(source_ids)))
             episode_ids = episode_ids_res.scalars().all()
 
             if episode_ids:
                 # 3. 删除所有弹幕
                 await progress_callback(40, "正在删除弹幕...")
-                await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+                await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
                 
                 # 4. 删除所有分集
                 await progress_callback(60, "正在删除分集...")
@@ -49,8 +49,8 @@ async def delete_anime_task(anime_id: int, session: AsyncSession, progress_callb
 
         # 6. 删除元数据和别名
         await progress_callback(80, "正在删除元数据...")
-        await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.anime_id == anime_id))
-        await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.anime_id == anime_id))
+        await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.animeId == anime_id))
+        await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.animeId == anime_id))
 
         # 7. 删除作品本身
         await progress_callback(90, "正在删除主作品记录...")
@@ -76,13 +76,13 @@ async def delete_source_task(source_id: int, session: AsyncSession, progress_cal
             raise TaskSuccess("数据源未找到，无需删除。")
 
         # 1. 找到所有关联的分集ID
-        episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.source_id == source_id))
+        episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId == source_id))
         episode_ids = episode_ids_res.scalars().all()
 
         if episode_ids:
             # 2. 删除所有这些分集关联的弹幕
             await progress_callback(30, f"正在删除 {len(episode_ids)} 个分集的弹幕...")
-            await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+            await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
             
             # 3. 删除所有这些分集
             await progress_callback(60, "正在删除分集记录...")
@@ -112,7 +112,7 @@ async def delete_episode_task(episode_id: int, session: AsyncSession, progress_c
             raise TaskSuccess("分集未找到，无需删除。")
 
         # 1. 显式删除关联的弹幕
-        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id == episode_id))
+        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId == episode_id))
         
         # 2. 删除分集本身
         await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id == episode_id))
@@ -133,7 +133,7 @@ async def delete_bulk_episodes_task(episode_ids: List[int], session: AsyncSessio
     await progress_callback(5, f"准备删除 {total} 个分集...")
     try:
         # 1. 一次性删除所有关联的弹幕
-        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episode_id.in_(episode_ids)))
+        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
         await progress_callback(50, "关联弹幕已删除，正在删除分集记录...")
 
         # 2. 一次性删除所有分集
@@ -305,7 +305,7 @@ async def full_refresh_task(source_id: int, session: AsyncSession, manager: Scra
         logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
         return
     
-    anime_id = source_info["anime_id"]
+    anime_id = source_info["animeId"]
     # 1. 清空旧数据
     await progress_callback(10, "正在清空旧数据...")
     await crud.clear_source_data(session, source_id)
@@ -415,8 +415,8 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
         try:
             for i, episode_data in enumerate(episodes):
                 new_index = i + 1
-                if episode_data['episode_index'] != new_index:
-                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episode_index=new_index))
+                if episode_data['episodeIndex'] != new_index:
+                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episodeIndex=new_index))
                     updated_count += 1
                 await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
             await session.commit()

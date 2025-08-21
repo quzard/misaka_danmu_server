@@ -134,10 +134,10 @@ class TmdbAutoMapJob(BaseJob):
                 current_progress = 5 + int((i / total_shows) * 95) if total_shows > 0 else 95
                 progress_callback(current_progress, f"正在处理: {show['title']} ({i+1}/{total_shows})")
 
-                anime_id, tmdb_id, title = show['anime_id'], show['tmdb_id'], show['title']
+                anime_id, tmdb_id, title = show['animeId'], show['tmdbId'], show['title']
                 self.logger.info(f"正在处理: '{title}' (Anime ID: {anime_id}, TMDB ID: {tmdb_id})")
                 try:
-                    if not show.get('tmdb_episode_group_id'):
+                    if not show.get('tmdbEpisodeGroupId'):
                         groups_res = await client.get(f"/tv/{tmdb_id}/episode_groups")
                         if groups_res.status_code == 200:
                             groups = groups_res.json().get("results", [])

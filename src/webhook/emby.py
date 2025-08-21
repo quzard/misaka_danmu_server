@@ -40,6 +40,7 @@ class EmbyWebhook(BaseWebhook):
         imdb_id = provider_ids.get("IMDB") # 修正：Emby 使用大写的 "IMDB"
         tvdb_id = provider_ids.get("Tvdb")
         douban_id = provider_ids.get("DoubanID") # Emby 可能使用 DoubanID
+        bangumi_id = provider_ids.get("Bangumi")
         
         # 根据媒体类型分别处理
         if item_type == "Episode":
@@ -90,6 +91,7 @@ class EmbyWebhook(BaseWebhook):
             tmdbId=str(tmdb_id) if tmdb_id else None,
             imdbId=str(imdb_id) if imdb_id else None,
             tvdbId=str(tvdb_id) if tvdb_id else None,
+            bangumiId=str(bangumi_id) if bangumi_id else None,
             webhookSource='emby',
             progress_callback=callback,
             session=session,

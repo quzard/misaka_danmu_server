@@ -145,7 +145,7 @@ async def search_anime_provider(
         logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
     else:
         logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
-        filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user, session)
+        filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
         filter_aliases.add(search_title)
         logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 

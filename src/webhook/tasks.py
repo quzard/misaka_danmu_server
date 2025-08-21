@@ -37,6 +37,7 @@ async def webhook_search_and_dispatch_task(
     tmdbId: Optional[str],
     imdbId: Optional[str],
     tvdbId: Optional[str],
+    bangumiId: Optional[str],
     webhookSource: str,
     progress_callback: Callable,
     session: AsyncSession,
@@ -59,11 +60,10 @@ async def webhook_search_and_dispatch_task(
             # 直接使用这个源的信息创建导入任务
             task_title = f"Webhook自动导入: {favorited_source['animeTitle']} ({favorited_source['providerName']})"
             task_coro = lambda session, cb: generic_import_task(
-                provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'],
-                animeTitle=favorited_source['animeTitle'], mediaType=favorited_source['mediaType'],
-                season=season, currentEpisodeIndex=currentEpisodeIndex,
-                imageUrl=favorited_source['imageUrl'], doubanId=doubanId,
-                tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId,
+                provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'],
+                mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
+                imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId,
+                bangumiId=bangumiId,
                 progress_callback=cb, session=session, manager=manager,
                 task_manager=task_manager
             )
@@ -123,9 +123,8 @@ async def webhook_search_and_dispatch_task(
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=season, currentEpisodeIndex=best_match.currentEpisodeIndex,
-            imageUrl=best_match.imageUrl, doubanId=doubanId,
-            tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId,
+            season=season, currentEpisodeIndex=best_match.currentEpisodeIndex, imageUrl=best_match.imageUrl,
+            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId,
             progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
             task_manager=task_manager
         )

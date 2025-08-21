@@ -440,7 +440,7 @@ async def get_token_from_path(
         # 尝试记录失败的访问
         token_record = await crud.get_api_token_by_token_str(session, token)
         if token_record:
-            is_expired = token_record.get('expires_at') and token_record['expires_at'].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
+            is_expired = token_record.get('expiresAt') and token_record['expiresAt'].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
             await crud.create_token_access_log(session, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
@@ -451,7 +451,7 @@ async def get_token_from_path(
 
     if ua_filter_mode != 'off':
         ua_rules = await crud.get_ua_rules(session)
-        ua_list = [rule['ua_string'] for rule in ua_rules]
+        ua_list = [rule['uaString'] for rule in ua_rules]
         
         is_matched = any(rule in user_agent for rule in ua_list)
 
@@ -615,11 +615,11 @@ async def _process_single_batch_match(item: DandanBatchMatchRequestItem, session
     # --- 步骤 1: 尝试 TMDB 精确匹配 ---
     potential_animes = await crud.find_animes_for_matching(session, parsed_info["title"])
     for anime in potential_animes:
-        if anime.get("tmdb_id") and anime.get("tmdb_episode_group_id"):
+        if anime.get("tmdbId") and anime.get("tmdbEpisodeGroupId"):
             tmdb_results = await crud.find_episode_via_tmdb_mapping(
                 session,
-                tmdb_id=anime["tmdb_id"],
-                group_id=anime["tmdb_episode_group_id"],
+                tmdb_id=anime["tmdbId"],
+                group_id=anime["tmdbEpisodeGroupId"],
                 custom_season=parsed_info.get("season"),
                 custom_episode=parsed_info["episode"]
             )
@@ -739,12 +739,12 @@ async def match_single_file(
             # 将主标题和所有别名都收集起来进行检查
             all_titles_to_check = [
                 r.get('animeTitle'),
-                r.get('name_en'),
-                r.get('name_jp'),
-                r.get('name_romaji'),
-                r.get('alias_cn_1'),
-                r.get('alias_cn_2'),
-                r.get('alias_cn_3'),
+                r.get('nameEn'),
+                r.get('nameJp'),
+                r.get('nameRomaji'),
+                r.get('aliasCn1'),
+                r.get('aliasCn2'),
+                r.get('aliasCn3'),
             ]
             # 规范化并移除空值
             normalized_aliases = {

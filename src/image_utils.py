@@ -46,7 +46,7 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
             provider_setting = next((s for s in metadata_settings if s['providerName'] == provider_name), None)
         
         if provider_setting:
-            use_proxy_for_this_provider = provider_setting.get('use_proxy', False)
+            use_proxy_for_this_provider = provider_setting.get('useProxy', False)
 
     proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
     # --- End of new proxy logic ---

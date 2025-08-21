@@ -23,22 +23,22 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = (
         select(
             Anime.id.label("animeId"),
-            Anime.local_image_path.label("localImagePath"),
-            Anime.image_url.label("imageUrl"),
+            Anime.localImagePath.label("localImagePath"),
+            Anime.imageUrl.label("imageUrl"),
             Anime.title,
             Anime.type,
             Anime.season,
-            Anime.created_at.label("createdAt"),
+            Anime.createdAt.label("createdAt"),
             case(
                 (Anime.type == 'movie', 1),
-                else_=func.coalesce(func.max(Episode.episode_index), 0)
+                else_=func.coalesce(func.max(Episode.episodeIndex), 0)
             ).label("episodeCount"),
             func.count(distinct(AnimeSource.id)).label("sourceCount")
         )
         .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
         .join(Episode, AnimeSource.id == Episode.source_id, isouter=True)
         .group_by(Anime.id)
-        .order_by(Anime.created_at.desc())
+        .order_by(Anime.createdAt.desc())
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
@@ -46,9 +46,9 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
 async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> Optional[Dict[str, Any]]:
     """获取指定源的最后一个分集。"""
     stmt = (
-        select(Episode.episode_index.label("episodeIndex"))
-        .where(Episode.source_id == sourceId)
-        .order_by(Episode.episode_index.desc())
+        select(Episode.episodeIndex.label("episodeIndex"))
+        .where(Episode.sourceId == sourceId)
+        .order_by(Episode.episodeIndex.desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -73,10 +73,10 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     if anime:
         update_values = {}
-        if not anime.image_url and image_url:
-            update_values["image_url"] = image_url
-        if not anime.local_image_path and local_image_path:
-            update_values["local_image_path"] = local_image_path
+        if not anime.imageUrl and image_url:
+            update_values["imageUrl"] = image_url
+        if not anime.localImagePath and local_image_path:
+            update_values["localImagePath"] = local_image_path
         if update_values:
             await session.execute(update(Anime).where(Anime.id == anime.id).values(**update_values))
             await session.flush() # 使用 flush 代替 commit，以在事务中保持对象状态
@@ -84,8 +84,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     # Create new anime
     new_anime = Anime(
-        title=title, type=media_type, season=season, image_url=image_url,
-        local_image_path=local_image_path, created_at=datetime.now()
+        title=title, type=media_type, season=season, imageUrl=image_url,
+        localImagePath=local_image_path, createdAt=datetime.now()
     )
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
@@ -100,7 +100,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
 async def update_anime_details(session: AsyncSession, anime_id: int, update_data: models.AnimeDetailUpdate) -> bool:
     """在事务中更新番剧的核心信息、元数据和别名。"""
-    anime = await session.get(Anime, anime_id, options=[selectinload(Anime.metadata_record), selectinload(Anime.aliases)])
+    anime = await session.get(Anime, anime_id, options=[selectinload(Anime.metadataRecord), selectinload(Anime.aliases)])
     if not anime:
         return False
 
@@ -108,28 +108,28 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.title = update_data.title
     anime.type = update_data.type
     anime.season = update_data.season
-    anime.episode_count = update_data.episodeCount
-    anime.image_url = update_data.imageUrl
+    anime.episodeCount = update_data.episodeCount
+    anime.imageUrl = update_data.imageUrl
 
     # Update or create AnimeMetadata
-    if not anime.metadata_record:
-        anime.metadata_record = AnimeMetadata(anime_id=anime_id)
-    anime.metadata_record.tmdb_id = update_data.tmdbId
-    anime.metadata_record.tmdb_episode_group_id = update_data.tmdbEpisodeGroupId
-    anime.metadata_record.bangumi_id = update_data.bangumiId
-    anime.metadata_record.tvdb_id = update_data.tvdbId
-    anime.metadata_record.douban_id = update_data.doubanId
-    anime.metadata_record.imdb_id = update_data.imdbId
+    if not anime.metadataRecord:
+        anime.metadataRecord = AnimeMetadata(animeId=anime_id)
+    anime.metadataRecord.tmdbId = update_data.tmdbId
+    anime.metadataRecord.tmdbEpisodeGroupId = update_data.tmdbEpisodeGroupId
+    anime.metadataRecord.bangumiId = update_data.bangumiId
+    anime.metadataRecord.tvdbId = update_data.tvdbId
+    anime.metadataRecord.doubanId = update_data.doubanId
+    anime.metadataRecord.imdbId = update_data.imdbId
 
     # Update or create AnimeAlias
     if not anime.aliases:
-        anime.aliases = AnimeAlias(anime_id=anime_id)
-    anime.aliases.name_en = update_data.nameEn
-    anime.aliases.name_jp = update_data.nameJp
-    anime.aliases.name_romaji = update_data.nameRomaji
-    anime.aliases.alias_cn_1 = update_data.aliasCn1
-    anime.aliases.alias_cn_2 = update_data.aliasCn2
-    anime.aliases.alias_cn_3 = update_data.aliasCn3
+        anime.aliases = AnimeAlias(animeId=anime_id)
+    anime.aliases.nameEn = update_data.nameEn
+    anime.aliases.nameJp = update_data.nameJp
+    anime.aliases.nameRomaji = update_data.nameRomaji
+    anime.aliases.aliasCn1 = update_data.aliasCn1
+    anime.aliases.aliasCn2 = update_data.aliasCn2
+    anime.aliases.aliasCn3 = update_data.aliasCn3
 
     await session.commit()
     return True
@@ -171,30 +171,30 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             Anime.id.label("animeId"),
             Anime.title.label("animeTitle"),
             Anime.type,
-            Anime.image_url.label("imageUrl"),
-            Anime.created_at.label("startDate"),
+            Anime.imageUrl.label("imageUrl"),
+            Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"),
             func.if_(Anime.type == 'movie', func.concat(Scraper.provider_name, ' 源'), Episode.title).label("episodeTitle"),
-            AnimeAlias.name_en,
-            AnimeAlias.name_jp,
-            AnimeAlias.name_romaji,
-            AnimeAlias.alias_cn_1,
-            AnimeAlias.alias_cn_2,
-            AnimeAlias.alias_cn_3,
-            Scraper.display_order,
-            AnimeSource.is_favorited.label("isFavorited"),
-            AnimeMetadata.bangumi_id.label("bangumiId")
+            AnimeAlias.nameEn,
+            AnimeAlias.nameJp,
+            AnimeAlias.nameRomaji,
+            AnimeAlias.aliasCn1,
+            AnimeAlias.aliasCn2,
+            AnimeAlias.aliasCn3,
+            Scraper.displayOrder,
+            AnimeSource.isFavorited.label("isFavorited"),
+            AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(AnimeSource, Anime.id == AnimeSource.anime_id)
         .join(Episode, AnimeSource.id == Episode.source_id)
-        .join(Scraper, AnimeSource.provider_name == Scraper.provider_name)
+        .join(Scraper, AnimeSource.providerName == Scraper.providerName)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
     )
 
     # Add conditions
     if episode_number is not None:
-        stmt = stmt.where(Episode.episode_index == episode_number)
+        stmt = stmt.where(Episode.episodeIndex == episode_number)
     if season_number is not None:
         stmt = stmt.where(Anime.season == season_number)
 
@@ -202,13 +202,13 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     normalized_like_title = f"%{clean_title.replace('：', ':').replace(' ', '')}%"
     like_conditions = [
         func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_title)
-        for col in [Anime.title, AnimeAlias.name_en, AnimeAlias.name_jp, AnimeAlias.name_romaji,
-                    AnimeAlias.alias_cn_1, AnimeAlias.alias_cn_2, AnimeAlias.alias_cn_3]
+        for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji,
+                    AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
     ]
     stmt = stmt.where(or_(*like_conditions))
 
     # Order and execute
-    stmt = stmt.order_by(func.length(Anime.title), Scraper.display_order)
+    stmt = stmt.order_by(func.length(Anime.title), Scraper.displayOrder)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -233,7 +233,7 @@ async def get_episode_indices_by_anime_title(session: AsyncSession, title: str) 
     """获取指定标题的作品已存在的所有分集序号。"""
     stmt = (
         select(distinct(Episode.episode_index))
-        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .where(Anime.title == title)
     )
@@ -244,12 +244,12 @@ async def find_favorited_source_for_anime(session: AsyncSession, title: str, sea
     """通过标题和季度查找已存在于库中且被标记为“精确”的数据源。"""
     stmt = (
         select(
-            AnimeSource.provider_name.label("providerName"),
-            AnimeSource.media_id.label("mediaId"),
+            AnimeSource.providerName.label("providerName"),
+            AnimeSource.mediaId.label("mediaId"),
             Anime.id.label("animeId"),
             Anime.title.label("animeTitle"),
             Anime.type.label("mediaType"),
-            Anime.image_url.label("imageUrl")
+            Anime.imageUrl.label("imageUrl")
         )
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .where(Anime.title == title, Anime.season == season, AnimeSource.is_favorited == True)
@@ -270,10 +270,10 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
             Anime.id.label("animeId"),
             Anime.title.label("animeTitle"),
             Anime.type,
-            Anime.image_url.label("imageUrl"),
-            Anime.created_at.label("startDate"),
+            Anime.imageUrl.label("imageUrl"),
+            Anime.createdAt.label("startDate"),
             func.count(distinct(Episode.id)).label("episodeCount"),
-            AnimeMetadata.bangumi_id.label("bangumiId")
+            AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
         .join(Episode, AnimeSource.id == Episode.source_id, isouter=True)
@@ -286,8 +286,8 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
     normalized_like_title = f"%{clean_title.replace('：', ':').replace(' ', '')}%"
     like_conditions = [
         func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_title)
-        for col in [Anime.title, AnimeAlias.name_en, AnimeAlias.name_jp, AnimeAlias.name_romaji,
-                    AnimeAlias.alias_cn_1, AnimeAlias.alias_cn_2, AnimeAlias.alias_cn_3]
+        for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji,
+                    AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
     ]
     stmt = stmt.where(or_(*like_conditions))
     
@@ -299,8 +299,8 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
     stmt = (
         select(
             Anime.id.label("anime_id"),
-            AnimeMetadata.tmdb_id,
-            AnimeMetadata.tmdb_episode_group_id,
+            AnimeMetadata.tmdbId,
+            AnimeMetadata.tmdbEpisodeGroupId,
             Anime.title
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
@@ -310,8 +310,8 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
     normalized_like_title = f"%{title.replace('：', ':').replace(' ', '')}%"
     like_conditions = [
         func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_title)
-        for col in [Anime.title, AnimeAlias.name_en, AnimeAlias.name_jp, AnimeAlias.name_romaji,
-                    AnimeAlias.alias_cn_1, AnimeAlias.alias_cn_2, AnimeAlias.alias_cn_3]
+        for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji,
+                    AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
     ]
     stmt = stmt.where(or_(*like_conditions)).distinct().order_by(func.length(Anime.title)).limit(5)
     
@@ -322,23 +322,23 @@ async def find_episode_via_tmdb_mapping(session: AsyncSession, tmdb_id: str, gro
     """通过TMDB映射表查找本地分集。"""
     stmt = (
         select(
-            Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.image_url.label("imageUrl"), Anime.created_at.label("startDate"),
-            Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Scraper.display_order, AnimeSource.is_favorited.label("isFavorited"),
-            AnimeMetadata.bangumi_id.label("bangumiId")
+            Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"), Anime.createdAt.label("startDate"),
+            Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Scraper.displayOrder, AnimeSource.isFavorited.label("isFavorited"),
+            AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(AnimeMetadata, and_(TmdbEpisodeMapping.tmdb_tv_id == AnimeMetadata.tmdb_id, TmdbEpisodeMapping.tmdb_episode_group_id == AnimeMetadata.tmdb_episode_group_id))
+        .join(AnimeMetadata, and_(TmdbEpisodeMapping.tmdbTvId == AnimeMetadata.tmdbId, TmdbEpisodeMapping.tmdbEpisodeGroupId == AnimeMetadata.tmdbEpisodeGroupId))
         .join(Anime, AnimeMetadata.anime_id == Anime.id)
         .join(AnimeSource, Anime.id == AnimeSource.anime_id)
-        .join(Episode, and_(AnimeSource.id == Episode.source_id, Episode.episode_index == TmdbEpisodeMapping.absolute_episode_number))
-        .join(Scraper, AnimeSource.provider_name == Scraper.provider_name)
-        .where(TmdbEpisodeMapping.tmdb_tv_id == tmdb_id, TmdbEpisodeMapping.tmdb_episode_group_id == group_id)
+        .join(Episode, and_(AnimeSource.id == Episode.sourceId, Episode.episodeIndex == TmdbEpisodeMapping.absoluteEpisodeNumber))
+        .join(Scraper, AnimeSource.providerName == Scraper.providerName)
+        .where(TmdbEpisodeMapping.tmdbTvId == tmdb_id, TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id)
     )
     if custom_season is not None:
-        stmt = stmt.where(TmdbEpisodeMapping.custom_season_number == custom_season, TmdbEpisodeMapping.custom_episode_number == custom_episode)
+        stmt = stmt.where(TmdbEpisodeMapping.customSeasonNumber == custom_season, TmdbEpisodeMapping.customEpisodeNumber == custom_episode)
     else:
-        stmt = stmt.where(TmdbEpisodeMapping.absolute_episode_number == custom_episode)
+        stmt = stmt.where(TmdbEpisodeMapping.absoluteEpisodeNumber == custom_episode)
     
-    stmt = stmt.order_by(AnimeSource.is_favorited.desc(), Scraper.display_order)
+    stmt = stmt.order_by(AnimeSource.isFavorited.desc(), Scraper.displayOrder)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -351,7 +351,7 @@ async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_
         .join(AnimeSource, Episode.source_id == AnimeSource.id)
         .where(
             AnimeSource.anime_id == anime_id,
-            Episode.episode_index == episode_index
+            Episode.episodeIndex == episode_index
         )
     )
     result = await session.execute(stmt)
@@ -369,8 +369,8 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
     """获取番剧的详细信息及其所有分集，用于dandanplay API。"""
     anime_stmt = (
         select(
-            Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.image_url.label("imageUrl"),
-            Anime.created_at.label("startDate"), Anime.source_url.label("bangumiUrl"),
+            Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"),
+            Anime.createdAt.label("startDate"), Anime.sourceUrl.label("bangumiUrl"),
             func.count(distinct(Episode.id)).label("episodeCount"), AnimeMetadata.bangumi_id.label("bangumiId")
         )
         .join(AnimeSource, Anime.id == AnimeSource.anime_id, isouter=True)
@@ -387,15 +387,15 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
     episodes = []
     if anime_details['type'] == 'movie':
         ep_stmt = (
-            select(Episode.id.label("episodeId"), func.concat(AnimeSource.provider_name, ' 源').label("episodeTitle"), Scraper.display_order.label("episodeNumber"))
+            select(Episode.id.label("episodeId"), func.concat(AnimeSource.providerName, ' 源').label("episodeTitle"), Scraper.displayOrder.label("episodeNumber"))
             .join(AnimeSource, Episode.source_id == AnimeSource.id)
-            .join(Scraper, AnimeSource.provider_name == Scraper.provider_name)
+            .join(Scraper, AnimeSource.providerName == Scraper.providerName)
             .where(AnimeSource.anime_id == anime_id)
-            .order_by(Scraper.display_order)
+            .order_by(Scraper.displayOrder)
         )
     else:
         ep_stmt = (
-            select(Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Episode.episode_index.label("episodeNumber"))
+            select(Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Episode.episodeIndex.label("episodeNumber"))
             .join(AnimeSource, Episode.source_id == AnimeSource.id)
             .where(AnimeSource.anime_id == anime_id)
             .order_by(Episode.episode_index)
@@ -408,15 +408,15 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
 
 async def get_anime_id_by_bangumi_id(session: AsyncSession, bangumi_id: str) -> Optional[int]:
     """通过 bangumi_id 查找 anime_id。"""
-    stmt = select(AnimeMetadata.anime_id).where(AnimeMetadata.bangumi_id == bangumi_id)
+    stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.bangumiId == bangumi_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
     """检查具有给定提供商和媒体ID的源是否已存在。"""
     stmt = select(AnimeSource.id).where(
-        AnimeSource.provider_name == provider_name,
-        AnimeSource.media_id == media_id
+        AnimeSource.providerName == provider_name,
+        AnimeSource.mediaId == media_id
     ).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
@@ -424,9 +424,9 @@ async def check_source_exists_by_media_id(session: AsyncSession, provider_name: 
 async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_name: str, media_id: str) -> int:
     """将一个外部数据源关联到一个番剧条目，如果关联已存在则直接返回其ID。"""
     stmt = select(AnimeSource.id).where(
-        AnimeSource.anime_id == anime_id,
-        AnimeSource.provider_name == provider_name,
-        AnimeSource.media_id == media_id
+        AnimeSource.animeId == anime_id,
+        AnimeSource.providerName == provider_name,
+        AnimeSource.mediaId == media_id
     )
     result = await session.execute(stmt)
     existing_id = result.scalar_one_or_none()
@@ -434,9 +434,9 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
         return existing_id
 
     new_source = AnimeSource(
-        anime_id=anime_id,
-        provider_name=provider_name,
-        media_id=media_id
+        animeId=anime_id,
+        providerName=provider_name,
+        mediaId=media_id
     )
     session.add(new_source)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -444,7 +444,7 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
 
 async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId: Optional[str], imdbId: Optional[str], tvdbId: Optional[str], doubanId: Optional[str], bangumiId: Optional[str] = None, tmdbEpisodeGroupId: Optional[str] = None):
     """仅当字段为空时，才更新番剧的元数据ID。"""
-    stmt = select(AnimeMetadata).where(AnimeMetadata.anime_id == anime_id)
+    stmt = select(AnimeMetadata).where(AnimeMetadata.animeId == anime_id)
     result = await session.execute(stmt)
     metadata = result.scalar_one_or_none()
 
@@ -452,12 +452,12 @@ async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId:
         return
 
     updated = False
-    if not metadata.tmdb_id and tmdbId: metadata.tmdb_id = tmdbId; updated = True
-    if not metadata.tmdb_episode_group_id and tmdbEpisodeGroupId: metadata.tmdb_episode_group_id = tmdbEpisodeGroupId; updated = True
-    if not metadata.imdb_id and imdbId: metadata.imdb_id = imdbId; updated = True
-    if not metadata.tvdb_id and tvdbId: metadata.tvdb_id = tvdbId; updated = True
-    if not metadata.douban_id and doubanId: metadata.douban_id = doubanId; updated = True
-    if not metadata.bangumi_id and bangumiId: metadata.bangumi_id = bangumiId; updated = True
+    if not metadata.tmdbId and tmdbId: metadata.tmdbId = tmdbId; updated = True
+    if not metadata.tmdbEpisodeGroupId and tmdbEpisodeGroupId: metadata.tmdbEpisodeGroupId = tmdbEpisodeGroupId; updated = True
+    if not metadata.imdbId and imdbId: metadata.imdbId = imdbId; updated = True
+    if not metadata.tvdbId and tvdbId: metadata.tvdbId = tvdbId; updated = True
+    if not metadata.doubanId and doubanId: metadata.doubanId = doubanId; updated = True
+    if not metadata.bangumiId and bangumiId: metadata.bangumiId = bangumiId; updated = True
 
     if updated:
         await session.commit()
@@ -477,26 +477,26 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user:
-        return {"id": user.id, "username": user.username, "hashed_password": user.hashed_password, "token": user.token}
+        return {"id": user.id, "username": user.username, "hashedPassword": user.hashedPassword, "token": user.token}
     return None
 
 async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
     from . import security
     hashed_password = security.get_password_hash(user.password)
-    new_user = User(username=user.username, hashed_password=hashed_password, created_at=datetime.now())
+    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=datetime.now())
     session.add(new_user)
     await session.commit()
 
 async def update_user_password(session: AsyncSession, username: str, new_hashed_password: str):
     """更新用户的密码"""
-    stmt = update(User).where(User.username == username).values(hashed_password=new_hashed_password)
+    stmt = update(User).where(User.username == username).values(hashedPassword=new_hashed_password)
     await session.execute(stmt)
     await session.commit()
 
 async def update_user_login_info(session: AsyncSession, username: str, token: str):
     """更新用户的最后登录时间和当前令牌"""
-    stmt = update(User).where(User.username == username).values(token=token, token_update=func.now())
+    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=func.now())
     await session.execute(stmt)
     await session.commit()
 
@@ -504,7 +504,7 @@ async def update_user_login_info(session: AsyncSession, username: str, token: st
 
 async def find_episode(session: AsyncSession, source_id: int, episode_index: int) -> Optional[Dict[str, Any]]:
     """查找特定源的特定分集"""
-    stmt = select(Episode.id, Episode.title).where(Episode.source_id == source_id, Episode.episode_index == episode_index)
+    stmt = select(Episode.id, Episode.title).where(Episode.sourceId == source_id, Episode.episodeIndex == episode_index)
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
@@ -517,13 +517,13 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
 
 async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
     """获取指定分集的所有弹幕"""
-    stmt = select(Comment.id.label("cid"), Comment.p, Comment.m).where(Comment.episode_id == episode_id)
+    stmt = select(Comment.id.label("cid"), Comment.p, Comment.m).where(Comment.episodeId == episode_id)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
 async def get_existing_comment_cids(session: AsyncSession, episode_id: int) -> set:
     """获取指定分集已存在的所有弹幕 cid。"""
-    stmt = select(Comment.cid).where(Comment.episode_id == episode_id)
+    stmt = select(Comment.cid).where(Comment.episodeId == episode_id)
     result = await session.execute(stmt)
     return set(result.scalars().all())
 
@@ -535,7 +535,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     if existing_id:
         return existing_id
 
-    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.anime_id == anime_id).order_by(AnimeSource.id)
+    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == anime_id).order_by(AnimeSource.id)
     source_ids_res = await session.execute(source_ids_stmt)
     source_ids = source_ids_res.scalars().all()
     try:
@@ -547,8 +547,8 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     new_episode_id = int(new_episode_id_str)
 
     new_episode = Episode(
-        id=new_episode_id, source_id=source_id, episode_index=episode_index,
-        provider_episode_id=provider_episode_id, title=title, source_url=url, fetched_at=datetime.now()
+        id=new_episode_id, sourceId=source_id, episodeIndex=episode_index,
+        providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now()
     )
     session.add(new_episode)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -561,12 +561,12 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
 
     # 1. 准备要插入的数据
     data_to_insert = [
-        {"episode_id": episode_id, "cid": c['cid'], "p": c['p'], "m": c['m'], "t": c['t']}
+        {"episodeId": episode_id, "cid": c['cid'], "p": c['p'], "m": c['m'], "t": c['t']}
         for c in comments
     ]
 
     # 2. 获取当前弹幕数量
-    initial_count_stmt = select(func.count()).select_from(Comment).where(Comment.episode_id == episode_id)
+    initial_count_stmt = select(func.count()).select_from(Comment).where(Comment.episodeId == episode_id)
     initial_count = (await session.execute(initial_count_stmt)).scalar_one()
 
     # 3. 执行 upsert 操作
@@ -586,13 +586,13 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
     await session.flush() # 确保操作完成
 
     # 4. 重新计算总数并更新
-    final_count_stmt = select(func.count()).select_from(Comment).where(Comment.episode_id == episode_id)
+    final_count_stmt = select(func.count()).select_from(Comment).where(Comment.episodeId == episode_id)
     final_count = (await session.execute(final_count_stmt)).scalar_one()
     
     newly_inserted_count = final_count - initial_count
 
     if newly_inserted_count > 0:
-        update_stmt = update(Episode).where(Episode.id == episode_id).values(comment_count=final_count)
+        update_stmt = update(Episode).where(Episode.id == episode_id).values(commentCount=final_count)
         await session.execute(update_stmt)
     return newly_inserted_count
 
@@ -605,8 +605,8 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
 async def get_anime_source_info(session: AsyncSession, source_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("sourceId"), AnimeSource.anime_id.label("animeId"), AnimeSource.provider_name.label("providerName"), AnimeSource.media_id.label("mediaId"),
-            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdb_id.label("tmdbId"), AnimeMetadata.bangumi_id.label("bangumiId")
+            AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"), AnimeSource.mediaId.label("mediaId"),
+            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(Anime, AnimeSource.anime_id == Anime.id)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
@@ -620,17 +620,17 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
     stmt = (
         select(
             AnimeSource.id.label("sourceId"),
-            AnimeSource.provider_name.label("providerName"),
-            AnimeSource.media_id.label("mediaId"),
-            AnimeSource.is_favorited.label("isFavorited"),
-            AnimeSource.incremental_refresh_enabled.label("incrementalRefreshEnabled"),
-            AnimeSource.created_at.label("createdAt"),
+            AnimeSource.providerName.label("providerName"),
+            AnimeSource.mediaId.label("mediaId"),
+            AnimeSource.isFavorited.label("isFavorited"),
+            AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
+            AnimeSource.createdAt.label("createdAt"),
             func.count(Episode.id).label("episodeCount")
         )
         .outerjoin(Episode, AnimeSource.id == Episode.source_id)
         .where(AnimeSource.anime_id == anime_id)
         .group_by(AnimeSource.id)
-        .order_by(AnimeSource.created_at)
+        .order_by(AnimeSource.createdAt)
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
@@ -638,11 +638,11 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
 async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
     stmt = (
         select(
-            Episode.id.label("episodeId"), Episode.title, Episode.episode_index.label("episodeIndex"),
-            Episode.source_url.label("sourceUrl"), Episode.fetched_at.label("fetchedAt"), Episode.comment_count.label("commentCount")
+            Episode.id.label("episodeId"), Episode.title, Episode.episodeIndex.label("episodeIndex"),
+            Episode.sourceUrl.label("sourceUrl"), Episode.fetchedAt.label("fetchedAt"), Episode.commentCount.label("commentCount")
         )
-        .where(Episode.source_id == source_id)
-        .order_by(Episode.episode_index)
+        .where(Episode.sourceId == source_id)
+        .order_by(Episode.episodeIndex)
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
@@ -659,8 +659,8 @@ async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Opt
 
 async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
-        select(AnimeSource.provider_name, Episode.provider_episode_id)
-        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        select(AnimeSource.providerName, Episode.providerEpisodeId)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episode_id)
     )
     result = await session.execute(stmt)
@@ -677,17 +677,17 @@ async def clear_source_data(session: AsyncSession, source_id: int):
 
 async def clear_episode_comments(session: AsyncSession, episode_id: int):
     await session.execute(delete(Comment).where(Comment.episode_id == episode_id))
-    await session.execute(update(Episode).where(Episode.id == episode_id).values(comment_count=0))
+    await session.execute(update(Episode).where(Episode.id == episode_id).values(commentCount=0))
     await session.commit()
 
 async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            Anime.id.label("animeId"), Anime.title, Anime.type, Anime.season, Anime.local_image_path.label("localImagePath"),
-            Anime.episode_count.label("episodeCount"), Anime.image_url.label("imageUrl"), AnimeMetadata.tmdb_id.label("tmdbId"), AnimeMetadata.tmdb_episode_group_id.label("tmdbEpisodeGroupId"),
-            AnimeMetadata.bangumi_id.label("bangumiId"), AnimeMetadata.tvdb_id.label("tvdbId"), AnimeMetadata.douban_id.label("doubanId"), AnimeMetadata.imdb_id.label("imdbId"),
-            AnimeAlias.name_en.label("nameEn"), AnimeAlias.name_jp.label("nameJp"), AnimeAlias.name_romaji.label("nameRomaji"), AnimeAlias.alias_cn_1.label("aliasCn1"),
-            AnimeAlias.alias_cn_2.label("aliasCn2"), AnimeAlias.alias_cn_3.label("aliasCn3")
+            Anime.id.label("animeId"), Anime.title, Anime.type, Anime.season, Anime.localImagePath.label("localImagePath"),
+            Anime.episodeCount.label("episodeCount"), Anime.imageUrl.label("imageUrl"), AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.tmdbEpisodeGroupId.label("tmdbEpisodeGroupId"),
+            AnimeMetadata.bangumiId.label("bangumiId"), AnimeMetadata.tvdbId.label("tvdbId"), AnimeMetadata.doubanId.label("doubanId"), AnimeMetadata.imdbId.label("imdbId"),
+            AnimeAlias.nameEn.label("nameEn"), AnimeAlias.nameJp.label("nameJp"), AnimeAlias.nameRomaji.label("nameRomaji"), AnimeAlias.aliasCn1.label("aliasCn1"),
+            AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.anime_id, isouter=True)
@@ -698,7 +698,7 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
     return dict(row) if row else None
 
 async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: int, group_id: str, group_details: models.TMDBEpisodeGroupDetails):
-    await session.execute(delete(TmdbEpisodeMapping).where(TmdbEpisodeMapping.tmdb_episode_group_id == group_id))
+    await session.execute(delete(TmdbEpisodeMapping).where(TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id))
     
     mappings_to_insert = []
     sorted_groups = sorted(group_details.groups, key=lambda g: g.order)
@@ -707,10 +707,10 @@ async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: in
         for custom_episode_index, episode in enumerate(custom_season_group.episodes):
             mappings_to_insert.append(
                 TmdbEpisodeMapping(
-                    tmdb_tv_id=tmdb_tv_id, group_id=group_id, tmdb_episode_id=episode.id,
-                    tmdb_season_number=episode.season_number, tmdb_episode_number=episode.episode_number,
-                    custom_season_number=custom_season_group.order, custom_episode_number=custom_episode_index + 1,
-                    absolute_episode_number=episode.order + 1
+                    tmdbTvId=tmdb_tv_id, tmdbEpisodeGroupId=group_id, tmdbEpisodeId=episode.id,
+                    tmdbSeasonNumber=episode.season_number, tmdbEpisodeNumber=episode.episode_number,
+                    customSeasonNumber=custom_season_group.order, customEpisodeNumber=custom_episode_index + 1,
+                    absoluteEpisodeNumber=episode.order + 1
                 )
             )
     if mappings_to_insert:
@@ -744,9 +744,9 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
         # Check for duplicates
         existing_target_source = await session.execute(
             select(AnimeSource).where(
-                AnimeSource.anime_id == target_anime_id,
-                AnimeSource.provider_name == src.provider_name,
-                AnimeSource.media_id == src.media_id
+                AnimeSource.animeId == target_anime_id,
+                AnimeSource.providerName == src.provider_name,
+                AnimeSource.mediaId == src.media_id
             )
         )
         if existing_target_source.scalar_one_or_none():
@@ -764,23 +764,23 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
 
     # Check for conflict
     conflict_stmt = select(Episode.id).where(
-        Episode.source_id == episode.source_id,
-        Episode.episode_index == update_data.episodeIndex,
+        Episode.sourceId == episode.sourceId,
+        Episode.episodeIndex == update_data.episodeIndex,
         Episode.id != episode.id
     )
     if (await session.execute(conflict_stmt)).scalar_one_or_none():
         raise ValueError("该集数已存在，请使用其他集数。")
 
     episode.title = update_data.title
-    episode.episode_index = update_data.episodeIndex
-    episode.source_url = update_data.sourceUrl
+    episode.episodeIndex = update_data.episodeIndex
+    episode.sourceUrl = update_data.sourceUrl
     await session.commit()
     return True
 
 async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     if not provider_names: return
     
-    existing_stmt = select(Scraper.provider_name)
+    existing_stmt = select(Scraper.providerName)
     existing_providers = set((await session.execute(existing_stmt)).scalars().all())
     
     new_providers = [name for name in provider_names if name not in existing_providers]
@@ -790,7 +790,7 @@ async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     max_order = (await session.execute(max_order_stmt)).scalar_one_or_none() or 0
     
     session.add_all([
-        Scraper(provider_name=name, display_order=max_order + i + 1, use_proxy=False)
+        Scraper(providerName=name, displayOrder=max_order + i + 1, useProxy=False)
         for i, name in enumerate(new_providers)
     ])
     await session.commit()
@@ -800,25 +800,25 @@ async def get_scraper_setting_by_name(session: AsyncSession, provider_name: str)
     scraper = await session.get(Scraper, provider_name)
     if scraper:
         return {
-            "providerName": scraper.provider_name,
-            "isEnabled": scraper.is_enabled,
-            "displayOrder": scraper.display_order,
-            "useProxy": scraper.use_proxy
+            "providerName": scraper.providerName,
+            "isEnabled": scraper.isEnabled,
+            "displayOrder": scraper.displayOrder,
+            "useProxy": scraper.useProxy
         }
     return None
 
 async def update_scraper_proxy(session: AsyncSession, provider_name: str, use_proxy: bool) -> bool:
     """更新单个搜索源的代理设置。"""
-    stmt = update(Scraper).where(Scraper.provider_name == provider_name).values(use_proxy=use_proxy)
+    stmt = update(Scraper).where(Scraper.providerName == provider_name).values(useProxy=use_proxy)
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount > 0
 
 async def get_all_scraper_settings(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(Scraper).order_by(Scraper.display_order)
+    stmt = select(Scraper).order_by(Scraper.displayOrder)
     result = await session.execute(stmt)
     return [
-        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy}
         for s in result.scalars()
     ]
 
@@ -826,8 +826,8 @@ async def update_scrapers_settings(session: AsyncSession, settings: List[models.
     for s in settings:
         await session.execute(
             update(Scraper)
-            .where(Scraper.provider_name == s.providerName)
-            .values(is_enabled=s.isEnabled, display_order=s.displayOrder, use_proxy=s.useProxy)
+            .where(Scraper.providerName == s.providerName)
+            .values(isEnabled=s.isEnabled, displayOrder=s.displayOrder, useProxy=s.useProxy)
         )
     await session.commit()
 
@@ -835,7 +835,7 @@ async def remove_stale_scrapers(session: AsyncSession, discovered_providers: Lis
     if not discovered_providers:
         logging.warning("发现的搜索源列表为空，跳过清理过时源的操作。")
         return
-    stmt = delete(Scraper).where(Scraper.provider_name.notin_(discovered_providers))
+    stmt = delete(Scraper).where(Scraper.providerName.notin_(discovered_providers))
     await session.execute(stmt)
     await session.commit()
 
@@ -844,13 +844,13 @@ async def remove_stale_scrapers(session: AsyncSession, discovered_providers: Lis
 async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: List[str]):
     if not provider_names: return
     
-    existing_stmt = select(MetadataSource.provider_name)
+    existing_stmt = select(MetadataSource.providerName)
     existing_providers = set((await session.execute(existing_stmt)).scalars().all())
     
     new_providers = [name for name in provider_names if name not in existing_providers]
     if not new_providers: return
 
-    max_order_stmt = select(func.max(MetadataSource.display_order))
+    max_order_stmt = select(func.max(MetadataSource.displayOrder))
     max_order = (await session.execute(max_order_stmt)).scalar_one_or_none() or 0
     
     session.add_all([
@@ -863,10 +863,10 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
     await session.commit()
 
 async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[str, Any]]:
-    stmt = select(MetadataSource).order_by(MetadataSource.display_order)
+    stmt = select(MetadataSource).order_by(MetadataSource.displayOrder)
     result = await session.execute(stmt)
     return [
-        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "isAuxSearchEnabled": s.is_aux_search_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy}
         for s in result.scalars()
     ]
 
@@ -875,8 +875,8 @@ async def update_metadata_sources_settings(session: AsyncSession, settings: List
         is_aux_enabled = True if s.providerName == 'tmdb' else s.isAuxSearchEnabled
         await session.execute(
             update(MetadataSource)
-            .where(MetadataSource.provider_name == s.providerName)
-            .values(is_aux_search_enabled=is_aux_enabled, display_order=s.displayOrder, use_proxy=s.useProxy)
+            .where(MetadataSource.providerName == s.providerName)
+            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy)
         )
     await session.commit()
 
@@ -884,25 +884,25 @@ async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[s
     """获取所有已启用辅助搜索的元数据源。"""
     stmt = (
         select(MetadataSource)
-        .where(MetadataSource.is_aux_search_enabled == True)
-        .order_by(MetadataSource.display_order)
+        .where(MetadataSource.isAuxSearchEnabled == True)
+        .order_by(MetadataSource.displayOrder)
     )
     result = await session.execute(stmt)
     return [
-        {"providerName": s.provider_name, "isEnabled": s.is_enabled, "isAuxSearchEnabled": s.is_aux_search_enabled, "displayOrder": s.display_order, "useProxy": s.use_proxy}
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy}
         for s in result.scalars()
     ]
 
 # --- Config & Cache ---
 
 async def get_config_value(session: AsyncSession, key: str, default: str) -> str:
-    stmt = select(Config.config_value).where(Config.config_key == key)
+    stmt = select(Config.configValue).where(Config.configKey == key)
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
     return value if value is not None else default
 
 async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
-    stmt = select(CacheData.cache_value).where(CacheData.cache_key == key, CacheData.expires_at > func.now())
+    stmt = select(CacheData.cacheValue).where(CacheData.cacheKey == key, CacheData.expiresAt > func.now())
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
     if value:
@@ -917,19 +917,19 @@ async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: in
     expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
 
     dialect = session.bind.dialect.name
-    values_to_insert = {"cache_provider": provider, "cache_key": key, "cache_value": json_value, "expires_at": expires_at}
+    values_to_insert = {"cacheProvider": provider, "cacheKey": key, "cacheValue": json_value, "expiresAt": expires_at}
 
     if dialect == 'mysql':
         stmt = mysql_insert(CacheData).values(values_to_insert)
         stmt = stmt.on_duplicate_key_update(
-            cache_provider=stmt.inserted.cache_provider,
-            cache_value=stmt.inserted.cache_value,
-            expires_at=stmt.inserted.expires_at
+            cache_provider=stmt.inserted.cacheProvider,
+            cache_value=stmt.inserted.cacheValue,
+            expires_at=stmt.inserted.expiresAt
         )
     elif dialect == 'postgresql':
         stmt = postgresql_insert(CacheData).values(values_to_insert)
         stmt = stmt.on_conflict_on_constraint('cache_data_pkey').do_update(
-            set_={"cache_provider": stmt.excluded.cache_provider, "cache_value": stmt.excluded.cache_value, "expires_at": stmt.excluded.expires_at}
+            set_={"cacheProvider": stmt.excluded.cacheProvider, "cacheValue": stmt.excluded.cacheValue, "expiresAt": stmt.excluded.expiresAt}
         )
     else:
         raise NotImplementedError(f"缓存设置功能尚未为数据库类型 '{dialect}' 实现。")
@@ -939,15 +939,15 @@ async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: in
 
 async def update_config_value(session: AsyncSession, key: str, value: str):
     dialect = session.bind.dialect.name
-    values_to_insert = {"config_key": key, "config_value": value}
+    values_to_insert = {"configKey": key, "configValue": value}
 
     if dialect == 'mysql':
         stmt = mysql_insert(Config).values(values_to_insert)
-        stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.config_value)
+        stmt = stmt.on_duplicate_key_update(config_value=stmt.inserted.configValue)
     elif dialect == 'postgresql':
         stmt = postgresql_insert(Config).values(values_to_insert)
         stmt = stmt.on_conflict_on_constraint('config_pkey').do_update(
-            set_={'config_value': stmt.excluded.config_value}
+            set_={'configValue': stmt.excluded.configValue}
         )
     else:
         raise NotImplementedError(f"配置更新功能尚未为数据库类型 '{dialect}' 实现。")
@@ -956,11 +956,11 @@ async def update_config_value(session: AsyncSession, key: str, value: str):
     await session.commit()
 
 async def clear_expired_cache(session: AsyncSession):
-    await session.execute(delete(CacheData).where(CacheData.expires_at <= func.now()))
+    await session.execute(delete(CacheData).where(CacheData.expiresAt <= func.now()))
     await session.commit()
 
 async def clear_expired_oauth_states(session: AsyncSession):
-    await session.execute(delete(OauthState).where(OauthState.expires_at <= func.now()))
+    await session.execute(delete(OauthState).where(OauthState.expiresAt <= func.now()))
     await session.commit()
 
 async def clear_all_cache(session: AsyncSession) -> int:
@@ -969,12 +969,12 @@ async def clear_all_cache(session: AsyncSession) -> int:
     return result.rowcount
 
 async def delete_cache(session: AsyncSession, key: str) -> bool:
-    result = await session.execute(delete(CacheData).where(CacheData.cache_key == key))
+    result = await session.execute(delete(CacheData).where(CacheData.cacheKey == key))
     await session.commit()
     return result.rowcount > 0
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
-    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetched_at=func.now()))
+    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=func.now()))
     await session.commit()
 
 # --- API Token Management ---
@@ -983,14 +983,14 @@ async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(ApiToken).order_by(ApiToken.created_at.desc())
     result = await session.execute(stmt)
     return [
-        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.is_enabled, "expiresAt": t.expires_at, "createdAt": t.created_at}
+        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}
         for t in result.scalars()
     ]
 
 async def get_api_token_by_id(session: AsyncSession, token_id: int) -> Optional[Dict[str, Any]]:
     token = await session.get(ApiToken, token_id)
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.is_enabled, "expiresAt": token.expires_at, "createdAt": token.created_at}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
     return None
 
 async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> Optional[Dict[str, Any]]:
@@ -998,7 +998,7 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
     result = await session.execute(stmt)
     token = result.scalar_one_or_none()
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.is_enabled, "expiresAt": token.expires_at, "createdAt": token.created_at}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
     return None
 
 async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str) -> int:
@@ -1012,7 +1012,7 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     if validityPeriod != "permanent":
         days = int(validityPeriod.replace('d', ''))
         expires_at = datetime.now(timezone.utc) + timedelta(days=days)
-    new_token = ApiToken(name=name, token=token, expires_at=expires_at)
+    new_token = ApiToken(name=name, token=token, expiresAt=expires_at)
     session.add(new_token)
     await session.commit()
     return new_token.id
@@ -1028,7 +1028,7 @@ async def delete_api_token(session: AsyncSession, token_id: int) -> bool:
 async def toggle_api_token(session: AsyncSession, token_id: int) -> bool:
     token = await session.get(ApiToken, token_id)
     if token:
-        token.is_enabled = not token.is_enabled
+        token.isEnabled = not token.isEnabled
         await session.commit()
         return True
     return False
@@ -1039,19 +1039,19 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     token_info = result.scalar_one_or_none()
     if not token_info:
         return None
-    if token_info.expires_at and token_info.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+    if token_info.expiresAt and token_info.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         return None
-    return {"id": token_info.id, "expires_at": token_info.expires_at}
+    return {"id": token_info.id, "expires_at": token_info.expiresAt}
 
 # --- UA Filter and Log Services ---
 
 async def get_ua_rules(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(UaRule).order_by(UaRule.created_at.desc())
     result = await session.execute(stmt)
-    return [{"id": r.id, "uaString": r.ua_string, "createdAt": r.created_at} for r in result.scalars()]
+    return [{"id": r.id, "uaString": r.uaString, "createdAt": r.createdAt} for r in result.scalars()]
 
 async def add_ua_rule(session: AsyncSession, ua_string: str) -> int:
-    new_rule = UaRule(ua_string=ua_string)
+    new_rule = UaRule(uaString=ua_string)
     session.add(new_rule)
     await session.commit()
     return new_rule.id
@@ -1065,7 +1065,7 @@ async def delete_ua_rule(session: AsyncSession, rule_id: int) -> bool:
     return False
 
 async def create_token_access_log(session: AsyncSession, token_id: int, ip_address: str, user_agent: Optional[str], log_status: str, path: Optional[str] = None):
-    new_log = TokenAccessLog(token_id=token_id, ip_address=ip_address, user_agent=user_agent, status=log_status, path=path)
+    new_log = TokenAccessLog(tokenId=token_id, ipAddress=ip_address, userAgent=user_agent, status=log_status, path=path)
     session.add(new_log)
     await session.commit()
 
@@ -1073,7 +1073,7 @@ async def get_token_access_logs(session: AsyncSession, token_id: int) -> List[Di
     stmt = select(TokenAccessLog).where(TokenAccessLog.token_id == token_id).order_by(TokenAccessLog.access_time.desc()).limit(200)
     result = await session.execute(stmt)
     return [
-        {"ipAddress": log.ip_address, "userAgent": log.user_agent, "accessTime": log.access_time, "status": log.status, "path": log.path}
+        {"ipAddress": log.ipAddress, "userAgent": log.userAgent, "accessTime": log.accessTime, "status": log.status, "path": log.path}
         for log in result.scalars()
     ]
 
@@ -1087,10 +1087,10 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
         return None
 
     # Toggle the target source
-    source.is_favorited = not source.is_favorited
+    source.isFavorited = not source.isFavorited
     
     # If it was favorited, unfavorite all others for the same anime
-    if source.is_favorited:
+    if source.isFavorited:
         stmt = (
             update(AnimeSource)
             .where(AnimeSource.anime_id == source.anime_id, AnimeSource.id != source_id)
@@ -1099,13 +1099,13 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
         await session.execute(stmt)
     
     await session.commit()
-    return source.is_favorited
+    return source.isFavorited
 
 async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> bool:
     source = await session.get(AnimeSource, source_id)
     if not source:
         return False
-    source.incremental_refresh_enabled = not source.incremental_refresh_enabled
+    source.incrementalRefreshEnabled = not source.incrementalRefreshEnabled
     await session.commit()
     return True
 
@@ -1113,16 +1113,16 @@ async def increment_incremental_refresh_failures(session: AsyncSession, source_i
     source = await session.get(AnimeSource, source_id)
     if not source:
         return 0
-    source.incremental_refresh_failures += 1
+    source.incrementalRefreshFailures += 1
     await session.commit()
-    return source.incremental_refresh_failures
+    return source.incrementalRefreshFailures
 
 async def reset_incremental_refresh_failures(session: AsyncSession, source_id: int):
-    await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(incremental_refresh_failures=0))
+    await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(incrementalRefreshFailures=0))
     await session.commit()
 
 async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> bool:
-    result = await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(incremental_refresh_enabled=False))
+    result = await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(incrementalRefreshEnabled=False))
     await session.commit()
     return result.rowcount > 0
 
@@ -1131,13 +1131,13 @@ async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> 
 async def create_oauth_state(session: AsyncSession, user_id: int) -> str:
     state = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(minutes=10)
-    new_state = OauthState(state_key=state, user_id=user_id, expires_at=expires_at)
+    new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at)
     session.add(new_state)
     await session.commit()
     return state
 
 async def consume_oauth_state(session: AsyncSession, state: str) -> Optional[int]:
-    stmt = select(OauthState).where(OauthState.state_key == state, OauthState.expires_at > func.now())
+    stmt = select(OauthState).where(OauthState.stateKey == state, OauthState.expiresAt > func.now())
     result = await session.execute(stmt)
     state_obj = result.scalar_one_or_none()
     if state_obj:
@@ -1157,25 +1157,25 @@ async def get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, Any
         return {
             "isAuthenticated": True,
             "nickname": auth.nickname,
-            "avatarUrl": auth.avatar_url,
-            "bangumiUserId": auth.bangumi_user_id,
-            "authorizedAt": auth.authorized_at,
-            "expiresAt": auth.expires_at,
+            "avatarUrl": auth.avatarUrl,
+            "bangumiUserId": auth.bangumiUserId,
+            "authorizedAt": auth.authorizedAt,
+            "expiresAt": auth.expiresAt,
         }
     return {"isAuthenticated": False}
 
 async def save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict[str, Any]):
     auth = await session.get(BangumiAuth, user_id)
     if auth:
-        auth.bangumi_user_id = auth_data.get('bangumi_user_id')
+        auth.bangumiUserId = auth_data.get('bangumiUserId')
         auth.nickname = auth_data.get('nickname')
-        auth.avatar_url = auth_data.get('avatar_url')
-        auth.access_token = auth_data.get('access_token')
-        auth.refresh_token = auth_data.get('refresh_token')
-        auth.expires_at = auth_data.get('expires_at')
+        auth.avatarUrl = auth_data.get('avatarUrl')
+        auth.accessToken = auth_data.get('accessToken')
+        auth.refreshToken = auth_data.get('refreshToken')
+        auth.expiresAt = auth_data.get('expiresAt')
     else:
         auth = BangumiAuth(
-            user_id=user_id, authorized_at=datetime.now(), **auth_data
+            userId=user_id, authorizedAt=datetime.now(), **auth_data
         )
         session.add(auth)
     await session.commit()
@@ -1189,7 +1189,7 @@ async def delete_bangumi_auth(session: AsyncSession, user_id: int) -> bool:
     return False
 
 async def get_sources_with_incremental_refresh_enabled(session: AsyncSession) -> List[int]:
-    stmt = select(AnimeSource.id).where(AnimeSource.incremental_refresh_enabled == True)
+    stmt = select(AnimeSource.id).where(AnimeSource.incrementalRefreshEnabled == True)
     result = await session.execute(stmt)
     return result.scalars().all()
 
@@ -1197,7 +1197,7 @@ async def get_sources_with_incremental_refresh_enabled(session: AsyncSession) ->
 
 async def get_animes_with_tmdb_id(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = (
-        select(Anime.id.label("anime_id"), Anime.title, AnimeMetadata.tmdb_id, AnimeMetadata.tmdb_episode_group_id)
+        select(Anime.id.label("animeId"), Anime.title, AnimeMetadata.tmdbId, AnimeMetadata.tmdbEpisodeGroupId)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.anime_id)
         .where(Anime.type == 'tv_series', AnimeMetadata.tmdb_id != None, AnimeMetadata.tmdb_id != '')
     )
@@ -1205,7 +1205,7 @@ async def get_animes_with_tmdb_id(session: AsyncSession) -> List[Dict[str, Any]]
     return [dict(row) for row in result.mappings()]
 
 async def update_anime_tmdb_group_id(session: AsyncSession, anime_id: int, group_id: str):
-    await session.execute(update(AnimeMetadata).where(AnimeMetadata.anime_id == anime_id).values(tmdb_episode_group_id=group_id))
+    await session.execute(update(AnimeMetadata).where(AnimeMetadata.animeId == anime_id).values(tmdbEpisodeGroupId=group_id))
     await session.commit()
 
 async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any]):
@@ -1213,20 +1213,20 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
     if not alias_record: return
 
     updated = False
-    if not alias_record.name_en and aliases.get('name_en'):
-        alias_record.name_en = aliases['name_en']; updated = True
-    if not alias_record.name_jp and aliases.get('name_jp'):
-        alias_record.name_jp = aliases['name_jp']; updated = True
-    if not alias_record.name_romaji and aliases.get('name_romaji'):
-        alias_record.name_romaji = aliases['name_romaji']; updated = True
+    if not alias_record.nameEn and aliases.get('nameEn'):
+        alias_record.nameEn = aliases['nameEn']; updated = True
+    if not alias_record.nameJp and aliases.get('nameJp'):
+        alias_record.nameJp = aliases['nameJp']; updated = True
+    if not alias_record.nameRomaji and aliases.get('nameRomaji'):
+        alias_record.nameRomaji = aliases['nameRomaji']; updated = True
     
     cn_aliases = aliases.get('aliases_cn', [])
-    if not alias_record.alias_cn_1 and len(cn_aliases) > 0:
-        alias_record.alias_cn_1 = cn_aliases[0]; updated = True
-    if not alias_record.alias_cn_2 and len(cn_aliases) > 1:
-        alias_record.alias_cn_2 = cn_aliases[1]; updated = True
-    if not alias_record.alias_cn_3 and len(cn_aliases) > 2:
-        alias_record.alias_cn_3 = cn_aliases[2]; updated = True
+    if not alias_record.aliasCn1 and len(cn_aliases) > 0:
+        alias_record.aliasCn1 = cn_aliases[0]; updated = True
+    if not alias_record.aliasCn2 and len(cn_aliases) > 1:
+        alias_record.aliasCn2 = cn_aliases[1]; updated = True
+    if not alias_record.aliasCn3 and len(cn_aliases) > 2:
+        alias_record.aliasCn3 = cn_aliases[2]; updated = True
 
     if updated:
         await session.commit()
@@ -1236,16 +1236,16 @@ async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(
         ScheduledTask.id.label("id"),
         ScheduledTask.name.label("name"),
-        ScheduledTask.job_type.label("jobType"),
-        ScheduledTask.cron_expression.label("cronExpression"),
-        ScheduledTask.is_enabled.label("isEnabled"),
-        ScheduledTask.last_run_at.label("lastRunAt"),
-        ScheduledTask.next_run_at.label("nextRunAt")
+        ScheduledTask.jobType.label("jobType"),
+        ScheduledTask.cronExpression.label("cronExpression"),
+        ScheduledTask.isEnabled.label("isEnabled"),
+        ScheduledTask.lastRunAt.label("lastRunAt"),
+        ScheduledTask.nextRunAt.label("nextRunAt")
     ).order_by(ScheduledTask.name)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 async def check_scheduled_task_exists_by_type(session: AsyncSession, job_type: str) -> bool:
-    stmt = select(ScheduledTask.id).where(ScheduledTask.job_type == job_type).limit(1)
+    stmt = select(ScheduledTask.id).where(ScheduledTask.jobType == job_type).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
@@ -1253,18 +1253,18 @@ async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Di
     stmt = select(
         ScheduledTask.id.label("id"), 
         ScheduledTask.name.label("name"),
-        ScheduledTask.job_type.label("jobType"), 
-        ScheduledTask.cron_expression.label("cronExpression"),
-        ScheduledTask.is_enabled.label("isEnabled"),
-        ScheduledTask.last_run_at.label("lastRunAt"),
-        ScheduledTask.next_run_at.label("nextRunAt")
+        ScheduledTask.jobType.label("jobType"), 
+        ScheduledTask.cronExpression.label("cronExpression"),
+        ScheduledTask.isEnabled.label("isEnabled"),
+        ScheduledTask.lastRunAt.label("lastRunAt"),
+        ScheduledTask.nextRunAt.label("nextRunAt")
     ).where(ScheduledTask.id == task_id)
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
 
 async def create_scheduled_task(session: AsyncSession, task_id: str, name: str, job_type: str, cron: str, is_enabled: bool):
-    new_task = ScheduledTask(id=task_id, name=name, job_type=job_type, cron_expression=cron, is_enabled=is_enabled)
+    new_task = ScheduledTask(id=task_id, name=name, jobType=job_type, cronExpression=cron, isEnabled=is_enabled)
     session.add(new_task)
     await session.commit()
 
@@ -1272,8 +1272,8 @@ async def update_scheduled_task(session: AsyncSession, task_id: str, name: str, 
     task = await session.get(ScheduledTask, task_id)
     if task:
         task.name = name
-        task.cron_expression = cron
-        task.is_enabled = is_enabled
+        task.cronExpression = cron
+        task.isEnabled = is_enabled
         await session.commit()
 
 async def delete_scheduled_task(session: AsyncSession, task_id: str):
@@ -1283,7 +1283,7 @@ async def delete_scheduled_task(session: AsyncSession, task_id: str):
         await session.commit()
 
 async def update_scheduled_task_run_times(session: AsyncSession, task_id: str, last_run: Optional[datetime], next_run: Optional[datetime]):
-    await session.execute(update(ScheduledTask).where(ScheduledTask.id == task_id).values(last_run_at=last_run, next_run_at=next_run))
+    await session.execute(update(ScheduledTask).where(ScheduledTask.id == task_id).values(lastRunAt=last_run, nextRunAt=next_run))
     await session.commit()
 
 # --- Task History ---
@@ -1298,7 +1298,7 @@ async def update_task_progress_in_history(session: AsyncSession, task_id: str, s
     await session.commit()
 
 async def finalize_task_in_history(session: AsyncSession, task_id: str, status: str, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, description=description, progress=100, finished_at=func.now()))
+    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, description=description, progress=100, finishedAt=func.now()))
     await session.commit()
 
 async def update_task_status(session: AsyncSession, task_id: str, status: str):
@@ -1314,10 +1314,10 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
     elif status_filter == 'completed':
         stmt = stmt.where(TaskHistory.status == '已完成')
     
-    stmt = stmt.order_by(TaskHistory.created_at.desc()).limit(100)
+    stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(100)
     result = await session.execute(stmt)
     return [
-        {"taskId": t.id, "title": t.title, "status": t.status, "progress": t.progress, "description": t.description, "createdAt": t.created_at}
+        {"taskId": t.id, "title": t.title, "status": t.status, "progress": t.progress, "description": t.description, "createdAt": t.createdAt}
         for t in result.scalars()
     ]
 
@@ -1331,7 +1331,7 @@ async def get_task_details_from_history(session: AsyncSession, task_id: str) -> 
             "status": task.status,
             "progress": task.progress,
             "description": task.description,
-            "createdAt": task.created_at,
+            "createdAt": task.createdAt,
         }
     return None
 
@@ -1353,7 +1353,7 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (
         update(TaskHistory)
         .where(TaskHistory.status.in_(['运行中', '已暂停']))
-        .values(status='失败', description='因程序重启而中断', finished_at=func.now())
+        .values(status='失败', description='因程序重启而中断', finishedAt=func.now())
     )
     result = await session.execute(stmt)
     await session.commit()
@@ -1364,9 +1364,9 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
 async def create_external_api_log(session: AsyncSession, ip_address: str, endpoint: str, status_code: int, message: Optional[str] = None):
     """创建一个外部API访问日志。"""
     new_log = ExternalApiLog(
-        ip_address=ip_address,
+        ipAddress=ip_address,
         endpoint=endpoint,
-        status_code=status_code,
+        statusCode=status_code,
         message=message
     )
     session.add(new_log)
@@ -1384,7 +1384,7 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
     existing_keys = set((await session.execute(existing_stmt)).scalars().all())
     
     new_configs = [
-        Config(config_key=key, config_value=str(value), description=description)
+        Config(configKey=key, configValue=str(value), description=description)
         for key, (value, description) in defaults.items()
         if key not in existing_keys
     ]

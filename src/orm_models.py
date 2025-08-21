@@ -16,15 +16,15 @@ class Anime(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(255), index=True)
     type: Mapped[str] = mapped_column(Enum('tv_series', 'movie', 'ova', 'other'), default='tv_series')
-    image_url: Mapped[Optional[str]] = mapped_column(String(512))
-    local_image_path: Mapped[Optional[str]] = mapped_column(String(512))
+    imageUrl: Mapped[Optional[str]] = mapped_column("image_url", String(512))
+    localImagePath: Mapped[Optional[str]] = mapped_column("local_image_path", String(512))
     season: Mapped[int] = mapped_column(Integer, default=1)
-    episode_count: Mapped[Optional[int]] = mapped_column(Integer)
-    source_url: Mapped[Optional[str]] = mapped_column(String(512))
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
+    episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer)
+    sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", String(512))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
-    metadata_record: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
+    metadataRecord: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
     aliases: Mapped["AnimeAlias"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
 
     __table_args__ = (
@@ -34,13 +34,13 @@ class Anime(Base):
 class AnimeSource(Base):
     __tablename__ = "anime_sources"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"))
-    provider_name: Mapped[str] = mapped_column(String(50))
-    media_id: Mapped[str] = mapped_column(String(255))
-    is_favorited: Mapped[bool] = mapped_column(Boolean, default=False)
-    incremental_refresh_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    incremental_refresh_failures: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
+    animeId: Mapped[int] = mapped_column("anime_id", ForeignKey("anime.id", ondelete="CASCADE"))
+    providerName: Mapped[str] = mapped_column("provider_name", String(50))
+    mediaId: Mapped[str] = mapped_column("media_id", String(255))
+    isFavorited: Mapped[bool] = mapped_column("is_favorited", Boolean, default=False)
+    incrementalRefreshEnabled: Mapped[bool] = mapped_column("incremental_refresh_enabled", Boolean, default=False)
+    incrementalRefreshFailures: Mapped[int] = mapped_column("incremental_refresh_failures", Integer, default=0)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
 
     anime: Mapped["Anime"] = relationship(back_populates="sources")
     episodes: Mapped[List["Episode"]] = relationship(back_populates="source", cascade="all, delete-orphan")
@@ -50,13 +50,13 @@ class AnimeSource(Base):
 class Episode(Base):
     __tablename__ = "episode"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    source_id: Mapped[int] = mapped_column(ForeignKey("anime_sources.id", ondelete="CASCADE"))
+    sourceId: Mapped[int] = mapped_column("source_id", ForeignKey("anime_sources.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(255))
-    episode_index: Mapped[int] = mapped_column(Integer)
-    provider_episode_id: Mapped[Optional[str]] = mapped_column(String(255))
-    source_url: Mapped[Optional[str]] = mapped_column(String(512))
-    fetched_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    episodeIndex: Mapped[int] = mapped_column("episode_index", Integer)
+    providerEpisodeId: Mapped[Optional[str]] = mapped_column("provider_episode_id", String(255))
+    sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", String(512))
+    fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", TIMESTAMP)
+    commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
 
     source: Mapped["AnimeSource"] = relationship(back_populates="episodes")
     comments: Mapped[List["Comment"]] = relationship(back_populates="episode", cascade="all, delete-orphan")
@@ -67,7 +67,7 @@ class Comment(Base):
     __tablename__ = "comment"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     cid: Mapped[str] = mapped_column(String(255))
-    episode_id: Mapped[int] = mapped_column(ForeignKey("episode.id", ondelete="CASCADE"))
+    episodeId: Mapped[int] = mapped_column("episode_id", ForeignKey("episode.id", ondelete="CASCADE"))
     p: Mapped[str] = mapped_column(String(255))
     m: Mapped[str] = mapped_column(TEXT)
     t: Mapped[float] = mapped_column(DECIMAL(10, 2))
@@ -83,68 +83,68 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
+    hashedPassword: Mapped[str] = mapped_column("hashed_password", String(255))
     token: Mapped[Optional[str]] = mapped_column(TEXT)
-    token_update: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
+    tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", TIMESTAMP)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
 
 class Scraper(Base):
     __tablename__ = "scrapers"
-    provider_name: Mapped[str] = mapped_column(String(50), primary_key=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    display_order: Mapped[int] = mapped_column(Integer, default=0)
-    use_proxy: Mapped[bool] = mapped_column(Boolean, default=False)
+    providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
+    isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    displayOrder: Mapped[int] = mapped_column("display_order", Integer, default=0)
+    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=False)
 
 class MetadataSource(Base):
     __tablename__ = "metadata_sources"
-    provider_name: Mapped[str] = mapped_column(String(50), primary_key=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_aux_search_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    display_order: Mapped[int] = mapped_column(Integer, default=0)
-    use_proxy: Mapped[bool] = mapped_column(Boolean, default=False)
+    providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
+    isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    isAuxSearchEnabled: Mapped[bool] = mapped_column("is_aux_search_enabled", Boolean, default=True)
+    displayOrder: Mapped[int] = mapped_column("display_order", Integer, default=0)
+    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=False)
 
 class AnimeMetadata(Base):
     __tablename__ = "anime_metadata"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"), unique=True)
-    tmdb_id: Mapped[Optional[str]] = mapped_column(String(50))
-    tmdb_episode_group_id: Mapped[Optional[str]] = mapped_column(String(50))
-    imdb_id: Mapped[Optional[str]] = mapped_column(String(50))
-    tvdb_id: Mapped[Optional[str]] = mapped_column(String(50))
-    douban_id: Mapped[Optional[str]] = mapped_column(String(50))
-    bangumi_id: Mapped[Optional[str]] = mapped_column(String(50))
+    animeId: Mapped[int] = mapped_column("anime_id", ForeignKey("anime.id", ondelete="CASCADE"), unique=True)
+    tmdbId: Mapped[Optional[str]] = mapped_column("tmdb_id", String(50))
+    tmdbEpisodeGroupId: Mapped[Optional[str]] = mapped_column("tmdb_episode_group_id", String(50))
+    imdbId: Mapped[Optional[str]] = mapped_column("imdb_id", String(50))
+    tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(50))
+    doubanId: Mapped[Optional[str]] = mapped_column("douban_id", String(50))
+    bangumiId: Mapped[Optional[str]] = mapped_column("bangumi_id", String(50))
 
-    anime: Mapped["Anime"] = relationship(back_populates="metadata_record")
+    anime: Mapped["Anime"] = relationship(back_populates="metadataRecord")
 
 class Config(Base):
     __tablename__ = "config"
-    config_key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    config_value: Mapped[str] = mapped_column(TEXT)
+    configKey: Mapped[str] = mapped_column("config_key", String(100), primary_key=True)
+    configValue: Mapped[str] = mapped_column("config_value", TEXT)
     description: Mapped[Optional[str]] = mapped_column(TEXT)
 
 class CacheData(Base):
     __tablename__ = "cache_data"
-    cache_provider: Mapped[Optional[str]] = mapped_column(String(50))
-    cache_key: Mapped[str] = mapped_column(String(255), primary_key=True)
-    cache_value: Mapped[str] = mapped_column(TEXT)
-    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP, index=True)
+    cacheProvider: Mapped[Optional[str]] = mapped_column("cache_provider", String(50))
+    cacheKey: Mapped[str] = mapped_column("cache_key", String(255), primary_key=True)
+    cacheValue: Mapped[str] = mapped_column("cache_value", TEXT)
+    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP, index=True)
 
 class ApiToken(Base):
     __tablename__ = "api_tokens"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100))
     token: Mapped[str] = mapped_column(String(50), unique=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP)
 
 class TokenAccessLog(Base):
     __tablename__ = "token_access_logs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    token_id: Mapped[int] = mapped_column(Integer)
-    ip_address: Mapped[str] = mapped_column(String(45))
-    user_agent: Mapped[Optional[str]] = mapped_column(TEXT)
-    access_time: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    tokenId: Mapped[int] = mapped_column("token_id", Integer)
+    ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
+    userAgent: Mapped[Optional[str]] = mapped_column("user_agent", TEXT)
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP, server_default=func.now())
     status: Mapped[str] = mapped_column(String(50))
     path: Mapped[Optional[str]] = mapped_column(String(512))
 
@@ -153,50 +153,50 @@ class TokenAccessLog(Base):
 class UaRule(Base):
     __tablename__ = "ua_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ua_string: Mapped[str] = mapped_column(String(255), unique=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
+    uaString: Mapped[str] = mapped_column("ua_string", String(255), unique=True)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
 
 class BangumiAuth(Base):
     __tablename__ = "bangumi_auth"
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    bangumi_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    userId: Mapped[int] = mapped_column("user_id", BigInteger, primary_key=True)
+    bangumiUserId: Mapped[Optional[int]] = mapped_column("bangumi_user_id", Integer)
     nickname: Mapped[Optional[str]] = mapped_column(String(255))
-    avatar_url: Mapped[Optional[str]] = mapped_column(String(512))
-    access_token: Mapped[str] = mapped_column(TEXT)
-    refresh_token: Mapped[Optional[str]] = mapped_column(TEXT)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    authorized_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    avatarUrl: Mapped[Optional[str]] = mapped_column("avatar_url", String(512))
+    accessToken: Mapped[str] = mapped_column("access_token", TEXT)
+    refreshToken: Mapped[Optional[str]] = mapped_column("refresh_token", TEXT)
+    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP)
+    authorizedAt: Mapped[Optional[datetime]] = mapped_column("authorized_at", TIMESTAMP)
 
 class OauthState(Base):
     __tablename__ = "oauth_states"
-    state_key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger)
-    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP, index=True)
+    stateKey: Mapped[str] = mapped_column("state_key", String(100), primary_key=True)
+    userId: Mapped[int] = mapped_column("user_id", BigInteger)
+    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP, index=True)
 
 class AnimeAlias(Base):
     __tablename__ = "anime_aliases"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"), unique=True)
-    name_en: Mapped[Optional[str]] = mapped_column(String(255))
-    name_jp: Mapped[Optional[str]] = mapped_column(String(255))
-    name_romaji: Mapped[Optional[str]] = mapped_column(String(255))
-    alias_cn_1: Mapped[Optional[str]] = mapped_column(String(255))
-    alias_cn_2: Mapped[Optional[str]] = mapped_column(String(255))
-    alias_cn_3: Mapped[Optional[str]] = mapped_column(String(255))
+    animeId: Mapped[int] = mapped_column("anime_id", ForeignKey("anime.id", ondelete="CASCADE"), unique=True)
+    nameEn: Mapped[Optional[str]] = mapped_column("name_en", String(255))
+    nameJp: Mapped[Optional[str]] = mapped_column("name_jp", String(255))
+    nameRomaji: Mapped[Optional[str]] = mapped_column("name_romaji", String(255))
+    aliasCn1: Mapped[Optional[str]] = mapped_column("alias_cn_1", String(255))
+    aliasCn2: Mapped[Optional[str]] = mapped_column("alias_cn_2", String(255))
+    aliasCn3: Mapped[Optional[str]] = mapped_column("alias_cn_3", String(255))
 
     anime: Mapped["Anime"] = relationship(back_populates="aliases")
 
 class TmdbEpisodeMapping(Base):
     __tablename__ = "tmdb_episode_mapping"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tmdb_tv_id: Mapped[int] = mapped_column(Integer)
-    tmdb_episode_group_id: Mapped[str] = mapped_column(String(50))
-    tmdb_episode_id: Mapped[int] = mapped_column(Integer)
-    tmdb_season_number: Mapped[int] = mapped_column(Integer)
-    tmdb_episode_number: Mapped[int] = mapped_column(Integer)
-    custom_season_number: Mapped[int] = mapped_column(Integer)
-    custom_episode_number: Mapped[int] = mapped_column(Integer)
-    absolute_episode_number: Mapped[int] = mapped_column(Integer)
+    tmdbTvId: Mapped[int] = mapped_column("tmdb_tv_id", Integer)
+    tmdbEpisodeGroupId: Mapped[str] = mapped_column("tmdb_episode_group_id", String(50))
+    tmdbEpisodeId: Mapped[int] = mapped_column("tmdb_episode_id", Integer)
+    tmdbSeasonNumber: Mapped[int] = mapped_column("tmdb_season_number", Integer)
+    tmdbEpisodeNumber: Mapped[int] = mapped_column("tmdb_episode_number", Integer)
+    customSeasonNumber: Mapped[int] = mapped_column("custom_season_number", Integer)
+    customEpisodeNumber: Mapped[int] = mapped_column("custom_episode_number", Integer)
+    absoluteEpisodeNumber: Mapped[int] = mapped_column("absolute_episode_number", Integer)
 
     __table_args__ = (
         UniqueConstraint('tmdb_episode_group_id', 'tmdb_episode_id', name='idx_group_episode_unique'),
@@ -208,11 +208,11 @@ class ScheduledTask(Base):
     __tablename__ = "scheduled_tasks"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    job_type: Mapped[str] = mapped_column(String(50))
-    cron_expression: Mapped[str] = mapped_column(String(100))
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_run_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    jobType: Mapped[str] = mapped_column("job_type", String(50))
+    cronExpression: Mapped[str] = mapped_column("cron_expression", String(100))
+    isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", TIMESTAMP)
+    nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", TIMESTAMP)
 
 class TaskHistory(Base):
     __tablename__ = "task_history"
@@ -221,17 +221,17 @@ class TaskHistory(Base):
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[Optional[str]] = mapped_column(TEXT)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), default=datetime.now)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP, server_default=func.now(), onupdate=func.now(), default=datetime.now)
+    finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP)
 
     __table_args__ = (Index('idx_created_at', 'created_at', mysql_length={'created_at': None}),)
 
 class ExternalApiLog(Base):
     __tablename__ = "external_api_logs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    access_time: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
-    ip_address: Mapped[str] = mapped_column(String(45))
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP, server_default=func.now())
+    ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
     endpoint: Mapped[str] = mapped_column(String(255))
-    status_code: Mapped[int] = mapped_column(Integer)
+    statusCode: Mapped[int] = mapped_column("status_code", Integer)
     message: Mapped[Optional[str]] = mapped_column(TEXT)
