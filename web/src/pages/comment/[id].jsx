@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getDanmakuDetail, getEpisodes } from '../../apis'
-import { Card } from 'antd'
+import { Breadcrumb, Card } from 'antd'
+import { HomeOutlined } from '@ant-design/icons'
 
 export const CommentDetail = () => {
   const { id } = useParams()
@@ -11,6 +12,8 @@ export const CommentDetail = () => {
   const [loading, setLoading] = useState(true)
   const [commentList, setCommentList] = useState([])
   const [episode, setEpisode] = useState({})
+
+  const navigate = useNavigate()
 
   const getDetail = async () => {
     setLoading(true)
@@ -25,12 +28,10 @@ export const CommentDetail = () => {
       ])
       setCommentList(commentRes.data?.comments || [])
       setEpisode(
-        episodeRes?.data?.filter(it => it.id === Number(id))?.[0] || {}
+        episodeRes?.data?.filter(it => it.episodeId === Number(id))?.[0] || {}
       )
       setLoading(false)
-    } catch (error) {
-      navigate(`/anime/${animeId}`)
-    }
+    } catch (error) {}
   }
 
   console.log(episode, 'episode')
@@ -41,6 +42,30 @@ export const CommentDetail = () => {
 
   return (
     <div className="my-6">
+      <Breadcrumb
+        className="!mb-4"
+        items={[
+          {
+            title: (
+              <Link>
+                <HomeOutlined />
+              </Link>
+            ),
+            onClick: () => navigate('/'),
+          },
+          {
+            title: <Link>弹幕库</Link>,
+            onClick: () => navigate('/library'),
+          },
+          {
+            title: <Link>分集列表</Link>,
+            onClick: () => navigate(-1),
+          },
+          {
+            title: '弹幕列表',
+          },
+        ]}
+      />
       <Card loading={loading} title={`弹幕列表: ${episode?.title ?? ''}`}>
         <div
           className="overflow-y-auto"

@@ -2,8 +2,20 @@ import { Button, Card, Form, Input, List, message, Tag } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import { getMetaData, setMetaData } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
-import { DndContext, DragOverlay } from '@dnd-kit/core'
-import { SortableContext, useSortable } from '@dnd-kit/sortable'
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 const SortableItem = ({ item, index, handleChangeStatus }) => {
@@ -28,6 +40,8 @@ const SortableItem = ({ item, index, handleChangeStatus }) => {
     transition,
     opacity: isDragging ? 0.5 : 1,
     cursor: 'grab',
+    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
+    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 
@@ -71,6 +85,20 @@ export const Metadata = () => {
   const [list, setList] = useState([])
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        distance: 8,
+        delay: 100,
+      },
+    })
+  )
 
   useEffect(() => {
     getMetaData()
@@ -192,8 +220,14 @@ export const Metadata = () => {
   return (
     <div className="my-6">
       <Card loading={loading} title="元信息搜索源">
-        <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
           <SortableContext
+            strategy={verticalListSortingStrategy}
             items={list.map((item, index) => item.id || `item-${index}`)}
           >
             <List

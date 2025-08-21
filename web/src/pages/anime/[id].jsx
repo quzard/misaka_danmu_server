@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   deleteAnimeSource,
   deleteAnimeSourceSingle,
@@ -13,6 +13,7 @@ import {
   toggleSourceIncremental,
 } from '../../apis'
 import {
+  Breadcrumb,
   Button,
   Card,
   Col,
@@ -31,6 +32,7 @@ import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
+import { HomeOutlined } from '@ant-design/icons'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
@@ -416,15 +418,33 @@ export const AnimeDetail = () => {
 
   return (
     <div className="my-6">
+      <Breadcrumb
+        className="!mb-4"
+        items={[
+          {
+            title: (
+              <Link>
+                <HomeOutlined />
+              </Link>
+            ),
+            onClick: () => navigate('/'),
+          },
+          {
+            title: <Link>弹幕库</Link>,
+            onClick: () => navigate('/library'),
+          },
+          {
+            title: animeDetail.title,
+          },
+        ]}
+      />
       <Card loading={loading} title={null}>
         <Row gutter={[12, 12]}>
           <Col md={20} xs={24}>
             <div className="flex items-center justify-start gap-4">
-              {imageSrc && (
-                <img src={imageSrc} className="h-[100px]" />
-              )}
+              {imageSrc && <img src={imageSrc} className="h-[100px]" />}
               <div>
-                <div className="text-xl font-bold mb-3">
+                <div className="text-xl font-bold mb-3 break-all">
                   {animeDetail.title}（Season{' '}
                   {padStart(String(animeDetail.season), 2, '0')}）
                 </div>

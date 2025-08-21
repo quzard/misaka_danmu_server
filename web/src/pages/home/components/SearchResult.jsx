@@ -20,6 +20,7 @@ import {
   Radio,
   Form,
   Empty,
+  InputNumber,
 } from 'antd'
 import { useAtom } from 'jotai'
 import { lastSearchResultAtom, searchLoadingAtom } from '../../../../store'
@@ -28,8 +29,20 @@ import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
 
 import { MyIcon } from '@/components/MyIcon'
-import { DndContext, DragOverlay } from '@dnd-kit/core'
-import { SortableContext, useSortable } from '@dnd-kit/sortable'
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 const IMPORT_MODE = [
@@ -65,6 +78,20 @@ export const SearchResult = () => {
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
   const [editConfirmLoading, setEditConfirmLoading] = useState(false)
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        distance: 8,
+        delay: 100,
+      },
+    })
+  )
 
   const searchSeason = lastSearchResultData?.season
 
@@ -273,29 +300,31 @@ export const SearchResult = () => {
     }
 
     // 找到原位置和新位置
-    const activeIndex = editEpisodeList.findIndex(
-      item => item.episodeId === active.data.current.item.episodeId
-    )
-    const overIndex = editEpisodeList.findIndex(
-      item => item.episodeId === over.data.current.item.episodeId
-    )
 
-    if (activeIndex !== -1 && overIndex !== -1) {
-      // 1. 重新排列数组
-      const newList = [...editEpisodeList]
-      const [movedItem] = newList.splice(activeIndex, 1)
-      newList.splice(overIndex, 0, movedItem)
+    setEditEpisodeList(list => {
+      const activeIndex = list.findIndex(
+        item => item.episodeId === active.data.current.item.episodeId
+      )
+      const overIndex = list.findIndex(
+        item => item.episodeId === over.data.current.item.episodeId
+      )
 
-      // 2. 重新计算所有项的display_order（从1开始连续编号）
-      const updatedList = newList.map((item, index) => ({
-        ...item,
-        episodeIndex: index + 1, // 排序值从1开始
-      }))
+      if (activeIndex !== -1 && overIndex !== -1) {
+        // 1. 重新排列数组
+        const newList = [...editEpisodeList]
+        const [movedItem] = newList.splice(activeIndex, 1)
+        newList.splice(overIndex, 0, movedItem)
 
-      // 3. 更新状态
-      console.log(updatedList, 'updatedList')
-      setEditEpisodeList(updatedList)
-    }
+        // // 2. 重新计算所有项的display_order（从1开始连续编号）
+        // const updatedList = newList.map((item, index) => ({
+        //   ...item,
+        //   episodeIndex: index + 1, // 排序值从1开始
+        // }))
+
+        return newList
+      }
+      return list
+    })
 
     setActiveItem(null)
   }
@@ -309,21 +338,48 @@ export const SearchResult = () => {
   }
 
   const handleDelete = item => {
-    console.log(item, 'item')
-    const activeIndex = editEpisodeList.findIndex(
-      o => o.episodeId === item.episodeId
-    )
-    const newList = [...editEpisodeList]
-    newList.splice(activeIndex, 1)
-
-    // 2. 重新计算所有项的display_order（从1开始连续编号）
-    const updatedList = newList.map((item, index) => ({
-      ...item,
-      episodeIndex: index + 1, // 排序值从1开始
-    }))
-
     // 3. 更新状态
-    setEditEpisodeList(updatedList)
+    setEditEpisodeList(list => {
+      const activeIndex = list.findIndex(o => o.episodeId === item.episodeId)
+      const newList = [...list]
+      newList.splice(activeIndex, 1)
+
+      // const updatedList = newList.map((item, index) => ({
+      //   ...item,
+      //   episodeIndex: index + 1, // 排序值从1开始
+      // }))
+      return newList
+    })
+  }
+
+  const handleEditTitle = (item, value) => {
+    setEditEpisodeList(list => {
+      return list.map(it => {
+        if (it.episodeId === item.episodeId) {
+          return {
+            ...it,
+            title: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
+  }
+
+  const handleEditIndex = (item, value) => {
+    setEditEpisodeList(list => {
+      return list.map(it => {
+        if (it.episodeId === item.episodeId) {
+          return {
+            ...it,
+            episodeIndex: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
   }
 
   const renderDragOverlay = () => {
@@ -366,7 +422,7 @@ export const SearchResult = () => {
         <div>
           <Row gutter={[12, 12]} className="mb-6">
             <Col md={20} xs={24}>
-              <div className="flex items-center justify-start gap-4">
+              <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-4">
                 <Button
                   type="primary"
                   className="w-32"
@@ -687,9 +743,15 @@ export const SearchResult = () => {
           </div>
         </div>
         <div>
-          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
             <SortableContext
               items={editEpisodeList.map(item => item.episodeId)}
+              strategy={verticalListSortingStrategy}
             >
               <List
                 itemLayout="vertical"
@@ -697,10 +759,12 @@ export const SearchResult = () => {
                 dataSource={editEpisodeList}
                 renderItem={(item, index) => (
                   <SortableItem
-                    key={item.id || index}
+                    key={item.episodeId}
                     item={item}
                     index={index}
                     handleDelete={() => handleDelete(item)}
+                    handleEditTitle={value => handleEditTitle(item, value)}
+                    handleEditIndex={value => handleEditIndex(item, value)}
                   />
                 )}
               />
@@ -715,7 +779,13 @@ export const SearchResult = () => {
   )
 }
 
-const SortableItem = ({ item, index, handleDelete }) => {
+const SortableItem = ({
+  item,
+  index,
+  handleDelete,
+  handleEditTitle,
+  handleEditIndex,
+}) => {
   const {
     attributes,
     listeners,
@@ -731,12 +801,31 @@ const SortableItem = ({ item, index, handleDelete }) => {
     },
   })
 
+  const inputRef = useRef(null)
+  const [isFocused, setIsFocused] = useState(false)
+  const inputNumberRef = useRef(null)
+  const [isNumberFocused, setIsNumberFocused] = useState(false)
+
+  useEffect(() => {
+    if (isFocused && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isFocused, item.title])
+
+  useEffect(() => {
+    if (isNumberFocused && inputNumberRef.current) {
+      inputNumberRef.current.focus()
+    }
+  }, [isNumberFocused, item.episodeIndex])
+
   // 拖拽样式
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
     cursor: 'grab',
+    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
+    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 
@@ -748,13 +837,28 @@ const SortableItem = ({ item, index, handleDelete }) => {
           <MyIcon icon="drag" size={24} />
         </div>
         <div className="w-full flex items-center justify-start gap-3">
-          <div>{item.episodeIndex}</div>
+          <InputNumber
+            ref={inputNumberRef}
+            value={item.episodeIndex}
+            onChange={value => {
+              handleEditIndex(value)
+            }}
+            onFocus={() => setIsNumberFocused(true)}
+            onBlur={() => setIsNumberFocused(false)}
+          />
           <Input
+            ref={inputRef}
             style={{
               width: '100%',
             }}
+            key={item.title}
             value={item.title}
-            onChange={e => {}}
+            onChange={e => {
+              console.log(e.target.value, 'e.target.value')
+              handleEditTitle(e.target.value)
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
           <div onClick={() => handleDelete(item)}>
             <CloseCircleOutlined />

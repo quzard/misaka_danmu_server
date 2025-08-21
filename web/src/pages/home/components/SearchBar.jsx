@@ -235,7 +235,7 @@ export const SearchBar = () => {
           </Row>
         </Form>
         {!!searchHistory.length && (
-          <div>
+          <div className="flex items-center justify-start flex-wrap gap-2 mt-3">
             {searchHistory.map((it, index) => {
               return (
                 <span
