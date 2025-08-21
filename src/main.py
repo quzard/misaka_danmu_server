@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
     await app.state.scraper_manager.initialize()
     # 新增：初始化元数据源管理器
-    app.state.metadata_manager = MetadataSourceManager(session_factory)
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager)
     await app.state.metadata_manager.initialize()
 
     app.state.task_manager = TaskManager(session_factory)
