@@ -174,7 +174,7 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             Anime.imageUrl.label("imageUrl"),
             Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"),
-            func.if_(Anime.type == 'movie', func.concat(Scraper.providerName, ' 源'),Episode.title).label("episodeTitle"),
+            func.if_(Anime.type == 'movie', func.concat(Scraper.providerName, ' 源'), Episode.title).label("episodeTitle"),
             AnimeAlias.nameEn,
             AnimeAlias.nameJp,
             AnimeAlias.nameRomaji,
@@ -298,7 +298,7 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
     """为匹配流程查找可能的番剧，并返回其核心ID以供TMDB映射使用。"""
     stmt = (
         select(
-            Anime.id.label("anime_id"),
+            Anime.id.label("animeId"),
             AnimeMetadata.tmdbId,
             AnimeMetadata.tmdbEpisodeGroupId,
             Anime.title
@@ -359,7 +359,7 @@ async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_
 
 async def fetch_comments_for_episodes(session: AsyncSession, episode_ids: List[int]) -> List[Dict[str, Any]]:
     """
-    获取一个或多个分集ID的所有弹幕。
+    获取多个分集ID的所有弹幕。
     """
     stmt = select(Comment.p, Comment.m).where(Comment.episodeId.in_(episode_ids))
     result = await session.execute(stmt)
@@ -371,13 +371,13 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
         select(
             Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"),
             Anime.createdAt.label("startDate"), Anime.sourceUrl.label("bangumiUrl"),
-            func.count(distinct(Episode.id)).label("episodeCount"), AnimeMetadata.bangumi_id.label("bangumiId")
+            func.count(distinct(Episode.id)).label("episodeCount"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
         .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .where(Anime.id == anime_id)
-        .group_by(Anime.id, AnimeMetadata.bangumi_id)
+        .group_by(Anime.id, AnimeMetadata.bangumiId)
     )
     anime_details_res = await session.execute(anime_stmt)
     anime_details = anime_details_res.mappings().first()
@@ -517,7 +517,9 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
 
 async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
     """获取指定分集的所有弹幕"""
-    return await fetch_comments_for_episodes(session, [episode_id])
+    stmt = select(Comment.p, Comment.m).where(Comment.episodeId == episode_id)
+    result = await session.execute(stmt)
+    return [dict(row) for row in result.mappings()]
 
 async def get_existing_comment_cids(session: AsyncSession, episode_id: int) -> set:
     """获取指定分集已存在的所有弹幕 cid。"""
@@ -527,7 +529,7 @@ async def get_existing_comment_cids(session: AsyncSession, episode_id: int) -> s
 
 async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
     """如果分集不存在则创建，并返回其确定性的ID。"""
-    stmt = select(Episode.id).where(Episode.source_id == source_id, Episode.episode_index == episode_index)
+    stmt = select(Episode.id).where(Episode.sourceId == source_id, Episode.episodeIndex == episode_index)
     result = await session.execute(stmt)
     existing_id = result.scalar_one_or_none()
     if existing_id:
@@ -647,8 +649,8 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
 
 async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
-        select(Episode.id, Episode.title, AnimeSource.provider_name)
-        .join(AnimeSource, Episode.source_id == AnimeSource.id)
+        select(Episode.id, Episode.title, AnimeSource.providerName)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episode_id)
     )
     result = await session.execute(stmt)
@@ -666,15 +668,15 @@ async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> O
     return dict(row) if row else None
 
 async def clear_source_data(session: AsyncSession, source_id: int):
-    episodes_to_delete = await session.execute(select(Episode.id).where(Episode.source_id == source_id))
+    episodes_to_delete = await session.execute(select(Episode.id).where(Episode.sourceId == source_id))
     episode_ids = episodes_to_delete.scalars().all()
     if episode_ids:
-        await session.execute(delete(Comment).where(Comment.episode_id.in_(episode_ids)))
+        await session.execute(delete(Comment).where(Comment.episodeId.in_(episode_ids)))
         await session.execute(delete(Episode).where(Episode.id.in_(episode_ids)))
     await session.commit()
 
 async def clear_episode_comments(session: AsyncSession, episode_id: int):
-    await session.execute(delete(Comment).where(Comment.episode_id == episode_id))
+    await session.execute(delete(Comment).where(Comment.episodeId == episode_id))
     await session.execute(update(Episode).where(Episode.id == episode_id).values(commentCount=0))
     await session.commit()
 
@@ -1371,7 +1373,7 @@ async def create_external_api_log(session: AsyncSession, ip_address: str, endpoi
     await session.commit()
 
 async def get_external_api_logs(session: AsyncSession, limit: int = 100) -> List[ExternalApiLog]:
-    stmt = select(ExternalApiLog).order_by(ExternalApiLog.access_time.desc()).limit(limit)
+    stmt = select(ExternalApiLog).order_by(ExternalApiLog.accessTime.desc()).limit(limit)
     result = await session.execute(stmt)
     return result.scalars().all()
 

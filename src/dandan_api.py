@@ -701,12 +701,12 @@ async def match_single_file(
     logger.info(f"为标题 '{parsed_info['title']}' 找到 {len(potential_animes)} 个可能的库内作品进行TMDB匹配。")
 
     for anime in potential_animes:
-        if anime.get("tmdb_id") and anime.get("tmdb_episode_group_id"):
-            logger.info(f"正在为作品 ID {anime['anime_id']} (TMDB ID: {anime['tmdb_id']}) 尝试 TMDB 映射匹配...")
+        if anime.get("tmdbId") and anime.get("tmdbEpisodeGroupId"):
+            logger.info(f"正在为作品 ID {anime['animeId']} (TMDB ID: {anime['tmdbId']}) 尝试 TMDB 映射匹配...")
             tmdb_results = await crud.find_episode_via_tmdb_mapping(
                 session,
-                tmdb_id=anime["tmdb_id"],
-                group_id=anime["tmdb_episode_group_id"],
+                tmdb_id=anime["tmdbId"],
+                group_id=anime["tmdbEpisodeGroupId"],
                 custom_season=parsed_info.get("season"),
                 custom_episode=parsed_info["episode"]
             )
