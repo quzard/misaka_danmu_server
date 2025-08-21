@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, R
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .. import crud, models, orm_models, security, scraper_manager
+from . import models as api_models
 from ..log_manager import get_logs
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..metadata_manager import MetadataSourceManager
@@ -1716,6 +1717,13 @@ async def logout():
     """
     return
 
+@router.get("/scheduled-tasks/available-jobs", response_model=List[api_models.AvailableJobInfo])
+async def get_available_jobs(request: Request):
+    """获取所有已加载的可用任务类型及其名称。"""
+    scheduler_manager = request.app.state.scheduler_manager
+    jobs = scheduler_manager.get_available_jobs()
+    logger.info(f"可用的任务类型: {jobs}")
+    return jobs
 @router.get("/scheduled-tasks", response_model=List[models.ScheduledTaskInfo], summary="获取所有定时任务")
 async def get_all_scheduled_tasks(
     session: AsyncSession = Depends(get_db_session),

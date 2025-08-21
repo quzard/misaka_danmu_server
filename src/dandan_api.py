@@ -51,17 +51,21 @@ class DandanApiRoute(APIRoute):
             except HTTPException as exc:
                 # 简单的 HTTP 状态码到 dandanplay 错误码的映射
                 # 1001: 无效的参数
-                # 1003: 未授权
+                # 1003: 未授权或资源不可用
                 # 404: 未找到
                 # 500: 服务器内部错误
                 error_code_map = {
                     status.HTTP_400_BAD_REQUEST: 1001,
-                    status.HTTP_404_NOT_FOUND: 404,
                     status.HTTP_422_UNPROCESSABLE_ENTITY: 1001,
+                    # 新增：将404也映射到1003，对外统一表现为“资源不可用”
+                    status.HTTP_404_NOT_FOUND: 1003,
                     status.HTTP_403_FORBIDDEN: 1003,
                     status.HTTP_500_INTERNAL_SERVER_ERROR: 500,
                 }
-                error_code = error_code_map.get(exc.status_code, 500)
+                error_code = error_code_map.get(exc.status_code, 1003) # 默认客户端错误为1003
+
+                # 为常见的错误代码提供更统一的错误消息
+                error_message = "请求的资源不可用或您没有权限访问。" if error_code == 1003 else exc.detail
 
                 # 始终返回 200 OK，错误信息在 JSON body 中体现
                 return JSONResponse(
@@ -69,7 +73,7 @@ class DandanApiRoute(APIRoute):
                     content={
                         "success": False,
                         "errorCode": error_code,
-                        "errorMessage": exc.detail,
+                        "errorMessage": error_message,
                     },
                 )
         return custom_route_handler
