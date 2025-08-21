@@ -1,155 +1,107 @@
 import asyncio
+import importlib
+import traceback
+import inspect
 import logging
-from typing import Any, Callable, Dict, List, Set
+import pkgutil
+from pathlib import Path
+from typing import Any, Dict, List, Set, Optional, Type
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
-from . import crud, models, security
-from .api.bangumi_api import get_bangumi_client, search_bangumi_aliases
-from .api.douban_api import get_douban_client, search_douban_aliases
-from .api.tmdb_api import get_tmdb_client, search_tmdb_aliases, update_tmdb_mappings_for_tv_group
-from .api.imdb_api import get_imdb_client, search_imdb_aliases
-from .api.tvdb_api import get_tvdb_client, search_tvdb_aliases
+from . import crud, models
+from .config_manager import ConfigManager
+from .metadata_sources.base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
-
-def _to_camel(snake_str: str) -> str:
-    """Converts a snake_case string to camelCase."""
-    components = snake_str.split('_')
-    return components[0] + ''.join(x.title() for x in components[1:])
-
+import httpx
 class MetadataSourceManager:
     """
-    Manages the state and status of metadata sources, and orchestrates auxiliary searches.
+    通过动态加载来管理元数据源的状态和状态。
+    此类发现、初始化并协调位于 `src/metadata_sources` 目录中的元数据源插件。
     """
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        """
+        初始化管理器。
+
+        Args:
+            session_factory: 用于数据库访问的异步会话工厂。
+            config_manager: 应用的配置管理器。
+        """
         self._session_factory = session_factory
+        self._config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.providers = ['tmdb', 'bangumi', 'douban', 'imdb', 'tvdb']
-        # Ephemeral status, checked on startup
-        self._provider_configs: Dict[str, List[str]] = {
-            "tmdb": ["tmdb_api_key", "tmdb_api_base_url", "tmdb_image_base_url"],
-            "bangumi": ["bangumi_client_id", "bangumi_client_secret"],
-            "douban": ["douban_cookie"],
-            "tvdb": ["tvdb_api_key"],
-            "imdb": [], # IMDb has no specific config keys in this system
-        }
-        self.connectivity_status: Dict[str, str] = {}
-        # Register the search functions
-        self._search_functions: Dict[str, Callable] = {
-            "tmdb": self._tmdb_alias_search_wrapper,
-            "bangumi": self._bangumi_alias_search_wrapper,
-            "douban": self._douban_alias_search_wrapper,
-            "imdb": self._imdb_alias_search_wrapper,
-            "tvdb": self._tvdb_alias_search_wrapper,
-        }
-
-    async def get_provider_config(self, provider_name: str, session: AsyncSession) -> Dict[str, str]:
-        """
-        获取指定元数据源的所有相关配置项。
-        """
-        if provider_name not in self.providers:
-            raise ValueError(f"未知的元数据源: {provider_name}")
         
-        keys_to_fetch = self._provider_configs.get(provider_name, [])
-        if not keys_to_fetch:
-            return {}
-            
-        tasks = [crud.get_config_value(session, key, "") for key in keys_to_fetch]
-        values = await asyncio.gather(*tasks)
-        
-        snake_case_dict = dict(zip(keys_to_fetch, values))
-        return {_to_camel(k): v for k, v in snake_case_dict.items()}
-
+        # 按 provider_name 存储实例化的源对象。
+        self.sources: Dict[str, BaseMetadataSource] = {}
+        # 在实例化之前存储发现的源类。
+        self._source_classes: Dict[str, Type[BaseMetadataSource]] = {}
+        # 从数据库缓存所有源的持久设置。
+        self.source_settings: Dict[str, Dict[str, Any]] = {}
 
     async def initialize(self):
-        """Syncs providers with DB and performs initial checks."""
-        async with self._session_factory() as session:
-            await crud.sync_metadata_sources_to_db(session, self.providers)
-        await self._check_connectivity()
+        """在应用启动时加载并同步元数据源。"""
+        await self.load_and_sync_sources()
         logger.info("元数据源管理器已初始化。")
 
-    # --- Wrappers to provide a consistent interface for search functions ---
-    async def _tmdb_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        async with await get_tmdb_client(user, session) as client:
-            return await search_tmdb_aliases(keyword, client)
+    async def load_and_sync_sources(self):
+        """动态发现、同步到数据库并加载元数据源插件。"""
+        await self.close_all()  # 在重新加载前确保旧连接已关闭
+        self.sources.clear()
+        self._source_classes.clear()
+        self.source_settings.clear()
 
-    async def _bangumi_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        # 优先尝试使用带认证的客户端，因为用户反馈认证后搜索结果可能更全
-        try:
-            async with await get_bangumi_client(user, session) as client:
-                return await search_bangumi_aliases(keyword, client)
-        except HTTPException as e:
-            # 如果获取认证客户端失败（例如，用户未授权），则回退到公共、无认证的客户端进行搜索
-            # 这样既能利用认证优势，又不会在未认证时报错
-            if e.status_code == 401:
-                self.logger.info("Bangumi not authenticated, falling back to public search for aliases.")
-                
-                # 为回退客户端复制代理逻辑以保持一致性
-                proxy_url = await crud.get_config_value(session, "proxyUrl", "")
-                proxy_enabled_globally = (await crud.get_config_value(session, "proxyEnabled", "false")).lower() == 'true'
-                use_proxy_for_provider = False
-                if proxy_enabled_globally:
-                    all_settings = await crud.get_all_metadata_source_settings(session)
-                    provider_setting = next((s for s in all_settings if s['providerName'] == 'bangumi'), None)
-                    if provider_setting: use_proxy_for_provider = provider_setting.get('useProxy', False)
-                proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_provider and proxy_url else None
-                
-                async with httpx.AsyncClient(timeout=15.0, proxies=proxy_to_use) as public_client:
-                    return await search_bangumi_aliases(keyword, public_client)
-            raise # 重新抛出其他HTTP异常
+        discovered_providers = []
+        
+        sources_package_path = [str(Path(__file__).parent / "metadata_sources")]
+        for finder, name, ispkg in pkgutil.iter_modules(sources_package_path):
+            if name.startswith("_") or name == "base":
+                continue
 
-    async def _douban_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        async with await get_douban_client(user, session) as client:
-            return await search_douban_aliases(keyword, client)
+            try:
+                module_name = f"src.metadata_sources.{name}"
+                module = importlib.import_module(module_name)
+                for class_name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, BaseMetadataSource) and obj is not BaseMetadataSource:
+                        provider_name = obj.provider_name
+                        if provider_name in self._source_classes:
+                            self.logger.warning(f"发现重复的元数据源 '{provider_name}'。将被覆盖。")
+                        
+                        self._source_classes[provider_name] = obj
+                        discovered_providers.append(provider_name)
+                        self.logger.info(f"元数据源 '{provider_name}' (来自模块 {name}) 已发现。")
+            except Exception as e:
+                self.logger.error(f"从模块 {name} 加载元数据源失败: {e}", exc_info=True)
 
-    async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User, session: AsyncSession):
-        """
-        通过调用特定的tmdb_api函数来协调更新TMDB分集组映射。
-        """
-        self.logger.info(f"管理器: 开始为 TMDB TV ID {tmdb_tv_id} 和 Group ID {group_id} 更新映射。")
-        try:
-            # 管理器负责获取正确的客户端
-            async with await get_tmdb_client(user, session) as client:
-                # 并调用具体的实现
-                await update_tmdb_mappings_for_tv_group(session, client, tmdb_tv_id, group_id)
-            self.logger.info(f"管理器: 成功更新了 TV ID {tmdb_tv_id} 和 Group ID {group_id} 的TMDB映射。")
-        except httpx.TimeoutException:
-            self.logger.error(f"管理器: 更新TMDB映射时发生超时错误 (ID: {tmdb_tv_id})。请检查您的网络连接、代理设置或TMDB服务器状态。")
-        except httpx.ConnectError as e:
-            self.logger.error(f"管理器: 更新TMDB映射时发生连接错误 (ID: {tmdb_tv_id})。请检查TMDB服务器是否可达或您的网络/代理设置。错误: {e}")
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"管理器: 更新TMDB映射时收到非2xx的HTTP状态码 (ID: {tmdb_tv_id}): {e.response.status_code} - 响应: {e.response.text}")
-        except Exception as e:
-            self.logger.error(f"管理器: 更新TMDB映射时发生错误: {e}", exc_info=True)
-            # 不重新抛出异常，只记录错误。主操作不应因此失败。
+        async with self._session_factory() as session:
+            await crud.sync_metadata_sources_to_db(session, discovered_providers)
+            settings_list = await crud.get_all_metadata_source_settings(session)
+        
+        self.source_settings = {s['providerName']: s for s in settings_list}
 
-    async def _imdb_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        async with await get_imdb_client(user, session) as client:
-            return await search_imdb_aliases(keyword, client)
+        for provider_name, source_class in self._source_classes.items():
+            self.sources[provider_name] = source_class(self._session_factory, self._config_manager)
+            self.logger.info(f"已加载元数据源 '{provider_name}'。")
 
-    async def _tvdb_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        async with await get_tvdb_client(user, session) as client:
-            return await search_tvdb_aliases(keyword, client)
-
-    async def search_aliases_from_enabled_sources(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        """
-        From all enabled auxiliary metadata sources, concurrently fetch aliases.
-        This method now accepts user and session to pass down to client getters.
-        """
-        enabled_sources = await crud.get_enabled_aux_metadata_sources(session)
-        tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
-
+    async def search_aliases_from_enabled_sources(self, keyword: str, user: models.User) -> Set[str]:
+        """从所有已启用的辅助元数据源并发获取别名。"""
+        async with self._session_factory() as session:
+            enabled_sources_settings = await crud.get_enabled_aux_metadata_sources(session)
+        
         tasks = []
-        for source_setting in enabled_sources:
+        for source_setting in enabled_sources_settings:
             provider = source_setting['providerName']
-            if provider == 'tmdb' and not tmdb_api_key:
-                continue # Skip TMDB if key is not set
-
-            if search_func_wrapper := self._search_functions.get(provider):
-                tasks.append(search_func_wrapper(keyword, user, session))
+            if source_instance := self.sources.get(provider):
+                tasks.append(source_instance.search_aliases(keyword, user))
+            else:
+                if provider == 'douban':
+                    tmdb_api_key = await self._config_manager.get("tmdb_api_key", "")
+                    if not tmdb_api_key:
+                        self.logger.warning(f"TMDB API Key not configured,douban will be skipped alias search.")
+                        continue  # Skip TMDB if key is not set
+                self.logger.warning(f"已启用的元数据源 '{provider}' 未被成功加载，跳过别名搜索。")
 
         if not tasks:
             return set()
@@ -161,61 +113,64 @@ class MetadataSourceManager:
                 all_aliases.update(res)
             elif isinstance(res, Exception):
                 self.logger.error(f"Auxiliary search sub-task failed: {res}", exc_info=False)
-        return all_aliases
-
-    async def _check_connectivity(self):
-        """Performs connectivity checks for sources that need it."""
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            async with self._session_factory() as session:
-                # Check Douban
-                try:
-                    douban_cookie = await crud.get_config_value(session, "douban_cookie", "")
-                    headers = {"User-Agent": "Mozilla/5.0"}
-                    if douban_cookie:
-                        headers["Cookie"] = douban_cookie
-                    await client.get("https://movie.douban.com/", headers=headers)
-                    self.connectivity_status['douban'] = "可访问"
-                except Exception:
-                    self.connectivity_status['douban'] = "访问失败"
-            
-            # Check IMDb
-            try:
-                headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"}
-                await client.get("https://www.imdb.com/", headers=headers)
-                self.connectivity_status['imdb'] = "可访问"
-            except Exception:
-                self.connectivity_status['imdb'] = "访问失败"
-        logger.info(f"元数据源连接状态检查完成: {self.connectivity_status}")
+        
+        # 过滤掉潜在的 None 或空字符串
+        return {alias for alias in all_aliases if alias}
 
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
-        """Gets all metadata sources with their persistent and ephemeral status."""
-        async with self._session_factory() as session:
-            settings = await crud.get_all_metadata_source_settings(session)
-            
-            # Get config statuses in parallel
-            config_keys = ["tmdb_api_key", "bangumi_client_id", "tvdb_api_key"]
-            config_values = await asyncio.gather(*[crud.get_config_value(session, key, "") for key in config_keys])
-        tmdb_key, bgm_id, tvdb_key = config_values
+        """获取所有元数据源及其持久化和临时状态。"""
+        tasks = []
+        # 确保我们只检查已加载的源
+        loaded_providers = list(self.sources.keys())
+        for provider_name in loaded_providers:
+            tasks.append(self.sources[provider_name].check_connectivity())
         
+        connectivity_statuses = await asyncio.gather(*tasks, return_exceptions=True)
+        status_map = dict(zip(loaded_providers, connectivity_statuses))
+
         full_status_list = []
-        for s in settings:
-            provider = s['providerName']
-            status_text = "可访问" # 默认状态
-            if provider == 'tmdb':
-                status_text = "已配置" if tmdb_key else "未配置"
-            elif provider == 'bangumi':
-                status_text = "已配置" if bgm_id else "未配置"
-            elif provider == 'tvdb':
-                status_text = "已配置" if tvdb_key else "未配置"
-            elif provider in self.connectivity_status:
-                status_text = self.connectivity_status[provider]
-            
+        for provider_name, setting in self.source_settings.items():
+            status_text = "检查失败"
+            status_result = status_map.get(provider_name)
+            if isinstance(status_result, str):
+                status_text = status_result
+            elif isinstance(status_result, Exception):
+                self.logger.error(f"检查 '{provider_name}' 连接状态时出错: {status_result}")
+
             full_status_list.append({
-                "providerName": provider,
-                "isAuxSearchEnabled": s['isAuxSearchEnabled'],
-                "displayOrder": s['displayOrder'],
+                "providerName": provider_name,
+                "isAuxSearchEnabled": setting.get('isAuxSearchEnabled', False),
+                "displayOrder": setting.get('displayOrder', 99),
                 "status": status_text,
-                "useProxy": s['useProxy']
+                "useProxy": setting.get('useProxy', False)
             })
-            
-        return full_status_list
+        
+        return sorted(full_status_list, key=lambda x: x['displayOrder'])
+
+    async def get_details(self, provider: str, id: str, user: models.User) -> Optional[models.MetadataDetailsResponse]:
+        """从特定提供商获取详细信息。此方法将调用委托给相应的已加载源插件。"""
+        if source_instance := self.sources.get(provider):
+            return await source_instance.get_details(id, user)
+        raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
+
+    async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User):
+        """协调TMDB分集组映射的更新。现在此操作将委托给TMDB源（如果存在且具有该方法）。"""
+        tmdb_source = self.sources.get("tmdb")
+        if tmdb_source and hasattr(tmdb_source, "update_tmdb_mappings"):
+            self.logger.info(f"管理器: 正在为 TMDB TV ID {tmdb_tv_id} 和 Group ID {group_id} 委派映射更新。")
+            # 该方法需要在 TmdbMetadataSource 类中定义
+            await tmdb_source.update_tmdb_mappings(tmdb_tv_id, group_id, user)
+        else:
+            self.logger.warning("TMDB 元数据源未加载或不支持 `update_tmdb_mappings` 方法。")
+
+    async def close_all(self):
+        """在应用关闭时关闭所有元数据源客户端。"""
+        self.logger.info("正在关闭所有元数据源...")
+        tasks = [source.close() for source in self.sources.values()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"在清理的过程中发现了错误{result} 详细信息{traceback.format_exc()}")
+                provider_name = list(self.sources.keys())[i]
+                self.logger.error(f"关闭元数据源 '{provider_name}' 时出错: {result}")
+        self.logger.info("所有元数据源已关闭。")
