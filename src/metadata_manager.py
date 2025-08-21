@@ -34,9 +34,9 @@ class MetadataSourceManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         
         # 按 provider_name 存储实例化的源对象。
-        self.sources: Dict[str, BaseMetadataSource] = {}
+        self.sources: Dict[str, Any] = {}
         # 在实例化之前存储发现的源类。
-        self._source_classes: Dict[str, Type[BaseMetadataSource]] = {}
+        self._source_classes: Dict[str, Type[Any]] = {}
         # 从数据库缓存所有源的持久设置。
         self.source_settings: Dict[str, Dict[str, Any]] = {}
 
@@ -63,7 +63,12 @@ class MetadataSourceManager:
                 module_name = f"src.metadata_sources.{name}"
                 module = importlib.import_module(module_name)
                 for class_name, obj in inspect.getmembers(module, inspect.isclass):
-                    if issubclass(obj, BaseMetadataSource) and obj is not BaseMetadataSource:
+                    # 使用鸭子类型（duck typing）来识别插件，而不是依赖于一个共享的基类。
+                    # 如果一个类有 'provider_name' 属性和 'search_aliases' 方法，我们就认为它是一个元数据源插件。
+                    if (hasattr(obj, 'provider_name') and
+                        hasattr(obj, 'search_aliases') and
+                        hasattr(obj, 'get_details') and
+                        obj.__module__ == module_name):
                         provider_name = obj.provider_name
                         if provider_name in self._source_classes:
                             self.logger.warning(f"发现重复的元数据源 '{provider_name}'。将被覆盖。")
