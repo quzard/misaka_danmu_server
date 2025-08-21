@@ -380,7 +380,7 @@ export const SearchResult = () => {
         <div>
           <Row gutter={[12, 12]} className="mb-6">
             <Col md={20} xs={24}>
-              <div className="flex items-center justify-start gap-4">
+              <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-4">
                 <Button
                   type="primary"
                   className="w-32"

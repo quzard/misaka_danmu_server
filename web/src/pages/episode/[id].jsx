@@ -378,7 +378,7 @@ export const EpisodeDetail = () => {
   return (
     <div className="my-6">
       <Card loading={loading} title={`分集列表: ${animeDetail?.title ?? ''}`}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap md:flex-nowrap">
           <Button
             onClick={() => {
               handleBatchDelete()

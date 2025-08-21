@@ -420,11 +420,9 @@ export const AnimeDetail = () => {
         <Row gutter={[12, 12]}>
           <Col md={20} xs={24}>
             <div className="flex items-center justify-start gap-4">
-              {imageSrc && (
-                <img src={imageSrc} className="h-[100px]" />
-              )}
+              {imageSrc && <img src={imageSrc} className="h-[100px]" />}
               <div>
-                <div className="text-xl font-bold mb-3">
+                <div className="text-xl font-bold mb-3 break-all">
                   {animeDetail.title}（Season{' '}
                   {padStart(String(animeDetail.season), 2, '0')}）
                 </div>

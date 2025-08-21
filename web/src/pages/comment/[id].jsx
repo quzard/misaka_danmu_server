@@ -25,7 +25,7 @@ export const CommentDetail = () => {
       ])
       setCommentList(commentRes.data?.comments || [])
       setEpisode(
-        episodeRes?.data?.filter(it => it.id === Number(id))?.[0] || {}
+        episodeRes?.data?.filter(it => it.episodeId === Number(id))?.[0] || {}
       )
       setLoading(false)
     } catch (error) {

@@ -27,6 +27,8 @@ import { SortableContext, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 import { QRCodeCanvas } from 'qrcode.react'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 
 const SortableItem = ({
   item,
@@ -50,6 +52,8 @@ const SortableItem = ({
     },
   })
 
+  const isMobile = useAtomValue(isMobileAtom)
+
   // 拖拽样式
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -71,7 +75,7 @@ const SortableItem = ({
           <div>{item.providerName}</div>
         </div>
         <div className="flex items-center justify-around gap-4">
-          {item.providerName === 'bilibili' && (
+          {item.providerName === 'bilibili' && !isMobile && (
             <div>
               {biliUserinfo.isLogin ? (
                 <div className="flex items-center justify-start gap-2">
@@ -429,7 +433,7 @@ export const Scrapers = () => {
           >
             <Input />
           </Form.Item>
-          <div className="flex items-center justify-start gap-4 mb-4">
+          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-4 mb-4">
             <Form.Item
               name={`scraper${setname.charAt(0).toUpperCase()}${setname.slice(1)}LogResponses`}
               label="记录原始响应"
