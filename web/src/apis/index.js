@@ -178,6 +178,19 @@ export const addUaRule = data => api.post('/api/ui/ua-rules', data)
 /** 删除ua规则 */
 export const deleteUaRule = data => api.delete(`/api/ui/ua-rules/${data.id}`)
 
+/** 弹幕输出控制 单源输出总数 */
+export const getDanmuOutputTotal = () =>
+  api.get('/api/ui/config/danmaku_output_limit_per_source')
+
+export const setDanmuOutputTotal = data =>
+  api.put('/api/ui/config/danmaku_output_limit_per_source', data)
+/** 弹幕输出控制 启用弹幕聚合 */
+export const getDanmuOutputAggregation = () =>
+  api.get('/api/ui/config/danmaku_aggregation_enabled')
+/** 弹幕输出控制 启用弹幕聚合 */
+export const setDanmuOutputAggregation = data =>
+  api.put('/api/ui/config/danmaku_aggregation_enabled', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhook_api_key')

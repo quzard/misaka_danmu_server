@@ -16,7 +16,13 @@ export const ApiDoc = () => {
         }
       >
         <div className="w-full">
-          <iframe className="w-full" src="/api/control/docs"></iframe>
+          <iframe
+            className="w-full"
+            style={{
+              height: `calc(100vh - 300px)`,
+            }}
+            src="/api/control/docs"
+          ></iframe>
         </div>
       </Card>
     </div>
