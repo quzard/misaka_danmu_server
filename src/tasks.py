@@ -267,7 +267,7 @@ async def edited_import_task(
             local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
             if request_data.imageUrl and not local_image_path:
                 image_download_failed = True
-            anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.media_type, request_data.season, request_data.image_url, local_image_path)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.mediaType, request_data.season, request_data.imageUrl, local_image_path)
             await crud.update_metadata_if_empty(
                 session, anime_id,
                 tmdbId=request_data.tmdbId,
