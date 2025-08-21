@@ -163,12 +163,23 @@ async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutExcept
 @app.middleware("http")
 async def log_not_found_requests(request: Request, call_next):
     """
-    中间件：捕获所有请求，如果响应是 404 Not Found，
-    则以JSON格式记录详细的请求入参，方便调试。
+    中间件：捕获所有请求。
+    - 如果是未找到的API路径 (404)，则返回 403 Forbidden，避免路径枚举。
+    - 对其他 404 错误，记录详细信息以供调试。
     """
     response = await call_next(request)
     if response.status_code == 404:
-        # 创建一个可序列化的 ASGI scope 副本以进行详细日志记录
+        # 如果是 API 路径未找到，返回 403
+        if request.url.path.startswith("/api/"):
+            logger.warning(
+                f"API路径未找到 (返回403): {request.method} {request.url.path} from {request.client.host}"
+            )
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Forbidden"}
+            )
+        
+        # 对于非 API 路径的 404 (例如，如果静态文件服务被错误配置)，记录详细信息
         scope = request.scope
         serializable_scope = {
             "type": scope.get("type"),
@@ -184,7 +195,7 @@ async def log_not_found_requests(request: Request, call_next):
             "headers": {h[0].decode("utf-8", "ignore"): h[1].decode("utf-8", "ignore") for h in scope.get("headers", [])},
         }
         log_details = {
-            "message": "HTTP 404 Not Found - 未找到匹配的API路由",
+            "message": "HTTP 404 Not Found - 未找到匹配的路由或文件",
             "url": str(request.url),
             "raw_request_scope": serializable_scope
         }
