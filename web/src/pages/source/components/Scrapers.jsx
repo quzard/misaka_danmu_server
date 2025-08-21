@@ -22,8 +22,20 @@ import {
   setSingleScraper,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
-import { DndContext, DragOverlay } from '@dnd-kit/core'
-import { SortableContext, useSortable } from '@dnd-kit/sortable'
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 import { QRCodeCanvas } from 'qrcode.react'
@@ -60,6 +72,8 @@ const SortableItem = ({
     transition,
     opacity: isDragging ? 0.5 : 1,
     cursor: 'grab',
+    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
+    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 
@@ -129,6 +143,20 @@ export const Scrapers = () => {
   const [biliQrcodeChecked, setBiliQrcodeChecked] = useState(false)
   /** 扫码登录轮训 */
   const timer = useRef(0)
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        distance: 8,
+        delay: 100,
+      },
+    })
+  )
 
   useEffect(() => {
     getInfo()
@@ -362,8 +390,14 @@ export const Scrapers = () => {
   return (
     <div className="my-6">
       <Card loading={loading} title="弹幕搜索源">
-        <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
           <SortableContext
+            strategy={verticalListSortingStrategy}
             items={list.map((item, index) => item.id || `item-${index}`)}
           >
             <List
@@ -433,12 +467,12 @@ export const Scrapers = () => {
           >
             <Input />
           </Form.Item>
-          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-4 mb-4">
+          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
             <Form.Item
               name={`scraper${setname.charAt(0).toUpperCase()}${setname.slice(1)}LogResponses`}
               label="记录原始响应"
               valuePropName="checked"
-              className="min-w-[100px] shrink-0"
+              className="min-w-[100px] shrink-0 !mb-0"
             >
               <Switch />
             </Form.Item>

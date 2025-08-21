@@ -1,0 +1,180 @@
+[2025-08-21 12:57:36] [root:112] [INFO] - 日志系统已初始化，日志将输出到控制台和 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/app.log
+[2025-08-21 12:57:36] [root:140] [INFO] - 专用的搜索源响应日志已初始化，将输出到 /Users/8btc_wucb/Workspace/misaka_danmu_server/config/logs/scraper_responses.log
+[2025-08-21 12:57:36] [src.database:78] [ERROR] - 检查或创建数据库时发生错误: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '127.0.0.1'")
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Traceback (most recent call last):
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 527, in _connect
+    self._reader, self._writer = await \
+                                 ^^^^^^^
+    ...<4 lines>...
+            timeout=self.connect_timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/tasks.py", line 507, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 88, in _open_connection
+    transport, _ = await loop.create_connection(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda: protocol, host, port, **kwds)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "uvloop/loop.pyx", line 2043, in create_connection
+  File "uvloop/loop.pyx", line 2020, in uvloop.loop.Loop.create_connection
+ConnectionRefusedError: [Errno 61] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 3301, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 447, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 1264, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 711, in checkout
+    rec = pool._do_get()
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 388, in _create_connection
+    return _ConnectionRecord(self)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 673, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 899, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 895, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/create.py", line 661, in connect
+    return dialect.connect(*cargs, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 629, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/dialects/mysql/aiomysql.py", line 164, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 75, in _connect
+    await conn._connect()
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 563, in _connect
+    raise OperationalError(
+    ...<2 lines>...
+    ) from e
+pymysql.err.OperationalError: (2003, "Can't connect to MySQL server on '127.0.0.1'")
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/src/database.py", line 66, in _create_db_if_not_exists
+    async with engine.connect() as conn:
+               ~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/ext/asyncio/base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/ext/asyncio/engine.py", line 274, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 3277, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 145, in __init__
+    Connection._handle_dbapi_exception_noconnection(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        err, dialect, engine
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2440, in _handle_dbapi_exception_noconnection
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 3301, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 447, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 1264, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 711, in checkout
+    rec = pool._do_get()
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 388, in _create_connection
+    return _ConnectionRecord(self)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 673, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 899, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/pool/base.py", line 895, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/create.py", line 661, in connect
+    return dialect.connect(*cargs, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 629, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/dialects/mysql/aiomysql.py", line 164, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 75, in _connect
+    await conn._connect()
+  File "/Users/8btc_wucb/Workspace/misaka_danmu_server/venv/lib/python3.13/site-packages/aiomysql/connection.py", line 563, in _connect
+    raise OperationalError(
+    ...<2 lines>...
+    ) from e
+sqlalchemy.exc.OperationalError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '127.0.0.1'")
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+[2025-08-21 12:57:36] [src.database:80] [ERROR] - ============================================================
+[2025-08-21 12:57:36] [src.database:81] [ERROR] - === 无法连接到数据库服务器，应用无法启动。 ===
+[2025-08-21 12:57:36] [src.database:82] [ERROR] - === 错误类型: OperationalError
+[2025-08-21 12:57:36] [src.database:83] [ERROR] - === 错误详情: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '127.0.0.1'")
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+[2025-08-21 12:57:36] [src.database:84] [ERROR] - ---
+[2025-08-21 12:57:36] [src.database:85] [ERROR] - --- 可能的原因与排查建议: ---
+[2025-08-21 12:57:36] [src.database:86] [ERROR] - --- 1. 数据库服务未运行: 请确认您的 MySQL/MariaDB 服务正在运行。
+[2025-08-21 12:57:36] [src.database:87] [ERROR] - --- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。
+[2025-08-21 12:57:36] [src.database:88] [ERROR] - ---    - 主机 (Host): 127.0.0.1
+[2025-08-21 12:57:36] [src.database:89] [ERROR] - ---    - 端口 (Port): 3306
+[2025-08-21 12:57:36] [src.database:90] [ERROR] - ---    - 用户 (User): danmaku_user
+[2025-08-21 12:57:36] [src.database:91] [ERROR] - --- 3. 网络问题: 如果应用和数据库在不同的容器或机器上，请检查它们之间的网络连接和防火墙设置。
+[2025-08-21 12:57:36] [src.database:92] [ERROR] - --- 4. 权限问题: 确认提供的用户有权限从应用所在的IP地址连接，并有创建数据库的权限。
+[2025-08-21 12:57:36] [src.database:93] [ERROR] - ============================================================

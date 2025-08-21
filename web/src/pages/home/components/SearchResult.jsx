@@ -28,8 +28,20 @@ import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
 
 import { MyIcon } from '@/components/MyIcon'
-import { DndContext, DragOverlay } from '@dnd-kit/core'
-import { SortableContext, useSortable } from '@dnd-kit/sortable'
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 const IMPORT_MODE = [
@@ -65,6 +77,20 @@ export const SearchResult = () => {
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
   const [editConfirmLoading, setEditConfirmLoading] = useState(false)
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        distance: 8,
+        delay: 100,
+      },
+    })
+  )
 
   const searchSeason = lastSearchResultData?.season
 
@@ -701,9 +727,15 @@ export const SearchResult = () => {
           </div>
         </div>
         <div>
-          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
             <SortableContext
               items={editEpisodeList.map(item => item.episodeId)}
+              strategy={verticalListSortingStrategy}
             >
               <List
                 itemLayout="vertical"
@@ -761,6 +793,8 @@ const SortableItem = ({ item, index, handleDelete, handleEditTitle }) => {
     transition,
     opacity: isDragging ? 0.5 : 1,
     cursor: 'grab',
+    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
+    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 

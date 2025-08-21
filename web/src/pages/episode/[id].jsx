@@ -1,4 +1,4 @@
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   deleteAnimeEpisode,
   deleteAnimeEpisodeSingle,
@@ -11,6 +11,7 @@ import {
 } from '../../apis'
 import { useEffect, useState } from 'react'
 import {
+  Breadcrumb,
   Button,
   Card,
   Empty,
@@ -24,6 +25,7 @@ import {
 } from 'antd'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
+import { HomeOutlined } from '@ant-design/icons'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()
@@ -377,6 +379,36 @@ export const EpisodeDetail = () => {
 
   return (
     <div className="my-6">
+      <Breadcrumb
+        className="!mb-4"
+        items={[
+          {
+            title: (
+              <Link>
+                <HomeOutlined />
+              </Link>
+            ),
+            onClick: () => navigate('/'),
+          },
+          {
+            title: <Link>弹幕库</Link>,
+            onClick: () => navigate('/library'),
+          },
+          {
+            title: (
+              <Link>
+                {animeDetail.title?.length > 10
+                  ? animeDetail.title.slice(0, 10) + '...'
+                  : animeDetail.title}
+              </Link>
+            ),
+            onClick: () => navigate(`/anime/${animeId}`),
+          },
+          {
+            title: '分集列表',
+          },
+        ]}
+      />
       <Card loading={loading} title={`分集列表: ${animeDetail?.title ?? ''}`}>
         <div className="flex items-center justify-between flex-wrap md:flex-nowrap">
           <Button
@@ -389,7 +421,7 @@ export const EpisodeDetail = () => {
           >
             删除选中
           </Button>
-          <div className="flex items-center justify-between gap-2">
+          <div className="w-full flex items-center justify-between md:justify-end gap-2 mb-4">
             <Button
               onClick={() => {
                 const validCounts = episodeList
