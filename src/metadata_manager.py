@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Set
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from fastapi import HTTPException
 
 from . import crud, models, security
 from .api.bangumi_api import get_bangumi_client, search_bangumi_aliases
@@ -76,9 +77,29 @@ class MetadataSourceManager:
             return await search_tmdb_aliases(keyword, client)
 
     async def _bangumi_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
-        # Bangumi search doesn't strictly need auth, but the client getter is there.
-        async with await get_bangumi_client(user, session) as client:
-            return await search_bangumi_aliases(keyword, client)
+        # 优先尝试使用带认证的客户端，因为用户反馈认证后搜索结果可能更全
+        try:
+            async with await get_bangumi_client(user, session) as client:
+                return await search_bangumi_aliases(keyword, client)
+        except HTTPException as e:
+            # 如果获取认证客户端失败（例如，用户未授权），则回退到公共、无认证的客户端进行搜索
+            # 这样既能利用认证优势，又不会在未认证时报错
+            if e.status_code == 401:
+                self.logger.info("Bangumi not authenticated, falling back to public search for aliases.")
+                
+                # 为回退客户端复制代理逻辑以保持一致性
+                proxy_url = await crud.get_config_value(session, "proxyUrl", "")
+                proxy_enabled_globally = (await crud.get_config_value(session, "proxyEnabled", "false")).lower() == 'true'
+                use_proxy_for_provider = False
+                if proxy_enabled_globally:
+                    all_settings = await crud.get_all_metadata_source_settings(session)
+                    provider_setting = next((s for s in all_settings if s['providerName'] == 'bangumi'), None)
+                    if provider_setting: use_proxy_for_provider = provider_setting.get('useProxy', False)
+                proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_provider and proxy_url else None
+                
+                async with httpx.AsyncClient(timeout=15.0, proxies=proxy_to_use) as public_client:
+                    return await search_bangumi_aliases(keyword, public_client)
+            raise # 重新抛出其他HTTP异常
 
     async def _douban_alias_search_wrapper(self, keyword: str, user: models.User, session: AsyncSession) -> Set[str]:
         async with await get_douban_client(user, session) as client:

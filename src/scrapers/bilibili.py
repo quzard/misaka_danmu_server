@@ -221,7 +221,7 @@ class BilibiliScraper(BaseScraper):
         if not hasattr(self, '_config_loaded') or self._config_loaded is False or force_refresh:
             self.logger.debug("Bilibili: 正在从数据库加载Cookie...")
             async with self._session_factory() as session:
-                cookie_str = await crud.get_config_value(session, "bilibili_cookie", "")
+                cookie_str = await crud.get_config_value(session, "bilibiliCookie", "")
             
             self.client.cookies.clear()
 
@@ -304,7 +304,7 @@ class BilibiliScraper(BaseScraper):
             if "SESSDATA" in self.client.cookies:
                 cookie_string = "; ".join(all_cookies)
                 async with self._session_factory() as session:
-                    await crud.update_config_value(session, "bilibili_cookie", cookie_string)
+                    await crud.update_config_value(session, "bilibiliCookie", cookie_string)
                 self.logger.info("Bilibili: 新的登录Cookie已保存到数据库。")
                 self._config_loaded = False
             else:
@@ -328,7 +328,7 @@ class BilibiliScraper(BaseScraper):
         elif action_name == "logout":
             # 从数据库中清除cookie
             async with self._session_factory() as session:
-                await crud.update_config_value(session, "bilibili_cookie", "")
+                await crud.update_config_value(session, "bilibiliCookie", "")
             self._config_loaded = False  # 强制下次请求时重新加载配置
             return {"message": "注销成功"}
         else:

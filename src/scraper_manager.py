@@ -185,7 +185,7 @@ class ScraperManager:
         """
         self._load_public_key()
         # 从配置中读取验证开关的状态
-        verification_enabled_str = await self.config_manager.get("scraper_verification_enabled", "false")
+        verification_enabled_str = await self.config_manager.get("scraperVerificationEnabled", "false")
         self._verification_enabled = verification_enabled_str.lower() == 'true'
         if not self._verification_enabled:
             logging.getLogger(__name__).info("搜索源签名验证已禁用。所有搜索源将被视为已验证。")
