@@ -1,4 +1,4 @@
-import {
+import { React,
   Button,
   Card,
   Empty,
@@ -12,7 +12,7 @@ import {
   Space,
   Table,
 } from 'antd'
-import {
+import { React,
   deleteAnime,
   getAllEpisode,
   getAnimeDetail,
@@ -30,12 +30,31 @@ import {
   refreshPoster,
   setAnimeDetail,
 } from '../../apis'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, React } from 'react'
 import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { RoutePaths } from '../../general/RoutePaths'
+
+const ApplyField = ({ name, label, fetchedValue, form }) => {
+  const currentValue = Form.useWatch(name, form)
+
+  return (
+    <Form.Item label={label}>
+      <div className="flex items-center gap-2">
+        <Form.Item name={name} noStyle>
+          <Input />
+        </Form.Item>
+        {fetchedValue && currentValue !== fetchedValue && (
+          <Button size="small" onClick={() => form.setFieldsValue({ [name]: fetchedValue })}>
+            应用
+          </Button>
+        )}
+      </div>
+    </Form.Item>
+  )
+}
 
 export const Library = () => {
   const [loading, setLoading] = useState(true)
@@ -52,6 +71,7 @@ export const Library = () => {
   const type = Form.useWatch('type', form)
   const animeId = Form.useWatch('animeId', form)
   const imageUrl = Form.useWatch('imageUrl', form)
+  const [fetchedMetadata, setFetchedMetadata] = useState(null)
 
   const getList = async () => {
     try {
@@ -74,6 +94,38 @@ export const Library = () => {
   useEffect(() => {
     setRenderData(list?.filter(it => it.title.includes(keyword)) || [])
   }, [list, keyword])
+
+  useEffect(() => {
+    if (!fetchedMetadata) return
+
+    const currentValues = form.getFieldsValue()
+    const newValues = {}
+
+    const fieldsToUpdate = {
+      nameEn: fetchedMetadata.nameEn,
+      nameJp: containsJapanese(fetchedMetadata?.nameJp)
+        ? fetchedMetadata.nameJp
+        : null,
+      nameRomaji: fetchedMetadata.nameRomaji ?? null,
+      aliasCn1: fetchedMetadata.aliasesCn?.[0] ?? null,
+      aliasCn2: fetchedMetadata.aliasesCn?.[1] ?? null,
+      aliasCn3: fetchedMetadata.aliasesCn?.[2] ?? null,
+      tvdbId: fetchedMetadata.tvdbId,
+      imdbId: fetchedMetadata.imdbId,
+      doubanId: fetchedMetadata.doubanId,
+      bangumiId: fetchedMetadata.bangumiId,
+    }
+
+    for (const [key, value] of Object.entries(fieldsToUpdate)) {
+      if (!currentValues[key] && value) {
+        newValues[key] = value
+      }
+    }
+
+    if (Object.keys(newValues).length > 0) {
+      form.setFieldsValue(newValues)
+    }
+  }, [fetchedMetadata, form])
 
   const columns = [
     {
@@ -469,8 +521,11 @@ export const Library = () => {
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
-        onCancel={() => setEditOpen(false)}
-        destroyOnHidden
+        onCancel={() => {
+          setEditOpen(false)
+          setFetchedMetadata(null)
+        }}
+        destroyOnClose
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -600,24 +655,46 @@ export const Library = () => {
               }}
             />
           </Form.Item>
-          <Form.Item name="nameEn" label="英文名">
-            <Input />
-          </Form.Item>
-          <Form.Item name="nameJp" label="日文名">
-            <Input />
-          </Form.Item>
-          <Form.Item name="nameRomaji" label="罗马音">
-            <Input />
-          </Form.Item>
-          <Form.Item name="aliasCn1" label="中文别名1">
-            <Input />
-          </Form.Item>
-          <Form.Item name="aliasCn2" label="中文别名2">
-            <Input />
-          </Form.Item>
-          <Form.Item name="aliasCn3" label="中文别名3">
-            <Input />
-          </Form.Item>
+          <ApplyField
+            name="nameEn"
+            label="英文名"
+            fetchedValue={fetchedMetadata?.nameEn}
+            form={form}
+          />
+          <ApplyField
+            name="nameJp"
+            label="日文名"
+            fetchedValue={
+              containsJapanese(fetchedMetadata?.nameJp)
+                ? fetchedMetadata.nameJp
+                : null
+            }
+            form={form}
+          />
+          <ApplyField
+            name="nameRomaji"
+            label="罗马音"
+            fetchedValue={fetchedMetadata?.nameRomaji}
+            form={form}
+          />
+          <ApplyField
+            name="aliasCn1"
+            label="中文别名1"
+            fetchedValue={fetchedMetadata?.aliasesCn?.[0]}
+            form={form}
+          />
+          <ApplyField
+            name="aliasCn2"
+            label="中文别名2"
+            fetchedValue={fetchedMetadata?.aliasesCn?.[1]}
+            form={form}
+          />
+          <ApplyField
+            name="aliasCn3"
+            label="中文别名3"
+            fetchedValue={fetchedMetadata?.aliasesCn?.[2]}
+            form={form}
+          />
           <Form.Item name="animeId" hidden>
             <Input />
           </Form.Item>
@@ -656,19 +733,8 @@ export const Library = () => {
                           mediaType: type === 'tv_series' ? 'tv' : type,
                           tmdbId: item.id,
                         })
-                        form.setFieldsValue({
-                          tmdbId: res.data.id,
-                          tvdbId: res.data.tvdbId,
-                          imdbId: res.data.imdbId,
-                          nameEn: res.data.nameEn,
-                          nameJp: containsJapanese(res.data?.nameJp)
-                            ? res.data?.nameJp
-                            : null,
-                          nameRomaji: res.data?.nameRomaji ?? null,
-                          aliasCn1: res.data?.aliasesCn?.[1] ?? null,
-                          aliasCn2: res.data?.aliasesCn?.[2] ?? null,
-                          aliasCn3: res.data?.aliasesCn?.[3] ?? null,
-                        })
+                        form.setFieldsValue({ tmdbId: res.data.id })
+                        setFetchedMetadata(res.data)
                         setTmdbOpen(false)
                       }}
                     >
@@ -714,15 +780,8 @@ export const Library = () => {
                         const res = await getImdbDetail({
                           imdbId: item.id,
                         })
-                        form.setFieldsValue({
-                          imdbId: res.data.id,
-                          nameJp: containsJapanese(res.data?.nameJp)
-                            ? res.data?.nameJp
-                            : null,
-                          aliasCn1: res.data?.aliasesCn?.[1] ?? null,
-                          aliasCn2: res.data?.aliasesCn?.[2] ?? null,
-                          aliasCn3: res.data?.aliasesCn?.[3] ?? null,
-                        })
+                        form.setFieldsValue({ imdbId: res.data.id })
+                        setFetchedMetadata(res.data)
                         setImdbOpen(false)
                       }}
                     >
@@ -768,18 +827,8 @@ export const Library = () => {
                         const res = await getTvdbDetail({
                           tvdbId: item.id,
                         })
-                        form.setFieldsValue({
-                          tvdbId: res.data.id,
-                          imdbId: res.data.imdbId,
-                          nameEn: res.data.nameEn,
-                          nameJp: containsJapanese(res.data?.nameJp)
-                            ? res.data?.nameJp
-                            : null,
-                          nameRomaji: res.data?.nameRomaji ?? null,
-                          aliasCn1: res.data?.aliasesCn?.[1] ?? null,
-                          aliasCn2: res.data?.aliasesCn?.[2] ?? null,
-                          aliasCn3: res.data?.aliasesCn?.[3] ?? null,
-                        })
+                        form.setFieldsValue({ tvdbId: res.data.id })
+                        setFetchedMetadata(res.data)
                         setTvdbOpen(false)
                       }}
                     >
@@ -912,17 +961,10 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        form.setFieldsValue({
-                          bangumiId: item.id,
-                          nameEn: item.nameEn,
-                          nameJp: containsJapanese(item.nameJp)
-                            ? item.nameJp
-                            : null,
-                          nameRomaji: item.nameRomaji,
-                          aliasCn1: item.aliasesCn?.[1] ?? null,
-                          aliasCn2: item.aliasesCn?.[2] ?? null,
-                          aliasCn3: item.aliasesCn?.[3] ?? null,
-                        })
+                        // The item from bgmResult is already the full detail
+                        const res = { data: item }
+                        form.setFieldsValue({ bangumiId: res.data.id })
+                        setFetchedMetadata(res.data)
                         setBgmOpen(false)
                       }}
                     >
@@ -968,23 +1010,8 @@ export const Library = () => {
                         const res = await getDoubanDetail({
                           doubanId: item.id,
                         })
-                        console.log(
-                          res.data.aliasesCn,
-                          res.data.aliasesCn?.[1] ?? null,
-                          ' res.data.aliasesCn'
-                        )
-                        form.setFieldsValue({
-                          doubanId: res.data.id,
-                          imdbId: res.data.imdbId,
-                          nameEn: res.data.nameEn,
-                          nameJp: containsJapanese(res.data.nameJp)
-                            ? res.data.nameJp
-                            : null,
-                          nameRomaji: res.data.nameRomaji,
-                          aliasCn1: res.data.aliasesCn?.[1] ?? null,
-                          aliasCn2: res.data.aliasesCn?.[2] ?? null,
-                          aliasCn3: res.data.aliasesCn?.[3] ?? null,
-                        })
+                        form.setFieldsValue({ doubanId: res.data.id })
+                        setFetchedMetadata(res.data)
                         setDoubanOpen(false)
                       }}
                     >

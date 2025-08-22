@@ -10,6 +10,47 @@ from .orm_models import Base
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
+async def _run_migrations(conn):
+    """
+    执行一次性的数据库架构迁移。
+    这是一个简化的迁移方案，用于处理特定的架构变更，例如添加或重命名字段。
+    """
+    db_type = settings.database.type.lower()
+    db_name = settings.database.name
+
+    # --- 迁移任务: 确保 anime.year 字段存在，并移除旧的 source_url 字段 ---
+    migration_id = "add_anime_year_and_drop_source_url"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    # 使用 information_schema 来检查列是否存在，这比 SHOW COLUMNS 更具可移植性
+    if db_type == "mysql":
+        check_source_url_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'anime' AND column_name = 'source_url'")
+        check_year_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'anime' AND column_name = 'year'")
+        add_year_sql = text("ALTER TABLE anime ADD COLUMN `year` INT NULL DEFAULT NULL AFTER `episode_count`")
+        drop_source_url_sql = text("ALTER TABLE anime DROP COLUMN source_url")
+    elif db_type == "postgresql":
+        check_source_url_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'anime' AND column_name = 'source_url'")
+        check_year_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'anime' AND column_name = 'year'")
+        add_year_sql = text('ALTER TABLE anime ADD COLUMN "year" INT NULL')
+        drop_source_url_sql = text("ALTER TABLE anime DROP COLUMN source_url")
+    else:
+        logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
+        return
+
+    has_source_url = (await conn.execute(check_source_url_sql)).scalar_one_or_none() is not None
+    has_year = (await conn.execute(check_year_sql)).scalar_one_or_none() is not None
+
+    if not has_year:
+        logger.info(f"列 'anime.year' 不存在。正在添加...")
+        await conn.execute(add_year_sql)
+        logger.info(f"成功添加列 'anime.year'。")
+
+    if has_source_url:
+        logger.info(f"发现过时的列 'anime.source_url'。正在删除...")
+        await conn.execute(drop_source_url_sql)
+        logger.info(f"成功删除列 'anime.source_url'。")
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
     db_type = settings.database.type.lower()
@@ -156,5 +197,7 @@ async def init_db_tables(app: FastAPI):
 
     engine = app.state.db_engine
     async with engine.begin() as conn:
+        # 在创建表之前运行迁移，以确保架构是最新的
+        await _run_migrations(conn)
         await conn.run_sync(Base.metadata.create_all)
     logger.info("ORM 模型已同步到数据库。")

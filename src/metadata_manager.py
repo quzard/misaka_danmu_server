@@ -100,11 +100,6 @@ class MetadataSourceManager:
             if source_instance := self.sources.get(provider):
                 tasks.append(source_instance.search_aliases(keyword, user))
             else:
-                if provider == 'douban':
-                    tmdb_api_key = await self._config_manager.get("tmdb_api_key", "")
-                    if not tmdb_api_key:
-                        self.logger.warning(f"TMDB API Key not configured,douban will be skipped alias search.")
-                        continue  # Skip TMDB if key is not set
                 self.logger.warning(f"已启用的元数据源 '{provider}' 未被成功加载，跳过别名搜索。")
 
         if not tasks:

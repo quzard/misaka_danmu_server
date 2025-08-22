@@ -374,7 +374,7 @@ async def deauthorize_bangumi(
 ):
     await crud.delete_bangumi_auth(session, current_user.id)
 
-@router.get("/search", response_model=List[BangumiApiSearchResult], summary="搜索 Bangumi 作品")
+@router.get("/search", response_model=List[models.MetadataDetailsResponse], summary="搜索 Bangumi 作品")
 async def search_bangumi_subjects(
     keyword: str = Query(..., min_length=1),
     client: httpx.AsyncClient = Depends(get_public_bangumi_client),
@@ -384,9 +384,12 @@ async def search_bangumi_subjects(
     cached_results = await crud.get_cache(session, cache_key)
     if cached_results is not None:
         logger.info(f"Bangumi 搜索 '{keyword}' 命中缓存。")
-        # The response model is List[Dict[str, Any]], so no strict validation is needed here
-        # for the cached data, which is good.
-        return cached_results
+        try:
+            # 确保缓存数据符合新模型
+            return [models.MetadataDetailsResponse.model_validate(item) for item in cached_results]
+        except ValidationError as e:
+            logger.warning(f"Bangumi 搜索缓存数据无效: {e}，将重新获取。")
+            await crud.delete_cache(session, cache_key)
 
     async with client:
         # 步骤 1: 初始搜索以获取ID列表
@@ -399,7 +402,7 @@ async def search_bangumi_subjects(
         if search_response.status_code == 404:
             return []
         search_response.raise_for_status()
-        
+
         search_result = BangumiSearchResponse.model_validate(search_response.json())
         if not search_result.data:
             return []
@@ -407,11 +410,8 @@ async def search_bangumi_subjects(
         # 步骤 2: 为每个搜索结果并发获取完整详情
         async def fetch_subject_details(subject_id: int, client: httpx.AsyncClient):
             try:
-                # 获取完整详情以包含 infobox
-                details_url = f"https://api.bgm.tv/v0/subjects/{subject_id}"
-                details_response = await client.get(details_url)
-                if details_response.status_code == 200:
-                    return details_response.json()
+                # 复用详情获取逻辑
+                return await get_bangumi_subject_details_logic(subject_id, client)
             except Exception as e:
                 logger.error(f"获取 Bangumi subject {subject_id} 详情失败: {e}")
             return None
@@ -420,20 +420,8 @@ async def search_bangumi_subjects(
         detailed_results = await asyncio.gather(*tasks)
 
         # 步骤 3: 组合并格式化最终结果
-        final_results = []
-        for subject_data in detailed_results:
-            if subject_data:
-                try:
-                    subject = BangumiSearchSubject.model_validate(subject_data)
-                    final_results.append(BangumiApiSearchResult(
-                        id=str(subject.id),
-                        title=subject.display_name,
-                        imageUrl=subject.image_url,
-                        details=subject.details_string,
-                    ))
-                except ValidationError as e:
-                    logger.error(f"验证 Bangumi subject 详情失败: {e}")
-        
+        final_results = [res for res in detailed_results if res]
+
         # 缓存结果
         ttl_seconds_str = await crud.get_config_value(session, 'metadata_search_ttl_seconds', '1800')
         results_to_cache = [r.model_dump() for r in final_results]
