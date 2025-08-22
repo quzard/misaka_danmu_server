@@ -13,7 +13,27 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 
 from . import models
 from .orm_models import (
-    Anime, AnimeSource, Episode, Comment, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
+    Anime, 
+    AnimeSource, 
+    Episode, 
+    Comment, 
+    User, 
+    Scraper, 
+    AnimeMetadata, 
+    Config,
+    CacheData, 
+    ApiToken, 
+    TokenAccessLog, 
+    UaRule, 
+    BangumiAuth, 
+    OauthState, 
+    AnimeAlias, 
+    TmdbEpisodeMapping, 
+    ScheduledTask, 
+    TaskHistory, 
+    MetadataSource, 
+    ExternalApiLog,
+    RateLimitState
 )
 
 # --- Anime & Library ---
@@ -1401,23 +1421,23 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
 
 # --- Rate Limiter CRUD ---
 
-async def get_rate_limit_state(session: AsyncSession, provider_name: str) -> Optional[models.RateLimitState]:
+async def get_rate_limit_state(session: AsyncSession, provider_name: str) -> Optional[RateLimitState]:
     """获取指定键的速率限制状态。"""
-    return await session.get(models.RateLimitState, provider_name)
+    return await session.get(RateLimitState, provider_name)
 
-async def get_all_rate_limit_states(session: AsyncSession) -> List[models.RateLimitState]:
+async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
     """获取所有速率限制状态。"""
-    result = await session.execute(select(models.RateLimitState))
+    result = await session.execute(select(RateLimitState))
     return result.scalars().all()
 
 async def reset_rate_limit_state(session: AsyncSession, provider_name: str):
     """重置或创建指定键的速率限制状态。"""
-    state = await session.get(models.RateLimitState, provider_name)
+    state = await session.get(RateLimitState, provider_name)
     if state:
         state.request_count = 1
         state.last_reset_time = datetime.now(timezone.utc)
     else:
-        state = models.RateLimitState(
+        state = RateLimitState(
             provider_name=provider_name,
             request_count=1,
             last_reset_time=datetime.now(timezone.utc)
@@ -1426,7 +1446,7 @@ async def reset_rate_limit_state(session: AsyncSession, provider_name: str):
 
 async def increment_rate_limit_count(session: AsyncSession, provider_name: str):
     """增加指定键的请求计数。"""
-    state = await session.get(models.RateLimitState, provider_name)
+    state = await session.get(RateLimitState, provider_name)
     if state:
         state.request_count += 1
     else:
