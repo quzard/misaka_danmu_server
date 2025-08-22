@@ -129,6 +129,8 @@ class BaseScraper(ABC):
     # (新增) 子类可以覆盖此属性，以表明其是否支持日志记录
     is_loggable: bool = True
 
+    rate_limit_quota: Optional[int] = None # 新增：特定源的配额
+    
     async def _should_log_responses(self) -> bool:
         """检查数据库以确定是否应为此爬虫记录原始响应。"""
         if not self.is_loggable:
