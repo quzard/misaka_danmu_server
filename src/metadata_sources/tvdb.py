@@ -5,6 +5,7 @@ import asyncio
 
 import httpx
 from fastapi import HTTPException, status
+from pydantic import BaseModel, Field
 
 from .. import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
@@ -226,3 +227,7 @@ class TvdbMetadataSource(BaseMetadataSource):
             return f"未配置: {e}"
         except Exception as e:
             return f"连接失败: {e}"
+
+    async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
+        """TVDB source does not support custom actions."""
+        raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")

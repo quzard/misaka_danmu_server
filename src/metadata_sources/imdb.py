@@ -173,3 +173,7 @@ class ImdbMetadataSource(BaseMetadataSource):
                 return "连接成功" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
         except Exception as e:
             return f"连接失败: {e}"
+
+    async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
+        """IMDb source does not support custom actions."""
+        raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")
