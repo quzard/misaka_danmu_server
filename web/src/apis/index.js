@@ -57,20 +57,26 @@ export const getSearchResult = (data, onProgress) => {
 }
 
 /** 获取tmdb详情 */
-export const getTmdbDetail = data =>
-  api.get(
-    `/api/ui/metadata/tmdb/details/${data.tmdbId}?mediaType=${data.mediaType}`
-  )
+export const getTMdbDetail = data =>
+  api.get(`/api/ui/metadata/tmdb/details/${data.mediaType}/${data.tmdbId}`)
 
 /** 获取tvdb详情 */
 export const getTvdbDetail = data =>
-  api.get(`/api/ui/metadata/tvdb/details/${data.tvdbId}`)
+  api.get(`/api/ui/metadata/tvdb/details/${data.tvdbId}`, {
+    mediaType: data.mediaType,
+  })
 /** 获取imdb详情 */
 export const getImdbDetail = data =>
-  api.get(`/api/ui/metadata/imdb/details/${data.imdbId}`)
+  api.get(`/api/ui/metadata/imdb/details/${data.imdbId}`, {
+    mediaType: data.mediaType,
+  })
 /** 获取douban详情 */
 export const getDoubanDetail = data =>
   api.get(`/api/ui/metadata/douban/details/${data.doubanId}`)
+
+/** 获取BGM详情 */
+export const getBgmDetail = data =>
+  api.get(`/api/ui/metadata/bangumi/details/${data.bangumiId}`)
 
 /** 导入弹幕  */
 export const importDanmu = data => api.post('/api/ui/import', data)
@@ -89,11 +95,13 @@ export const importEdit = data => api.post('/api/ui/import/edited', data)
 /** 搜索tmdb */
 export const getTmdbSearch = data =>
   api.get(
-    `/api/ui/metadata/tmdb/search?keyword=${data.keyword}&mediaType=${data.mediaType}`
+    `/api/ui/metadata/tmdb/search?keyword=${encodeURIComponent(data.keyword)}&mediaType=${data.mediaType}`
   )
 /** 搜索tvdb */
 export const getTvdbSearch = data =>
-  api.get(`/api/ui/metadata/tvdb/search?keyword=${data.keyword}`)
+  api.get(
+    `/api/ui/metadata/tvdb/search?keyword=${encodeURIComponent(data.keyword)}&mediaType=${data.mediaType}`
+  )
 /** 搜索tmdb剧集组 */
 export const getEgidSearch = data =>
   api.post(`/api/ui/metadata/tmdb/actions/get_episode_groups`, {
@@ -109,14 +117,16 @@ export const getAllEpisode = data =>
 
 /** 搜索BGM */
 export const getBgmSearch = data =>
-  api.get(`/api/ui/metadata/bangumi/search?keyword=${data.keyword}`)
+  api.get(`/api/ui/metadata/bangumi/search?keyword=${encodeURIComponent(data.keyword)}`)
 
 /** 豆瓣搜索 */
 export const getDoubanSearch = data =>
-  api.get(`/api/ui/metadata/douban/search?keyword=${data.keyword}`)
+  api.get(`/api/ui/metadata/douban/search?keyword=${encodeURIComponent(data.keyword)}`)
 /** imdb搜索 */
 export const getImdbSearch = data =>
-  api.get(`/api/ui/metadata/imdb/search?keyword=${data.keyword}`)
+  api.get(
+    `/api/ui/metadata/imdb/search?keyword=${encodeURIComponent(data.keyword)}&mediaType=${data.mediaType}`
+  )
 
 /** ---------------------------------------------------任务相关开始------------------------------------------------ */
 /** 任务列表 */
