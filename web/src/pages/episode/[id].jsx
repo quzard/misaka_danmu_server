@@ -26,6 +26,7 @@ import {
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import { HomeOutlined } from '@ant-design/icons'
+import { RoutePaths } from '../../general/RoutePaths'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()

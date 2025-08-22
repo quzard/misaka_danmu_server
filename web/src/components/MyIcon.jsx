@@ -1,5 +1,3 @@
-import { useNavigate } from 'react-router-dom'
-import { RoutePaths } from '../general/RoutePaths.jsx'
 import classNames from 'classnames'
 
 export const MyIcon = ({ size, className, color, icon }) => {

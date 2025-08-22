@@ -18,6 +18,7 @@ import {
   Progress,
   Space,
   Tag,
+  Tooltip,
 } from 'antd'
 import {
   CheckOutlined,
@@ -196,45 +197,58 @@ export const ImportTask = () => {
         title="任务管理器"
         extra={
           <Space>
-            <Button
-              type="default"
-              shape="circle"
-              icon={
-                selectList.length === taskList.length ? (
-                  <CheckOutlined />
-                ) : (
-                  <MinusOutlined />
-                )
-              }
-              onClick={() => {
-                if (selectList.length === taskList.length) {
-                  setSelectList([])
-                } else {
-                  setSelectList(taskList)
+            <Tooltip title="全选/取消全选">
+              <Button
+                type="default"
+                shape="circle"
+                icon={
+                  selectList.length === taskList.length &&
+                  !!selectList.length ? (
+                    <CheckOutlined />
+                  ) : (
+                    <MinusOutlined />
+                  )
                 }
-              }}
-            />
-            <Button
-              disabled={!canPause}
-              type="default"
-              shape="circle"
-              icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
-              onClick={handlePause}
-            />
-            <Button
-              disabled={!canDelete}
-              type="default"
-              shape="circle"
-              icon={<DeleteOutlined />}
-              onClick={handleDelete}
-            />
-            <Button
-              disabled={!canStop}
-              type="default"
-              shape="circle"
-              icon={<StopOutlined />}
-              onClick={handleStop}
-            />
+                onClick={() => {
+                  if (
+                    selectList.length === taskList.length &&
+                    !!selectList.length
+                  ) {
+                    setSelectList([])
+                  } else {
+                    setSelectList(taskList)
+                  }
+                }}
+              />
+            </Tooltip>
+            <Tooltip title="启用/暂停任务">
+              <Button
+                disabled={!canPause}
+                type="default"
+                shape="circle"
+                icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
+                onClick={handlePause}
+              />
+            </Tooltip>
+            <Tooltip title="删除任务">
+              <Button
+                disabled={!canDelete}
+                type="default"
+                shape="circle"
+                icon={<DeleteOutlined />}
+                onClick={handleDelete}
+              />
+            </Tooltip>
+            <Tooltip title="中止任务">
+              <Button
+                disabled={!canStop}
+                type="default"
+                shape="circle"
+                icon={<StopOutlined />}
+                onClick={handleStop}
+              />
+            </Tooltip>
+
             <Input.Search
               placeholder="按任务标题搜索"
               allowClear
