@@ -220,13 +220,27 @@ async def generic_import_task(
         if comments and anime_id is None:
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
+
+            title_to_use = normalized_title
+            # 检查是否存在同名、同季但年份不同的作品
+            existing_anime = await crud.find_anime_by_title_and_season(session, normalized_title, season)
+            if existing_anime:
+                existing_year = existing_anime.get('year')
+                # 只要年份不完全相等（包括一个为None另一个有值的情况），就视为不同作品
+                if existing_year != year:
+                    # 为了区分，我们将年份附加到标题后，以强制创建新条目
+                    if year is not None:
+                        title_to_use = f"{normalized_title} ({year})"
+                        logger.info(f"发现同名同季但年份不同的作品 (库: {existing_year}, 新: {year})。将使用新标题创建条目: '{title_to_use}'")
+
             local_image_path = await download_image(imageUrl, session, manager, provider)
             if imageUrl and not local_image_path:
                 image_download_failed = True
-            anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path, year) # type: ignore
+            anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season, imageUrl, local_image_path, year)
             await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
             logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
+
 
         if anime_id and source_id:
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
@@ -280,11 +294,24 @@ async def edited_import_task(
 
         comments = await scraper.get_comments(episode.episodeId)
 
-        if comments and anime_id is None: # type: ignore
+        if comments and anime_id is None:
             local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
             if request_data.imageUrl and not local_image_path:
                 image_download_failed = True
-            anime_id = await crud.get_or_create_anime(session, normalized_title, request_data.mediaType, request_data.season, request_data.imageUrl, local_image_path, request_data.year)
+            
+            title_to_use = normalized_title
+            existing_anime = await crud.find_anime_by_title_and_season(session, normalized_title, request_data.season)
+            if existing_anime:
+                existing_year = existing_anime.get('year')
+                if existing_year != request_data.year:
+                    if request_data.year is not None:
+                        title_to_use = f"{normalized_title} ({request_data.year})"
+                        logger.info(f"发现同名同季但年份不同的作品 (库: {existing_year}, 新: {request_data.year})。将使用新标题创建条目: '{title_to_use}'")
+
+            anime_id = await crud.get_or_create_anime(
+                session, title_to_use, request_data.mediaType, request_data.season, 
+                request_data.imageUrl, local_image_path, request_data.year
+            )
             await crud.update_metadata_if_empty(
                 session, anime_id,
                 tmdbId=request_data.tmdbId,
@@ -340,7 +367,7 @@ async def full_refresh_task(source_id: int, session: AsyncSession, manager: Scra
         doubanId=None, tmdbId=source_info.get("tmdbId"),
         imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
         progress_callback=progress_callback,
-        session=session, # type: ignore
+        session=session,
         manager=manager,
         task_manager=task_manager,
         rate_limiter=rate_limiter)
@@ -462,7 +489,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         await generic_import_task(
             provider=source_info["providerName"], mediaId=source_info["mediaId"],
             animeTitle=animeTitle, mediaType=source_info["type"],
-            season=source_info.get("season", 1),
+            season=source_info.get("season", 1), year=source_info.get("year"),
             currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
             doubanId=None, tmdbId=source_info.get("tmdbId"),
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
@@ -475,29 +502,35 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         raise
 
 async def manual_import_task(
-    sourceId: int, title: str, episodeIndex: int, url: str, providerName: str,
-    progress_callback: Callable, session: AsyncSession, manager: ScraperManager
+    sourceId: int, title: str, episodeIndex: int, url: str, providerName: str, # type: ignore
+    progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter
 ):
     """后台任务：从URL手动导入弹幕。"""
-    logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title}', url='{url}'") # type: ignore
-    await progress_callback(10, "正在准备导入...") # type: ignore
+    logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title}', url='{url}'")
+    await progress_callback(10, "正在准备导入...")
     
     try:
         scraper = manager.get_scraper(providerName)
-        provider_episode_id = await scraper.get_id_from_url(url) # type: ignore
-        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。") # type: ignore
+        provider_episode_id = await scraper.get_id_from_url(url)
+        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
 
-        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id) # type: ignore
+        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
-        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}") # type: ignore
-        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback) # type: ignore
-        if not comments: raise TaskSuccess("未找到任何弹幕。") # type: ignore
+        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
+        
+        try:
+            await rate_limiter.check_and_update(providerName)
+        except RateLimitExceededError as e:
+            raise TaskSuccess(f"达到速率限制。请在 {e.retry_after_seconds:.0f} 秒后重试。")
 
-        await progress_callback(90, "正在写入数据库...") # type: ignore
-        episode_db_id = await crud.create_episode_if_not_exists(session, sourceId, episodeIndex, title, url, episode_id_for_comments) # type: ignore
+        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
+        if not comments: raise TaskSuccess("未找到任何弹幕。")
+
+        await progress_callback(90, "正在写入数据库...")
+        episode_db_id = await crud.create_episode_if_not_exists(session, sourceId, episodeIndex, title, url, episode_id_for_comments)
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
         await session.commit()
-        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。") # type: ignore
+        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         raise
     except Exception as e:
@@ -511,6 +544,7 @@ async def auto_search_and_import_task(
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
+    rate_limiter: RateLimiter,
 ):
     """
     全自动搜索并导入的核心任务逻辑。
@@ -576,9 +610,10 @@ async def auto_search_and_import_task(
             task_coro = lambda s, cb: generic_import_task(
                 provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
                 animeTitle=main_title, mediaType=media_type, season=season,
-                currentEpisodeIndex=payload.episode, imageUrl=image_url,
+                year=payload.year, currentEpisodeIndex=payload.episode, imageUrl=image_url,
                 doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
-                progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager
+                progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
+                rate_limiter=rate_limiter
             )
             await task_manager.submit_task(task_coro, f"自动导入 (库内): {main_title}")
             raise TaskSuccess("作品已在库中，已为已有源创建导入任务。")
@@ -601,10 +636,11 @@ async def auto_search_and_import_task(
     await progress_callback(80, f"选择最佳源: {best_match.provider}")
     task_coro = lambda s, cb: generic_import_task(
         provider=best_match.provider, mediaId=best_match.mediaId,
-        animeTitle=main_title, mediaType=media_type, season=season,
+        animeTitle=main_title, mediaType=media_type, season=season, year=payload.year,
         currentEpisodeIndex=payload.episode, imageUrl=image_url,
         doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
-        progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager
+        progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
+        rate_limiter=rate_limiter
     )
     await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}")
     raise TaskSuccess("已为最佳匹配源创建导入任务。")

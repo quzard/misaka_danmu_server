@@ -1,5 +1,6 @@
 import logging
 import json
+from datetime import datetime
 from typing import Any, Dict
 from fastapi import Request, HTTPException, status
 
@@ -66,6 +67,13 @@ class JellyfinWebhook(BaseWebhook):
         tvdb_id = payload.get("Provider_tvdb")
         douban_id = payload.get("Provider_doubanid")
         bangumi_id = payload.get("Provider_bangumi")
+        year = None
+        if premiere_date_str := payload.get("PremiereDate"):
+            try:
+                # Jellyfin's PremiereDate is a full ISO 8601 string
+                year = datetime.fromisoformat(premiere_date_str.replace("Z", "+00:00")).year
+            except (ValueError, TypeError):
+                logger.warning(f"Webhook: 无法从Jellyfin的PremiereDate '{premiere_date_str}' 解析年份。")
         
         # 根据媒体类型分别处理
         if item_type == "Episode":
@@ -111,6 +119,7 @@ class JellyfinWebhook(BaseWebhook):
             mediaType=media_type,
             season=season_number,
             currentEpisodeIndex=episode_number,
+            year=year,
             searchKeyword=search_keyword,
             doubanId=str(douban_id) if douban_id else None,
             tmdbId=str(tmdb_id) if tmdb_id else None,

@@ -1,4 +1,5 @@
 import logging
+import secrets
 from typing import Dict
 import json
 
@@ -27,8 +28,10 @@ async def handle_webhook(
     webhook_manager: WebhookManager = Depends(get_webhook_manager),
 ):
     """统一的Webhook入口，用于接收来自Sonarr, Radarr等服务的通知。"""
-    stored_key = await crud.get_config_value(session, "webhook_api_key", "")
-    if not stored_key or api_key != stored_key:
+    # 修正：数据库中存储的键名是驼峰命名法的 "webhookApiKey"
+    stored_key = await crud.get_config_value(session, "webhookApiKey", "")
+    # 修正：使用 secrets.compare_digest 防止时序攻击，并处理 stored_key 为空的情况
+    if not stored_key or not secrets.compare_digest(api_key, stored_key):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的Webhook API Key")
 
     # API 端点现在变得更简单。

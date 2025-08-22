@@ -39,6 +39,7 @@ async def webhook_search_and_dispatch_task(
     tvdbId: Optional[str],
     bangumiId: Optional[str],
     webhookSource: str,
+    year: Optional[int],
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager,
@@ -60,7 +61,7 @@ async def webhook_search_and_dispatch_task(
             # 直接使用这个源的信息创建导入任务
             task_title = f"Webhook自动导入: {favorited_source['animeTitle']} ({favorited_source['providerName']})"
             task_coro = lambda session, cb: generic_import_task(
-                provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'],
+                provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
                 mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
                 imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId,
                 bangumiId=bangumiId,
@@ -121,7 +122,7 @@ async def webhook_search_and_dispatch_task(
         else: # movie
             task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
         task_coro = lambda session, cb: generic_import_task(
-            provider=best_match.provider, mediaId=best_match.mediaId,
+            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
             season=season, currentEpisodeIndex=best_match.currentEpisodeIndex, imageUrl=best_match.imageUrl,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId,

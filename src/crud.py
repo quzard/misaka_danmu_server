@@ -1398,3 +1398,37 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
         await session.commit()
         logging.getLogger(__name__).info(f"成功初始化 {len(new_configs)} 个新配置项。")
     logging.getLogger(__name__).info("默认配置检查完成。")
+
+# --- Rate Limiter CRUD ---
+
+async def get_rate_limit_state(session: AsyncSession, provider_name: str) -> Optional[models.RateLimitState]:
+    """获取指定键的速率限制状态。"""
+    return await session.get(models.RateLimitState, provider_name)
+
+async def get_all_rate_limit_states(session: AsyncSession) -> List[models.RateLimitState]:
+    """获取所有速率限制状态。"""
+    result = await session.execute(select(models.RateLimitState))
+    return result.scalars().all()
+
+async def reset_rate_limit_state(session: AsyncSession, provider_name: str):
+    """重置或创建指定键的速率限制状态。"""
+    state = await session.get(models.RateLimitState, provider_name)
+    if state:
+        state.request_count = 1
+        state.last_reset_time = datetime.now(timezone.utc)
+    else:
+        state = models.RateLimitState(
+            provider_name=provider_name,
+            request_count=1,
+            last_reset_time=datetime.now(timezone.utc)
+        )
+        session.add(state)
+
+async def increment_rate_limit_count(session: AsyncSession, provider_name: str):
+    """增加指定键的请求计数。"""
+    state = await session.get(models.RateLimitState, provider_name)
+    if state:
+        state.request_count += 1
+    else:
+        # 这通常在第一次请求时发生
+        await reset_rate_limit_state(session, provider_name)

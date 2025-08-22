@@ -41,6 +41,7 @@ class EmbyWebhook(BaseWebhook):
         tvdb_id = provider_ids.get("Tvdb")
         douban_id = provider_ids.get("DoubanID") # Emby 可能使用 DoubanID
         bangumi_id = provider_ids.get("Bangumi")
+        year = item.get("ProductionYear")
         
         # 根据媒体类型分别处理
         if item_type == "Episode":
@@ -86,6 +87,7 @@ class EmbyWebhook(BaseWebhook):
             mediaType=media_type,
             season=season_number,
             currentEpisodeIndex=episode_number,
+            year=year,
             searchKeyword=search_keyword,
             doubanId=str(douban_id) if douban_id else None,
             tmdbId=str(tmdb_id) if tmdb_id else None,
