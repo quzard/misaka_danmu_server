@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-import httpx
+from httpx import HTTPStatusError
 
 from .. import models
 from ..config_manager import ConfigManager

@@ -29,7 +29,10 @@ class TmdbMetadataSource(BaseMetadataSource):
         if not api_key:
             raise ValueError("TMDB API Key not configured.")
         
-        base_url = await self.config_manager.get("tmdbApiBaseUrl", "https://api.themoviedb.org/3")
+        # 修正：确保基础URL总是以 /3 结尾，以兼容用户可能输入的各种域名格式
+        base_url_from_config = await self.config_manager.get("tmdbApiBaseUrl", "https://api.themoviedb.org/3")
+        cleaned_domain = base_url_from_config.rstrip('/')
+        base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
         
         params = {"api_key": api_key, "language": "zh-CN"}
         return httpx.AsyncClient(base_url=base_url, params=params, timeout=20.0, follow_redirects=True)
