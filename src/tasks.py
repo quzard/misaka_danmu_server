@@ -225,17 +225,8 @@ async def generic_import_task(
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
 
+            # 修正：不再通过修改标题来区分同年份的作品，而是直接依赖 crud.get_or_create_anime 来处理唯一性。
             title_to_use = normalized_title
-            # 检查是否存在同名、同季但年份不同的作品
-            existing_anime = await crud.find_anime_by_title_and_season(session, normalized_title, season)
-            if existing_anime:
-                existing_year = existing_anime.get('year')
-                # 只要年份不完全相等（包括一个为None另一个有值的情况），就视为不同作品
-                if existing_year != year:
-                    # 为了区分，我们将年份附加到标题后，以强制创建新条目
-                    if year is not None:
-                        title_to_use = f"{normalized_title} ({year})"
-                        logger.info(f"发现同名同季但年份不同的作品 (库: {existing_year}, 新: {year})。将使用新标题创建条目: '{title_to_use}'")
 
             local_image_path = await download_image(imageUrl, session, manager, provider)
             if imageUrl and not local_image_path:
@@ -305,15 +296,8 @@ async def edited_import_task(
             if request_data.imageUrl and not local_image_path:
                 image_download_failed = True
             
+            # 修正：不再通过修改标题来区分同年份的作品，而是直接依赖 crud.get_or_create_anime 来处理唯一性。
             title_to_use = normalized_title
-            existing_anime = await crud.find_anime_by_title_and_season(session, normalized_title, request_data.season)
-            if existing_anime:
-                existing_year = existing_anime.get('year')
-                if existing_year != request_data.year:
-                    if request_data.year is not None:
-                        title_to_use = f"{normalized_title} ({request_data.year})"
-                        logger.info(f"发现同名同季但年份不同的作品 (库: {existing_year}, 新: {request_data.year})。将使用新标题创建条目: '{title_to_use}'")
-
             anime_id = await crud.get_or_create_anime(
                 session, title_to_use, request_data.mediaType, request_data.season, 
                 request_data.imageUrl, local_image_path, request_data.year
