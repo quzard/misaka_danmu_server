@@ -427,3 +427,26 @@ class EnrichedTMDBGroupInGroupDetail(BaseModel):
 
 class EnrichedTMDBEpisodeGroupDetails(TMDBEpisodeGroupDetails):
     groups: List[EnrichedTMDBGroupInGroupDetail]
+
+# --- Rate Limiter Models ---
+
+class RateLimitStatusItem(BaseModel):
+    """单个流控规则的状态"""
+    providerName: str
+    requestCount: int
+    limit: int
+    period: str
+    periodSeconds: int
+    lastResetTime: datetime
+    secondsUntilReset: int
+
+    class Config:
+        from_attributes = True
+
+class RateLimitStatusResponse(BaseModel):
+    """流控状态API的完整响应模型"""
+    globalEnabled: bool
+    providers: List[RateLimitStatusItem]
+
+# --- Rate Limiter Models ---
+

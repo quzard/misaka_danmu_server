@@ -2052,11 +2052,58 @@ class FullRateLimitStatusResponse(BaseModel):
     globalStatus: RateLimitStatus
     providerStatus: Dict[str, RateLimitStatus]
 
-@router.get("/rate-limit/status", response_model=FullRateLimitStatusResponse, summary="获取速率限制状态")
+@router.get("/rate-limit/status", response_model=models.RateLimitStatusResponse, summary="获取所有流控规则的状态")
 async def get_rate_limit_status(
-    current_user: models.User = Depends(security.get_current_user),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    request: Request, # 确保有 request 依赖
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager) # 确保有 config_manager 依赖
 ):
-    """获取全局和各源的当前速率限制使用情况。"""
-    status = await rate_limiter.get_status()
-    return FullRateLimitStatusResponse.model_validate(status)
+    """
+    获取所有流控规则的当前状态，并明确指出全局流控是否已启用。
+    """
+    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "false")
+    global_enabled = global_enabled_str.lower() == 'true'
+
+    all_states = await crud.get_all_rate_limit_states(session)
+    all_scrapers = await crud.get_all_scraper_settings(session)
+
+    # 为每个源（包括全局）构建其限制配置
+    provider_limits = {}
+    for scraper in all_scrapers:
+        provider_name = scraper['providerName']
+        limit_str = await config_manager.get(f"{provider_name}RateLimitCount", "0")
+        period = await config_manager.get(f"{provider_name}RateLimitPeriod", "hour")
+        provider_limits[provider_name] = {"limit": int(limit_str) if limit_str.isdigit() else 0, "period": period}
+
+    global_limit_str = await config_manager.get("globalRateLimitCount", "0")
+    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
+    provider_limits['__global__'] = {"limit": int(global_limit_str) if global_limit_str.isdigit() else 0, "period": global_period}
+
+    status_items = []
+    period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+
+    for state in all_states:
+        provider_name = state.providerName
+        limits = provider_limits.get(provider_name)
+        if not limits: # 如果源不存在于配置中，则跳过
+            continue
+
+        # 如果限制数为0，我们仍然需要展示它，以便UI可以显示 "X / ∞"
+        if limits['limit'] < 0:
+             limits['limit'] = 0
+
+        period_seconds = period_map.get(limits['period'], 3600)
+        time_since_reset = datetime.now(timezone.utc) - state.lastResetTime
+        seconds_until_reset = max(0, period_seconds - int(time_since_reset.total_seconds()))
+
+        status_items.append(models.RateLimitStatusItem(
+            providerName=provider_name,
+            requestCount=state.requestCount,
+            limit=limits['limit'],
+            period=limits['period'],
+            periodSeconds=period_seconds,
+            lastResetTime=state.lastResetTime,
+            secondsUntilReset=seconds_until_reset
+        ))
+
+    return models.RateLimitStatusResponse(globalEnabled=global_enabled, providers=status_items)

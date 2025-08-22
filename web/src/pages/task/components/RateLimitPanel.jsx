@@ -1,95 +1,105 @@
-import { Card, Col, Progress, Row, Spin, Tooltip, Typography } from 'antd'
-import { useEffect, useState, useRef } from 'react'
-import { getRateLimitStatus } from '@/apis'
-import { QuestionCircleOutlined } from '@ant-design/icons'
+import { useEffect, useState } from 'react';
+import { getRateLimitStatus } from '../../../apis';
+import { Alert, Card, Progress, Spin, Tooltip } from 'antd';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/zh-cn';
 
-const { Title, Text } = Typography
+dayjs.extend(relativeTime);
+dayjs.locale('zh-cn');
 
-// 辅助函数：将秒格式化为易读的字符串
-const formatSeconds = seconds => {
-  if (seconds < 60) return `${seconds}秒`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  if (remainingSeconds === 0) return `${minutes}分钟`
-  return `${minutes}分${remainingSeconds}秒`
-}
+const getPeriodText = (period) => {
+  const map = { second: '秒', minute: '分钟', hour: '小时', day: '天' };
+  return map[period] || period;
+};
 
-const RateLimitCard = ({ title, status }) => {
-  if (!status || !status.limit || status.limit <= 0) {
-    return null // 如果限制未启用或无效，则不渲染卡片
+const RateLimitItem = ({ item, isGlobal, isDisabled }) => {
+  const percent = item.limit > 0 ? (item.requestCount / item.limit) * 100 : 0;
+  const title = isGlobal ? '全局流控' : item.providerName;
+
+  const itemContent = (
+    <div className={isDisabled ? 'opacity-50' : ''}>
+      <div className="flex justify-between items-center mb-1">
+        <span className="font-semibold">{title}</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {item.requestCount} / {item.limit > 0 ? item.limit : '∞'} (每 {item.limit > 0 ? `${item.periodSeconds / 3600 >= 1 ? item.periodSeconds / 3600 : item.periodSeconds / 60}` : ''} {getPeriodText(item.period)})
+        </span>
+      </div>
+      <Progress
+        percent={percent}
+        showInfo={false}
+        strokeColor={percent > 80 ? '#f5222d' : '#1890ff'}
+      />
+      <div className="text-right text-xs text-gray-400 dark:text-gray-500 mt-1">
+        重置于: {dayjs(item.lastResetTime).fromNow()}
+      </div>
+    </div>
+  );
+
+  if (isDisabled) {
+    return (
+      <Tooltip title="全局流控已开启，此规则当前遵循全局设置。">
+        {itemContent}
+      </Tooltip>
+    );
   }
 
-  const percent = (status.count / status.limit) * 100
-  const periodHours = (status.periodSeconds / 3600).toFixed(1).replace('.0', '')
-  const limitText = `${status.limit} 次 / ${periodHours} 小时`
-
-  return (
-    <Col xs={24} sm={12} md={8} lg={6}>
-      <Card title={title} size="small" className="text-center">
-        <Progress
-          type="circle"
-          percent={percent}
-          format={() => `${status.count}/${status.limit}`}
-        />
-        <Text type="secondary" className="block mt-2">
-          {limitText}
-        </Text>
-        <Text type="secondary" className="block mt-1">
-          将于 {formatSeconds(status.resetsInSeconds)} 后重置
-        </Text>
-      </Card>
-    </Col>
-  )
-}
+  return itemContent;
+};
 
 export const RateLimitPanel = () => {
-  const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState(null)
-  const timerRef = useRef(null)
+  const [statusData, setStatusData] = useState({ globalEnabled: false, providers: [] });
+  const [loading, setLoading] = useState(true);
 
   const fetchStatus = async () => {
     try {
-      const res = await getRateLimitStatus()
-      setStatus(res.data)
+      const res = await getRateLimitStatus();
+      setStatusData(res.data);
     } catch (error) {
-      console.error('获取流控状态失败:', error)
+      console.error('获取流控状态失败:', error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchStatus()
-    timerRef.current = setInterval(fetchStatus, 5000) // 每5秒刷新一次
-    return () => clearInterval(timerRef.current)
-  }, [])
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  if (loading) {
-    return <div className="text-center p-10"><Spin /></div>
-  }
+  const globalStatus = statusData.providers.find(p => p.providerName === '__global__');
+  const providerStatus = statusData.providers.filter(p => p.providerName !== '__global__');
 
   return (
     <div className="my-6">
-      <Card>
-        <Title level={4} className="!mb-4">
-          全局流控状态
-          <Tooltip title="全局流控限制所有源在指定周期内的总下载次数。周期从该周期内的第一次下载开始计算。">
-            <QuestionCircleOutlined className="ml-2 text-gray-400 cursor-help" />
-          </Tooltip>
-        </Title>
-        <Row gutter={[16, 16]}>
-          <RateLimitCard title="全局" status={status?.globalStatus} />
-        </Row>
-
-        <Title level={4} className="!mt-8 !mb-4">
-          各源流控状态
-        </Title>
-        <Row gutter={[16, 16]}>
-          {status?.providerStatus && Object.entries(status.providerStatus).map(([provider, providerStatus]) => (
-            <RateLimitCard key={provider} title={provider.charAt(0).toUpperCase() + provider.slice(1)} status={providerStatus} />
-          ))}
-        </Row>
+      <Card title="下载流控状态">
+        <Spin spinning={loading}>
+          <div className="mb-4">
+            这里显示了每个启用了速率限制的下载源的当前状态。计数器会在每个周期开始时自动重置。
+          </div>
+          {statusData.globalEnabled && (
+            <Alert
+              message="全局流控已开启"
+              description="所有下载源共享同一个速率限制。下方未独立设置的源将遵循全局规则。"
+              type="info"
+              showIcon
+              className="mb-4"
+            />
+          )}
+          <div className="space-y-4">
+            {globalStatus && <RateLimitItem item={globalStatus} isGlobal />}
+            {providerStatus.map(item => (
+              <RateLimitItem key={item.providerName} item={item} isDisabled={statusData.globalEnabled && item.limit === 0} />
+            ))}
+            {!statusData.providers.length && !loading && (
+              <div className="text-center text-gray-500 dark:text-gray-400 py-4">
+                没有正在进行的流控或未启用任何流控规则。
+              </div>
+            )}
+          </div>
+        </Spin>
       </Card>
     </div>
-  )
-}
+  );
+};
