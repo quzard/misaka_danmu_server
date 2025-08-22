@@ -1,4 +1,5 @@
-import { React,
+import React, { useEffect, useState } from 'react'
+import {
   Button,
   Card,
   Empty,
@@ -12,7 +13,7 @@ import { React,
   Space,
   Table,
 } from 'antd'
-import { React,
+import {
   deleteAnime,
   getAllEpisode,
   getAnimeDetail,
@@ -30,12 +31,17 @@ import { React,
   refreshPoster,
   setAnimeDetail,
 } from '../../apis'
-import { useEffect, useState, React } from 'react'
 import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { RoutePaths } from '../../general/RoutePaths'
+
+const containsJapanese = str => {
+  if (!str) return false
+  // 此正则表达式匹配日文假名和常见的CJK统一表意文字
+  return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(str)
+}
 
 const ApplyField = ({ name, label, fetchedValue, form }) => {
   const currentValue = Form.useWatch(name, form)
