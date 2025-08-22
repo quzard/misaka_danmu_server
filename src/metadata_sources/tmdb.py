@@ -195,7 +195,20 @@ class TmdbMetadataSource(BaseMetadataSource):
                     if not tmdb_id: raise ValueError("缺少 tmdbId")
                     response = await client.get(f"/tv/{tmdb_id}/episode_groups")
                     response.raise_for_status()
-                    return response.json().get("results", [])
+                    raw_results = response.json().get("results", [])
+                    # 手动构造驼峰命名的响应，以满足前端要求
+                    camel_case_results = []
+                    for item in raw_results:
+                        camel_case_results.append({
+                            "description": item.get("description"),
+                            "episodeCount": item.get("episode_count"),
+                            "groupCount": item.get("group_count"),
+                            "id": item.get("id"),
+                            "name": item.get("name"),
+                            "network": item.get("network"),
+                            "type": item.get("type"),
+                        })
+                    return camel_case_results
                 elif action_name == "get_all_episodes":
                     egid = payload.get("egid")
                     tmdb_id = payload.get("tmdbId")

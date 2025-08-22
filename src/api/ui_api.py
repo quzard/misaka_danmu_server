@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
 from datetime import timedelta, datetime, timezone
-from sqlalchemy import update
+from sqlalchemy import update, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import httpx
@@ -275,7 +275,28 @@ async def get_library(
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
-    db_results = await crud.get_library_anime(session)
+    # 修正：直接在此处执行正确的查询，以确保 episodeCount 和 sourceCount 是实时计算的。
+    stmt = (
+        select(
+            orm_models.Anime.id.label("animeId"),
+            orm_models.Anime.title,
+            orm_models.Anime.type,
+            orm_models.Anime.season,
+            orm_models.Anime.year,
+            orm_models.Anime.imageUrl,
+            orm_models.Anime.localImagePath,
+            orm_models.Anime.createdAt,
+            func.count(func.distinct(orm_models.AnimeSource.id)).label("sourceCount"),
+            func.count(func.distinct(orm_models.Episode.id)).label("episodeCount")
+        )
+        .select_from(orm_models.Anime)
+        .outerjoin(orm_models.Anime.sources)
+        .outerjoin(orm_models.AnimeSource.episodes)
+        .group_by(orm_models.Anime.id)
+        .order_by(orm_models.Anime.createdAt.desc())
+    )
+    result = await session.execute(stmt)
+    db_results = result.mappings().all()
     # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
     return models.LibraryResponse(animes=[models.LibraryAnimeInfo.model_validate(item) for item in db_results])
 
@@ -952,6 +973,22 @@ async def get_metadata_details(
     current_user: models.User = Depends(security.get_current_user),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
+    details = await manager.get_details(provider, item_id, current_user, mediaType=mediaType)
+    if not details:
+        raise HTTPException(status_code=404, detail="未找到详情")
+    return details
+
+@router.get("/metadata/{provider}/details/{mediaType}/{item_id}", response_model=models.MetadataDetailsResponse, summary="获取元数据详情 (带媒体类型)", include_in_schema=False)
+async def get_metadata_details_with_type(
+    provider: str,
+    mediaType: str,
+    item_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """
+    一个兼容性路由，允许将 mediaType 作为路径的一部分。
+    """
     details = await manager.get_details(provider, item_id, current_user, mediaType=mediaType)
     if not details:
         raise HTTPException(status_code=404, detail="未找到详情")

@@ -19,6 +19,7 @@ import {
   getAnimeDetail,
   getAnimeLibrary,
   getBgmSearch,
+  getBgmDetail,
   getDoubanDetail,
   getDoubanSearch,
   getEgidSearch,
@@ -969,8 +970,9 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        // The item from bgmResult is already the full detail
-                        const res = { data: item }
+                        const res = await getBgmDetail({
+                          bangumiId: item.id,
+                        })
                         form.setFieldsValue({ bangumiId: res.data.id })
                         setFetchedMetadata(res.data)
                         setBgmOpen(false)
