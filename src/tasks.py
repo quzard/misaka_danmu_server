@@ -7,6 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, models, orm_models
+from .rate_limiter import RateLimiter, RateLimitExceededError
 from .image_utils import download_image
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
@@ -167,7 +168,8 @@ async def generic_import_task(
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager, 
-    task_manager: TaskManager
+    task_manager: TaskManager,
+    rate_limiter: RateLimiter
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -205,6 +207,13 @@ async def generic_import_task(
         async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
             current_total_progress = base_progress + (danmaku_progress / 100) * (85 / total_episodes)
             await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
+
+        try:
+            await rate_limiter.check_and_update(provider)
+        except RateLimitExceededError as e:
+            logger.warning(f"任务 '{normalized_title}' 因达到速率限制而暂停: {e}")
+            # 任务成功结束，但附带一条关于速率限制的消息
+            raise TaskSuccess(f"达到速率限制。请在 {e.retry_after_seconds:.0f} 秒后重试。")
 
         comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
@@ -244,7 +253,8 @@ async def edited_import_task(
     request_data: "models.EditedImportRequest",
     progress_callback: Callable,
     session: AsyncSession,
-    manager: ScraperManager
+    manager: ScraperManager,
+    rate_limiter: RateLimiter
 ):
     """后台任务：处理编辑后的导入请求。"""
     scraper = manager.get_scraper(request_data.provider)
@@ -262,6 +272,12 @@ async def edited_import_task(
 
     for i, episode in enumerate(episodes):
         await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
+        try:
+            await rate_limiter.check_and_update(request_data.provider)
+        except RateLimitExceededError as e:
+            logger.warning(f"编辑后导入任务 '{normalized_title}' 因达到速率限制而暂停: {e}")
+            raise TaskSuccess(f"达到速率限制。请在 {e.retry_after_seconds:.0f} 秒后重试。")
+
         comments = await scraper.get_comments(episode.episodeId)
 
         if comments and anime_id is None: # type: ignore
@@ -295,7 +311,7 @@ async def edited_import_task(
     await session.commit()
     raise TaskSuccess(final_message)
 
-async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
+async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable):
     """
     后台任务：全量刷新一个已存在的番剧。
     """
@@ -324,9 +340,10 @@ async def full_refresh_task(source_id: int, session: AsyncSession, manager: Scra
         doubanId=None, tmdbId=source_info.get("tmdbId"),
         imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
         progress_callback=progress_callback,
-        session=session,
+        session=session, # type: ignore
         manager=manager,
-        task_manager=task_manager)
+        task_manager=task_manager,
+        rate_limiter=rate_limiter)
 
 async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """Background task to delete multiple sources."""
@@ -432,7 +449,7 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, animeTitle: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable, animeTitle: str):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)

@@ -21,6 +21,7 @@ from .scheduler import SchedulerManager
 from .config import settings
 from . import crud, security
 from .log_manager import setup_logging
+from .rate_limiter import RateLimiter
 
 print(f"当前环境: {settings.environment}") 
 
@@ -81,9 +82,12 @@ async def lifespan(app: FastAPI):
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
+        "rate_limit_global_limit": ("50", ""),
+        "rate_limit_global_period_seconds": ("3600", ""),
     }
     await app.state.config_manager.register_defaults(default_configs)
 
+    app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager)
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
     await app.state.scraper_manager.initialize()
     # 新增：初始化元数据源管理器
@@ -98,7 +102,7 @@ async def lifespan(app: FastAPI):
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager)
+    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter)
     await app.state.scheduler_manager.start()
     
     yield

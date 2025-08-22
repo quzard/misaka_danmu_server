@@ -13,6 +13,7 @@ from sqlalchemy import update, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import httpx
+from ..rate_limiter import RateLimiter
 from ..config_manager import ConfigManager
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
@@ -64,6 +65,10 @@ async def get_metadata_manager(request: Request) -> MetadataSourceManager:
 async def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
+
+async def get_rate_limiter(request: Request) -> RateLimiter:
+    """依赖项：从应用状态获取速率限制器"""
+    return request.app.state.rate_limiter
 
 @router.get(
     "/search/anime",
@@ -576,7 +581,8 @@ async def refresh_anime(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     为指定的数据源启动一个刷新任务。
@@ -595,14 +601,14 @@ async def refresh_anime(
         
         task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
-            sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager, 
+            sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
             task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"]
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
         task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
-        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, cb)
+        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb)
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
@@ -2033,3 +2039,24 @@ async def change_current_user_password(
     # 3. 更新密码
     new_hashed_password = security.get_password_hash(password_data.newPassword)
     await crud.update_user_password(session, current_user.username, new_hashed_password)
+
+# --- Rate Limiter API ---
+
+class RateLimitStatus(BaseModel):
+    limit: int
+    periodSeconds: int
+    count: int
+    resetsInSeconds: int
+
+class FullRateLimitStatusResponse(BaseModel):
+    globalStatus: RateLimitStatus
+    providerStatus: Dict[str, RateLimitStatus]
+
+@router.get("/rate-limit/status", response_model=FullRateLimitStatusResponse, summary="获取速率限制状态")
+async def get_rate_limit_status(
+    current_user: models.User = Depends(security.get_current_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """获取全局和各源的当前速率限制使用情况。"""
+    status = await rate_limiter.get_status()
+    return FullRateLimitStatusResponse.model_validate(status)

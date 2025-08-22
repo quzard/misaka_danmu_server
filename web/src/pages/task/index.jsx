@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ImportTask } from './components/ImportTask'
 import { ScheduleTask } from './components/ScheduleTask'
+import { RateLimitPanel } from './components/RateLimitPanel'
 import { Tabs } from 'antd'
 
 export const Task = () => {
@@ -18,6 +19,11 @@ export const Task = () => {
           label: '定时任务',
           key: 'schedule',
           children: <ScheduleTask />,
+        },
+        {
+          label: '流控面板',
+          key: 'ratelimit',
+          children: <RateLimitPanel />,
         },
       ]}
       onChange={key => setActiveKey(key)}

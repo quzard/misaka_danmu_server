@@ -235,3 +235,9 @@ class ExternalApiLog(Base):
     endpoint: Mapped[str] = mapped_column(String(255))
     statusCode: Mapped[int] = mapped_column("status_code", Integer)
     message: Mapped[Optional[str]] = mapped_column(TEXT) # type: ignore
+
+class RateLimitState(Base):
+    __tablename__ = "rate_limit_state"
+    provider_name: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
+    request_count: Mapped[int] = mapped_column("request_count", Integer, default=0)
+    last_reset_time: Mapped[datetime] = mapped_column("last_reset_time", TIMESTAMP(timezone=True), server_default=func.now())
