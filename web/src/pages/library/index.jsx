@@ -26,7 +26,7 @@ import {
   getEgidSearch,
   getImdbDetail,
   getImdbSearch,
-  getTmdbDetail,
+  getTMdbDetail,
   getTmdbSearch,
   getTvdbDetail,
   getTvdbSearch,
@@ -486,6 +486,7 @@ export const Library = () => {
       setSearchImdbLoading(true)
       const res = await getImdbSearch({
         keyword: title,
+        mediaType: type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
       })
       if (!!res?.data?.length) {
         setImdbResult(res?.data || [])
@@ -785,6 +786,8 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'douban',
+                        mediaType:
+                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
                       currentId: doubanId,
                     })
                   }}
@@ -809,6 +812,8 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'imdb',
+                        mediaType:
+                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
                       currentId: imdbId,
                     })
                   }}
@@ -958,6 +963,8 @@ export const Library = () => {
                       type="primary"
                       onClick={async () => {
                         const res = await getImdbDetail({
+                          mediaType:
+                            item.type === 'tv_series' ? 'series' : 'movie',
                           imdbId: item.id,
                         })
                         form.setFieldsValue({ imdbId: res.data.id })
