@@ -367,7 +367,7 @@ async def fetch_comments_for_episodes(session: AsyncSession, episode_ids: List[i
     """
     获取多个分集ID的所有弹幕。
     """
-    stmt = select(Comment.p, Comment.m).where(Comment.episodeId.in_(episode_ids))
+    stmt = select(Comment.cid, Comment.p, Comment.m).where(Comment.episodeId.in_(episode_ids))
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -523,7 +523,7 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
 
 async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
     """获取指定分集的所有弹幕"""
-    stmt = select(Comment.p, Comment.m).where(Comment.episodeId == episode_id)
+    stmt = select(Comment.cid, Comment.p, Comment.m).where(Comment.episodeId == episode_id)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -1401,34 +1401,35 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
 
 # --- Rate Limiter CRUD ---
 
-async def get_rate_limit_state(session: AsyncSession, provider_name: str) -> Optional[RateLimitState]:
-    """获取指定键的速率限制状态。"""
-    return await session.get(RateLimitState, provider_name)
+async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: str) -> RateLimitState:
+    """获取或创建特定提供商的速率限制状态。"""
+    stmt = select(RateLimitState).where(RateLimitState.providerName == provider_name)
+    result = await session.execute(stmt)
+    state = result.scalar_one_or_none()
+    if not state:
+        state = RateLimitState(
+            providerName=provider_name,
+            requestCount=0,
+            lastResetTime=datetime.now(timezone.utc)
+        )
+        session.add(state)
+        await session.flush()
+    return state
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
     """获取所有速率限制状态。"""
     result = await session.execute(select(RateLimitState))
     return result.scalars().all()
 
-async def reset_rate_limit_state(session: AsyncSession, provider_name: str):
-    """重置或创建指定键的速率限制状态。"""
-    state = await session.get(RateLimitState, provider_name)
-    if state:
-        state.requestCount = 1
-        state.lastResetTime = datetime.now(timezone.utc)
-    else:
-        state = RateLimitState(
-            providerName=provider_name,
-            requestCount=1,
-            lastResetTime=datetime.now(timezone.utc)
-        )
-        session.add(state)
+async def reset_all_rate_limit_states(session: AsyncSession):
+    """重置所有速率限制状态的请求计数和重置时间。"""
+    stmt = update(RateLimitState).values(
+        requestCount=0,
+        lastResetTime=func.now()
+    )
+    await session.execute(stmt)
 
 async def increment_rate_limit_count(session: AsyncSession, provider_name: str):
-    """增加指定键的请求计数。"""
-    state = await session.get(RateLimitState, provider_name)
-    if state:
-        state.requestCount += 1
-    else:
-        # 这通常在第一次请求时发生
-        await reset_rate_limit_state(session, provider_name)
+    """为指定的提供商增加请求计数。如果状态不存在，则会创建它。"""
+    state = await get_or_create_rate_limit_state(session, provider_name)
+    state.requestCount += 1

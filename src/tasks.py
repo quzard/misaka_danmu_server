@@ -452,7 +452,7 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
             for i, episode_data in enumerate(episodes):
                 new_index = i + 1
                 if episode_data['episodeIndex'] != new_index:
-                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['id']).values(episodeIndex=new_index))
+                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['episodeId']).values(episodeIndex=new_index))
                     updated_count += 1
                 await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
             await session.commit()
@@ -538,11 +538,17 @@ async def auto_search_and_import_task(
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
-    rate_limiter: RateLimiter,
+    rate_limiter: Optional[RateLimiter] = None,
 ):
     """
     全自动搜索并导入的核心任务逻辑。
     """
+    # 防御性检查：确保 rate_limiter 已被正确传递。
+    if rate_limiter is None:
+        error_msg = "任务启动失败：内部错误（速率限制器未提供）。请检查任务提交处的代码。"
+        logger.error(f"auto_search_and_import_task was called without a rate_limiter. This is a bug. Payload: {payload}")
+        raise ValueError(error_msg)
+
     search_type = payload.searchType
     search_term = payload.searchTerm
     

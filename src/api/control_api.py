@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud, models, tasks
+from ..rate_limiter import RateLimiter
 from ..config_manager import ConfigManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
@@ -36,6 +37,10 @@ def get_task_manager(request: Request) -> TaskManager:
 def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
+
+def get_rate_limiter(request: Request) -> RateLimiter:
+    """依赖项：从应用状态获取速率限制器"""
+    return request.app.state.rate_limiter
 
 # 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
 api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
@@ -182,6 +187,7 @@ async def auto_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     api_key: str = Depends(verify_api_key),
 ):
     """
@@ -225,7 +231,8 @@ async def auto_import(
     task_title = f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
-            payload, cb, session, manager, metadata_manager, task_manager
+            payload, cb, session, manager, metadata_manager, task_manager,
+            rate_limiter=rate_limiter
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
         return {"message": "自动导入任务已提交", "taskId": task_id}
@@ -305,6 +312,7 @@ async def direct_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     api_key: str = Depends(verify_api_key),
 ):
     """
@@ -340,9 +348,11 @@ async def direct_import(
             season=item_to_import.season, 
             currentEpisodeIndex=item_to_import.currentEpisodeIndex,
             imageUrl=item_to_import.imageUrl, 
-            doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
+            year=item_to_import.year, doubanId=payload.doubanId,
+            tmdbId=payload.tmdbId, imdbId=payload.imdbId,
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
-            progress_callback=cb, session=session, manager=manager, task_manager=task_manager
+            progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
+            rate_limiter=rate_limiter
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
         return {"message": "导入任务已提交", "taskId": task_id}
@@ -389,6 +399,7 @@ async def edited_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     api_key: str = Depends(verify_api_key),
 ):
     """
@@ -419,6 +430,7 @@ async def edited_import(
         provider=item_info.provider,
         mediaId=item_info.mediaId,
         animeTitle=payload.title or item_info.title, # type: ignore
+        year=item_info.year,
         mediaType=item_info.type,
         season=item_info.season,
         imageUrl=item_info.imageUrl,
@@ -434,7 +446,8 @@ async def edited_import(
     task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
-            request_data=task_payload, progress_callback=cb, session=session, manager=manager
+            request_data=task_payload, progress_callback=cb, session=session, manager=manager,
+            rate_limiter=rate_limiter
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
@@ -447,6 +460,7 @@ async def url_import(
     payload: ControlUrlImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
     api_key: str = Depends(verify_api_key),
 ):
     """
@@ -479,9 +493,10 @@ async def url_import(
             mediaType=media_info.type, # type: ignore
             currentEpisodeIndex=payload.episodeIndex,
             season=final_season,
+            year=media_info.year,
             imageUrl=media_info.imageUrl,
             doubanId=payload.doubanId, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
-            tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
+            tvdbId=payload.tvdbId, bangumiId=payload.bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
