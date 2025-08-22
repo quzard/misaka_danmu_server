@@ -328,22 +328,22 @@ async def edited_import_task(
     await session.commit()
     raise TaskSuccess(final_message)
 
-async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable):
+async def full_refresh_task(sourceId: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable):
     """
     后台任务：全量刷新一个已存在的番剧。
     """
-    logger.info(f"开始刷新源 ID: {source_id}")
-    source_info = await crud.get_anime_source_info(session, source_id)
+    logger.info(f"开始刷新源 ID: {sourceId}")
+    source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
+        logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
         return
     
     anime_id = source_info["animeId"]
     # 1. 清空旧数据
     await progress_callback(10, "正在清空旧数据...")
-    await crud.clear_source_data(session, source_id)
-    logger.info(f"已清空源 ID: {source_id} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
+    await crud.clear_source_data(session, sourceId)
+    logger.info(f"已清空源 ID: {sourceId} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
     # 2. 重新执行通用导入逻辑
     await generic_import_task(
         provider=source_info["providerName"],
@@ -388,13 +388,13 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         await progress_callback(0, "正在获取分集信息...")
         # 1. 获取分集的源信息
         info = await crud.get_episode_provider_info(session, episodeId)
-        if not info or not info.get("provider_name") or not info.get("provider_episode_id"):
+        if not info or not info.get("providerName") or not info.get("providerEpisodeId"):
             logger.error(f"刷新失败：在数据库中找不到分集 ID: {episodeId} 的源信息")
-            progress_callback(100, "失败: 找不到源信息")
+            await progress_callback(100, "失败: 找不到源信息")
             return
 
-        provider_name = info["provider_name"]
-        provider_episode_id = info["provider_episode_id"]
+        provider_name = info["providerName"]
+        provider_episode_id = info["providerEpisodeId"]
         scraper = manager.get_scraper(provider_name)
 
         # 3. 获取新弹幕并插入
@@ -528,7 +528,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         raise
 
 async def manual_import_task(
-    sourceId: int, title: str, episodeIndex: int, url: str, providerName: str, # type: ignore
+    sourceId: int, animeId: int, title: str, episodeIndex: int, url: str, providerName: str,
     progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter
 ):
     """后台任务：从URL手动导入弹幕。"""
@@ -537,7 +537,12 @@ async def manual_import_task(
     
     try:
         scraper = manager.get_scraper(providerName)
-        provider_episode_id = await scraper.get_id_from_url(url)
+        provider_episode_id = None
+        if hasattr(scraper, 'get_ids_from_url'): provider_episode_id = await scraper.get_ids_from_url(url)
+        elif hasattr(scraper, 'get_danmaku_id_from_url'): provider_episode_id = await scraper.get_danmaku_id_from_url(url)
+        elif hasattr(scraper, 'get_tvid_from_url'): provider_episode_id = await scraper.get_tvid_from_url(url)
+        elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
+        
         if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
 
         episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
@@ -556,7 +561,7 @@ async def manual_import_task(
         await rate_limiter.increment(providerName)
 
         await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.create_episode_if_not_exists(session, sourceId, episodeIndex, title, url, episode_id_for_comments)
+        episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, title, url, episode_id_for_comments)
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
         await session.commit()
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")

@@ -551,7 +551,7 @@ async def delete_episode_from_source(
     if not episode_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
 
-    provider_name = episode_info.get('provider_name', '未知源')
+    provider_name = episode_info.get('providerName', '未知源')
     task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.delete_episode_task(episodeId, session, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -1277,7 +1277,7 @@ async def add_ua_rule(
     try:
         rule_id = await crud.add_ua_rule(session, ruleData.uaString)
         # This is a bit inefficient but ensures we return the full object
-        rules = await crud.getUaRules(session)
+        rules = await crud.get_ua_rules(session)
         new_rule = next((r for r in rules if r['id'] == rule_id), None)
         return models.UaRule.model_validate(new_rule)
     except Exception:
@@ -1707,7 +1707,7 @@ async def manual_import_episode(
     if not source_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    provider_name = source_info['provider_name']
+    provider_name = source_info['providerName']
     
     url_prefixes = {
         'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com',
@@ -1718,10 +1718,10 @@ async def manual_import_episode(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {source_info['title']} - {request_data.title} - [{provider_name}]"
-    task_coro = lambda session, callback: manual_import_task(
-        source_id=source_id, title=request_data.title, episode_index=request_data.episode_index,
-        url=request_data.url, provider_name=provider_name,
-        progress_callback=callback, session=session, manager=scraper_manager
+    task_coro = lambda session, callback: tasks.manual_import_task(
+        sourceId=source_id, animeId=source_info['animeId'], title=request_data.title, episodeIndex=request_data.episode_index,
+        url=request_data.url, providerName=provider_name,
+        progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}

@@ -59,7 +59,8 @@ async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> O
 async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Optional[Dict[str, Any]]:
     """获取用于刷新的分集信息。"""
     stmt = (
-        select(Episode.id, Episode.title)
+        select(Episode.id, Episode.title, AnimeSource.providerName)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episodeId)
     )
     result = await session.execute(stmt)
@@ -652,17 +653,6 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
-
-async def get_episode_for_refresh(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
-    stmt = (
-        select(Episode.id, Episode.title, AnimeSource.providerName)
-        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
-        .where(Episode.id == episode_id)
-    )
-    result = await session.execute(stmt)
-    row = result.mappings().first()
-    return dict(row) if row else None
-
 async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(AnimeSource.providerName, Episode.providerEpisodeId)
