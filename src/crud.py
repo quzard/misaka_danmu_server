@@ -764,24 +764,61 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
     await session.commit()
     return True
 
-async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:
-    episode = await session.get(Episode, episode_id)
-    if not episode: return False
+async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> Optional[Episode]:
+    """更新单个分集的信息。如果集数被修改，将重新生成ID并迁移关联的弹幕。返回更新后的Episode对象。"""
+    # 使用 joinedload 高效地获取关联的 source 和 anime 信息
+    stmt = select(Episode).where(Episode.id == episode_id).options(joinedload(Episode.source).joinedload(AnimeSource.anime))
+    result = await session.execute(stmt)
+    episode = result.scalar_one_or_none()
 
-    # Check for conflict
+    if not episode:
+        return None
+
+    # 情况1: 集数未改变，仅更新标题或URL
+    if episode.episodeIndex == update_data.episodeIndex:
+        episode.title = update_data.title
+        episode.sourceUrl = update_data.sourceUrl
+        await session.commit()
+        await session.refresh(episode)
+        return episode
+
+    # 情况2: 集数已改变，需要重新生成主键并迁移数据
+    # 1. 检查新集数是否已存在，避免冲突
     conflict_stmt = select(Episode.id).where(
         Episode.sourceId == episode.sourceId,
         Episode.episodeIndex == update_data.episodeIndex,
-        Episode.id != episode.id
+        Episode.id != episode_id
     )
     if (await session.execute(conflict_stmt)).scalar_one_or_none():
         raise ValueError("该集数已存在，请使用其他集数。")
 
-    episode.title = update_data.title
-    episode.episodeIndex = update_data.episodeIndex
-    episode.sourceUrl = update_data.sourceUrl
+    # 2. 计算新的确定性ID
+    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == episode.source.animeId).order_by(AnimeSource.id)
+    source_ids_res = await session.execute(source_ids_stmt)
+    source_ids = source_ids_res.scalars().all()
+    try:
+        source_order = source_ids.index(episode.sourceId) + 1
+    except ValueError:
+        raise ValueError(f"内部错误: Source ID {episode.sourceId} 不属于 Anime ID {episode.source.animeId}")
+
+    new_episode_id_str = f"25{episode.source.animeId:06d}{source_order:02d}{update_data.episodeIndex:04d}"
+    new_episode_id = int(new_episode_id_str)
+
+    # 3. 创建一个新的分集对象
+    new_episode = Episode(
+        id=new_episode_id, sourceId=episode.sourceId, episodeIndex=update_data.episodeIndex,
+        title=update_data.title, sourceUrl=update_data.sourceUrl,
+        providerEpisodeId=episode.providerEpisodeId, fetchedAt=episode.fetchedAt, commentCount=episode.commentCount
+    )
+    session.add(new_episode)
+
+    # 4. 将旧分集的弹幕关联到新分集
+    await session.execute(update(Comment).where(Comment.episodeId == episode_id).values(episodeId=new_episode_id))
+
+    # 5. 删除旧的分集记录
+    await session.delete(episode)
     await session.commit()
-    return True
+    return new_episode
 
 async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     if not provider_names: return
@@ -1425,7 +1462,7 @@ async def reset_all_rate_limit_states(session: AsyncSession):
     """重置所有速率限制状态的请求计数和重置时间。"""
     stmt = update(RateLimitState).values(
         requestCount=0,
-        lastResetTime=func.now()
+        lastResetTime=datetime.now(timezone.utc)
     )
     await session.execute(stmt)
 

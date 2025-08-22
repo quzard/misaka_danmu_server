@@ -185,7 +185,7 @@ class SchedulerManager:
 
             task_info = await crud.get_scheduled_task(session, task_id)
             if not task_info: return None
-            job_type = task_info['job_type']
+            job_type = task_info['jobType']
 
             # 确保增量更新任务的轮询间隔不低于3小时
             if job_type == "incrementalRefresh" and not cron_is_valid(cron, 3):

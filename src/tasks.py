@@ -434,34 +434,69 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         raise # Re-raise so the task manager catches it and marks as FAILED
 
 async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_callback: Callable):
-    """后台任务：重新编号一个源的所有分集。"""
+    """后台任务：重新编号一个源的所有分集，并同步更新其ID。"""
     logger.info(f"开始重整源 ID: {source_id} 的分集顺序。")
     await progress_callback(0, "正在获取分集列表...")
     
     try:
-        # 获取所有分集，按现有顺序排序
-        episodes = await crud.get_episodes_for_source(session, source_id)
-        if not episodes:
+        # 1. 获取所有分集ORM对象，按现有顺序排序
+        episodes_orm_res = await session.execute(
+            select(orm_models.Episode)
+            .where(orm_models.Episode.sourceId == source_id)
+            .order_by(orm_models.Episode.episodeIndex)
+        )
+        episodes_orm = episodes_orm_res.scalars().all()
+
+        if not episodes_orm:
             raise TaskSuccess("没有找到分集，无需重整。")
 
-        total_episodes = len(episodes)
-        updated_count = 0
-        
-        # 开始事务
+        await progress_callback(10, "正在计算新的分集ID...")
+
+        # 2. 获取计算新ID所需的信息
+        source_info = await crud.get_anime_source_info(session, source_id)
+        if not source_info:
+            raise ValueError(f"找不到源ID {source_id} 的信息。")
+        anime_id = source_info['animeId']
+
+        all_anime_sources_stmt = select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == anime_id).order_by(orm_models.AnimeSource.id)
+        all_anime_sources_res = await session.execute(all_anime_sources_stmt)
+        all_source_ids = all_anime_sources_res.scalars().all()
         try:
-            for i, episode_data in enumerate(episodes):
-                new_index = i + 1
-                if episode_data['episodeIndex'] != new_index:
-                    await session.execute(update(orm_models.Episode).where(orm_models.Episode.id == episode_data['episodeId']).values(episodeIndex=new_index))
-                    updated_count += 1
-                await progress_callback(int(((i + 1) / total_episodes) * 100), f"正在处理分集 {i+1}/{total_episodes}...")
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            logger.error(f"重整源 ID {source_id} 时数据库事务失败: {e}", exc_info=True)
-            raise
+            source_order = all_source_ids.index(source_id) + 1
+        except ValueError:
+            raise ValueError(f"内部错误: Source ID {source_id} 不属于 Anime ID {anime_id}")
+
+        # 3. 识别需要迁移的分集
+        migrations = []
+        for i, old_ep in enumerate(episodes_orm):
+            new_index = i + 1
+            if old_ep.episodeIndex != new_index:
+                new_id_str = f"25{anime_id:06d}{source_order:02d}{new_index:04d}"
+                new_id = int(new_id_str)
+                
+                new_episode_obj = orm_models.Episode(
+                    id=new_id, sourceId=old_ep.sourceId, episodeIndex=new_index,
+                    title=old_ep.title, sourceUrl=old_ep.sourceUrl,
+                    providerEpisodeId=old_ep.providerEpisodeId, fetchedAt=old_ep.fetchedAt,
+                    commentCount=old_ep.commentCount
+                )
+                migrations.append({"old_ep": old_ep, "new_ep": new_episode_obj})
+
+        if not migrations:
+            raise TaskSuccess("所有分集顺序正确，无需重整。")
+
+        await progress_callback(30, f"准备迁移 {len(migrations)} 个分集...")
+
+        # 4. 执行迁移
+        for m in migrations:
+            await session.execute(update(orm_models.Comment).where(orm_models.Comment.episodeId == m["old_ep"].id).values(episodeId=m["new_ep"].id))
+            await session.delete(m["old_ep"])
+        
+        await session.flush()
+        session.add_all([m["new_ep"] for m in migrations])
+        
         await session.commit()
-        raise TaskSuccess(f"重整完成，共更新了 {updated_count} 个分集的集数。")
+        raise TaskSuccess(f"重整完成，共更新了 {len(migrations)} 个分集的集数和ID。")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
         raise
