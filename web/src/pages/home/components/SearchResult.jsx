@@ -518,7 +518,7 @@ export const SearchResult = () => {
                               <Tag color="volcano">年份：{item.year}</Tag>
                               <Tag color="orange">季度：{item.season}</Tag>
                               <Tag color="gold">
-                                总集数：{item.episodeCount}
+                                总集数：{item.episodeCount ?? 0}
                               </Tag>
                             </div>
                           </div>

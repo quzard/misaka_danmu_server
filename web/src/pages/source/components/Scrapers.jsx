@@ -562,7 +562,7 @@ export const Scrapers = () => {
 
             {biliQrcodeStatus === 'expire' && (
               <div
-                className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 cursor-pointer"
+                className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 cursor-pointer text-neutral-100"
                 onClick={handleBiliQrcode}
               >
                 二维码已失效
@@ -571,7 +571,7 @@ export const Scrapers = () => {
               </div>
             )}
             {biliQrcodeStatus === 'mobileConfirm' && (
-              <div className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80">
+              <div className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 text-neutral-100">
                 已扫描，请在
                 <br />
                 手机上确认登录
@@ -579,7 +579,7 @@ export const Scrapers = () => {
             )}
             {biliQrcodeStatus === 'error' && (
               <div
-                className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 cursor-pointer"
+                className="absolute left-0 top-0 w-full h-full p-3 flex items-center justify-center bg-black/80 cursor-pointer text-neutral-100"
                 onClick={handleBiliQrcode}
               >
                 轮询失败
