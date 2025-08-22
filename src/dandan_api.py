@@ -7,12 +7,13 @@ from typing import Callable
 from datetime import datetime
 from opencc import OpenCC
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
 from fastapi.routing import APIRoute
 
-from . import crud, models
+from . import crud, models, orm_models
 from .config_manager import ConfigManager
 from .database import get_db_session
 from .scraper_manager import ScraperManager
@@ -849,6 +850,7 @@ async def match_batch_files(
     results = await asyncio.gather(*tasks)
     return results
 
+
 @implementation_router.get(
     "/extcomment",
     response_model=models.CommentResponse,
@@ -908,7 +910,37 @@ async def get_external_comments_from_url(
     comments = [models.Comment.model_validate(c) for c in comments_data]
     return models.CommentResponse(count=len(comments), comments=comments)
 
+async def _get_real_episode_id(
+    session: AsyncSession,
+    anime_id: int,
+    source_order: int,
+    episode_index: int
+) -> Optional[int]:
+    """
+    根据复合信息（anime_id, source_order, episode_index）查找真实的数据库 episode.id。
+    """
+    # 1. 根据 source_order 找到 provider_name
+    provider_name_res = await session.execute(
+        select(orm_models.Scraper.providerName).where(orm_models.Scraper.displayOrder == source_order)
+    )
+    provider_name = provider_name_res.scalar_one_or_none()
+    if not provider_name:
+        return None
 
+    # 2. 根据 anime_id 和 provider_name 找到 source_id
+    source_id_res = await session.execute(
+        select(orm_models.AnimeSource.id).where(
+            orm_models.AnimeSource.animeId == anime_id,
+            orm_models.AnimeSource.providerName == provider_name
+        )
+    )
+    source_id = source_id_res.scalar_one_or_none()
+    if not source_id:
+        return None
+
+    # 3. 根据 source_id 和 episode_index 找到 episode.id
+    episode_id_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId == source_id, orm_models.Episode.episodeIndex == episode_index))
+    return episode_id_res.scalar_one_or_none()
 @implementation_router.get(
     "/comment/{episodeId}",
     response_model=models.CommentResponse,
@@ -930,40 +962,43 @@ async def get_comments_for_dandan(
     新增：支持 withRelated 参数，用于聚合所有源的弹幕。
     兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
-    aggregation_enabled_str = await config_manager.get('danmakuAggregationEnabled', 'true')
+    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'true')
     aggregation_enabled = aggregation_enabled_str.lower() == 'true'
 
-    comments_data = []
     episode_id_str = str(episodeId)
-    
-    # 检查是否为新版ID格式 (14位且以25开头)，并且用户请求了关联弹幕
     is_new_format = len(episode_id_str) == 14 and episode_id_str.startswith('25')
 
-    if withRelated and aggregation_enabled and is_new_format:
-        try:
-            # 从新版ID格式中解析出 anime_id 和 episode_index
-            # 格式: 25 (固定) + anime_id (6位) + source_order (2位) + episode_index (4位)
-            anime_id = int(episode_id_str[2:8])
-            episode_index = int(episode_id_str[10:14])
-            
-            logger.info(f"withRelated=true: 正在为 anime_id={anime_id}, episode_index={episode_index} 查找所有关联分集...")
-            related_episode_ids = await crud.get_related_episode_ids(session, anime_id, episode_index)
-            
-            if related_episode_ids:
-                logger.info(f"找到 {len(related_episode_ids)} 个关联分集，正在聚合弹幕...")
-                comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
-            else:
-                logger.warning(f"未找到任何关联分集，回退到获取单个分集 (ID: {episodeId})。")
-                comments_data = await crud.fetch_comments(session, episodeId)
-        except (ValueError, IndexError) as e:
-            logger.error(f"解析新版格式的 episode_id '{episodeId}' 失败: {e}。回退到获取单个分集。")
-            comments_data = await crud.fetch_comments(session, episodeId)
-    else:
-        if withRelated and not aggregation_enabled:
-            logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
-        elif withRelated and not is_new_format:
-            logger.info(f"withRelated=true，但 episode_id '{episodeId}' 是旧版格式，仅获取当前分集弹幕。")
+    comments_data = []
+    if not is_new_format:
+        # 旧版ID，直接作为数据库主键使用
         comments_data = await crud.fetch_comments(session, episodeId)
+    else:
+        # 新版复合ID，需要解析
+        try:
+            anime_id = int(episode_id_str[2:8])
+            source_order = int(episode_id_str[8:10])
+            episode_index = int(episode_id_str[10:14])
+
+            if withRelated and aggregation_enabled:
+                # 聚合弹幕逻辑
+                logger.info(f"聚合弹幕: anime_id={anime_id}, episode_index={episode_index}")
+                related_episode_ids = await crud.get_related_episode_ids(session, anime_id, episode_index)
+                if related_episode_ids:
+                    comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
+            else:
+                # 单集弹幕逻辑
+                if withRelated and not aggregation_enabled:
+                    logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
+                
+                real_episode_id = await _get_real_episode_id(session, anime_id, source_order, episode_index)
+                if real_episode_id:
+                    comments_data = await crud.fetch_comments(session, real_episode_id)
+                else:
+                    logger.warning(f"无法从复合信息中找到对应的分集: anime_id={anime_id}, source_order={source_order}, episode_index={episode_index}")
+
+        except (ValueError, IndexError) as e:
+            logger.error(f"解析新版格式的 episode_id '{episodeId}' 失败: {e}。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的 episodeId 格式。")
 
     # 新增：聚合后去重逻辑
     unique_comments = {}

@@ -52,7 +52,7 @@ class ImdbMetadataSource(BaseMetadataSource):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
         }
-        return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxies=proxy_to_use)
+        return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         self.logger.info(f"IMDb: 正在使用JSON API搜索 '{keyword}'")

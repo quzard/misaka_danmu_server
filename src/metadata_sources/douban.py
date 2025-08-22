@@ -51,7 +51,7 @@ class DoubanMetadataSource(BaseMetadataSource):
 
         proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
 
-        return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxies=proxies)
+        return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         self.logger.info(f"豆瓣: 正在使用JSON API搜索 '{keyword}'")
