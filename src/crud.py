@@ -958,6 +958,7 @@ async def update_config_value(session: AsyncSession, key: str, value: str):
         raise NotImplementedError(f"配置更新功能尚未为数据库类型 '{dialect}' 实现。")
 
     await session.execute(stmt)
+    await session.commit()
 
 async def clear_expired_cache(session: AsyncSession):
     await session.execute(delete(CacheData).where(CacheData.expiresAt <= func.now()))

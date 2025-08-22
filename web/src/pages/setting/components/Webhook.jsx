@@ -47,9 +47,8 @@ export const Webhook = () => {
   }
 
   const onRefresh = async () => {
-    await refreshWebhookApikey()
-    const value = await getWebhookApikey()
-    setApiKey(value)
+    const res = await refreshWebhookApikey()
+    setApiKey(res.data.value)
   }
 
   const onSaveDoamin = async () => {
