@@ -26,7 +26,7 @@ import {
   getEgidSearch,
   getImdbDetail,
   getImdbSearch,
-  getTMdbDetail,
+  getTmdbDetail,
   getTmdbSearch,
   getTvdbDetail,
   getTvdbSearch,

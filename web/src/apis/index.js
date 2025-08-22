@@ -57,7 +57,7 @@ export const getSearchResult = (data, onProgress) => {
 }
 
 /** 获取tmdb详情 */
-export const getTMdbDetail = data =>
+export const getTmdbDetail = data =>
   api.get(
     `/api/ui/metadata/tmdb/details/${data.tmdbId}?mediaType=${data.mediaType}`
   )
