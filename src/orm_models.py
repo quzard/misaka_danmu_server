@@ -20,8 +20,8 @@ class Anime(Base):
     localImagePath: Mapped[Optional[str]] = mapped_column("local_image_path", String(512))
     season: Mapped[int] = mapped_column(Integer, default=1)
     episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer, nullable=True)
-    year: Mapped[Optional[int]] = mapped_column("year", Integer, nullable=True)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    year: Mapped[Optional[int]] = mapped_column("year", Integer, nullable=True) # type: ignore
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
     metadataRecord: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
@@ -39,8 +39,8 @@ class AnimeSource(Base):
     mediaId: Mapped[str] = mapped_column("media_id", String(255))
     isFavorited: Mapped[bool] = mapped_column("is_favorited", Boolean, default=False)
     incrementalRefreshEnabled: Mapped[bool] = mapped_column("incremental_refresh_enabled", Boolean, default=False)
-    incrementalRefreshFailures: Mapped[int] = mapped_column("incremental_refresh_failures", Integer, default=0)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    incrementalRefreshFailures: Mapped[int] = mapped_column("incremental_refresh_failures", Integer, default=0) # type: ignore
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
 
     anime: Mapped["Anime"] = relationship(back_populates="sources")
     episodes: Mapped[List["Episode"]] = relationship(back_populates="source", cascade="all, delete-orphan")
@@ -54,8 +54,8 @@ class Episode(Base):
     title: Mapped[str] = mapped_column(String(255))
     episodeIndex: Mapped[int] = mapped_column("episode_index", Integer)
     providerEpisodeId: Mapped[Optional[str]] = mapped_column("provider_episode_id", String(255))
-    sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", String(512))
-    fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", TIMESTAMP)
+    sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", String(512)) # type: ignore
+    fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", TIMESTAMP(timezone=True))
     commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
 
     source: Mapped["AnimeSource"] = relationship(back_populates="episodes")
@@ -84,9 +84,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True)
     hashedPassword: Mapped[str] = mapped_column("hashed_password", String(255))
-    token: Mapped[Optional[str]] = mapped_column(TEXT)
-    tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", TIMESTAMP)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    token: Mapped[Optional[str]] = mapped_column(TEXT) # type: ignore
+    tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", TIMESTAMP(timezone=True))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
 
 class Scraper(Base):
     __tablename__ = "scrapers"
@@ -125,9 +125,9 @@ class Config(Base):
 class CacheData(Base):
     __tablename__ = "cache_data"
     cacheProvider: Mapped[Optional[str]] = mapped_column("cache_provider", String(50))
-    cacheKey: Mapped[str] = mapped_column("cache_key", String(255), primary_key=True)
-    cacheValue: Mapped[str] = mapped_column("cache_value", TEXT)
-    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP, index=True)
+    cacheKey: Mapped[str] = mapped_column("cache_key", String(255), primary_key=True) # type: ignore
+    cacheValue: Mapped[str] = mapped_column("cache_value", TEXT) # type: ignore
+    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP(timezone=True), index=True)
 
 class ApiToken(Base):
     __tablename__ = "api_tokens"
@@ -135,18 +135,18 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(String(100))
     token: Mapped[str] = mapped_column(String(50), unique=True)
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
-    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
+    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP(timezone=True))
 
 class TokenAccessLog(Base):
     __tablename__ = "token_access_logs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tokenId: Mapped[int] = mapped_column("token_id", Integer)
     ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
-    userAgent: Mapped[Optional[str]] = mapped_column("user_agent", TEXT)
-    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP, server_default=func.now())
+    userAgent: Mapped[Optional[str]] = mapped_column("user_agent", TEXT) # type: ignore
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(50))
-    path: Mapped[Optional[str]] = mapped_column(String(512))
+    path: Mapped[Optional[str]] = mapped_column(String(512)) # type: ignore
 
     __table_args__ = (Index('idx_token_id_time', 'token_id', 'access_time', mysql_length={'access_time': None}),)
 
@@ -154,7 +154,7 @@ class UaRule(Base):
     __tablename__ = "ua_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uaString: Mapped[str] = mapped_column("ua_string", String(255), unique=True)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
 
 class BangumiAuth(Base):
     __tablename__ = "bangumi_auth"
@@ -162,16 +162,16 @@ class BangumiAuth(Base):
     bangumiUserId: Mapped[Optional[int]] = mapped_column("bangumi_user_id", Integer)
     nickname: Mapped[Optional[str]] = mapped_column(String(255))
     avatarUrl: Mapped[Optional[str]] = mapped_column("avatar_url", String(512))
-    accessToken: Mapped[str] = mapped_column("access_token", TEXT)
-    refreshToken: Mapped[Optional[str]] = mapped_column("refresh_token", TEXT)
-    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP)
-    authorizedAt: Mapped[Optional[datetime]] = mapped_column("authorized_at", TIMESTAMP)
+    accessToken: Mapped[str] = mapped_column("access_token", TEXT) # type: ignore
+    refreshToken: Mapped[Optional[str]] = mapped_column("refresh_token", TEXT) # type: ignore
+    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP(timezone=True))
+    authorizedAt: Mapped[Optional[datetime]] = mapped_column("authorized_at", TIMESTAMP(timezone=True))
 
 class OauthState(Base):
     __tablename__ = "oauth_states"
-    stateKey: Mapped[str] = mapped_column("state_key", String(100), primary_key=True)
+    stateKey: Mapped[str] = mapped_column("state_key", String(100), primary_key=True) # type: ignore
     userId: Mapped[int] = mapped_column("user_id", BigInteger)
-    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP, index=True)
+    expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP(timezone=True), index=True)
 
 class AnimeAlias(Base):
     __tablename__ = "anime_aliases"
@@ -208,11 +208,11 @@ class ScheduledTask(Base):
     __tablename__ = "scheduled_tasks"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    jobType: Mapped[str] = mapped_column("job_type", String(50))
+    jobType: Mapped[str] = mapped_column("job_type", String(50)) # type: ignore
     cronExpression: Mapped[str] = mapped_column("cron_expression", String(100))
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
-    lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", TIMESTAMP)
-    nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", TIMESTAMP)
+    lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", TIMESTAMP(timezone=True))
+    nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", TIMESTAMP(timezone=True))
 
 class TaskHistory(Base):
     __tablename__ = "task_history"
@@ -220,18 +220,18 @@ class TaskHistory(Base):
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)
-    description: Mapped[Optional[str]] = mapped_column(TEXT)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
-    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP, server_default=func.now(), onupdate=func.now(), default=datetime.now)
-    finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP)
+    description: Mapped[Optional[str]] = mapped_column(TEXT) # type: ignore
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=datetime.now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), default=datetime.now)
+    finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP(timezone=True))
 
     __table_args__ = (Index('idx_created_at', 'created_at', mysql_length={'created_at': None}),)
 
 class ExternalApiLog(Base):
     __tablename__ = "external_api_logs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP, server_default=func.now())
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now())
     ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
     endpoint: Mapped[str] = mapped_column(String(255))
     statusCode: Mapped[int] = mapped_column("status_code", Integer)
-    message: Mapped[Optional[str]] = mapped_column(TEXT)
+    message: Mapped[Optional[str]] = mapped_column(TEXT) # type: ignore
