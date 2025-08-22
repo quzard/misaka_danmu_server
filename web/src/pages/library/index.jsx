@@ -26,7 +26,7 @@ import {
   getEgidSearch,
   getImdbDetail,
   getImdbSearch,
-  getTMdbDetail,
+  getTmdbDetail,
   getTmdbSearch,
   getTvdbDetail,
   getTvdbSearch,
@@ -434,10 +434,11 @@ export const Library = () => {
   const [searchTvdbLoading, setSearchTvdbLoading] = useState(false)
   const onTvdbSearch = async () => {
     try {
-      if (searchTmdbLoading) return
+      if (searchTvdbLoading) return
       setSearchTvdbLoading(true)
       const res = await getTvdbSearch({
         keyword: title,
+        mediaType: type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
       })
       if (!!res?.data?.length) {
         setTvdbResult(res?.data || [])
@@ -457,7 +458,7 @@ export const Library = () => {
   const [searchDoubanLoading, setSearchDoubanLoading] = useState(false)
   const onDoubanSearch = async () => {
     try {
-      if (searchTmdbLoading) return
+      if (searchDoubanLoading) return
       setSearchDoubanLoading(true)
       const res = await getDoubanSearch({
         keyword: title,
@@ -757,6 +758,8 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'tvdb',
+                        mediaType:
+                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
                       currentId: tvdbId,
                     })
                   }}
@@ -884,7 +887,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.title}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
                       {!!item.details && (
                         <div className="text-sm mt-2 line-clamp-4">
@@ -897,7 +902,7 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getTMdbDetail({
+                        const res = await getTmdbDetail({
                           mediaType: type === 'tv_series' ? 'tv' : type,
                           tmdbId: item.id,
                         })
@@ -936,7 +941,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.title}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
                       {!!item.details && (
                         <div className="mt-2 text-sm line-clamp-4">
@@ -987,7 +994,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.title}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
                       {!!item.details && (
                         <div className="mt-2 text-sm line-clamp-4">
@@ -1001,6 +1010,7 @@ export const Library = () => {
                       type="primary"
                       onClick={async () => {
                         const res = await getTvdbDetail({
+                          mediaType: item.type === 'tv_series' ? 'series' : 'movie',
                           tvdbId: item.id,
                         })
                         form.setFieldsValue({ tvdbId: res.data.id })
@@ -1125,7 +1135,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.title}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
                       {!!item.details && (
                         <div className="text-sm mt-2 line-clamp-4">
@@ -1176,7 +1188,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.title}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
                       {!!item.details && (
                         <div className="mt-2 text-sm line-clamp-4">
