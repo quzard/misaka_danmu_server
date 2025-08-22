@@ -93,7 +93,7 @@ services:
       --collation-server=utf8mb4_general_ci
       --explicit_defaults_for_timestamp=true
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]
       interval: 5s
       timeout: 3s
       retries: 2
@@ -109,7 +109,8 @@ services:
     container_name: misaka-danmu-server
     restart: unless-stopped
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy  
     environment:
       # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
       - PUID=1000
