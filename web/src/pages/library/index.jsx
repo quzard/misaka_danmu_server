@@ -17,6 +17,7 @@ import {
   deleteAnime,
   getAllEpisode,
   getAnimeDetail,
+  getAnimeInfoAsSource,
   getAnimeLibrary,
   getBgmSearch,
   getDoubanDetail,
@@ -36,12 +37,7 @@ import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { RoutePaths } from '../../general/RoutePaths'
-
-const containsJapanese = str => {
-  if (!str) return false
-  // 此正则表达式匹配日文假名和常见的CJK统一表意文字
-  return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(str)
-}
+import { padStart } from 'lodash'
 
 const ApplyField = ({ name, label, fetchedValue, form }) => {
   const currentValue = Form.useWatch(name, form)
@@ -53,7 +49,10 @@ const ApplyField = ({ name, label, fetchedValue, form }) => {
           <Input />
         </Form.Item>
         {fetchedValue && currentValue !== fetchedValue && (
-          <Button size="small" onClick={() => form.setFieldsValue({ [name]: fetchedValue })}>
+          <Button
+            size="small"
+            onClick={() => form.setFieldsValue({ [name]: fetchedValue })}
+          >
             应用
           </Button>
         )}
@@ -74,6 +73,10 @@ export const Library = () => {
   const [confirmLoading, setConfirmLoading] = useState(false)
   const title = Form.useWatch('title', form)
   const tmdbId = Form.useWatch('tmdbId', form)
+  const tvdbId = Form.useWatch('tvdbId', form)
+  const doubanId = Form.useWatch('doubanId', form)
+  const bangumiId = Form.useWatch('bangumiId', form)
+  const imdbId = Form.useWatch('imdbId', form)
   const type = Form.useWatch('type', form)
   const animeId = Form.useWatch('animeId', form)
   const imageUrl = Form.useWatch('imageUrl', form)
@@ -317,6 +320,90 @@ export const Library = () => {
   }
 
   /** 搜索相关 */
+  /** 精准搜索loading */
+  const [searchAsIdLoading, setSearchAsIdLoading] = useState(false)
+
+  const handleSearchAsId = async ({ source, currentId, mediaType }) => {
+    try {
+      if (searchAsIdLoading) return
+      setSearchAsIdLoading(true)
+      const res = await getAnimeInfoAsSource({ source, currentId, mediaType })
+      applySearchSelectionData({
+        data: res.data,
+        source,
+      })
+      message.success(
+        `${source.toUpperCase()} 信息获取成功，请检查并应用建议的别名。`
+      )
+    } catch (error) {
+      message.error(`获取 ${source.toUpperCase()} 详情失败: ${error.message}`)
+    } finally {
+      setSearchAsIdLoading(false)
+    }
+  }
+
+  const applySearchSelectionData = ({ data, source }) => {
+    if (!data) return
+    switch (source) {
+      case 'bangumi':
+        form.setFieldsValue({
+          nameEn: data.nameEn,
+          nameJp: containsJapanese(data.nameJp) ? data.nameJp : '',
+          nameRomaji: data.nameRomaji,
+          ...getAliasCn(data.aliasesCn, data.name),
+        })
+        break
+      case 'tmdb':
+        form.setFieldsValue({
+          imdbId: data.imdbId,
+          tvdbId: data.tvdbId,
+          nameEn: data.nameEn,
+          nameJp: containsJapanese(data.nameJp) ? data.nameJp : '',
+          nameRomaji: data.nameRomaji,
+          ...getAliasCn(data.aliasesCn, data.mainTitleFromSearch),
+        })
+        break
+      case 'imdb':
+        form.setFieldsValue({
+          nameJp: containsJapanese(data.nameJp) ? data.nameJp : '',
+          ...getAliasCn(data.aliasesCn, data.nameEn),
+        })
+        break
+      case 'tvdb':
+        form.setFieldsValue({
+          imdbId: data.imdbId,
+          nameJp: containsJapanese(data.nameJp) ? data.nameJp : '',
+          nameEn: data.nameEn,
+          ...getAliasCn(data.aliasesCn, data.nameEn),
+        })
+        break
+      case 'douban':
+        form.setFieldsValue({
+          imdbId: data.imdbId,
+          nameJp: containsJapanese(data.nameJp) ? data.nameJp : '',
+          nameEn: data.nameEn,
+          ...getAliasCn(
+            data.aliasesCn,
+            data.aliases_cn && data.aliases_cn.length > 0
+              ? data.aliases_cn[0]
+              : ''
+          ),
+        })
+        break
+    }
+  }
+
+  const getAliasCn = (aliasesCn, name) => {
+    const filteredAliases = (aliasesCn || []).filter(
+      alias => !!alias && alias !== name
+    )
+    return {
+      aliasCn1: filteredAliases?.[0],
+      aliasCn2: filteredAliases?.[1],
+      aliasCn3: filteredAliases?.[2],
+    }
+  }
+
   const [tmdbResult, setTmdbResult] = useState([])
   const [tmdbOpen, setTmdbOpen] = useState(false)
   const [searchTmdbLoading, setSearchTmdbLoading] = useState(false)
@@ -531,7 +618,6 @@ export const Library = () => {
           setEditOpen(false)
           setFetchedMetadata(null)
         }}
-        destroyOnClose
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -570,7 +656,10 @@ export const Library = () => {
             />
           </Form.Item>
           <Form.Item name="year" label="年份">
-            <InputNumber style={{ width: '100%' }} placeholder="请输入发行年份" />
+            <InputNumber
+              style={{ width: '100%' }}
+              placeholder="请输入发行年份"
+            />
           </Form.Item>
           <Form.Item name="imageUrl" label="海报URL">
             <Input
@@ -599,6 +688,21 @@ export const Library = () => {
               placeholder="例如：1396"
               allowClear
               enterButton="Search"
+              suffix={
+                <span
+                  className="cursor-pointer opacity-80 transition-all hover:opacity-100"
+                  onClick={() => {
+                    handleSearchAsId({
+                      source: 'tmdb',
+                      currentId: tmdbId,
+                      mediaType:
+                        type === DANDAN_TYPE_MAPPING.tvseries ? 'tv' : 'movie',
+                    })
+                  }}
+                >
+                  <MyIcon icon="jingzhun" size={20} />
+                </span>
+              }
               loading={searchTmdbLoading}
               onSearch={() => {
                 onTmdbSearch()
@@ -622,6 +726,19 @@ export const Library = () => {
               placeholder="例如：296100"
               allowClear
               enterButton="Search"
+              suffix={
+                <span
+                  className="cursor-pointer opacity-80 transition-all hover:opacity-100"
+                  onClick={() => {
+                    handleSearchAsId({
+                      source: 'bangumi',
+                      currentId: bangumiId,
+                    })
+                  }}
+                >
+                  <MyIcon icon="jingzhun" size={20} />
+                </span>
+              }
               loading={searchBgmLoading}
               onSearch={() => {
                 onBgmSearch()
@@ -633,6 +750,19 @@ export const Library = () => {
               placeholder="例如：364093"
               allowClear
               enterButton="Search"
+              suffix={
+                <span
+                  className="cursor-pointer opacity-80 transition-all hover:opacity-100"
+                  onClick={() => {
+                    handleSearchAsId({
+                      source: 'tvdb',
+                      currentId: tvdbId,
+                    })
+                  }}
+                >
+                  <MyIcon icon="jingzhun" size={20} />
+                </span>
+              }
               loading={searchTvdbLoading}
               onSearch={() => {
                 onTvdbSearch()
@@ -644,6 +774,19 @@ export const Library = () => {
               placeholder="例如：35297708"
               allowClear
               enterButton="Search"
+              suffix={
+                <span
+                  className="cursor-pointer opacity-80 transition-all hover:opacity-100"
+                  onClick={() => {
+                    handleSearchAsId({
+                      source: 'douban',
+                      currentId: doubanId,
+                    })
+                  }}
+                >
+                  <MyIcon icon="jingzhun" size={20} />
+                </span>
+              }
               loading={searchDoubanLoading}
               onSearch={() => {
                 onDoubanSearch()
@@ -655,6 +798,19 @@ export const Library = () => {
               placeholder="例如：tt9140554"
               allowClear
               enterButton="Search"
+              suffix={
+                <span
+                  className="cursor-pointer opacity-80 transition-all hover:opacity-100"
+                  onClick={() => {
+                    handleSearchAsId({
+                      source: 'imdb',
+                      currentId: imdbId,
+                    })
+                  }}
+                >
+                  <MyIcon icon="jingzhun" size={20} />
+                </span>
+              }
               loading={searchImdbLoading}
               onSearch={() => {
                 onImdbSearch()
@@ -729,7 +885,11 @@ export const Library = () => {
                     <div className="ml-4">
                       <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
-                      <div className="mt-2 text-sm">{item.details}</div>
+                      {!!item.details && (
+                        <div className="text-sm mt-2 line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -777,7 +937,11 @@ export const Library = () => {
                     <div className="ml-4">
                       <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
-                      <div className="mt-2 text-sm">{item.details}</div>
+                      {!!item.details && (
+                        <div className="mt-2 text-sm line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -824,7 +988,11 @@ export const Library = () => {
                     <div className="ml-4">
                       <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
-                      <div className="mt-2 text-sm">{item.details}</div>
+                      {!!item.details && (
+                        <div className="mt-2 text-sm line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -866,15 +1034,11 @@ export const Library = () => {
             return (
               <List.Item key={index}>
                 <div className="flex justify-between items-center">
-                  <div className="flex items-center justify-start">
-                    <img width={60} alt="logo" src={item.imageUrl} />
-                    <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">
-                        {item.name} ({item.groupCount} 组, {item.episodeCount}{' '}
-                        集)
-                      </div>
-                      <div>{item.description || '无描述'}</div>
+                  <div>
+                    <div className="text-xl font-bold mb-3">
+                      {item.name} ({item.groupCount} 组, {item.episodeCount} 集)
                     </div>
+                    <div>{item.description || '无描述'}</div>
                   </div>
                   <div className="flex item-center justify-center gap-2">
                     <Button
@@ -921,16 +1085,16 @@ export const Library = () => {
           renderItem={(item, index) => {
             return (
               <List.Item key={index}>
-                <div className="text-base font-bold">
+                <div className="text-base font-bold mb-2">
                   {item.name} (Order: {item.order})
                 </div>
                 {item.episodes?.map((ep, i) => {
                   return (
                     <div key={i}>
                       第{ep.order + 1}集（绝对：S
-                      {ep.seasonNumber.toString().padStart(2, '0')}E
-                      {ep.episodeNumber.toString().padStart(2, '0')}）|
-                      {ep.name || '无标题'}`
+                      {padStart(ep.seasonNumber, 2, '0')}E
+                      {padStart(ep.episodeNumber, 2, '0')}）|
+                      {ep.name || '无标题'}
                     </div>
                   )
                 })}
@@ -962,7 +1126,11 @@ export const Library = () => {
                     <div className="ml-4">
                       <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
-                      <div className="mt-2 text-sm">{item.details}</div>
+                      {!!item.details && (
+                        <div className="text-sm mt-2 line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -1008,7 +1176,11 @@ export const Library = () => {
                     <div className="ml-4">
                       <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
-                      <div className="mt-2 text-sm">{item.details}</div>
+                      {!!item.details && (
+                        <div className="mt-2 text-sm line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>

@@ -175,6 +175,8 @@ export const ScheduleTask = () => {
         setAddOpen(false)
       } catch (error) {
         message.error('任务编辑失败，请稍后重试。')
+      } finally {
+        setConfirmLoading(false)
       }
     } else {
       try {
@@ -185,6 +187,8 @@ export const ScheduleTask = () => {
         setAddOpen(false)
       } catch (error) {
         message.error('任务添加失败，请稍后重试。')
+      } finally {
+        setConfirmLoading(false)
       }
     }
   }

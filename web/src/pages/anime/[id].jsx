@@ -446,7 +446,7 @@ export const AnimeDetail = () => {
               <div>
                 <div className="text-xl font-bold mb-3 break-all">
                   {animeDetail.title}（Season{' '}
-                  {padStart(String(animeDetail.season), 2, '0')}）
+                  {padStart(animeDetail.season, 2, '0')}）
                 </div>
                 <div className="flex items-center justify-start gap-2">
                   <span>总集数: {totalEpisodeCount}</span>|

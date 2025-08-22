@@ -178,7 +178,7 @@ export const SearchBar = () => {
               <Progress percent={percent} />
             </div>
           )}
-          <Row gutter={12}>
+          <Row gutter={12} className="mb-5 md:mb-0">
             <Col md={6} xs={24}>
               <Form.Item>
                 <Checkbox
@@ -235,7 +235,7 @@ export const SearchBar = () => {
           </Row>
         </Form>
         {!!searchHistory.length && (
-          <div className="flex items-center justify-start flex-wrap gap-2 mt-3">
+          <div className="flex items-center justify-start flex-wrap gap-2">
             {searchHistory.map((it, index) => {
               return (
                 <span

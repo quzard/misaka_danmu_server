@@ -96,11 +96,16 @@ export const getTvdbSearch = data =>
   api.get(`/api/ui/metadata/tvdb/search?keyword=${data.keyword}`)
 /** 搜索tmdb剧集组 */
 export const getEgidSearch = data =>
-  api.post(`/api/ui/metadata/tmdb/actions/get_episode_groups`, { tmdbId: data.tmdbId })
+  api.post(`/api/ui/metadata/tmdb/actions/get_episode_groups`, {
+    tmdbId: data.tmdbId,
+  })
 
 /** 查看所有分集 */
 export const getAllEpisode = data =>
-  api.post(`/api/ui/metadata/tmdb/actions/get_all_episodes`, { egid: data.egid, tmdbId: data.tmdbId })
+  api.post(`/api/ui/metadata/tmdb/actions/get_all_episodes`, {
+    egid: data.egid,
+    tmdbId: data.tmdbId,
+  })
 
 /** 搜索BGM */
 export const getBgmSearch = data =>
@@ -212,11 +217,14 @@ export const getBangumiConfig = () => api.get('/api/ui/config/provider/bangumi')
 export const setBangumiConfig = data =>
   api.put('/api/ui/config/provider/bangumi', data)
 /** 获取授权信息 */
-export const getBangumiAuth = () => api.post('/api/ui/metadata/bangumi/actions/get_auth_state')
+export const getBangumiAuth = () =>
+  api.post('/api/ui/metadata/bangumi/actions/get_auth_state')
 /** 获取授权链接 */
-export const getBangumiAuthUrl = () => api.post('/api/ui/metadata/bangumi/actions/get_auth_url')
+export const getBangumiAuthUrl = () =>
+  api.post('/api/ui/metadata/bangumi/actions/get_auth_url')
 /** 注销授权 */
-export const logoutBangumiAuth = () => api.post('/api/ui/metadata/bangumi/actions/logout')
+export const logoutBangumiAuth = () =>
+  api.post('/api/ui/metadata/bangumi/actions/logout')
 
 /** ------------------------------------------ 豆瓣、tmdb、tvdb配置、代理------------------------------------------  */
 /** 获取tmdb配置 */
@@ -351,6 +359,19 @@ export const getDanmakuDetail = data => api.get(`/api/ui/comment/${data.id}`)
 /** 刷新海报 */
 export const refreshPoster = data =>
   api.post(`/api/ui/library/anime/${data.animeId}/refresh-poster`, data)
+
+/** 精准获取资源信息 */
+export const getAnimeInfoAsSource = data => {
+  const detailsUrlMap = {
+    bangumi: `/api/ui/bangumi/subjects/${data.currentId}`,
+    douban: `/api/ui/douban/details/${data.currentId}`,
+    tvdb: `/api/ui/tvdb/details/${data.currentId}`,
+    imdb: `/api/ui/imdb/details/${data.currentId}`,
+    tmdb: `/api/ui/tmdb/details/${data.mediaType}/${data.currentId}`,
+  }
+  const detailsUrl = detailsUrlMap[data.source]
+  return api.get(detailsUrl)
+}
 
 /** ----------------------------------------------外部控制----------------------------------------------  */
 /** 获取apikey */
