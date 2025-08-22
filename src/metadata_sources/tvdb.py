@@ -5,6 +5,7 @@ import httpx
 
 from .. import models
 from .base import BaseMetadataSource
+from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -17,41 +18,47 @@ class TvdbMetadataSource(BaseMetadataSource):
             raise ValueError("TVDB API Key not configured.")
         
         headers = {"Authorization": f"Bearer {api_key}"}
-        return httpx.AsyncClient(base_url="https://api4.thetvdb.com/v4", headers=headers, timeout=20.0)
+        return httpx.AsyncClient(base_url="https://api4.thetvdb.com/v4", headers=headers, timeout=20.0, follow_redirects=True)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        async with await self._create_client() as client:
-            response = await client.get("/search", params={"query": keyword})
-            response.raise_for_status()
-            data = response.json().get("data", [])
-            
-            results = []
-            for item in data:
-                results.append(models.MetadataDetailsResponse(
-                    id=item['tvdb_id'],
-                    tvdbId=item['tvdb_id'],
-                    title=item.get('name'),
-                    imageUrl=item.get('image_url'),
-                    details=f"Year: {item.get('year')}"
-                ))
-            return results
+        try:
+            async with await self._create_client() as client:
+                response = await client.get("/search", params={"query": keyword})
+                response.raise_for_status()
+                data = response.json().get("data", [])
+                
+                results = []
+                for item in data:
+                    results.append(models.MetadataDetailsResponse(
+                        id=item['tvdb_id'],
+                        tvdbId=item['tvdb_id'],
+                        title=item.get('name'),
+                        imageUrl=item.get('image_url'),
+                        details=f"Year: {item.get('year')}"
+                    ))
+                return results
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
-        async with await self._create_client() as client:
-            response = await client.get(f"/series/{item_id}/extended")
-            if response.status_code == 404: return None
-            response.raise_for_status()
-            
-            details = response.json().get("data", {})
-            
-            return models.MetadataDetailsResponse(
-                id=str(details['id']),
-                tvdbId=str(details['id']),
-                title=details.get('name'),
-                imageUrl=details.get('image'),
-                details=details.get('overview'),
-                imdbId=details.get('remoteIds', [{}])[0].get('id') if details.get('remoteIds') else None
-            )
+        try:
+            async with await self._create_client() as client:
+                response = await client.get(f"/series/{item_id}/extended")
+                if response.status_code == 404: return None
+                response.raise_for_status()
+                
+                details = response.json().get("data", {})
+                
+                return models.MetadataDetailsResponse(
+                    id=str(details['id']),
+                    tvdbId=str(details['id']),
+                    title=details.get('name'),
+                    imageUrl=details.get('image'),
+                    details=details.get('overview'),
+                    imdbId=details.get('remoteIds', [{}])[0].get('id') if details.get('remoteIds') else None
+                )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
         return set() # TVDB is not a good source for aliases
