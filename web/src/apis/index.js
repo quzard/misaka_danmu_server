@@ -138,6 +138,10 @@ export const runTask = data =>
 export const getAvailableScheduledJobs = () =>
   api.get('/api/ui/scheduled-tasks/available-jobs')
 
+/** 获取流控状态 */
+export const getRateLimitStatus = () => api.get('/api/ui/rate-limit/status')
+
+
 /** ---------------------------------------------------token相关开始------------------------------------------------ */
 /** 获取token列表 */
 export const getTokenList = () => api.get('/api/ui/tokens')
