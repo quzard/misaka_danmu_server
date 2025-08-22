@@ -44,12 +44,23 @@ class IncrementalRefreshJob(BaseJob):
             try:
                 # 调用导入任务，只导入指定的一集
                 await generic_import_task(
-                    provider=source_info["providerName"], media_id=source_info["mediaId"],
-                    anime_title=anime_title, media_type=source_info["type"],
-                    season=source_info.get("season", 1), current_episode_index=next_episode_index,
-                    image_url=None, douban_id=None, tmdb_id=source_info.get("tmdb_id"), imdb_id=None, tvdb_id=None,
-                    progress_callback=progress_callback,  # 修正：传递主任务的回调，而不是一个同步的lambda
-                    session=session, manager=self.scraper_manager, task_manager=self.task_manager,
+                    provider=source_info["providerName"],
+                    mediaId=source_info["mediaId"],
+                    animeTitle=anime_title,
+                    mediaType=source_info["type"],
+                    season=source_info.get("season", 1),
+                    year=source_info.get("year"),
+                    currentEpisodeIndex=next_episode_index,
+                    imageUrl=None,
+                    doubanId=None,
+                    tmdbId=source_info.get("tmdbId"),
+                    imdbId=None,
+                    tvdbId=None,
+                    bangumiId=source_info.get("bangumiId"),
+                    progress_callback=progress_callback,
+                    session=session,
+                    manager=self.scraper_manager,
+                    task_manager=self.task_manager,
                 )
             except TaskSuccess as e:
                 message = str(e)

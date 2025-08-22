@@ -1053,6 +1053,45 @@ async def get_all_tasks(
     tasks = await crud.get_tasks_from_history(session, search, status)
     return [models.TaskInfo.model_validate(t) for t in tasks]
 
+
+@router.post("/tasks/{task_id}/pause", status_code=status.HTTP_204_NO_CONTENT, summary="暂停一个正在运行的任务")
+async def pause_task_endpoint(
+    task_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """暂停一个正在运行的任务。"""
+    paused = await task_manager.pause_task(task_id)
+    if not paused:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或无法暂停。")
+    return
+
+
+@router.post("/tasks/{task_id}/resume", status_code=status.HTTP_204_NO_CONTENT, summary="恢复一个已暂停的任务")
+async def resume_task_endpoint(
+    task_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """恢复一个已暂停的任务。"""
+    resumed = await task_manager.resume_task(task_id)
+    if not resumed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或无法恢复。")
+    return
+
+
+@router.post("/tasks/{task_id}/abort", status_code=status.HTTP_204_NO_CONTENT, summary="中止一个正在运行的任务")
+async def abort_task_endpoint(
+    task_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    task_manager: TaskManager = Depends(get_task_manager)
+):
+    """中止一个正在运行或暂停的任务。"""
+    aborted = await task_manager.abort_current_task(task_id)
+    if not aborted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或无法中止。")
+    return
+
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")
 async def delete_task_from_history_endpoint(
     task_id: str,
