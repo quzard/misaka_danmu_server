@@ -58,17 +58,19 @@ export const getSearchResult = (data, onProgress) => {
 
 /** 获取tmdb详情 */
 export const getTMdbDetail = data =>
-  api.get(`/api/ui/tmdb/details/${data.mediaType}/${data.tmdbId}`)
+  api.get(
+    `/api/ui/metadata/tmdb/details/${data.tmdbId}?mediaType=${data.mediaType}`
+  )
 
 /** 获取tvdb详情 */
 export const getTvdbDetail = data =>
-  api.get(`/api/ui/tvdb/details/${data.tvdbId}`)
+  api.get(`/api/ui/metadata/tvdb/details/${data.tvdbId}`)
 /** 获取imdb详情 */
 export const getImdbDetail = data =>
-  api.get(`/api/ui/imdb/details/${data.imdbId}`)
+  api.get(`/api/ui/metadata/imdb/details/${data.imdbId}`)
 /** 获取douban详情 */
 export const getDoubanDetail = data =>
-  api.get(`/api/ui/douban/details/${data.doubanId}`)
+  api.get(`/api/ui/metadata/douban/details/${data.doubanId}`)
 
 /** 导入弹幕  */
 export const importDanmu = data => api.post('/api/ui/import', data)
@@ -86,38 +88,30 @@ export const importEdit = data => api.post('/api/ui/import/edited', data)
 
 /** 搜索tmdb */
 export const getTmdbSearch = data =>
-  api.get(`/api/ui/tmdb/search/${data.mediaType}`, {
-    keyword: data.keyword,
-  })
+  api.get(
+    `/api/ui/metadata/tmdb/search?keyword=${data.keyword}&mediaType=${data.mediaType}`
+  )
 /** 搜索tvdb */
 export const getTvdbSearch = data =>
-  api.get(`/api/ui/tvdb/search`, {
-    keyword: data.keyword,
-  })
+  api.get(`/api/ui/metadata/tvdb/search?keyword=${data.keyword}`)
 /** 搜索tmdb剧集组 */
 export const getEgidSearch = data =>
-  api.get(`/api/ui/tmdb/tv/${data.tmdbId}/episode_groups`)
+  api.post(`/api/ui/metadata/tmdb/actions/get_episode_groups`, { tmdbId: data.tmdbId })
 
 /** 查看所有分集 */
 export const getAllEpisode = data =>
-  api.get(`/api/ui/tmdb/episode_group/${data.egid}?tv_id=${data.tmdbId}`)
+  api.post(`/api/ui/metadata/tmdb/actions/get_all_episodes`, { egid: data.egid, tmdbId: data.tmdbId })
 
 /** 搜索BGM */
 export const getBgmSearch = data =>
-  api.get(`/api/ui/bangumi/search`, {
-    keyword: data.keyword,
-  })
+  api.get(`/api/ui/metadata/bangumi/search?keyword=${data.keyword}`)
 
 /** 豆瓣搜索 */
 export const getDoubanSearch = data =>
-  api.get(`/api/ui/douban/search`, {
-    keyword: data.keyword,
-  })
+  api.get(`/api/ui/metadata/douban/search?keyword=${data.keyword}`)
 /** imdb搜索 */
 export const getImdbSearch = data =>
-  api.get(`/api/ui/imdb/search`, {
-    keyword: data.keyword,
-  })
+  api.get(`/api/ui/metadata/imdb/search?keyword=${data.keyword}`)
 
 /** ---------------------------------------------------任务相关开始------------------------------------------------ */
 /** 任务列表 */
@@ -218,11 +212,11 @@ export const getBangumiConfig = () => api.get('/api/ui/config/provider/bangumi')
 export const setBangumiConfig = data =>
   api.put('/api/ui/config/provider/bangumi', data)
 /** 获取授权信息 */
-export const getBangumiAuth = () => api.get('/api/ui/bangumi/auth/state')
+export const getBangumiAuth = () => api.post('/api/ui/metadata/bangumi/actions/get_auth_state')
 /** 获取授权链接 */
-export const getBangumiAuthUrl = () => api.get('/api/ui/bangumi/auth/url')
+export const getBangumiAuthUrl = () => api.post('/api/ui/metadata/bangumi/actions/get_auth_url')
 /** 注销授权 */
-export const logoutBangumiAuth = () => api.delete('/api/ui/bangumi/auth')
+export const logoutBangumiAuth = () => api.post('/api/ui/metadata/bangumi/actions/logout')
 
 /** ------------------------------------------ 豆瓣、tmdb、tvdb配置、代理------------------------------------------  */
 /** 获取tmdb配置 */

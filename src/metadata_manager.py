@@ -146,6 +146,24 @@ class MetadataSourceManager:
         
         return sorted(full_status_list, key=lambda x: x['displayOrder'])
 
+    async def search(self, provider: str, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
+        """从特定提供商搜索媒体。"""
+        if source_instance := self.sources.get(provider):
+            return await source_instance.search(keyword, user, mediaType=mediaType)
+        raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
+
+    async def get_details(self, provider: str, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
+        """从特定提供商获取详细信息。"""
+        if source_instance := self.sources.get(provider):
+            return await source_instance.get_details(item_id, user, mediaType=mediaType)
+        raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
+
+    async def execute_action(self, provider: str, action_name: str, payload: Dict, user: models.User) -> Any:
+        """执行特定提供商的自定义操作。"""
+        if source_instance := self.sources.get(provider):
+            return await source_instance.execute_action(action_name, payload, user)
+        raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
+
     async def getProviderConfig(self, providerName: str) -> Dict[str, Any]:
         """
         获取特定元数据提供商的配置。
@@ -174,12 +192,6 @@ class MetadataSourceManager:
             return {"value": next(iter(config_values.values()), "")}
 
         return config_values
-
-    async def get_details(self, provider: str, id: str, user: models.User) -> Optional[models.MetadataDetailsResponse]:
-        """从特定提供商获取详细信息。此方法将调用委托给相应的已加载源插件。"""
-        if source_instance := self.sources.get(provider):
-            return await source_instance.get_details(id, user)
-        raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 
     async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User):
         """协调TMDB分集组映射的更新。现在此操作将委托给TMDB源（如果存在且具有该方法）。"""

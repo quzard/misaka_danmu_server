@@ -942,6 +942,42 @@ async def get_server_logs(current_user: models.User = Depends(security.get_curre
     """获取存储在内存中的最新日志条目。"""
     return get_logs()
 
+@router.get("/metadata/{provider}/search", response_model=List[models.MetadataDetailsResponse], summary="从元数据源搜索")
+async def search_metadata(
+    provider: str,
+    keyword: str,
+    mediaType: Optional[str] = Query(None),
+    current_user: models.User = Depends(security.get_current_user),
+    manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    return await manager.search(provider, keyword, current_user, mediaType=mediaType)
+
+@router.get("/metadata/{provider}/details/{item_id}", response_model=models.MetadataDetailsResponse, summary="获取元数据详情")
+async def get_metadata_details(
+    provider: str,
+    item_id: str,
+    mediaType: Optional[str] = Query(None),
+    current_user: models.User = Depends(security.get_current_user),
+    manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    details = await manager.get_details(provider, item_id, current_user, mediaType=mediaType)
+    if not details:
+        raise HTTPException(status_code=404, detail="未找到详情")
+    return details
+
+@router.post("/metadata/{provider}/actions/{action_name}", summary="执行元数据源的自定义操作")
+async def execute_metadata_action(
+    provider: str,
+    action_name: str,
+    payload: Dict[str, Any] = None,
+    current_user: models.User = Depends(security.get_current_user),
+    manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    try:
+        return await manager.execute_action(provider, action_name, payload or {}, current_user)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
 @router.post("/scrapers/{providerName}/actions/{actionName}", summary="执行搜索源的自定义操作")
 async def execute_scraper_action(
     providerName: str,

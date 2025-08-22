@@ -498,13 +498,6 @@ async def auto_search_and_import_task(
     """
     全自动搜索并导入的核心任务逻辑。
     """
-    # 修正：导入重构后的逻辑函数和客户端创建函数
-    from .api.tmdb_api import get_tmdb_details_logic, _create_tmdb_client
-    from .api.bangumi_api import get_bangumi_subject_details_logic, _create_bangumi_client
-    from .api.douban_api import get_douban_details_logic, _create_douban_client
-    from .api.tvdb_api import get_tvdb_details_logic, _create_tvdb_client
-    from .api.imdb_api import get_imdb_details_logic, _create_imdb_client
-
     search_type = payload.searchType
     search_term = payload.searchTerm
     
@@ -517,37 +510,16 @@ async def auto_search_and_import_task(
     image_url = None
     tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
+    # 为后台任务创建一个虚拟用户对象
+    user = models.User(id=1, username="admin")
+
     # 1. 获取元数据和别名
     if search_type != "keyword":
         try:
             await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
-            details: Optional[models.MetadataDetailsResponse] = None
-            if search_type == "tmdb":
-                async with await _create_tmdb_client(session) as client:
-                    types_to_try = [payload.mediaType] if payload.mediaType else ["tv", "movie"]
-                    for m_type in types_to_try:
-                        if not m_type: continue
-                        try:
-                            details = await get_tmdb_details_logic(client=client, media_type=m_type, tmdb_id=int(search_term))
-                            media_type = m_type
-                            break
-                        except ValueError:
-                            logger.info(f"TMDB ID {search_term} not found as type '{m_type}', trying next type...")
-                    if not details: raise ValueError(f"Could not find TMDB entry for ID {search_term} as either TV or Movie.")
-            elif search_type == "bangumi":
-                # Bangumi auth requires a user_id. We'll use the admin user (ID 1) as a fallback.
-                # This might fail if the token is expired, which is an acceptable limitation for background tasks.
-                async with await _create_bangumi_client(session, user_id=1) as client:
-                    details = await get_bangumi_subject_details_logic(subject_id=int(search_term), client=client)
-            elif search_type == "douban":
-                async with await _create_douban_client(session) as client:
-                    details = await get_douban_details_logic(douban_id=search_term, client=client)
-            elif search_type == "tvdb":
-                async with await _create_tvdb_client(session) as client:
-                    details = await get_tvdb_details_logic(tvdb_id=search_term, client=client)
-            elif search_type == "imdb":
-                async with await _create_imdb_client(session) as client:
-                    details = await get_imdb_details_logic(imdb_id=search_term, client=client)
+            details = await metadata_manager.get_details(
+                provider=search_type, item_id=search_term, user=user, mediaType=payload.mediaType
+            )
             
             if details:
                 main_title = details.title or main_title
