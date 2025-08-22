@@ -1,5 +1,5 @@
 import re
-from typing import Optional, List, Any, Dict, Callable
+from typing import Optional, List, Any, Dict, Callable, Union
 import asyncio
 import secrets
 import importlib
@@ -1718,6 +1718,51 @@ async def manual_import_episode(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
 
+async def manual_import_task(
+    source_id: int, title: str, episode_index: int, url: str, provider_name: str,
+    progress_callback: Callable, session: AsyncSession, manager: ScraperManager
+):
+    """后台任务：从URL手动导入弹幕。"""
+    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
+    await progress_callback(10, "正在准备导入...")
+    
+    try:
+        scraper = manager.get_scraper(provider_name)
+        
+        provider_episode_id = None
+        if hasattr(scraper, 'get_ids_from_url'): provider_episode_id = await scraper.get_ids_from_url(url)
+        elif hasattr(scraper, 'get_danmaku_id_from_url'): provider_episode_id = await scraper.get_danmaku_id_from_url(url)
+        elif hasattr(scraper, 'get_tvid_from_url'): provider_episode_id = await scraper.get_tvid_from_url(url)
+        elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
+        
+        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
+
+        # 修正：处理 Bilibili 和 MGTV 返回的字典ID，并将其格式化为 get_comments 期望的字符串格式。
+        episode_id_for_comments = provider_episode_id
+        if isinstance(provider_episode_id, dict):
+            if provider_name == 'bilibili':
+                episode_id_for_comments = f"{provider_episode_id.get('aid')},{provider_episode_id.get('cid')}"
+            elif provider_name == 'mgtv':
+                # MGTV 的 get_comments 期望 "cid,vid"
+                episode_id_for_comments = f"{provider_episode_id.get('cid')},{provider_episode_id.get('vid')}"
+            else:
+                # 对于其他可能的字典返回，将其字符串化
+                episode_id_for_comments = str(provider_episode_id)
+
+        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
+        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
+        if not comments: raise TaskSuccess("未找到任何弹幕。")
+
+        await progress_callback(90, "正在写入数据库...")
+        episode_db_id = await crud.get_or_create_episode(session, source_id, episode_index, title, url, episode_id_for_comments)
+        added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        logger.error(f"手动导入任务失败: {e}", exc_info=True)
+        raise
+
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED, summary="从指定数据源导入弹幕", response_model=UITaskResponse)
 async def import_from_provider(
     request_data: models.ImportRequest,
@@ -2005,68 +2050,66 @@ async def change_current_user_password(
 
 # --- Rate Limiter API ---
 
-class RateLimitStatus(BaseModel):
-    limit: int
-    periodSeconds: int
-    count: int
-    resetsInSeconds: int
+class RateLimitProviderStatus(BaseModel):
+    providerName: str
+    requestCount: int
+    quota: Union[int, str]  # Can be a number or "∞"
 
-class FullRateLimitStatusResponse(BaseModel):
-    globalStatus: RateLimitStatus
-    providerStatus: Dict[str, RateLimitStatus]
+class RateLimitStatusResponse(BaseModel):
+    globalEnabled: bool
+    globalRequestCount: int
+    globalLimit: int
+    globalPeriod: str
+    secondsUntilReset: int
+    providers: List[RateLimitProviderStatus]
 
-@router.get("/rate-limit/status", response_model=models.RateLimitStatusResponse, summary="获取所有流控规则的状态")
+@router.get("/rate-limit/status", response_model=RateLimitStatusResponse, summary="获取所有流控规则的状态")
 async def get_rate_limit_status(
-    request: Request, # 确保有 request 依赖
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager) # 确保有 config_manager 依赖
+    config_manager: ConfigManager = Depends(get_config_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
-    """
-    获取所有流控规则的当前状态，并明确指出全局流控是否已启用。
-    """
+    """获取所有流控规则的当前状态，包括全局和各源的配额使用情况。"""
     global_enabled_str = await config_manager.get("globalRateLimitEnabled", "false")
     global_enabled = global_enabled_str.lower() == 'true'
+    global_limit_str = await config_manager.get("globalRateLimitCount", "50")
+    global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50
+    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
+    period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
 
     all_states = await crud.get_all_rate_limit_states(session)
-    all_scrapers = await crud.get_all_scraper_settings(session)
+    states_map = {s.providerName: s for s in all_states}
 
-    # 为每个源（包括全局）构建其限制配置
-    provider_limits = {}
-    for scraper in all_scrapers:
-        provider_name = scraper['providerName']
-        limit_str = await config_manager.get(f"{provider_name}RateLimitCount", "0")
-        period = await config_manager.get(f"{provider_name}RateLimitPeriod", "hour")
-        provider_limits[provider_name] = {"limit": int(limit_str) if limit_str.isdigit() else 0, "period": period}
-
-    global_limit_str = await config_manager.get("globalRateLimitCount", "0")
-    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
-    provider_limits['__global__'] = {"limit": int(global_limit_str) if global_limit_str.isdigit() else 0, "period": global_period}
-
-    status_items = []
-    period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
-
-    for state in all_states:
-        provider_name = state.providerName
-        limits = provider_limits.get(provider_name)
-        if not limits: # 如果源不存在于配置中，则跳过
-            continue
-
-        # 如果限制数为0，我们仍然需要展示它，以便UI可以显示 "X / ∞"
-        if limits['limit'] < 0:
-             limits['limit'] = 0
-
-        period_seconds = period_map.get(limits['period'], 3600)
-        time_since_reset = datetime.now(timezone.utc) - state.lastResetTime
+    global_state = states_map.get("__global__")
+    seconds_until_reset = 0
+    if global_state:
+        time_since_reset = datetime.now(timezone.utc) - global_state.lastResetTime
         seconds_until_reset = max(0, period_seconds - int(time_since_reset.total_seconds()))
 
-        status_items.append(models.RateLimitStatusItem(
+    provider_items = []
+    for provider_name in scraper_manager.get_all_provider_names():
+        provider_state = states_map.get(provider_name)
+        
+        quota: Union[int, str] = "∞"
+        try:
+            scraper_instance = scraper_manager.get_scraper(provider_name)
+            provider_quota = getattr(scraper_instance, 'rate_limit_quota', None)
+            if provider_quota is not None and provider_quota > 0:
+                quota = provider_quota
+        except ValueError:
+            pass
+
+        provider_items.append(RateLimitProviderStatus(
             providerName=provider_name,
-            requestCount=state.requestCount,
-            limit=limits['limit'],
-            period=limits['period'],
-            periodSeconds=period_seconds,
-            lastResetTime=state.lastResetTime,
-            secondsUntilReset=seconds_until_reset
+            requestCount=provider_state.requestCount if provider_state else 0,
+            quota=quota
         ))
 
-    return models.RateLimitStatusResponse(globalEnabled=global_enabled, providers=status_items)
+    return RateLimitStatusResponse(
+        globalEnabled=global_enabled,
+        globalRequestCount=global_state.requestCount if global_state else 0,
+        globalLimit=global_limit,
+        globalPeriod=global_period,
+        secondsUntilReset=seconds_until_reset,
+        providers=provider_items
+    )
