@@ -315,6 +315,14 @@ async def get_anime_full_details(
     details = await crud.get_anime_full_details(session, animeId)
     if not details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
+    
+    # 修正：如果 crud 函数没有返回年份，手动从 Anime 表中获取并添加到响应中
+    # 这确保了即使在 `get_anime_full_details` 的实现中忘记包含年份，API也能正确返回。
+    if 'year' not in details or details.get('year') is None:
+        anime_record = await session.get(orm_models.Anime, animeId)
+        if anime_record:
+            details['year'] = anime_record.year
+
     return models.AnimeFullDetails.model_validate(details)
 
 @router.put("/library/anime/{animeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑影视信息")
