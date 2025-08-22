@@ -189,10 +189,10 @@ export const setDanmuOutputAggregation = data =>
 
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
-export const getWebhookApikey = () => api.get('/api/ui/config/webhook_api_key')
+export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')
 /** 刷新webhookapi key */
 export const refreshWebhookApikey = () =>
-  api.post('/api/ui/config/webhook_api_key/regenerate')
+  api.post('/api/ui/config/webhookApiKey/regenerate')
 /** 获取webhook 域名 */
 export const getWebhookDomain = () =>
   api.get('/api/ui/config/webhook_custom_domain')
@@ -354,11 +354,11 @@ export const refreshPoster = data =>
 
 /** ----------------------------------------------外部控制----------------------------------------------  */
 /** 获取apikey */
-export const getControlApiKey = () => api.get('/api/ui/config/external_api_key')
+export const getControlApiKey = () => api.get('/api/ui/config/externalApiKey')
 
 /** 刷新apikey */
 export const refreshControlApiKey = () =>
-  api.post('/api/ui/config/external_api_key/regenerate')
+  api.post('/api/ui/config/externalApiKey/regenerate')
 
 /** apikey 访问日志 */
 export const getControlApiKeyLog = () => api.get('api/ui/external-logs')
