@@ -448,7 +448,7 @@ async def get_token_from_path(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
 
     # 2. UA 过滤
-    ua_filter_mode = await crud.get_config_value(session, 'ua_filter_mode', 'off')
+    ua_filter_mode = await crud.get_config_value(session, 'uaFilterMode', 'off')
     user_agent = request.headers.get("user-agent", "")
 
     if ua_filter_mode != 'off':
@@ -462,7 +462,7 @@ async def get_token_from_path(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent is blacklisted")
         
         if ua_filter_mode == 'whitelist' and not is_matched:
-            await crud.create_token_access_log(pool, token_info['id'], request.client.host, user_agent, log_status='denied_ua_whitelist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
     # 3. 记录成功访问
@@ -962,7 +962,7 @@ async def get_comments_for_dandan(
     新增：支持 withRelated 参数，用于聚合所有源的弹幕。
     兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
-    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'true')
+    aggregation_enabled_str = await config_manager.get('danmakuAggregationEnabled', 'true')
     aggregation_enabled = aggregation_enabled_str.lower() == 'true'
 
     episode_id_str = str(episodeId)

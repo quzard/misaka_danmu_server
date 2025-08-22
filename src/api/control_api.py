@@ -55,7 +55,7 @@ async def verify_api_key(
             detail="Not authenticated: API Key is missing.",
         )
 
-    stored_key = await crud.get_config_value(session, "external_api_key", "")
+    stored_key = await crud.get_config_value(session, "externalApiKey", "")
 
     if not stored_key or not secrets.compare_digest(api_key, stored_key):
         await crud.create_external_api_log(
