@@ -385,9 +385,10 @@ export const Library = () => {
           nameEn: data.nameEn,
           ...getAliasCn(
             data.aliasesCn,
-            data.aliases_cn && data.aliases_cn.length > 0
-              ? data.aliases_cn[0]
-              : ''
+            // 修正：统一使用驼峰命名的 aliasesCn，并提供更好的备用标题
+            data.aliasesCn && data.aliasesCn.length > 0
+              ? data.aliasesCn[0]
+              : data.name || ''
           ),
         })
         break
