@@ -575,7 +575,7 @@ async def refresh_single_episode(
     
     logger.info(f"用户 '{current_user.username}' 请求刷新分集 ID: {episodeId} ({episode['title']})")
 
-    provider_name = episode.get('provider_name', '未知源')
+    provider_name = episode.get('providerName', '未知源')
     task_title = f"刷新分集: {episode['title']} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -598,7 +598,7 @@ async def refresh_anime(
     - incremental: 尝试抓取最新一集。
     """
     source_info = await crud.get_anime_source_info(session, sourceId)
-    if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
+    if not source_info or not source_info.get("providerName") or not source_info.get("mediaId"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
     
     if mode == "incremental":
@@ -2091,8 +2091,13 @@ async def get_rate_limit_status(
     global_state = states_map.get("__global__")
     seconds_until_reset = 0
     if global_state:
-        time_since_reset = datetime.now(timezone.utc) - global_state.lastResetTime
-        seconds_until_reset = max(0, period_seconds - int(time_since_reset.total_seconds()))
+        # 确保从数据库读取的时间是 "aware" 的，以防止类型错误
+        # 即使数据库返回一个 naive datetime，我们也假定它是UTC时间
+        last_reset_time_from_db = global_state.lastResetTime
+        if last_reset_time_from_db.tzinfo is None:
+            last_reset_time_from_db = last_reset_time_from_db.replace(tzinfo=timezone.utc)
+        time_since_reset = datetime.now(timezone.utc) - last_reset_time_from_db
+        seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
     # 修正：从数据库获取所有已配置的搜索源，而不是调用一个不存在的方法
