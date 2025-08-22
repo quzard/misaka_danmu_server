@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from . import crud
+from .rate_limiter import RateLimiter
 from .jobs.base import BaseJob
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
@@ -46,10 +47,11 @@ def cron_is_valid(cron: str, min_hours: int) -> bool:
 # --- Scheduler Manager ---
 
 class SchedulerManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
+        self.rate_limiter = rate_limiter
         self.scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
         self._job_classes: Dict[str, Type[BaseJob]] = {}
 
@@ -83,7 +85,9 @@ class SchedulerManager:
         job_class = self._job_classes[job_type]
         
         async def runner():
-            job_instance = job_class(self._session_factory, self.task_manager, self.scraper_manager)
+            # 修正：将所有需要的管理器传递给任务实例
+            job_instance = job_class(self._session_factory, self.task_manager, self.scraper_manager) # type: ignore
+            job_instance.rate_limiter = self.rate_limiter  # 将速率限制器注入到任务实例中
             task_coro_factory = lambda session, callback: job_instance.run(session, callback)
             task_id, done_event = await self.task_manager.submit_task(task_coro_factory, job_instance.job_name)
             # The apscheduler job now waits for the actual task to complete.
