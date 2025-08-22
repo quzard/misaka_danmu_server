@@ -154,6 +154,8 @@ class TmdbMetadataSource(BaseMetadataSource):
                     if details.nameEn: aliases.add(details.nameEn)
                     if details.nameJp: aliases.add(details.nameJp)
                     aliases.update(details.aliasesCn)
+            
+            self.logger.info(f"TMDB辅助搜索成功，找到别名: {[a for a in aliases if a]}")
         except ValueError as e:
             # 捕获 _create_client 中的 API Key 未配置错误
             self.logger.warning(f"TMDB辅助搜索因配置问题跳过: {e}")

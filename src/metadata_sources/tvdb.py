@@ -95,3 +95,7 @@ class TvdbMetadataSource(BaseMetadataSource):
                 else: return f"连接失败 (状态码: {response.status_code})"
         except ValueError as e: return f"未配置: {e}"
         except Exception as e: return f"连接失败: {e}"
+
+    async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
+        """TVDB source does not support custom actions."""
+        raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")

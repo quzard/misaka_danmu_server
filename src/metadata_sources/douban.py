@@ -49,7 +49,7 @@ class DoubanMetadataSource(BaseMetadataSource):
         provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
         use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
 
-        proxies = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+        proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
 
         return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
