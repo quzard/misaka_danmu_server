@@ -24,6 +24,20 @@ def _clean_movie_title(title: Optional[str]) -> Optional[str]:
 class TmdbMetadataSource(BaseMetadataSource):
     provider_name = "tmdb"
 
+    async def _get_robust_image_base_url(self) -> str:
+        """
+        获取TMDB图片基础URL，并对其进行健壮性处理。
+        如果用户只配置了域名，则自动附加默认的尺寸路径。
+        """
+        image_base_url_config = await self.config_manager.get("tmdbImageBaseUrl", "https://image.tmdb.org/t/p/w500")
+        
+        # 如果配置中不包含 /t/p/ 路径，说明用户可能只填写了域名
+        if '/t/p/' not in image_base_url_config:
+            # 我们附加一个默认的尺寸路径，使其成为一个有效的图片基础URL
+            return f"{image_base_url_config.rstrip('/')}/t/p/w500"
+        
+        return image_base_url_config.rstrip('/')
+
     async def _create_client(self) -> httpx.AsyncClient:
         api_key = await self.config_manager.get("tmdbApiKey")
         if not api_key:
@@ -47,7 +61,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                 response.raise_for_status()
                 data = response.json().get("results", [])
                 
-                image_base_url = await self.config_manager.get("tmdbImageBaseUrl", "https://image.tmdb.org/t/p/")
+                image_base_url = await self._get_robust_image_base_url()
                 
                 results = []
                 for item in data:
@@ -59,7 +73,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                         id=str(item['id']),
                         tmdbId=str(item['id']),
                         title=title,
-                        imageUrl=f"{image_base_url}w500{item.get('poster_path')}" if item.get('poster_path') else None,
+                        imageUrl=f"{image_base_url}{item.get('poster_path')}" if item.get('poster_path') else None,
                         details=details_str
                     ))
                 return results
@@ -79,7 +93,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                 response.raise_for_status()
                 details = response.json()
 
-                image_base_url = await self.config_manager.get("tmdbImageBaseUrl", "https://image.tmdb.org/t/p/")
+                image_base_url = await self._get_robust_image_base_url()
                 
                 aliases = self._parse_tmdb_details_for_aliases(details)
                 
@@ -91,7 +105,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                     nameJp=aliases.get("name_jp"),
                     nameRomaji=aliases.get("name_romaji"),
                     aliasesCn=aliases.get("aliases_cn", []),
-                    imageUrl=f"{image_base_url}w500{details.get('poster_path')}" if details.get('poster_path') else None,
+                    imageUrl=f"{image_base_url}{details.get('poster_path')}" if details.get('poster_path') else None,
                     details=details.get('overview'),
                     imdbId=details.get('external_ids', {}).get('imdb_id'),
                     tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None
