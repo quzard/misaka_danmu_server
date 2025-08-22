@@ -221,6 +221,14 @@ async def get_bangumi_client(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
+async def get_public_bangumi_client() -> httpx.AsyncClient:
+    """
+    依赖项：创建一个未经身份验证的公共 httpx 客户端，用于访问 Bangumi 的公共端点。
+    """
+    headers = {"User-Agent": "l429609201/misaka_danmu_server(https://github.com/l429609201/misaka_danmu_server)"}
+    return httpx.AsyncClient(headers=headers, timeout=20.0)
+
+
 # --- API Endpoints ---
 
 async def get_bangumi_subject_details_logic(subject_id: int, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
@@ -369,7 +377,7 @@ async def deauthorize_bangumi(
 @router.get("/search", response_model=List[BangumiApiSearchResult], summary="搜索 Bangumi 作品")
 async def search_bangumi_subjects(
     keyword: str = Query(..., min_length=1),
-    client: httpx.AsyncClient = Depends(get_bangumi_client),
+    client: httpx.AsyncClient = Depends(get_public_bangumi_client),
     session: AsyncSession = Depends(get_db_session),
 ):
     cache_key = f"bgm_search_{keyword}"
