@@ -209,7 +209,8 @@ async def generic_import_task(
             await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
 
         try:
-            await rate_limiter.check_and_update(provider)
+            # 1. 先检查是否允许下载
+            await rate_limiter.check(provider)
         except RateLimitExceededError as e:
             logger.warning(f"任务 '{normalized_title}' 因达到速率限制而暂停: {e}")
             # 任务成功结束，但附带一条关于速率限制的消息
@@ -217,7 +218,10 @@ async def generic_import_task(
 
         comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
-        if comments and anime_id is None:
+        if comments:
+            # 2. 只有成功获取到弹幕后，才增加计数
+            await rate_limiter.increment(provider)
+        if comments and anime_id is None: # type: ignore
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
 
@@ -287,13 +291,15 @@ async def edited_import_task(
     for i, episode in enumerate(episodes):
         await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
         try:
-            await rate_limiter.check_and_update(request_data.provider)
+            await rate_limiter.check(request_data.provider)
         except RateLimitExceededError as e:
             logger.warning(f"编辑后导入任务 '{normalized_title}' 因达到速率限制而暂停: {e}")
             raise TaskSuccess(f"达到速率限制。请在 {e.retry_after_seconds:.0f} 秒后重试。")
 
         comments = await scraper.get_comments(episode.episodeId)
 
+        if comments:
+            await rate_limiter.increment(request_data.provider)
         if comments and anime_id is None:
             local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
             if request_data.imageUrl and not local_image_path:
@@ -517,14 +523,17 @@ async def manual_import_task(
         episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
         await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
-        
         try:
-            await rate_limiter.check_and_update(providerName)
+            await rate_limiter.check(providerName)
         except RateLimitExceededError as e:
             raise TaskSuccess(f"达到速率限制。请在 {e.retry_after_seconds:.0f} 秒后重试。")
 
         comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
-        if not comments: raise TaskSuccess("未找到任何弹幕。")
+        if not comments:
+            raise TaskSuccess("未找到任何弹幕。")
+
+        # 成功获取到弹幕后，增加计数
+        await rate_limiter.increment(providerName)
 
         await progress_callback(90, "正在写入数据库...")
         episode_db_id = await crud.create_episode_if_not_exists(session, sourceId, episodeIndex, title, url, episode_id_for_comments)
