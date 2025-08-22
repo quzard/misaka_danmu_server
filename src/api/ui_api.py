@@ -504,35 +504,6 @@ async def reorder_source_episodes(
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {sourceId} 集数的任务 (Task ID: {task_id})。")
     return {"message": f"重整集数任务 '{task_title}' 已提交。", "taskId": task_id}
 
-@router.post("/library/source/{sourceId}/incremental-refresh", status_code=status.HTTP_202_ACCEPTED, summary="增量刷新指定源", response_model=UITaskResponse)
-async def incremental_refresh_source(
-    sourceId: int,
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
-):
-    """提交一个后台任务，增量刷新指定源，抓取比当前已收录分集多一集的弹幕"""
-    source_info = await crud.get_anime_source_info(session, sourceId)
-    if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
-
-    # 获取当前最新分集
-    eps = await crud.get_episodes_for_source(session, sourceId)
-    if len(eps) > 0:
-        latest_episode_index = sorted(eps, key=lambda x: x['episode_index'])[-1]['episode_index']
-    else:
-        latest_episode_index = 0
-
-    next_episode_index = latest_episode_index + 1
-    logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
-
-    # 从新集信息创建任务
-    task_coro = lambda session, callback: tasks.incremental_refresh_task(sourceId, next_episode_index, session, scraper_manager, task_manager, callback, source_info["title"]) # type: ignore
-    task_id, _ = await task_manager.submit_task(task_coro, f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试获取第{next_episode_index}集")
-
-    return {"message": f"番剧 '{source_info['title']}' 的增量刷新任务已提交，尝试获取第{next_episode_index}集。", "taskId": task_id}
-
 
 @router.delete("/library/episode/{episodeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务", response_model=UITaskResponse)
 async def delete_episode_from_source(
@@ -577,25 +548,46 @@ async def refresh_single_episode(
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
 
-@router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="全量刷新指定源的弹幕", response_model=UITaskResponse)
+@router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新指定数据源 (全量或增量)", response_model=UITaskResponse)
 async def refresh_anime(
     sourceId: int,
+    mode: str = Query("full", description="刷新模式: 'full' (全量) 或 'incremental' (增量)"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """为指定数据源启动一个后台任务，删除其所有旧弹幕并从源重新获取。"""
+    """
+    为指定的数据源启动一个刷新任务。
+    - full: 清空并重新抓取所有分集和弹幕。
+    - incremental: 尝试抓取最新一集。
+    """
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info or not source_info.get("provider_name") or not source_info.get("media_id"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
     
-    logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
-    
-    task_coro = lambda session, callback: tasks.full_refresh_task(sourceId, session, scraper_manager, task_manager, callback) # type: ignore
-    task_id, _ = await task_manager.submit_task(task_coro, f"刷新: {source_info['title']} ({source_info['providerName']})")
+    if mode == "incremental":
+        logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
+        eps = await crud.get_episodes_for_source(session, sourceId)
+        latest_episode_index = max((ep['episodeIndex'] for ep in eps), default=0)
+        next_episode_index = latest_episode_index + 1
+        
+        task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
+        task_coro = lambda s, cb: tasks.incremental_refresh_task(
+            sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager, 
+            task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"]
+        )
+        message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
+    elif mode == "full":
+        logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
+        task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
+        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, cb)
+        message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
 
-    return {"message": f"番剧 '{source_info['title']}' 的全量刷新任务已提交。", "taskId": task_id}
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    return {"message": message_to_return, "taskId": task_id}
 
 @router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务", response_model=UITaskResponse)
 async def delete_anime_from_library(
@@ -1309,12 +1301,14 @@ async def generic_import_task(
     anime_title: str,
     media_type: str,
     season: int,
+    year: Optional[int],
     current_episode_index: Optional[int],
     image_url: Optional[str],
     douban_id: Optional[str],
     tmdb_id: Optional[str],
     imdb_id: Optional[str],
     tvdb_id: Optional[str],
+    bangumi_id: Optional[str],
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager, 
@@ -1361,8 +1355,8 @@ async def generic_import_task(
         if comments and anime_id is None:
             logger.info("首次成功获取弹幕，正在创建数据库主条目...")
             await progress_callback(base_progress + 1, "正在创建数据库主条目...")
-            local_image_path = await download_image(image_url, session, provider)
-            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path)
+            local_image_path = await download_image(image_url, session, manager, provider)
+            anime_id = await crud.get_or_create_anime(session, normalized_title, media_type, season, image_url, local_image_path, year)
             await crud.update_metadata_if_empty(session, anime_id, tmdb_id, imdb_id, tvdb_id, douban_id)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, media_id)
             logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
@@ -1421,36 +1415,62 @@ async def edited_import_task(
     else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
 
 async def full_refresh_task(source_id: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable):
-    """
-    后台任务：全量刷新一个已存在的番剧。
-    """
-    logger.info(f"开始刷新源 ID: {source_id}")
+    """后台任务：全量刷新一个已存在的番剧，采用先获取后删除的安全策略。"""
+    logger.info(f"开始全量刷新源 ID: {source_id}")
     source_info = await crud.get_anime_source_info(session, source_id)
     if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {source_id}")
-        return
+        raise TaskSuccess("刷新失败: 找不到源信息")
+
+    scraper = manager.get_scraper(source_info["providerName"])
+
+    # 步骤 1: 获取所有新数据，但不写入数据库
+    await progress_callback(10, "正在获取新分集列表...")
+    new_episodes = await scraper.get_episodes(source_info["mediaId"])
+    if not new_episodes:
+        raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
+
+    await progress_callback(20, f"获取到 {len(new_episodes)} 个新分集，正在获取弹幕...")
     
-    anime_id = source_info["anime_id"]
-    # 1. 清空旧数据
-    await progress_callback(10, "正在清空旧数据...")
-    await crud.clear_source_data(session, source_id)
-    logger.info(f"已清空源 ID: {source_id} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
-    # 2. 重新执行通用导入逻辑
-    await generic_import_task(
-        provider=source_info["provider_name"],
-        media_id=source_info["media_id"],
-        anime_title=source_info["title"],
-        media_type=source_info["type"],
-        season=source_info.get("season", 1),
-        current_episode_index=None,
-        image_url=None,
-        douban_id=None, tmdb_id=source_info.get("tmdb_id"), 
-        imdb_id=None, tvdb_id=None,
-        progress_callback=progress_callback,
-        session=session,
-        manager=manager,
-        task_manager=task_manager)
+    new_data_package = []
+    total_comments_fetched = 0
+    total_episodes = len(new_episodes)
+
+    for i, episode in enumerate(new_episodes):
+        base_progress = 20 + int((i / total_episodes) * 70) if total_episodes > 0 else 90
+        
+        async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
+            current_sub_progress = (danmaku_progress / 100) * (70 / total_episodes)
+            await progress_callback(base_progress + current_sub_progress, f"处理: {episode.title} - {danmaku_description}")
+
+        comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+        new_data_package.append((episode, comments))
+        if comments:
+            total_comments_fetched += len(comments)
+
+    if total_comments_fetched == 0:
+        raise TaskSuccess("刷新完成，但未找到任何新弹幕。旧数据已保留。")
+
+    # 步骤 2: 数据获取成功，现在在一个事务中执行清空和写入操作
+    await progress_callback(95, "数据获取成功，正在清空旧数据并写入新数据...")
+    try:
+        await crud.clear_source_data(session, source_id)
+        
+        for episode_info, comments in new_data_package:
+            episode_db_id = await crud.create_episode_if_not_exists(
+                session, source_info["animeId"], source_id, 
+                episode_info.episodeIndex, episode_info.title, 
+                episode_info.url, episode_info.episodeId
+            )
+            if comments:
+                await crud.bulk_insert_comments(session, episode_db_id, comments)
+        
+        await session.commit()
+        raise TaskSuccess(f"全量刷新完成，共导入 {len(new_episodes)} 个分集，{total_comments_fetched} 条弹幕。")
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"全量刷新源 {source_id} 时数据库写入失败: {e}", exc_info=True)
+        raise
 
 async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession, progress_callback: Callable):
     """Background task to delete multiple sources."""
@@ -1551,6 +1571,29 @@ async def reorder_episodes_task(source_id: int, session: AsyncSession, progress_
         raise TaskSuccess(f"重整完成，共更新了 {updated_count} 个分集的集数。")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {source_id}) 失败: {e}", exc_info=True)
+        raise
+
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, progress_callback: Callable, animeTitle: str):
+    """后台任务：增量刷新一个已存在的番剧。"""
+    logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
+    source_info = await crud.get_anime_source_info(session, sourceId)
+    if not source_info:
+        progress_callback(100, "失败: 找不到源信息")
+        logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
+        return
+    try:
+        # 重新执行通用导入逻辑, 只导入指定的一集
+        await generic_import_task(
+            provider=source_info["providerName"], media_id=source_info["mediaId"],
+            anime_title=animeTitle, media_type=source_info["type"],
+            season=source_info.get("season", 1), year=source_info.get("year"),
+            current_episode_index=nextEpisodeIndex, image_url=None,
+            douban_id=None, tmdb_id=source_info.get("tmdbId"),
+            imdb_id=None, tvdb_id=None, bangumi_id=source_info.get("bangumiId"),
+            progress_callback=progress_callback,
+            session=session, manager=manager, task_manager=task_manager)
+    except Exception as e:
+        logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
 class ManualImportRequest(models.BaseModel):

@@ -727,8 +727,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.name}</div>
+                      <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
+                      <div className="mt-2 text-sm">{item.details}</div>
                     </div>
                   </div>
                   <div>
@@ -959,8 +960,9 @@ export const Library = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.name}</div>
+                      <div className="text-xl font-bold mb-3">{item.title}</div>
                       <div>ID: {item.id}</div>
+                      <div className="mt-2 text-sm">{item.details}</div>
                     </div>
                   </div>
                   <div>
