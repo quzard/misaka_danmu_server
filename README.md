@@ -93,11 +93,12 @@ services:
       --collation-server=utf8mb4_general_ci
       --explicit_defaults_for_timestamp=true
     healthcheck:
-      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]
+      #!!! 重要：-u和-p后不能有空格 !!!
+      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]    
       interval: 5s
       timeout: 3s
       retries: 2
-      start_period: 0s
+      start_period: 30s
     # 不直接暴露到宿主机
     expose:
       - "3306"
@@ -140,7 +141,8 @@ networks:
 ```
 3.  **重要**: 
   - 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
-  -   确保 `DANMUAPI_DATABASE__PASSWORD` 与 `MYSQL_PASSWORD` 一致。
+  - 确保`healthcheck`中`-p`的密码和`MYSQL_ROOT_PASSWORD`一致。
+  - 确保 `DANMUAPI_DATABASE__PASSWORD` 与 `MYSQL_PASSWORD` 一致。
 
 3.  在同一目录运行命令启动应用：
     ```bash
