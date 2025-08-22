@@ -88,8 +88,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     # Create new anime
     new_anime = Anime(
-        title=title, type=media_type, season=season, imageUrl=image_url,
-        localImagePath=local_image_path, createdAt=datetime.now(), year=year
+        title=title, type=media_type, season=season, imageUrl=image_url, localImagePath=local_image_path,
+        createdAt=datetime.now(timezone.utc), year=year
     )
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
@@ -489,8 +489,8 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
 async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
     from . import security
-    hashed_password = security.get_password_hash(user.password)
-    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=datetime.now())
+    hashed_password = security.get_password_hash(user.password) # type: ignore
+    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=datetime.now(timezone.utc))
     session.add(new_user)
     await session.commit()
 
@@ -502,7 +502,7 @@ async def update_user_password(session: AsyncSession, username: str, new_hashed_
 
 async def update_user_login_info(session: AsyncSession, username: str, token: str):
     """更新用户的最后登录时间和当前令牌"""
-    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=func.now())
+    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=datetime.now(timezone.utc))
     await session.execute(stmt)
     await session.commit()
 
@@ -554,7 +554,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
 
     new_episode = Episode(
         id=new_episode_id, sourceId=source_id, episodeIndex=episode_index,
-        providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now()
+        providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now(timezone.utc)
     )
     session.add(new_episode)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -764,30 +764,28 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
     await session.commit()
     return True
 
-async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> Optional[Episode]:
-    """更新单个分集的信息。如果集数被修改，将重新生成ID并迁移关联的弹幕。返回更新后的Episode对象。"""
-    # 使用 joinedload 高效地获取关联的 source 和 anime 信息
+async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:
+    """更新单个分集的信息。如果集数被修改，将重新生成ID并迁移关联的弹幕。"""
+    # 使用 joinedload 高效地获取关联的 source 和 anime 信息 # type: ignore
     stmt = select(Episode).where(Episode.id == episode_id).options(joinedload(Episode.source).joinedload(AnimeSource.anime))
     result = await session.execute(stmt)
     episode = result.scalar_one_or_none()
 
     if not episode:
-        return None
+        return False
 
     # 情况1: 集数未改变，仅更新标题或URL
     if episode.episodeIndex == update_data.episodeIndex:
         episode.title = update_data.title
         episode.sourceUrl = update_data.sourceUrl
         await session.commit()
-        await session.refresh(episode)
-        return episode
+        return True
 
     # 情况2: 集数已改变，需要重新生成主键并迁移数据
     # 1. 检查新集数是否已存在，避免冲突
     conflict_stmt = select(Episode.id).where(
         Episode.sourceId == episode.sourceId,
-        Episode.episodeIndex == update_data.episodeIndex,
-        Episode.id != episode_id
+        Episode.episodeIndex == update_data.episodeIndex
     )
     if (await session.execute(conflict_stmt)).scalar_one_or_none():
         raise ValueError("该集数已存在，请使用其他集数。")
@@ -811,6 +809,7 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
         providerEpisodeId=episode.providerEpisodeId, fetchedAt=episode.fetchedAt, commentCount=episode.commentCount
     )
     session.add(new_episode)
+    await session.flush()  # 插入新记录以获取其ID
 
     # 4. 将旧分集的弹幕关联到新分集
     await session.execute(update(Comment).where(Comment.episodeId == episode_id).values(episodeId=new_episode_id))
@@ -818,7 +817,7 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     # 5. 删除旧的分集记录
     await session.delete(episode)
     await session.commit()
-    return new_episode
+    return True
 
 async def sync_scrapers_to_db(session: AsyncSession, provider_names: List[str]):
     if not provider_names: return
@@ -956,7 +955,7 @@ async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
 
 async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: int, provider: Optional[str] = None):
     json_value = json.dumps(value, ensure_ascii=False)
-    expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
 
     dialect = session.bind.dialect.name
     values_to_insert = {"cacheProvider": provider, "cacheKey": key, "cacheValue": json_value, "expiresAt": expires_at}
@@ -1002,7 +1001,7 @@ async def clear_expired_cache(session: AsyncSession):
     await session.commit()
 
 async def clear_expired_oauth_states(session: AsyncSession):
-    await session.execute(delete(OauthState).where(OauthState.expiresAt <= func.now()))
+    await session.execute(delete(OauthState).where(OauthState.expiresAt <= datetime.now(timezone.utc)))
     await session.commit()
 
 async def clear_all_cache(session: AsyncSession) -> int:
@@ -1016,7 +1015,7 @@ async def delete_cache(session: AsyncSession, key: str) -> bool:
     return result.rowcount > 0
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
-    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=func.now()))
+    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=datetime.now(timezone.utc)))
     await session.commit()
 
 # --- API Token Management ---
@@ -1172,7 +1171,7 @@ async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> 
 
 async def create_oauth_state(session: AsyncSession, user_id: int) -> str:
     state = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at)
     session.add(new_state)
     await session.commit()
@@ -1217,7 +1216,7 @@ async def save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict
         auth.expiresAt = auth_data.get('expiresAt')
     else:
         auth = BangumiAuth(
-            userId=user_id, authorizedAt=datetime.now(), **auth_data
+            userId=user_id, authorizedAt=datetime.now(timezone.utc), **auth_data
         )
         session.add(auth)
     await session.commit()
@@ -1340,7 +1339,7 @@ async def update_task_progress_in_history(session: AsyncSession, task_id: str, s
     await session.commit()
 
 async def finalize_task_in_history(session: AsyncSession, task_id: str, status: str, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, description=description, progress=100, finishedAt=func.now()))
+    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, description=description, progress=100, finishedAt=datetime.now(timezone.utc)))
     await session.commit()
 
 async def update_task_status(session: AsyncSession, task_id: str, status: str):
@@ -1395,7 +1394,7 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (
         update(TaskHistory)
         .where(TaskHistory.status.in_(['运行中', '已暂停']))
-        .values(status='失败', description='因程序重启而中断', finishedAt=func.now())
+        .values(status='失败', description='因程序重启而中断', finishedAt=datetime.now(timezone.utc))
     )
     result = await session.execute(stmt)
     await session.commit()
