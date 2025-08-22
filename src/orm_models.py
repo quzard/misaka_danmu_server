@@ -238,6 +238,6 @@ class ExternalApiLog(Base):
 
 class RateLimitState(Base):
     __tablename__ = "rate_limit_state"
-    provider_name: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
-    request_count: Mapped[int] = mapped_column("request_count", Integer, default=0)
-    last_reset_time: Mapped[datetime] = mapped_column("last_reset_time", TIMESTAMP(timezone=True), server_default=func.now())
+    providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
+    requestCount: Mapped[int] = mapped_column("request_count", Integer, default=0)
+    lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", TIMESTAMP(timezone=True), server_default=func.now())
