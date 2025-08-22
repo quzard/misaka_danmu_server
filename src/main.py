@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
     }
     await app.state.config_manager.register_defaults(default_configs)
 
-    app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager)
+    app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
     await app.state.scraper_manager.initialize()
     # 新增：初始化元数据源管理器
