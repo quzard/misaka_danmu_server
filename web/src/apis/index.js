@@ -363,11 +363,11 @@ export const refreshPoster = data =>
 /** 精准获取资源信息 */
 export const getAnimeInfoAsSource = data => {
   const detailsUrlMap = {
-    bangumi: `/api/ui/bangumi/subjects/${data.currentId}`,
-    douban: `/api/ui/douban/details/${data.currentId}`,
-    tvdb: `/api/ui/tvdb/details/${data.currentId}`,
-    imdb: `/api/ui/imdb/details/${data.currentId}`,
-    tmdb: `/api/ui/tmdb/details/${data.mediaType}/${data.currentId}`,
+    bangumi: `/api/ui/metadata/bangumi/details/${data.currentId}`,
+    douban: `/api/ui/metadata/douban/details/${data.currentId}`,
+    tvdb: `/api/ui/metadata/tvdb/details/${data.currentId}`,
+    imdb: `/api/ui/metadata/imdb/details/${data.currentId}`,
+    tmdb: `/api/ui/metadata/tmdb/details/${data.mediaType}/${data.currentId}`,
   }
   const detailsUrl = detailsUrlMap[data.source]
   return api.get(detailsUrl)
