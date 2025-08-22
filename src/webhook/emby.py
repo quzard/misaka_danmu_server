@@ -97,7 +97,8 @@ class EmbyWebhook(BaseWebhook):
             webhookSource='emby',
             progress_callback=callback,
             session=session,
-            manager=self.scraper_manager,
-            task_manager=self.task_manager
+            manager=self.scraper_manager, # type: ignore
+            task_manager=self.task_manager,
+            rate_limiter=self.rate_limiter
         )
         await self.task_manager.submit_task(task_coro, task_title)

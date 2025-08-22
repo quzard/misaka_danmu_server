@@ -6,6 +6,7 @@ from fastapi import Request
 from pydantic import BaseModel
 
 from ..task_manager import TaskManager
+from ..rate_limiter import RateLimiter
 from ..scraper_manager import ScraperManager
 
 class WebhookPayload(BaseModel):
@@ -18,10 +19,11 @@ class WebhookPayload(BaseModel):
 class BaseWebhook(ABC):
     """所有 Webhook 处理器的抽象基类。"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
+        self.rate_limiter = rate_limiter
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod

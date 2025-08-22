@@ -501,8 +501,9 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
             session=session,
-            manager=manager,
-            task_manager=task_manager)
+            manager=manager, # type: ignore
+            task_manager=task_manager,
+            rate_limiter=rate_limiter)
     except Exception as e:
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise

@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
     app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager, app.state.rate_limiter
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)

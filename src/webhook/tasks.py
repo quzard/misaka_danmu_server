@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
 from .. import crud
+from ..rate_limiter import RateLimiter
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess
 from ..tasks import generic_import_task
@@ -44,6 +45,7 @@ async def webhook_search_and_dispatch_task(
     session: AsyncSession,
     manager: ScraperManager,
     task_manager: TaskManager,
+    rate_limiter: RateLimiter
 ):
     """
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
@@ -64,7 +66,7 @@ async def webhook_search_and_dispatch_task(
                 provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
                 mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
                 imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId,
-                bangumiId=bangumiId,
+                bangumiId=bangumiId, rate_limiter=rate_limiter,
                 progress_callback=cb, session=session, manager=manager,
                 task_manager=task_manager
             )
@@ -125,7 +127,7 @@ async def webhook_search_and_dispatch_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
             season=season, currentEpisodeIndex=best_match.currentEpisodeIndex, imageUrl=best_match.imageUrl,
-            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId,
+            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
             task_manager=task_manager
         )
