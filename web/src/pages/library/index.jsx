@@ -113,6 +113,12 @@ export const Library = () => {
       width: 50,
     },
     {
+      title: '年份',
+      dataIndex: 'year',
+      key: 'year',
+      width: 80,
+    },
+    {
       title: '集数',
       dataIndex: 'episodeCount',
       key: 'episodeCount',
@@ -232,6 +238,7 @@ export const Library = () => {
       const values = await form.validateFields()
       await setAnimeDetail({
         ...values,
+        year: values.year ? Number(values.year) : null,
         tmdbId: values.tmdbId ? `${values.tmdbId}` : null,
         tvdbId: values.tvdbId ? `${values.tvdbId}` : null,
       })
@@ -500,6 +507,9 @@ export const Library = () => {
               style={{ width: '100%' }}
               placeholder="留空则自动计算"
             />
+          </Form.Item>
+          <Form.Item name="year" label="年份">
+            <InputNumber style={{ width: '100%' }} placeholder="请输入发行年份" />
           </Form.Item>
           <Form.Item name="imageUrl" label="海报URL">
             <Input

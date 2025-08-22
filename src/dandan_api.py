@@ -182,8 +182,9 @@ class DandanSearchAnimeItem(BaseModel):
     animeTitle: str
     type: str
     typeDescription: str
-    imageUrl: Optional[str] = None
-    startDate: Optional[datetime] = None
+    imageUrl: Optional[str] = None    
+    startDate: Optional[str] = None # To keep compatibility, but will be populated from year
+    year: Optional[int] = None
     episodeCount: int
     rating: float = 0.0
     isFavorited: bool = False
@@ -248,7 +249,7 @@ class BangumiDetails(BangumiIntro):
     episodes: List[BangumiEpisode] = []
     summary: Optional[str] = ""
     metadata: List[str] = []
-    bangumiUrl: Optional[str] = None
+    year: Optional[int] = None
     userRating: int = 0
     favoriteStatus: Optional[str] = None
     comment: Optional[str] = None
@@ -519,6 +520,8 @@ async def search_anime_for_dandan(
     for res in db_results:
         dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
         dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+        year = res.get('year')
+        start_date_str = f"{year}-01-01T00:00:00Z" if year else (res.get('startDate').isoformat() if res.get('startDate') else None)
 
         animes.append(DandanSearchAnimeItem(
             animeId=res['animeId'],
@@ -527,7 +530,8 @@ async def search_anime_for_dandan(
             type=dandan_type,
             typeDescription=dandan_type_desc,
             imageUrl=res.get('imageUrl'),
-            startDate=res.get('startDate'),
+            startDate=start_date_str,
+            year=year,
             episodeCount=res.get('episodeCount', 0),
             # 显式设置默认值以提高代码清晰度
             rating=0.0,  # 当前系统未实现评级功能
@@ -600,7 +604,7 @@ async def get_bangumi_details(
         type=dandan_type,
         typeDescription=dandan_type_desc,
         episodes=formatted_episodes,
-        bangumiUrl=anime_data.get('bangumiUrl'),
+        year=anime_data.get('year'),
         summary="暂无简介",
     )
 

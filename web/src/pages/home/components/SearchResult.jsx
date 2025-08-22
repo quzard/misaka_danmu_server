@@ -166,6 +166,7 @@ export const SearchResult = () => {
           // 关键修正：如果用户搜索时指定了季度，则优先使用该季度
           // 否则，使用从单个结果中解析出的季度
           season: searchSeason !== null ? searchSeason : item.season,
+          year: item.year, // 新增年份
           imageUrl: item.imageUrl,
           doubanId: item.doubanId,
           currentEpisodeIndex: item.currentEpisodeIndex,
@@ -192,6 +193,7 @@ export const SearchResult = () => {
           // 关键修正：如果用户搜索时指定了季度，则优先使用该季度
           // 否则，使用从单个结果中解析出的季度
           season: searchSeason !== null ? searchSeason : editItem.season,
+          year: editItem.year, // 新增年份
           imageUrl: editItem.imageUrl,
           doubanId: editItem.doubanId,
           currentEpisodeIndex: editItem.currentEpisodeIndex,
@@ -245,6 +247,7 @@ export const SearchResult = () => {
                   mediaId: item.mediaId,
                   type: item.type,
                   season: item.season,
+                  year: item.year,
                   imageUrl: item.imageUrl,
                   doubanId: item.doubanId,
                   currentEpisodeIndex: item.currentEpisodeIndex,

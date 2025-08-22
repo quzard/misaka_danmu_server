@@ -19,8 +19,8 @@ class Anime(Base):
     imageUrl: Mapped[Optional[str]] = mapped_column("image_url", String(512))
     localImagePath: Mapped[Optional[str]] = mapped_column("local_image_path", String(512))
     season: Mapped[int] = mapped_column(Integer, default=1)
-    episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer)
-    sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", String(512))
+    episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer, nullable=True)
+    year: Mapped[Optional[int]] = mapped_column("year", Integer, nullable=True)
     createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP, server_default=func.now(), default=datetime.now)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")

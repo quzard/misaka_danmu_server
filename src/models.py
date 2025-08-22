@@ -81,6 +81,7 @@ class ImportRequest(BaseModel):
     animeTitle: str = Field(..., description="要存储在数据库中的番剧标题")
     type: str = Field(..., description="媒体类型, e.g., 'tv_series', 'movie'")
     season: Optional[int] = Field(1, description="季度数，默认为1")
+    year: Optional[int] = Field(None, description="发行年份")
     tmdbId: Optional[str] = Field(None, description="关联的TMDB ID (可选)")
     imageUrl: Optional[str] = Field(None, description="封面图片URL")
     doubanId: Optional[str] = None
@@ -108,6 +109,7 @@ class AnimeDetailUpdate(BaseModel):
     title: str = Field(..., min_length=1, description="新的影视名称")
     type: str
     season: int = Field(..., ge=0, description="新的季度")
+    year: Optional[int] = Field(None, description="发行年份")
     episodeCount: Optional[int] = Field(None, ge=1, description="新的集数")
     imageUrl: Optional[str] = None
     tmdbId: Optional[str] = None
@@ -135,6 +137,7 @@ class AnimeFullDetails(BaseModel):
     title: str
     type: str
     season: int
+    year: Optional[int] = None
     episodeCount: Optional[int] = None
     localImagePath: Optional[str] = None
     imageUrl: Optional[str] = None
@@ -184,6 +187,7 @@ class LibraryAnimeInfo(BaseModel):
     title: str
     type: str
     season: int
+    year: Optional[int] = None
     episodeCount: int
     sourceCount: int
     createdAt: datetime
@@ -274,6 +278,7 @@ class EditedImportRequest(BaseModel):
     animeTitle: str
     mediaType: str
     season: int
+    year: Optional[int] = None
     imageUrl: Optional[str] = None
     doubanId: Optional[str] = None
     tmdbId: Optional[str] = None

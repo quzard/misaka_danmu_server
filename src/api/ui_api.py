@@ -942,30 +942,6 @@ async def get_server_logs(current_user: models.User = Depends(security.get_curre
     """获取存储在内存中的最新日志条目。"""
     return get_logs()
 
-# --- Dynamic Metadata Source Router Inclusion ---
-# This approach avoids hardcoding each metadata source API, making the system more modular.
-# It dynamically discovers and registers the API routers for all available metadata sources.
-METADATA_PROVIDERS = ['bangumi', 'douban', 'imdb', 'tmdb', 'tvdb']
-
-for provider_name in METADATA_PROVIDERS:
-    try:
-        # Dynamically import the API module for the provider
-        module_name = f"src.api.{provider_name}_api"
-        api_module = importlib.import_module(module_name)
-        
-        # Check if the module has a 'router' attribute
-        if hasattr(api_module, 'router'):
-            # Include the router with a consistent prefix and tag
-            tag_name = f"UI - {provider_name.upper()}"
-            router.include_router(api_module.router, prefix=f"/{provider_name}", tags=[tag_name])
-            logger.info(f"Successfully registered API router for metadata source: {provider_name}")
-        else:
-            logger.warning(f"Metadata source API module '{module_name}' does not have a 'router' attribute.")
-    except ImportError:
-        logger.warning(f"Could not find an API module for metadata source: '{provider_name}' (expected at {module_name}.py)")
-    except Exception as e:
-        logger.error(f"Failed to register API router for metadata source '{provider_name}': {e}", exc_info=True)
-
 @router.post("/scrapers/{providerName}/actions/{actionName}", summary="执行搜索源的自定义操作")
 async def execute_scraper_action(
     providerName: str,
@@ -1655,6 +1631,7 @@ async def import_from_provider(
         animeTitle=request_data.animeTitle,
         mediaType=request_data.type,
         season=request_data.season,
+        year=request_data.year,
         currentEpisodeIndex=request_data.currentEpisodeIndex,
         imageUrl=request_data.imageUrl,
         doubanId=request_data.doubanId,

@@ -28,6 +28,7 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
             Anime.title,
             Anime.type,
             Anime.season,
+            Anime.year,
             Anime.createdAt.label("createdAt"),
             case(
                 (Anime.type == 'movie', 1),
@@ -65,7 +66,7 @@ async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Opti
     row = result.mappings().first()
     return dict(row) if row else None
 
-async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str]) -> int:
+async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None) -> int:
     """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
     stmt = select(Anime).where(Anime.title == title, Anime.season == season)
     result = await session.execute(stmt)
@@ -77,6 +78,9 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
             update_values["imageUrl"] = image_url
         if not anime.localImagePath and local_image_path:
             update_values["localImagePath"] = local_image_path
+        # 新增：如果已有条目没有年份，则更新
+        if not anime.year and year:
+            update_values["year"] = year
         if update_values:
             await session.execute(update(Anime).where(Anime.id == anime.id).values(**update_values))
             await session.flush() # 使用 flush 代替 commit，以在事务中保持对象状态
@@ -85,7 +89,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     # Create new anime
     new_anime = Anime(
         title=title, type=media_type, season=season, imageUrl=image_url,
-        localImagePath=local_image_path, createdAt=datetime.now()
+        localImagePath=local_image_path, createdAt=datetime.now(), year=year
     )
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
@@ -109,6 +113,7 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.type = update_data.type
     anime.season = update_data.season
     anime.episodeCount = update_data.episodeCount
+    anime.year = update_data.year
     anime.imageUrl = update_data.imageUrl
 
     # Update or create AnimeMetadata
@@ -272,6 +277,7 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
             Anime.type,
             Anime.imageUrl.label("imageUrl"),
             Anime.createdAt.label("startDate"),
+            Anime.year,
             func.count(distinct(Episode.id)).label("episodeCount"),
             AnimeMetadata.bangumiId.label("bangumiId")
         )
@@ -370,7 +376,7 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
     anime_stmt = (
         select(
             Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"),
-            Anime.createdAt.label("startDate"), Anime.sourceUrl.label("bangumiUrl"),
+            Anime.createdAt.label("startDate"), Anime.year,
             func.count(distinct(Episode.id)).label("episodeCount"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
@@ -605,7 +611,7 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
 async def get_anime_source_info(session: AsyncSession, source_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"), AnimeSource.mediaId.label("mediaId"),
+            AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"), AnimeSource.mediaId.label("mediaId"), Anime.year,
             Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
@@ -683,7 +689,7 @@ async def clear_episode_comments(session: AsyncSession, episode_id: int):
 async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            Anime.id.label("animeId"), Anime.title, Anime.type, Anime.season, Anime.localImagePath.label("localImagePath"),
+            Anime.id.label("animeId"), Anime.title, Anime.type, Anime.season, Anime.year, Anime.localImagePath.label("localImagePath"),
             Anime.episodeCount.label("episodeCount"), Anime.imageUrl.label("imageUrl"), AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.tmdbEpisodeGroupId.label("tmdbEpisodeGroupId"),
             AnimeMetadata.bangumiId.label("bangumiId"), AnimeMetadata.tvdbId.label("tvdbId"), AnimeMetadata.doubanId.label("doubanId"), AnimeMetadata.imdbId.label("imdbId"),
             AnimeAlias.nameEn.label("nameEn"), AnimeAlias.nameJp.label("nameJp"), AnimeAlias.nameRomaji.label("nameRomaji"), AnimeAlias.aliasCn1.label("aliasCn1"),
