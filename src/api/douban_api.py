@@ -121,8 +121,9 @@ async def search_douban(
     """通过关键词在豆瓣网站上搜索影视作品。"""
     return await _search_douban_json_api(keyword, client) # This function is already good
 
-async def get_douban_details_logic(douban_id: str, client: httpx.AsyncClient) -> "models.MetadataDetailsResponse":
+async def get_douban_details_logic(douban_id: str, media_type: str, client: httpx.AsyncClient) -> models.MetadataDetailsResponse:
     """从豆瓣详情页抓取作品信息。"""
+    logger.info(f"豆瓣: 正在获取详情 douban_id={douban_id}, media_type={media_type}")
     details_url = f"https://movie.douban.com/subject/{douban_id}/"
     try:
         response = await client.get(details_url)
@@ -162,13 +163,15 @@ async def get_douban_details_logic(douban_id: str, client: httpx.AsyncClient) ->
         # 去重
         aliases_cn = list(dict.fromkeys(aliases_cn))
 
-        return {
-            "id": douban_id,
-            "imdb_id": imdb_id,
-            "name_en": name_en,
-            "name_jp": name_jp,
-            "aliases_cn": aliases_cn,
-        }
+        return models.MetadataDetailsResponse(
+            id=douban_id,
+            doubanId=douban_id,
+            title=title,
+            imdbId=imdb_id,
+            nameEn=name_en,
+            nameJp=name_jp,
+            aliasesCn=aliases_cn,
+        )
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 403:
@@ -179,12 +182,14 @@ async def get_douban_details_logic(douban_id: str, client: httpx.AsyncClient) ->
         logger.error(f"解析豆瓣详情页时发生错误: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="解析豆瓣详情页失败。")
 
-@router.get("/details/{douban_id}", response_model=models.MetadataDetailsResponse, summary="获取豆瓣作品详情")
+@router.get("/details/{media_type}/{douban_id}", response_model=models.MetadataDetailsResponse, summary="获取豆瓣作品详情")
 async def get_douban_details(
-    douban_id: str = Path(...), client: httpx.AsyncClient = Depends(get_douban_client)
+    media_type: str = Path(..., description="媒体类型, 'tv' 或 'movie'"),
+    douban_id: str = Path(...),
+    client: httpx.AsyncClient = Depends(get_douban_client)
 ):
     """获取指定豆瓣ID的作品详情，主要用于提取别名。"""
-    return await _scrape_douban_details(douban_id, client)
+    return await get_douban_details_logic(douban_id, media_type, client)
 
 async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
     """从豆瓣获取别名。"""
@@ -203,31 +208,8 @@ async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[
                 best_subject_id = subjects[0]['id']
 
         if best_subject_id:
-            details = await _scrape_douban_details(best_subject_id, client)
-            local_aliases.update(details.get('aliases_cn', []))
-        logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
-    except Exception as e:
-        logger.warning(f"豆瓣辅助搜索失败: {e}")
-    return {alias for alias in local_aliases if alias}
-
-async def search_douban_aliases(keyword: str, client: httpx.AsyncClient) -> Set[str]:
-    """从豆瓣获取别名。"""
-    local_aliases: Set[str] = set()
-    try:
-        movie_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "movie", "tag": keyword, "page_limit": 1, "page_start": 0})
-        tv_task = client.get("https://movie.douban.com/j/search_subjects", params={"type": "tv", "tag": keyword, "page_limit": 1, "page_start": 0})
-        movie_res, tv_res = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
-
-        best_subject_id = None
-        if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
-            if subjects := movie_res.json().get('subjects', []):
-                best_subject_id = subjects[0]['id']
-        if not best_subject_id and isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
-            if subjects := tv_res.json().get('subjects', []):
-                best_subject_id = subjects[0]['id']
-
-        if best_subject_id:
-            details = await get_douban_details_logic(best_subject_id, client)
+            # media_type 在此不影响逻辑，但为了函数签名一致性而传递
+            details = await get_douban_details_logic(best_subject_id, "tv", client)
             local_aliases.update(details.aliasesCn or [])
         logger.info(f"豆瓣辅助搜索成功，找到别名: {[a for a in local_aliases if a]}")
     except Exception as e:
