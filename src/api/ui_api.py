@@ -2078,7 +2078,7 @@ async def get_rate_limit_status(
     scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """获取所有流控规则的当前状态，包括全局和各源的配额使用情况。"""
-    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "false")
+    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "true")
     global_enabled = global_enabled_str.lower() == 'true'
     global_limit_str = await config_manager.get("globalRateLimitCount", "50")
     global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50

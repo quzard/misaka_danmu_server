@@ -962,7 +962,7 @@ async def get_comments_for_dandan(
     新增：支持 withRelated 参数，用于聚合所有源的弹幕。
     兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
-    aggregation_enabled_str = await config_manager.get('danmakuAggregationEnabled', 'true')
+    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'false')
     aggregation_enabled = aggregation_enabled_str.lower() == 'true'
 
     episode_id_str = str(episodeId)
@@ -1009,7 +1009,7 @@ async def get_comments_for_dandan(
     comments_data = list(unique_comments.values())
 
     # 应用输出数量限制
-    limit_str = await config_manager.get('danmakuOutputLimitPerSource', '-1')
+    limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
     try:
         limit = int(limit_str)
     except (ValueError, TypeError):
