@@ -20,15 +20,10 @@ import {
   getAnimeInfoAsSource,
   getAnimeLibrary,
   getBgmSearch,
-  getBgmDetail,
-  getDoubanDetail,
   getDoubanSearch,
   getEgidSearch,
-  getImdbDetail,
   getImdbSearch,
-  getTmdbDetail,
   getTmdbSearch,
-  getTvdbDetail,
   getTvdbSearch,
   refreshPoster,
   setAnimeDetail,
@@ -760,8 +755,10 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'tvdb',
-                        mediaType:
-                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
+                      mediaType:
+                        type === DANDAN_TYPE_MAPPING.tvseries
+                          ? 'series'
+                          : 'movie',
                       currentId: tvdbId,
                     })
                   }}
@@ -786,8 +783,10 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'douban',
-                        mediaType:
-                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
+                      mediaType:
+                        type === DANDAN_TYPE_MAPPING.tvseries
+                          ? 'series'
+                          : 'movie',
                       currentId: doubanId,
                     })
                   }}
@@ -812,8 +811,10 @@ export const Library = () => {
                   onClick={() => {
                     handleSearchAsId({
                       source: 'imdb',
-                        mediaType:
-                          type === DANDAN_TYPE_MAPPING.tvseries ? 'series' : 'movie',
+                      mediaType:
+                        type === DANDAN_TYPE_MAPPING.tvseries
+                          ? 'series'
+                          : 'movie',
                       currentId: imdbId,
                     })
                   }}
@@ -908,9 +909,10 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getTmdbDetail({
+                        const res = await getAnimeInfoAsSource({
+                          source: 'tmdb',
                           mediaType: type === 'tv_series' ? 'tv' : type,
-                          tmdbId: item.id,
+                          currentId: item.id,
                         })
                         form.setFieldsValue({ tmdbId: res.data.id })
                         setFetchedMetadata(res.data)
@@ -962,10 +964,9 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getImdbDetail({
-                          mediaType:
-                            item.type === 'tv_series' ? 'series' : 'movie',
-                          imdbId: item.id,
+                        const res = await getAnimeInfoAsSource({
+                          source: 'imdb',
+                          currentId: item.id,
                         })
                         form.setFieldsValue({ imdbId: res.data.id })
                         setFetchedMetadata(res.data)
@@ -1017,9 +1018,9 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getTvdbDetail({
-                          mediaType: item.type === 'tv_series' ? 'series' : 'movie',
-                          tvdbId: item.id,
+                        const res = await getAnimeInfoAsSource({
+                          source: 'tvdb',
+                          currentId: item.id,
                         })
                         form.setFieldsValue({ tvdbId: res.data.id })
                         setFetchedMetadata(res.data)
@@ -1158,8 +1159,9 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getBgmDetail({
-                          bangumiId: item.id,
+                        const res = await getAnimeInfoAsSource({
+                          source: 'bangumi',
+                          currentId: item.id,
                         })
                         form.setFieldsValue({ bangumiId: res.data.id })
                         setFetchedMetadata(res.data)
@@ -1211,8 +1213,9 @@ export const Library = () => {
                     <Button
                       type="primary"
                       onClick={async () => {
-                        const res = await getDoubanDetail({
-                          doubanId: item.id,
+                        const res = await getAnimeInfoAsSource({
+                          source: 'douban',
+                          currentId: item.id,
                         })
                         form.setFieldsValue({ doubanId: res.data.id })
                         setFetchedMetadata(res.data)
