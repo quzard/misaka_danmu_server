@@ -908,29 +908,34 @@ async def update_scraper_config(
     payload: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
-    # 1. 单独处理 useProxy 字段，它更新的是 scrapers 表
-    if 'useProxy' in payload:
-        use_proxy_value = bool(payload.pop('useProxy', False))
-        await crud.update_scraper_proxy(session, providerName, use_proxy_value)
+    """更新指定搜索源的配置，包括代理设置和其他可配置字段。"""
+    try:
+        # 1. 单独处理 useProxy 字段，它更新的是 scrapers 表
+        if 'useProxy' in payload:
+            use_proxy_value = bool(payload.pop('useProxy', False))
+            await crud.update_scraper_proxy(session, providerName, use_proxy_value)
 
-    # 辅助函数，用于将 camelCase 转换为 snake_case
-    def to_snake(camel_str):
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+        # 辅助函数，用于将 camelCase 转换为 snake_case
+        def to_snake(camel_str):
+            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
+            return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
-    # 2. 处理其他所有键值对配置，它们更新的是 config 表
-    for camel_key, value in payload.items():
-        db_key = to_snake(camel_key)
-        # 对布尔值进行特殊处理
-        value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
-        await crud.update_config_value(session, db_key, value_to_save)
-        config_manager.invalidate(db_key)
-    
-    logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置。")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+        # 2. 处理其他所有键值对配置，它们更新的是 config 表
+        for camel_key, value in payload.items():
+            db_key = to_snake(camel_key)
+            value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
+            await crud.update_config_value(session, db_key, value_to_save)
+            config_manager.invalidate(db_key)
+        
+        # 3. 在所有数据库操作完成后，统一提交事务
+        await session.commit()
+        logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置。")
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"更新搜索源 '{providerName}' 配置时出错: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
 
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")
 async def get_server_logs(current_user: models.User = Depends(security.get_current_user)):

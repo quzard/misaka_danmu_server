@@ -1,5 +1,6 @@
 import axios from 'axios'
 import Cookies from 'js-cookie'
+import { message } from 'antd'
 
 const getURL = url => {
   return {
@@ -30,6 +31,18 @@ instance.interceptors.response.use(
   res => res,
   error => {
     console.log('resError', error.response?.data, error.response?.config.url)
+    // 新增：全局处理 401 未授权错误
+    // 当任何API请求返回401时，说明token已失效
+    if (error.response && error.response.status === 401) {
+      // 清除过期的 token
+      Cookies.remove('token')
+      // 提示用户
+      message.error('登录已过期，请重新登录。')
+      // 延迟一小段时间后重定向到登录页，以确保用户能看到提示
+      setTimeout(() => {
+        window.location.href = '/login'
+      }, 1500)
+    }
     return Promise.reject(error.response?.data || {})
   }
 )
