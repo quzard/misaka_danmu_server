@@ -2095,7 +2095,10 @@ async def get_rate_limit_status(
         seconds_until_reset = max(0, period_seconds - int(time_since_reset.total_seconds()))
 
     provider_items = []
-    for provider_name in scraper_manager.get_all_provider_names():
+    # 修正：从数据库获取所有已配置的搜索源，而不是调用一个不存在的方法
+    all_scrapers = await crud.get_all_scraper_settings(session)
+    for scraper_setting in all_scrapers:
+        provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
         
         quota: Union[int, str] = "∞"
