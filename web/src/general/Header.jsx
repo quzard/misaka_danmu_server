@@ -170,7 +170,7 @@ const DesktopHeader = ({ activeKey }) => {
 
   const onLogout = async () => {
     await logout()
-    clearStorage(DANMU_API_TOKEN_KEY)
+    Cookies.remove('token')
     navigate(RoutePaths.LOGIN)
   }
   return (
