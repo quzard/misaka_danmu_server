@@ -602,7 +602,8 @@ async def refresh_anime(
         task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
-            task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"]
+            task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"],
+            rate_limiter=rate_limiter
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
@@ -1690,7 +1691,8 @@ async def manual_import_episode(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """提交一个后台任务，从给定的URL手动导入弹幕。"""
     source_info = await crud.get_anime_source_info(session, source_id)
@@ -1716,58 +1718,14 @@ async def manual_import_episode(
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
 
-async def manual_import_task(
-    source_id: int, title: str, episode_index: int, url: str, provider_name: str,
-    progress_callback: Callable, session: AsyncSession, manager: ScraperManager
-):
-    """后台任务：从URL手动导入弹幕。"""
-    logger.info(f"开始手动导入任务: source_id={source_id}, title='{title}', url='{url}'")
-    await progress_callback(10, "正在准备导入...")
-    
-    try:
-        scraper = manager.get_scraper(provider_name)
-        
-        provider_episode_id = None
-        if hasattr(scraper, 'get_ids_from_url'): provider_episode_id = await scraper.get_ids_from_url(url)
-        elif hasattr(scraper, 'get_danmaku_id_from_url'): provider_episode_id = await scraper.get_danmaku_id_from_url(url)
-        elif hasattr(scraper, 'get_tvid_from_url'): provider_episode_id = await scraper.get_tvid_from_url(url)
-        elif hasattr(scraper, 'get_vid_from_url'): provider_episode_id = await scraper.get_vid_from_url(url)
-        
-        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
-
-        # 修正：处理 Bilibili 和 MGTV 返回的字典ID，并将其格式化为 get_comments 期望的字符串格式。
-        episode_id_for_comments = provider_episode_id
-        if isinstance(provider_episode_id, dict):
-            if provider_name == 'bilibili':
-                episode_id_for_comments = f"{provider_episode_id.get('aid')},{provider_episode_id.get('cid')}"
-            elif provider_name == 'mgtv':
-                # MGTV 的 get_comments 期望 "cid,vid"
-                episode_id_for_comments = f"{provider_episode_id.get('cid')},{provider_episode_id.get('vid')}"
-            else:
-                # 对于其他可能的字典返回，将其字符串化
-                episode_id_for_comments = str(provider_episode_id)
-
-        await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
-        comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
-        if not comments: raise TaskSuccess("未找到任何弹幕。")
-
-        await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.get_or_create_episode(session, source_id, episode_index, title, url, episode_id_for_comments)
-        added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
-    except TaskSuccess:
-        raise
-    except Exception as e:
-        logger.error(f"手动导入任务失败: {e}", exc_info=True)
-        raise
-
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED, summary="从指定数据源导入弹幕", response_model=UITaskResponse)
 async def import_from_provider(
     request_data: models.ImportRequest,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     try:
         # 在启动任务前检查provider是否存在
@@ -1803,7 +1761,8 @@ async def import_from_provider(
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
         session=session,
-        manager=scraper_manager
+        manager=scraper_manager,
+        rate_limiter=rate_limiter
     )
     
     # 构造任务标题
@@ -1822,7 +1781,8 @@ async def import_edited_episodes(
     request_data: models.EditedImportRequest,
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager)
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
@@ -1830,7 +1790,8 @@ async def import_edited_episodes(
         request_data=request_data,
         progress_callback=callback,
         session=session,
-        manager=scraper_manager
+        manager=scraper_manager,
+        rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
@@ -1927,7 +1888,8 @@ async def import_from_url(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     provider = request_data.provider
     url = request_data.url
@@ -1987,8 +1949,9 @@ async def import_from_url(
     task_coro = lambda session, callback: generic_import_task(
         provider=provider, media_id=media_id_for_scraper, anime_title=title, # type: ignore
         media_type=request_data.media_type, season=request_data.season,
-        current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None,
-        progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager
+        current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None, bangumi_id=None,
+        progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
+        rate_limiter=rate_limiter
     )
     
     task_title = f"URL导入: {title} ({provider})"

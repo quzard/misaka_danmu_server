@@ -8,6 +8,7 @@ import httpx
 
 from .. import crud, models
 from .base import BaseJob
+from ..rate_limiter import RateLimiter
 from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
 
@@ -15,9 +16,14 @@ class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoMap"
     job_name = "TMDB自动映射与更新"
 
-    # Add this __init__ to match the base class
+    # 修正：此任务不涉及弹幕下载，因此移除不必要的 rate_limiter 依赖
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager):
-        super().__init__(session_factory, task_manager, scraper_manager)
+        # 由于此任务的依赖项与基类不同，我们不调用 super().__init__，
+        # 而是直接初始化此任务所需的属性。
+        self._session_factory = session_factory
+        self.task_manager = task_manager
+        self.scraper_manager = scraper_manager
+        self.logger = logging.getLogger(self.__class__.__name__)
 
 
     async def _create_tmdb_client(self, session: AsyncSession) -> httpx.AsyncClient:

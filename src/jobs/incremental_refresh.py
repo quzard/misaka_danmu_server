@@ -15,68 +15,53 @@ class IncrementalRefreshJob(BaseJob):
 
     async def run(self, session: AsyncSession, progress_callback: Callable):
         """定时任务的核心逻辑: 按最新分集ID+1 抓取新集"""
-        await progress_callback(0, "正在获取所有数据源...")
+        await progress_callback(0, "正在获取所有启用的追更源...")
         source_ids = await crud.get_sources_with_incremental_refresh_enabled(session)
         total_sources = len(source_ids)
         if not total_sources:
-            raise TaskSuccess("没有找到任何数据源，任务结束。")
+            raise TaskSuccess("没有找到任何启用的追更源，任务结束。")
 
-        self.logger.info(f"开始对 {total_sources} 个数据源进行增量更新检查。")
-        await progress_callback(5, f"找到 {total_sources} 个数据源，开始检查...")
+        self.logger.info(f"定时追更：找到 {total_sources} 个源，将为每个源创建独立的导入任务。")
+        await progress_callback(10, f"找到 {total_sources} 个源，正在创建任务...")
 
+        submitted_count = 0
         for i, source_id in enumerate(source_ids):
-            source_info = await crud.get_anime_source_info(session, source_id)
-            if not source_info:
-                self.logger.warning(f"无法找到数据源(id={source_id})的信息，跳过。")
-                continue
+            # 为每个任务使用独立的会话，避免主会话被长时间占用
+            async with self._session_factory() as task_session:
+                source_info = await crud.get_anime_source_info(task_session, source_id)
+                if not source_info:
+                    self.logger.warning(f"无法找到数据源(id={source_id})的信息，跳过。")
+                    continue
 
-            anime_title = source_info.get("title", "未知作品")
-            progress = 5 + int(((i + 1) / total_sources) * 90)
-            await progress_callback(progress, f"正在检查: {anime_title} ({i+1}/{total_sources})")
+                # 获取当前最新分集
+                episodes = await crud.get_episodes_for_source(task_session, source_id)
+                latest_episode_index = max((ep['episodeIndex'] for ep in episodes), default=0)
+                
+                next_episode_index = latest_episode_index + 1
+                self.logger.info(f"为 '{source_info['title']}' (源ID: {source_id}) 尝试获取第 {next_episode_index} 集...")
 
-            # 获取当前最新分集
-            episodes = await crud.get_episodes_for_source(session, source_id)
-            latest_episode_index = max(ep['episodeIndex'] for ep in episodes) if episodes else 0
-            
-            next_episode_index = latest_episode_index + 1
-            self.logger.info(f"为 '{anime_title}' (源ID: {source_id}) 尝试获取第 {next_episode_index} 集...")
+                task_title = f"定时追更: {source_info['title']} - S{source_info.get('season', 1):02d}E{next_episode_index:02d}"
 
-            try:
-                # 调用导入任务，只导入指定的一集
-                await generic_import_task(
-                    provider=source_info["providerName"],
-                    mediaId=source_info["mediaId"],
-                    animeTitle=anime_title,
-                    mediaType=source_info["type"],
-                    season=source_info.get("season", 1),
-                    year=source_info.get("year"),
-                    currentEpisodeIndex=next_episode_index,
-                    imageUrl=None,
-                    doubanId=None,
-                    tmdbId=source_info.get("tmdbId"),
-                    imdbId=None,
-                    tvdbId=None,
-                    bangumiId=source_info.get("bangumiId"),
-                    progress_callback=progress_callback,
-                    session=session,
-                    manager=self.scraper_manager,
-                    task_manager=self.task_manager,
-                )
-            except TaskSuccess as e:
-                message = str(e)
-                if "未能获取到任何分集" in message:
-                    # This is considered a "failure" for incremental refresh
-                    new_failure_count = await crud.increment_incremental_refresh_failures(session, source_id)
-                    self.logger.warning(f"'{anime_title}' (源ID: {source_id}) 未找到新分集，失败次数: {new_failure_count}。")
-                    if new_failure_count >= 15:
-                        await crud.disable_incremental_refresh(session, source_id)
-                        self.logger.info(f"'{anime_title}' (源ID: {source_id}) 已连续15次未找到新分集，已自动取消追更。")
-                else:
-                    # Any other success message means a new episode was found (even if with 0 comments)
-                    await crud.reset_incremental_refresh_failures(session, source_id)
-                    self.logger.info(f"为 '{anime_title}' (源ID: {source_id}) 的增量更新成功: {message}")
-            except Exception as e:
-                self.logger.error(f"为 '{anime_title}' (源ID: {source_id}) 的增量更新失败: {e}", exc_info=True)
+                # 使用闭包捕获当前循环的变量
+                def create_task_coro_factory(info, next_ep):
+                    return lambda s, cb: generic_import_task(
+                        provider=info["providerName"], mediaId=info["mediaId"], animeTitle=info["title"],
+                        mediaType=info["type"], season=info.get("season", 1), year=info.get("year"),
+                        currentEpisodeIndex=next_ep, imageUrl=None, doubanId=None,
+                        tmdbId=info.get("tmdbId"), imdbId=None, tvdbId=None, bangumiId=info.get("bangumiId"),
+                        progress_callback=cb, session=s, manager=self.scraper_manager,
+                        task_manager=self.task_manager, rate_limiter=self.rate_limiter
+                    )
+                
+                try:
+                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index), task_title)
+                    submitted_count += 1
+                except ValueError as e:
+                    self.logger.info(f"跳过创建任务 '{task_title}'，因为它已在队列中或正在运行。")
+                except Exception as e:
+                    self.logger.error(f"为源 '{source_info['title']}' (ID: {source_id}) 创建追更任务时失败: {e}")
 
-        await progress_callback(100, "所有数据源检查完毕。")
-        raise TaskSuccess(f"自动增量更新任务完成，共检查了 {total_sources} 个数据源。")
+            progress = 10 + int(((i + 1) / total_sources) * 90)
+            await progress_callback(progress, f"已处理 {i+1}/{total_sources} 个源")
+
+        raise TaskSuccess(f"定时追更任务分发完成，共为 {submitted_count} 个源创建了新的导入任务。")

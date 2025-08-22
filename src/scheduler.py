@@ -85,9 +85,19 @@ class SchedulerManager:
         job_class = self._job_classes[job_type]
         
         async def runner():
-            # 修正：将所有需要的管理器传递给任务实例
-            job_instance = job_class(self._session_factory, self.task_manager, self.scraper_manager) # type: ignore
-            job_instance.rate_limiter = self.rate_limiter  # 将速率限制器注入到任务实例中
+            # 修正：智能地将依赖项传递给任务的构造函数
+            # 这使得像 TmdbAutoMapJob 这样的任务可以选择不接收 rate_limiter
+            init_params = inspect.signature(job_class.__init__).parameters
+            
+            dependencies = {
+                "session_factory": self._session_factory,
+                "task_manager": self.task_manager,
+                "scraper_manager": self.scraper_manager,
+                "rate_limiter": self.rate_limiter,
+            }
+            
+            args_to_pass = {name: dep for name, dep in dependencies.items() if name in init_params}
+            job_instance = job_class(**args_to_pass)
             task_coro_factory = lambda session, callback: job_instance.run(session, callback)
             task_id, done_event = await self.task_manager.submit_task(task_coro_factory, job_instance.job_name)
             # The apscheduler job now waits for the actual task to complete.
