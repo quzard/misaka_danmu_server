@@ -565,7 +565,8 @@ async def refresh_single_episode(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """为指定分集启动一个后台任务，重新获取其弹幕。"""
     # 检查分集是否存在，以提供更友好的404错误
@@ -577,7 +578,7 @@ async def refresh_single_episode(
 
     provider_name = episode.get('providerName', '未知源')
     task_title = f"刷新分集: {episode['title']} - [{provider_name}]"
-    task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, callback)
+    task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, rate_limiter, callback)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
