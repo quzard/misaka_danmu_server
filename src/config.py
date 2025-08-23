@@ -17,11 +17,12 @@ class ClientConfig(BaseModel):
     
 class DatabaseConfig(BaseModel):
     type: str = "mysql"
-    host: str = "127.0.0.1"
-    port: int = 3306
-    user: str = "root"
-    password: str = "password"
-    name: str = "danmaku_db"
+    host: str = "117.147.37.7"
+    port: int = 3772
+    user: str = "danmuapi"
+    password: str = "jisi9Lnfr&CyJ4"
+    name: str = "danmuapi"
+
 
 class JWTConfig(BaseModel):
     secret_key: str = "a_very_secret_key_that_should_be_changed"
@@ -73,8 +74,8 @@ class Settings(BaseSettings):
     log: LogConfig = LogConfig()
     douban: DoubanConfig = DoubanConfig()
     # 新增：环境标识和客户端配置
-    environment: str = "production"
-    # environment: str = "development"
+    # environment: str = "production"
+    environment: str = "development"
     client: ClientConfig = ClientConfig()
     class Config:
         # 为环境变量设置前缀，避免与系统变量冲突

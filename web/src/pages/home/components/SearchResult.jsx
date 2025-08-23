@@ -749,7 +749,7 @@ export const SearchResult = () => {
         </div>
         <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
           <div className="shrink-0">集数区间:</div>
-          <div className="w-full flex items-center justify-between">
+          <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
             <span>从</span>
             <InputNumber
               value={range[0]}
@@ -767,6 +767,7 @@ export const SearchResult = () => {
             />
             <Button
               type="primary"
+              block
               onClick={() => {
                 console.log(range)
                 setEditEpisodeList(list => {
