@@ -322,9 +322,8 @@ class BangumiMetadataSource(BaseMetadataSource):
                 # 浏览器在打开新窗口时会自动使用当前域名和端口进行补全。
                 # 这使得即使用户没有配置自定义域名，授权流程也能正常工作。
                 redirect_uri = f"{(base_url or '').rstrip('/')}/api/metadata/bangumi/auth/callback"
-                state = secrets.token_urlsafe(16)
-                await crud.create_oauth_state(session, state, user.id)
-                await session.commit()
+                # 修正：调用正确的 crud 函数，该函数应接受 session 和 user_id，并返回 state
+                state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
                 auth_url = f"https://bgm.tv/oauth/authorize?{urlencode(params)}"
                 return {"url": auth_url}
@@ -335,4 +334,3 @@ class BangumiMetadataSource(BaseMetadataSource):
             return {"message": "注销成功"}
         else:
             return await super().execute_action(action_name, payload, user)
-

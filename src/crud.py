@@ -1333,8 +1333,15 @@ async def update_scheduled_task_run_times(session: AsyncSession, task_id: str, l
 
 # --- Task History ---
 
-async def create_task_in_history(session: AsyncSession, task_id: str, title: str, status: str, description: str):
-    new_task = TaskHistory(id=task_id, title=title, status=status, description=description)
+async def create_task_in_history(
+    session: AsyncSession,
+    task_id: str,
+    title: str,
+    status: str,
+    description: str,
+    scheduled_task_id: Optional[str] = None
+):
+    new_task = TaskHistory(id=task_id, title=title, status=status, description=description, scheduledTaskId=scheduled_task_id)
     session.add(new_task)
     await session.commit()
 
@@ -1403,6 +1410,31 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount
+
+async def get_last_run_result_for_scheduled_task(session: AsyncSession, scheduled_task_id: str) -> Optional[Dict[str, Any]]:
+    """获取指定定时任务的最近一次运行结果。"""
+    stmt = (
+        select(TaskHistory)
+        .where(TaskHistory.scheduledTaskId == scheduled_task_id)
+        .order_by(TaskHistory.createdAt.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    task_run = result.scalar_one_or_none()
+    if not task_run:
+        return None
+    
+    # 返回一个与 models.TaskInfo 兼容的字典
+    return {
+        "id": task_run.id,
+        "title": task_run.title,
+        "status": task_run.status,
+        "progress": task_run.progress,
+        "description": task_run.description,
+        "createdAt": task_run.createdAt,
+        "updatedAt": task_run.updatedAt,
+        "finishedAt": task_run.finishedAt,
+    }
 
 # --- External API Logging ---
 

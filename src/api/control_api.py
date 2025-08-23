@@ -831,18 +831,19 @@ async def list_scheduled_tasks(
 ):
     """获取所有已配置的定时任务及其当前状态。"""
     tasks = await scheduler_manager.get_all_tasks()
-    return tasks
+    # 修正：将 'id' 键重命名为 'taskId' 以保持API一致性
+    return [{**task, 'taskId': task.pop('id')} for task in tasks]
 
-@scheduler_router.get("/{task_id}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
+@scheduler_router.get("/{taskId}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
 async def get_scheduled_task_last_result(
-    task_id: str = Path(..., description="定时任务的ID"),
+    taskId: str = Path(..., description="定时任务的ID"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
     获取指定定时任务的最近一次运行结果。
     如果任务从未运行过，将返回 404 Not Found。
     """
-    result = await crud.get_last_run_result_for_scheduled_task(session, task_id)
+    result = await crud.get_last_run_result_for_scheduled_task(session, taskId)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该定时任务的运行记录。")
     return models.TaskInfo.model_validate(result)
