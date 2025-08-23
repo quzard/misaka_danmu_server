@@ -95,6 +95,9 @@ async def lifespan(app: FastAPI):
     app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager)
     await app.state.metadata_manager.initialize()
 
+    # 新增：调用新的路由注册函数
+    app.state.metadata_manager.register_source_routers(app)
+
     app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
