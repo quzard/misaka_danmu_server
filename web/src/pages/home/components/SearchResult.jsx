@@ -699,7 +699,7 @@ export const SearchResult = () => {
           <div className="shrink-0">作品标题:</div>
           <div className="w-full">
             <Input
-              value={editItem.title}
+              value={editAnimeTitle || editItem.title}
               placeholder="请输入作品标题"
               onChange={e => {
                 setEditAnimeTitle(e.target.value)
