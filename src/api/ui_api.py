@@ -242,14 +242,15 @@ async def search_anime_provider(
 @router.get("/library/episodes-by-title", response_model=List[int], summary="根据作品标题获取已存在的分集序号")
 async def get_existing_episode_indices(
     title: str = Query(..., description="要查询的作品标题"),
+    season: Optional[int] = Query(None, description="要查询的季度号"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """
-    根据一个作品的标题，查询弹幕库中该作品已存在的所有分集的序号列表。
+    根据一个作品的标题和季度，查询弹幕库中该作品已存在的所有分集的序号列表。
     用于在“编辑导入”界面实现增量导入。
     """
-    return await crud.get_episode_indices_by_anime_title(session, title)
+    return await crud.get_episode_indices_by_anime_title(session, title, season=season)
 
 
 
