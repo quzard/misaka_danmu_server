@@ -59,92 +59,94 @@
 
 ## 🚀 快速开始 (使用 Docker Compose)
 
-推荐使用 Docker 和 Docker Compose 进行部署。以下将引导您分步部署数据库和应用服务。
+推荐使用 Docker 和 Docker Compose 进行部署。
 
-### 步骤 1: 部署数据库 (MySQL)
-
-1. 在一个合适的目录（例如 `./danmuku`）下，创建 `docker-compose.mysql.yaml` 文件，内容如下：
+1. 在一个合适的目录（例如 `./danmuku`）下，创建 `docker-compose.yaml` 文件，内容如下：
 
 ```shell
   mkdir danmuku
   cd danmuku
 ```
 
-2. 目录内创建一个名为 `docker-compose.mysql.yaml` 的文件，内容如下
+2. 目录内创建一个名为 `docker-compose.yaml` 的文件，内容如下
 
 ```yaml
-  services:
-    mysql:
-      image: mysql:8.1.0-oracle
-      container_name: danmu-mysql
-      restart: unless-stopped
-      environment:
-        # !!! 重要：请务必替换为您的强密码 !!!
-        MYSQL_ROOT_PASSWORD: "your_strong_root_password"
-        MYSQL_DATABASE: "danmuapi"
-        MYSQL_USER: "danmuapi"
-        MYSQL_PASSWORD: "your_strong_user_password"
-        TZ: "Asia/Shanghai"
-      volumes:
-        - ./mysql-data:/var/lib/mysql
-        - ./mysql-conf:/etc/mysql/conf.d
-        - ./mysql-logs:/logs
-      ports:
-        - "3306:3306"   
-      command:
-        --character-set-server=utf8mb4
-        --collation-server=utf8mb4_general_ci
-        --explicit_defaults_for_timestamp=true
-      healthcheck:
-        test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
-        interval: 5s
-        timeout: 3s
-        retries: 2
-        start_period: 0s
-      network_mode: "bridge"
+version: "3.8"
+services:
+  mysql:
+    image: mysql:8.1.0-oracle
+    container_name: danmu-mysql
+    restart: unless-stopped
+    environment:
+      # !!! 重要：请务必替换为您的强密码 !!!
+      MYSQL_ROOT_PASSWORD: "your_strong_root_password"
+      MYSQL_DATABASE: "danmuapi"
+      MYSQL_USER: "danmuapi"
+      MYSQL_PASSWORD: "your_strong_user_password"
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+      - ./mysql-conf:/etc/mysql/conf.d
+      - ./mysql-logs:/logs  
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --explicit_defaults_for_timestamp=true
+    healthcheck:
+      #!!! 重要：-u和-p后不能有空格 !!!
+      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]    
+      interval: 5s
+      timeout: 3s
+      retries: 2
+      start_period: 30s
+    # 不直接暴露到宿主机
+    expose:
+      - "3306"
+    networks:
+      - misaka-net
+
+  danmu-app:
+    image: l429609201/misaka_danmu_server:latest
+    container_name: misaka-danmu-server
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy  
+    environment:
+      # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
+      - PUID=1000
+      - PGID=10
+      - UMASK=0022
+      #  连接MySql数据库相关配置
+      - DANMUAPI_DATABASE__HOST=mysql
+      - DANMUAPI_DATABASE__PORT=3306
+      - DANMUAPI_DATABASE__NAME=danmuapi
+      # !!! 重要：请使用上面mysql容器相同的用户名和密码 !!!
+      - DANMUAPI_DATABASE__USER=danmuapi
+      - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
+
+      # --- 初始管理员配置 ---
+      - DANMUAPI_ADMIN__INITIAL_USER=admin
+    volumes:
+      - ./config:/app/config
+    ports:
+      - "7768:7768"           
+    networks:
+      - misaka-net
+
+networks:
+  misaka-net:
+    driver: bridge
 
 ```
-3.  **重要**: 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
-
-4.  在 `docker-compose.mysql.yaml` 所在目录运行命令启动数据库：
-    ```bash
-    docker-compose -f docker-compose.mysql.yaml up -d
-    ```
-
-### 步骤 2: 部署弹幕库
-1. 创建 `docker-compose.app.yaml` 文件
-
-```yaml
-  services:
-    danmu-app:
-      image: l429609201/misaka_danmu_server:latest
-      container_name: misaka-danmu-server
-      restart: unless-stopped
-      environment:
-        # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
-        - PUID=1000
-        - PGID=1000
-        - UMASK=0022
-        #  连接MySql数据库相关配置
-        - DANMUAPI_DATABASE__HOST=127.0.0.1
-        - DANMUAPI_DATABASE__PORT=3306
-        - DANMUAPI_DATABASE__NAME=danmuapi
-        # !!! 重要：请使用上面mysql容器相同的用户名和密码 !!!
-        - DANMUAPI_DATABASE__USER=danmuapi
-        - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
-
-        # --- 初始管理员配置 ---
-        - DANMUAPI_ADMIN__INITIAL_USER=admin
-      volumes:
-        - ./config:/app/config
-      network_mode: "host"
-```
-2.  **重要**:
-    -   确保 `DANMUAPI_DATABASE__PASSWORD` 与您在 `docker-compose.mysql.yaml` 中设置的 `MYSQL_PASSWORD` 一致。
+3.  **重要**: 
+  - 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
+  - 确保`healthcheck`中`-p`的密码和`MYSQL_ROOT_PASSWORD`一致。
+  - 确保 `DANMUAPI_DATABASE__PASSWORD` 与 `MYSQL_PASSWORD` 一致。
 
 3.  在同一目录运行命令启动应用：
     ```bash
-    docker-compose -f docker-compose.app.yaml up -d
+    docker-compose -f docker-compose.yaml up -d
     ```
 
 
