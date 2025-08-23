@@ -13,7 +13,7 @@ from sqlalchemy import update, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import httpx
-from ..rate_limiter import RateLimiter
+from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
@@ -937,28 +937,48 @@ async def update_scraper_config(
     payload: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """更新指定搜索源的配置，包括代理设置和其他可配置字段。"""
     try:
+        scraper_class = manager.get_scraper_class(providerName)
+        if not scraper_class:
+            raise HTTPException(status_code=404, detail="该搜索源不存在。")
+
         # 1. 单独处理 useProxy 字段，它更新的是 scrapers 表
         if 'useProxy' in payload:
             use_proxy_value = bool(payload.pop('useProxy', False))
             await crud.update_scraper_proxy(session, providerName, use_proxy_value)
 
-        # 辅助函数，用于将 camelCase 转换为 snake_case
+        # 2. 构建所有期望处理的配置键 (camelCase)
+        expected_camel_keys = set()
+        def to_snake(camel_str):
+            components = snake_str.split('_')
+            return components[0] + ''.join(x.title() for x in components[1:])
+
+        if hasattr(scraper_class, 'configurable_fields'):
+            for snake_key in scraper_class.configurable_fields.keys():
+                expected_camel_keys.add(to_camel(snake_key))
+        
+        if getattr(scraper_class, 'is_loggable', False):
+            expected_camel_keys.add(f"scraper{providerName.capitalize()}LogResponses")
+        
+        expected_camel_keys.add(f"{providerName}EpisodeBlacklistRegex")
+
+        # 3. 遍历 payload，只处理期望的键
         def to_snake(camel_str):
             s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
             return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
-        # 2. 处理其他所有键值对配置，它们更新的是 config 表
         for camel_key, value in payload.items():
-            db_key = to_snake(camel_key)
-            value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
-            await crud.update_config_value(session, db_key, value_to_save)
-            config_manager.invalidate(db_key)
+            if camel_key in expected_camel_keys:
+                db_key = to_snake(camel_key)
+                value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
+                await crud.update_config_value(session, db_key, value_to_save)
+                config_manager.invalidate(db_key)
         
-        # 3. 在所有数据库操作完成后，统一提交事务
+        # 4. 在所有数据库操作完成后，统一提交事务
         await session.commit()
         logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置。")
     except Exception as e:
@@ -2076,9 +2096,20 @@ class RateLimitStatusResponse(BaseModel):
 async def get_rate_limit_status(
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager)
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """获取所有流控规则的当前状态，包括全局和各源的配额使用情况。"""
+    # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
+    try:
+        await rate_limiter.check("__global__")
+    except RateLimitExceededError:
+        # 我们只关心检查和重置的副作用，不关心它是否真的超限，所以忽略此错误
+        pass
+    except Exception as e:
+        # 记录其他潜在错误，但不中断状态获取
+        logger.error(f"在获取流控状态时，检查全局流控失败: {e}")
+
     global_enabled_str = await config_manager.get("globalRateLimitEnabled", "true")
     global_enabled = global_enabled_str.lower() == 'true'
     global_limit_str = await config_manager.get("globalRateLimitCount", "50")
@@ -2092,12 +2123,8 @@ async def get_rate_limit_status(
     global_state = states_map.get("__global__")
     seconds_until_reset = 0
     if global_state:
-        # 确保从数据库读取的时间是 "aware" 的，以防止类型错误
-        # 即使数据库返回一个 naive datetime，我们也假定它是UTC时间
-        last_reset_time_from_db = global_state.lastResetTime
-        if last_reset_time_from_db.tzinfo is None:
-            last_reset_time_from_db = last_reset_time_from_db.replace(tzinfo=timezone.utc)
-        time_since_reset = datetime.now(timezone.utc) - last_reset_time_from_db
+        # crud.py 中已确保 lastResetTime 是 aware datetime
+        time_since_reset = datetime.now(timezone.utc) - global_state.lastResetTime
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []

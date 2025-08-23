@@ -137,9 +137,19 @@ class BangumiMetadataSource(BaseMetadataSource):
             subject = BangumiSearchSubject.model_validate(subject_data)
             aliases = subject.aliases
 
+            # 推断媒体类型
+            media_type = "tv_series" # 默认为 tv_series
+            if subject_data.get("type") == 2: # Anime
+                # 如果总集数为1，则认为是电影
+                if subject_data.get("eps") == 1:
+                    media_type = "movie"
+                # 检查标题中是否包含电影关键词
+                elif _clean_movie_title(subject.display_name) != subject.display_name:
+                    media_type = "movie"
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
-                nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
+                type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
                 aliasesCn=aliases.get("aliases_cn", [])
             )
@@ -174,12 +184,32 @@ class BangumiMetadataSource(BaseMetadataSource):
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
+        """检查与Bangumi API的连接性，并遵循代理设置。"""
+        proxy_to_use = None
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            # 使用会话工厂获取数据库会话
+            async with self._session_factory() as session:
+                # 获取全局代理设置
+                proxy_url = await crud.get_config_value(session, "proxy_url", "")
+                proxy_enabled_str = await crud.get_config_value(session, "proxy_enabled", "false")
+                proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
+
+                # 如果全局代理启用，则检查此源的代理设置
+                if proxy_enabled_globally and proxy_url:
+                    source_setting = await crud.get_metadata_source_setting_by_name(session, self.provider_name)
+                    if source_setting and source_setting.get('useProxy', False):
+                        proxy_to_use = proxy_url
+                        self.logger.debug(f"Bangumi: 连接性检查将使用代理: {proxy_to_use}")
+
+            async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use) as client:
                 response = await client.get("https://api.bgm.tv/v0/ping")
                 return "连接成功" if response.status_code == 204 else f"连接失败 (状态码: {response.status_code})"
+        except httpx.ProxyError as e:
+            self.logger.error(f"Bangumi: 连接性检查代理错误: {e}")
+            return "连接失败 (代理错误)"
         except Exception as e:
-            return f"连接失败: {e}"
+            self.logger.error(f"Bangumi: 连接性检查发生未知错误: {e}", exc_info=True)
+            return "连接失败"
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User) -> Any:
         if action_name == "get_auth_state":

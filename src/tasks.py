@@ -1,5 +1,6 @@
 import logging
 from typing import Callable, List, Optional
+import re
 import traceback
 
 from thefuzz import fuzz
@@ -659,7 +660,7 @@ async def auto_search_and_import_task(
             task_coro = lambda s, cb: generic_import_task(
                 provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
                 animeTitle=main_title, mediaType=media_type, season=season,
-                year=payload.year, currentEpisodeIndex=payload.episode, imageUrl=image_url,
+                year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
                 doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
                 progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
                 rate_limiter=rate_limiter
@@ -669,9 +670,28 @@ async def auto_search_and_import_task(
 
     # 3. 如果库中不存在，则进行全网搜索
     await progress_callback(40, "媒体库未找到，开始全网搜索...")
-    search_keywords = list(filter(None, aliases))
     episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
-    all_results = await scraper_manager.search_all(search_keywords, episode_info=episode_info)
+    
+    # 使用主标题进行搜索
+    logger.info(f"将使用主标题 '{main_title}' 进行全网搜索...")
+    all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
+    logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
+
+    # 使用所有别名进行过滤
+    def normalize_for_filtering(title: str) -> str:
+        if not title: return ""
+        title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+        return title.lower().replace(" ", "").replace("：", ":").strip()
+
+    normalized_filter_aliases = {normalize_for_filtering(alias) for alias in aliases if alias}
+    filtered_results = []
+    for item in all_results:
+        normalized_item_title = normalize_for_filtering(item.title)
+        if not normalized_item_title: continue
+        if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+            filtered_results.append(item)
+    logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+    all_results = filtered_results
 
     if not all_results:
         raise TaskSuccess("全网搜索未找到任何结果。")
@@ -685,7 +705,7 @@ async def auto_search_and_import_task(
     await progress_callback(80, f"选择最佳源: {best_match.provider}")
     task_coro = lambda s, cb: generic_import_task(
         provider=best_match.provider, mediaId=best_match.mediaId,
-        animeTitle=main_title, mediaType=media_type, season=season, year=payload.year,
+        animeTitle=main_title, mediaType=media_type, season=season, year=best_match.year,
         currentEpisodeIndex=payload.episode, imageUrl=image_url,
         doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
         progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,

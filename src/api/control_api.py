@@ -55,6 +55,9 @@ async def verify_api_key(
     ip_address = request.client.host
 
     if not api_key:
+        await crud.create_external_api_log(
+            session, ip_address, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated: API Key is missing.",
@@ -69,6 +72,10 @@ async def verify_api_key(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的API密钥"
         )
+    # 记录成功的API Key验证
+    await crud.create_external_api_log(
+        session, ip_address, endpoint, status.HTTP_200_OK, "API Key验证通过"
+    )
     return api_key
 
 # --- Pydantic 模型 ---
@@ -144,6 +151,7 @@ class ControlAnimeDetailsResponse(BaseModel):
     title: str
     type: str
     season: int
+    year: Optional[int] = None
     episodeCount: Optional[int] = None
     localImagePath: Optional[str] = None
     imageUrl: Optional[str] = None
@@ -297,11 +305,8 @@ async def search_media(
             # Cache the full results with the search_id. Use a short TTL.
             await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in results], 600) # 10 minutes TTL
             
-            await crud.create_external_api_log(session, "N/A", "/search", 200, f"搜索 '{keyword}' 成功，找到 {len(results)} 个结果。Search ID: {search_id}")
-            
             return ControlSearchResponse(searchId=search_id, results=indexed_results)
         except Exception as e:
-            await crud.create_external_api_log(session, "N/A", "/search", 500, f"搜索 '{keyword}' 失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     finally:
         await manager.release_search_lock(api_key)
@@ -385,10 +390,10 @@ async def get_episodes(
     except Exception:
         raise HTTPException(status_code=500, detail="无法解析缓存的搜索结果。")
 
-    if not (0 <= resultIndex < len(cached_results)):
-        raise HTTPException(status_code=400, detail="提供的 resultIndex 无效。")
+    if not (0 <= result_index < len(cached_results)):
+        raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_to_fetch = cached_results[resultIndex]
+    item_to_fetch = cached_results[result_index]
     
     scraper = manager.get_scraper(item_to_fetch.provider)
     return await scraper.get_episodes(item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
@@ -586,12 +591,18 @@ async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, sessio
     return {"message": "分集信息更新成功。"}
 
 @library_router.post("/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕", response_model=ControlTaskResponse)
-async def refresh_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager), manager: ScraperManager = Depends(get_scraper_manager)):
+async def refresh_episode(
+    episodeId: int,
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+):
     """提交一个后台任务，为单个分集重新从其源网站获取最新的弹幕。"""
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, cb),
+        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb),
         f"外部API刷新分集: {info['title']}"
     )
     return {"message": "刷新分集任务已提交", "taskId": task_id}
@@ -627,7 +638,19 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
         await cb(10, "清空中...")
         await crud.clear_episode_comments(session, episodeId)
         await cb(50, f"插入 {len(payload.comments)} 条新弹幕...")
-        added = await crud.bulk_insert_comments(session, episodeId, [c.model_dump() for c in payload.comments])
+        
+        comments_to_insert = []
+        for c in payload.comments:
+            comment_dict = c.model_dump()
+            try:
+                # 从 'p' 字段解析时间戳，并添加到字典中
+                timestamp_str = comment_dict['p'].split(',')[0]
+                comment_dict['t'] = float(timestamp_str)
+            except (IndexError, ValueError):
+                comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
+            comments_to_insert.append(comment_dict)
+
+        added = await crud.bulk_insert_comments(session, episodeId, comments_to_insert)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
@@ -646,10 +669,18 @@ async def get_tokens(session: AsyncSession = Depends(get_db_session)):
 
 @token_router.post("", response_model=models.ApiTokenInfo, status_code=201, summary="创建Token")
 async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = Depends(get_db_session)):
-    """创建一个新的API Token。"""
+    """
+    创建一个新的API Token。
+
+    ### 请求体说明
+    - `name`: (string, 必需) Token的名称，用于在UI中识别。
+    - `validityPeriod`: (string, 必需) Token的有效期。
+        - 填入数字（如 "30", "90"）表示有效期为多少天。
+        - 填入 "permanent" 表示永久有效。
+    """
     token_str = secrets.token_urlsafe(16)
     try:
-        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validity_period)
+        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validityPeriod)
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
     except ValueError as e:
@@ -671,9 +702,11 @@ async def get_token_logs(tokenId: int, session: AsyncSession = Depends(get_db_se
 @token_router.put("/{tokenId}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
 async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
     """切换API Token的启用/禁用状态。"""
-    if not await crud.toggle_api_token(session, tokenId):
+    new_status = await crud.toggle_api_token(session, tokenId)
+    if new_status is None:
         raise HTTPException(404, "Token未找到")
-    return {"message": "Token 状态已切换。"}
+    message = "Token 已启用。" if new_status else "Token 已禁用。"
+    return {"message": message}
 
 @token_router.delete("/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
 async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
