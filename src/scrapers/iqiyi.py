@@ -12,6 +12,10 @@ from collections import defaultdict
 import httpx
 from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
 
+import chardet
+from typing import List, Optional
+from lxml import etree
+
 from ..config_manager import ConfigManager
 from .. import models
 from .base import BaseScraper, get_season_from_title
@@ -223,6 +227,18 @@ class IqiyiScraper(BaseScraper):
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
+        # 实体引用匹配正则
+        self.entity_pattern = re.compile(r'&#[xX]?[0-9a-fA-F]+;')
+
+        # XML 1.0规范允许的字符编码范围
+        self.valid_codes = set(
+            [0x09, 0x0A, 0x0D] +  # 制表符、换行、回车
+            list(range(0x20, 0x7E + 1)) +  # 可打印ASCII
+            list(range(0x80, 0xFF + 1)) +  # 扩展ASCII
+            list(range(0x100, 0xD7FF + 1)) +
+            list(range(0xE000, 0xFDCF + 1)) +
+            list(range(0xFDE0, 0xFFFD + 1))
+        )
 
     async def close(self):
         """关闭HTTP客户端"""
@@ -243,6 +259,42 @@ class IqiyiScraper(BaseScraper):
                 cookies=self.cookies,
             )
         return await self.client.request(method, url, **kwargs)
+
+    def _filter_entities(self, xml_str: str) -> str:
+        """过滤XML中的无效实体引用和字符"""
+        original_len = len(xml_str)
+
+        def replace(match):
+            entity = match.group()
+            try:
+                if entity.startswith('&#x') or entity.startswith('&#X'):
+                    code = int(entity[3:-1], 16)
+                else:
+                    code = int(entity[2:-1])
+                return entity if code in self.valid_codes else ''
+            except:
+                return ''
+
+        xml_str = self.entity_pattern.sub(replace, xml_str)
+        xml_str = re.sub(
+            r'[^\x09\x0A\x0D\x20-\x7E\x80-\xFF\u0100-\uD7FF\uE000-\uFDCF\uFDE0-\uFFFD]',
+            '',
+            xml_str
+        )
+
+        self.logger.debug(f"过滤前后长度变化: {original_len} → {len(xml_str)} (减少 {original_len - len(xml_str)})")
+        return xml_str
+
+    def _log_error_context(self, xml_str: str, line: int, col: int):
+        """打印错误位置附近的XML内容"""
+        lines = xml_str.split('\n')
+        start = max(0, line - 3)
+        end = min(len(lines), line + 3)
+
+        self.logger.error(f"错误位置上下文（行{line}，列{col}）:")
+        for i in range(start, end):
+            prefix = "→ " if i == line - 1 else "  "
+            self.logger.error(f"{prefix}行{i + 1}: {lines[i][:100]}...")
 
     async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """使用桌面版API进行搜索 (主API)"""
@@ -780,6 +832,96 @@ class IqiyiScraper(BaseScraper):
         
         return []
 
+    async def _get_danmu_content_by_mat_test(self, tv_id: str, mat: int) -> List[IqiyiComment]:
+        """根据tv_id和分段号获取弹幕内容"""
+        if len(tv_id) < 4:
+            self.logger.warning("tv_id长度不足4位，返回空")
+            return []
+
+        # 构建弹幕URL
+        s1 = tv_id[-4:-2]
+        s2 = tv_id[-2:]
+        url = f"http://cmts.iqiyi.com/bullet/{s1}/{s2}/{tv_id}_300_{mat}.z"
+        self.logger.debug(f"URL构建: s1={s1}, s2={s2}, 完整URL={url}")
+
+        try:
+            # 发送请求
+            response = await self._request("GET", url)
+
+            # 处理状态码
+            if response.status_code == 404:
+                self.logger.info(f"未找到分段 {mat}（404）")
+                return []
+            response.raise_for_status()
+
+            # 解压缩数据
+            decompressed_data = zlib.decompress(response.content)
+
+            # 验证解压后的数据是否为空
+            if len(decompressed_data) < 10:
+                self.logger.warning("解压后数据为空或过小")
+                return []
+
+            # 检测编码并处理BOM头
+            encoding_result = chardet.detect(decompressed_data)
+            encoding = encoding_result['encoding'] or 'utf-8'
+
+            if encoding.lower() == 'utf-8' and decompressed_data.startswith(b'\xef\xbb\xbf'):
+                decompressed_data = decompressed_data[3:]
+                self.logger.debug("已移除UTF-8 BOM头")
+
+            # 解码为字符串
+            xml_str = decompressed_data.decode(encoding, errors='replace')
+
+            # 过滤无效内容
+            xml_str = self._filter_entities(xml_str)
+            if len(xml_str) < 10:
+                self.logger.warning("过滤后XML内容为空或过小")
+                return []
+
+            # 关键修复1：使用XML专用解析器，保留原始结构
+            parser = etree.XMLParser(recover=True)  # 容错的XML解析器，而非HTML解析器
+            try:
+                root = etree.fromstring(xml_str.encode('utf-8'), parser=parser)
+            except etree.XMLSyntaxError as e:
+                self._log_error_context(xml_str, e.lineno, e.position[1])
+                raise
+
+            # 关键修复2：使用绝对路径匹配bulletInfo（根据XML结构）
+            # 从日志样本可知结构：<danmu> -> <data> -> <entry> -> <list> -> <bulletInfo>
+            bullet_count = len(root.xpath('/danmu/data/entry/list/bulletInfo'))
+
+            # 提取弹幕信息
+            comments = []
+            # 遍历绝对路径下的bulletInfo节点
+            for item in root.xpath('/danmu/data/entry/list/bulletInfo'):
+                content = item.findtext('content')
+                show_time = item.findtext('showTime')
+
+                if not (content and show_time):
+                    self.logger.debug("跳过缺少content或showTime的弹幕")
+                    continue
+
+                comments.append(IqiyiComment(
+                    contentId=item.findtext('contentId', default='0'),
+                    content=content,
+                    showTime=int(show_time),
+                    color=item.findtext('color', default='ffffff'),
+                    userInfo=IqiyiUserInfo(uid=item.findtext('userInfo/uid'))
+                    if item.findtext('userInfo/uid') else None
+                ))
+
+            return comments
+
+        except zlib.error:
+            self.logger.warning("解压失败（可能是文件损坏）")
+        except (etree.XMLSyntaxError, Exception) as e:
+            if isinstance(e, etree.XMLSyntaxError):
+                self._log_error_context(xml_str, e.lineno, e.position[1])
+            self.logger.error(f"处理失败: {str(e)}", exc_info=True)
+
+        return []
+
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
         tv_id = episode_id # For iqiyi, episodeId is tvId
         all_comments = []
@@ -798,7 +940,8 @@ class IqiyiScraper(BaseScraper):
                 progress = int((mat / total_mats) * 100) if total_mats > 0 else 100
                 await progress_callback(progress, f"正在获取第 {mat}/{total_mats} 分段")
 
-            comments_in_mat = await self._get_danmu_content_by_mat(tv_id, mat)
+            # comments_in_mat = await self._get_danmu_content_by_mat(tv_id, mat)
+            comments_in_mat = await self._get_danmu_content_by_mat_test(tv_id, mat)
             if not comments_in_mat:
                 break
             all_comments.extend(comments_in_mat)
