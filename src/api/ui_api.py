@@ -154,6 +154,9 @@ async def search_anime_provider(
         filter_aliases.add(search_title)
         logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
+        # 新增：根据您的要求，打印最终的别名列表以供调试
+        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
+
         logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
         all_results = await manager.search_all([search_title], episode_info=episode_info)
 
@@ -166,7 +169,10 @@ async def search_anime_provider(
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
-            if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+            # 修正：使用模糊匹配替代严格的子字符串匹配，以提高容错率
+            # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
+            # 只要搜索结果的标题与“白名单”中的任何一个别名相似度高于85，就予以保留。
+            if any(fuzz.token_set_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
                 filtered_results.append(item)
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         results = filtered_results
