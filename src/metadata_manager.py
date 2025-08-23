@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Set, Optional, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 
 from . import crud, models, orm_models
 from .config_manager import ConfigManager
