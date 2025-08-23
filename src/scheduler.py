@@ -80,7 +80,7 @@ class SchedulerManager:
         """获取所有已加载的可用任务类型及其名称。"""
         return [{"jobType": job.job_type, "name": job.job_name} for job in self._job_classes.values()]
 
-    def _create_job_runner(self, job_type: str) -> Callable:
+    def _create_job_runner(self, job_type: str, scheduled_task_id: str) -> Callable:
         """创建一个包装器，用于在 TaskManager 中运行任务，并等待其完成。"""
         job_class = self._job_classes[job_type]
         
@@ -99,7 +99,11 @@ class SchedulerManager:
             args_to_pass = {name: dep for name, dep in dependencies.items() if name in init_params}
             job_instance = job_class(**args_to_pass)
             task_coro_factory = lambda session, callback: job_instance.run(session, callback)
-            task_id, done_event = await self.task_manager.submit_task(task_coro_factory, job_instance.job_name)
+            task_id, done_event = await self.task_manager.submit_task(
+                task_coro_factory,
+                job_instance.job_name,
+                scheduled_task_id=scheduled_task_id
+            )
             # The apscheduler job now waits for the actual task to complete.
             await done_event.wait()
             logger.info(f"定时任务的运行器已确认任务 '{job_instance.job_name}' (ID: {task_id}) 执行完毕。")
@@ -143,7 +147,7 @@ class SchedulerManager:
             for task in tasks:
                 if task['jobType'] in self._job_classes:
                     try:
-                        runner = self._create_job_runner(task['jobType'])
+                        runner = self._create_job_runner(task['jobType'], task['id'])
                         job = self.scheduler.add_job(runner, CronTrigger.from_crontab(task['cronExpression']), id=task['id'], name=task['name'], replace_existing=True)
                         if not task['isEnabled']: self.scheduler.pause_job(task['id'])
                         # When loading, the job object is new and has no last_run_time. We only need to update the next_run_time.
@@ -169,10 +173,14 @@ class SchedulerManager:
                 exists = await crud.check_scheduled_task_exists_by_type(session, "incrementalRefresh")
                 if exists:
                     raise ValueError("“定时追更”任务已存在，无法重复创建。")
+            elif job_type == "tmdbAutoMap":
+                exists = await crud.check_scheduled_task_exists_by_type(session, "tmdbAutoMap")
+                if exists:
+                    raise ValueError("“TMDB自动映射与更新”任务已存在，无法重复创建。")
 
             task_id = str(uuid4())
             await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled)
-            runner = self._create_job_runner(job_type)
+            runner = self._create_job_runner(job_type, task_id)
             job = self.scheduler.add_job(runner, CronTrigger.from_crontab(cron), id=task_id, name=name)
             if not is_enabled: job.pause()        
             await crud.update_scheduled_task_run_times(session, task_id, None, job.next_run_time)

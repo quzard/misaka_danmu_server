@@ -217,6 +217,7 @@ class ScheduledTask(Base):
 class TaskHistory(Base):
     __tablename__ = "task_history"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    scheduledTaskId: Mapped[Optional[str]] = mapped_column("scheduled_task_id", ForeignKey("scheduled_tasks.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)

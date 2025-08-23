@@ -14,6 +14,7 @@ from ..rate_limiter import RateLimiter
 from ..config_manager import ConfigManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
+from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 
@@ -33,6 +34,10 @@ def get_metadata_manager(request: Request) -> MetadataSourceManager:
 def get_task_manager(request: Request) -> TaskManager:
     """依赖项：从应用状态获取任务管理器"""
     return request.app.state.task_manager
+
+def get_scheduler_manager(request: Request) -> SchedulerManager:
+    """依赖项：从应用状态获取定时任务调度器"""
+    return request.app.state.scheduler_manager
 
 def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
@@ -817,4 +822,31 @@ async def resume_task(taskId: str, task_manager: TaskManager = Depends(get_task_
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="恢复任务失败，可能任务未被暂停。")
     return {"message": "任务已恢复。"}
 
+# --- 定时任务管理 ---
+scheduler_router = APIRouter(prefix="/scheduler", dependencies=[Depends(verify_api_key)])
+
+@scheduler_router.get("/tasks", response_model=List[Dict[str, Any]], summary="获取所有定时任务")
+async def list_scheduled_tasks(
+    scheduler_manager: SchedulerManager = Depends(get_scheduler_manager),
+):
+    """获取所有已配置的定时任务及其当前状态。"""
+    tasks = await scheduler_manager.get_all_tasks()
+    return tasks
+
+@scheduler_router.get("/{task_id}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
+async def get_scheduled_task_last_result(
+    task_id: str = Path(..., description="定时任务的ID"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    获取指定定时任务的最近一次运行结果。
+    如果任务从未运行过，将返回 404 Not Found。
+    """
+    result = await crud.get_last_run_result_for_scheduled_task(session, task_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该定时任务的运行记录。")
+    return models.TaskInfo.model_validate(result)
+
+
 router.include_router(tasks_router)
+router.include_router(scheduler_router)
