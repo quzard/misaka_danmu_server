@@ -1,5 +1,6 @@
 import logging
 import json
+from datetime import datetime
 from typing import Any, Dict
 from fastapi import Request, HTTPException, status
 
@@ -65,6 +66,14 @@ class JellyfinWebhook(BaseWebhook):
         imdb_id = payload.get("Provider_imdb")
         tvdb_id = payload.get("Provider_tvdb")
         douban_id = payload.get("Provider_doubanid")
+        bangumi_id = payload.get("Provider_bangumi")
+        year = None
+        if premiere_date_str := payload.get("PremiereDate"):
+            try:
+                # Jellyfin's PremiereDate is a full ISO 8601 string
+                year = datetime.fromisoformat(premiere_date_str.replace("Z", "+00:00")).year
+            except (ValueError, TypeError):
+                logger.warning(f"Webhook: 无法从Jellyfin的PremiereDate '{premiere_date_str}' 解析年份。")
         
         # 根据媒体类型分别处理
         if item_type == "Episode":
@@ -105,20 +114,23 @@ class JellyfinWebhook(BaseWebhook):
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
 
         # 使用新的、专门的 webhook 任务
-        task_coro = lambda callback: webhook_search_and_dispatch_task(
-            anime_title=anime_title,
-            media_type=media_type,
+        task_coro = lambda session, callback: webhook_search_and_dispatch_task(
+            animeTitle=anime_title,
+            mediaType=media_type,
             season=season_number,
-            current_episode_index=episode_number,
-            search_keyword=search_keyword,
-            douban_id=str(douban_id) if douban_id else None,
-            tmdb_id=str(tmdb_id) if tmdb_id else None,
-            imdb_id=str(imdb_id) if imdb_id else None,
-            tvdb_id=str(tvdb_id) if tvdb_id else None,
-            webhook_source='jellyfin',
+            currentEpisodeIndex=episode_number,
+            year=year,
+            searchKeyword=search_keyword,
+            doubanId=str(douban_id) if douban_id else None,
+            tmdbId=str(tmdb_id) if tmdb_id else None,
+            imdbId=str(imdb_id) if imdb_id else None,
+            tvdbId=str(tvdb_id) if tvdb_id else None,
+            bangumiId=str(bangumi_id) if bangumi_id else None,
+            webhookSource='jellyfin',
             progress_callback=callback,
-            pool=self.pool,
-            manager=self.scraper_manager,
-            task_manager=self.task_manager
+            session=session,
+            manager=self.scraper_manager, # type: ignore
+            task_manager=self.task_manager,
+            rate_limiter=self.rate_limiter
         )
         await self.task_manager.submit_task(task_coro, task_title)

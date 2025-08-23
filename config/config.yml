@@ -3,6 +3,14 @@ server:
   host: "0.0.0.0"
   port: 7768
 
+# 本地调试测试时打开
+# environment: development
+environment: production
+
+client:
+  host: localhost
+  port: 5173
+
 # 数据库配置
 database:
   host: "127.0.0.1"
@@ -10,7 +18,6 @@ database:
   user: "danmaku_user"
   password: "your_password_here" # 请修改为您的数据库密码, 建议通过环境变量覆盖
   name: "danmaku_db"
-
 # JWT (JSON Web Token) 配置
 jwt:
   secret_key: "your_super_secret_key_for_jwt_please_change_it" # 请务必修改为一个复杂且唯一的密钥, 建议通过环境变量覆盖

@@ -59,16 +59,24 @@
 
 ## 🚀 快速开始 (使用 Docker Compose)
 
-推荐使用 Docker 和 Docker Compose 进行部署。
 
-1. 在一个合适的目录（例如 `./danmuku`）下，创建 `docker-compose.yaml` 文件，内容如下：
+推荐使用 Docker 和 Docker Compose 进行一键部署。
 
-```shell
-  mkdir danmuku
-  cd danmuku
-```
+### 步骤 1: 准备 `docker-compose.yaml`
 
-2. 目录内创建一个名为 `docker-compose.yaml` 的文件，内容如下
+1.  在一个合适的目录（例如 `~/danmuku`）下，创建 `docker-compose.yaml` 文件。
+
+
+    ```bash
+    mkdir -p ~/danmuku
+    cd ~/danmuku
+    touch docker-compose.yaml
+    ```
+
+2.  根据您选择的数据库，将以下内容之一复制到 `docker-compose.yaml` 文件中。
+
+#### 方案 A: 使用 MySQL (推荐)
+
 
 ```yaml
 version: "3.8"
@@ -79,29 +87,26 @@ services:
     restart: unless-stopped
     environment:
       # !!! 重要：请务必替换为您的强密码 !!!
-      MYSQL_ROOT_PASSWORD: "your_strong_root_password"
-      MYSQL_DATABASE: "danmuapi"
-      MYSQL_USER: "danmuapi"
-      MYSQL_PASSWORD: "your_strong_user_password"
+      MYSQL_ROOT_PASSWORD: "your_strong_root_password"                  #数据库root密码
+      MYSQL_DATABASE: "danmuapi"                                        #数据库名称
+      MYSQL_USER: "danmuapi"                                            #数据库用户名
+      MYSQL_PASSWORD: "your_strong_user_password"                       #数据库密码
       TZ: "Asia/Shanghai"
     volumes:
       - ./mysql-data:/var/lib/mysql
-      - ./mysql-conf:/etc/mysql/conf.d
-      - ./mysql-logs:/logs  
+
     command:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_general_ci
       --explicit_defaults_for_timestamp=true
     healthcheck:
-      #!!! 重要：-u和-p后不能有空格 !!!
-      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]    
+      #!!! 重要：-u和-p后不能有空格, 且密码需要与 MYSQL_PASSWORD 保持一致 !!! 这里启动检查的密码也要改
+      test: ["CMD-SHELL", "mysql -udanmuapi -pyour_strong_user_password -e 'SELECT 1' danmuapi"]
       interval: 5s
       timeout: 3s
-      retries: 2
+      retries: 5
       start_period: 30s
-    # 不直接暴露到宿主机
-    expose:
-      - "3306"
+
     networks:
       - misaka-net
 
@@ -111,26 +116,87 @@ services:
     restart: unless-stopped
     depends_on:
       mysql:
-        condition: service_healthy  
+        condition: service_healthy
     environment:
       # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
       - PUID=1000
-      - PGID=10
+      - PGID=1000
       - UMASK=0022
-      #  连接MySql数据库相关配置
-      - DANMUAPI_DATABASE__HOST=mysql
-      - DANMUAPI_DATABASE__PORT=3306
-      - DANMUAPI_DATABASE__NAME=danmuapi
+      # --- 数据库连接配置 ---
+      - DANMUAPI_DATABASE__TYPE=mysql                         # 数据库类型
+      - DANMUAPI_DATABASE__HOST=mysql                         # 使用服务名
+      - DANMUAPI_DATABASE__PORT=3306                          # 端口号
+      - DANMUAPI_DATABASE__NAME=danmuapi                      # 数据库名称
       # !!! 重要：请使用上面mysql容器相同的用户名和密码 !!!
-      - DANMUAPI_DATABASE__USER=danmuapi
-      - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password
-
+      - DANMUAPI_DATABASE__USER=danmuapi                      #数据库用户名
+      - DANMUAPI_DATABASE__PASSWORD=your_strong_user_password #数据库密码
       # --- 初始管理员配置 ---
       - DANMUAPI_ADMIN__INITIAL_USER=admin
     volumes:
       - ./config:/app/config
     ports:
-      - "7768:7768"           
+      - "7768:7768"
+    networks:
+      - misaka-net
+
+networks:
+  misaka-net:
+    driver: bridge
+```
+
+#### 方案 B: 使用 PostgreSQL (可选)
+
+```yaml
+version: "3.8"
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: danmu-postgres
+    restart: unless-stopped
+    environment:
+      # !!! 重要：请务必替换为您的强密码 !!!
+      POSTGRES_PASSWORD: "your_strong_postgres_password"               #数据库密码
+      POSTGRES_USER: "danmuapi"                                        #数据库用户名
+      POSTGRES_DB: "danmuapi"                                          #数据库名称
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U danmuapi -d danmuapi"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - misaka-net
+
+  danmu-app:
+    image: l429609201/misaka_danmu_server:latest
+    container_name: misaka-danmu-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 设置运行容器的用户和组ID，以匹配您宿主机的用户，避免挂载卷的权限问题。
+      - PUID=1000
+      - PGID=1000
+      - UMASK=0022
+      # --- 数据库连接配置 ---
+      - DANMUAPI_DATABASE__TYPE=postgresql                              # 数据库类型
+      - DANMUAPI_DATABASE__HOST=postgres                                # 使用服务名
+      - DANMUAPI_DATABASE__PORT=5432                                    # 数据库端口
+      - DANMUAPI_DATABASE__NAME=danmuapi                                # 数据库名称
+      # !!! 重要：请使用上面postgres容器相同的用户名和密码 !!!
+      - DANMUAPI_DATABASE__USER=danmuapi                                # 数据库用户名    
+      - DANMUAPI_DATABASE__PASSWORD=your_strong_postgres_password       # 数据库密码
+      # --- 初始管理员配置 ---
+      - DANMUAPI_ADMIN__INITIAL_USER=admin
+    volumes:
+      - ./config:/app/config
+    ports:
+      - "7768:7768"
+
     networks:
       - misaka-net
 
@@ -139,16 +205,17 @@ networks:
     driver: bridge
 
 ```
-3.  **重要**: 
-  - 修改文件中的 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_PASSWORD` 为您自己的安全密码。
-  - 确保`healthcheck`中`-p`的密码和`MYSQL_ROOT_PASSWORD`一致。
-  - 确保 `DANMUAPI_DATABASE__PASSWORD` 与 `MYSQL_PASSWORD` 一致。
 
-3.  在同一目录运行命令启动应用：
+### 步骤 2: 修改配置并启动
+
+1.  **重要**: 打开您刚刚创建的 `docker-compose.yaml` 文件，将所有 `your_strong_..._password` 替换为您自己的安全密码。
+    -   对于MySQL，您需要修改 `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD` (两处) 和 `healthcheck` 中的密码。
+    -   对于PostgreSQL，您需要修改 `POSTGRES_PASSWORD` 和 `DANMUAPI_DATABASE__PASSWORD`。
+2.  在 `docker-compose.yaml` 所在目录运行命令启动应用：
     ```bash
-    docker-compose -f docker-compose.yaml up -d
-    ```
+    docker-compose up -d
 
+    ```
 
 ### 步骤 3: 访问和配置
 
@@ -170,7 +237,7 @@ networks:
 
 在您的播放器（如 Yamby, Hills, 小幻影视等）的自定义弹幕接口设置中，填入以下格式的地址：
 
-`http://<服务器IP>:<端口>/api/<你的Token>`
+`http://<服务器IP>:<端口>/api/v1/<你的Token>`
 
 - `<服务器IP>`: 部署本服务的主机 IP 地址。
 - `<端口>`: 部署本服务时设置的端口（默认为 `7768`）。
@@ -181,15 +248,15 @@ networks:
 假设您的服务部署在 `192.168.1.100`，端口为 `7768`，创建的 Token 是 `Q2KHYcveM0SaRKvxomQm`。
 
 
-- **对于 Yamby （版本要大于1.5.9.11） / Hills （版本要大于1.4.0）:**
+- **对于 Yamby （版本要大于1.5.9.11） / Hills （版本要大于1.4.2）:**
 
   在自定义弹幕接口中填写：
-  `http://192.168.1.100:7768/api/Q2KHYcveM0SaRKvxomQm`
+  `http://192.168.1.100:7768/api/v1/Q2KHYcveM0SaRKvxomQm`
 - **对于 小幻影视:**
   小幻影视您可以添加含有 `/api/v2` 的路径，可以直接填写复制得到的url：
-  `http://192.168.1.100:7768/api/Q2KHYcveM0SaRKvxomQm/api/v2   #可加可不加/api/v2 ` 
+  `http://192.168.1.100:7768/api/v1/Q2KHYcveM0SaRKvxomQm/api/v2   #可加可不加/api/v2 ` 
   
-> **兼容性说明**: 本服务已对路由进行特殊处理，无论您使用 `.../api/<Token>` 还是 `.../api/<Token>/api/v2` 格式，服务都能正确响应，以最大程度兼容不同客户端。
+> **兼容性说明**: 本服务已对路由进行特殊处理，无论您使用 `.../api/v1/<Token>` 还是 `.../api/v1/<Token>/api/v2` 格式，服务都能正确响应，以最大程度兼容不同客户端。
 
 ## Webhook 配置
 
@@ -240,6 +307,28 @@ networks:
   10. 保存设置。
 
 现在，当有新的电影或剧集添加到您的 Emby/Jellyfin 媒体库时，本服务将自动收到通知，并创建一个后台任务来为其搜索和导入弹幕。
+
+
+## 常见问题
+
+### 忘记密码怎么办？
+
+如果您忘记了管理员密码，可以通过以下步骤在服务器上重置：
+
+1.  通过 SSH 或其他方式登录到您的服务器。
+
+2.  进入您存放 `docker-compose.yml` 的目录。
+
+3.  执行以下命令来重置指定用户的密码。请将 `<username>` 替换为您要重置密码的用户名（例如 `admin`）。
+
+    ```bash
+    docker-compose exec danmu-api python -m scripts.reset_password <username>
+    ```
+
+    > **注意**: 如果您没有使用 `docker-compose`，或者您的容器名称不是 `danmu-api`，请使用 `docker exec` 命令：
+    > `docker exec <您的容器名称> python -m scripts.reset_password <username>`
+
+4.  命令执行后，终端会输出一个新的随机密码。请立即使用此密码登录，并在 "设置" -> "账户安全" 页面中修改为您自己的密码。
 
 
 ### 贡献者
