@@ -573,32 +573,34 @@ async def bulk_insert_comments(session: AsyncSession, episode_id: int, comments:
     if not comments:
         return 0
 
-    # 1. 准备要插入的数据
-    data_to_insert = [
-        {"episodeId": episode_id, "cid": c['cid'], "p": c['p'], "m": c['m'], "t": c['t']}
-        for c in comments
-    ]
-
     # 2. 获取当前弹幕数量
     initial_count_stmt = select(func.count()).select_from(Comment).where(Comment.episodeId == episode_id)
     initial_count = (await session.execute(initial_count_stmt)).scalar_one()
 
-    # 3. 执行 upsert 操作
+    # 3. 分块执行 upsert 操作以避免参数数量超限
     dialect = session.bind.dialect.name
-    if dialect == 'mysql':
-        stmt = mysql_insert(Comment).values(data_to_insert)
-        stmt = stmt.on_duplicate_key_update(cid=stmt.inserted.cid) # A no-op update to trigger IGNORE behavior
-    elif dialect == 'postgresql':
-        stmt = postgresql_insert(Comment).values(data_to_insert)
-        # 修正：使用 on_conflict_do_nothing 并通过 index_elements 指定列，以提高兼容性
-        stmt = stmt.on_conflict_do_nothing(index_elements=['episode_id', 'cid'])
-    else:
-        # For other dialects, we might need a slower, row-by-row approach or raise an error.
-        # For now, we focus on mysql and postgresql.
-        raise NotImplementedError(f"批量插入弹幕功能尚未为数据库类型 '{dialect}' 实现。")
-    
-    await session.execute(stmt)
-    await session.flush() # 确保操作完成
+    # 每批插入5000条，每条5个字段，总参数为25000，低于PostgreSQL的32767限制
+    chunk_size = 5000
+
+    for i in range(0, len(comments), chunk_size):
+        chunk = comments[i:i + chunk_size]
+        data_to_insert = [
+            {"episodeId": episode_id, "cid": c['cid'], "p": c['p'], "m": c['m'], "t": c['t']}
+            for c in chunk
+        ]
+
+        if dialect == 'mysql':
+            stmt = mysql_insert(Comment).values(data_to_insert)
+            stmt = stmt.on_duplicate_key_update(cid=stmt.inserted.cid) # A no-op update to trigger IGNORE behavior
+        elif dialect == 'postgresql':
+            stmt = postgresql_insert(Comment).values(data_to_insert)
+            stmt = stmt.on_conflict_do_nothing(index_elements=['episode_id', 'cid'])
+        else:
+            raise NotImplementedError(f"批量插入弹幕功能尚未为数据库类型 '{dialect}' 实现。")
+        
+        await session.execute(stmt)
+
+    await session.flush() # 确保所有分块操作完成
 
     # 4. 重新计算总数并更新
     final_count_stmt = select(func.count()).select_from(Comment).where(Comment.episodeId == episode_id)
