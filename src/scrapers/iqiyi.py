@@ -267,6 +267,7 @@ class IqiyiScraper(BaseScraper):
             list(range(0xE000, 0xFDCF + 1)) +
             list(range(0xFDE0, 0xFFFD + 1))
          )
+
     async def close(self):
         """关闭HTTP客户端"""
         if self.client:
@@ -337,6 +338,42 @@ class IqiyiScraper(BaseScraper):
                 cookies=self.cookies,
             )
         return await self.client.request(method, url, **kwargs)
+    def _filter_entities(self, xml_str: str) -> str:
+        """过滤XML中的无效实体引用和字符"""
+        original_len = len(xml_str)
+
+        def replace(match):
+            entity = match.group()
+            try:
+                if entity.startswith('&#x') or entity.startswith('&#X'):
+                    code = int(entity[3:-1], 16)
+                else:
+                    code = int(entity[2:-1])
+                return entity if code in self.valid_codes else ''
+            except:
+                return ''
+
+        xml_str = self.entity_pattern.sub(replace, xml_str)
+        xml_str = re.sub(
+            r'[^\x09\x0A\x0D\x20-\x7E\x80-\xFF\u0100-\uD7FF\uE000-\uFDCF\uFDE0-\uFFFD]',
+            '',
+            xml_str
+        )
+
+        self.logger.debug(f"过滤前后长度变化: {original_len} → {len(xml_str)} (减少 {original_len - len(xml_str)})")
+        return xml_str
+
+    def _log_error_context(self, xml_str: str, line: int, col: int):
+        """打印错误位置附近的XML内容"""
+        lines = xml_str.split('\n')
+        start = max(0, line - 3)
+        end = min(len(lines), line + 3)
+
+        self.logger.error(f"错误位置上下文（行{line}，列{col}）:")
+        for i in range(start, end):
+            prefix = "→ " if i == line - 1 else "  "
+            self.logger.error(f"{prefix}行{i + 1}: {lines[i][:100]}...")
+
     def _filter_entities(self, xml_str: str) -> str:
         """过滤XML中的无效实体引用和字符"""
         original_len = len(xml_str)
@@ -1190,5 +1227,5 @@ class IqiyiScraper(BaseScraper):
             return str(base_info.tv_id)
         
         self.logger.warning(f"爱奇艺: 未能从 link_id '{link_id}' 获取到 tvid。")
-    
+        
         return None
