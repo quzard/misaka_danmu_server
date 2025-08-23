@@ -4,7 +4,7 @@ import uuid
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Path
 from fastapi.security import APIKeyQuery
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
