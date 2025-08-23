@@ -1358,19 +1358,27 @@ async def update_task_status(session: AsyncSession, task_id: str, status: str):
     await session.commit()
 
 async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
-    stmt = select(TaskHistory)
+    # 修正：显式选择需要的列，以避免在旧的数据库模式上查询不存在的列（如 scheduled_task_id）
+    stmt = select(
+        TaskHistory.id,
+        TaskHistory.title,
+        TaskHistory.status,
+        TaskHistory.progress,
+        TaskHistory.description,
+        TaskHistory.createdAt
+    )
     if search_term:
         stmt = stmt.where(TaskHistory.title.like(f"%{search_term}%"))
     if status_filter == 'in_progress':
         stmt = stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
     elif status_filter == 'completed':
         stmt = stmt.where(TaskHistory.status == '已完成')
-    
+
     stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(100)
     result = await session.execute(stmt)
     return [
-        {"taskId": t.id, "title": t.title, "status": t.status, "progress": t.progress, "description": t.description, "createdAt": t.createdAt}
-        for t in result.scalars()
+        {"taskId": row.id, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
+        for row in result.mappings()
     ]
 
 async def get_task_details_from_history(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
