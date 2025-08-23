@@ -49,7 +49,7 @@ export const ImportTask = () => {
         !!selectList.length) ||
         (selectList.every(item => item.status === '已暂停') &&
           !!selectList.length),
-      selectList.every(item => item.status === '已暂停'),
+      selectList.every(item => item.status === '已暂停') && !!selectList.length,
       selectList.every(item => item.status === '运行中') && !!selectList.length,
     ]
   }, [selectList])
@@ -57,7 +57,10 @@ export const ImportTask = () => {
   const canDelete = useMemo(() => {
     return (
       selectList.every(
-        item => item.status === '已完成' || item.status === '失败'
+        item =>
+          item.status === '已完成' ||
+          item.status === '失败' ||
+          item.status === '排队中'
       ) && !!selectList.length
     )
   }, [selectList])

@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, List, message, Tag } from 'antd'
+import { Button, Card, Form, Input, List, message, Tag, Tooltip } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import { getMetaData, setMetaData } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
@@ -17,6 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { ContainerOutlined } from '@ant-design/icons'
 
 const SortableItem = ({ item, index, handleChangeStatus }) => {
   const {
@@ -193,10 +194,16 @@ export const Metadata = () => {
               <div>{activeItem.providerName}</div>
             </div>
             <div className="flex items-center justify-around gap-4">
-              {activeItem.status !== '未配置' ? (
-                <Tag color="green">{activeItem.status}</Tag>
-              ) : (
-                <Tag color="red">{activeItem.status}</Tag>
+              {activeItem.status !== '未配置' && (
+                <Tooltip title={activeItem.status}>
+                  <ContainerOutlined
+                    className={
+                      activeItem.status?.includes('失败')
+                        ? 'text-red-400'
+                        : 'text-green-400'
+                    }
+                  />
+                </Tooltip>
               )}
               {activeItem.isAuxSearchEnabled ? (
                 <Tag color="green">已启用</Tag>
