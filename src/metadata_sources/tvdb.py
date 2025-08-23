@@ -79,7 +79,6 @@ class TvdbMetadataSource(BaseMetadataSource):
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         try:
             async with await self._create_client() as client:
-                # 修正：根据 mediaType 决定搜索类型
                 params = {"query": keyword}
                 if mediaType:
                     params["type"] = mediaType
@@ -87,7 +86,7 @@ class TvdbMetadataSource(BaseMetadataSource):
                 response = await client.get("/search", params=params)
                 response.raise_for_status()
                 data = response.json().get("data", [])
-                
+
                 results = []
                 for item in data:
                     results.append(models.MetadataDetailsResponse(
@@ -98,36 +97,59 @@ class TvdbMetadataSource(BaseMetadataSource):
                     ))
                 return results
         except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
-        except HTTPStatusError as e:
-            detail = f"TVDB服务返回错误: {e.response.status_code}"
-            if e.response.status_code == 401:
-                detail += "，请检查您的API Key是否正确。"
+            self.logger.error(f"TVDB搜索失败，配置错误: {e}")
+            return []
+        except httpx.HTTPStatusError as e:
             self.logger.error(f"TVDB搜索失败，HTTP错误: {e.response.status_code} for URL: {e.request.url}")
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+            return []
         except Exception as e:
             self.logger.error(f"TVDB搜索失败，发生意外错误: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TVDB搜索时发生内部错误。")
+            return []
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         try:
             async with await self._create_client() as client:
-                # 修正：根据 mediaType 决定请求的端点
-                endpoint_type = "series" if mediaType == "series" else "movies"
-                response = await client.get(f"/{endpoint_type}/{item_id}/extended")
-                if response.status_code == 404: return None
-                response.raise_for_status()
-                
-                details = response.json().get("data", {})
-                imdb_id = None
-                if remote_ids := details.get('remoteIds'):
-                    imdb_entry = next((rid for rid in remote_ids if rid.get('sourceName') == 'IMDB'), None)
-                    if imdb_entry: imdb_id = imdb_entry.get('id')
+                async def _fetch_and_parse(entity_type: str) -> Optional[models.MetadataDetailsResponse]:
+                    try:
+                        self.logger.info(f"TVDB: 正在尝试将ID {item_id} 作为 '{entity_type}' 获取...")
+                        response = await client.get(f"/{entity_type}/{item_id}/extended")
+                        if response.status_code == 404:
+                            self.logger.debug(f"TVDB: ID {item_id} 未被找到为 '{entity_type}'。")
+                            return None
+                        response.raise_for_status()
+                        details = response.json().get("data", {})
+                        if not details: return None
+                        imdb_id = None
+                        if remote_ids := details.get('remoteIds'):
+                            imdb_entry = next((rid for rid in remote_ids if rid.get('sourceName') == 'IMDB'), None)
+                            if imdb_entry: imdb_id = imdb_entry.get('id')
+                        return models.MetadataDetailsResponse(
+                            id=str(details['id']), tvdbId=str(details['id']), title=details.get('name'),
+                            imageUrl=details.get('image'), details=details.get('overview'), imdbId=imdb_id,
+                            type='movie' if entity_type == 'movies' else 'tv_series',
+                            year=int(details['year']) if details.get('year') and details['year'].isdigit() else None
+                        )
+                    except httpx.HTTPStatusError as e:
+                        self.logger.error(f"TVDB: 获取 {entity_type} (ID: {item_id}) 时发生HTTP错误: {e.response.status_code}")
+                        return None
+                    except Exception as e:
+                        self.logger.error(f"TVDB: 处理 {entity_type} (ID: {item_id}) 时发生未知错误: {e}", exc_info=True)
+                        return None
 
-                return models.MetadataDetailsResponse(
-                    id=str(details['id']), tvdbId=str(details['id']), title=details.get('name'),
-                    imageUrl=details.get('image'), details=details.get('overview'), imdbId=imdb_id
-                )
+                details = None
+                if mediaType == "movie":
+                    details = await _fetch_and_parse("movies")
+                elif mediaType == "series":
+                    details = await _fetch_and_parse("series")
+                else:
+                    details = await _fetch_and_parse("movies")
+                    if not details:
+                        self.logger.info(f"TVDB: 作为电影获取失败，正在尝试作为电视剧获取...")
+                        details = await _fetch_and_parse("series")
+                return details
+        except ValueError as e:
+            self.logger.error(f"TVDB获取详情失败 (item_id={item_id}): {e}")
+            raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
         except Exception as e:
             self.logger.error(f"TVDB获取详情失败: {e}", exc_info=True)
             return None
@@ -137,13 +159,25 @@ class TvdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            async with await self._create_client() as client:
-                response = await client.get("/search", params={"query": "test"})
-                if response.status_code == 200: return "连接成功"
-                elif response.status_code == 401: return "连接失败 (API Key无效)"
-                else: return f"连接失败 (状态码: {response.status_code})"
-        except ValueError as e: return f"未配置: {e}"
-        except Exception as e: return f"连接失败: {e}"
+            api_key = await self.config_manager.get("tvdbApiKey")
+            if not api_key:
+                return "未配置API Key"
+            proxy_url = await self.config_manager.get("proxy_url", "")
+            proxy_enabled_globally = (await self.config_manager.get("proxy_enabled", "false")).lower() == 'true'
+            async with self._session_factory() as session:
+                metadata_settings = await crud.get_all_metadata_source_settings(session)
+            provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
+            use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
+            proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+            async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use) as client:
+                response = await client.post("https://api4.thetvdb.com/v4/login", json={"apikey": api_key})
+                if response.status_code == 200:
+                    return "连接正常"
+                else:
+                    return f"连接失败 (状态码: {response.status_code})"
+        except Exception as e:
+            self.logger.error(f"TVDB: 连接性检查失败: {e}", exc_info=True)
+            return "连接失败"
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """TVDB source does not support custom actions."""
         raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")
