@@ -56,7 +56,8 @@ class MetadataSourceManager:
             # 检查源实例是否有 'api_router' 属性，并且它是一个 APIRouter
             if hasattr(source_instance, 'api_router') and isinstance(getattr(source_instance, 'api_router', None), APIRouter):
                 # 使用标准化的前缀挂载路由
-                prefix = f"/api/metadata/{provider_name}"
+                # 修正：将路由挂载到 /api/ui/ 下，以确保回调URL的正确性并与UI API保持一致
+                prefix = f"/api/ui/metadata/{provider_name}"
                 app.include_router(
                     source_instance.api_router,
                     prefix=prefix,
