@@ -18,6 +18,7 @@ from .rate_limiter import RateLimiter
 from .jobs.base import BaseJob
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
+from .metadata_manager import MetadataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +48,12 @@ def cron_is_valid(cron: str, min_hours: int) -> bool:
 # --- Scheduler Manager ---
 
 class SchedulerManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
         self.rate_limiter = rate_limiter
+        self.metadata_manager = metadata_manager
         self.scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
         self._job_classes: Dict[str, Type[BaseJob]] = {}
 
@@ -94,6 +96,7 @@ class SchedulerManager:
                 "task_manager": self.task_manager,
                 "scraper_manager": self.scraper_manager,
                 "rate_limiter": self.rate_limiter,
+                "metadata_manager": self.metadata_manager,
             }
             
             args_to_pass = {name: dep for name, dep in dependencies.items() if name in init_params}

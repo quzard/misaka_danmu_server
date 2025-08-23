@@ -177,7 +177,7 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         host = request.headers.get("host")
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
         base_url = f"{scheme}://{forwarded_host or host}"
-    redirect_uri = f"{base_url.rstrip('/')}/api/metadata/bangumi/auth/callback"
+    redirect_uri = f"{base_url.rstrip('/')}/api/ui/metadata/bangumi/auth/callback"
     payload = {"grant_type": "authorization_code", "client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri}
     try:
         async with httpx.AsyncClient() as client:

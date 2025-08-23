@@ -168,16 +168,16 @@ async def search_anime_provider(
         # 修正：采用更智能的两阶段过滤策略
         # 阶段1：基于原始搜索词进行初步、宽松的过滤，以确保所有相关系列（包括不同季度和剧场版）都被保留。
         # 只有当用户明确指定季度时，我们才进行更严格的过滤。
-        normalized_search_title = normalize_for_filtering(search_title)
+        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
         filtered_results = []
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
             
-            # 使用模糊匹配来检查搜索结果是否与原始搜索词相关。
+            # 检查搜索结果是否与任何一个别名匹配
             # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
-            # 80的阈值可以在保留相关性的同时，过滤掉大部分无关结果（如“刀剑若梦”）。
-            if fuzz.token_set_ratio(normalized_item_title, normalized_search_title) > 80:
+            # 80的阈值可以在保留相关性的同时，过滤掉大部分无关结果。
+            if any(fuzz.token_set_ratio(normalized_item_title, alias) > 80 for alias in normalized_filter_aliases):
                 filtered_results.append(item)
 
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")

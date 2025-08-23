@@ -54,14 +54,20 @@ async def _migrate_add_scheduled_task_id(conn, db_type, db_name):
         add_sql = text("ALTER TABLE task_history ADD COLUMN `scheduled_task_id` VARCHAR(100) NULL DEFAULT NULL AFTER `id`, ADD INDEX `ix_task_history_scheduled_task_id` (`scheduled_task_id`)")
     elif db_type == "postgresql":
         check_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'scheduled_task_id'")
-        add_sql = text('ALTER TABLE task_history ADD COLUMN "scheduled_task_id" VARCHAR(100) NULL; CREATE INDEX ix_task_history_scheduled_task_id ON task_history ("scheduled_task_id");')
+        # 修正：将SQL语句拆分为两个，以兼容PostgreSQL
+        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "scheduled_task_id" VARCHAR(100) NULL')
+        create_index_sql = text('CREATE INDEX ix_task_history_scheduled_task_id ON task_history ("scheduled_task_id")')
     else:
         return
 
     column_exists = (await conn.execute(check_sql)).scalar_one_or_none() is not None
     if not column_exists:
         logger.info(f"列 'task_history.scheduled_task_id' 不存在。正在添加...")
-        await conn.execute(add_sql)
+        if db_type == "mysql":
+            await conn.execute(add_sql)
+        elif db_type == "postgresql":
+            await conn.execute(add_column_sql)
+            await conn.execute(create_index_sql)
         logger.info(f"成功添加列 'task_history.scheduled_task_id'。")
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
