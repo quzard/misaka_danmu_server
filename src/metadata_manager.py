@@ -40,9 +40,10 @@ class MetadataSourceManager:
         # 从数据库缓存所有源的持久设置。
         self.source_settings: Dict[str, Dict[str, Any]] = {}
 
-    async def initialize(self):
+    async def initialize(self, app):
         """在应用启动时加载并同步元数据源。"""
         await self.load_and_sync_sources()
+        self.register_source_routers(app)
         logger.info("元数据源管理器已初始化。")
 
     def register_source_routers(self, app):
