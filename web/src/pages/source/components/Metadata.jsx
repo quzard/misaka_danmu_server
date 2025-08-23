@@ -58,10 +58,16 @@ const SortableItem = ({ item, index, handleChangeStatus }) => {
           <div>{item.providerName}</div>
         </div>
         <div className="flex items-center justify-around gap-4">
-          {item.status !== '未配置' ? (
-            <Tag color="green">{item.status}</Tag>
-          ) : (
-            <Tag color="red">{item.status}</Tag>
+          {item.status !== '未配置' && (
+            <Tooltip title={item.status} trigger={['click', 'hover']}>
+              <ContainerOutlined
+                style={{
+                  color: item.status?.includes('失败')
+                    ? 'var(--color-red-400)'
+                    : 'var(--color-green-400)',
+                }}
+              />
+            </Tooltip>
           )}
           {item.isAuxSearchEnabled ? (
             <Tag color="green">已启用</Tag>
@@ -197,11 +203,11 @@ export const Metadata = () => {
               {activeItem.status !== '未配置' && (
                 <Tooltip title={activeItem.status}>
                   <ContainerOutlined
-                    className={
-                      activeItem.status?.includes('失败')
-                        ? 'text-red-400'
-                        : 'text-green-400'
-                    }
+                    style={{
+                      color: activeItem.status?.includes('失败')
+                        ? 'var(--color-red-400)'
+                        : 'var(--color-green-400)',
+                    }}
                   />
                 </Tooltip>
               )}
