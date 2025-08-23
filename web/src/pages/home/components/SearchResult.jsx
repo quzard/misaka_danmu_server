@@ -714,6 +714,7 @@ export const SearchResult = () => {
                 try {
                   const res = await getInLibraryEpisodes({
                     title: editAnimeTitle || editItem.title,
+                    season: editItem.season ?? 1,
                   })
                   if (!res.data?.length) {
                     message.error(

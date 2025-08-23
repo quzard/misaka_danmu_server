@@ -354,7 +354,7 @@ export const EpisodeDetail = () => {
     try {
       if (resetLoading) return
       setResetLoading(true)
-      const episodeIds = resetInfo?.toDelete?.map(ep => Number(ep.id))
+      const episodeIds = resetInfo?.toDelete?.map(ep => Number(ep.episodeId))
       await deleteAnimeEpisode({
         episodeIds: episodeIds,
       })

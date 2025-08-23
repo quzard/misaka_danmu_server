@@ -65,6 +65,7 @@ export const getEditEpisodes = data => api.get('/api/ui/search/episodes', data)
 export const getInLibraryEpisodes = data =>
   api.get('/api/ui/library/episodes-by-title', {
     title: data.title,
+    season: data.season,
   })
 
 /** 提交编辑导入 */
@@ -95,11 +96,15 @@ export const getAllEpisode = data =>
 
 /** 搜索BGM */
 export const getBgmSearch = data =>
-  api.get(`/api/ui/metadata/bangumi/search?keyword=${encodeURIComponent(data.keyword)}`)
+  api.get(
+    `/api/ui/metadata/bangumi/search?keyword=${encodeURIComponent(data.keyword)}`
+  )
 
 /** 豆瓣搜索 */
 export const getDoubanSearch = data =>
-  api.get(`/api/ui/metadata/douban/search?keyword=${encodeURIComponent(data.keyword)}`)
+  api.get(
+    `/api/ui/metadata/douban/search?keyword=${encodeURIComponent(data.keyword)}`
+  )
 /** imdb搜索 */
 export const getImdbSearch = data =>
   api.get(
@@ -140,7 +145,6 @@ export const getAvailableScheduledJobs = () =>
 
 /** 获取流控状态 */
 export const getRateLimitStatus = () => api.get('/api/ui/rate-limit/status')
-
 
 /** ---------------------------------------------------token相关开始------------------------------------------------ */
 /** 获取token列表 */
