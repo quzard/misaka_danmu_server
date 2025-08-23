@@ -59,11 +59,13 @@
 
 ## 🚀 快速开始 (使用 Docker Compose)
 
+
 推荐使用 Docker 和 Docker Compose 进行一键部署。
 
 ### 步骤 1: 准备 `docker-compose.yaml`
 
 1.  在一个合适的目录（例如 `~/danmuku`）下，创建 `docker-compose.yaml` 文件。
+
 
     ```bash
     mkdir -p ~/danmuku
@@ -74,6 +76,7 @@
 2.  根据您选择的数据库，将以下内容之一复制到 `docker-compose.yaml` 文件中。
 
 #### 方案 A: 使用 MySQL (推荐)
+
 
 ```yaml
 version: "3.8"
@@ -91,6 +94,7 @@ services:
       TZ: "Asia/Shanghai"
     volumes:
       - ./mysql-data:/var/lib/mysql
+
     command:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_general_ci
@@ -102,6 +106,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 30s
+
     networks:
       - misaka-net
 
@@ -191,12 +196,14 @@ services:
       - ./config:/app/config
     ports:
       - "7768:7768"
+
     networks:
       - misaka-net
 
 networks:
   misaka-net:
     driver: bridge
+
 ```
 
 ### 步骤 2: 修改配置并启动
@@ -207,6 +214,7 @@ networks:
 2.  在 `docker-compose.yaml` 所在目录运行命令启动应用：
     ```bash
     docker-compose up -d
+
     ```
 
 ### 步骤 3: 访问和配置
