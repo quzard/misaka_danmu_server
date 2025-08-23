@@ -235,14 +235,21 @@ async def find_anime_by_title_and_season(session: AsyncSession, title: str, seas
     row = result.mappings().first()
     return dict(row) if row else None
 
-async def get_episode_indices_by_anime_title(session: AsyncSession, title: str) -> List[int]:
-    """获取指定标题的作品已存在的所有分集序号。"""
+async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, season: Optional[int] = None) -> List[int]:
+    """根据作品标题和可选的季度号获取已存在的所有分集序号列表。"""
     stmt = (
         select(distinct(Episode.episodeIndex))
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .join(Anime, AnimeSource.animeId == Anime.id)
         .where(Anime.title == title)
     )
+
+    # 如果提供了季度号，则增加过滤条件
+    if season is not None:
+        stmt = stmt.where(Anime.season == season)
+
+    stmt = stmt.order_by(Episode.episodeIndex)
+    
     result = await session.execute(stmt)
     return result.scalars().all()
 
