@@ -49,7 +49,7 @@ export const ImportTask = () => {
         !!selectList.length) ||
         (selectList.every(item => item.status === '已暂停') &&
           !!selectList.length),
-      selectList.every(item => item.status === '已暂停') && !!selectList.length,
+      selectList.every(item => item.status === '已暂停'),
       selectList.every(item => item.status === '运行中') && !!selectList.length,
     ]
   }, [selectList])
