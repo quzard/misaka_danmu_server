@@ -51,6 +51,27 @@ async def _run_migrations(conn):
         logger.info(f"成功删除列 'anime.source_url'。")
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+    # --- 迁移任务: 确保 task_history.scheduled_task_id 字段存在 ---
+    migration_id_2 = "add_scheduled_task_id_to_task_history"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id_2}...")
+
+    if db_type == "mysql":
+        check_scheduled_task_id_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'scheduled_task_id'")
+        add_scheduled_task_id_sql = text("ALTER TABLE task_history ADD COLUMN `scheduled_task_id` VARCHAR(100) NULL DEFAULT NULL AFTER `id`, ADD INDEX `ix_task_history_scheduled_task_id` (`scheduled_task_id`)")
+    elif db_type == "postgresql":
+        check_scheduled_task_id_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'scheduled_task_id'")
+        add_scheduled_task_id_sql = text('ALTER TABLE task_history ADD COLUMN "scheduled_task_id" VARCHAR(100) NULL; CREATE INDEX ix_task_history_scheduled_task_id ON task_history ("scheduled_task_id");')
+    else:
+        # 已在上面处理过，这里只是为了代码完整性
+        return
+
+    has_scheduled_task_id = (await conn.execute(check_scheduled_task_id_sql)).scalar_one_or_none() is not None
+    if not has_scheduled_task_id:
+        logger.info(f"列 'task_history.scheduled_task_id' 不存在。正在添加...")
+        await conn.execute(add_scheduled_task_id_sql)
+        logger.info(f"成功添加列 'task_history.scheduled_task_id'。")
+    logger.info(f"迁移任务 '{migration_id_2}' 检查完成。")
+
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
     db_type = settings.database.type.lower()
@@ -124,7 +145,7 @@ async def _create_db_if_not_exists():
         logger.error(f"=== 错误详情: {e}")
         logger.error("---")
         logger.error("--- 可能的原因与排查建议: ---")
-        logger.error("--- 1. 数据库服务未运行: 请确认您的 MySQL/MariaDB 服务正在运行。")
+        logger.error("--- 1. 数据库服务未运行: 请确认您的 数据库 服务正在运行。")
         logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
         logger.error(f"---    - 主机 (Host): {settings.database.host}")
         logger.error(f"---    - 端口 (Port): {settings.database.port}")

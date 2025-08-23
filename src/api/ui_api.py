@@ -164,16 +164,22 @@ async def search_anime_provider(
             if not title: return ""
             title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
             return title.lower().replace(" ", "").replace("：", ":").strip()
-        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
+
+        # 修正：采用更智能的两阶段过滤策略
+        # 阶段1：基于原始搜索词进行初步、宽松的过滤，以确保所有相关系列（包括不同季度和剧场版）都被保留。
+        # 只有当用户明确指定季度时，我们才进行更严格的过滤。
+        normalized_search_title = normalize_for_filtering(search_title)
         filtered_results = []
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
-            # 修正：使用模糊匹配替代严格的子字符串匹配，以提高容错率
+            
+            # 使用模糊匹配来检查搜索结果是否与原始搜索词相关。
             # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
-            # 只要搜索结果的标题与“白名单”中的任何一个别名相似度高于85，就予以保留。
-            if any(fuzz.token_set_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+            # 80的阈值可以在保留相关性的同时，过滤掉大部分无关结果（如“刀剑若梦”）。
+            if fuzz.token_set_ratio(normalized_item_title, normalized_search_title) > 80:
                 filtered_results.append(item)
+
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         results = filtered_results
 
@@ -1042,13 +1048,12 @@ async def get_metadata_details_with_type(
 async def execute_metadata_action(
     provider: str,
     action_name: str,
-    request: Request,
     payload: Dict[str, Any] = None,
     current_user: models.User = Depends(security.get_current_user),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     try:
-        return await manager.execute_action(provider, action_name, payload or {}, current_user, request=request)
+        return await manager.execute_action(provider, action_name, payload or {}, current_user)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

@@ -190,9 +190,15 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": user_info.get("avatar", {}).get("large"), "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 0))}
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
+        # 修正：返回一个更简洁的页面，该页面只包含一个脚本，
+        # 用于通知父窗口授权已完成，然后立即尝试关闭自身。
+        # 这为用户提供了更流畅的“即时关闭”体验。
         return HTMLResponse("""
-            <html><head><title>授权成功</title></head><body><p>授权成功！此窗口将自动关闭。</p><script>window.opener && window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); window.close();</script></body></html>
-        """)
+            <html><head><title>授权处理中...</title></head><body><script type="text/javascript">
+              try { window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); } catch(e) { console.error(e); }
+              window.close();
+            </script><p>授权成功，请关闭此窗口。</p></body></html>
+            """)
     except httpx.HTTPStatusError as e:
         logger.error(f"Bangumi token exchange failed: {e.response.text}", exc_info=True)
         return HTMLResponse(f"<html><body>Token exchange failed: {e.response.text}</body></html>", status_code=500)
