@@ -16,7 +16,7 @@ import httpx
 from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .. import crud, models, orm_models, security, scraper_manager
@@ -1048,12 +1048,13 @@ async def get_metadata_details_with_type(
 async def execute_metadata_action(
     provider: str,
     action_name: str,
-    payload: Dict[str, Any] = None,
+    request: Request,
+    payload: Optional[Dict[str, Any]] = Body(None),
     current_user: models.User = Depends(security.get_current_user),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     try:
-        return await manager.execute_action(provider, action_name, payload or {}, current_user)
+        return await manager.execute_action(provider, action_name, payload or {}, current_user, request=request)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

@@ -10,19 +10,11 @@ from .orm_models import Base
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
-async def _run_migrations(conn):
-    """
-    执行一次性的数据库架构迁移。
-    这是一个简化的迁移方案，用于处理特定的架构变更，例如添加或重命名字段。
-    """
-    db_type = settings.database.type.lower()
-    db_name = settings.database.name
-
-    # --- 迁移任务: 确保 anime.year 字段存在，并移除旧的 source_url 字段 ---
+async def _migrate_add_anime_year(conn, db_type, db_name):
+    """迁移任务: 确保 anime.year 字段存在，并移除旧的 source_url 字段。"""
     migration_id = "add_anime_year_and_drop_source_url"
     logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
 
-    # 使用 information_schema 来检查列是否存在，这比 SHOW COLUMNS 更具可移植性
     if db_type == "mysql":
         check_source_url_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'anime' AND column_name = 'source_url'")
         check_year_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'anime' AND column_name = 'year'")
@@ -34,7 +26,6 @@ async def _run_migrations(conn):
         add_year_sql = text('ALTER TABLE anime ADD COLUMN "year" INT NULL')
         drop_source_url_sql = text("ALTER TABLE anime DROP COLUMN source_url")
     else:
-        logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
         return
 
     has_source_url = (await conn.execute(check_source_url_sql)).scalar_one_or_none() is not None
@@ -51,26 +42,42 @@ async def _run_migrations(conn):
         logger.info(f"成功删除列 'anime.source_url'。")
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
-    # --- 迁移任务: 确保 task_history.scheduled_task_id 字段存在 ---
-    migration_id_2 = "add_scheduled_task_id_to_task_history"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id_2}...")
+async def _migrate_add_scheduled_task_id(conn, db_type, db_name):
+    """
+    迁移任务: 确保 task_history.scheduled_task_id 字段存在。
+    """
+    migration_id = "add_scheduled_task_id_to_task_history"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
 
     if db_type == "mysql":
-        check_scheduled_task_id_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'scheduled_task_id'")
-        add_scheduled_task_id_sql = text("ALTER TABLE task_history ADD COLUMN `scheduled_task_id` VARCHAR(100) NULL DEFAULT NULL AFTER `id`, ADD INDEX `ix_task_history_scheduled_task_id` (`scheduled_task_id`)")
+        check_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'scheduled_task_id'")
+        add_sql = text("ALTER TABLE task_history ADD COLUMN `scheduled_task_id` VARCHAR(100) NULL DEFAULT NULL AFTER `id`, ADD INDEX `ix_task_history_scheduled_task_id` (`scheduled_task_id`)")
     elif db_type == "postgresql":
-        check_scheduled_task_id_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'scheduled_task_id'")
-        add_scheduled_task_id_sql = text('ALTER TABLE task_history ADD COLUMN "scheduled_task_id" VARCHAR(100) NULL; CREATE INDEX ix_task_history_scheduled_task_id ON task_history ("scheduled_task_id");')
+        check_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'scheduled_task_id'")
+        add_sql = text('ALTER TABLE task_history ADD COLUMN "scheduled_task_id" VARCHAR(100) NULL; CREATE INDEX ix_task_history_scheduled_task_id ON task_history ("scheduled_task_id");')
     else:
-        # 已在上面处理过，这里只是为了代码完整性
         return
 
-    has_scheduled_task_id = (await conn.execute(check_scheduled_task_id_sql)).scalar_one_or_none() is not None
-    if not has_scheduled_task_id:
+    column_exists = (await conn.execute(check_sql)).scalar_one_or_none() is not None
+    if not column_exists:
         logger.info(f"列 'task_history.scheduled_task_id' 不存在。正在添加...")
-        await conn.execute(add_scheduled_task_id_sql)
+        await conn.execute(add_sql)
         logger.info(f"成功添加列 'task_history.scheduled_task_id'。")
-    logger.info(f"迁移任务 '{migration_id_2}' 检查完成。")
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+
+async def _run_migrations(conn):
+    """
+    执行所有一次性的数据库架构迁移。
+    """
+    db_type = settings.database.type.lower()
+    db_name = settings.database.name
+
+    if db_type not in ["mysql", "postgresql"]:
+        logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
+        return
+
+    await _migrate_add_anime_year(conn, db_type, db_name)
+    await _migrate_add_scheduled_task_id(conn, db_type, db_name)
 
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
