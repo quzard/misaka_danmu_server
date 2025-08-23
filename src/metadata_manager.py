@@ -177,10 +177,10 @@ class MetadataSourceManager:
             return await source_instance.get_details(item_id, user, mediaType=mediaType)
         raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 
-    async def execute_action(self, provider: str, action_name: str, payload: Dict, user: models.User) -> Any:
+    async def execute_action(self, provider: str, action_name: str, payload: Dict, user: models.User, request: Request) -> Any:
         """执行特定提供商的自定义操作。"""
         if source_instance := self.sources.get(provider):
-            return await source_instance.execute_action(action_name, payload, user)
+            return await source_instance.execute_action(action_name, payload, user, request=request)
         raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 
     async def getProviderConfig(self, providerName: str) -> Dict[str, Any]:
