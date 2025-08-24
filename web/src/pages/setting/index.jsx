@@ -7,12 +7,9 @@ import { TMDB } from './components/TMDB'
 import { Douban } from './components/Douban'
 import { TVDB } from './components/TVDB'
 import { Proxy } from './components/Proxy'
-import { useSearchParams } from 'react-router-dom'
 
 export const Setting = () => {
-  const [searchParams] = useSearchParams()
-  const key = searchParams.get('key')
-  const [activeKey, setActiveKey] = useState(key || 'security')
+  const [activeKey, setActiveKey] = useState('security')
   return (
     <Tabs
       defaultActiveKey={activeKey}

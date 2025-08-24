@@ -16,7 +16,6 @@ import { EpisodeDetail } from '../pages/episode/[id].jsx'
 import { CommentDetail } from '../pages/comment/[id].jsx'
 import { Control } from '../pages/control/index.jsx'
 import { Bullet } from '../pages/bullet/index.jsx'
-import { BangumiAuth } from '../pages/auth/bangumi.jsx'
 
 export const router = createBrowserRouter([
   {
@@ -74,10 +73,6 @@ export const router = createBrowserRouter([
         element: <Login />,
       },
     ],
-  },
-  {
-    path: 'auth/bangumi',
-    element: <BangumiAuth />,
   },
   {
     path: '*',
