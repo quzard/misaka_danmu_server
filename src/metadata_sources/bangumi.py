@@ -338,7 +338,8 @@ class BangumiMetadataSource(BaseMetadataSource):
                     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
                     base_url = f"{scheme}://{forwarded_host or host}"
                 
-                redirect_uri = f"{base_url.rstrip('/')}/api/metadata/bangumi/auth/callback"
+                # 修正：回调URL必须与 metadata_manager.py 中注册的路由前缀完全匹配
+                redirect_uri = f"{base_url.rstrip('/')}/api/ui/metadata/bangumi/auth/callback"
                 state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
                 auth_url = f"https://bgm.tv/oauth/authorize?{urlencode(params)}"
