@@ -206,10 +206,7 @@ export const getWebhookServices = () => api.get('/api/ui/webhooks/available')
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */
 export const getBangumiConfig = () => api.get('/api/ui/config/provider/bangumi')
-/** 设置bangumi api配置
- * bangumi_client_id
- * bangumi_client_secret
- */
+/** 设置bangumi api配置 */
 export const setBangumiConfig = data =>
   api.put('/api/ui/config/provider/bangumi', data)
 /** 获取授权信息 */
@@ -221,6 +218,12 @@ export const getBangumiAuthUrl = () =>
 /** 注销授权 */
 export const logoutBangumiAuth = () =>
   api.post('/api/ui/metadata/bangumi/actions/logout')
+/** oauth2 回调授权 */
+export const bangumiAuthOauth2 = data =>
+  api.post('/api/ui/metadata/bangumi/auth/callback', {
+    state: data.state,
+    code: data.code,
+  })
 
 /** ------------------------------------------ 豆瓣、tmdb、tvdb配置、代理------------------------------------------  */
 /** 获取tmdb配置 */

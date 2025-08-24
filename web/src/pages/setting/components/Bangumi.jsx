@@ -6,7 +6,7 @@ import {
   logoutBangumiAuth,
   setBangumiConfig,
 } from '../../../apis'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -20,7 +20,6 @@ export const Bangumi = () => {
   const [isSaveLoading, setIsSaveLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [authInfo, setAuthInfo] = useState({})
-  const oauthPopup = useRef()
 
   const getConfig = async () => {
     const res = await getBangumiConfig()
@@ -77,20 +76,8 @@ export const Bangumi = () => {
 
   const handleLogin = async () => {
     try {
-      if (oauthPopup.current && !oauthPopup.current?.closed) {
-        oauthPopup.current?.focus?.()
-      } else {
-        const res = await getBangumiAuthUrl()
-        const width = 600,
-          height = 700
-        const left = window.screen.width / 2 - width / 2
-        const top = window.screen.height / 2 - height / 2
-        oauthPopup.current = window.open(
-          res.data.url,
-          'BangumiAuth',
-          `width=${width},height=${height},top=${top},left=${left}`
-        )
-      }
+      const res = await getBangumiAuthUrl()
+      location.href = `${res.data.url}&redirect_uri=${encodeURIComponent(`${window.location.origin}/auth/bangumi`)}`
     } catch (error) {
       alert(`获取授权链接失败: ${error.message}`)
     }
@@ -98,17 +85,6 @@ export const Bangumi = () => {
 
   useEffect(() => {
     getInfo()
-    const handleMessage = event => {
-      if (event.data === 'BANGUMI-OAUTH-COMPLETE') {
-        if (oauthPopup.current) oauthPopup.current?.close?.()
-        getInfo()
-      }
-    }
-    window.addEventListener('message', handleMessage)
-    return () => {
-      // 正确地移除之前添加的同一个函数引用
-      window.removeEventListener('message', handleMessage)
-    }
   }, [])
 
   return (
