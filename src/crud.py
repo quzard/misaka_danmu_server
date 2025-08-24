@@ -1290,26 +1290,26 @@ async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 async def check_scheduled_task_exists_by_type(session: AsyncSession, job_type: str) -> bool:
-    stmt = select(ScheduledTask.id).where(ScheduledTask.jobType == job_type).limit(1)
+    stmt = select(ScheduledTask.taskId).where(ScheduledTask.jobType == job_type).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
 async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     stmt = select(
-        ScheduledTask.id.label("id"), 
+        ScheduledTask.taskId.label("taskId"), 
         ScheduledTask.name.label("name"),
         ScheduledTask.jobType.label("jobType"), 
         ScheduledTask.cronExpression.label("cronExpression"),
         ScheduledTask.isEnabled.label("isEnabled"),
         ScheduledTask.lastRunAt.label("lastRunAt"),
         ScheduledTask.nextRunAt.label("nextRunAt")
-    ).where(ScheduledTask.id == task_id)
+    ).where(ScheduledTask.taskId == task_id)
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
 
 async def create_scheduled_task(session: AsyncSession, task_id: str, name: str, job_type: str, cron: str, is_enabled: bool):
-    new_task = ScheduledTask(id=task_id, name=name, jobType=job_type, cronExpression=cron, isEnabled=is_enabled)
+    new_task = ScheduledTask(taskId=task_id, name=name, jobType=job_type, cronExpression=cron, isEnabled=is_enabled)
     session.add(new_task)
     await session.commit()
 
@@ -1328,7 +1328,7 @@ async def delete_scheduled_task(session: AsyncSession, task_id: str):
         await session.commit()
 
 async def update_scheduled_task_run_times(session: AsyncSession, task_id: str, last_run: Optional[datetime], next_run: Optional[datetime]):
-    await session.execute(update(ScheduledTask).where(ScheduledTask.id == task_id).values(lastRunAt=last_run, nextRunAt=next_run))
+    await session.execute(update(ScheduledTask).where(ScheduledTask.taskId == task_id).values(lastRunAt=last_run, nextRunAt=next_run))
     await session.commit()
 
 # --- Task History ---
@@ -1341,20 +1341,20 @@ async def create_task_in_history(
     description: str,
     scheduled_task_id: Optional[str] = None
 ):
-    new_task = TaskHistory(id=task_id, title=title, status=status, description=description, scheduledTaskId=scheduled_task_id)
+    new_task = TaskHistory(taskId=task_id, title=title, status=status, description=description, scheduledTaskId=scheduled_task_id)
     session.add(new_task)
     await session.commit()
 
 async def update_task_progress_in_history(session: AsyncSession, task_id: str, status: str, progress: int, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, progress=progress, description=description))
+    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, progress=progress, description=description))
     await session.commit()
 
 async def finalize_task_in_history(session: AsyncSession, task_id: str, status: str, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status, description=description, progress=100, finishedAt=datetime.now(timezone.utc)))
+    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, description=description, progress=100, finishedAt=datetime.now(timezone.utc)))
     await session.commit()
 
 async def update_task_status(session: AsyncSession, task_id: str, status: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.id == task_id).values(status=status))
+    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status))
     await session.commit()
 
 async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
@@ -1386,7 +1386,7 @@ async def get_task_details_from_history(session: AsyncSession, task_id: str) -> 
     task = await session.get(TaskHistory, task_id)
     if task:
         return {
-            "taskId": task.id,
+            "taskId": task.taskId,
             "title": task.title,
             "status": task.status,
             "progress": task.progress,
@@ -1398,7 +1398,7 @@ async def get_task_details_from_history(session: AsyncSession, task_id: str) -> 
 async def get_task_from_history_by_id(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     task = await session.get(TaskHistory, task_id)
     if task:
-        return {"id": task.id, "title": task.title, "status": task.status}
+        return {"taskId": task.taskId, "title": task.title, "status": task.status}
     return None
 
 async def delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
