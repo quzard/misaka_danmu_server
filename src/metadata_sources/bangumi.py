@@ -355,3 +355,4 @@ class BangumiMetadataSource(BaseMetadataSource):
             return {"message": "注销成功"}
         else:
             return await super().execute_action(action_name, payload, user, request)
+
