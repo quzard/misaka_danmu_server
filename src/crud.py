@@ -1360,7 +1360,7 @@ async def update_task_status(session: AsyncSession, task_id: str, status: str):
 async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
     # 修正：显式选择需要的列，以避免在旧的数据库模式上查询不存在的列（如 scheduled_task_id）
     stmt = select(
-        TaskHistory.id,
+        TaskHistory.taskId,
         TaskHistory.title,
         TaskHistory.status,
         TaskHistory.progress,
@@ -1377,7 +1377,7 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
     stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(100)
     result = await session.execute(stmt)
     return [
-        {"taskId": row.id, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
+        {"taskId": row.taskId, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
         for row in result.mappings()
     ]
 

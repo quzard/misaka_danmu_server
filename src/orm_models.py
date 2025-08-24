@@ -206,7 +206,8 @@ class TmdbEpisodeMapping(Base):
 
 class ScheduledTask(Base):
     __tablename__ = "scheduled_tasks"
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # 修正：将Python属性名从 'id' 改为 'taskId'，以匹配API响应模型，同时保持数据库列名为 'id'
+    taskId: Mapped[str] = mapped_column("id", String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     jobType: Mapped[str] = mapped_column("job_type", String(50)) # type: ignore
     cronExpression: Mapped[str] = mapped_column("cron_expression", String(100))

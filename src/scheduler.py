@@ -150,13 +150,13 @@ class SchedulerManager:
             for task in tasks:
                 if task['jobType'] in self._job_classes:
                     try:
-                        runner = self._create_job_runner(task['jobType'], task['id'])
-                        job = self.scheduler.add_job(runner, CronTrigger.from_crontab(task['cronExpression']), id=task['id'], name=task['name'], replace_existing=True)
-                        if not task['isEnabled']: self.scheduler.pause_job(task['id'])
+                        runner = self._create_job_runner(task['jobType'], task['taskId'])
+                        job = self.scheduler.add_job(runner, CronTrigger.from_crontab(task['cronExpression']), id=task['taskId'], name=task['name'], replace_existing=True)
+                        if not task['isEnabled']: self.scheduler.pause_job(task['taskId'])
                         # When loading, the job object is new and has no last_run_time. We only need to update the next_run_time.
                         await crud.update_scheduled_task_run_times(session, job.id, task['lastRunAt'], job.next_run_time)
                     except Exception as e:
-                        logger.error(f"加载定时任务 '{task['name']}' (ID: {task['id']}) 失败: {e}")
+                        logger.error(f"加载定时任务 '{task['name']}' (ID: {task['taskId']}) 失败: {e}")
 
     async def get_all_tasks(self) -> List[Dict[str, Any]]:
         """从数据库获取所有定时任务的列表。"""
