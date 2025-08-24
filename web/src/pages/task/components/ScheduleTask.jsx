@@ -174,7 +174,7 @@ export const ScheduleTask = () => {
         fetchData()
         setAddOpen(false)
       } catch (error) {
-        message.error('任务编辑失败，请稍后重试。')
+        message.error(error?.detail ?? '任务编辑失败，请稍后重试。')
       } finally {
         setConfirmLoading(false)
       }
@@ -186,7 +186,7 @@ export const ScheduleTask = () => {
         fetchData()
         setAddOpen(false)
       } catch (error) {
-        message.error('任务添加失败，请稍后重试。')
+        message.error(error?.detail ?? '任务添加失败，请稍后重试。')
       } finally {
         setConfirmLoading(false)
       }
@@ -206,7 +206,7 @@ export const ScheduleTask = () => {
           message.success('任务删除成功。')
           fetchData()
         } catch (error) {
-          message.error('任务删除失败，请稍后重试。')
+          message.error(error?.detail ?? '任务删除失败，请稍后重试。')
         }
       },
     })
