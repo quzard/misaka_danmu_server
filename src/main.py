@@ -112,6 +112,28 @@ async def lifespan(app: FastAPI):
     app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
     await app.state.scheduler_manager.start()
     
+    # --- 前端服务 (生产环境) ---
+    # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
+    # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
+    # 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
+    if settings.environment == "development":
+        # 开发环境：所有非API请求都重定向到Vite开发服务器
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_react_app_dev(request: Request, full_path: str):
+            base_url = f"http://{settings.client.host}:{settings.client.port}"
+            return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
+    else:
+        # 生产环境：显式挂载静态资源目录
+        app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
+        # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
+        app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
+        # 挂载用户缓存的图片 (如海报)
+        app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
+        # 然后，为所有其他路径提供 index.html 以支持前端路由
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(request: Request, full_path: str):
+            return FileResponse("web/dist/index.html")
+
     yield
     
     # --- Shutdown Logic ---
@@ -236,27 +258,6 @@ async def cleanup_task(app: FastAPI):
 app.include_router(api_router, prefix="/api")
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
-
-# --- 前端服务 (生产环境) ---
-# 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-# 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
-if settings.environment == "development":
-    # 开发环境：所有非API请求都重定向到Vite开发服务器
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_react_app_dev(request: Request, full_path: str):
-        base_url = f"http://{settings.client.host}:{settings.client.port}"
-        return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-else:
-    # 生产环境：显式挂载静态资源目录
-    app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
-    app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-    # 挂载用户缓存的图片 (如海报)
-    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-    # 然后，为所有其他路径提供 index.html 以支持前端路由
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(request: Request, full_path: str):
-        return FileResponse("web/dist/index.html")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
