@@ -159,27 +159,6 @@ def get_config_manager_dep(request: Request) -> ConfigManager:
     """Dependency to get ConfigManager from app state."""
     return request.app.state.config_manager
 
-async def _get_base_url(request: Request, config_manager: ConfigManager) -> str:
-    """
-    Determines the base URL of the application, prioritizing user-configured domain,
-    then reverse proxy headers, and finally the request's host header.
-    """
-    base_url = await config_manager.get("webhookDomain", "")
-    if base_url:
-        return base_url.rstrip('/')
-
-    forwarded_host = request.headers.get("x-forwarded-host")
-    host = request.headers.get("host")
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    
-    final_host = forwarded_host or host
-    if final_host:
-        return f"{scheme}://{final_host}"
-    
-    # Fallback to the base URL derived from the request itself
-    return str(request.base_url).rstrip('/')
-
-
 @auth_router.get("/auth/callback", summary="Bangumi OAuth回调处理", include_in_schema=False, name="bangumi_auth_callback")
 async def bangumi_auth_callback(request: Request, code: str = Query(...), state: str = Query(...), session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager_dep)):
     user_id = await crud.consume_oauth_state(session, state)
@@ -187,9 +166,8 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
     client_id, client_secret = await asyncio.gather(config_manager.get("bangumiClientId"), config_manager.get("bangumiClientSecret"))
     if not client_id or not client_secret: return HTMLResponse("<html><body>Server configuration error: Bangumi App ID or Secret is not set.</body></html>", status_code=500)
     
-    # 修正：手动构造回调URL，以确保在反向代理后也能正确工作。
-    base_url = await _get_base_url(request, config_manager)
-    redirect_uri = f"{base_url}/api/ui/metadata/bangumi/auth/callback"
+    # 修正：使用 FastAPI 的 url_for 来生成回调URL，以确保其在反向代理后也能正确工作。
+    redirect_uri = str(request.url_for('bangumi_auth_callback'))
 
     payload = {"grant_type": "authorization_code", "client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri}
     try:
@@ -340,9 +318,8 @@ class BangumiMetadataSource(BaseMetadataSource):
                 if not client_id:
                     raise ValueError("Bangumi App ID 未在设置中配置。")
                 
-                # 修正：手动构造回调URL，以确保在反向代理后也能正确工作。
-                base_url = await _get_base_url(request, self.config_manager)
-                redirect_uri = f"{base_url}/api/ui/metadata/bangumi/auth/callback"
+                # 修正：使用 FastAPI 的 url_for 来生成回调URL，以确保其在反向代理后也能正确工作。
+                redirect_uri = str(request.url_for('bangumi_auth_callback'))
                 
                 state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
