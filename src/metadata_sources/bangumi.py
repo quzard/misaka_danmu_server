@@ -159,16 +159,37 @@ def get_config_manager_dep(request: Request) -> ConfigManager:
     """Dependency to get ConfigManager from app state."""
     return request.app.state.config_manager
 
+async def _get_base_url(request: Request, config_manager: ConfigManager) -> str:
+    """
+    Determines the base URL of the application, prioritizing user-configured domain,
+    then reverse proxy headers, and finally the request's host header.
+    """
+    base_url = await config_manager.get("webhookDomain", "")
+    if base_url:
+        return base_url.rstrip('/')
+
+    forwarded_host = request.headers.get("x-forwarded-host")
+    host = request.headers.get("host")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    
+    final_host = forwarded_host or host
+    if final_host:
+        return f"{scheme}://{final_host}"
+    
+    return str(request.base_url).rstrip('/')
+
 
 @auth_router.get("/auth/callback", summary="Bangumi OAuth回调处理", include_in_schema=False, name="bangumi_auth_callback")
 async def bangumi_auth_callback(request: Request, code: str = Query(...), state: str = Query(...), session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager_dep)):
-    # 修正：调用正确的 crud 函数名
     user_id = await crud.consume_oauth_state(session, state)
     if not user_id: return HTMLResponse("<html><body>State Mismatch. Authorization failed. Please try again.</body></html>", status_code=400)
     client_id, client_secret = await asyncio.gather(config_manager.get("bangumiClientId"), config_manager.get("bangumiClientSecret"))
     if not client_id or not client_secret: return HTMLResponse("<html><body>Server configuration error: Bangumi App ID or Secret is not set.</body></html>", status_code=500)
     
-    redirect_uri = str(request.url_for('bangumi_auth_callback'))
+    # 修正：手动构造回调URL，以确保在反向代理后也能正确工作。
+    base_url = await _get_base_url(request, config_manager)
+    redirect_uri = f"{base_url}/api/ui/metadata/bangumi/auth/callback"
+
     payload = {"grant_type": "authorization_code", "client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri}
     try:
         async with httpx.AsyncClient() as client:
@@ -181,9 +202,6 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": user_info.get("avatar", {}).get("large"), "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 0))}
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
-        # 修正：返回一个更简洁的页面，该页面只包含一个脚本，
-        # 用于通知父窗口授权已完成，然后立即尝试关闭自身。
-        # 这为用户提供了更流畅的“即时关闭”体验。
         return HTMLResponse("""
             <html><head><title>授权处理中...</title></head><body><script type="text/javascript">
               try { window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); } catch(e) { console.error(e); }
@@ -321,8 +339,10 @@ class BangumiMetadataSource(BaseMetadataSource):
                 if not client_id:
                     raise ValueError("Bangumi App ID 未在设置中配置。")
                 
-                # 修正：使用 FastAPI 的 url_for 来生成回调URL，以确保其在反向代理后也能正确工作。
-                redirect_uri = str(request.url_for('bangumi_auth_callback'))
+                # 修正：手动构造回调URL，以确保在反向代理后也能正确工作。
+                base_url = await _get_base_url(request, self.config_manager)
+                redirect_uri = f"{base_url}/api/ui/metadata/bangumi/auth/callback"
+                
                 state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
                 auth_url = f"https://bgm.tv/oauth/authorize?{urlencode(params)}"
