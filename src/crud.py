@@ -1434,7 +1434,7 @@ async def get_last_run_result_for_scheduled_task(session: AsyncSession, schedule
     
     # 返回一个与 models.TaskInfo 兼容的字典
     return {
-        "id": task_run.id,
+        "taskId": task_run.taskId,
         "title": task_run.title,
         "status": task_run.status,
         "progress": task_run.progress,

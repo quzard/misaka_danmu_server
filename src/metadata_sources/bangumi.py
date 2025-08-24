@@ -176,6 +176,7 @@ async def _get_base_url(request: Request, config_manager: ConfigManager) -> str:
     if final_host:
         return f"{scheme}://{final_host}"
     
+    # Fallback to the base URL derived from the request itself
     return str(request.base_url).rstrip('/')
 
 
