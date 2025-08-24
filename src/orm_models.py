@@ -216,7 +216,8 @@ class ScheduledTask(Base):
 
 class TaskHistory(Base):
     __tablename__ = "task_history"
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # 修正：将Python属性名从 'id' 改为 'taskId'，以匹配Pydantic模型，同时保持数据库列名为 'id'
+    taskId: Mapped[str] = mapped_column("id", String(100), primary_key=True)
     scheduledTaskId: Mapped[Optional[str]] = mapped_column("scheduled_task_id", ForeignKey("scheduled_tasks.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(50))
