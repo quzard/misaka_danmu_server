@@ -1279,7 +1279,7 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(
-        ScheduledTask.id.label("id"),
+        ScheduledTask.taskId.label("taskId"),
         ScheduledTask.name.label("name"),
         ScheduledTask.jobType.label("jobType"),
         ScheduledTask.cronExpression.label("cronExpression"),
