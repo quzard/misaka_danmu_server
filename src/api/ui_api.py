@@ -176,8 +176,9 @@ async def search_anime_provider(
             
             # 检查搜索结果是否与任何一个别名匹配
             # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
-            # 80的阈值可以在保留相关性的同时，过滤掉大部分无关结果。
-            if any(fuzz.token_set_ratio(normalized_item_title, alias) > 80 for alias in normalized_filter_aliases):
+            # 修正：使用 partial_ratio 来更好地匹配续作和外传 (e.g., "刀剑神域" vs "刀剑神域外传")
+            # 85 的阈值可以在保留强相关的同时，过滤掉大部分无关结果。
+            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
                 filtered_results.append(item)
 
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
