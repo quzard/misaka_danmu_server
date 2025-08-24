@@ -10,6 +10,7 @@ from .base import BaseJob
 from ..rate_limiter import RateLimiter
 from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
+from ..metadata_manager import MetadataSourceManager
 
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoMap"

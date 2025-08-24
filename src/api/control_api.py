@@ -848,7 +848,7 @@ async def list_scheduled_tasks(
     """获取所有已配置的定时任务及其当前状态。"""
     tasks = await scheduler_manager.get_all_tasks()
     # 修正：将 'id' 键重命名为 'taskId' 以保持API一致性
-    return [{**task, 'taskId': task.pop('id')} for task in tasks]
+    return tasks
 
 @scheduler_router.get("/{taskId}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
 async def get_scheduled_task_last_result(

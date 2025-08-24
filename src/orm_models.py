@@ -148,7 +148,7 @@ class TokenAccessLog(Base):
     status: Mapped[str] = mapped_column(String(50))
     path: Mapped[Optional[str]] = mapped_column(String(512)) # type: ignore
 
-    __table_args__ = (Index('idx_token_id_time', 'token_id', 'access_time', mysql_length={'access_time': None}),)
+    __table_args__ = (Index('idx_token_id_time', 'token_id', 'access_time'),)
 
 class UaRule(Base):
     __tablename__ = "ua_rules"
@@ -206,7 +206,8 @@ class TmdbEpisodeMapping(Base):
 
 class ScheduledTask(Base):
     __tablename__ = "scheduled_tasks"
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # 修正：将Python属性名从 'id' 改为 'taskId'，以匹配API响应模型，同时保持数据库列名为 'id'
+    taskId: Mapped[str] = mapped_column("id", String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     jobType: Mapped[str] = mapped_column("job_type", String(50)) # type: ignore
     cronExpression: Mapped[str] = mapped_column("cron_expression", String(100))
@@ -227,7 +228,7 @@ class TaskHistory(Base):
     updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), default=datetime.now)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP(timezone=True))
 
-    __table_args__ = (Index('idx_created_at', 'created_at', mysql_length={'created_at': None}),)
+    __table_args__ = (Index('idx_created_at', 'created_at'),)
 
 class ExternalApiLog(Base):
     __tablename__ = "external_api_logs"
