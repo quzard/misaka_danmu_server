@@ -694,7 +694,7 @@ async def auto_search_and_import_task(
                     details.tvdbId, details.imdbId
                 )
                 # 修正：从元数据源获取最准确的媒体类型
-                if details.type:
+                if hasattr(details, 'type') and details.type:
                     media_type = details.type
                 
                 # 新增：从其他启用的元数据源获取更多别名，以提高搜索覆盖率
