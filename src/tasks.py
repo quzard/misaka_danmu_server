@@ -5,7 +5,7 @@ import re
 import traceback
 
 from thefuzz import fuzz
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, models, orm_models
@@ -30,28 +30,34 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
         # 1. 找到所有关联的源ID
         source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == animeId))
         source_ids = source_ids_res.scalars().all()
+        await progress_callback(10, f"找到 {len(source_ids)} 个关联数据源。")
 
         if source_ids:
             # 2. 找到所有关联的分集ID
-            await progress_callback(20, "正在查找关联数据...")
+            await progress_callback(20, "正在查找关联分集...")
             episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId.in_(source_ids)))
             episode_ids = episode_ids_res.scalars().all()
+            await progress_callback(30, f"找到 {len(episode_ids)} 个关联分集。")
 
             if episode_ids:
                 # 3. 删除所有弹幕
-                await progress_callback(40, "正在删除弹幕...")
+                comment_count_res = await session.execute(
+                    select(func.count(orm_models.Comment.id)).where(orm_models.Comment.episodeId.in_(episode_ids))
+                )
+                comment_count = comment_count_res.scalar_one()
+                await progress_callback(40, f"正在删除 {comment_count} 条弹幕...")
                 await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
                 
                 # 4. 删除所有分集
-                await progress_callback(60, "正在删除分集...")
+                await progress_callback(60, f"正在删除 {len(episode_ids)} 个分集...")
                 await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
 
             # 5. 删除所有源
-            await progress_callback(70, "正在删除数据源...")
+            await progress_callback(70, f"正在删除 {len(source_ids)} 个数据源...")
             await session.execute(delete(orm_models.AnimeSource).where(orm_models.AnimeSource.id.in_(source_ids)))
 
         # 6. 删除元数据和别名
-        await progress_callback(80, "正在删除元数据...")
+        await progress_callback(80, "正在删除元数据和别名...")
         await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.animeId == animeId))
         await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.animeId == animeId))
 
