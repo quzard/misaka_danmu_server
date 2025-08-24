@@ -93,7 +93,9 @@ async def lifespan(app: FastAPI):
 
     # 新增：初始化元数据源管理器
     app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager)
-    await app.state.metadata_manager.initialize(app)
+    await app.state.metadata_manager.initialize()
+
+
 
     app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager
@@ -227,6 +229,10 @@ async def cleanup_task(app: FastAPI):
 app.include_router(api_router, prefix="/api")
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
+
+# 新增：在主应用中显式挂载元数据管理器的路由
+# 这使得路由结构更清晰，并解决了潜在的冲突问题
+app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
 # --- 前端服务 (生产环境) ---
 # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录

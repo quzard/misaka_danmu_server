@@ -168,7 +168,7 @@ export const ScheduleTask = () => {
     if (!!values.taskId) {
       try {
         setConfirmLoading(true)
-        await editScheduledTask(values)
+        await editScheduledTask({ ...values, id: values.taskId })
         message.success('任务编辑成功。')
         form.resetFields()
         fetchData()
