@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from datetime import datetime
 from collections import defaultdict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ..utils import parse_search_keyword
 from .. import crud
 import httpx
 from pydantic import BaseModel, Field, ValidationError
