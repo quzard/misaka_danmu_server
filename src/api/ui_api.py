@@ -102,87 +102,92 @@ async def search_anime_provider(
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
     此接口实现了智能的按季缓存机制，并保留了原有的别名搜索、过滤和排序逻辑。
     """
-    parsed_keyword = parse_search_keyword(keyword)
-    search_title = parsed_keyword["title"]
-    season_to_filter = parsed_keyword["season"]
-    episode_to_filter = parsed_keyword["episode"]
+    try:
+        parsed_keyword = parse_search_keyword(keyword)
+        search_title = parsed_keyword["title"]
+        season_to_filter = parsed_keyword["season"]
+        episode_to_filter = parsed_keyword["episode"]
 
-    # --- 新增：按季缓存逻辑 ---
-    # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
-    cache_key = f"provider_search_{search_title}_{season_to_filter or 'all'}"
-    cached_results_data = await crud.get_cache(session, cache_key)
+        # --- 新增：按季缓存逻辑 ---
+        # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
+        cache_key = f"provider_search_{search_title}_{season_to_filter or 'all'}"
+        cached_results_data = await crud.get_cache(session, cache_key)
 
-    if cached_results_data is not None:
-        logger.info(f"搜索缓存命中: '{cache_key}'")
-        # 缓存数据已排序和过滤，只需更新当前请求的集数信息
-        results = [models.ProviderSearchInfo.model_validate(item) for item in cached_results_data]
-        for item in results:
-            item.currentEpisodeIndex = episode_to_filter
-        
-        return UIProviderSearchResponse(
-            results=results,
-            search_season=season_to_filter,
-            search_episode=episode_to_filter
-        )
-    
-    logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
-    # --- 缓存逻辑结束 ---
-
-    episode_info = {
-        "season": season_to_filter,
-        "episode": episode_to_filter
-    } if episode_to_filter is not None else None
-
-    logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
-    if not manager.has_enabled_scrapers:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
-        )
-
-    # --- 原有的复杂搜索流程开始 ---
-    tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
-    enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
-
-    if not enabled_aux_sources or (len(enabled_aux_sources) == 1 and enabled_aux_sources[0]['providerName'] == 'tmdb' and not tmdb_api_key):
-        logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
-        results = await manager.search_all([search_title], episode_info=episode_info)
-        logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
-    else:
-        logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
-        filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
-        filter_aliases.add(search_title)
-        logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
-
-        # 新增：根据您的要求，打印最终的别名列表以供调试
-        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
-
-        logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
-        all_results = await manager.search_all([search_title], episode_info=episode_info)
-
-        def normalize_for_filtering(title: str) -> str:
-            if not title: return ""
-            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-            return title.lower().replace(" ", "").replace("：", ":").strip()
-
-        # 修正：采用更智能的两阶段过滤策略
-        # 阶段1：基于原始搜索词进行初步、宽松的过滤，以确保所有相关系列（包括不同季度和剧场版）都被保留。
-        # 只有当用户明确指定季度时，我们才进行更严格的过滤。
-        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
-        filtered_results = []
-        for item in all_results:
-            normalized_item_title = normalize_for_filtering(item.title)
-            if not normalized_item_title: continue
+        if cached_results_data is not None:
+            logger.info(f"搜索缓存命中: '{cache_key}'")
+            # 缓存数据已排序和过滤，只需更新当前请求的集数信息
+            results = [models.ProviderSearchInfo.model_validate(item) for item in cached_results_data]
+            for item in results:
+                item.currentEpisodeIndex = episode_to_filter
             
-            # 检查搜索结果是否与任何一个别名匹配
-            # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
-            # 修正：使用 partial_ratio 来更好地匹配续作和外传 (e.g., "刀剑神域" vs "刀剑神域外传")
-            # 85 的阈值可以在保留强相关的同时，过滤掉大部分无关结果。
-            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
-                filtered_results.append(item)
+            return UIProviderSearchResponse(
+                results=results,
+                search_season=season_to_filter,
+                search_episode=episode_to_filter
+            )
+        
+        logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
+        # --- 缓存逻辑结束 ---
 
-        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-        results = filtered_results
+        episode_info = {
+            "season": season_to_filter,
+            "episode": episode_to_filter
+        } if episode_to_filter is not None else None
+
+        logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
+        if not manager.has_enabled_scrapers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
+            )
+
+        # --- 原有的复杂搜索流程开始 ---
+        tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
+        enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
+
+        if not enabled_aux_sources or (len(enabled_aux_sources) == 1 and enabled_aux_sources[0]['providerName'] == 'tmdb' and not tmdb_api_key):
+            logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
+            results = await manager.search_all([search_title], episode_info=episode_info)
+            logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
+        else:
+            logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
+            filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
+            filter_aliases.add(search_title)
+            logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
+
+            # 新增：根据您的要求，打印最终的别名列表以供调试
+            logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
+
+            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+            all_results = await manager.search_all([search_title], episode_info=episode_info)
+
+            def normalize_for_filtering(title: str) -> str:
+                if not title: return ""
+                title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+                return title.lower().replace(" ", "").replace("：", ":").strip()
+
+            # 修正：采用更智能的两阶段过滤策略
+            # 阶段1：基于原始搜索词进行初步、宽松的过滤，以确保所有相关系列（包括不同季度和剧场版）都被保留。
+            # 只有当用户明确指定季度时，我们才进行更严格的过滤。
+            normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
+            filtered_results = []
+            for item in all_results:
+                normalized_item_title = normalize_for_filtering(item.title)
+                if not normalized_item_title: continue
+                
+                # 检查搜索结果是否与任何一个别名匹配
+                # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
+                # 修正：使用 partial_ratio 来更好地匹配续作和外传 (e.g., "刀剑神域" vs "刀剑神域外传")
+                # 85 的阈值可以在保留强相关的同时，过滤掉大部分无关结果。
+                if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+                    filtered_results.append(item)
+
+            logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+            results = filtered_results
+    except httpx.RequestError as e:
+        error_message = f"搜索 '{keyword}' 时发生网络错误: {e}"
+        logger.error(error_message, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=error_message)
 
     # 辅助函数，用于根据标题修正媒体类型
     def is_movie_by_title(title: str) -> bool:
@@ -281,6 +286,11 @@ async def get_episodes_for_search_result(
         # 将 db_media_type 传递给 get_episodes 以帮助需要它的刮削器（如 mgtv）
         episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
         return episodes
+    except httpx.RequestError as e:
+        # 新增：捕获网络错误
+        error_message = f"从 {provider} 获取分集列表时发生网络错误: {e}"
+        logger.error(f"获取分集列表失败 (provider={provider}, media_id={media_id}): {error_message}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=error_message)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -1075,6 +1085,11 @@ async def execute_scraper_action(
         scraper = manager.get_scraper(providerName)
         result = await scraper.execute_action(actionName, payload or {})
         return result
+    except httpx.RequestError as e:
+        # 新增：捕获所有 httpx 网络错误 (连接超时, 读取超时等)
+        error_message = f"与 {providerName} 通信时发生网络错误: {e}"
+        logger.error(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时出错: {error_message}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=error_message)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except NotImplementedError as e:
