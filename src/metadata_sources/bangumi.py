@@ -338,8 +338,8 @@ class BangumiMetadataSource(BaseMetadataSource):
                         proxy_to_use = proxy_url
                         self.logger.debug(f"Bangumi: 连接性检查将使用代理: {proxy_to_use}")
             async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use, verify=ssl_verify) as client:
-                response = await client.get("https://api.bgm.tv/v0/ping")
-                return "连接成功 (未配置认证)" if response.status_code == 204 else f"连接失败 (状态码: {response.status_code})"
+                response = await client.get("https://bgm.tv/")
+                return "连接成功 (未配置认证)" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
         except httpx.ProxyError as e:
             self.logger.error(f"Bangumi: 连接性检查代理错误: {e}")
             return "连接失败 (代理错误)"

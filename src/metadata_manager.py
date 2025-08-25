@@ -210,6 +210,13 @@ class MetadataSourceManager:
         if providerName in ["douban", "tvdb"]:
             return {"value": next(iter(config_values.values()), "")}
 
+        # 新增：为Bangumi添加 authMode 字段，以明确告知前端当前应显示哪种模式
+        if providerName == "bangumi":
+            if config_values.get("bangumiToken"):
+                config_values["authMode"] = "token"
+            else:
+                config_values["authMode"] = "oauth"
+
         return config_values
 
     async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User):
