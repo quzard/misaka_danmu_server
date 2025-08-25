@@ -256,7 +256,7 @@ class TencentScraper(BaseScraper):
         type_mapping = {
             "电视剧": "tv_series", "动漫": "tv_series",
             "电影": "movie",
-            "综艺": "other", "综艺节目": "other",
+            "综艺": "tv_series", "综艺节目": "tv_series",
         }
         internal_media_type = type_mapping.get(content_type)
 
