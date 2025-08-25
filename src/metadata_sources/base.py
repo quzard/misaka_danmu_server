@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Set, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker # type: ignore
 from fastapi import Request
+from httpx import HTTPStatusError
 
 from .. import models
 from ..config_manager import ConfigManager

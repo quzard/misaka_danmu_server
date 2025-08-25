@@ -16,66 +16,80 @@ from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
+from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
 
 async def delete_anime_task(animeId: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete an anime and all its related data."""
-    await progress_callback(0, "开始删除...")
-    try:
-        # 检查作品是否存在
-        anime_exists = await session.get(orm_models.Anime, animeId)
-        if not anime_exists:
-            raise TaskSuccess("作品未找到，无需删除。")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            await progress_callback(0, f"开始删除 (尝试 {attempt + 1}/{max_retries})...")
+            
+            # 检查作品是否存在
+            anime_exists = await session.get(orm_models.Anime, animeId)
+            if not anime_exists:
+                raise TaskSuccess("作品未找到，无需删除。")
 
-        # 1. 找到所有关联的源ID
-        source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == animeId))
-        source_ids = source_ids_res.scalars().all()
-        await progress_callback(10, f"找到 {len(source_ids)} 个关联数据源。")
+            # 1. 找到所有关联的源ID
+            source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == animeId))
+            source_ids = source_ids_res.scalars().all()
+            await progress_callback(10, f"找到 {len(source_ids)} 个关联数据源。")
 
-        if source_ids:
-            # 2. 找到所有关联的分集ID
-            await progress_callback(20, "正在查找关联分集...")
-            episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId.in_(source_ids)))
-            episode_ids = episode_ids_res.scalars().all()
-            await progress_callback(30, f"找到 {len(episode_ids)} 个关联分集。")
+            if source_ids:
+                # 2. 找到所有关联的分集ID
+                await progress_callback(20, "正在查找关联分集...")
+                episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId.in_(source_ids)))
+                episode_ids = episode_ids_res.scalars().all()
+                await progress_callback(30, f"找到 {len(episode_ids)} 个关联分集。")
 
-            if episode_ids:
-                # 3. 删除所有弹幕
-                comment_count_res = await session.execute(
-                    select(func.count(orm_models.Comment.id)).where(orm_models.Comment.episodeId.in_(episode_ids))
-                )
-                comment_count = comment_count_res.scalar_one()
-                await progress_callback(40, f"正在删除 {comment_count} 条弹幕...")
-                await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
-                
-                # 4. 删除所有分集
-                await progress_callback(60, f"正在删除 {len(episode_ids)} 个分集...")
-                await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
+                if episode_ids:
+                    # 3. 删除所有弹幕
+                    comment_count_res = await session.execute(
+                        select(func.count(orm_models.Comment.id)).where(orm_models.Comment.episodeId.in_(episode_ids))
+                    )
+                    comment_count = comment_count_res.scalar_one()
+                    await progress_callback(40, f"正在删除 {comment_count} 条弹幕...")
+                    await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
+                    
+                    # 4. 删除所有分集
+                    await progress_callback(60, f"正在删除 {len(episode_ids)} 个分集...")
+                    await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
 
-            # 5. 删除所有源
-            await progress_callback(70, f"正在删除 {len(source_ids)} 个数据源...")
-            await session.execute(delete(orm_models.AnimeSource).where(orm_models.AnimeSource.id.in_(source_ids)))
+                # 5. 删除所有源
+                await progress_callback(70, f"正在删除 {len(source_ids)} 个数据源...")
+                await session.execute(delete(orm_models.AnimeSource).where(orm_models.AnimeSource.id.in_(source_ids)))
 
-        # 6. 删除元数据和别名
-        await progress_callback(80, "正在删除元数据和别名...")
-        await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.animeId == animeId))
-        await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.animeId == animeId))
+            # 6. 删除元数据和别名
+            await progress_callback(80, "正在删除元数据和别名...")
+            await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.animeId == animeId))
+            await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.animeId == animeId))
 
-        # 7. 删除作品本身
-        await progress_callback(90, "正在删除主作品记录...")
-        await session.delete(anime_exists)
-        
-        await session.commit()
-        raise TaskSuccess("删除成功。")
-    except TaskSuccess:
-        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
-        raise
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"删除作品任务 (ID: {animeId}) 失败: {e}", exc_info=True)
-        raise
+            # 7. 删除作品本身
+            await progress_callback(90, "正在删除主作品记录...")
+            await session.delete(anime_exists)
+            
+            await session.commit()
+            raise TaskSuccess("删除成功。")
+        except OperationalError as e:
+            await session.rollback()
+            if "Lock wait timeout exceeded" in str(e) and attempt < max_retries - 1:
+                wait_time = 2 ** (attempt + 1) # 2, 4, 8 seconds
+                logger.warning(f"删除作品时遇到锁超时，将在 {wait_time} 秒后重试...")
+                await progress_callback(0, f"数据库锁定，将在 {wait_time} 秒后重试...")
+                await asyncio.sleep(wait_time)
+                continue # Retry the loop
+            else:
+                logger.error(f"删除作品任务 (ID: {animeId}) 失败: {e}", exc_info=True)
+                raise # Re-raise if it's not a lock error or retries are exhausted
+        except TaskSuccess:
+            raise # Propagate success exception
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"删除作品任务 (ID: {animeId}) 失败: {e}", exc_info=True)
+            raise
 
 async def delete_source_task(sourceId: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete a source and all its related data."""
