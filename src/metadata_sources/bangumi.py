@@ -17,6 +17,7 @@ from .. import crud, models, orm_models, security
 from ..config import settings
 from ..config_manager import ConfigManager
 from ..database import get_db_session
+from ..utils import parse_search_keyword
 from ..scraper_manager import ScraperManager
 from .base import BaseMetadataSource
 
@@ -230,6 +231,29 @@ class BangumiMetadataSource(BaseMetadataSource):
         return httpx.AsyncClient(base_url="https://api.bgm.tv", headers=headers, timeout=20.0)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
+        """
+        Performs a cached search for Bangumi content.
+        It caches the base results for a title.
+        """
+        parsed = parse_search_keyword(keyword)
+        search_title = parsed['title']
+
+        cache_key = f"search_base_{self.provider_name}_{search_title}_{user.id}"
+        cached_results = await self._get_from_cache(cache_key)
+        if cached_results:
+            self.logger.info(f"Bangumi: 从缓存中命中基础搜索结果 (title='{search_title}')")
+            return [models.MetadataDetailsResponse.model_validate(r) for r in cached_results]
+
+        self.logger.info(f"Bangumi: 缓存未命中，正在为标题 '{search_title}' 执行网络搜索...")
+        all_results = await self._perform_network_search(search_title, user, mediaType)
+        
+        if all_results:
+            await self._set_to_cache(cache_key, [r.model_dump() for r in all_results], 'metadata_search_ttl_seconds', 3600)
+        
+        return all_results
+
+    async def _perform_network_search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
+        """Performs the actual network search for Bangumi."""
         async with await self._create_client(user) as client:
             search_payload = {"keyword": keyword, "filter": {"type": [2]}}
             search_response = await client.post("/v0/search/subjects", json=search_payload)
@@ -240,8 +264,8 @@ class BangumiMetadataSource(BaseMetadataSource):
             if not search_result.data: return []
 
             tasks = [self.get_details(str(subject.id), user) for subject in search_result.data]
-            detailed_results = await asyncio.gather(*tasks)
-            return [res for res in detailed_results if res]
+            detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
+            return [res for res in detailed_results if isinstance(res, models.MetadataDetailsResponse)]
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         async with await self._create_client(user) as client:

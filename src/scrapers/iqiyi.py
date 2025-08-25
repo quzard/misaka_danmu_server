@@ -21,6 +21,7 @@ from lxml import etree
 
 from ..config_manager import ConfigManager
 from .. import models
+from ..utils import parse_search_keyword
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
@@ -262,7 +263,7 @@ class IqiyiScraper(BaseScraper):
                 "Referer": "https://www.iqiyi.com/",
             },
             cookies=self.cookies,
-            timeout=15.0, # 增加默认超时时间
+            timeout=30.0, # 增加默认超时时间
             follow_redirects=True
         )
         self.entity_pattern = re.compile(r'&#[xX]?[0-9a-fA-F]+;')
@@ -484,7 +485,36 @@ class IqiyiScraper(BaseScraper):
         return results
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """
+        Performs a cached search for iQiyi content.
+        It caches the base results for a title and then filters them based on season.
+        """
+        parsed = parse_search_keyword(keyword)
+        search_title = parsed['title']
+        search_season = parsed['season']
 
+        cache_key = f"search_base_{self.provider_name}_{search_title}"
+        cached_results = await self._get_from_cache(cache_key)
+
+        if cached_results:
+            self.logger.info(f"爱奇艺: 从缓存中命中基础搜索结果 (title='{search_title}')")
+            all_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
+        else:
+            self.logger.info(f"爱奇艺: 缓存未命中，正在为标题 '{search_title}' 执行网络搜索...")
+            all_results = await self._perform_network_search(search_title, episode_info)
+            if all_results:
+                await self._set_to_cache(cache_key, [r.model_dump() for r in all_results], 'search_ttl_seconds', 3600)
+
+        if search_season is None:
+            return all_results
+
+        # Filter results by season
+        final_results = [item for item in all_results if item.season == search_season]
+        self.logger.info(f"爱奇艺: 为 S{search_season} 过滤后，剩下 {len(final_results)} 个结果。")
+        return final_results
+
+    async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """Performs the actual network search for iQiyi."""
         # 并行执行两个搜索API
         desktop_task = self._search_desktop_api(keyword, episode_info)
         mobile_task = self._search_mobile_api(keyword, episode_info)
@@ -502,10 +532,10 @@ class IqiyiScraper(BaseScraper):
         # 基于 mediaId 去重
         unique_results = list({item.mediaId: item for item in all_results}.values())
 
-        self.logger.info(f"爱奇艺 (合并): 搜索 '{keyword}' 完成，找到 {len(unique_results)} 个唯一结果。")
+        self.logger.info(f"爱奇艺 (合并): 网络搜索 '{keyword}' 完成，找到 {len(unique_results)} 个唯一结果。")
         if unique_results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in unique_results])
-            self.logger.info(f"爱奇艺 (合并): 搜索结果列表:\n{log_results}")
+            self.logger.info(f"爱奇艺 (合并): 网络搜索结果列表:\n{log_results}")
 
         return unique_results
 
