@@ -184,6 +184,7 @@ async def generic_import_task(
     currentEpisodeIndex: Optional[int],
     imageUrl: Optional[str],
     doubanId: Optional[str],
+    metadata_manager: MetadataSourceManager,
     tmdbId: Optional[str],
     imdbId: Optional[str],
     tvdbId: Optional[str],
@@ -208,9 +209,42 @@ async def generic_import_task(
         db_media_type=mediaType
     )
     if not episodes:
-        msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
-        logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{mediaId}')")
-        raise TaskSuccess(msg)
+        # --- FAILOVER LOGIC ---
+        logger.info(f"主源 '{provider}' 未能找到分集，尝试故障转移...")
+        await progress_callback(15, "主源未找到分集，尝试故障转移...")
+        
+        user = models.User(id=1, username="scheduled_task") # Create a dummy user for metadata calls
+        
+        comments = await metadata_manager.get_failover_comments(
+            title=animeTitle,
+            season=season,
+            episode_index=currentEpisodeIndex,
+            user=user
+        )
+        
+        if comments:
+            logger.info(f"故障转移成功，找到 {len(comments)} 条弹幕。正在保存...")
+            await progress_callback(20, f"故障转移成功，找到 {len(comments)} 条弹幕。")
+            
+            local_image_path = await download_image(imageUrl, session, manager, provider)
+            image_download_failed = bool(imageUrl and not local_image_path)
+            
+            anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path, year)
+            await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
+            source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
+            
+            episode_title = f"第 {currentEpisodeIndex} 集"
+            episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, currentEpisodeIndex, episode_title, None, "failover")
+            
+            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+            await session.commit()
+            
+            final_message = f"通过故障转移导入完成，共新增 {added_count} 条弹幕。" + (" (警告：海报图片下载失败)" if image_download_failed else "")
+            raise TaskSuccess(final_message)
+        else:
+            msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
+            logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{mediaId}')")
+            raise TaskSuccess(msg)
 
     if mediaType == "movie" and episodes:
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
@@ -395,6 +429,7 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, manager: Scrap
         currentEpisodeIndex=None,
         imageUrl=None,
         doubanId=None, tmdbId=source_info.get("tmdbId"),
+        metadata_manager=task_manager.metadata_manager, # Pass metadata_manager
         imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
         progress_callback=progress_callback,
         session=session,
@@ -565,6 +600,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1), year=source_info.get("year"),
             currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
+            metadata_manager=task_manager.metadata_manager, # Pass metadata_manager
             doubanId=None, tmdbId=source_info.get("tmdbId"),
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
@@ -734,6 +770,7 @@ async def auto_search_and_import_task(
                 provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
                 animeTitle=main_title, mediaType=media_type, season=season,
                 year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
+                metadata_manager=metadata_manager,
                 doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
                 progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
                 rate_limiter=rate_limiter
@@ -791,6 +828,7 @@ async def auto_search_and_import_task(
     task_coro = lambda s, cb: generic_import_task(
         provider=best_match.provider, mediaId=best_match.mediaId,
         animeTitle=main_title, mediaType=media_type, season=season, year=best_match.year,
+        metadata_manager=metadata_manager,
         currentEpisodeIndex=payload.episode, imageUrl=image_url,
         doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
         progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,

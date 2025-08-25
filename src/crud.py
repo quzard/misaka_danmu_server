@@ -911,17 +911,19 @@ async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[s
     stmt = select(MetadataSource).order_by(MetadataSource.displayOrder)
     result = await session.execute(stmt)
     return [
-        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy}
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
         for s in result.scalars()
     ]
 
 async def update_metadata_sources_settings(session: AsyncSession, settings: List['models.MetadataSourceSettingUpdate']):
     for s in settings:
         is_aux_enabled = True if s.providerName == 'tmdb' else s.isAuxSearchEnabled
+        # 新增：确保 isFailoverEnabled 字段被正确处理
+        is_failover_enabled = s.isFailoverEnabled if hasattr(s, 'isFailoverEnabled') else False
         await session.execute(
             update(MetadataSource)
             .where(MetadataSource.providerName == s.providerName)
-            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy)
+            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy, isFailoverEnabled=is_failover_enabled)
         )
     await session.commit()
 
@@ -934,7 +936,20 @@ async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[s
     )
     result = await session.execute(stmt)
     return [
-        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy}
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
+        for s in result.scalars()
+    ]
+
+async def get_enabled_failover_sources(session: AsyncSession) -> List[Dict[str, Any]]:
+    """获取所有已启用故障转移的元数据源。"""
+    stmt = (
+        select(MetadataSource)
+        .where(MetadataSource.isFailoverEnabled == True)
+        .order_by(MetadataSource.displayOrder)
+    )
+    result = await session.execute(stmt)
+    return [
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
         for s in result.scalars()
     ]
 
