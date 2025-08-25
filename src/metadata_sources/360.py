@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import urllib.parse
 import re
 from typing import Any, Dict, List, Optional, Set
 
@@ -15,27 +16,21 @@ logger = logging.getLogger(__name__)
 
 # --- Pydantic Models for 360 API ---
 
-class So360PlayLink(BaseModel):
-    play_link: Optional[str] = Field(None, alias="play_link")
-
 class So360SearchResultItem(BaseModel):
-    title: str
-    play_link_obj: Optional[So360PlayLink] = Field(None, alias="play_link_obj")
-
-    @property
-    def composite_id(self) -> Optional[str]:
-        if self.play_link_obj and self.play_link_obj.play_link:
-            match = re.search(r'/(tv|va|ct|mv)/([a-zA-Z0-9=]+)\.html', self.play_link_obj.play_link)
-            if match:
-                prefix, b64_id = match.groups()
-                return f"{prefix}_{b64_id}"
-        return None
+    id: str
+    en_id: Optional[str] = Field(None, alias="en_id")
+    title: str = Field(alias="titleTxt")
+    year: Optional[str] = None
+    cover: Optional[str] = None
+    cat_id: Optional[str] = Field(None, alias="cat_id")
+    cat_name: Optional[str] = Field(None, alias="cat_name")
+    playlinks: Dict[str, str] = Field(default_factory=dict)
 
 class So360SearchRes(BaseModel):
-    res: List[So360SearchResultItem] = Field(default_factory=list)
+    rows: List[So360SearchResultItem] = Field(default_factory=list)
 
 class So360SearchResult(BaseModel):
-    result: Optional[So360SearchRes] = None
+    longData: Optional[So360SearchRes] = Field(None, alias="longData")
 
 class So360SearchResponse(BaseModel):
     data: Optional[So360SearchResult] = None
@@ -74,43 +69,49 @@ class So360MetadataSource(BaseMetadataSource):
         )
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        search_url = f"{self.api_base_url}/search/index"
+        search_url = f"{self.api_base_url}/index"
         params = {
+            'force_v': '1',
             "kw": keyword,
-            "from": "so_video",
-            "pn": 1,
-            "ps": 20,
-            "scene": "video_home",
-            "scene_type": 1
+            'from': '',
+            'pageno': '1',
+            'v_ap': '1',
+            'tab': 'all',
+            'cb': '__jp0'
         }
         try:
-            response = await self.client.get(search_url, params=params)
+            headers = {'referer': f'https://so.360kan.com/?kw={urllib.parse.quote(keyword)}'}
+            response = await self.client.get(search_url, params=params, headers=headers)
             response.raise_for_status()
             
             json_text = response.text
-            if json_text.startswith('so.jsonp_video_search_result('):
-                json_text = json_text[len('so.jsonp_video_search_result('):-1]
+            if json_text.startswith('__jp0('):
+                json_text = json_text[len('__jp0('):-1]
             
             data = So360SearchResponse.model_validate(json.loads(json_text))
             
-            if not data.data or not data.data.result:
+            if not data.data or not data.data.longData:
                 return []
 
-            tasks = []
-            for item in data.data.result.res:
-                if item.composite_id:
-                    tasks.append(self.get_details(item.composite_id, user))
-            
-            detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            final_results = []
-            for res in detailed_results:
-                if isinstance(res, models.MetadataDetailsResponse):
-                    final_results.append(res)
-                elif isinstance(res, Exception):
-                    self.logger.error(f"获取360影视详情时出错: {res}")
+            results = []
+            for item in data.data.longData.rows:
+                media_type = "other"
+                if item.cat_name:
+                    if "电影" in item.cat_name: media_type = "movie"
+                    elif "动漫" in item.cat_name or "电视" in item.cat_name: media_type = "tv_series"
 
-            return final_results
+                # 使用 en_id 作为更稳定的ID，如果不存在则回退到 id
+                media_id = item.en_id or item.id
+
+                results.append(models.MetadataDetailsResponse(
+                    id=media_id,
+                    title=item.title,
+                    type=media_type,
+                    imageUrl=item.cover,
+                    year=int(item.year) if item.year and item.year.isdigit() else None
+                ))
+
+            return results
 
         except Exception as e:
             self.logger.error(f"360影视搜索失败 for '{keyword}': {e}", exc_info=True)
@@ -118,13 +119,12 @@ class So360MetadataSource(BaseMetadataSource):
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         try:
-            prefix, b64_id = item_id.split("_", 1)
+            # 360源的item_id现在是en_id或id，我们需要通过它找到详情页URL，这通常需要一次搜索
+            search_results = await self.search(keyword=item_id, user=user)
+            if not search_results: return None
+            return search_results[0]
         except ValueError:
             self.logger.error(f"无效的360影视ID格式: {item_id}")
-            return None
-
-        detail_url = f"{self.web_base_url}/{prefix}/{b64_id}.html"
-        try:
             response = await self.client.get(detail_url)
             response.raise_for_status()
             
@@ -173,10 +173,10 @@ class So360MetadataSource(BaseMetadataSource):
 
         # 2. Find the best match
         best_match = next((r for r in search_results if r.season == season), search_results[0])
-        self.logger.info(f"360 Failover: Found best match: '{best_match.title}' (ID: {best_match.id})")
+        self.logger.info(f"360 Failover: Found best match: '{best_match.title}' (ID: {best_match.id})") # 这里用的是 ProviderSearchInfo 的 id
 
         # 3. Get episode URL from 360's other platform links
-        episode_url = await self._get_episode_url_from_360(best_match.id, episode_index)
+        episode_url = await self._get_episode_url_from_360(best_match.title, episode_index) # 使用标题进行搜索
         if not episode_url:
             self.logger.info(f"360 Failover: Could not find a URL for episode {episode_index}.")
             return None
@@ -204,26 +204,43 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.error(f"360 Failover: Error getting comments from URL '{episode_url}': {e}", exc_info=True)
             return None
 
+    def _convert_hunantv_to_mgtv(self, url: str) -> str:
+        """将hunantv.com的URL转换为mgtv.com的URL。"""
+        m = re.match(r'https?://www\.hunantv\.com/v/1/(\d+)/f/(\d+)\.html', url)
+        if m:
+            new_url = f'https://www.mgtv.com/b/{m.group(1)}/{m.group(2)}.html'
+            self.logger.debug(f"Converted hunantv URL '{url}' to '{new_url}'")
+            return new_url
+        return url
+
     async def _get_episode_url_from_360(self, media_id: str, episode_index: int) -> Optional[str]:
         try:
-            params = {'kw': media_id, 'from': 'so_video', 'force_v': '1', 'v_ap': '1', 'tab': 'all', 'cb': '__jp0'}
-            response = await self.client.get(f"{self.api_base_url}/index", params=params)
+            # 搜索接口返回的 media_id 实际上是标题，我们需要用它重新搜索以获取 ent_id
+            params = {'kw': media_id, 'from': '', 'force_v': '1', 'v_ap': '1', 'tab': 'all', 'cb': '__jp0'}
+            headers = {'referer': f'https://so.360kan.com/?kw={urllib.parse.quote(media_id)}'}
+            response = await self.client.get(f"{self.api_base_url}/index", params=params, headers=headers)
             response.raise_for_status()
             json_text = response.text
             if json_text.startswith('__jp0('):
                 json_text = json_text[len('__jp0('):-1]
             
             data = json.loads(json_text)
-            item_data = data.get('data', {}).get('longData', {}).get('rows', [{}])[0]
+            rows = data.get('data', {}).get('longData', {}).get('rows', [])
+            if not rows: return None
+            item_data = rows[0]
 
             cat_id = item_data.get('cat_id')
-            ent_id = item_data.get('id')
+            # 参考脚本逻辑：综艺用id，其他用en_id
+            ent_id = item_data.get('id') if (cat_id == '3' or ('综艺' in item_data.get('cat_name', ''))) else item_data.get('en_id')
+            if not ent_id:
+                ent_id = item_data.get('id') # Fallback to id if en_id is missing
+ 
             cat_name = item_data.get('cat_name')
             year = item_data.get('year')
             playlinks = item_data.get('playlinks', {})
 
             platform_order = ['qq', 'qiyi', 'youku', 'bilibili', 'bilibili1', 'imgo']
-            
+ 
             for site in platform_order:
                 if site in playlinks:
                     self.logger.info(f"360 Failover: Checking platform '{site}' for episodes.")
@@ -231,30 +248,45 @@ class So360MetadataSource(BaseMetadataSource):
                     if episodes and len(episodes) >= episode_index:
                         episode_data = episodes[episode_index - 1]
                         url = episode_data.get('url') if isinstance(episode_data, dict) else episode_data if isinstance(episode_data, str) else None
-                        if url: return url
+                        if url:
+                            # 新增：转换湖南TV的URL
+                            return self._convert_hunantv_to_mgtv(url)
             return None
         except Exception as e:
             self.logger.error(f"360 Failover: _get_episode_url_from_360 failed: {e}", exc_info=True)
             return None
 
     async def _get_360_platform_episodes(self, cat_id, ent_id, site, cat_name, year, item) -> List[Any]:
+        # 综艺类型，走分页接口 (当前实现只取第一页)
         if (cat_id == '3' or (cat_name and '综艺' in cat_name)):
-            # Logic for variety shows (paginated)
-            # This part is complex and less relevant for anime, so keeping it simple for now.
-            # A full implementation would handle pagination for `episodeszongyi`.
-            return [] 
+            params = {'site': site, 'y': year or '', 'entid': ent_id, 'offset': 0, 'count': 100, 'v_ap': '1', 'cb': '__jp7'}
+            try:
+                resp = await self.client.get(f'{self.api_base_url}/episodeszongyi', params=params)
+                json_text = resp.text
+                if json_text.startswith('__jp7('):
+                    json_text = json_text[len('__jp7('):-1]
+                parsed = json.loads(json_text)
+                if parsed.get('code') == 0 and parsed.get('data'):
+                    return parsed['data'].get('list', [])
+            except Exception as e:
+                self.logger.error(f"360 Failover: 获取综艺分集失败: {e}")
+            return []
         else:
+            # 其他类型，走 episodesv2 接口
             s_param = json.dumps([{"cat_id": cat_id, "ent_id": ent_id, "site": site}])
             params = {'v_ap': '1', 's': s_param, 'cb': '__jp8'}
-            resp = await self.client.get(f'{self.api_base_url}/episodesv2', params=params)
-            json_text = resp.text
-            if json_text.startswith('__jp8('):
-                json_text = json_text[len('__jp8('):-1]
-            parsed = json.loads(json_text)
-            if parsed.get('code') == 0 and parsed.get('data'):
-                series_html = parsed['data'][0].get('seriesHTML', {})
-                if 'seriesPlaylinks' in series_html:
-                    return series_html['seriesPlaylinks']
+            try:
+                resp = await self.client.get(f'{self.api_base_url}/episodesv2', params=params)
+                json_text = resp.text
+                if json_text.startswith('__jp8('):
+                    json_text = json_text[len('__jp8('):-1]
+                parsed = json.loads(json_text)
+                if parsed.get('code') == 0 and parsed.get('data'):
+                    series_html = parsed['data'][0].get('seriesHTML', {})
+                    if 'seriesPlaylinks' in series_html:
+                        return series_html['seriesPlaylinks']
+            except Exception as e:
+                self.logger.error(f"360 Failover: 获取剧集分集失败: {e}")
         return []
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
