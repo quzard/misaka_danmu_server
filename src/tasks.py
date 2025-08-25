@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from thefuzz import fuzz
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import OperationalError
 
 from . import crud, models, orm_models
 from .rate_limiter import RateLimiter, RateLimitExceededError
@@ -15,6 +16,7 @@ from .image_utils import download_image
 from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
+from .utils import parse_search_keyword
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from sqlalchemy.exc import OperationalError
 
@@ -214,6 +216,12 @@ async def generic_import_task(
     """
     # 重构导入逻辑以避免创建空条目
     scraper = manager.get_scraper(provider)
+
+    # 修正：在创建作品前，再次从标题中解析季和集，以确保数据一致性
+    parsed_info = parse_search_keyword(animeTitle)
+    title_to_use = parsed_info["title"]
+    # 优先使用从标题解析出的季度，如果解析不出，则回退到传入的 season 参数
+    season_to_use = parsed_info["season"] if parsed_info["season"] is not None else season
     normalized_title = animeTitle.replace(":", "：")
 
     await progress_callback(10, "正在获取分集列表...")
@@ -243,7 +251,7 @@ async def generic_import_task(
             local_image_path = await download_image(imageUrl, session, manager, provider)
             image_download_failed = bool(imageUrl and not local_image_path)
             
-            anime_id = await crud.get_or_create_anime(session, normalized_title, mediaType, season, imageUrl, local_image_path, year)
+            anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year)
             await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
             source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
             
@@ -342,7 +350,8 @@ async def edited_import_task(
     progress_callback: Callable,
     session: AsyncSession,
     manager: ScraperManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    metadata_manager: MetadataSourceManager
 ):
     """后台任务：处理编辑后的导入请求。"""
     scraper = manager.get_scraper(request_data.provider)
@@ -351,6 +360,12 @@ async def edited_import_task(
     episodes = request_data.episodes
     if not episodes:
         raise TaskSuccess("没有提供任何分集，任务结束。")
+
+    # 新增：从标题中解析季和集，以确保数据一致性
+    parsed_info = parse_search_keyword(normalized_title)
+    title_to_use = parsed_info["title"]
+    season_to_use = parsed_info["season"] if parsed_info["season"] is not None else request_data.season
+
 
     anime_id: Optional[int] = None
     source_id: Optional[int] = None
@@ -379,10 +394,9 @@ async def edited_import_task(
             if request_data.imageUrl and not local_image_path:
                 image_download_failed = True
             
-            # 修正：不再通过修改标题来区分同年份的作品，而是直接依赖 crud.get_or_create_anime 来处理唯一性。
-            title_to_use = normalized_title
             anime_id = await crud.get_or_create_anime(
-                session, title_to_use, request_data.mediaType, request_data.season, 
+                session, title_to_use, request_data.mediaType,
+                season_to_use,
                 request_data.imageUrl, local_image_path, request_data.year
             )
             await crud.update_metadata_if_empty(
@@ -416,7 +430,7 @@ async def edited_import_task(
         final_message += " (警告：海报图片下载失败)"
     raise TaskSuccess(final_message)
 
-async def full_refresh_task(sourceId: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable):
+async def full_refresh_task(sourceId: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable):
     """
     后台任务：全量刷新一个已存在的番剧。
     """
@@ -442,8 +456,7 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, manager: Scrap
         year=source_info.get("year"), # 从源信息中获取年份
         currentEpisodeIndex=None,
         imageUrl=None,
-        doubanId=None, tmdbId=source_info.get("tmdbId"),
-        metadata_manager=task_manager.metadata_manager, # Pass metadata_manager
+        doubanId=None, tmdbId=source_info.get("tmdbId"), metadata_manager=metadata_manager,
         imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
         progress_callback=progress_callback,
         session=session,
@@ -599,7 +612,7 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable, animeTitle: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
@@ -614,8 +627,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1), year=source_info.get("year"),
             currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
-            metadata_manager=task_manager.metadata_manager, # Pass metadata_manager
-            doubanId=None, tmdbId=source_info.get("tmdbId"),
+            doubanId=None, tmdbId=source_info.get("tmdbId"), metadata_manager=metadata_manager,
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
             session=session,
@@ -861,10 +873,10 @@ async def database_maintenance_task(session: AsyncSession, progress_callback: Ca
     
     try:
         # 日志保留天数，默认为30天。
-        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "30")
+        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "3")
         retention_days = int(retention_days_str)
     except (ValueError, TypeError):
-        retention_days = 30
+        retention_days = 3
     
     if retention_days > 0:
         logger.info(f"将清理 {retention_days} 天前的日志记录。")
@@ -896,6 +908,17 @@ async def database_maintenance_task(session: AsyncSession, progress_callback: Ca
             binlog_cleanup_message = await crud.purge_binary_logs(session, days=3)
             logger.info(binlog_cleanup_message)
             await progress_callback(60, binlog_cleanup_message)
+        except OperationalError as e:
+            # 检查是否是权限不足的错误 (MySQL error code 1227)
+            if e.orig and hasattr(e.orig, 'args') and len(e.orig.args) > 0 and e.orig.args[0] == 1227:
+                binlog_cleanup_message = "Binlog 清理失败: 数据库用户缺少 SUPER 或 BINLOG_ADMIN 权限。此为正常现象，可安全忽略。"
+                logger.warning(binlog_cleanup_message)
+                await progress_callback(60, binlog_cleanup_message)
+            else:
+                # 其他操作错误，仍然记录详细信息
+                binlog_cleanup_message = f"Binlog 清理失败: {e}"
+                logger.error(binlog_cleanup_message, exc_info=True)
+                await progress_callback(60, binlog_cleanup_message)
         except Exception as e:
             # 记录错误，但不中断任务
             binlog_cleanup_message = f"Binlog 清理失败: {e}"
