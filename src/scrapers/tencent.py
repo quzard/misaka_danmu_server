@@ -232,6 +232,12 @@ class TencentScraper(BaseScraper):
         video_info = item.video_info
         vid = item.doc.id
 
+        # 关键修正：参考旧代码，过滤掉没有年份信息的条目。
+        # 这通常是无效的或非正片内容（如“安利向”、“二创合集”等）。
+        if not video_info.year or video_info.year == 0:
+            self.logger.debug(f"跳过无年份信息的项目: {video_info.title}")
+            return None
+
         # Extract and clean title
         title = video_info.title.replace('<em>', '').replace('</em>', '')
         title = self._apply_title_mapping(title)
