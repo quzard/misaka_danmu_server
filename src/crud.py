@@ -1088,7 +1088,9 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     token_info = result.scalar_one_or_none()
     if not token_info:
         return None
-    if token_info.expiresAt and token_info.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+    # 修正：使用带时区的当前时间进行比较，以避免 naive 和 aware datetime 的比较错误
+    now_utc = datetime.now(timezone.utc)
+    if token_info.expiresAt and token_info.expiresAt < now_utc:
         return None
     return {"id": token_info.id, "expires_at": token_info.expiresAt}
 
