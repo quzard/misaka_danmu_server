@@ -77,7 +77,7 @@ class TencentModuleParams(BaseModel):
     tabs: Optional[str] = None # This is a JSON string
 
 class TencentItemParams(BaseModel):
-    vid: str
+    vid: Optional[str] = None
     title: str
     is_trailer: str = Field("0", alias="is_trailer")
     union_title: Optional[str] = None
@@ -512,7 +512,7 @@ class TencentScraper(BaseScraper):
             module_data = result.data.module_list_datas[0]
             if module_data.module_datas and module_data.module_datas[0].item_data_lists:
                 for item in module_data.module_datas[0].item_data_lists.item_datas:
-                    if item.item_params:
+                    if item.item_params and item.item_params.vid:
                         episodes.append(TencentEpisode.model_validate(item.item_params.model_dump()))
         return episodes
 
@@ -560,7 +560,7 @@ class TencentScraper(BaseScraper):
                 module_data = result.data.module_list_datas[0]
                 if module_data.module_datas and module_data.module_datas[0].item_data_lists:
                     for item in module_data.module_datas[0].item_data_lists.item_datas:
-                        if item.item_params and item.item_params.vid not in all_episodes:
+                        if item.item_params and item.item_params.vid and item.item_params.vid not in all_episodes:
                             all_episodes[item.item_params.vid] = TencentEpisode.model_validate(item.item_params.model_dump())
                             new_episodes_this_page += 1
             
