@@ -430,39 +430,66 @@ async def edited_import_task(
         final_message += " (警告：海报图片下载失败)"
     raise TaskSuccess(final_message)
 
-async def full_refresh_task(sourceId: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable):
+async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable):
     """
-    后台任务：全量刷新一个已存在的番剧。
+    后台任务：全量刷新一个已存在的番剧，采用先获取后删除的安全策略。
     """
     logger.info(f"开始刷新源 ID: {sourceId}")
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
         await progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
-        return
+        raise TaskSuccess("刷新失败: 找不到源信息")
+
+    scraper = scraper_manager.get_scraper(source_info["providerName"])
+
+    # 步骤 1: 获取所有新数据，但不写入数据库
+    await progress_callback(10, "正在获取新分集列表...")
+    new_episodes = await scraper.get_episodes(source_info["mediaId"])
+    if not new_episodes:
+        raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
+
+    await progress_callback(20, f"获取到 {len(new_episodes)} 个新分集，正在获取弹幕...")
     
-    anime_id = source_info["animeId"]
-    # 1. 清空旧数据
-    await progress_callback(10, "正在清空旧数据...")
-    await crud.clear_source_data(session, sourceId)
-    logger.info(f"已清空源 ID: {sourceId} 的旧分集和弹幕。") # image_url 在这里不会被传递，因为刷新时我们不希望覆盖已有的海报
-    # 2. 重新执行通用导入逻辑
-    await generic_import_task(
-        provider=source_info["providerName"],
-        mediaId=source_info["mediaId"],
-        animeTitle=source_info["title"],
-        mediaType=source_info["type"],
-        season=source_info.get("season", 1),
-        year=source_info.get("year"), # 从源信息中获取年份
-        currentEpisodeIndex=None,
-        imageUrl=None,
-        doubanId=None, tmdbId=source_info.get("tmdbId"), metadata_manager=metadata_manager,
-        imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
-        progress_callback=progress_callback,
-        session=session,
-        manager=manager,
-        task_manager=task_manager,
-        rate_limiter=rate_limiter)
+    new_data_package = []
+    total_comments_fetched = 0
+    total_episodes = len(new_episodes)
+
+    for i, episode in enumerate(new_episodes):
+        base_progress = 20 + int((i / total_episodes) * 70) if total_episodes > 0 else 90
+        
+        async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
+            current_sub_progress = (danmaku_progress / 100) * (70 / total_episodes)
+            await progress_callback(base_progress + current_sub_progress, f"处理: {episode.title} - {danmaku_description}")
+
+        comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+        new_data_package.append((episode, comments))
+        if comments:
+            total_comments_fetched += len(comments)
+
+    if total_comments_fetched == 0:
+        raise TaskSuccess("刷新完成，但未找到任何新弹幕。旧数据已保留。")
+
+    # 步骤 2: 数据获取成功，现在在一个事务中执行清空和写入操作
+    await progress_callback(95, "数据获取成功，正在清空旧数据并写入新数据...")
+    try:
+        await crud.clear_source_data(session, sourceId)
+        
+        for episode_info, comments in new_data_package:
+            episode_db_id = await crud.create_episode_if_not_exists(
+                session, source_info["animeId"], sourceId, 
+                episode_info.episodeIndex, episode_info.title, 
+                episode_info.url, episode_info.episodeId
+            )
+            if comments:
+                await crud.bulk_insert_comments(session, episode_db_id, comments)
+        
+        await session.commit()
+        raise TaskSuccess(f"全量刷新完成，共导入 {len(new_episodes)} 个分集，{total_comments_fetched} 条弹幕。")
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"全量刷新源 {sourceId} 时数据库写入失败: {e}", exc_info=True)
+        raise
 
 async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, progress_callback: Callable):
     """Background task to delete multiple sources."""

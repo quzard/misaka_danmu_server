@@ -151,8 +151,22 @@ async def search_anime_provider(
             logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
         else:
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
-            filter_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
-            filter_aliases.add(search_title)
+            # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
+            # 1. 获取所有可能的别名
+            all_possible_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
+            
+            # 2. 验证每个别名与原始搜索词的相似度
+            validated_aliases = set()
+            for alias in all_possible_aliases:
+                # 使用 token_set_ratio 并设置一个合理的阈值（例如70），以允许小的差异但过滤掉完全不相关的结果。
+                if fuzz.token_set_ratio(search_title, alias) > 70:
+                    validated_aliases.add(alias)
+                else:
+                    logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{search_title}' 相比)")
+            
+            # 3. 使用经过验证的别名列表进行后续操作
+            filter_aliases = validated_aliases
+            filter_aliases.add(search_title) # 确保原始搜索词总是在列表中
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
             # 新增：根据您的要求，打印最终的别名列表以供调试
