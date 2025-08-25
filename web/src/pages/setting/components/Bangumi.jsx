@@ -164,7 +164,18 @@ export const Bangumi = () => {
             <>
               <Form.Item
                 name="bangumiClientId"
-                label="App ID"
+                label={
+                  <span>
+                    App ID{' '}
+                    <a
+                      href="https://bgm.tv/dev/app"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <QuestionCircleOutlined className="cursor-pointer text-gray-400" />
+                    </a>
+                  </span>
+                }
                 rules={[{ required: true, message: '请输入App ID' }]}
                 className="mb-4"
               >
@@ -197,10 +208,15 @@ export const Bangumi = () => {
               name="bangumiToken"
               label={
                 <span>
-                  Access Token{' '}
-                  <Tooltip title="您可以在 Bangumi 个人设置 -> 开发者 -> 新建应用 中获取。">
-                    <QuestionCircleOutlined className="cursor-pointer" />
-                  </Tooltip>
+                  Access Token
+                  <a
+                    href="https://next.bgm.tv/demo/access-token"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1"
+                  >
+                    <QuestionCircleOutlined className="cursor-pointer text-gray-400" />
+                  </a>
                 </span>
               }
               className="mb-6"

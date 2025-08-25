@@ -117,7 +117,9 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     if not auth:
         return {"isAuthenticated": False}
     
-    if auth.expiresAt and auth.expiresAt.replace(tzinfo=None) < datetime.utcnow():
+    # 修正：使用带时区的当前时间进行比较
+    now_utc = datetime.now(timezone.utc)
+    if auth.expiresAt and auth.expiresAt < now_utc:
         return {"isAuthenticated": False, "isExpired": True}
 
     return {
@@ -131,15 +133,18 @@ async def _save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dic
     """保存或更新用户的Bangumi授权信息。"""
     existing_auth = await session.get(orm_models.BangumiAuth, user_id)
     
+    # 修正：确保所有写入数据库的时间都是带时区的UTC时间
+    now_utc = datetime.now(timezone.utc)
+
     if 'expiresAt' in auth_data and isinstance(auth_data['expiresAt'], datetime) and auth_data['expiresAt'].tzinfo is None:
         auth_data['expiresAt'] = auth_data['expiresAt'].replace(tzinfo=timezone.utc)
 
     if existing_auth:
         for key, value in auth_data.items():
             setattr(existing_auth, key, value)
-        existing_auth.authorizedAt = datetime.now(timezone.utc)
+        existing_auth.authorizedAt = now_utc
     else:
-        new_auth = orm_models.BangumiAuth(userId=user_id, **auth_data, authorizedAt=datetime.now(timezone.utc))
+        new_auth = orm_models.BangumiAuth(userId=user_id, **auth_data, authorizedAt=now_utc)
         session.add(new_auth)
     await session.flush()
 
@@ -178,7 +183,13 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
             user_info_response = await client.get("https://api.bgm.tv/v0/me", headers={"Authorization": f"Bearer {token_data['access_token']}"})
             user_info_response.raise_for_status()
             user_info = user_info_response.json()
-        auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": user_info.get("avatar", {}).get("large"), "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 0))}
+        
+        # 新增：确保头像URL是完整的HTTPS地址
+        avatar_url = user_info.get("avatar", {}).get("large")
+        if avatar_url and avatar_url.startswith("//"):
+            avatar_url = "https:" + avatar_url
+
+        auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": avatar_url, "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 0))}
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
         return HTMLResponse("""
