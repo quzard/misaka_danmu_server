@@ -197,15 +197,34 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
 class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
+    
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+        self.api_base_url = "https://api.bgm.tv"
+        self._session_factory = session_factory
+        self.config_manager = config_manager
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._token: Optional[str] = None
+        self._config_loaded = False
 
+    async def _ensure_config(self):
+        """从数据库配置中加载个人访问令牌。"""
+        if self._config_loaded:
+            return
+        self._token = await self.config_manager.get("bangumiToken")
+        self._config_loaded = True
+        
     async def _create_client(self, user: models.User) -> httpx.AsyncClient:
-        async with self._session_factory() as session:
-            auth_info = await _get_bangumi_auth(session, user.id)
-        
+        await self._ensure_config()
         headers = {"User-Agent": f"DanmuApiServer/1.0 ({settings.jwt.secret_key[:8]})"}
-        if auth_info and auth_info.get("isAuthenticated") and auth_info.get("accessToken"):
-            headers["Authorization"] = f"Bearer {auth_info['accessToken']}"
-        
+        if self._token:
+            self.logger.debug("Bangumi: 正在使用 Access Token 进行认证。")
+            headers["Authorization"] = f"Bearer {self._token}"
+        else:
+            async with self._session_factory() as session:
+                auth_info = await _get_bangumi_auth(session, user.id)
+            if auth_info and auth_info.get("isAuthenticated") and auth_info.get("accessToken"):
+                self.logger.debug("Bangumi: 正在使用 OAuth Access Token 进行认证。")
+                headers["Authorization"] = f"Bearer {auth_info['accessToken']}"
         return httpx.AsyncClient(base_url="https://api.bgm.tv", headers=headers, timeout=20.0)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
@@ -280,28 +299,47 @@ class BangumiMetadataSource(BaseMetadataSource):
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
-        """检查与Bangumi API的连接性，并遵循代理设置。"""
+        """检查与Bangumi API的连接性，并遵循代理设置。优先验证Token，再检查OAuth配置。"""
+        await self._ensure_config()
+
+        # 1. 优先检查 Access Token
+        if self._token:
+            try:
+                headers = {"User-Agent": f"DanmuApiServer/1.0 ({settings.jwt.secret_key[:8]})", "Authorization": f"Bearer {self._token}"}
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(f"{self.api_base_url}/v0/me", headers=headers)
+                if response.status_code == 200:
+                    user_info = response.json()
+                    return f"已通过 Access Token 连接 (用户: {user_info.get('nickname', '未知')})"
+                else:
+                    return f"Access Token 无效 (HTTP {response.status_code})"
+            except Exception as e:
+                self.logger.error(f"使用 Access Token 检查连接性时出错: {e}")
+                return "Access Token 连接失败"
+
+        # 2. 如果没有Token，检查OAuth是否已配置
+        client_id = await self.config_manager.get("bangumiClientId")
+        if client_id:
+            return "已配置 OAuth，等待用户授权"
+
+        # 3. 如果两者都没有，只检查网络连通性
         proxy_to_use = None
         try:
-            # 使用会话工厂获取数据库会话
             async with self._session_factory() as session:
-                # 获取全局代理设置
                 proxy_url = await crud.get_config_value(session, "proxy_url", "")
                 proxy_enabled_str = await crud.get_config_value(session, "proxy_enabled", "false")
                 ssl_verify_str = await crud.get_config_value(session, "proxySslVerify", "true")
                 ssl_verify = ssl_verify_str.lower() == 'true'
                 proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
 
-                # 如果全局代理启用，则检查此源的代理设置
                 if proxy_enabled_globally and proxy_url:
                     source_setting = await crud.get_metadata_source_setting_by_name(session, self.provider_name)
                     if source_setting and source_setting.get('useProxy', False):
                         proxy_to_use = proxy_url
                         self.logger.debug(f"Bangumi: 连接性检查将使用代理: {proxy_to_use}")
-
             async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use, verify=ssl_verify) as client:
                 response = await client.get("https://api.bgm.tv/v0/ping")
-                return "连接成功" if response.status_code == 204 else f"连接失败 (状态码: {response.status_code})"
+                return "连接成功 (未配置认证)" if response.status_code == 204 else f"连接失败 (状态码: {response.status_code})"
         except httpx.ProxyError as e:
             self.logger.error(f"Bangumi: 连接性检查代理错误: {e}")
             return "连接失败 (代理错误)"

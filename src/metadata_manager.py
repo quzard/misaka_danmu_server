@@ -193,7 +193,7 @@ class MetadataSourceManager:
         # 将提供商名称映射到其在数据库中的配置键
         config_keys_map = {
             "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-            "bangumi": ["bangumiClientId", "bangumiClientSecret"],
+            "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
             "imdb": []  # IMDb 目前没有特定配置

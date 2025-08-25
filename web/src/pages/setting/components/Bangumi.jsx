@@ -11,6 +11,7 @@ import {
   EyeInvisibleOutlined,
   EyeOutlined,
   LockOutlined,
+  KeyOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
@@ -19,6 +20,7 @@ export const Bangumi = () => {
   const [loading, setLoading] = useState(true)
   const [isSaveLoading, setIsSaveLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [showToken, setShowToken] = useState(false)
   const [authInfo, setAuthInfo] = useState({})
   const oauthPopup = useRef()
 
@@ -153,6 +155,29 @@ export const Bangumi = () => {
               visibilityToggle={{
                 visible: showPassword,
                 onVisibleChange: setShowPassword,
+              }}
+              iconRender={visible =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+            />
+          </Form.Item>
+
+          <div className="text-center my-4 text-gray-400 dark:text-gray-500">
+            ------ 或 ------
+          </div>
+
+          <Form.Item
+            name="bangumiToken"
+            label="Access Token"
+            className="mb-6"
+            tooltip="在 OAuth 授权和 Access Token 中，会优先使用 Access Token。您可以在 Bangumi 个人设置 -> 开发者 -> 新建应用 中获取。"
+          >
+            <Input.Password
+              prefix={<KeyOutlined className="text-gray-400" />}
+              placeholder="请输入 Access Token"
+              visibilityToggle={{
+                visible: showToken,
+                onVisibleChange: setShowToken,
               }}
               iconRender={visible =>
                 visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
