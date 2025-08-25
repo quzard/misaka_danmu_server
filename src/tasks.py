@@ -3,6 +3,7 @@ from typing import Callable, List, Optional
 import asyncio
 import re
 import traceback
+from datetime import datetime, timedelta, timezone
 
 from thefuzz import fuzz
 from sqlalchemy import delete, func, select, update
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import crud, models, orm_models
 from .rate_limiter import RateLimiter, RateLimitExceededError
 from .image_utils import download_image
+from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
@@ -796,3 +798,70 @@ async def auto_search_and_import_task(
     )
     await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}")
     raise TaskSuccess("已为最佳匹配源创建导入任务。")
+async def database_maintenance_task(session: AsyncSession, progress_callback: Callable):
+    """
+    执行数据库维护的核心任务：清理旧日志和优化表。
+    """
+    logger.info("开始执行数据库维护任务...")
+    
+    # --- 1. 应用日志清理 ---
+    await progress_callback(10, "正在清理旧日志...")
+    
+    try:
+        # 日志保留天数，默认为30天。
+        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "30")
+        retention_days = int(retention_days_str)
+    except (ValueError, TypeError):
+        retention_days = 30
+    
+    if retention_days > 0:
+        logger.info(f"将清理 {retention_days} 天前的日志记录。")
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        
+        tables_to_prune = {
+            "任务历史": (orm_models.TaskHistory, orm_models.TaskHistory.createdAt),
+            "Token访问日志": (orm_models.TokenAccessLog, orm_models.TokenAccessLog.accessTime),
+            "外部API访问日志": (orm_models.ExternalApiLog, orm_models.ExternalApiLog.accessTime),
+        }
+        
+        total_deleted = 0
+        for name, (model, date_column) in tables_to_prune.items():
+            deleted_count = await crud.prune_logs(session, model, date_column, cutoff_date)
+            if deleted_count > 0:
+                logger.info(f"从 {name} 表中删除了 {deleted_count} 条旧记录。")
+            total_deleted += deleted_count
+        await progress_callback(40, f"应用日志清理完成，共删除 {total_deleted} 条记录。")
+    else:
+        logger.info("日志保留天数设为0或无效，跳过清理。")
+        await progress_callback(40, "日志保留天数设为0，跳过清理。")
+
+    # --- 2. Binlog 清理 (仅MySQL) ---
+    db_type = settings.database.type.lower()
+    if db_type == "mysql":
+        await progress_callback(50, "正在清理 MySQL Binlog...")
+        try:
+            # 用户指定清理3天前的日志
+            binlog_cleanup_message = await crud.purge_binary_logs(session, days=3)
+            logger.info(binlog_cleanup_message)
+            await progress_callback(60, binlog_cleanup_message)
+        except Exception as e:
+            # 记录错误，但不中断任务
+            binlog_cleanup_message = f"Binlog 清理失败: {e}"
+            logger.error(binlog_cleanup_message, exc_info=True)
+            await progress_callback(60, binlog_cleanup_message)
+
+    # --- 3. 数据库表优化 ---
+    await progress_callback(70, "正在执行数据库表优化...")
+    
+    try:
+        optimization_message = await crud.optimize_database(session, db_type)
+        logger.info(f"数据库优化结果: {optimization_message}")
+    except Exception as e:
+        optimization_message = f"数据库优化失败: {e}"
+        logger.error(optimization_message, exc_info=True)
+        # 即使优化失败，也不应导致整个任务失败，仅记录错误
+
+    await progress_callback(90, optimization_message)
+
+    final_message = f"数据库维护完成。{optimization_message}"
+    raise TaskSuccess(final_message)
