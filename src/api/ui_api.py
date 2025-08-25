@@ -615,7 +615,8 @@ async def refresh_anime(
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """
     为指定的数据源启动一个刷新任务。
@@ -636,13 +637,13 @@ async def refresh_anime(
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
             task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"],
-            rate_limiter=rate_limiter
+            rate_limiter=rate_limiter, metadata_manager=metadata_manager
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
         task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
-        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb)
+        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb, metadata_manager)
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
@@ -1833,7 +1834,8 @@ async def import_from_provider(
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     try:
         # 在启动任务前检查provider是否存在
@@ -1866,6 +1868,7 @@ async def import_from_provider(
         imdbId=None, 
         tvdbId=None, # 手动导入时这些ID为空,
         bangumiId=request_data.bangumiId,
+        metadata_manager=metadata_manager,
         task_manager=task_manager, # 传递 task_manager
         progress_callback=callback,
         session=session,
@@ -1890,7 +1893,8 @@ async def import_edited_episodes(
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
@@ -1899,7 +1903,8 @@ async def import_edited_episodes(
         progress_callback=callback,
         session=session,
         manager=scraper_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        metadata_manager=metadata_manager
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
@@ -1997,7 +2002,8 @@ async def import_from_url(
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     provider = request_data.provider
     url = request_data.url
@@ -2058,6 +2064,7 @@ async def import_from_url(
         provider=provider, media_id=media_id_for_scraper, anime_title=title, # type: ignore
         media_type=request_data.media_type, season=request_data.season,
         current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None, bangumi_id=None,
+        metadata_manager=metadata_manager,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
         rate_limiter=rate_limiter
     )
