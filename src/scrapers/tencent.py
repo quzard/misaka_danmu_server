@@ -246,14 +246,21 @@ class TencentScraper(BaseScraper):
             self.logger.debug(f"跳过不相关内容 (关键词过滤): {title}")
             return None
 
-        # Content type filtering
+        # 内容类型过滤与映射
         content_type = video_info.type_name
-        if content_type == "短剧":
+        if "短剧" in content_type:
             self.logger.debug(f"跳过短剧类型: {title}")
             return None
         
-        # Filter non-supported content types
-        if content_type not in ["电视剧", "动漫", "综艺", "综艺节目", "电影"]:
+        # 将腾讯的类型映射到系统内部标准类型
+        type_mapping = {
+            "电视剧": "tv_series", "动漫": "tv_series",
+            "电影": "movie",
+            "综艺": "other", "综艺节目": "other",
+        }
+        internal_media_type = type_mapping.get(content_type)
+
+        if not internal_media_type:
             self.logger.debug(f"跳过不支持的内容类型: {content_type}")
             return None
 
@@ -298,7 +305,7 @@ class TencentScraper(BaseScraper):
             provider=self.provider_name,
             mediaId=vid,
             title=title,
-            type=content_type,
+            type=internal_media_type, # 使用映射后的标准类型
             season=get_season_from_title(title),
             year=int(year) if year else None,
             imageUrl=cover_url,
