@@ -17,6 +17,7 @@ from .. import crud, models, orm_models, security
 from ..config import settings
 from ..config_manager import ConfigManager
 from ..database import get_db_session
+from ..scraper_manager import ScraperManager
 from .base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
@@ -201,11 +202,9 @@ class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
     
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
+        super().__init__(session_factory, config_manager, scraper_manager)
         self.api_base_url = "https://api.bgm.tv"
-        self._session_factory = session_factory
-        self.config_manager = config_manager
-        self.logger = logging.getLogger(self.__class__.__name__)
         self._token: Optional[str] = None
         self._config_loaded = False
 
