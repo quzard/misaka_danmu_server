@@ -66,8 +66,14 @@ class So360MetadataSource(BaseMetadataSource):
         super().__init__(session_factory, config_manager, scraper_manager)
         self.api_base_url = "https://api.so.360kan.com"
         self.web_base_url = "https://www.360kan.com"
+        # 新增：硬编码一组有效的Cookie，以确保API请求成功
+        hardcoded_cookies = {
+            '__guid': '26972607.2949894437869698600.1752640253092.913',
+            '__huid': '11da4Vxk54oFVy89kXmOuuvPhPxzN45efwa8EHQR4I8Tg%3D',
+        }
         self.client = httpx.AsyncClient(
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+            cookies=hardcoded_cookies,
             timeout=20.0,
         )
 
@@ -83,7 +89,6 @@ class So360MetadataSource(BaseMetadataSource):
             'cb': '__jp0'
         }
         try:
-            # 修复1: 对关键词进行URL编码，以避免UnicodeEncodeError
             encoded_keyword = quote(keyword)
             headers = {'Referer': f'https://so.360kan.com/?kw={encoded_keyword}'}
             response = await self.client.get(search_url, params=params, headers=headers)
@@ -326,11 +331,17 @@ class So360MetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            # 修复2: 切换到检查主站的可访问性，而不是一个可能已失效的API
-            response = await self.client.get(self.web_base_url, timeout=10.0)
-            if response.status_code == 200:
+            # 修复：直接请求API端点，并验证其响应是否为有效的JSONP
+            response = await self.client.get(f"{self.api_base_url}/index?kw=test&cb=__jp0", timeout=10.0)
+            response.raise_for_status()
+            text = response.text
+            if text.startswith('__jp0(') and text.endswith(')'):
+                # 尝试解析JSONP内容，如果成功则认为连接正常
+                json.loads(text[len('__jp0('):-1])
                 return "连接成功"
-            return f"连接失败 (状态码: {response.status_code})"
+            return "连接失败 (API响应格式不正确)"
+        except json.JSONDecodeError:
+            return "连接失败 (API响应不是有效的JSON)"
         except Exception as e:
             self.logger.error(f"360影视连接检查失败: {e}")
             return "连接失败"
