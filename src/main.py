@@ -124,18 +124,12 @@ async def lifespan(app: FastAPI):
             base_url = f"http://{settings.client.host}:{settings.client.port}"
             return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
     else:
-        # 生产环境：显式挂载静态资源目录
-        app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-        # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
-        app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-        # pwa挂载
-        app.mount("/manifest.json", StaticFiles(directory="web/dist/manifest.json"), name="manifest")
         # 挂载用户缓存的图片 (如海报)
         app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-        # 然后，为所有其他路径提供 index.html 以支持前端路由
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(request: Request, full_path: str):
-            return FileResponse("web/dist/index.html")
+        # 生产环境：挂载Vite构建后的前端静态资源目录
+        # html=True 会自动处理 index.html 作为入口，并为所有未找到的路径返回 index.html，以支持前端路由。
+        # 这一个挂载点会处理 /assets/*, /images/*, /manifest.json 等所有在 web/dist 下的文件。
+        app.mount("/", StaticFiles(directory="web/dist", html=True), name="static-web")
 
     yield
     
