@@ -66,10 +66,14 @@ class So360MetadataSource(BaseMetadataSource):
         super().__init__(session_factory, config_manager, scraper_manager)
         self.api_base_url = "https://api.so.360kan.com"
         self.web_base_url = "https://www.360kan.com"
-        # 新增：硬编码一组有效的Cookie，以确保API请求成功
+        # 修正：硬编码一组更完整的有效Cookie，以确保API请求成功
         hardcoded_cookies = {
             '__guid': '26972607.2949894437869698600.1752640253092.913',
+            'refer_scene': '47007',
             '__huid': '11da4Vxk54oFVy89kXmOuuvPhPxzN45efwa8EHQR4I8Tg%3D',
+            '___sid': '26972607.3930629777557762600.1752655408731.65',
+            '__DC_gid': '26972607.192430250.1752640253137.1752656674152.17',
+            'monitor_count': '12',
         }
         self.client = httpx.AsyncClient(
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
@@ -93,12 +97,16 @@ class So360MetadataSource(BaseMetadataSource):
             headers = {'Referer': f'https://so.360kan.com/?kw={encoded_keyword}'}
             response = await self.client.get(search_url, params=params, headers=headers)
             response.raise_for_status()
-            
+
             json_text = response.text
-            if json_text.startswith('__jp0('):
-                json_text = json_text[len('__jp0('):-1]
-            
-            data = So360SearchResponse.model_validate(json.loads(json_text))
+            # 修正：采用参考脚本中更健壮的JSONP解析方式
+            try:
+                start_index = json_text.index('(') + 1
+                end_index = json_text.rindex(')')
+                json_payload = json_text[start_index:end_index]
+            except ValueError:
+                json_payload = json_text # 如果找不到括号，则假定它不是JSONP
+            data = So360SearchResponse.model_validate(json.loads(json_payload))
             
             if not data.data or not data.data.longData:
                 return []
@@ -126,6 +134,9 @@ class So360MetadataSource(BaseMetadataSource):
             return results
         except httpx.ConnectError as e:
             self.logger.error(f"360影视搜索失败 for '{keyword}': 无法连接到服务器。请检查网络或代理设置。 {e}")
+            return []
+        except json.JSONDecodeError:
+            self.logger.error(f"360影视搜索失败 for '{keyword}': 响应不是有效的JSON。响应内容: {response.text[:200]}...")
             return []
         except Exception as e:
             self.logger.error(f"360影视搜索失败 for '{keyword}': {e}", exc_info=True)
@@ -331,17 +342,21 @@ class So360MetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            # 修复：直接请求API端点，并验证其响应是否为有效的JSONP
+            # 修正：连接检测应模拟真实搜索流程
             response = await self.client.get(f"{self.api_base_url}/index?kw=test&cb=__jp0", timeout=10.0)
             response.raise_for_status()
             text = response.text
-            if text.startswith('__jp0(') and text.endswith(')'):
-                # 尝试解析JSONP内容，如果成功则认为连接正常
-                json.loads(text[len('__jp0('):-1])
-                return "连接成功"
-            return "连接失败 (API响应格式不正确)"
+            # 使用与搜索相同的健壮解析逻辑
+            start_index = text.index('(') + 1
+            end_index = text.rindex(')')
+            json_payload = text[start_index:end_index]
+            # 尝试解析，如果成功则认为连接正常
+            json.loads(json_payload)
+            return "连接成功"
         except json.JSONDecodeError:
             return "连接失败 (API响应不是有效的JSON)"
+        except ValueError: # .index or .rindex fails
+            return "连接失败 (API响应格式不正确)"
         except Exception as e:
             self.logger.error(f"360影视连接检查失败: {e}")
             return "连接失败"
