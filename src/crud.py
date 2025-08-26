@@ -1130,10 +1130,12 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     if not token_info:
         return None
     # 修正：使用带时区的当前时间进行比较，以避免 naive 和 aware datetime 的比较错误
-    now_utc = datetime.now(timezone.utc)
-    if token_info.expiresAt and token_info.expiresAt < now_utc:
-        return None
-    return {"id": token_info.id, "expires_at": token_info.expiresAt}
+    if token_info.expiresAt:
+        # 关键修复：将从数据库读取的 naive datetime 对象转换为 aware datetime 对象
+        expires_at_aware = token_info.expiresAt.replace(tzinfo=timezone.utc)
+        if expires_at_aware < datetime.now(timezone.utc):
+            return None # Token 已过期
+    return {"id": token_info.id, "expiresAt": token_info.expiresAt}
 
 # --- UA Filter and Log Services ---
 
