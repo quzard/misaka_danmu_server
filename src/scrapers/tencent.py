@@ -5,6 +5,7 @@ import logging
 import html
 import json
 from typing import List, Dict, Any, Optional, Union, Callable, Tuple
+from urllib.parse import quote
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from collections import defaultdict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -375,7 +376,8 @@ class TencentScraper(BaseScraper):
         payload = request_model.model_dump(by_alias=False)
         
         headers = self.multiterminal_headers.copy()
-        headers['Referer'] = f"https://v.qq.com/x/search/?q={keyword}&stag=&smartbox_ab="
+        encoded_keyword = quote(keyword)
+        headers['Referer'] = f"https://v.qq.com/x/search/?q={encoded_keyword}&stag=&smartbox_ab="
 
         results = []
         try:
@@ -461,7 +463,8 @@ class TencentScraper(BaseScraper):
             if isinstance(res_list, list):
                 all_results.extend(res_list)
             elif isinstance(res_list, Exception):
-                self.logger.error(f"Tencent ({api_name}): 搜索子任务失败: {res_list}", exc_info=True)
+                # Pass the exception object directly to exc_info for safe logging
+                self.logger.error(f"Tencent ({api_name}): 搜索子任务失败", exc_info=res_list)
 
         # 基于 mediaId 去重
         unique_results = list({item.mediaId: item for item in all_results}.values())
