@@ -60,26 +60,11 @@ class TencentSearchItem(BaseModel):
 class TencentSearchItemList(BaseModel):
     item_list: List[TencentSearchItem] = Field(alias="itemList")
 
-# --- Models for MultiTerminalSearch API (JS Port) ---
-class TencentSearchExtraInfo(BaseModel):
-    isNewMarkLabel: str = "1"
-    multi_terminal_pc: str = "1"
-    themeType: str = "1"
-    sugRelatedIds: str = "{}"
-    appVersion: str = ""
-
-class TencentAreaBox(BaseModel):
-    box_id: str = Field(alias="boxId")
-    item_list: Optional[List[TencentSearchItem]] = Field(None, alias="itemList")
-
 class TencentSearchData(BaseModel):
     normal_list: Optional[TencentSearchItemList] = Field(None, alias="normalList")
-    area_box_list: Optional[List[TencentAreaBox]] = Field(None, alias="areaBoxList")
 
 class TencentSearchResult(BaseModel):
     data: Optional[TencentSearchData] = None
-    ret: Optional[int] = None
-    msg: Optional[str] = None
 
 # --- Models for GetPageData API (New) ---
 
@@ -132,25 +117,6 @@ class TencentSearchRequest(BaseModel):
     scene_id: int = Field(21, alias="sceneId")
     platform: str = "23"
 
-# --- 新的搜索请求模型 (移植自JS脚本) ---
-class TencentMultiTerminalSearchRequest(BaseModel):
-    version: str = "25071701"
-    clientType: int = 1
-    filterValue: str = ""
-    uuid: str = "0379274D-05A0-4EB6-A89C-878C9A460426"
-    retry: int = 0
-    query: str
-    pagenum: int = 0
-    isPrefetch: bool = True
-    pagesize: int = 30
-    queryFrom: int = 0
-    searchDatakey: str = "" # 保持为空字符串，与JS脚本一致
-    transInfo: str = "{}" # 修正：此字段应为一个空的JSON对象字符串
-    isneedQc: bool = True
-    preQid: str = ""
-    adClientInfo: str = "{}" # 修正：此字段应为一个空的JSON对象字符串
-    extraInfo: TencentSearchExtraInfo = Field(default_factory=TencentSearchExtraInfo)
-
 # --- 腾讯API客户端 ---
 
 class TencentScraper(BaseScraper):
@@ -160,7 +126,7 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
-    
+
     # 英文关键词，通常是独立的缩写或单词
     _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
     # 中文关键词，基于用户提供的JS脚本，非常全面
@@ -187,7 +153,6 @@ class TencentScraper(BaseScraper):
         self.client = httpx.AsyncClient(headers=self.base_headers, cookies=self.cookies, timeout=20.0)
 
         # 新增：用于分集获取的API端点
-        self.search_api_url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.MultiTerminalSearch/MbSearch?vplatform=2"
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
     # Porting TITLE_MAPPING from JS
@@ -308,6 +273,65 @@ class TencentScraper(BaseScraper):
             currentEpisodeIndex=None # This is a quick search, detailed episode info is fetched later
         )
 
+    async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """通过腾讯桌面搜索API查找番剧。"""
+        url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.HttpMobileRecall/MbSearchHttp"
+        request_model = TencentSearchRequest(query=keyword)
+        payload = request_model.model_dump(by_alias=True)
+        results = []
+        try:
+            self.logger.info(f"Tencent (桌面API): 正在搜索 '{keyword}'...")
+            response = await self.client.post(url, json=payload)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Desktop Search Response (keyword='{keyword}'): {response.text}")
+
+            response.raise_for_status()
+            response_json = response.json()
+            data = TencentSearchResult.model_validate(response_json)
+
+            if data.data and data.data.normal_list:
+                for item in data.data.normal_list.item_list:
+                    # Apply filtering logic here
+                    filtered_item = self._filter_search_item(item, keyword)
+                    if filtered_item:
+                        results.append(filtered_item)
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"Tencent (桌面API): 搜索请求失败: {e}")
+        except (ValidationError, KeyError) as e:
+            self.logger.error(f"Tencent (桌面API): 解析搜索结果失败: {e}", exc_info=True)
+        return results
+
+    async def _search_mobile_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """通过腾讯移动端搜索API查找番剧。"""
+        url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.HttpMobileRecall/MbSearchHttp"
+        request_model = TencentSearchRequest(query=keyword)
+        payload = request_model.model_dump(by_alias=True)
+        headers = self.base_headers.copy()
+        headers['User-Agent'] = 'live4iphoneRel/9.01.46 (iPhone; iOS 18.5; Scale/3.00)'
+        
+        results = []
+        try:
+            self.logger.info(f"Tencent (移动API): 正在搜索 '{keyword}'...")
+            response = await self.client.post(url, json=payload, headers=headers)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Mobile Search Response (keyword='{keyword}'): {response.text}")
+
+            response.raise_for_status()
+            response_json = response.json()
+            data = TencentSearchResult.model_validate(response_json)
+
+            if data.data and data.data.normal_list:
+                for item in data.data.normal_list.item_list:
+                    # Apply filtering logic here
+                    filtered_item = self._filter_search_item(item, keyword)
+                    if filtered_item:
+                        results.append(filtered_item)
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"Tencent (移动API): 搜索请求失败: {e}")
+        except (ValidationError, KeyError) as e:
+            self.logger.error(f"Tencent (移动API): 解析搜索结果失败: {e}", exc_info=True)
+        return results
+
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """并发执行桌面端和移动端搜索，并合并去重结果。"""
         # 智能缓存逻辑
@@ -336,56 +360,32 @@ class TencentScraper(BaseScraper):
         return final_results
 
     async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        """实际执行网络搜索的内部方法，移植自JS脚本，使用新的API和解析逻辑。"""
-        request_model = TencentMultiTerminalSearchRequest(query=keyword)
-        payload = request_model.model_dump(by_alias=True)
+        """
+        实际执行网络搜索的内部方法。
+        """
+
+        desktop_task = self._search_desktop_api(keyword, episode_info)
+        mobile_task = self._search_mobile_api(keyword, episode_info)
         
-        try:
-            self.logger.info(f"Tencent: 正在使用新版API搜索 '{keyword}'...")
-            response = await self.client.post(self.search_api_url, json=payload)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Tencent MultiTerminalSearch Response (keyword='{keyword}'): {response.text}")
+        results_lists = await asyncio.gather(desktop_task, mobile_task, return_exceptions=True)
+        
+        all_results = []
+        for i, res_list in enumerate(results_lists):
+            api_name = "桌面API" if i == 0 else "移动API"
+            if isinstance(res_list, list):
+                all_results.extend(res_list)
+            elif isinstance(res_list, Exception):
+                self.logger.error(f"Tencent ({api_name}): 搜索子任务失败: {res_list}", exc_info=True)
 
-            response.raise_for_status()
-            data = TencentSearchResult.model_validate(response.json())
+        # 基于 mediaId 去重
+        unique_results = list({item.mediaId: item for item in all_results}.values())
 
-            if data.ret and data.ret != 0:
-                self.logger.error(f"Tencent API返回错误: {data.msg or '未知错误'}")
-                return []
-
-            raw_items = []
-            if data.data:
-                # 优先从 areaBoxList 的 MainNeed 中提取
-                if data.data.area_box_list:
-                    for box in data.data.area_box_list:
-                        if box.box_id == "MainNeed" and box.item_list:
-                            self.logger.debug("Tencent: 从 areaBoxList 的 MainNeed 中提取到结果。")
-                            raw_items.extend(box.item_list)
-                
-                # 如果 areaBoxList 中没有，则回退到 normalList
-                if not raw_items and data.data.normal_list:
-                    self.logger.debug("Tencent: areaBoxList 中无结果，回退到 normalList。")
-                    raw_items.extend(data.data.normal_list.item_list)
-
-            unique_results = []
-            seen_ids = set()
-            for item in raw_items:
-                filtered_item = self._filter_search_item(item, keyword)
-                if filtered_item and filtered_item.mediaId not in seen_ids:
-                    unique_results.append(filtered_item)
-                    seen_ids.add(filtered_item.mediaId)
-
-            self.logger.info(f"Tencent: 网络搜索 '{keyword}' 完成，找到 {len(unique_results)} 个唯一结果。")
+        self.logger.info(f"Tencent (合并): 网络搜索 '{keyword}' 完成，找到 {len(unique_results)} 个唯一结果。")
+        if unique_results:
             log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in unique_results])
             self.logger.info(f"Tencent (合并): 搜索结果列表:\n{log_results}")
 
-            return unique_results
-
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"Tencent: 搜索请求失败: {e}")
-        except (ValidationError, KeyError) as e:
-            self.logger.error(f"Tencent: 解析搜索结果失败: {e}", exc_info=True)
-        return []
+        return unique_results
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从腾讯视频URL中提取作品信息。"""
