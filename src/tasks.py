@@ -22,6 +22,29 @@ from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
+def _generate_episode_range_string(episode_indices: List[int]) -> str:
+    """
+    将分集编号列表转换为紧凑的字符串表示形式。
+    例如: [1, 2, 3, 5, 8, 9, 10] -> "1-3, 5, 8-10"
+    """
+    if not episode_indices:
+        return "无"
+
+    indices = sorted(list(set(episode_indices)))
+    if not indices:
+        return "无"
+
+    ranges = []
+    start = end = indices[0]
+
+    for i in range(1, len(indices)):
+        if indices[i] == end + 1:
+            end = indices[i]
+        else:
+            ranges.append(str(start) if start == end else f"{start}-{end}")
+            start = end = indices[i]
+    ranges.append(str(start) if start == end else f"{start}-{end}")
+    return ", ".join(ranges)
 
 async def delete_anime_task(animeId: int, session: AsyncSession, progress_callback: Callable):
     """Background task to delete an anime and all its related data."""
@@ -336,11 +359,14 @@ async def generic_import_task(
         
         i += 1 # 成功处理完一个分集，移动到下一个
 
+    episode_indices = [ep.episodeIndex for ep in episodes]
+    episode_range_str = _generate_episode_range_string(episode_indices)
+
     final_message = ""
     if total_comments_added == 0:
-        final_message = "导入完成，但未找到任何新弹幕。"
+        final_message = f"导入完成，导入集: < {episode_range_str} >，但未找到任何新弹幕。"
     else:
-        final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
+        final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if image_download_failed:
         final_message += " (警告：海报图片下载失败)"
     raise TaskSuccess(final_message)
@@ -375,8 +401,8 @@ async def edited_import_task(
     i = 0
     while i < total_episodes:
         episode = episodes[i]
-        await progress_callback(10 + int((i / total_episodes) * 85), f"正在处理: {episode.title} ({i+1}/{total_episodes})")
         base_progress = 10 + int((i / total_episodes) * 85)
+        await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
         try:
             await rate_limiter.check(request_data.provider)
         except RateLimitExceededError as e:
@@ -385,7 +411,12 @@ async def edited_import_task(
             await asyncio.sleep(e.retry_after_seconds)
             continue
 
-        comments = await scraper.get_comments(episode.episodeId)
+        async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
+            progress_slice = 85 / total_episodes if total_episodes > 0 else 0
+            current_total_progress = base_progress + (danmaku_progress / 100) * progress_slice
+            await progress_callback(current_total_progress, f"处理: {episode.title} - {danmaku_description}")
+
+        comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
         if comments:
             await rate_limiter.increment(request_data.provider)
@@ -421,11 +452,14 @@ async def edited_import_task(
         
         i += 1
 
+    episode_indices = [ep.episodeIndex for ep in episodes]
+    episode_range_str = _generate_episode_range_string(episode_indices)
+
     final_message = ""
     if total_comments_added == 0:
-        final_message = "导入完成，但未找到任何新弹幕。"
+        final_message = f"导入完成，导入集: < {episode_range_str} >，但未找到任何新弹幕。"
     else:
-        final_message = f"导入完成，共新增 {total_comments_added} 条弹幕。"
+        final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if image_download_failed:
         final_message += " (警告：海报图片下载失败)"
     raise TaskSuccess(final_message)
