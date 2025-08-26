@@ -202,6 +202,58 @@ class MetadataSourceManager:
         self.logger.info(f"Failover: No source could find comments for '{title}' S{season}E{episode_index}")
         return None
 
+    async def supplement_search_result(self, target_provider: str, keyword: str, episode_info: Optional[Dict[str, Any]]) -> List[models.ProviderSearchInfo]:
+        """
+        当主搜索源未找到结果时，尝试通过故障转移源（如360）查找对应平台的链接，并返回结果。
+        """
+        self.logger.info(f"主搜索源 '{target_provider}' 未找到结果，正在尝试故障转移...")
+        
+        async with self._session_factory() as session:
+            failover_sources_settings = await crud.get_enabled_failover_sources(session)
+        
+        user = models.User(id=0, username="system")
+        
+        for source_setting in failover_sources_settings:
+            provider_name = source_setting['providerName']
+            if source_instance := self.sources.get(provider_name):
+                if hasattr(source_instance, "find_url_for_provider"):
+                    self.logger.info(f"故障转移: 正在使用 '{provider_name}' 查找 '{keyword}' 的 '{target_provider}' 链接...")
+                    target_url = await source_instance.find_url_for_provider(keyword, target_provider, user)
+                    if target_url:
+                        self.logger.info(f"故障转移成功: 从 '{provider_name}' 找到URL: {target_url}")
+                        try:
+                            target_scraper = self.scraper_manager.get_scraper(target_provider)
+                            info = await target_scraper.get_info_from_url(target_url)
+                            if info:
+                                return [info]
+                        except Exception as e:
+                            self.logger.error(f"通过故障转移URL '{target_url}' 获取信息失败: {e}")
+                            continue
+        return []
+
+    async def find_new_media_id(self, source_info: Dict[str, Any]) -> Optional[str]:
+        """
+        当获取分集列表失败时，尝试通过故障转移源查找新的 mediaId。
+        """
+        target_provider = source_info["providerName"]
+        title = source_info["title"]
+        season = source_info.get("season", 1)
+        self.logger.info(f"分集获取失败，正在为 '{title}' S{season} ({target_provider}) 尝试故障转移查找新 mediaId...")
+
+        async with self._session_factory() as session:
+            failover_sources_settings = await crud.get_enabled_failover_sources(session)
+        
+        user = models.User(id=0, username="system")
+
+        for source_setting in failover_sources_settings:
+            provider_name = source_setting['providerName']
+            if source_instance := self.sources.get(provider_name):
+                if hasattr(source_instance, "find_url_for_provider"):
+                    target_url = await source_instance.find_url_for_provider(title, target_provider, user, season=season)
+                    if target_url:
+                        return await self.scraper_manager.get_scraper(target_provider).get_id_from_url(target_url)
+        return None
+
     async def search(self, provider: str, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         """从特定提供商搜索媒体。"""
         if source_instance := self.sources.get(provider):

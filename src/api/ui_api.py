@@ -430,15 +430,12 @@ async def get_source_details(
     return models.SourceDetailsResponse.model_validate(source_info)
 
 class ReassociationRequest(models.BaseModel):
-    targetAnimeId: int = Field(..., alias="target_anime_id")
-
-    class Config:
-        populate_by_name = True
+    targetAnimeId: int
 
 @router.post("/library/anime/{sourceAnimeId}/reassociate", status_code=status.HTTP_204_NO_CONTENT, summary="重新关联作品的数据源")
 async def reassociate_anime_sources(
     sourceAnimeId: int,
-    request_data: ReassociationRequest,
+    request_data: ReassociationRequest = Body(...),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):

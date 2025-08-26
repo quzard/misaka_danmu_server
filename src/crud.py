@@ -463,6 +463,12 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
     await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_source.id
 
+async def update_source_media_id(session: AsyncSession, source_id: int, new_media_id: str):
+    """更新指定源的 mediaId。"""
+    stmt = update(AnimeSource).where(AnimeSource.id == source_id).values(mediaId=new_media_id)
+    await session.execute(stmt)
+    # 注意：这里不 commit，由调用方（任务）来决定何时提交事务
+
 async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId: Optional[str], imdbId: Optional[str], tvdbId: Optional[str], doubanId: Optional[str], bangumiId: Optional[str] = None, tmdbEpisodeGroupId: Optional[str] = None):
     """仅当字段为空时，才更新番剧的元数据ID。"""
     stmt = select(AnimeMetadata).where(AnimeMetadata.animeId == anime_id)
@@ -748,13 +754,17 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
     return False
 
 async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int, target_anime_id: int) -> bool:
+    if source_anime_id == target_anime_id:
+        return False # 不能将一个作品与它自己合并
+
     source_anime = await session.get(Anime, source_anime_id, options=[selectinload(Anime.sources)])
     target_anime = await session.get(Anime, target_anime_id)
     if not source_anime or not target_anime:
         return False
 
-    for src in source_anime.sources:
-        # Check for duplicates
+    # 修正：遍历源列表的副本，以避免在迭代时修改集合
+    for src in list(source_anime.sources):
+        # 检查目标作品上是否已存在重复的数据源
         existing_target_source = await session.execute(
             select(AnimeSource).where(
                 AnimeSource.animeId == target_anime_id,
@@ -763,9 +773,9 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
             )
         )
         if existing_target_source.scalar_one_or_none():
-            await session.delete(src) # Delete the duplicate from the source anime
+            await session.delete(src) # 如果目标已存在，则直接删除此重复源
         else:
-            src.animeId = target_anime_id
+            src.animeId = target_anime_id # 否则，将其关联到目标作品
     
     await session.delete(source_anime)
     await session.commit()
@@ -935,6 +945,19 @@ async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[s
     stmt = (
         select(MetadataSource)
         .where(MetadataSource.isAuxSearchEnabled == True)
+        .order_by(MetadataSource.displayOrder)
+    )
+    result = await session.execute(stmt)
+    return [
+        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
+        for s in result.scalars()
+    ]
+
+async def get_enabled_failover_sources(session: AsyncSession) -> List[Dict[str, Any]]:
+    """获取所有已启用故障转移的元数据源。"""
+    stmt = (
+        select(MetadataSource)
+        .where(MetadataSource.isFailoverEnabled == True)
         .order_by(MetadataSource.displayOrder)
     )
     result = await session.execute(stmt)
