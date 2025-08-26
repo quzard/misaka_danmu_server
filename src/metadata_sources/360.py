@@ -121,7 +121,7 @@ class So360MetadataSource(BaseMetadataSource):
                 media_id = item.en_id or item.id
 
                 results.append(models.MetadataDetailsResponse(
-                    itemId=media_id,
+                    id=media_id,
                     provider=self.provider_name,
                     title=item.title,
                     type=media_type,
@@ -199,7 +199,7 @@ class So360MetadataSource(BaseMetadataSource):
                         aliases = [cover_info.sub_title] if cover_info.sub_title else []
 
                         return models.MetadataDetailsResponse(
-                            itemId=item_id,
+                            id=item_id,
                             provider=self.provider_name,
                             title=cover_info.title,
                             type=cover_info.media_type,
@@ -227,7 +227,7 @@ class So360MetadataSource(BaseMetadataSource):
             return None
 
         best_match = next((r for r in search_results if get_season_from_title(r.title) == season), search_results[0])
-        self.logger.info(f"360 Failover: Found best match: '{best_match.title}' (ID: {best_match.itemId})")
+        self.logger.info(f"360 Failover: Found best match: '{best_match.title}' (ID: {best_match.id})")
 
         episode_url = await self._get_episode_url_from_360(best_match, episode_index)
         if not episode_url:
