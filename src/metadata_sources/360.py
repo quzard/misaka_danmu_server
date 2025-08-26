@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .. import models
 from ..config_manager import ConfigManager
-from .base import BaseMetadataSource, get_season_from_title
+from .base import BaseMetadataSource
+from ..scrapers.base import get_season_from_title
 
 logger = logging.getLogger(__name__)
 
