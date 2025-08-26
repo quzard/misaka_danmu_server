@@ -26,7 +26,7 @@ class So360SearchResultItem(BaseModel):
     cover: Optional[str] = None
     cat_id: Optional[str] = Field(None, alias="cat_id")
     cat_name: Optional[str] = Field(None, alias="cat_name")
-    playlinks: Dict[str, Union[str, List[Dict[str, Any]]]] = Field(default_factory=dict)
+    playlinks: Dict[str, Any] = Field(default_factory=dict)
     playlinks_year: Optional[Dict[str, List[int]]] = Field(None, alias="playlinks_year")
     years: Optional[List[int]] = None
     alias: Optional[List[str]] = None
