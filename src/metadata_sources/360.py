@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup # type: ignore
@@ -82,7 +83,9 @@ class So360MetadataSource(BaseMetadataSource):
             'cb': '__jp0'
         }
         try:
-            headers = {'Referer': f'https://so.360kan.com/?kw={keyword}'}
+            # 修复1: 对关键词进行URL编码，以避免UnicodeEncodeError
+            encoded_keyword = quote(keyword)
+            headers = {'Referer': f'https://so.360kan.com/?kw={encoded_keyword}'}
             response = await self.client.get(search_url, params=params, headers=headers)
             response.raise_for_status()
             
@@ -323,8 +326,9 @@ class So360MetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            response = await self.client.get(f"{self.api_base_url}/index?kw=test&cb=__jp0", timeout=10.0)
-            if response.status_code == 200 and "data" in response.json():
+            # 修复2: 切换到检查主站的可访问性，而不是一个可能已失效的API
+            response = await self.client.get(self.web_base_url, timeout=10.0)
+            if response.status_code == 200:
                 return "连接成功"
             return f"连接失败 (状态码: {response.status_code})"
         except Exception as e:
