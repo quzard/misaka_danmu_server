@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import quote
 
 import httpx
@@ -26,7 +26,7 @@ class So360SearchResultItem(BaseModel):
     cover: Optional[str] = None
     cat_id: Optional[str] = Field(None, alias="cat_id")
     cat_name: Optional[str] = Field(None, alias="cat_name")
-    playlinks: Dict[str, str] = Field(default_factory=dict)
+    playlinks: Dict[str, Union[str, List[Dict[str, Any]]]] = Field(default_factory=dict)
     playlinks_year: Optional[Dict[str, List[int]]] = Field(None, alias="playlinks_year")
     years: Optional[List[int]] = None
     alias: Optional[List[str]] = None
@@ -165,7 +165,16 @@ class So360MetadataSource(BaseMetadataSource):
             return None
         
         playlinks = best_match.extra.get("playlinks", {}) if best_match.extra else {}
-        return playlinks.get(target_site)
+        link_info = playlinks.get(target_site)
+
+        if isinstance(link_info, str):
+            return link_info
+        elif isinstance(link_info, list) and link_info:
+            # 对于综艺节目，其播放链接是一个列表，我们返回第一集的URL
+            first_episode = link_info[0]
+            if isinstance(first_episode, dict) and 'url' in first_episode:
+                return first_episode['url']
+        return None
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         possible_paths = [f"/dianshiju/{item_id}.html", f"/dongman/{item_id}.html", f"/dianying/{item_id}.html"]
