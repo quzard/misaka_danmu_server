@@ -144,11 +144,11 @@ class TencentMultiTerminalSearchRequest(BaseModel):
     isPrefetch: bool = True
     pagesize: int = 30
     queryFrom: int = 0
-    searchDatakey: str = ""
-    transInfo: str = ""
+    searchDatakey: str = "" # 保持为空字符串，与JS脚本一致
+    transInfo: str = "{}" # 修正：此字段应为一个空的JSON对象字符串
     isneedQc: bool = True
     preQid: str = ""
-    adClientInfo: str = ""
+    adClientInfo: str = "{}" # 修正：此字段应为一个空的JSON对象字符串
     extraInfo: TencentSearchExtraInfo = Field(default_factory=TencentSearchExtraInfo)
 
 # --- 腾讯API客户端 ---
