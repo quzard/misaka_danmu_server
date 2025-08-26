@@ -139,7 +139,7 @@ class MetadataSourceManager:
                 # 针对常见的网络错误提供更友好的提示
                 if isinstance(res, httpx.ConnectError):
                     self.logger.warning(f"无法连接到元数据源 '{provider_name}'。请检查网络连接或代理设置。")
-                elif isinstance(res, httpx.TimeoutException):
+                elif isinstance(res, (httpx.TimeoutException, httpx.ReadTimeout)):
                     self.logger.warning(f"连接元数据源 '{provider_name}' 超时。")
                 else:
                     # 对于其他异常，记录更详细的信息，但避免完整的堆栈跟踪，除非在调试模式下
