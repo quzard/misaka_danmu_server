@@ -314,6 +314,7 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
 
 async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Dict[str, Any]]:
     """为匹配流程查找可能的番剧，并返回其核心ID以供TMDB映射使用。"""
+    title_len_expr = func.length(Anime.title)
     stmt = (
         select(
             Anime.id.label("animeId"),
@@ -321,7 +322,7 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
             AnimeMetadata.tmdbEpisodeGroupId,
             Anime.title,
             # 修正：将用于排序的列添加到 SELECT 列表中，以兼容 PostgreSQL 的 DISTINCT 规则
-            func.length(Anime.title).label("title_length")
+            title_len_expr.label("title_length")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
@@ -333,7 +334,7 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
         for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji,
                     AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
     ]
-    stmt = stmt.where(or_(*like_conditions)).distinct().order_by(func.length(Anime.title)).limit(5)
+    stmt = stmt.where(or_(*like_conditions)).distinct().order_by(title_len_expr).limit(5)
     
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]

@@ -237,24 +237,6 @@ class TencentScraper(BaseScraper):
             if any(kw in title for kw in non_formal_keywords):
                 self.logger.debug(f"检测到非正片电影内容，跳过处理: {title}")
                 return None
-        
-        # For TV series, check for normal episodes (JS logic)
-        # This part assumes video_info.play_sites might contain episodeInfoList,
-        # which is true for some Tencent API responses.
-        if content_type == "电视剧" and video_info.play_sites:
-            has_normal_episode = False
-            for site in video_info.play_sites:
-                if site.get("episodeInfoList"):
-                    for ep in site["episodeInfoList"]:
-                        ep_title = ep.get("title", "")
-                        if re.match(r"^\d+$", ep_title) or re.match(r"第\d+[集期]", ep_title):
-                            has_normal_episode = True
-                            break
-                if has_normal_episode:
-                    break
-            if not has_normal_episode:
-                self.logger.debug(f"检测到非正规电视剧集，跳过处理: {title}")
-                return None
 
         # Extract other info
         year = str(video_info.year) if video_info.year else None
