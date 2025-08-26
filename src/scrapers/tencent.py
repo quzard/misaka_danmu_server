@@ -160,16 +160,20 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
+    
+    # 英文关键词，通常是独立的缩写或单词
+    _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
+    # 中文关键词，基于用户提供的JS脚本，非常全面
+    _CN_JUNK = r'拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|预告片|先导预告|终极预告|正式预告|官方预告|彩蛋片段|删减片段|未播片段|番外彩蛋|精彩片段|精彩看点|精彩回顾|精彩集锦|看点解析|看点预告|NG镜头|NG花絮|番外篇|番外特辑|制作特辑|拍摄特辑|幕后特辑|导演特辑|演员特辑|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV|前季回顾|剧情回顾|往期回顾|内容总结|剧情盘点|精选合集|剪辑合集|混剪视频|独家专访|演员访谈|导演访谈|主创访谈|媒体采访|发布会采访|抢先看|抢先版|试看版|短剧|vlog'
+
+    # 将英文和中文关键词组合成一个统一的、强大的过滤模式
+    _JUNK_TITLE_PATTERN = re.compile(
+        r'(\[|\【|\b)(' + _ENG_JUNK + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)|(' + _CN_JUNK + r')',
+        re.IGNORECASE
+    )
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        # 修正：使用更健壮的正则表达式来过滤非正片内容
-        # 合并了用户脚本中的关键词，并增加了对 "纯享版"、"会员版" 等常见衍生内容的过滤
-        self._EPISODE_BLACKLIST_PATTERN = re.compile(
-            r"预告|彩蛋|专访|直拍|直播回顾|加更|走心|解忧|纯享|节点|解读|揭秘|赏析|速看|资讯|访谈|番外|短片|纪录片|"
-            r"花絮|看点|预告片|精彩回放|NG|特辑|菜单|片花|首映礼|宣传片|未删减|剪辑版|MV|主题曲|片尾曲|OST|纯享版|会员版|独家版|未播|抢先看|精选合集",
-            re.IGNORECASE
-        )
         # 用于从标题中提取集数的正则表达式
         self._EPISODE_INDEX_PATTERN = re.compile(r"^(?:第)?(\d+)(?:集|话)?$")
         self.base_headers = {
@@ -185,21 +189,6 @@ class TencentScraper(BaseScraper):
         # 新增：用于分集获取的API端点
         self.search_api_url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.MultiTerminalSearch/MbSearch?vplatform=2"
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
-
-
-    # Porting SKIP_KEYWORDS from JS
-    _SKIP_KEYWORDS = [
-        "拍摄花絮", "制作花絮", "幕后花絮", "未播花絮", "独家花絮", "花絮特辑",
-        "预告片", "先导预告", "终极预告", "正式预告", "官方预告",
-        "彩蛋片段", "删减片段", "未播片段", "番外彩蛋",
-        "精彩片段", "精彩看点", "精彩回顾", "精彩集锦", "看点解析", "看点预告",
-        "NG镜头", "NG花絮", "番外篇", "番外特辑",
-        "制作特辑", "拍摄特辑", "幕后特辑", "导演特辑", "演员特辑",
-        "片尾曲", "插曲", "主题曲", "背景音乐", "OST", "音乐MV", "歌曲MV",
-        "前季回顾", "剧情回顾", "往期回顾", "内容总结", "剧情盘点", "精选合集", "剪辑合集", "混剪视频",
-        "独家专访", "演员访谈", "导演访谈", "主创访谈", "媒体采访", "发布会采访",
-        "抢先看", "抢先版", "试看版", "短剧", "vlog"
-    ]
 
     # Porting TITLE_MAPPING from JS
     _TITLE_MAPPING = {
@@ -219,13 +208,6 @@ class TencentScraper(BaseScraper):
     async def close(self):
         """关闭HTTP客户端"""
         await self.client.aclose()
-
-    def _should_skip_title(self, title: str) -> bool:
-        """Ported from JS: shouldSkipTitle."""
-        if not title:
-            return True
-        lower_title = title.lower()
-        return any(keyword.lower() in lower_title for keyword in self._SKIP_KEYWORDS)
 
     def _filter_search_item(self, item: TencentSearchItem, keyword: str) -> Optional[models.ProviderSearchInfo]:
         """
@@ -255,8 +237,8 @@ class TencentScraper(BaseScraper):
             return None
 
         # Apply intelligent filtering based on keywords
-        if self._should_skip_title(title):
-            self.logger.debug(f"跳过不相关内容 (关键词过滤): {title}")
+        if self._JUNK_TITLE_PATTERN.search(title):
+            self.logger.debug(f"跳过不相关内容 (Junk Pattern Filter): {title}")
             return None
 
         # 内容类型过滤与映射
@@ -591,8 +573,8 @@ class TencentScraper(BaseScraper):
         for ep in tencent_episodes:
             if ep.is_trailer == "1":
                 continue
-            title_to_check = ep.union_title or ep.title
-            if self._EPISODE_BLACKLIST_PATTERN.search(title_to_check):
+            title_to_check = ep.union_title or ep.title or ""
+            if self._JUNK_TITLE_PATTERN.search(title_to_check):
                 continue
             pre_filtered.append(ep)
 
