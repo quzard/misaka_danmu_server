@@ -66,6 +66,20 @@ class TencentSearchData(BaseModel):
 class TencentSearchResult(BaseModel):
     data: Optional[TencentSearchData] = None
 
+# --- Models for the new MultiTerminalSearch API (from JS file) ---
+class TencentAreaBox(BaseModel):
+    boxId: str
+    itemList: Optional[List[TencentSearchItem]] = None
+
+class TencentSearchDataV2(BaseModel):
+    areaBoxList: Optional[List[TencentAreaBox]] = None
+    normalList: Optional[TencentSearchItemList] = None
+
+class TencentSearchResultV2(BaseModel):
+    data: Optional[TencentSearchDataV2] = None
+    ret: int
+    msg: Optional[str] = None
+
 # --- Models for GetPageData API (New) ---
 
 class TencentEpisodeTabInfo(BaseModel):
@@ -117,6 +131,32 @@ class TencentSearchRequest(BaseModel):
     scene_id: int = Field(21, alias="sceneId")
     platform: str = "23"
 
+# --- 新的搜索API请求模型 (参考JS代码) ---
+class TencentExtraInfo(BaseModel):
+    isNewMarkLabel: str = "1"
+    multi_terminal_pc: str = "1"
+    themeType: str = "1"
+    sugRelatedIds: str = "{}"
+    appVersion: str = ""
+
+class TencentMultiTerminalSearchRequest(BaseModel):
+    version: str = "25071701"
+    clientType: int = 1
+    filterValue: str = ""
+    uuid: str = "0379274D-05A0-4EB6-A89C-878C9A460426"
+    query: str
+    retry: int = 0
+    pagenum: int = 0
+    isPrefetch: bool = True
+    pagesize: int = 30
+    queryFrom: int = 0
+    searchDatakey: str = ""
+    transInfo: str = ""
+    isneedQc: bool = True
+    preQid: str = ""
+    adClientInfo: str = ""
+    extraInfo: TencentExtraInfo = Field(default_factory=TencentExtraInfo)
+
 # --- 腾讯API客户端 ---
 
 class TencentScraper(BaseScraper):
@@ -148,6 +188,20 @@ class TencentScraper(BaseScraper):
         }
         # 根据C#代码，这个特定的cookie对于成功请求至关重要
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
+        
+        # Headers and cookies for the new MultiTerminalSearch API
+        self.multiterminal_headers = {
+            'Content-Type': 'application/json',
+            'Origin': 'https://v.qq.com',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'H38': '220496a1fb1498325e9be6d938',
+            'H42': '335a00a80ab9bbbef56793d8e7a97e87b9341dee34ebd83d61afc0cdb303214caaece3',
+            'Uk': '8e91af25d3af99d0f0640327e7307666',
+        }
+        self.multiterminal_cookies = {'tvfe_boss_uuid': 'ee8f05103d59226f', 'pgv_pvid': '3155633511', 'video_platform': '2', 'ptag': 'v_qq_com', 'main_login': 'qq'}
+
         # httpx.AsyncClient 是 Python 中功能强大的异步HTTP客户端，等同于 C# 中的 HttpClient
         # 此处通过 cookies 参数传入字典，httpx 会自动将其格式化为正确的 Cookie 请求头，效果与C#代码一致
         self.client = httpx.AsyncClient(headers=self.base_headers, cookies=self.cookies, timeout=20.0)
@@ -314,6 +368,54 @@ class TencentScraper(BaseScraper):
             self.logger.error(f"Tencent (移动API): 解析搜索结果失败: {e}", exc_info=True)
         return results
 
+    async def _search_multiterminal_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """通过腾讯新的 MultiTerminalSearch API 查找番剧 (基于JS代码)。"""
+        url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.MultiTerminalSearch/MbSearch?vplatform=2"
+        request_model = TencentMultiTerminalSearchRequest(query=keyword)
+        payload = request_model.model_dump(by_alias=False)
+        
+        headers = self.multiterminal_headers.copy()
+        headers['Referer'] = f"https://v.qq.com/x/search/?q={keyword}&stag=&smartbox_ab="
+
+        results = []
+        try:
+            self.logger.info(f"Tencent (MultiTerminal API): 正在搜索 '{keyword}'...")
+            # 使用独立的 httpx.AsyncClient 或更新现有客户端的 headers/cookies
+            # 为了隔离，这里创建一个新的临时客户端
+            async with httpx.AsyncClient(headers=headers, cookies=self.multiterminal_cookies, timeout=20.0) as client:
+                response = await client.post(url, json=payload)
+
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent MultiTerminal Search Response (keyword='{keyword}'): {response.text}")
+
+            response.raise_for_status()
+            response_json = response.json()
+            data = TencentSearchResultV2.model_validate(response_json)
+
+            if data.ret != 0:
+                self.logger.error(f"Tencent (MultiTerminal API): API返回错误: {data.msg} (ret: {data.ret})")
+                return []
+
+            items_to_process = []
+            if data.data and data.data.areaBoxList:
+                for box in data.data.areaBoxList:
+                    if box.boxId == "MainNeed" and box.itemList:
+                        self.logger.debug(f"Tencent (MultiTerminal API): 从 MainNeed box 找到 {len(box.itemList)} 个项目。")
+                        items_to_process.extend(box.itemList)
+                        break
+            
+            if not items_to_process and data.data and data.data.normalList and data.data.normalList.item_list:
+                self.logger.debug("Tencent (MultiTerminal API): MainNeed box 未找到或为空, 回退到 normalList。")
+                items_to_process.extend(data.data.normalList.item_list)
+
+            for item in items_to_process:
+                filtered_item = self._filter_search_item(item, keyword)
+                if filtered_item:
+                    results.append(filtered_item)
+        except (httpx.HTTPStatusError, ValidationError, KeyError, json.JSONDecodeError) as e:
+            self.logger.error(f"Tencent (MultiTerminal API): 解析或请求失败: {e}", exc_info=True)
+        return results
+
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """并发执行桌面端和移动端搜索，并合并去重结果。"""
         # 智能缓存逻辑
@@ -348,12 +450,14 @@ class TencentScraper(BaseScraper):
 
         desktop_task = self._search_desktop_api(keyword, episode_info)
         mobile_task = self._search_mobile_api(keyword, episode_info)
+        multiterminal_task = self._search_multiterminal_api(keyword, episode_info)
         
-        results_lists = await asyncio.gather(desktop_task, mobile_task, return_exceptions=True)
+        results_lists = await asyncio.gather(desktop_task, mobile_task, multiterminal_task, return_exceptions=True)
         
         all_results = []
+        api_names = ["桌面API", "移动API", "MultiTerminal API"]
         for i, res_list in enumerate(results_lists):
-            api_name = "桌面API" if i == 0 else "移动API"
+            api_name = api_names[i]
             if isinstance(res_list, list):
                 all_results.extend(res_list)
             elif isinstance(res_list, Exception):
