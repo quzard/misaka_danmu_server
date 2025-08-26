@@ -430,8 +430,8 @@ async def edited_import_task(
         final_message += " (警告：海报图片下载失败)"
     raise TaskSuccess(final_message)
 
-async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable):
-    """
+async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable, metadata_manager: MetadataSourceManager):
+    """    
     后台任务：全量刷新一个已存在的番剧，采用先获取后删除的安全策略。
     """
     logger.info(f"开始刷新源 ID: {sourceId}")

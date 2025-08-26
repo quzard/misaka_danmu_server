@@ -184,7 +184,7 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             Anime.imageUrl.label("imageUrl"),
             Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"),
-            func.if_(Anime.type == 'movie', func.concat(Scraper.providerName, ' 源'), Episode.title).label("episodeTitle"),
+            case((Anime.type == 'movie', func.concat(Scraper.providerName, ' 源')), else_=Episode.title).label("episodeTitle"),
             AnimeAlias.nameEn,
             AnimeAlias.nameJp,
             AnimeAlias.nameRomaji,
@@ -319,7 +319,9 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
             Anime.id.label("animeId"),
             AnimeMetadata.tmdbId,
             AnimeMetadata.tmdbEpisodeGroupId,
-            Anime.title
+            Anime.title,
+            # 修正：将用于排序的列添加到 SELECT 列表中，以兼容 PostgreSQL 的 DISTINCT 规则
+            func.length(Anime.title).label("title_length")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)

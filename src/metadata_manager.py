@@ -129,11 +129,21 @@ class MetadataSourceManager:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_aliases: Set[str] = set()
-        for res in results:
+        
+        # 修正：改进错误日志记录
+        for i, res in enumerate(results):
             if isinstance(res, set):
                 all_aliases.update(res)
             elif isinstance(res, Exception):
-                self.logger.error(f"Auxiliary search sub-task failed: {res}", exc_info=False)
+                provider_name = enabled_sources_settings[i]['providerName']
+                # 针对常见的网络错误提供更友好的提示
+                if isinstance(res, httpx.ConnectError):
+                    self.logger.warning(f"无法连接到元数据源 '{provider_name}'。请检查网络连接或代理设置。")
+                elif isinstance(res, httpx.TimeoutException):
+                    self.logger.warning(f"连接元数据源 '{provider_name}' 超时。")
+                else:
+                    # 对于其他异常，记录更详细的信息，但避免完整的堆栈跟踪，除非在调试模式下
+                    self.logger.error(f"元数据源 '{provider_name}' 的辅助搜索子任务失败: {res}", exc_info=False)
         
         # 过滤掉潜在的 None 或空字符串
         return {alias for alias in all_aliases if alias}

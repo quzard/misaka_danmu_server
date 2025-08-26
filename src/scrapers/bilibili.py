@@ -800,7 +800,11 @@ class BilibiliScraper(BaseScraper):
 
         formatted = []
         for c in processed_comments:
+            # Sanitize content to remove null characters, which are invalid in PostgreSQL's TEXT type.
+            sanitized_content = c.content.replace('\x00', '')
+            if not sanitized_content: # Skip if the comment is empty after sanitization
+                continue
             timestamp = c.progress / 1000.0
             p_string = f"{timestamp:.3f},{c.mode},{c.color},[{self.provider_name}]"
-            formatted.append({"cid": str(c.id), "p": p_string, "m": c.content, "t": round(timestamp, 2)})
+            formatted.append({"cid": str(c.id), "p": p_string, "m": sanitized_content, "t": round(timestamp, 2)})
         return formatted
