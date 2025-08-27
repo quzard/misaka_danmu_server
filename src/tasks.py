@@ -313,6 +313,17 @@ async def generic_import_task(
         target_episode_index=currentEpisodeIndex,
         db_media_type=mediaType
     )
+    # 修正：即使 scraper.get_episodes 应该处理过滤，我们在此处再次强制过滤，
+    # 以确保由 Webhook 触发的单集导入任务（特别是首次导入）只处理目标分集。
+    # 这是一个健壮性修复，以防某些 scraper 未正确实现 target_episode_index 逻辑。
+    if currentEpisodeIndex is not None and episodes:
+        original_count = len(episodes)
+        episodes = [ep for ep in episodes if ep.episodeIndex == currentEpisodeIndex]
+        if len(episodes) < original_count:
+            logger.info(
+                f"已将分集列表从 {original_count} 个强制过滤为 {len(episodes)} 个 (目标集: {currentEpisodeIndex})，以匹配 Webhook 请求。"
+            )
+
     if not episodes:
         # --- FAILOVER LOGIC ---
         logger.info(f"主源 '{provider}' 未能找到分集，尝试故障转移...")
