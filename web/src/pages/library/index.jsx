@@ -64,6 +64,7 @@ export const Library = () => {
   const [renderData, setRenderData] = useState([])
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
+  const [libraryPageSize, setLibraryPageSize] = useState(50)
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -597,10 +598,13 @@ export const Library = () => {
             pagination={
               renderData?.length > 50
                 ? {
-                    pageSize: 50,
+                    pageSize: libraryPageSize,
                     showTotal: total => `共 ${total} 条数据`,
                     showSizeChanger: true,
                     showQuickJumper: true,
+                    onShowSizeChange: (_, size) => {
+                      setLibraryPageSize(size)
+                    },
                   }
                 : null
             }
@@ -906,6 +910,7 @@ export const Library = () => {
           dataSource={tmdbResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -961,6 +966,7 @@ export const Library = () => {
           dataSource={imdbResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -1015,6 +1021,7 @@ export const Library = () => {
           dataSource={tvdbResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -1069,6 +1076,7 @@ export const Library = () => {
           dataSource={egidResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -1121,6 +1129,7 @@ export const Library = () => {
           dataSource={allEpisode?.groups || []}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -1156,6 +1165,7 @@ export const Library = () => {
           dataSource={bgmResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -1210,6 +1220,7 @@ export const Library = () => {
           dataSource={doubanResult}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
