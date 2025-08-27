@@ -45,6 +45,7 @@ export const AnimeDetail = () => {
   const [editOpen, setEditOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
+  const [libraryPageSisze, setLibraryPageSisze] = useState(10)
 
   const navigate = useNavigate()
 
@@ -531,7 +532,10 @@ export const AnimeDetail = () => {
           size="large"
           dataSource={renderList}
           pagination={{
-            pageSize: 10,
+            pageSize: libraryPageSisze,
+            onShowSizeChange: (_, size) => {
+              setLibraryPageSisze(size)
+            },
           }}
           renderItem={(item, index) => {
             return (
