@@ -339,24 +339,42 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_episode_via_tmdb_mapping(session: AsyncSession, tmdb_id: str, group_id: str, custom_season: Optional[int], custom_episode: int) -> List[Dict[str, Any]]:
-    """通过TMDB映射表查找本地分集。"""
+async def find_episode_via_tmdb_mapping(
+    session: AsyncSession,
+    tmdb_id: str,
+    group_id: str,
+    custom_season: Optional[int],
+    custom_episode: Optional[int]
+) -> List[Dict[str, Any]]:
+    """
+    通过TMDB映射表查找本地分集。
+    此实现通过 select_from 和显式 join 解决了SQL查询的歧义问题。
+    """
     stmt = (
         select(
             Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"), Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Scraper.displayOrder, AnimeSource.isFavorited.label("isFavorited"),
             AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(AnimeMetadata, and_(TmdbEpisodeMapping.tmdbTvId == AnimeMetadata.tmdbId, TmdbEpisodeMapping.tmdbEpisodeGroupId == AnimeMetadata.tmdbEpisodeGroupId))
+        .select_from(TmdbEpisodeMapping)
+        .join(
+            AnimeMetadata,
+            AnimeMetadata.tmdbId == TmdbEpisodeMapping.tmdbTvId
+        )
         .join(Anime, AnimeMetadata.animeId == Anime.id)
         .join(AnimeSource, Anime.id == AnimeSource.animeId)
         .join(Episode, and_(AnimeSource.id == Episode.sourceId, Episode.episodeIndex == TmdbEpisodeMapping.absoluteEpisodeNumber))
         .join(Scraper, AnimeSource.providerName == Scraper.providerName)
         .where(TmdbEpisodeMapping.tmdbTvId == tmdb_id, TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id)
     )
-    if custom_season is not None:
-        stmt = stmt.where(TmdbEpisodeMapping.customSeasonNumber == custom_season, TmdbEpisodeMapping.customEpisodeNumber == custom_episode)
-    else:
+
+    if custom_season is not None and custom_episode is not None:
+        stmt = stmt.where(
+            TmdbEpisodeMapping.customSeasonNumber == custom_season,
+            TmdbEpisodeMapping.customEpisodeNumber == custom_episode
+        )
+    elif custom_episode is not None:
+        # 如果只提供了集数（或季度未提供），则使用绝对集数进行匹配
         stmt = stmt.where(TmdbEpisodeMapping.absoluteEpisodeNumber == custom_episode)
     
     stmt = stmt.order_by(AnimeSource.isFavorited.desc(), Scraper.displayOrder)

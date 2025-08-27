@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any
 from typing import Callable
 from datetime import datetime
 from opencc import OpenCC
+from thefuzz import fuzz
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -738,31 +739,28 @@ async def match_single_file(
     
     # 新增：对结果进行严格的标题过滤，避免模糊匹配带来的问题
     normalized_search_title = parsed_info["title"].replace("：", ":").replace(" ", "")
-    if normalized_search_title:
-        exact_matches = []
-        for r in results:
-            # 将主标题和所有别名都收集起来进行检查
-            all_titles_to_check = [
-                r.get('animeTitle'),
-                r.get('nameEn'),
-                r.get('nameJp'),
-                r.get('nameRomaji'),
-                r.get('aliasCn1'),
-                r.get('aliasCn2'),
-                r.get('aliasCn3'),
-            ]
-            # 规范化并移除空值
-            normalized_aliases = {
-                t.replace("：", ":").replace(" ", "") for t in all_titles_to_check if t
-            }
-            
-            # 检查搜索词是否是任何一个标题/别名的子串
-            if any(normalized_search_title in alias for alias in normalized_aliases):
-                exact_matches.append(r)
+    exact_matches = []
+    for r in results:
+        # 将主标题和所有别名都收集起来进行检查
+        all_titles_to_check = [
+            r.get('animeTitle'),
+            r.get('nameEn'),
+            r.get('nameJp'),
+            r.get('nameRomaji'),
+            r.get('aliasCn1'),
+            r.get('aliasCn2'),
+            r.get('aliasCn3'),
+        ]
+        # 规范化并移除空值
+        aliases_to_check = {t for t in all_titles_to_check if t}
+        
+        # 修正：使用更鲁棒的模糊匹配来找到相关结果
+        if any(fuzz.partial_ratio(alias, parsed_info["title"]) > 85 for alias in aliases_to_check):
+            exact_matches.append(r)
 
-        if len(exact_matches) < len(results):
-            logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
-            results = exact_matches
+    if len(exact_matches) < len(results):
+        logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
+        results = exact_matches
 
     if not results:
         response = DandanMatchResponse(isMatched=False, matches=[])
