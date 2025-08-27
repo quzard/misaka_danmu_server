@@ -240,10 +240,11 @@ async def cleanup_task(app: FastAPI):
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
 
-app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
-
 # 新增：显式地挂载外部控制API路由，以确保其优先级
 app.include_router(control_router, prefix="/api/control", tags=["External Control API"])
+
+app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
+
 # --- 前端服务 (生产环境) ---
 # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
 # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
