@@ -75,19 +75,3 @@ def convert_keys_to_camel(data: Any) -> Any:
     if isinstance(data, list):
         return [convert_keys_to_camel(i) for i in data]
     return data
-
-def to_camel(snake_str: str) -> str:
-    """将 snake_case 字符串转换为 camelCase。"""
-    components = snake_str.split('_')
-    # 我们将除第一个之外的每个组件的首字母大写，然后连接起来。
-    return components[0] + ''.join(x.title() for x in components[1:])
-
-def convert_keys_to_camel(data: Any) -> Any:
-    """
-    递归地将字典的键从 snake_case 转换为 camelCase。
-    """
-    if isinstance(data, dict):
-        return {to_camel(k): convert_keys_to_camel(v) for k, v in data.items()}
-    if isinstance(data, list):
-        return [convert_keys_to_camel(i) for i in data]
-    return data
