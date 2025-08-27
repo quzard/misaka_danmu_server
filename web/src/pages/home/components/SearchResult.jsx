@@ -440,6 +440,7 @@ export const SearchResult = () => {
                     : '全选'}
                 </Button>
                 <Checkbox.Group
+                  className="shrink-0"
                   options={[
                     {
                       label: '电影/剧场版',
@@ -453,7 +454,7 @@ export const SearchResult = () => {
                   value={checkedList}
                   onChange={onTypeChange}
                 />
-                <div className="w-40">
+                <div className="w-full md:w-40">
                   <Input
                     placeholder="在结果中过滤标题"
                     onChange={e => setKeyword(e.target.value)}
@@ -511,13 +512,13 @@ export const SearchResult = () => {
                             </div>
                             <div className="flex items-center flex-wrap gap-2">
                               <Tag color="magenta">源：{item.provider}</Tag>
-                              <Tag color="red">
-                                类型：{DANDAN_TYPE_DESC_MAPPING[item.type]}
-                              </Tag>
                               <Tag color="volcano">年份：{item.year}</Tag>
                               <Tag color="orange">季度：{item.season}</Tag>
                               <Tag color="gold">
                                 总集数：{item.episodeCount ?? 0}
+                              </Tag>
+                              <Tag color="red">
+                                类型：{DANDAN_TYPE_DESC_MAPPING[item.type]}
                               </Tag>
                             </div>
                           </div>
@@ -628,7 +629,7 @@ export const SearchResult = () => {
                 <Input.Search
                   placeholder="请输入最终导入名称"
                   allowClear
-                  enterButton="Search"
+                  enterButton="搜索"
                   loading={searchTmdbLoading}
                   onSearch={onTmdbSearch}
                 />
