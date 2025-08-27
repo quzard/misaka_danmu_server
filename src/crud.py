@@ -384,9 +384,28 @@ async def find_episode_via_tmdb_mapping(
     )
 
     if custom_season is not None and custom_episode is not None:
-        stmt = stmt.where(MappingFromFile.customSeasonNumber == custom_season, MappingFromFile.customEpisodeNumber == custom_episode)
+        # 增强：同时匹配自定义编号和TMDB官方编号
+        stmt = stmt.where(
+            or_(
+                and_(
+                    MappingFromFile.customSeasonNumber == custom_season,
+                    MappingFromFile.customEpisodeNumber == custom_episode
+                ),
+                and_(
+                    MappingFromFile.tmdbSeasonNumber == custom_season,
+                    MappingFromFile.tmdbEpisodeNumber == custom_episode
+                )
+            )
+        )
     elif custom_episode is not None:
-        stmt = stmt.where(MappingFromFile.absoluteEpisodeNumber == custom_episode)
+        # 增强：当只有集数时，也同时匹配绝对集数和两种S01EXX的情况
+        stmt = stmt.where(
+            or_(
+                MappingFromFile.absoluteEpisodeNumber == custom_episode,
+                and_(MappingFromFile.customSeasonNumber == 1, MappingFromFile.customEpisodeNumber == custom_episode),
+                and_(MappingFromFile.tmdbSeasonNumber == 1, MappingFromFile.tmdbEpisodeNumber == custom_episode)
+            )
+        )
     
     stmt = stmt.order_by(AnimeSource.isFavorited.desc(), Scraper.displayOrder)
     result = await session.execute(stmt)
