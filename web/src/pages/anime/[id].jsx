@@ -436,15 +436,13 @@ export const AnimeDetail = () => {
         items={[
           {
             title: (
-              <Link>
+              <Link to="/">
                 <HomeOutlined />
               </Link>
             ),
-            onClick: () => navigate('/'),
           },
           {
-            title: <Link>弹幕库</Link>,
-            onClick: () => navigate('/library'),
+            title: <Link to="/library">弹幕库</Link>,
           },
           {
             title: animeDetail.title,

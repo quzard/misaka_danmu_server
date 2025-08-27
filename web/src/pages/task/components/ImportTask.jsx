@@ -268,7 +268,7 @@ export const ImportTask = () => {
         <div className="flex items-center justify-center gap-4 py-3 text-base font-semibold">
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'all',
+              'bg-primary text-white': status === 'all',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=all`, {
@@ -280,7 +280,7 @@ export const ImportTask = () => {
           </div>
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'completed',
+              'bg-primary text-white': status === 'completed',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=completed`, {
@@ -292,7 +292,7 @@ export const ImportTask = () => {
           </div>
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'in_progress',
+              'bg-primary text-white': status === 'in_progress',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=in_progress`, {
@@ -320,6 +320,7 @@ export const ImportTask = () => {
                     extra={
                       <>
                         <Tag
+                          className="!mb-3"
                           color={item.status.includes('失败') ? 'red' : 'green'}
                         >
                           {item.status}
