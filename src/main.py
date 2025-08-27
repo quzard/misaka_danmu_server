@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
-from .database import init_db_tables, close_db_engine, create_initial_admin_user
-from .api import api_router
+from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
+from .api import api_router, control_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -242,6 +242,8 @@ app.include_router(api_router, prefix="/api")
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
+# 新增：显式地挂载外部控制API路由，以确保其优先级
+app.include_router(control_router, prefix="/api/control", tags=["External Control API"])
 # --- 前端服务 (生产环境) ---
 # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
 # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
