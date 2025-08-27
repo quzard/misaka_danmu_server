@@ -107,8 +107,8 @@ class TaskManager:
                     await crud.finalize_task_in_history(
                         final_session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
                     )
-            except Exception:
-                error_message = "任务执行失败"
+            except Exception as e:
+                error_message = f"任务执行失败 - {e}"
                 async with self._session_factory() as final_session:
                     await crud.finalize_task_in_history(
                         final_session, task.task_id, TaskStatus.FAILED, error_message

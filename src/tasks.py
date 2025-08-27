@@ -359,8 +359,8 @@ async def generic_import_task(
             raise TaskSuccess(final_message)
         else:
             msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
-            logger.warning(f"任务终止: {msg} (provider='{provider}', media_id='{mediaId}')")
-            raise TaskSuccess(msg)
+            logger.error(f"任务失败: {msg} (provider='{provider}', media_id='{mediaId}')")
+            raise ValueError(msg)
 
     if mediaType == "movie" and episodes:
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
