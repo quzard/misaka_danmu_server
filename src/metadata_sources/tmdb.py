@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Set, cast
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from .. import crud, models
+from .. import crud, models, utils
 from .base import BaseMetadataSource
 
 from fastapi import HTTPException, status
@@ -271,7 +271,9 @@ class TmdbMetadataSource(BaseMetadataSource):
             # 1. 获取剧集组详情
             response = await client.get(f"/tv/episode_group/{group_id}", params={"language": "zh-CN"})
             response.raise_for_status()
-            group_details = models.TMDBEpisodeGroupDetails.model_validate(response.json())
+            api_data = response.json()
+            camel_case_data = utils.convert_keys_to_camel(api_data)
+            group_details = models.TMDBEpisodeGroupDetails.model_validate(camel_case_data)
 
             # 2. (可选) 丰富分集信息，例如获取日文标题和图片
             # This part can be extended if needed. For now, we focus on mapping.

@@ -757,7 +757,7 @@ async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: in
             mappings_to_insert.append(
                 TmdbEpisodeMapping(
                     tmdbTvId=tmdb_tv_id, tmdbEpisodeGroupId=group_id, tmdbEpisodeId=episode.id,
-                    tmdbSeasonNumber=episode.season_number, tmdbEpisodeNumber=episode.episode_number,
+                    tmdbSeasonNumber=episode.seasonNumber, tmdbEpisodeNumber=episode.episodeNumber,
                     customSeasonNumber=custom_season_group.order, customEpisodeNumber=custom_episode_index + 1,
                     absoluteEpisodeNumber=episode.order + 1
                 )
