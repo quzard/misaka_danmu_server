@@ -51,9 +51,9 @@ export const Header = () => {
       {isMobile ? (
         <>
           <div className="fixed top-0 left-0 w-full z-50 py-2 bg-base-bg">
-            <div className="flex justify-start items-center px-8">
+            <div className="flex justify-start items-center px-4 md:px-8">
               <div onClick={() => navigate(RoutePaths.HOME)}>
-                <img src="/images/logo.png" className="h-6 cursor-pointer" />
+                <img src="/images/logo.png" className="h-8 cursor-pointer" />
               </div>
               <div className="flex items-center justify-center gap-2 ml-auto">
                 <Tag>{version}</Tag>
