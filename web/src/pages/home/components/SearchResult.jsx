@@ -79,6 +79,7 @@ export const SearchResult = () => {
   const dragOverlayRef = useRef(null)
   const [editConfirmLoading, setEditConfirmLoading] = useState(false)
   const [range, setRange] = useState([1, 1])
+  const [episodePageSize, setEpisodePageSize] = useState(10)
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -500,12 +501,13 @@ export const SearchResult = () => {
                             })
                           }
                         >
-                          <div className="shrink-0 mr-3 w-6 h-6 border-2 border-base-text rounded-full flex items-center justify-center">
-                            {isActive && (
-                              <CheckOutlined className="font-base font-bold" />
-                            )}
-                          </div>
-                          <img width={60} alt="logo" src={item.imageUrl} />
+                          <Checkbox checked={isActive} />
+                          <img
+                            width={60}
+                            alt="logo"
+                            src={item.imageUrl}
+                            className="ml-3"
+                          />
                           <div className="ml-4">
                             <div className="text-xl font-bold mb-3">
                               {item.title}
@@ -659,6 +661,7 @@ export const SearchResult = () => {
           dataSource={tmdbList}
           pagination={{
             pageSize: 4,
+            showSizeChanger: false,
           }}
           renderItem={(item, index) => {
             return (
@@ -816,6 +819,12 @@ export const SearchResult = () => {
               <List
                 itemLayout="vertical"
                 size="large"
+                pagination={{
+                  pageSize: episodePageSize,
+                  onShowSizeChange: (_, size) => {
+                    setEpisodePageSize(size)
+                  },
+                }}
                 dataSource={editEpisodeList}
                 renderItem={(item, index) => (
                   <SortableItem

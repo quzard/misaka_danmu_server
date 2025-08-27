@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   List,
@@ -341,10 +342,12 @@ export const ImportTask = () => {
                       })}
                     >
                       {isActive && (
-                        <div className="w-6 h-6 border-2 border-base-text rounded-full flex items-center justify-center absolute top-1/2 left-0 transform -translate-y-1/2">
-                          <CheckOutlined className="font-base font-bold" />
-                        </div>
+                        <Checkbox
+                          checked={isActive}
+                          className="absolute top-1/2 left-0 transform -translate-y-1/2"
+                        />
                       )}
+
                       <div className="text-base mb-1">{item.title}</div>
                       <div className="mb-2">{item.description}</div>
                       <Progress
