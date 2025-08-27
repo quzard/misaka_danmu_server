@@ -386,9 +386,9 @@ class UaRuleCreate(BaseModel):
 class TMDBEpisodeInGroupDetail(BaseModel):
     id: int
     name: str
-    episodeNumber: int = Field(..., alias="episode_number")
-    seasonNumber: int = Field(..., alias="season_number")
-    airDate: Optional[str] = Field(None, alias="air_date")
+    episodeNumber: int
+    seasonNumber: int
+    airDate: Optional[str] = None
     overview: Optional[str] = ""
     order: int
 
@@ -402,8 +402,8 @@ class TMDBEpisodeGroupDetails(BaseModel):
     id: str
     name: str
     description: Optional[str] = ""
-    episodeCount: int = Field(..., alias="episode_count")
-    groupCount: int = Field(..., alias="group_count")
+    episodeCount: int
+    groupCount: int
     groups: List[TMDBGroupInGroupDetail]
     network: Optional[Dict[str, Any]] = None
     type: int
