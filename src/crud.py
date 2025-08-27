@@ -339,29 +339,59 @@ async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Di
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_episode_via_tmdb_mapping(session: AsyncSession, tmdb_id: str, group_id: str, custom_season: Optional[int], custom_episode: int) -> List[Dict[str, Any]]:
-    """通过TMDB映射表查找本地分集。"""
+async def find_episode_via_tmdb_mapping(
+    session: AsyncSession,
+    tmdb_id: str,
+    group_id: str,
+    custom_season: Optional[int],
+    custom_episode: Optional[int]
+) -> List[Dict[str, Any]]:
+    """
+    通过TMDB映射关系查找本地数据库中的分集。
+    此实现使用自连接(self-join)来查找与文件名S/E对应的库内S/E。
+    """
+    # 为 tmdb_episode_mapping 表的自连接创建别名
+    MappingFromFile = aliased(TmdbEpisodeMapping)
+    MappingToLibrary = aliased(TmdbEpisodeMapping)
+
     stmt = (
         select(
             Anime.id.label("animeId"), Anime.title.label("animeTitle"), Anime.type, Anime.imageUrl.label("imageUrl"), Anime.createdAt.label("startDate"),
             Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Scraper.displayOrder, AnimeSource.isFavorited.label("isFavorited"),
             AnimeMetadata.bangumiId.label("bangumiId")
         )
-        .join(AnimeMetadata, and_(TmdbEpisodeMapping.tmdbTvId == AnimeMetadata.tmdbId, TmdbEpisodeMapping.tmdbEpisodeGroupId == AnimeMetadata.tmdbEpisodeGroupId))
-        .join(Anime, AnimeMetadata.animeId == Anime.id)
+        .select_from(MappingFromFile)
+        .join(
+            MappingToLibrary,
+            and_(
+                MappingFromFile.absoluteEpisodeNumber == MappingToLibrary.absoluteEpisodeNumber,
+                MappingFromFile.tmdbTvId == MappingToLibrary.tmdbTvId,
+                MappingFromFile.tmdbEpisodeGroupId == MappingToLibrary.tmdbEpisodeGroupId
+            )
+        )
+        .join(AnimeMetadata, AnimeMetadata.tmdbId == MappingToLibrary.tmdbTvId)
+        .join(Anime, and_(
+            Anime.id == AnimeMetadata.animeId,
+            Anime.season == MappingToLibrary.customSeasonNumber
+        ))
         .join(AnimeSource, Anime.id == AnimeSource.animeId)
-        .join(Episode, and_(AnimeSource.id == Episode.sourceId, Episode.episodeIndex == TmdbEpisodeMapping.absoluteEpisodeNumber))
+        .join(Episode, and_(
+            Episode.sourceId == AnimeSource.id,
+            Episode.episodeIndex == MappingToLibrary.customEpisodeNumber
+        ))
         .join(Scraper, AnimeSource.providerName == Scraper.providerName)
-        .where(TmdbEpisodeMapping.tmdbTvId == tmdb_id, TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id)
+        .where(MappingFromFile.tmdbTvId == tmdb_id, MappingFromFile.tmdbEpisodeGroupId == group_id)
     )
-    if custom_season is not None:
-        stmt = stmt.where(TmdbEpisodeMapping.customSeasonNumber == custom_season, TmdbEpisodeMapping.customEpisodeNumber == custom_episode)
-    else:
-        stmt = stmt.where(TmdbEpisodeMapping.absoluteEpisodeNumber == custom_episode)
+
+    if custom_season is not None and custom_episode is not None:
+        stmt = stmt.where(MappingFromFile.customSeasonNumber == custom_season, MappingFromFile.customEpisodeNumber == custom_episode)
+    elif custom_episode is not None:
+        stmt = stmt.where(MappingFromFile.absoluteEpisodeNumber == custom_episode)
     
     stmt = stmt.order_by(AnimeSource.isFavorited.desc(), Scraper.displayOrder)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
+
 
 async def get_related_episode_ids(session: AsyncSession, anime_id: int, episode_index: int) -> List[int]:
     """
