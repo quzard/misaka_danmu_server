@@ -511,14 +511,20 @@ export const SearchResult = () => {
                               {item.title}
                             </div>
                             <div className="flex items-center flex-wrap gap-2">
-                              <Tag color="magenta">源：{item.provider}</Tag>
-                              <Tag color="volcano">年份：{item.year}</Tag>
-                              <Tag color="orange">季度：{item.season}</Tag>
-                              <Tag color="gold">
-                                总集数：{item.episodeCount ?? 0}
+                              <Tag color="magenta">
+                                源：{item.provider ?? '未知'}
                               </Tag>
                               <Tag color="red">
-                                类型：{DANDAN_TYPE_DESC_MAPPING[item.type]}
+                                {DANDAN_TYPE_DESC_MAPPING[item.type]}
+                              </Tag>
+                              <Tag color="volcano">
+                                年份：{item.year ?? '未知'}
+                              </Tag>
+                              <Tag color="orange">
+                                季度：{item.season ?? '未知'}
+                              </Tag>
+                              <Tag color="gold">
+                                总集数：{item.episodeCount ?? 0}
                               </Tag>
                             </div>
                           </div>
@@ -661,8 +667,15 @@ export const SearchResult = () => {
                   <div className="flex items-center justify-start">
                     <img width={60} alt="logo" src={item.imageUrl} />
                     <div className="ml-4">
-                      <div className="text-xl font-bold mb-3">{item.name}</div>
+                      <div className="text-xl font-bold mb-3">
+                        {item.title || item.name}
+                      </div>
                       <div>ID: {item.id}</div>
+                      {!!item.details && (
+                        <div className="text-sm mt-2 line-clamp-4">
+                          {item.details}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
