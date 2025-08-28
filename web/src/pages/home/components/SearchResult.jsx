@@ -44,6 +44,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useModal } from '../../../ModalContext'
+import { useMessage } from '../../../MessageContext'
 
 const IMPORT_MODE = [
   {
@@ -68,6 +70,9 @@ export const SearchResult = () => {
   const [lastSearchResultData] = useAtom(lastSearchResultAtom)
 
   const [selectList, setSelectList] = useState([])
+
+  const modalApi = useModal()
+  const messageApi = useMessage()
 
   /** 编辑导入相关 */
   const [editImportOpen, setEditImportOpen] = useState(false)
@@ -172,9 +177,9 @@ export const SearchResult = () => {
         doubanId: item.doubanId,
         currentEpisodeIndex: item.currentEpisodeIndex,
       })
-      message.success(res.data.message || '导入成功')
+      messageApi.success(res.data.message || '导入成功')
     } catch (error) {
-      message.error(`提交导入任务失败: ${error.detail || error}`)
+      messageApi.error(`提交导入任务失败: ${error.detail || error}`)
     } finally {
       setLoading(false)
     }
@@ -201,9 +206,9 @@ export const SearchResult = () => {
           episodes: editEpisodeList ?? [],
         })
       )
-      message.success(res.data?.message || '编辑导入任务已提交。')
+      messageApi.success(res.data?.message || '编辑导入任务已提交。')
     } catch (error) {
-      message.error(`提交导入任务失败: ${error.message}`)
+      messageApi.error(`提交导入任务失败: ${error.message}`)
     } finally {
       setEditConfirmLoading(false)
       setEditImportOpen(false)
@@ -217,14 +222,14 @@ export const SearchResult = () => {
     let tmdbparams = {}
     if (importMode === 'merge') {
       if (!title) {
-        message.error('最终导入名称不能为空。')
+        messageApi.error('最终导入名称不能为空。')
         return
       }
       tmdbparams = {
         tmdbId: `${tmdbid}`,
       }
     }
-    Modal.confirm({
+    modalApi.confirm({
       title: '批量导入',
       zIndex: 1002,
       content: (
@@ -257,7 +262,7 @@ export const SearchResult = () => {
               )
             })
           )
-          message.success('批量导入任务已提交，请在任务管理器中查看进度。')
+          messageApi.success('批量导入任务已提交，请在任务管理器中查看进度。')
           setSelectList([])
           setConfirmLoading(false)
           setBatchOpen(false)
@@ -285,10 +290,10 @@ export const SearchResult = () => {
         setTmdbResult(res?.data || [])
         setTmdbOpen(true)
       } else {
-        message.error('没有找到相关内容')
+        messageApi.error('没有找到相关内容')
       }
     } catch (error) {
-      message.error('TMDB搜索失败')
+      messageApi.error('TMDB搜索失败')
     } finally {
       setSearchTmdbLoading(false)
     }
@@ -469,7 +474,7 @@ export const SearchResult = () => {
                 type="primary"
                 onClick={() => {
                   if (selectList.length === 0) {
-                    message.error('请选择要导入的媒体')
+                    messageApi.error('请选择要导入的媒体')
                     return
                   }
 
@@ -733,7 +738,7 @@ export const SearchResult = () => {
                     season: editItem.season ?? 1,
                   })
                   if (!res.data?.length) {
-                    message.error(
+                    messageApi.error(
                       `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
                     )
                     return
@@ -750,11 +755,11 @@ export const SearchResult = () => {
                     )
                   }, 0)
 
-                  message.success(
+                  messageApi.success(
                     `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
                   )
                 } catch (error) {
-                  message.error(`查询已存在分集失败: ${error.message}`)
+                  messageApi.error(`查询已存在分集失败: ${error.message}`)
                 }
               }}
             >

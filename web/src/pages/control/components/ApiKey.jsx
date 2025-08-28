@@ -7,12 +7,17 @@ import {
 import { Button, Card, Input, message, Modal, Space } from 'antd'
 import { useEffect, useState } from 'react'
 import { getControlApiKey, refreshControlApiKey } from '../../../apis'
+import { useModal } from '../../../ModalContext'
+import { useMessage } from '../../../MessageContext'
 
 export const ApiKey = () => {
   const [apikey, setApikey] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [showKey, setShowkey] = useState(false)
+
+  const modalApi = useModal()
+  const messageApi = useMessage()
 
   useEffect(() => {
     setLoading(true)
@@ -26,7 +31,7 @@ export const ApiKey = () => {
   }, [])
 
   const onRefresh = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: '刷新API key',
       zIndex: 1002,
       content: <div>您确定要重新生成外部API密钥吗？旧的密钥将立即失效。</div>,
@@ -37,9 +42,9 @@ export const ApiKey = () => {
           setRefreshing(true)
           const res = await refreshControlApiKey()
           setApikey(res.data.value ?? '')
-          message.success('新的API密钥已生成！')
+          messageApi.success('新的API密钥已生成！')
         } catch (error) {
-          message.error(`生成失败: ${error.message}`)
+          messageApi.error(`生成失败: ${error.message}`)
         } finally {
           setRefreshing(false)
         }
