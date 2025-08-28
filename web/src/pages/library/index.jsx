@@ -918,6 +918,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -974,6 +975,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -1029,6 +1031,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -1084,6 +1087,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -1137,6 +1141,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -1173,6 +1178,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -1228,6 +1234,7 @@ export const Library = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (

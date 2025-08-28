@@ -449,11 +449,21 @@ export const SearchResult = () => {
                   className="shrink-0"
                   options={[
                     {
-                      label: '电影/剧场版',
+                      label: (
+                        <>
+                          <MyIcon icon="movie" size={16} className="mr-1" />
+                          电影/剧场版
+                        </>
+                      ),
                       value: DANDAN_TYPE_MAPPING.movie,
                     },
                     {
-                      label: '电视节目',
+                      label: (
+                        <>
+                          <MyIcon icon="tv" size={16} className="mr-1" />
+                          电视节目
+                        </>
+                      ),
                       value: DANDAN_TYPE_MAPPING.tvseries,
                     },
                   ]}
@@ -516,13 +526,19 @@ export const SearchResult = () => {
                           <div className="ml-4">
                             <div className="text-xl font-bold mb-3">
                               {item.title}
+                              {item.type === 'movie' ? (
+                                <MyIcon
+                                  icon="movie"
+                                  size={20}
+                                  className="ml-2"
+                                />
+                              ) : (
+                                <MyIcon icon="tv" size={20} className="ml-2" />
+                              )}
                             </div>
                             <div className="flex items-center flex-wrap gap-2">
                               <Tag color="magenta">
                                 源：{item.provider ?? '未知'}
-                              </Tag>
-                              <Tag color="red">
-                                {DANDAN_TYPE_DESC_MAPPING[item.type]}
                               </Tag>
                               <Tag color="volcano">
                                 年份：{item.year ?? '未知'}
@@ -606,15 +622,19 @@ export const SearchResult = () => {
                   key={index}
                   className="my-3 p-2 rounded-xl border-gray-300/45 border"
                 >
-                  <div className="text-xl font-bold mb-2">{item.title}</div>
+                  <div className="text-xl font-bold mb-2">
+                    {item.title}
+                    {item.type === 'movie' ? (
+                      <MyIcon icon="movie" size={20} className="ml-2" />
+                    ) : (
+                      <MyIcon icon="tv" size={20} className="ml-2" />
+                    )}
+                  </div>
                   <div className="flex items-center flex-wrap gap-2">
-                    <Tag color="magenta">源：{item.provider}</Tag>
-                    <Tag color="red">
-                      类型：{DANDAN_TYPE_DESC_MAPPING[item.type]}
-                    </Tag>
-                    <Tag color="volcano">年份：{item.year}</Tag>
-                    <Tag color="orange">季度：{item.season}</Tag>
-                    <Tag color="gold">总集数：{item.episodeCount}</Tag>
+                    <Tag color="magenta">源：{item.provider ?? '未知'}</Tag>
+                    <Tag color="volcano">年份：{item.year ?? '未知'}</Tag>
+                    <Tag color="orange">季度：{item.season ?? '未知'}</Tag>
+                    <Tag color="gold">总集数：{item.episodeCount ?? 0}</Tag>
                   </div>
                 </div>
               )
@@ -667,6 +687,7 @@ export const SearchResult = () => {
           pagination={{
             pageSize: 4,
             showSizeChanger: false,
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (
@@ -829,6 +850,7 @@ export const SearchResult = () => {
                   onShowSizeChange: (_, size) => {
                     setEpisodePageSize(size)
                   },
+                  hideOnSinglePage: true,
                 }}
                 dataSource={editEpisodeList}
                 renderItem={(item, index) => (

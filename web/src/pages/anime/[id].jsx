@@ -540,6 +540,7 @@ export const AnimeDetail = () => {
             onShowSizeChange: (_, size) => {
               setLibraryPageSisze(size)
             },
+            hideOnSinglePage: true,
           }}
           renderItem={(item, index) => {
             return (

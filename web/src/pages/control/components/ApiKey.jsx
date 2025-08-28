@@ -1,4 +1,5 @@
 import {
+  CopyOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   LockOutlined,
@@ -9,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { getControlApiKey, refreshControlApiKey } from '../../../apis'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+import copy from 'copy-to-clipboard'
 
 export const ApiKey = () => {
   const [apikey, setApikey] = useState('')
@@ -54,7 +56,7 @@ export const ApiKey = () => {
 
   return (
     <div className="my-6">
-      <Card title="外部API密钥">
+      <Card title="外部API密钥" loading={loading}>
         <div className="mb-4">
           此密钥用于所有 /api/control/* 接口的鉴权。请妥善保管，不要泄露。
         </div>
@@ -75,6 +77,16 @@ export const ApiKey = () => {
                 readOnly
                 block
                 value={apikey}
+              />
+
+              <Button
+                loading={refreshing}
+                type="primary"
+                icon={<CopyOutlined />}
+                onClick={() => {
+                  copy(apikey)
+                  messageApi.success('复制成功')
+                }}
               />
               <Button
                 loading={refreshing}
