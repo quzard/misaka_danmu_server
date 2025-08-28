@@ -64,12 +64,13 @@
 
 ### 步骤 1: 准备 `docker-compose.yaml`
 
-1.  在一个合适的目录（例如 `~/danmuku`）下，创建 `docker-compose.yaml` 文件。
+1.  在一个合适的目录（例如 `~/danmuku`）下，创建 `docker-compose.yaml` 文件和所需的文件夹 `config，db-data`。
 
 
     ```bash
     mkdir -p ~/danmuku
     cd ~/danmuku
+    mkdir db-data,config                 
     touch docker-compose.yaml
     ```
 
@@ -93,15 +94,15 @@ services:
       MYSQL_PASSWORD: "your_strong_user_password"                       #数据库密码
       TZ: "Asia/Shanghai"
     volumes:
-      - ./mysql-data:/var/lib/mysql
+      - ./db-data:/var/lib/mysql
     command:
       - '--character-set-server=utf8mb4'
       - '--collation-server=utf8mb4_unicode_ci'
       - '--expire_logs_days=3' # 自动清理超过3天的binlog日志
       - '--binlog_expire_logs_seconds=259200' # 兼容MariaDB的等效设置 (3天)
     healthcheck:
-      #!!! 重要：-u和-p后不能有空格, 且密码需要与 MYSQL_PASSWORD 保持一致 !!! 这里启动检查的密码也要改
-      test: ["CMD-SHELL", "mysql -udanmuapi -p'your_strong_root_password' -e \"SELECT 1\" danmuapi"]
+      # 使用mysqladmin ping命令进行健康检查，通过环境变量引用密码
+      test: ["CMD-SHELL", "mysqladmin ping -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -160,7 +161,7 @@ services:
       POSTGRES_DB: "danmuapi"                                          #数据库名称
       TZ: "Asia/Shanghai"
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - ./db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U danmuapi -d danmuapi"]
       interval: 5s
