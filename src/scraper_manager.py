@@ -33,24 +33,6 @@ class ScraperManager:
         self.config_manager = config_manager
         self.metadata_manager = metadata_manager
 
-    async def register_scraper_defaults(self):
-        """将每个搜索源的默认配置注册到数据库中。"""
-        self.logger = logging.getLogger(__name__)
-        defaults = {}
-        for provider_name, scraper_class in self._scraper_classes.items():
-            # 修正：直接从类中获取属性，而不是实例
-            if default_pattern := getattr(scraper_class, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT', ''):
-                config_key = f"{provider_name}_episode_blacklist_regex"
-                # 修正：确保描述是字符串
-                description = f"{provider_name.capitalize()} 的分集标题过滤规则"
-                defaults[config_key] = (default_pattern, description)
-
-        if defaults:
-            await self.config_manager.register_defaults(defaults)
-            self.logger.info(f"已为 {len(defaults)} 个搜索源注册了特定的默认分集黑名单。")
-        else:
-            self.logger.info("没有找到需要注册的特定搜索源默认配置。")
-
     async def acquire_search_lock(self, api_key: str) -> bool:
         """Acquires a search lock for a given API key. Returns False if already locked."""
         async with self._lock:
@@ -160,7 +142,7 @@ class ScraperManager:
                         
                         # 在加载时直接发现并收集提供商特定的默认配置
                         if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
-                            config_key = f"episode_blacklist_{provider_name}"
+                            config_key = f"{provider_name}_episode_blacklist_regex"
                             default_value = getattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT')
                             description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
                             default_configs_to_register[config_key] = (default_value, description)
@@ -227,7 +209,6 @@ class ScraperManager:
             logging.getLogger(__name__).info("搜索源签名验证已禁用。所有搜索源将被视为已验证。")
 
         await self.load_and_sync_scrapers()
-        await self.register_scraper_defaults()
 
     @property
     def has_enabled_scrapers(self) -> bool:

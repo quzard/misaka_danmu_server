@@ -72,6 +72,26 @@ class BaseScraper(ABC):
     所有搜索源的抽象基类。
     定义了搜索媒体、获取分集和获取弹幕的通用接口。
     """
+    # 新增：全局搜索结果过滤规则，适用于所有源
+    _GLOBAL_SEARCH_JUNK_TITLE_PATTERN = re.compile(
+        r'纪录片|预告|花絮|专访|直拍|直播回顾|加更|走心|解忧|纯享|节点|解读|揭秘|赏析|速看|资讯|访谈|番外|短片|'
+        r'拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|'
+        r'预告片|先导预告|终极预告|正式预告|官方预告|'
+        r'彩蛋片段|删减片段|未播片段|番外彩蛋|'
+        r'精彩片段|精彩看点|精彩回顾|精彩集锦|看点解析|看点预告|'
+        r'NG镜头|NG花絮|番外篇|番外特辑|'
+        r'制作特辑|拍摄特辑|幕后特辑|导演特辑|演员特辑|'
+        r'片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV|'
+        r'前季回顾|剧情回顾|往期回顾|内容总结|剧情盘点|精选合集|剪辑合集|混剪视频|'
+        r'独家专访|演员访谈|导演访谈|主创访谈|媒体采访|发布会采访|'
+        r'抢先看|抢先版|试看版|即将上线',
+        re.IGNORECASE
+    )
+
+    # 新增：全局分集标题过滤规则的默认值
+    _GLOBAL_EPISODE_BLACKLIST_DEFAULT = r"^(.*?)((.+?版)|(特(别|典))|((导|演)员|嘉宾|角色)访谈|福利|彩蛋|花絮|预告|特辑|专访|访谈|幕后|周边|资讯|看点|速看|回顾|盘点|合集|PV|MV|CM|OST|ED|OP|BD|特典|SP|NCOP|NCED|MENU|Web-DL|rip|x264|x265|aac|flac)(.*?)$"
+    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT: str = ""
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         self._session_factory = session_factory
         self.config_manager = config_manager
@@ -123,12 +143,6 @@ class BaseScraper(ABC):
     # (新增) 子类应覆盖此列表，声明它们可以处理的域名
     handled_domains: List[str] = []
 
-    # (新增) 子类可以覆盖此属性，以提供一个默认的 Referer
-    referer: Optional[str] = None
-
-    # (新增) 子类可以覆盖此属性，以表明其是否支持日志记录
-    is_loggable: bool = True
-
     rate_limit_quota: Optional[int] = None # 新增：特定源的配额
     
     async def _should_log_responses(self) -> bool:
@@ -141,34 +155,37 @@ class BaseScraper(ABC):
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
-        获取并编译此源的自定义分集黑名单正则表达式。
-        结果会被缓存以提高性能。
+        获取最终用于过滤分集标题的正则表达式对象。
+        它会合并全局黑名单和特定于提供商的黑名单。
         """
-        # 移除实例级别的缓存，直接依赖 ConfigManager 的缓存机制。
-        # ConfigManager 的缓存会在配置更新时被正确地失效。
-        key = f"{self.provider_name}_episode_blacklist_regex"
-        regex_str = await self.config_manager.get(key, "")
-        if regex_str:
-            try:
-                # 每次调用都重新编译，因为 ConfigManager 会缓存 regex_str，
-                # 这里的开销很小。
-                return re.compile(regex_str, re.IGNORECASE)
-            except re.error as e:
-                self.logger.error(f"无效的黑名单正则表达式: '{regex_str}' - {e}")
-        return None
+        # 1. 获取全局黑名单，如果用户未配置，则使用内置默认值
+        global_pattern_str = await self.config_manager.get(
+            "episode_blacklist_regex",
+            self._GLOBAL_EPISODE_BLACKLIST_DEFAULT
+        )
 
-    async def get_provider_specific_blacklist_pattern(self) -> Optional[re.Pattern]:
-        """
-        获取此特定提供商的分集标题黑名单正则表达式。
-        结果会被缓存以提高性能。
-        """
-        config_key = f"episode_blacklist_{self.provider_name}"
-        regex_str = await self.config_manager.get(config_key, "")
-        if regex_str:
-            try:
-                return re.compile(regex_str, re.IGNORECASE)
-            except re.error as e:
-                self.logger.error(f"提供商 '{self.provider_name}' 的特定分集黑名单正则表达式无效: {e}")
+        # 2. 获取特定于提供商的黑名单
+        provider_key = f"{self.provider_name}_episode_blacklist_regex"
+        # 注意：这里不提供默认值。如果数据库中没有（即用户从未保存过，且启动时也未注册上），
+        # 则返回 None，我们只使用全局黑名单。
+        provider_pattern_str = await self.config_manager.get(provider_key, None)
+
+        # 3. 合并两个正则表达式
+        final_patterns = []
+        if global_pattern_str and global_pattern_str.strip():
+            final_patterns.append(f"({global_pattern_str})")
+        
+        if provider_pattern_str and provider_pattern_str.strip():
+            final_patterns.append(f"({provider_pattern_str})")
+
+        if not final_patterns:
+            return None
+
+        final_regex_str = "|".join(final_patterns)
+        try:
+            return re.compile(final_regex_str, re.IGNORECASE)
+        except re.error as e:
+            self.logger.error(f"编译分集黑名单正则表达式失败: '{final_regex_str}'. 错误: {e}")
         return None
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any]) -> Any:
