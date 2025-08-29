@@ -258,6 +258,14 @@ export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */
 export const setMetaData = data => api.put('/api/ui/metadata-sources', data)
 
+/** ---------------------------------------------- 全局过滤设置 ----------------------------------------------  */
+/** 获取全局过滤规则 */
+export const getGlobalFilter = () =>
+  api.get('/api/ui/settings/global-filter')
+/** 更新全局过滤规则 */
+export const setGlobalFilter = data =>
+  api.put('/api/ui/settings/global-filter', data)
+
 /** 获取bi站登录信息 */
 export const getbiliUserinfo = () =>
   api.post('/api/ui/scrapers/bilibili/actions/get_login_info')

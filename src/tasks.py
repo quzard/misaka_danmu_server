@@ -603,40 +603,49 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
 async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_callback: Callable):
     """后台任务：重新编号一个源的所有分集，并同步更新其ID。"""
-    from sqlalchemy import text
     logger.info(f"开始重整源 ID: {sourceId} 的分集顺序。")
     await progress_callback(0, "正在获取分集列表...")
     
+    dialect_name = session.bind.dialect.name
+    is_mysql = dialect_name == 'mysql'
+    is_postgres = dialect_name == 'postgresql'
+    
     try:
-        # 暂时禁用外键检查
-        await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+        # 根据数据库方言，暂时禁用外键检查
+        if is_mysql:
+            await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+        elif is_postgres:
+            await session.execute(text("SET session_replication_role = 'replica';"))
+
         try:
             # 1. 获取所有分集ORM对象，按现有顺序排序
             episodes_orm_res = await session.execute(
                 select(orm_models.Episode)
                 .where(orm_models.Episode.sourceId == sourceId)
-                .order_by(orm_models.Episode.episodeIndex)
+                .order_by(orm_models.Episode.episodeIndex, orm_models.Episode.id)
             )
             episodes_orm = episodes_orm_res.scalars().all()
 
             if not episodes_orm:
                 raise TaskSuccess("没有找到分集，无需重整。")
 
-            await progress_callback(10, "正在计算新的分集ID...")
+            await progress_callback(10, "正在计算新的分集编号...")
 
             # 2. 获取计算新ID所需的信息
             source_info = await crud.get_anime_source_info(session, sourceId)
             if not source_info:
                 raise ValueError(f"找不到源ID {sourceId} 的信息。")
             anime_id = source_info['animeId']
+            
+            # 修正：直接更新 episodeIndex，不再修改主键ID
+            migrations = []
+            for i, old_ep in enumerate(episodes_orm):
+                new_index = i + 1
+                if old_ep.episodeIndex != new_index:
+                    migrations.append({'id': old_ep.id, 'new_index': new_index})
 
-            all_anime_sources_stmt = select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == anime_id).order_by(orm_models.AnimeSource.id)
-            all_anime_sources_res = await session.execute(all_anime_sources_stmt)
-            all_source_ids = all_anime_sources_res.scalars().all()
-            try:
-                source_order = all_source_ids.index(sourceId) + 1
-            except ValueError:
-                raise ValueError(f"内部错误: Source ID {sourceId} 不属于 Anime ID {anime_id}")
+            if not migrations:
+                raise TaskSuccess("所有分集顺序正确，无需重整。")
 
             # 3. 识别需要迁移的分集
             migrations = []
@@ -657,25 +666,25 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             if not migrations:
                 raise TaskSuccess("所有分集顺序正确，无需重整。")
 
-            await progress_callback(30, f"准备迁移 {len(migrations)} 个分集...")
+            await progress_callback(30, f"准备更新 {len(migrations)} 个分集...")
 
             # 4. 执行迁移
-            for m in migrations:
-                await session.execute(update(orm_models.Comment).where(orm_models.Comment.episodeId == m["old_ep"].id).values(episodeId=m["new_ep"].id))
-                await session.delete(m["old_ep"])
-            
-            await session.flush()
-            session.add_all([m["new_ep"] for m in migrations])
+            # 使用 SQLAlchemy 的批量更新功能
+            await session.execute(update(orm_models.Episode), migrations)
             
             await session.commit()
-            raise TaskSuccess(f"重整完成，共更新了 {len(migrations)} 个分集的集数和ID。")
+            raise TaskSuccess(f"重整完成，共更新了 {len(migrations)} 个分集的集数。")
         except Exception as e:
             await session.rollback()
             logger.error(f"重整分集任务 (源ID: {sourceId}) 事务中失败: {e}", exc_info=True)
             raise
         finally:
-            # 务必重新启用外键检查
-            await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+            # 务必重新启用外键检查/恢复会话角色
+            if is_mysql:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+            elif is_postgres:
+                await session.execute(text("SET session_replication_role = 'origin';"))
+            await session.commit()
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
         raise

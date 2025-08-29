@@ -2111,6 +2111,31 @@ async def run_scheduled_task_now(taskId: str, current_user: models.User = Depend
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+class GlobalFilterSettings(BaseModel):
+    cn: str
+    eng: str
+
+@router.get("/settings/global-filter", response_model=GlobalFilterSettings, summary="获取全局标题过滤规则")
+async def get_global_filter_settings(
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取用于过滤搜索结果的全局中文和英文黑名单正则表达式。"""
+    cn_filter = await config.get("search_result_global_blacklist_cn", "")
+    eng_filter = await config.get("search_result_global_blacklist_eng", "")
+    return GlobalFilterSettings(cn=cn_filter, eng=eng_filter)
+
+@router.put("/settings/global-filter", summary="更新全局标题过滤规则")
+async def update_global_filter_settings(
+    payload: GlobalFilterSettings,
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """更新全局的中文和英文标题过滤黑名单。"""
+    await config.setValue("search_result_global_blacklist_cn", payload.cn)
+    await config.setValue("search_result_global_blacklist_eng", payload.eng)
+    return {"message": "全局过滤规则已更新。"}
+
 @auth_router.put("/users/me/password", status_code=status.HTTP_204_NO_CONTENT, summary="修改当前用户密码")
 async def change_current_user_password(
     password_data: models.PasswordChange,

@@ -157,6 +157,20 @@ class BaseScraper(ABC):
                 self.logger.error(f"无效的黑名单正则表达式: '{regex_str}' - {e}")
         return None
 
+    async def get_provider_specific_blacklist_pattern(self) -> Optional[re.Pattern]:
+        """
+        获取此特定提供商的分集标题黑名单正则表达式。
+        结果会被缓存以提高性能。
+        """
+        config_key = f"episode_blacklist_{self.provider_name}"
+        regex_str = await self.config_manager.get(config_key, "")
+        if regex_str:
+            try:
+                return re.compile(regex_str, re.IGNORECASE)
+            except re.error as e:
+                self.logger.error(f"提供商 '{self.provider_name}' 的特定分集黑名单正则表达式无效: {e}")
+        return None
+
     async def execute_action(self, action_name: str, payload: Dict[str, Any]) -> Any:
         """
         执行一个指定的操作。
