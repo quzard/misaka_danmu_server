@@ -21,10 +21,17 @@ import {
   Form,
   Empty,
   InputNumber,
+  Dropdown,
+  Space,
 } from 'antd'
 import { useAtom } from 'jotai'
 import { lastSearchResultAtom, searchLoadingAtom } from '../../../../store'
-import { CheckOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import {
+  CheckOutlined,
+  CloseCircleOutlined,
+  CalendarOutlined,
+  CloudServerOutlined,
+} from '@ant-design/icons'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
 
@@ -116,6 +123,9 @@ export const SearchResult = () => {
     DANDAN_TYPE_MAPPING.tvseries,
   ])
 
+  const [yearFilter, setYearFilter] = useState('all')
+  const [providerFilter, setProviderFilter] = useState('all')
+
   const [keyword, setKeyword] = useState('')
 
   /** 渲染使用的数据 */
@@ -142,18 +152,36 @@ export const SearchResult = () => {
   }, [selectList])
 
   useEffect(() => {
-    const list = lastSearchResultData.results
-      ?.filter(it => it.title.includes(keyword))
-      ?.filter(it => checkedList.includes(it.type))
-    console.log(
-      keyword,
-      checkedList,
-      lastSearchResultData.results,
-      list,
-      'list'
-    )
+    const list =
+      lastSearchResultData.results
+        ?.filter(it => it.title.includes(keyword))
+        ?.filter(it => checkedList.includes(it.type))
+        ?.filter(it => yearFilter === 'all' || it.year === yearFilter)
+        ?.filter(
+          it => providerFilter === 'all' || it.provider === providerFilter
+        ) || []
     setRenderData(list)
-  }, [keyword, checkedList, lastSearchResultData])
+  }, [
+    keyword,
+    checkedList,
+    lastSearchResultData,
+    yearFilter,
+    providerFilter,
+  ])
+
+  const { years, providers } = useMemo(() => {
+    if (!lastSearchResultData.results?.length) return { years: [], providers: [] }
+    const yearSet = new Set()
+    const providerSet = new Set()
+    lastSearchResultData.results.forEach(item => {
+      if (item.year) yearSet.add(item.year)
+      if (item.provider) providerSet.add(item.provider)
+    })
+    return {
+      years: Array.from(yearSet).sort((a, b) => b - a),
+      providers: Array.from(providerSet).sort(),
+    }
+  }, [lastSearchResultData.results])
 
   const onTypeChange = values => {
     console.log(values, 'values')
@@ -337,6 +365,27 @@ export const SearchResult = () => {
     setActiveItem(null)
   }
 
+  // 年份筛选菜单
+  const yearMenu = {
+    items: [
+      { key: 'all', label: '所有年份' },
+      ...years.map(year => ({ key: year, label: `${year}年` })),
+    ],
+    onClick: ({ key }) => setYearFilter(key === 'all' ? 'all' : Number(key)),
+  }
+
+  // 来源筛选菜单
+  const providerMenu = {
+    items: [
+      { key: 'all', label: '所有来源' },
+      ...providers.map(p => ({
+        key: p,
+        label: p.charAt(0).toUpperCase() + p.slice(1),
+      })),
+    ],
+    onClick: ({ key }) => setProviderFilter(key),
+  }
+
   // 处理拖拽开始
   const handleDragStart = event => {
     const { active } = event
@@ -430,7 +479,7 @@ export const SearchResult = () => {
         <div>
           <Row gutter={[12, 12]} className="mb-6">
             <Col md={20} xs={24}>
-              <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-4">
+              <Space wrap align="center">
                 <Button
                   type="primary"
                   className="w-32"
@@ -470,13 +519,26 @@ export const SearchResult = () => {
                   value={checkedList}
                   onChange={onTypeChange}
                 />
+                <Dropdown menu={yearMenu} disabled={!years.length}>
+                  <Button icon={<CalendarOutlined />}>
+                    {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
+                  </Button>
+                </Dropdown>
+                <Dropdown menu={providerMenu} disabled={!providers.length}>
+                  <Button icon={<CloudServerOutlined />}>
+                    {providerFilter === 'all'
+                      ? '按来源'
+                      : providerFilter.charAt(0).toUpperCase() +
+                        providerFilter.slice(1)}
+                  </Button>
+                </Dropdown>
                 <div className="w-full md:w-40">
                   <Input
                     placeholder="在结果中过滤标题"
                     onChange={e => setKeyword(e.target.value)}
                   />
                 </div>
-              </div>
+              </Space>
             </Col>
             <Col md={4} xs={24}>
               <Button
