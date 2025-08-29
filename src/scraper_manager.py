@@ -143,7 +143,7 @@ class ScraperManager:
                         
                         # 新增：发现并收集提供商特定的默认配置
                         if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
-                            config_key = f"episode_blacklist_{provider_name}"
+                            config_key = f"{provider_name}_episode_blacklist_regex"
                             default_value = getattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT')
                             description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
                             self._default_configs[config_key] = (default_value, description)
