@@ -110,11 +110,11 @@ class ControlSearchResponse(BaseModel):
 class ControlDirectImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: str = Field("", description="强制指定TMDB ID")
+    tvdbId: str = Field("", description="强制指定TVDB ID")
+    bangumiId: str = Field("", description="强制指定Bangumi ID")
+    imdbId: str = Field("", description="强制指定IMDb ID")
+    doubanId: str = Field("", description="强制指定豆瓣 ID")
 
     class Config:
         populate_by_name = True
@@ -123,12 +123,12 @@ class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tmdbEpisodeGroupId: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: str = Field("", description="强制指定TMDB ID")
+    tmdbEpisodeGroupId: str = Field("", description="强制指定TMDB剧集组ID")
+    tvdbId: str = Field("", description="强制指定TVDB ID")
+    bangumiId: str = Field("", description="强制指定Bangumi ID")
+    imdbId: str = Field("", description="强制指定IMDb ID")
+    doubanId: str = Field("", description="强制指定豆瓣 ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
     class Config:
@@ -140,11 +140,11 @@ class ControlUrlImportRequest(BaseModel):
     url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
     title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
     season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbId: str = Field("", description="强制指定TMDB ID")
+    tvdbId: str = Field("", description="强制指定TVDB ID")
+    bangumiId: str = Field("", description="强制指定Bangumi ID")
+    imdbId: str = Field("", description="强制指定IMDb ID")
+    doubanId: str = Field("", description="强制指定豆瓣 ID")
     episodeIndex: int = Field(..., alias="episode_index", description="要导入的集数", gt=0)
 
 class DanmakuOutputSettings(BaseModel):
