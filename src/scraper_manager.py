@@ -205,6 +205,7 @@ class ScraperManager:
             logging.getLogger(__name__).info("搜索源签名验证已禁用。所有搜索源将被视为已验证。")
 
         await self.load_and_sync_scrapers()
+        await self.register_scraper_defaults()
 
     async def register_scraper_defaults(self):
         """将所有搜索源发现的默认配置注册到 ConfigManager。"""
