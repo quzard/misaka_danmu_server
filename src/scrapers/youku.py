@@ -95,7 +95,6 @@ class YoukuScraper(BaseScraper):
     provider_name = "youku"
     handled_domains = ["v.youku.com"]
     referer = "https://v.youku.com"
-    # 新增：优酷特定的分集黑名单默认规则
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(版|篇)?|加更(版|篇)?|花絮|预告|特辑|彩蛋|专访|幕后(故事|花絮)?|直播|纯享|未播|衍生|番外|会员(专属|加长)?|片花|精华|看点|速览|解读|reaction|影评)(.*?)$"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):

@@ -157,7 +157,6 @@ class BilibiliScraper(BaseScraper):
     provider_name = "bilibili"
     handled_domains = ["www.bilibili.com", "b23.tv"]
     referer = "https://www.bilibili.com/"
-    # 新增：Bilibili特定的分集黑名单默认规则
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)?|加更|花絮|预告|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员(专享)?|片花|精华|看点|速看|解读|reaction|影评|解说|吐槽|盘点)(.*?)$"
 
     # For WBI signing

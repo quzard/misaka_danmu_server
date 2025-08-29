@@ -167,7 +167,7 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
-    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"doki|片场|vlog|短剧|VIP|付费|预告|看点|精彩|花絮"
+    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(第.?期朋友们和Ta的脱口秀|抢先(看|集)?|加更(集|版)?|纯享|解忧局|走心局|火锅局|直播陪看|超前|彩蛋|旅行日记|巅峰时刻|直播回顾|精编|花絮(独家)?|预告|特辑|专访|幕后(独家)?|未播(片段)?|衍生|番外|会员(尊享|加长)?|片花|精华|看点|速看|陪看|解读|reaction|影评|坞里都知道|福持目标坞民)(.*?)$"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
