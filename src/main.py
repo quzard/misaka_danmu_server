@@ -104,8 +104,6 @@ async def lifespan(app: FastAPI):
 
     # 4. 现在可以安全地初始化所有管理器
     await app.state.scraper_manager.initialize()
-    # 新增：注册由搜索源提供的默认配置，例如各源特定的分集黑名单
-    await app.state.scraper_manager.register_scraper_defaults()
     await app.state.metadata_manager.initialize()
 
     # 5. 初始化其他依赖于上述管理器的组件

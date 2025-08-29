@@ -22,8 +22,6 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
-
-    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
@@ -283,13 +281,13 @@ class GamerScraper(BaseScraper):
                     if sn_match and title_match:
                         raw_episodes.append({'link': None, 'sn': sn_match.group(1), 'title': title_match.group(1)})
 
-            # 根据黑名单过滤分集
-            filtered_raw_episodes = [ep for ep in raw_episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep['title'])]
-            
-            # Apply custom blacklist from config
+            # 统一过滤逻辑
             blacklist_pattern = await self.get_episode_blacklist_pattern()
+            filtered_raw_episodes = raw_episodes
             if blacklist_pattern:
-                filtered_raw_episodes = [ep for ep in filtered_raw_episodes if not blacklist_pattern.search(ep['title'])]
+                original_count = len(raw_episodes)
+                filtered_raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep['title'])]
+                self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {original_count - len(filtered_raw_episodes)} 个分集。")
 
             # 过滤后再编号
             episodes = []

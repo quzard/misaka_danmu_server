@@ -167,17 +167,7 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
-
-    # 英文关键词，通常是独立的缩写或单词
-    _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
-    # 中文关键词，基于用户提供的JS脚本，非常全面
-    _CN_JUNK = r'拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|预告片|先导预告|终极预告|正式预告|官方预告|彩蛋片段|删减片段|未播片段|番外彩蛋|精彩片段|精彩看点|精彩回顾|精彩集锦|看点解析|看点预告|NG镜头|NG花絮|番外篇|番外特辑|制作特辑|拍摄特辑|幕后特辑|导演特辑|演员特辑|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV|前季回顾|剧情回顾|往期回顾|内容总结|剧情盘点|精选合集|剪辑合集|混剪视频|独家专访|演员访谈|导演访谈|主创访谈|媒体采访|发布会采访|抢先看|抢先版|试看版|短剧|vlog'
-
-    # 将英文和中文关键词组合成一个统一的、强大的过滤模式
-    _JUNK_TITLE_PATTERN = re.compile(
-        r'(\[|\【|\b)(' + _ENG_JUNK + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)|(' + _CN_JUNK + r')',
-        re.IGNORECASE
-    )
+    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"doki|片场|vlog|短剧|VIP|付费|预告|看点|精彩|花絮"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
@@ -257,8 +247,8 @@ class TencentScraper(BaseScraper):
             return None
 
         # Apply intelligent filtering based on keywords
-        if self._JUNK_TITLE_PATTERN.search(title):
-            self.logger.debug(f"跳过不相关内容 (Junk Pattern Filter): {title}")
+        if self._GLOBAL_SEARCH_JUNK_TITLE_PATTERN.search(title):
+            self.logger.debug(f"跳过不相关内容 (Global Junk Pattern Filter): {title}")
             return None
 
         # 内容类型过滤与映射
@@ -657,15 +647,8 @@ class TencentScraper(BaseScraper):
         将原始腾讯分集列表处理并格式化为通用格式。
         新增：过滤非正片内容，并为综艺和普通剧集应用不同的排序和重编号逻辑。
         """
-        # 1. 初步过滤
-        pre_filtered = []
-        for ep in tencent_episodes:
-            if ep.is_trailer == "1":
-                continue
-            title_to_check = ep.union_title or ep.title or ""
-            if self._JUNK_TITLE_PATTERN.search(title_to_check):
-                continue
-            pre_filtered.append(ep)
+        # 1. 过滤掉预告片
+        pre_filtered = [ep for ep in tencent_episodes if ep.is_trailer != "1"]
 
         # 2. 判断是否为综艺节目
         is_variety_show = False
@@ -707,12 +690,13 @@ class TencentScraper(BaseScraper):
             episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
 
         # 4. 应用自定义黑名单并最终格式化
+        blacklist_pattern = await self.get_episode_blacklist_pattern()
         final_episodes = []
-        custom_blacklist_pattern = await self.get_episode_blacklist_pattern()
 
         for i, ep in enumerate(episodes_to_format):
             display_title = ep.union_title or ep.title
-            if custom_blacklist_pattern and custom_blacklist_pattern.search(display_title):
+            if blacklist_pattern and blacklist_pattern.search(display_title):
+                self.logger.debug(f"Tencent: 根据黑名单规则过滤掉分集: '{display_title}'")
                 continue
             
             final_episodes.append(models.ProviderEpisodeInfo(

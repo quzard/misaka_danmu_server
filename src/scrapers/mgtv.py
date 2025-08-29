@@ -342,22 +342,14 @@ class MgtvScraper(BaseScraper):
                 else:
                     break # No more pages
 
-            # 新增：在排序前，过滤掉预告、花絮等非正片内容
-            filtered_episodes = []
-            for ep in all_episodes:
-                # 优先使用更具描述性的 t3 标题进行检查，如果不存在则使用 t1
-                title_to_check = ep.title3 or ep.title
-                if self._JUNK_TITLE_PATTERN.search(title_to_check):
-                    self.logger.debug(f"MGTV: 在分集列表中过滤掉非正片内容: '{title_to_check}'")
-                    continue
-                filtered_episodes.append(ep)
+            raw_episodes = all_episodes
 
-            raw_episodes = filtered_episodes
-
-            # Apply provider-specific blacklist from config
-            provider_blacklist_pattern = await self.get_provider_specific_blacklist_pattern()
-            if provider_blacklist_pattern:
-                raw_episodes = [ep for ep in raw_episodes if not provider_blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
+            # 统一过滤逻辑
+            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            if blacklist_pattern:
+                original_count = len(raw_episodes)
+                raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
+                self.logger.info(f"MGTV: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
 
             # Apply custom blacklist from config
             blacklist_pattern = await self.get_episode_blacklist_pattern()

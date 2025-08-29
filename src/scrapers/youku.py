@@ -95,7 +95,6 @@ class YoukuScraper(BaseScraper):
     provider_name = "youku"
     handled_domains = ["v.youku.com"]
     referer = "https://v.youku.com"
-    _EPISODE_BLACKLIST_KEYWORDS = ["彩蛋", "加更", "走心", "解忧", "纯享"]
     # 新增：优酷特定的分集黑名单默认规则
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(版|篇)?|加更(版|篇)?|花絮|预告|特辑|彩蛋|专访|幕后(故事|花絮)?|直播|纯享|未播|衍生|番外|会员(专属|加长)?|片花|精华|看点|速览|解读|reaction|影评)(.*?)$"
 
@@ -265,21 +264,13 @@ class YoukuScraper(BaseScraper):
                 if not page_result or not page_result.videos:
                     break
                 
-                if page == 1 and page_result.total:
-                    total_episodes = page_result.total
-
-                filtered_videos = []
-                for v in page_result.videos:
-                    if not any(kw in v.title for kw in self._EPISODE_BLACKLIST_KEYWORDS):
-                        filtered_videos.append(v)
-                all_episodes.extend(filtered_videos)
+                all_episodes.extend(page_result.videos)
 
                 if len(all_episodes) >= total_episodes or len(page_result.videos) < page_size:
                     break
                 
                 if target_episode_index and len(all_episodes) >= target_episode_index:
                     self.logger.info(f"Youku: Found target episode index {target_episode_index}, stopping pagination.")
-                    break
 
                 page += 1
                 await asyncio.sleep(0.3)
@@ -287,17 +278,13 @@ class YoukuScraper(BaseScraper):
                 self.logger.error(f"Youku: Failed to get episodes page {page} for media_id {media_id}: {e}", exc_info=True)
                 break
 
+        # 统一过滤逻辑
         raw_episodes = all_episodes
-
-        # Apply provider-specific blacklist from config
-        provider_blacklist_pattern = await self.get_provider_specific_blacklist_pattern()
-        if provider_blacklist_pattern:
-            raw_episodes = [ep for ep in raw_episodes if not provider_blacklist_pattern.search(ep.title)]
-
-        # Apply custom blacklist from config
         blacklist_pattern = await self.get_episode_blacklist_pattern()
         if blacklist_pattern:
+            original_count = len(raw_episodes)
             raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep.title)]
+            self.logger.info(f"Youku: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
 
         # 过滤后再编号
         provider_episodes = [

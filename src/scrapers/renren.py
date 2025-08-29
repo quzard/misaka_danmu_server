@@ -427,10 +427,12 @@ class RenrenScraper(BaseScraper):
             if sid:
                 raw_episodes.append(ep)
 
-        # Apply custom blacklist from config
+        # 统一过滤逻辑
         blacklist_pattern = await self.get_episode_blacklist_pattern()
         if blacklist_pattern:
+            original_count = len(raw_episodes)
             raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(str(ep.get("title", "")))]
+            self.logger.info(f"Renren: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
 
         # 过滤后再编号
         provider_eps = []
