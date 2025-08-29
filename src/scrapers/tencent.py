@@ -689,21 +689,27 @@ class TencentScraper(BaseScraper):
 
             episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
 
-        # 4. 应用自定义黑名单并最终格式化
+        # 4. 应用自定义黑名单 (先过滤)
         blacklist_pattern = await self.get_episode_blacklist_pattern()
-        final_episodes = []
+        if blacklist_pattern:
+            filtered_for_blacklist = []
+            for ep in episodes_to_format:
+                display_title = ep.union_title or ep.title
+                if not blacklist_pattern.search(display_title):
+                    filtered_for_blacklist.append(ep)
+                else:
+                    self.logger.debug(f"Tencent: 根据黑名单规则过滤掉分集: '{display_title}'")
+            episodes_to_format = filtered_for_blacklist
 
+        # 5. 最终格式化 (后编号)
+        final_episodes = []
         for i, ep in enumerate(episodes_to_format):
             display_title = ep.union_title or ep.title
-            if blacklist_pattern and blacklist_pattern.search(display_title):
-                self.logger.debug(f"Tencent: 根据黑名单规则过滤掉分集: '{display_title}'")
-                continue
-            
             final_episodes.append(models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.vid,
                 title=display_title,
-                episodeIndex=i + 1, # 关键：使用连续索引
+                episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=f"https://v.qq.com/x/cover/{cid}/{ep.vid}.html"
             ))
 
