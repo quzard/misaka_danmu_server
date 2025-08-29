@@ -1,11 +1,12 @@
 import asyncio
 import importlib
+import re
 import pkgutil
 import inspect
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Type, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Type, Tuple, TYPE_CHECKING
 from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization, asymmetric
 
@@ -30,6 +31,7 @@ class ScraperManager:
         self._verified_scrapers: set[str] = set()
         self._verification_enabled: bool = False
         self.config_manager = config_manager
+        self._default_configs: Dict[str, Tuple[Any, str]] = {}
         self.metadata_manager = metadata_manager
         # 注意：加载逻辑现在是异步的，将在应用启动时调用
 
@@ -138,6 +140,14 @@ class ScraperManager:
                         # (新增) 注册该刮削器能处理的域名
                         for domain in getattr(obj, 'handled_domains', []):
                             self._domain_map[domain] = provider_name
+                        
+                        # 新增：发现并收集提供商特定的默认配置
+                        if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
+                            config_key = f"{provider_name}_episode_blacklist_regex"
+                            default_value = getattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT')
+                            description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
+                            self._default_configs[config_key] = (default_value, description)
+
                         self._scraper_classes[provider_name] = obj
 
             except TypeError as e:
@@ -195,6 +205,12 @@ class ScraperManager:
             logging.getLogger(__name__).info("搜索源签名验证已禁用。所有搜索源将被视为已验证。")
 
         await self.load_and_sync_scrapers()
+        await self.register_scraper_defaults()
+
+    async def register_scraper_defaults(self):
+        """将所有搜索源发现的默认配置注册到 ConfigManager。"""
+        if self._default_configs:
+            await self.config_manager.register_defaults(self._default_configs)
 
     @property
     def has_enabled_scrapers(self) -> bool:
@@ -220,21 +236,45 @@ class ScraperManager:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        all_search_results = []
+        all_results = []
         seen_results = set() # 用于去重
 
-        for result in results:
+        for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logging.getLogger(__name__).error(f"搜索任务中出现错误: {result}")
+                # This assumes enabled_scrapers order is preserved in tasks
+                provider_name = enabled_scrapers[i // len(keywords)].provider_name
+                logging.getLogger(__name__).error(f"搜索源 '{provider_name}' 的搜索子任务失败: {result}", exc_info=True)
             elif result:
                 for item in result:
                     # 使用 (provider, mediaId) 作为唯一标识符
                     unique_id = (item.provider, item.mediaId)
                     if unique_id not in seen_results:
-                        all_search_results.append(item)
+                        all_results.append(item)
                         seen_results.add(unique_id)
 
-        return all_search_results
+        # 新增：在此处应用全局标题过滤
+        cn_pattern_str = await self.config_manager.get("search_result_global_blacklist_cn", "")
+        eng_pattern_str = await self.config_manager.get("search_result_global_blacklist_eng", "")
+
+        cn_pattern = re.compile(cn_pattern_str, re.IGNORECASE) if cn_pattern_str else None
+        eng_pattern = re.compile(r'(\[|\【|\b)(' + eng_pattern_str + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)', re.IGNORECASE) if eng_pattern_str else None
+
+        if not cn_pattern and not eng_pattern:
+            return all_results
+
+        filtered_results = []
+        for item in all_results:
+            is_junk = False
+            if cn_pattern and cn_pattern.search(item.title):
+                is_junk = True
+            if not is_junk and eng_pattern and eng_pattern.search(item.title):
+                is_junk = True
+            
+            if not is_junk:
+                filtered_results.append(item)
+        
+        logging.getLogger(__name__).info(f"全局标题过滤: 从 {len(all_results)} 个结果中保留了 {len(filtered_results)} 个。")
+        return filtered_results
 
     async def search_sequentially(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> Optional[tuple[str, List[ProviderSearchInfo]]]:
         """

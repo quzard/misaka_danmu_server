@@ -107,45 +107,49 @@ class ControlSearchResponse(BaseModel):
     searchId: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
     results: List[ControlSearchResultItem] = Field(..., description="搜索结果列表")
 
-class ControlDirectImportRequest(BaseModel):
+class _BaseOptionalIds(BaseModel):
+    """一个基础模型，用于统一处理可选的元数据ID，并确保None值被转换为空字符串。"""
+    tmdbId: Optional[str] = ""
+    tvdbId: Optional[str] = ""
+    bangumiId: Optional[str] = ""
+    imdbId: Optional[str] = ""
+    doubanId: Optional[str] = ""
+
+    @model_validator(mode='before')
+    @classmethod
+    def empty_str_for_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if key in cls.model_fields and value is None:
+                    data[key] = ""
+        return data
+
+class ControlDirectImportRequest(_BaseOptionalIds):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
 
     class Config:
         populate_by_name = True
 
-class ControlEditedImportRequest(BaseModel):
+class ControlEditedImportRequest(_BaseOptionalIds):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tmdbEpisodeGroupId: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
+    tmdbEpisodeGroupId: Optional[str] = Field("", description="强制指定TMDB剧集组ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
 
     class Config:
         populate_by_name = True
 
-class ControlUrlImportRequest(BaseModel):
+class ControlUrlImportRequest(_BaseOptionalIds):
     """用于外部API通过URL导入的请求模型"""
-    provider: str = Field(..., description="要导入的源，例如 'bilibili'")
     url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
     title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
     season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
-    tmdbId: Optional[str] = Field(None, description="强制指定TMDB ID")
-    tvdbId: Optional[str] = Field(None, description="强制指定TVDB ID")
-    bangumiId: Optional[str] = Field(None, description="强制指定Bangumi ID")
-    imdbId: Optional[str] = Field(None, description="强制指定IMDb ID")
-    doubanId: Optional[str] = Field(None, description="强制指定豆瓣 ID")
-    episodeIndex: int = Field(..., alias="episode_index", description="要导入的集数", gt=0)
+    episodeIndex: Optional[int] = Field(None, alias="episode_index", description="要导入的特定集数。如果留空，则导入整季。", gt=0)
+
+    class Config:
+        populate_by_name = True
 
 class DanmakuOutputSettings(BaseModel):
     limitPerSource: int = Field(..., alias="limit_per_source")
@@ -500,7 +504,7 @@ async def edited_import(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
-@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入整个作品", response_model=ControlTaskResponse)
+@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入", response_model=ControlTaskResponse)
 async def url_import(
     payload: ControlUrlImportRequest,
     task_manager: TaskManager = Depends(get_task_manager),
@@ -511,8 +515,8 @@ async def url_import(
 ):
     """
     ### 功能
-    从一个作品的URL（例如B站番剧主页、腾讯视频播放页等）直接导入其所有分集的弹幕。
-
+    从一个作品的URL（例如B站番剧主页、腾讯视频播放页等）直接导入弹幕。
+    如果提供了 `episodeIndex`，则只导入单集；否则导入整季。
     ### 工作流程
     1.  服务会尝试从URL中解析出对应的弹幕源和媒体ID。
     2.  然后为该媒体创建一个后台导入任务。
@@ -534,7 +538,12 @@ async def url_import(
     final_title = payload.title or media_info.title
     final_season = payload.season if payload.season is not None else media_info.season
 
-    task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})"
+    task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})" # type: ignore
+    if payload.episodeIndex:
+        task_title += f" - 第 {payload.episodeIndex} 集"
+        message = f"'{final_title}' 的URL单集导入任务已提交。"
+    else:
+        message = f"'{final_title}' 的URL整季导入任务已提交。"
     try:
         task_coro = lambda session, cb: tasks.generic_import_task(
             provider=scraper.provider_name,
@@ -550,7 +559,7 @@ async def url_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title)
-        return {"message": f"'{final_title}' 的URL单集导入任务已提交。", "taskId": task_id}
+        return {"message": message, "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
