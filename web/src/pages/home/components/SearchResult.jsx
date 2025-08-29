@@ -500,10 +500,10 @@ export const SearchResult = () => {
               itemLayout="vertical"
               size="large"
               dataSource={renderData}
-              renderItem={(item, index) => {
+              renderItem={(item) => {
                 const isActive = selectList.includes(item)
                 return (
-                  <List.Item key={index}>
+                  <List.Item key={`${item.mediaId}-${item.provider}`}>
                     <Row gutter={[12, 12]}>
                       <Col md={16} xs={24}>
                         <div
@@ -521,7 +521,7 @@ export const SearchResult = () => {
                             width={60}
                             alt="logo"
                             src={item.imageUrl}
-                            className="ml-3"
+                            className="ml-3 aspect-[3/4]"
                           />
                           <div className="ml-4">
                             <div className="text-xl font-bold mb-3">
