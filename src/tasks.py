@@ -767,178 +767,186 @@ async def auto_search_and_import_task(
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
     rate_limiter: Optional[RateLimiter] = None,
+    api_key: Optional[str] = None,
 ):
     """
     全自动搜索并导入的核心任务逻辑。
     """
-    # 防御性检查：确保 rate_limiter 已被正确传递。
-    if rate_limiter is None:
-        error_msg = "任务启动失败：内部错误（速率限制器未提供）。请检查任务提交处的代码。"
-        logger.error(f"auto_search_and_import_task was called without a rate_limiter. This is a bug. Payload: {payload}")
-        raise ValueError(error_msg)
+    try:
+        # 防御性检查：确保 rate_limiter 已被正确传递。
+        if rate_limiter is None:
+            error_msg = "任务启动失败：内部错误（速率限制器未提供）。请检查任务提交处的代码。"
+            logger.error(f"auto_search_and_import_task was called without a rate_limiter. This is a bug. Payload: {payload}")
+            raise ValueError(error_msg)
 
-    search_type = payload.searchType
-    search_term = payload.searchTerm
-    
-    await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
-
-    aliases = {search_term}
-    main_title = search_term
-    media_type = payload.mediaType
-    season = payload.season
-    image_url = None
-    tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
-
-    # 为后台任务创建一个虚拟用户对象
-    user = models.User(id=1, username="admin")
-
-    # 1. 获取元数据和别名
-    if search_type != "keyword":
-        # --- Start of fix for TMDB/TVDB mediaType ---
-        # 如果是TMDB或TVDB搜索，且没有提供mediaType，则根据有无季/集信息进行推断
-        # 同时，将内部使用的 'tv_series'/'movie' 转换为特定提供商需要的格式
-        provider_media_type = media_type
-        if search_type in ["tmdb", "tvdb"]:
-            # TVDB API v4 使用 'series' 和 'movies'
-            provider_specific_tv_type = "tv" if search_type == "tmdb" else "series"
-            provider_specific_movie_type = "movie" if search_type == "tmdb" else "movies"
-
-            if not media_type:
-                # 修正：只要提供了季度信息，就应推断为电视剧
-                if payload.season is not None:
-                    provider_media_type = provider_specific_tv_type
-                    media_type = "tv_series" # 更新内部使用的类型
-                    logger.info(f"{search_type.upper()} 搜索未提供 mediaType，根据季/集信息推断为 '{provider_specific_tv_type}'。")
-                else:
-                    provider_media_type = provider_specific_movie_type
-                    media_type = "movie" # 更新内部使用的类型
-                    logger.info(f"{search_type.upper()} 搜索未提供 mediaType 和季/集信息，默认推断为 '{provider_specific_movie_type}'。")
-            elif media_type == "tv_series":
-                provider_media_type = provider_specific_tv_type
-            elif media_type == "movie":
-                provider_media_type = provider_specific_movie_type
-        # --- End of fix ---
-        try:
-            await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
-            details = await metadata_manager.get_details(
-                provider=search_type, item_id=search_term, user=user, mediaType=provider_media_type
-            )
-            
-            if details:
-                main_title = details.title or main_title
-                image_url = details.imageUrl
-                aliases.add(main_title)
-                aliases.update(details.aliasesCn or [])
-                aliases.add(details.nameEn)
-                aliases.add(details.nameJp)
-                tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
-                    details.tmdbId, details.bangumiId, details.doubanId,
-                    details.tvdbId, details.imdbId
-                )
-                # 修正：从元数据源获取最准确的媒体类型
-                if hasattr(details, 'type') and details.type:
-                    media_type = details.type
-                
-                # 新增：从其他启用的元数据源获取更多别名，以提高搜索覆盖率
-                logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
-                enriched_aliases = await metadata_manager.search_aliases_from_enabled_sources(main_title, user)
-                if enriched_aliases:
-                    aliases.update(enriched_aliases)
-                    logger.info(f"别名已扩充: {aliases}")
-        except Exception as e:
-            logger.error(f"从 {search_type.upper()} 获取元数据失败: {e}\n{traceback.format_exc()}")
-            # Don't fail the whole task, just proceed with the original search term
-
-    # 2. 检查媒体库中是否已存在
-    await progress_callback(20, "正在检查媒体库...")
-    existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
-    if existing_anime:
-        favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
-        if favorited_source:
-            source_to_use = favorited_source
-            logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['providerName']}")
-        else:
-            all_sources = await crud.get_anime_sources(session, existing_anime['id'])
-            if all_sources:
-                ordered_settings = await crud.get_all_scraper_settings(session)
-                provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
-                all_sources.sort(key=lambda s: provider_order.get(s['providerName'], 999))
-                source_to_use = all_sources[0]
-                logger.info(f"媒体库中已存在作品，选择优先级最高的源: {source_to_use['providerName']}")
-            else: source_to_use = None
+        search_type = payload.searchType
+        search_term = payload.searchTerm
         
-        if source_to_use:
-            await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
-            task_coro = lambda s, cb: generic_import_task(
-                provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
-                animeTitle=main_title, mediaType=media_type, season=season,
-                year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
-                metadata_manager=metadata_manager,
-                doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
-                progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
-                rate_limiter=rate_limiter
-            )
-            await task_manager.submit_task(task_coro, f"自动导入 (库内): {main_title}")
-            raise TaskSuccess("作品已在库中，已为已有源创建导入任务。")
+        await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
 
-    # 3. 如果库中不存在，则进行全网搜索
-    await progress_callback(40, "媒体库未找到，开始全网搜索...")
-    episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
-    
-    # 使用主标题进行搜索
-    logger.info(f"将使用主标题 '{main_title}' 进行全网搜索...")
-    all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
-    logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
+        aliases = {search_term}
+        main_title = search_term
+        media_type = payload.mediaType
+        season = payload.season
+        image_url = None
+        tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
-    # 使用所有别名进行过滤
-    def normalize_for_filtering(title: str) -> str:
-        if not title: return ""
-        title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-        return title.lower().replace(" ", "").replace("：", ":").strip()
+        # 为后台任务创建一个虚拟用户对象
+        user = models.User(id=1, username="admin")
 
-    normalized_filter_aliases = {normalize_for_filtering(alias) for alias in aliases if alias}
-    filtered_results = []
-    for item in all_results:
-        normalized_item_title = normalize_for_filtering(item.title)
-        if not normalized_item_title: continue
-        if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
-            filtered_results.append(item)
-    logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-    all_results = filtered_results
+        # 1. 获取元数据和别名
+        if search_type != "keyword":
+            # --- Start of fix for TMDB/TVDB mediaType ---
+            # 如果是TMDB或TVDB搜索，且没有提供mediaType，则根据有无季/集信息进行推断
+            # 同时，将内部使用的 'tv_series'/'movie' 转换为特定提供商需要的格式
+            provider_media_type = media_type
+            if search_type in ["tmdb", "tvdb"]:
+                # TVDB API v4 使用 'series' 和 'movies'
+                provider_specific_tv_type = "tv" if search_type == "tmdb" else "series"
+                provider_specific_movie_type = "movie" if search_type == "tmdb" else "movies"
 
-    if not all_results:
-        raise ValueError("全网搜索未找到任何结果。")
+                if not media_type:
+                    # 修正：只要提供了季度信息，就应推断为电视剧
+                    if payload.season is not None:
+                        provider_media_type = provider_specific_tv_type
+                        media_type = "tv_series" # 更新内部使用的类型
+                        logger.info(f"{search_type.upper()} 搜索未提供 mediaType，根据季/集信息推断为 '{provider_specific_tv_type}'。")
+                    else:
+                        provider_media_type = provider_specific_movie_type
+                        media_type = "movie" # 更新内部使用的类型
+                        logger.info(f"{search_type.upper()} 搜索未提供 mediaType 和季/集信息，默认推断为 '{provider_specific_movie_type}'。")
+                elif media_type == "tv_series":
+                    provider_media_type = provider_specific_tv_type
+                elif media_type == "movie":
+                    provider_media_type = provider_specific_movie_type
+            # --- End of fix ---
+            try:
+                await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
+                details = await metadata_manager.get_details(
+                    provider=search_type, item_id=search_term, user=user, mediaType=provider_media_type
+                )
+                
+                if details:
+                    main_title = details.title or main_title
+                    image_url = details.imageUrl
+                    aliases.add(main_title)
+                    aliases.update(details.aliasesCn or [])
+                    aliases.add(details.nameEn)
+                    aliases.add(details.nameJp)
+                    tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
+                        details.tmdbId, details.bangumiId, details.doubanId,
+                        details.tvdbId, details.imdbId
+                    )
+                    # 修正：从元数据源获取最准确的媒体类型
+                    if hasattr(details, 'type') and details.type:
+                        media_type = details.type
+                    
+                    # 新增：从其他启用的元数据源获取更多别名，以提高搜索覆盖率
+                    logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
+                    enriched_aliases = await metadata_manager.search_aliases_from_enabled_sources(main_title, user)
+                    if enriched_aliases:
+                        aliases.update(enriched_aliases)
+                        logger.info(f"别名已扩充: {aliases}")
+            except Exception as e:
+                logger.error(f"从 {search_type.upper()} 获取元数据失败: {e}\n{traceback.format_exc()}")
+                # Don't fail the whole task, just proceed with the original search term
 
-    # 4. 选择最佳源
-    ordered_settings = await crud.get_all_scraper_settings(session)
-    provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
-    
-    # 修正：使用更智能的排序逻辑来选择最佳匹配
-    # 1. 媒体类型是否匹配
-    # 2. 标题相似度 (使用 a_main_title 确保与原始元数据标题比较)
-    # 3. 用户设置的源优先级
-    all_results.sort(
-        key=lambda item: (
-            1 if item.type == media_type else 0,  # 媒体类型匹配得1分，否则0分
-            fuzz.token_set_ratio(main_title, item.title), # 标题相似度得分
-            -provider_order.get(item.provider, 999) # 源优先级，取负数因为值越小优先级越高
-        ),
-        reverse=True # 按得分从高到低排序
-    )
-    best_match = all_results[0]
+        # 2. 检查媒体库中是否已存在
+        await progress_callback(20, "正在检查媒体库...")
+        existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+        if existing_anime:
+            favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
+            if favorited_source:
+                source_to_use = favorited_source
+                logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['providerName']}")
+            else:
+                all_sources = await crud.get_anime_sources(session, existing_anime['id'])
+                if all_sources:
+                    ordered_settings = await crud.get_all_scraper_settings(session)
+                    provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
+                    all_sources.sort(key=lambda s: provider_order.get(s['providerName'], 999))
+                    source_to_use = all_sources[0]
+                    logger.info(f"媒体库中已存在作品，选择优先级最高的源: {source_to_use['providerName']}")
+                else: source_to_use = None
+            
+            if source_to_use:
+                await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
+                unique_key = f"import-{source_to_use['providerName']}-{source_to_use['mediaId']}"
+                task_coro = lambda s, cb: generic_import_task(
+                    provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
+                    animeTitle=main_title, mediaType=media_type, season=season,
+                    year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
+                    metadata_manager=metadata_manager,
+                    doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
+                    progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
+                    rate_limiter=rate_limiter
+                )
+                await task_manager.submit_task(task_coro, f"自动导入 (库内): {main_title}", unique_key=unique_key)
+                raise TaskSuccess("作品已在库中，已为已有源创建导入任务。")
 
-    await progress_callback(80, f"选择最佳源: {best_match.provider}")
-    task_coro = lambda s, cb: generic_import_task(
-        provider=best_match.provider, mediaId=best_match.mediaId,
-        animeTitle=main_title, mediaType=media_type, season=season, year=best_match.year,
-        metadata_manager=metadata_manager,
-        currentEpisodeIndex=payload.episode, imageUrl=image_url,
-        doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
-        progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
-        rate_limiter=rate_limiter
-    )
-    await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}")
-    raise TaskSuccess("已为最佳匹配源创建导入任务。")
+        # 3. 如果库中不存在，则进行全网搜索
+        await progress_callback(40, "媒体库未找到，开始全网搜索...")
+        episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
+        
+        # 使用主标题进行搜索
+        logger.info(f"将使用主标题 '{main_title}' 进行全网搜索...")
+        all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
+        logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
+
+        # 使用所有别名进行过滤
+        def normalize_for_filtering(title: str) -> str:
+            if not title: return ""
+            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+            return title.lower().replace(" ", "").replace("：", ":").strip()
+
+        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in aliases if alias}
+        filtered_results = []
+        for item in all_results:
+            normalized_item_title = normalize_for_filtering(item.title)
+            if not normalized_item_title: continue
+            if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+                filtered_results.append(item)
+        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        all_results = filtered_results
+
+        if not all_results:
+            raise ValueError("全网搜索未找到任何结果。")
+
+        # 4. 选择最佳源
+        ordered_settings = await crud.get_all_scraper_settings(session)
+        provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
+        
+        # 修正：使用更智能的排序逻辑来选择最佳匹配
+        # 1. 媒体类型是否匹配
+        # 2. 标题相似度 (使用 a_main_title 确保与原始元数据标题比较)
+        # 3. 用户设置的源优先级
+        all_results.sort(
+            key=lambda item: (
+                1 if item.type == media_type else 0,  # 媒体类型匹配得1分，否则0分
+                fuzz.token_set_ratio(main_title, item.title), # 标题相似度得分
+                -provider_order.get(item.provider, 999) # 源优先级，取负数因为值越小优先级越高
+            ),
+            reverse=True # 按得分从高到低排序
+        )
+        best_match = all_results[0]
+
+        await progress_callback(80, f"选择最佳源: {best_match.provider}")
+        unique_key = f"import-{best_match.provider}-{best_match.mediaId}"
+        task_coro = lambda s, cb: generic_import_task(
+            provider=best_match.provider, mediaId=best_match.mediaId,
+            animeTitle=main_title, mediaType=media_type, season=season, year=best_match.year,
+            metadata_manager=metadata_manager,
+            currentEpisodeIndex=payload.episode, imageUrl=image_url,
+            doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
+            progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
+            rate_limiter=rate_limiter
+        )
+        await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}", unique_key=unique_key)
+        raise TaskSuccess("已为最佳匹配源创建导入任务。")
+    finally:
+        if api_key:
+            await scraper_manager.release_search_lock(api_key)
+            logger.info(f"自动导入任务已为 API key 释放搜索锁。")
 async def database_maintenance_task(session: AsyncSession, progress_callback: Callable):
     """
     执行数据库维护的核心任务：清理旧日志和优化表。

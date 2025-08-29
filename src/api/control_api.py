@@ -257,16 +257,29 @@ async def auto_import(
     if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
         raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
 
+    if not await manager.acquire_search_lock(api_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
+        )
+
     task_title = f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
             payload, cb, session, manager, metadata_manager, task_manager,
-            rate_limiter=rate_limiter
+            rate_limiter=rate_limiter,
+            api_key=api_key
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=f"auto-import-{payload.searchType}-{payload.searchTerm}")
         return {"message": "自动导入任务已提交", "taskId": task_id}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except Exception as e:
+        # 捕获任何在任务提交阶段发生的异常，并确保释放锁
+        await manager.release_search_lock(api_key)
+        if isinstance(e, ValueError):
+            # 如果是已知的重复任务错误，返回 409
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        # 对于其他未知错误，重新抛出，由FastAPI处理
+        raise
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
@@ -300,7 +313,7 @@ async def search_media(
     if not await manager.acquire_search_lock(api_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="A search is already in progress for this API key. Please wait for it to complete."
+            detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
     try:
         # --- Start of WebUI Search Logic ---
@@ -384,6 +397,7 @@ async def direct_import(
     item_to_import = cached_results[payload.resultIndex]
 
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
+    unique_key = f"import-{item_to_import.provider}-{item_to_import.mediaId}"
     try:
         task_coro = lambda session, cb: tasks.generic_import_task(
             provider=item_to_import.provider,
@@ -399,7 +413,7 @@ async def direct_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
             rate_limiter=rate_limiter
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -493,12 +507,13 @@ async def edited_import(
     )
 
     task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
+    unique_key = f"import-{task_payload.provider}-{task_payload.mediaId}"
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
             request_data=task_payload, progress_callback=cb, session=session, manager=manager,
             rate_limiter=rate_limiter
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -538,6 +553,7 @@ async def url_import(
     final_title = payload.title or media_info.title
     final_season = payload.season if payload.season is not None else media_info.season
 
+    unique_key = f"import-{scraper.provider_name}-{media_info.mediaId}"
     task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})" # type: ignore
     if payload.episodeIndex:
         task_title += f" - 第 {payload.episodeIndex} 集"
@@ -558,7 +574,7 @@ async def url_import(
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title)
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": message, "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
