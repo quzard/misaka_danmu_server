@@ -31,9 +31,7 @@ class ScraperManager:
         self._verified_scrapers: set[str] = set()
         self._verification_enabled: bool = False
         self.config_manager = config_manager
-        self._default_configs: Dict[str, Tuple[Any, str]] = {}
         self.metadata_manager = metadata_manager
-        # 注意：加载逻辑现在是异步的，将在应用启动时调用
 
     async def acquire_search_lock(self, api_key: str) -> bool:
         """Acquires a search lock for a given API key. Returns False if already locked."""
@@ -104,6 +102,7 @@ class ScraperManager:
         self._domain_map.clear()
         discovered_providers = []
         scraper_classes = {}
+        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
 
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
@@ -141,12 +140,12 @@ class ScraperManager:
                         for domain in getattr(obj, 'handled_domains', []):
                             self._domain_map[domain] = provider_name
                         
-                        # 新增：发现并收集提供商特定的默认配置
+                        # 在加载时直接发现并收集提供商特定的默认配置
                         if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
                             config_key = f"{provider_name}_episode_blacklist_regex"
                             default_value = getattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT')
                             description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
-                            self._default_configs[config_key] = (default_value, description)
+                            default_configs_to_register[config_key] = (default_value, description)
 
                         self._scraper_classes[provider_name] = obj
 
@@ -166,6 +165,11 @@ class ScraperManager:
                 # 使用标准日志记录器
                 logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)
         
+        # 在同步数据库之前，注册所有发现的默认配置
+        if default_configs_to_register:
+            await self.config_manager.register_defaults(default_configs_to_register)
+            logging.getLogger(__name__).info(f"已为 {len(default_configs_to_register)} 个搜索源注册默认分集黑名单。")
+
         # 新增：在同步新搜索源之前，先从数据库中移除不再存在的过时搜索源。
         async with self._session_factory() as session:
             await crud.remove_stale_scrapers(session, discovered_providers)
@@ -205,12 +209,6 @@ class ScraperManager:
             logging.getLogger(__name__).info("搜索源签名验证已禁用。所有搜索源将被视为已验证。")
 
         await self.load_and_sync_scrapers()
-        await self.register_scraper_defaults()
-
-    async def register_scraper_defaults(self):
-        """将所有搜索源发现的默认配置注册到 ConfigManager。"""
-        if self._default_configs:
-            await self.config_manager.register_defaults(self._default_configs)
 
     @property
     def has_enabled_scrapers(self) -> bool:
