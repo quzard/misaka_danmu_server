@@ -898,7 +898,7 @@ async def auto_search_and_import_task(
     all_results = filtered_results
 
     if not all_results:
-        raise TaskSuccess("全网搜索未找到任何结果。")
+        raise ValueError("全网搜索未找到任何结果。")
 
     # 4. 选择最佳源
     ordered_settings = await crud.get_all_scraper_settings(session)
