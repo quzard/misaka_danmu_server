@@ -1804,10 +1804,10 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
 class ManualImportRequest(models.BaseModel):
     title: Optional[str] = None
     episodeIndex: int = Field(..., alias="episodeIndex")
-    url: str
+    content: str # 修正：将 'url' 重命名为 'content' 以更准确地反映其用途（对于XML导入，它包含文件内容）
 
     class Config:
-        populate_by_name = True
+        populate_by_name = True # 允许使用 'episodeIndex' 或 'episode_index'
 
 @router.post("/library/source/{source_id}/manual-import", status_code=status.HTTP_202_ACCEPTED, summary="手动导入单个分集弹幕")
 async def manual_import_episode(
@@ -1829,17 +1829,17 @@ async def manual_import_episode(
     # 仅对非自定义源验证URL
     if provider_name != 'custom':
         url_prefixes = {
-            'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com',
-            'youku': 'youku.com', 'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
+            'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com', 'youku': 'youku.com',
+            'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
         }
         expected_prefix = url_prefixes.get(provider_name)
-        if not expected_prefix or expected_prefix not in request_data.url:
+        if not expected_prefix or expected_prefix not in request_data.content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.manual_import_task(
-        sourceId=source_id, animeId=source_info['animeId'], title=request_data.title, episodeIndex=request_data.episodeIndex,
-        url=request_data.url, providerName=provider_name,
+        sourceId=source_id, animeId=source_info['animeId'], title=request_data.title,
+        episodeIndex=request_data.episodeIndex, content=request_data.content, providerName=provider_name,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
@@ -2323,4 +2323,3 @@ async def get_rate_limit_status(
         secondsUntilReset=seconds_until_reset,
         providers=provider_items
     )
-

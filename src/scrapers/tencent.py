@@ -301,6 +301,9 @@ class TencentScraper(BaseScraper):
         year = str(video_info.year) if video_info.year else None
         cover_url = video_info.img_url
 
+        # 修正：如果内容是电影，则总集数应为1，而不是依赖API可能返回的0。
+        episode_count = 1 if internal_media_type == 'movie' else (video_info.subject_doc.video_num if video_info.subject_doc else None)
+
         # Build ProviderSearchInfo
         return models.ProviderSearchInfo(
             provider=self.provider_name,
@@ -310,7 +313,7 @@ class TencentScraper(BaseScraper):
             season=get_season_from_title(title),
             year=int(year) if year else None,
             imageUrl=cover_url,
-            episodeCount=video_info.subject_doc.video_num if video_info.subject_doc else None,
+            episodeCount=episode_count,
             currentEpisodeIndex=None # This is a quick search, detailed episode info is fetched later
         )
 
@@ -733,20 +736,20 @@ class TencentScraper(BaseScraper):
                 title = ep.union_title or ep.title or ""
                 
                 if has_qi_format:
-                    qi_updown_match = re.search(r'第(\d+)期([上下])', title)
-                    qi_match = re.search(r'第(\d+)期', title) and not qi_updown_match
-
+                    qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE)
                     if qi_updown_match:
                         qi_num_str, part = qi_updown_match.groups()
                         # 检查后缀
                         qi_text = f"第{qi_num_str}期{part}"
                         after_text = title[title.find(qi_text) + len(qi_text):]
-                        if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text):
+                        if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text, re.IGNORECASE):
                             episode_infos.append({'ep': ep, 'qi_num': int(qi_num_str), 'part': part})
-                    elif qi_match:
-                        # 过滤掉带有多余后缀的"第N期"
-                        if not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
-                            episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
+                    else:
+                        qi_match = re.search(r'第(\d+)期', title)
+                        if qi_match:
+                            # 过滤掉带有多余后缀的"第N期"
+                            if not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
+                                episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
                 else:
                     # 如果没有"第N期"格式，则保留所有非广告内容
                     if "广告" not in title and "推广" not in title:

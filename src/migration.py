@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import List
-import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 
 from sqlalchemy import select, inspect, text, func
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -49,15 +49,21 @@ class TmpComment(TmpBase):
 
 def _generate_xml_from_comments(comments: List[TmpComment], episode_id: int) -> str:
     """根据弹幕对象列表生成符合dandanplay标准的XML字符串。"""
-    root = ET.Element('i')
-    ET.SubElement(root, 'chatserver').text = 'danmaku.misaka.org'
-    ET.SubElement(root, 'chatid').text = str(episode_id)
-    ET.SubElement(root, 'mission').text = '0'
-    ET.SubElement(root, 'maxlimit').text = '2000'
-    ET.SubElement(root, 'source').text = 'misaka'
+    xml_parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<i>',
+        '  <chatserver>danmu.misaka-mikoto.jp</chatserver>',
+        '  <chatid>0</chatid>',
+        '  <mission>0</mission>',
+        f'  <maxlimit>{len(comments)}</maxlimit>',
+        '  <source>kuyun</source>'
+    ]
     for comment in comments:
-        ET.SubElement(root, 'd', p=comment.p).text = comment.m
-    return ET.tostring(root, encoding='unicode', xml_declaration=True)
+        content = xml_escape(comment.m or '')
+        p_attr = comment.p or '0,1,25,16777215'
+        xml_parts.append(f'  <d p="{p_attr}">{content}</d>')
+    xml_parts.append('</i>')
+    return '\n'.join(xml_parts)
 
 async def _add_danmaku_path_column_if_not_exists(session: AsyncSession):
     """如果 episode 表中不存在 danmaku_file_path 列，则添加它。"""
@@ -143,12 +149,11 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
                     continue
 
                 anime_id = episode.source.anime.id
-                source_id = episode.source.id
 
                 xml_content = _generate_xml_from_comments(episode.comments, episode_id)
                 
-                web_path = f"/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
-                absolute_path = DANMAKU_BASE_DIR / str(anime_id) / str(source_id) / f"{episode_id}.xml"
+                web_path = f"/data/danmaku/{anime_id}/{episode_id}.xml"
+                absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
                 
                 absolute_path.parent.mkdir(parents=True, exist_ok=True)
                 absolute_path.write_text(xml_content, encoding='utf-8')
