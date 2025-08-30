@@ -147,7 +147,7 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
 
                 xml_content = _generate_xml_from_comments(episode.comments, episode_id)
                 
-                web_path = f"/data/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
+                web_path = f"/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
                 absolute_path = DANMAKU_BASE_DIR / str(anime_id) / str(source_id) / f"{episode_id}.xml"
                 
                 absolute_path.parent.mkdir(parents=True, exist_ok=True)

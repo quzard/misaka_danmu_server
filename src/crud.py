@@ -26,14 +26,23 @@ logger = logging.getLogger(__name__)
 # --- 新增：文件存储相关常量和辅助函数 ---
 DANMAKU_BASE_DIR = Path(__file__).parent.parent / "config" / "danmaku"
 
-def _generate_xml_from_comments(comments: List[Dict[str, Any]], episode_id: int) -> str:
+def _generate_xml_from_comments(
+    comments: List[Dict[str, Any]], 
+    episode_id: int, 
+    provider_name: Optional[str] = "misaka",
+    chat_server: Optional[str] = "danmaku.misaka.org"
+) -> str:
     """根据弹幕字典列表生成符合dandanplay标准的XML字符串。"""
     root = ET.Element('i')
-    ET.SubElement(root, 'chatserver').text = 'danmaku.misaka.org'
+    ET.SubElement(root, 'chatserver').text = chat_server
     ET.SubElement(root, 'chatid').text = str(episode_id)
     ET.SubElement(root, 'mission').text = '0'
     ET.SubElement(root, 'maxlimit').text = '2000'
-    ET.SubElement(root, 'source').text = 'misaka'
+    ET.SubElement(root, 'source').text = 'k-v' # 保持与官方格式一致
+    # 新增字段
+    ET.SubElement(root, 'sourceprovider').text = provider_name
+    ET.SubElement(root, 'datasize').text = str(len(comments))
+    
     for comment in comments:
         p_attr = str(comment.get('p', ''))
         d = ET.SubElement(root, 'd', p=p_attr)
@@ -670,7 +679,7 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
     # 从Web路径转换为物理文件路径
     # e.g., /data/danmaku/1/2/3.xml -> config/danmaku/1/2/3.xml
     try:
-        relative_path = Path(episode.danmakuFilePath.replace("/data/danmaku/", "", 1))
+        relative_path = Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
         absolute_path = DANMAKU_BASE_DIR / relative_path
         
         if not absolute_path.exists():
@@ -730,9 +739,15 @@ async def write_danmaku_to_file(
     anime_id = episode.source.anime.id
     source_id = episode.source.id
 
-    xml_content = _generate_xml_from_comments(comments, episode_id)
+    # 新增：获取原始弹幕服务器信息
+    provider_name = episode.source.providerName
+    # 这是一个简化的映射，您可以根据需要扩展
+    chat_server_map = {
+        "bilibili": "comment.bilibili.com"
+    }
+    xml_content = _generate_xml_from_comments(comments, episode_id, provider_name, chat_server_map.get(provider_name, "danmaku.misaka.org"))
     
-    web_path = f"/data/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
+    web_path = f"/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
     absolute_path = DANMAKU_BASE_DIR / str(anime_id) / str(source_id) / f"{episode_id}.xml"
     
     try:
@@ -829,7 +844,7 @@ async def clear_episode_comments(session: AsyncSession, episode_id: int):
         return
     
     if episode.danmakuFilePath:
-        absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/data/danmaku/", "", 1))
+        absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
         if absolute_path.exists():
             try:
                 absolute_path.unlink()
@@ -899,7 +914,7 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
     episode = await session.get(Episode, episode_id)
     if episode:
         if episode.danmakuFilePath:
-            absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/data/danmaku/", "", 1))
+            absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
             if absolute_path.exists():
                 absolute_path.unlink()
         await session.delete(episode)
@@ -976,8 +991,8 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     # 3. 重命名弹幕文件（如果存在）
     new_web_path = None
     if episode.danmakuFilePath:
-        old_absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/data/danmaku/", "", 1))
-        new_web_path = f"/data/danmaku/{episode.source.animeId}/{episode.sourceId}/{new_episode_id}.xml"
+        old_absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
+        new_web_path = f"/danmaku/{episode.source.animeId}/{episode.sourceId}/{new_episode_id}.xml"
         new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / str(episode.sourceId) / f"{new_episode_id}.xml"
         if old_absolute_path.exists():
             try:

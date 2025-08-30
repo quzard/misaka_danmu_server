@@ -95,6 +95,32 @@ async def _migrate_add_failover_enabled_to_metadata_sources(conn, db_type, db_na
         logger.info(f"成功添加列 'metadata_sources.is_failover_enabled'。")
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+async def _migrate_alter_danmaku_file_path_length(conn, db_type, db_name):
+    """迁移任务: 确保 episode.danmaku_file_path 字段有足够的长度。"""
+    migration_id = "alter_danmaku_file_path_length"
+    new_length = 1024
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    if db_type == "mysql":
+        check_sql = text(f"SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'episode' AND column_name = 'danmaku_file_path'")
+        alter_sql = text(f"ALTER TABLE episode MODIFY COLUMN `danmaku_file_path` VARCHAR({new_length})")
+    elif db_type == "postgresql":
+        check_sql = text("SELECT character_maximum_length FROM information_schema.columns WHERE table_name = 'episode' AND column_name = 'danmaku_file_path'")
+        alter_sql = text(f'ALTER TABLE episode ALTER COLUMN "danmaku_file_path" TYPE VARCHAR({new_length})')
+    else:
+        return
+
+    current_length = (await conn.execute(check_sql)).scalar_one_or_none()
+    
+    # 检查列是否存在及其长度是否小于期望值
+    if current_length is not None and current_length < new_length:
+        logger.info(f"列 'episode.danmaku_file_path' 当前长度为 {current_length}，小于目标长度 {new_length}。正在扩展...")
+        await conn.execute(alter_sql)
+        logger.info(f"成功将列 'episode.danmaku_file_path' 扩展到 {new_length}。")
+    else:
+        logger.info(f"列 'episode.danmaku_file_path' 无需扩展。")
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+
 async def _run_migrations(conn):
     """
     执行所有一次性的数据库架构迁移。
@@ -109,6 +135,7 @@ async def _run_migrations(conn):
     await _migrate_add_anime_year(conn, db_type, db_name)
     await _migrate_add_scheduled_task_id(conn, db_type, db_name)
     await _migrate_add_failover_enabled_to_metadata_sources(conn, db_type, db_name)
+    await _migrate_alter_danmaku_file_path_length(conn, db_type, db_name)
 
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
