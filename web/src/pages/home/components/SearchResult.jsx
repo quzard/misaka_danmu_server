@@ -161,16 +161,11 @@ export const SearchResult = () => {
           it => providerFilter === 'all' || it.provider === providerFilter
         ) || []
     setRenderData(list)
-  }, [
-    keyword,
-    checkedList,
-    lastSearchResultData,
-    yearFilter,
-    providerFilter,
-  ])
+  }, [keyword, checkedList, lastSearchResultData, yearFilter, providerFilter])
 
   const { years, providers } = useMemo(() => {
-    if (!lastSearchResultData.results?.length) return { years: [], providers: [] }
+    if (!lastSearchResultData.results?.length)
+      return { years: [], providers: [] }
     const yearSet = new Set()
     const providerSet = new Set()
     lastSearchResultData.results.forEach(item => {
@@ -478,7 +473,7 @@ export const SearchResult = () => {
       <Card title="搜索结果" loading={searchLoading}>
         <div>
           <Row gutter={[12, 12]} className="mb-6">
-            <Col md={20} xs={24}>
+            <Col md={9} xs={24}>
               <Space wrap align="center">
                 <Button
                   type="primary"
@@ -519,6 +514,10 @@ export const SearchResult = () => {
                   value={checkedList}
                   onChange={onTypeChange}
                 />
+              </Space>
+            </Col>
+            <Col md={11} xs={24}>
+              <Space wrap align="center">
                 <Dropdown menu={yearMenu} disabled={!years.length}>
                   <Button icon={<CalendarOutlined />}>
                     {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
@@ -532,7 +531,7 @@ export const SearchResult = () => {
                         providerFilter.slice(1)}
                   </Button>
                 </Dropdown>
-                <div className="w-full md:w-40">
+                <div className="w-full">
                   <Input
                     placeholder="在结果中过滤标题"
                     onChange={e => setKeyword(e.target.value)}
@@ -562,7 +561,7 @@ export const SearchResult = () => {
               itemLayout="vertical"
               size="large"
               dataSource={renderData}
-              renderItem={(item) => {
+              renderItem={item => {
                 const isActive = selectList.includes(item)
                 return (
                   <List.Item key={`${item.mediaId}-${item.provider}`}>
