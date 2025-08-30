@@ -969,8 +969,8 @@ class TencentScraper(BaseScraper):
 
         return formatted_comments
 
-    async def get_media_id_from_url(self, url: str) -> Optional[str]:
-        """从腾讯视频URL中提取 media_id (cid 或 vid)。"""
+    async def get_id_from_url(self, url: str) -> Optional[str]:
+        """从腾讯视频URL中提取 media_id (cid 或 vid)，以实现基类的抽象方法。"""
         # 优先匹配 cover URL 中的 cid
         cid_match = re.search(r'/cover/([^/]+?)(/|\.html|$)', url)
         if cid_match:
