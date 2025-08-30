@@ -83,7 +83,9 @@ async def _write_danmaku_file_and_update_db(session: AsyncSession, anime_id: int
     
     xml_content = _generate_dandan_xml(comments)
     danmaku_file_path.write_text(xml_content, encoding='utf-8')
-    
+
+    # 关键修正：确保Web路径的格式绝对正确，以防止出现类似 /data181/... 或 /danmaku/... 的错误。
+    # 正确的、统一的Web路径应为 /data/danmaku/{animeId}/{episodeId}.xml
     web_path = f"/data/danmaku/{anime_id}/{episode_id}.xml"
     await crud.update_episode_danmaku_info(session, episode_id, web_path, len(comments))
     return len(comments)

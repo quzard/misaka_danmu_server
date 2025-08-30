@@ -676,10 +676,15 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
     if not episode or not episode.danmakuFilePath:
         return []
     
-    # 从Web路径转换为物理文件路径
-    # e.g., /data/danmaku/1/2/3.xml -> config/danmaku/1/2/3.xml
     try:
-        relative_path = Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
+        # 关键修正：健壮地将Web路径映射到物理文件系统路径
+        # 1. 找到 /danmaku/ 之后的部分
+        path_parts = episode.danmakuFilePath.split('/danmaku/')
+        if len(path_parts) != 2:
+            logger.warning(f"弹幕文件路径格式不正确，无法解析: {episode.danmakuFilePath}")
+            return []
+        
+        relative_path = Path(path_parts[1])
         absolute_path = DANMAKU_BASE_DIR / relative_path
         
         if not absolute_path.exists():
@@ -689,7 +694,7 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
         xml_content = absolute_path.read_text(encoding='utf-8')
         return parse_dandan_xml_to_comments(xml_content)
     except Exception as e:
-        logger.error(f"读取或解析弹幕文件失败: {episode.danmakuFilePath}。错误: {e}")
+        logger.error(f"读取或解析弹幕文件失败: {episode.danmakuFilePath}。错误: {e}", exc_info=True)
         return []
 
 async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
