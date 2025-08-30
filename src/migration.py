@@ -62,7 +62,7 @@ def _generate_xml_from_comments(comments: List[TmpComment], episode_id: int) -> 
 async def _add_danmaku_path_column_if_not_exists(session: AsyncSession):
     """如果 episode 表中不存在 danmaku_file_path 列，则添加它。"""
     def check_columns_sync(conn):
-        inspector = inspect(conn)
+        inspector = inspect(conn.connection())
         columns = inspector.get_columns('episode')
         return any(c['name'] == 'danmaku_file_path' for c in columns)
 
@@ -81,7 +81,7 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
     logger.info("--- 正在检查数据库迁移需求 ---")
     async with session_factory() as session:
         def check_table_sync(conn):
-            inspector = inspect(conn)
+            inspector = inspect(conn.connection())
             return inspector.has_table('comment')
 
         has_comment_table = await session.run_sync(check_table_sync)
