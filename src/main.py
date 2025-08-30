@@ -105,12 +105,16 @@ async def lifespan(app: FastAPI):
     await app.state.scraper_manager.initialize()
     await app.state.metadata_manager.initialize()
 
+    # --- 动态挂载元数据源的API路由 ---
+    # 这是处理动态路由（如OAuth回调）的关键步骤。
+    # 我们创建一个临时的FastAPI子应用，将元数据管理器的路由包含进去，
+    # 然后将这个子应用挂载到主应用上。
+    metadata_app = FastAPI(docs_url=None, redoc_url=None)
+    metadata_app.include_router(app.state.metadata_manager.router)
+    app.mount("/api/metadata", metadata_app)
+
     # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
-
-    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
-
-
 
     app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager

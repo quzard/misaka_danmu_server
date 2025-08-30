@@ -51,6 +51,8 @@ export const EpisodeDetail = () => {
   const [resetLoading, setResetLoading] = useState(false)
   const [resetInfo, setResetInfo] = useState({})
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [isXmlImport, setIsXmlImport] = useState(false)
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -174,6 +176,7 @@ export const EpisodeDetail = () => {
                     episodeId: record.episodeId,
                     originalEpisodeIndex: record.episodeIndex,
                   })
+                  setIsEditing(true)
                   setEditOpen(true)
                 }}
               >
@@ -504,19 +507,21 @@ export const EpisodeDetail = () => {
             </Button>
             <Button
               onClick={() => {
-                setEditOpen(true)
-              }}
-              type="primary"
-            >
-              手动导入
-            </Button>
-            <Button
-              onClick={() => {
                 setIsBatchModalOpen(true)
               }}
               type="primary"
             >
               批量导入
+            </Button>
+            <Button
+              onClick={() => {
+                form.resetFields()
+                setIsEditing(false)
+                setEditOpen(true)
+              }}
+              type="primary"
+            >
+              手动导入
             </Button>
           </div>
         </div>
@@ -535,14 +540,14 @@ export const EpisodeDetail = () => {
         )}
       </Card>
       <Modal
-        title="编辑分集信息"
+        title={isEditing ? '编辑分集信息' : '手动导入分集'}
         open={editOpen}
         onOk={handleSave}
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
         onCancel={() => setEditOpen(false)}
-        destroyOnHidden
+        destroyOnClose
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -563,12 +568,31 @@ export const EpisodeDetail = () => {
               placeholder="请输入分集集数"
             />
           </Form.Item>
+          {!isEditing && (
+            <Form.Item label="导入方式">
+              <Switch
+                checkedChildren="XML"
+                unCheckedChildren="URL"
+                checked={isXmlImport}
+                onChange={setIsXmlImport}
+              />
+            </Form.Item>
+          )}
           <Form.Item
             name="sourceUrl"
-            label="官方链接"
-            rules={[{ required: true, message: '请输入官方链接' }]}
+            label={isXmlImport ? '弹幕XML内容' : '官方链接'}
+            rules={[
+              {
+                required: true,
+                message: `请输入${isXmlImport ? '弹幕XML内容' : '官方链接'}`,
+              },
+            ]}
           >
-            <Input placeholder="请输入官方链接" />
+            {isXmlImport ? (
+              <Input.TextArea rows={6} placeholder="请在此处粘贴弹幕XML文件的内容" />
+            ) : (
+              <Input placeholder="请输入官方链接" />
+            )}
           </Form.Item>
           <Form.Item name="episodeId" hidden>
             <Input />
