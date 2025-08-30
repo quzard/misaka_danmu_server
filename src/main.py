@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
-from .database import init_db, close_db, create_initial_admin_user # type: ignore
+from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
 from .api import ui_api, control_api
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
     # --- Startup Logic ---
     setup_logging()
 
-    # init_db 现在处理数据库创建、引擎和会话工厂的创建
-    await init_db(app)
+    # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
+    await init_db_tables(app)
     session_factory = app.state.db_session_factory
 
     # 新增：在启动时清理任何未完成的任务
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
             await app.state.cleanup_task
         except asyncio.CancelledError:
             pass
-    await close_db_engine(app)
+    await close_db_engine(app) # 恢复数据库引擎关闭调用
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
     if hasattr(app.state, "task_manager"):
@@ -267,8 +267,8 @@ else:
     app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
     # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
     app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-    # dist挂载
-    app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
+    # pwa挂载
+    #app.mount("/manifest.json", StaticFiles(directory="web/dist/manifest.json"), name="manifest")
     # 挂载用户缓存的图片 (如海报)
     app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
     # 然后，为所有其他路径提供 index.html 以支持前端路由
