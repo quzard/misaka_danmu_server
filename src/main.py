@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
-from .api import ui_api, control_api
+from .api import api_router, control_router # 恢复为原始的导入方式
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
     # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
 
-    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata", include_in_schema=False)
+    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
 
 
@@ -143,8 +143,6 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
 
-# --- 主应用实例 ---
-# 文档只为外部控制API生成
 app = FastAPI(
     title="Misaka Danmaku External Control API",
     description="用于外部自动化和集成的API。所有端点都需要通过 `?api_key=` 进行鉴权。",
@@ -157,7 +155,8 @@ app = FastAPI(
 # 新增：配置CORS，允许前端开发服务器访问API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
+    # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,6 +171,12 @@ async def httpx_connect_error_handler(request: Request, exc: httpx.ConnectError)
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": f"无法连接到外部服务 ({exc.request.url.host})。请检查您的网络连接、代理设置，或确认目标服务未屏蔽您的服务器IP。"},
     )
+
+# 只将 control_api 路由挂载到文档应用上
+docs_app.include_router(control_api.router, prefix="/api/control", tags=["External Control"])
+
+# 将文档应用作为子应用挂载到主应用上
+app.mount("/api/control/docs", docs_app)
 
 @app.exception_handler(httpx.TimeoutException)
 async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutException):
@@ -242,15 +247,17 @@ async def cleanup_task(app: FastAPI):
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
 
 # --- API 路由挂载 ---
-# 1. Web UI API (不对外暴露文档)
-app.include_router(ui_api.router, prefix="/api/ui", tags=["UI"], include_in_schema=False)
-app.include_router(ui_api.auth_router, prefix="/api/auth", tags=["Auth"], include_in_schema=False)
+# 挂载顺序很重要：更具体的路径应该放在前面
 
-# 2. 外部控制 API (对外暴露文档)
-app.include_router(control_api.router, prefix="/api/control", tags=["External Control"])
+# 1. 外部控制 API (对外暴露文档)
+app.include_router(control_router, prefix="/api/control", tags=["External Control"])
 
-# 3. dandanplay 兼容 API (不对外暴露文档)
+# 2. dandanplay 兼容 API (不对外暴露文档)
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
+
+# 3. UI 和其他 API (不对外暴露文档)
+# 恢复为原始的挂载方式，确保 /api/ui/auth/token 等路径正确
+app.include_router(api_router, prefix="/api", include_in_schema=False)
 
 # --- 前端服务 (生产环境) ---
 # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
