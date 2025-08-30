@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
 from datetime import timedelta, datetime, timezone
-from sqlalchemy import update, select, func
+from sqlalchemy import update, select, func, exc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import httpx
@@ -271,6 +271,28 @@ async def search_anime_provider(
         search_episode=episode_to_filter
     )
 
+@router.post("/library/anime", response_model=models.LibraryAnimeInfo, status_code=201, summary="创建自定义作品条目")
+async def create_anime_entry(
+    payload: models.AnimeCreate,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    手动创建一个新的作品条目，不关联任何数据源。
+    """
+    try:
+        new_anime = await crud.create_anime(session, payload)
+        await session.commit()
+        # We need to return a LibraryAnimeInfo, so we fetch the full details
+        # with counts.
+        details = await crud.get_library_anime_by_id(session, new_anime.id)
+        if not details:
+            # This should not happen, but as a fallback
+            raise HTTPException(status_code=500, detail="创建作品后无法立即获取其信息。")
+        return models.LibraryAnimeInfo.model_validate(details)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
 @router.get("/library/episodes-by-title", response_model=List[int], summary="根据作品标题获取已存在的分集序号")
 async def get_existing_episode_indices(
     title: str = Query(..., description="要查询的作品标题"),
@@ -415,6 +437,32 @@ async def refresh_anime_poster(
     if affected_rows == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品未找到。")
     return {"new_path": new_local_path}
+
+@router.post("/library/anime/{animeId}/sources", response_model=models.SourceInfo, status_code=201, summary="为作品新增数据源")
+async def add_source_to_anime(
+    animeId: int,
+    payload: models.SourceCreate,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    为一个已存在的作品手动关联一个新的数据源。
+    """
+    anime = await crud.get_anime_full_details(session, animeId)
+    if not anime:
+        raise HTTPException(status_code=404, detail="作品未找到")
+
+    try:
+        source_id = await crud.link_source_to_anime(session, animeId, payload.providerName, payload.mediaId)
+        await session.commit()
+        all_sources = await crud.get_anime_sources(session, animeId)
+        newly_created_source = next((s for s in all_sources if s['sourceId'] == source_id), None)
+        if not newly_created_source:
+            raise HTTPException(status_code=500, detail="创建数据源后无法立即获取其信息。")
+        return models.SourceInfo.model_validate(newly_created_source)
+    except exc.IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该数据源已存在于此作品下，无法重复添加。")
 
 @router.get("/library/source/{sourceId}/details", response_model=models.SourceDetailsResponse, summary="获取单个数据源的详情")
 async def get_source_details(
@@ -1754,8 +1802,8 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         raise
 
 class ManualImportRequest(models.BaseModel):
-    title: str
-    episode_index: int = Field(..., alias="episodeIndex")
+    title: Optional[str] = None
+    episodeIndex: int = Field(..., alias="episodeIndex")
     url: str
 
     class Config:
@@ -1778,22 +1826,61 @@ async def manual_import_episode(
 
     provider_name = source_info['providerName']
     
-    url_prefixes = {
-        'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com',
-        'youku': 'youku.com', 'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
-    }
-    expected_prefix = url_prefixes.get(provider_name)
-    if not expected_prefix or expected_prefix not in request_data.url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
+    # 仅对非自定义源验证URL
+    if provider_name != 'custom':
+        url_prefixes = {
+            'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com',
+            'youku': 'youku.com', 'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
+        }
+        expected_prefix = url_prefixes.get(provider_name)
+        if not expected_prefix or expected_prefix not in request_data.url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
-    task_title = f"手动导入: {source_info['title']} - {request_data.title} - [{provider_name}]"
+    task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.manual_import_task(
-        sourceId=source_id, animeId=source_info['animeId'], title=request_data.title, episodeIndex=request_data.episode_index,
+        sourceId=source_id, animeId=source_info['animeId'], title=request_data.title, episodeIndex=request_data.episodeIndex,
         url=request_data.url, providerName=provider_name,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
+
+@router.post("/library/source/{sourceId}/batch-import", status_code=status.HTTP_202_ACCEPTED, summary="批量手动导入分集", response_model=UITaskResponse)
+async def batch_manual_import(
+    sourceId: int,
+    payload: models.BatchManualImportRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    """
+    为指定的数据源批量手动导入分集。
+    - 对于普通数据源，请求体中的 'content' 应为视频URL。
+    - 对于 'custom' 数据源，'content' 应为dandanplay格式的XML弹幕文件内容。
+    """
+    source_info = await crud.get_anime_source_info(session, sourceId)
+    if not source_info:
+        raise HTTPException(status_code=404, detail="数据源未找到")
+
+    task_title = f"批量手动导入: {source_info['title']} ({source_info['providerName']})"
+    unique_key = f"batch-manual-import-{sourceId}"
+    try:
+        task_coro = lambda s, cb: tasks.batch_manual_import_task(
+            sourceId=sourceId,
+            animeId=source_info['animeId'],
+            providerName=source_info['providerName'],
+            items=payload.items,
+            progress_callback=cb,
+            session=s,
+            manager=scraper_manager,
+            rate_limiter=rate_limiter
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        return {"message": "批量手动导入任务已提交", "taskId": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 async def manual_import_task(
     source_id: int, title: str, episode_index: int, url: str, provider_name: str,
@@ -2236,3 +2323,4 @@ async def get_rate_limit_status(
         secondsUntilReset=seconds_until_reset,
         providers=provider_items
     )
+

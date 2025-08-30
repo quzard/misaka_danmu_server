@@ -22,7 +22,7 @@ from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 # --- 依赖项 ---
 
@@ -211,8 +211,7 @@ async def auto_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    api_key: str = Depends(verify_api_key),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     ### 功能
@@ -287,7 +286,6 @@ async def search_media(
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
-    api_key: str = Depends(verify_api_key),
 ):
     """
     ### 功能
@@ -370,8 +368,7 @@ async def direct_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    api_key: str = Depends(verify_api_key),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     ### 功能
@@ -424,7 +421,6 @@ async def get_episodes(
     result_index: int = Query(..., ge=0, description="要获取分集的结果的索引"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
-    api_key: str = Depends(verify_api_key),
 ):
     """
     ### 功能
@@ -462,8 +458,7 @@ async def edited_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    api_key: str = Depends(verify_api_key),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     ### 功能
@@ -525,8 +520,7 @@ async def url_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    api_key: str = Depends(verify_api_key),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     ### 功能
@@ -580,22 +574,21 @@ async def url_import(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- 媒体库管理 ---
-library_router = APIRouter(prefix="/library", dependencies=[Depends(verify_api_key)])
 
-@library_router.get("", response_model=List[models.LibraryAnimeInfo], summary="获取媒体库列表")
+@router.get("/library", response_model=List[models.LibraryAnimeInfo], summary="获取媒体库列表")
 async def get_library(session: AsyncSession = Depends(get_db_session)):
     """获取当前弹幕库中所有已收录的作品列表。"""
     db_results = await crud.get_library_anime(session)
     return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
 
-@library_router.get("/anime/{animeId}", response_model=ControlAnimeDetailsResponse, summary="获取作品详情")
+@router.get("/library/anime/{animeId}", response_model=ControlAnimeDetailsResponse, summary="获取作品详情")
 async def get_anime_details(animeId: int, session: AsyncSession = Depends(get_db_session)):
     """获取弹幕库中单个作品的完整详细信息，包括所有元数据ID和别名。"""
     details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
     return ControlAnimeDetailsResponse.model_validate(details)
 
-@library_router.get("/anime/{animeId}/sources", response_model=List[models.SourceInfo], summary="获取作品的所有数据源")
+@router.get("/library/anime/{animeId}/sources", response_model=List[models.SourceInfo], summary="获取作品的所有数据源")
 async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db_session)):
     """获取指定作品已关联的所有弹幕源列表。"""
     # First, check if the anime exists to provide a proper 404.
@@ -604,14 +597,14 @@ async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db
         raise HTTPException(status_code=404, detail="作品未找到")
     return await crud.get_anime_sources(session, animeId)
 
-@library_router.put("/anime/{animeId}", response_model=ControlActionResponse, summary="编辑作品信息")
+@router.put("/library/anime/{animeId}", response_model=ControlActionResponse, summary="编辑作品信息")
 async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):
     """更新弹幕库中单个作品的详细信息。"""
     if not await crud.update_anime_details(session, animeId, payload):
         raise HTTPException(404, "作品未找到")
     return {"message": "作品信息更新成功。"}
 
-@library_router.delete("/anime/{animeId}", status_code=202, summary="删除作品", response_model=ControlTaskResponse)
+@router.delete("/library/anime/{animeId}", status_code=202, summary="删除作品", response_model=ControlTaskResponse)
 async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     """提交一个后台任务，以删除弹幕库中的一个作品及其所有关联的数据源、分集和弹幕。"""
     details = await crud.get_anime_full_details(session, animeId)
@@ -625,7 +618,7 @@ async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_sess
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@library_router.delete("/source/{sourceId}", status_code=202, summary="删除数据源", response_model=ControlTaskResponse)
+@router.delete("/library/source/{sourceId}", status_code=202, summary="删除数据源", response_model=ControlTaskResponse)
 async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     """提交一个后台任务，以删除一个已关联的数据源及其所有分集和弹幕。"""
     info = await crud.get_anime_source_info(session, sourceId)
@@ -639,7 +632,7 @@ async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_se
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@library_router.put("/source/{sourceId}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
+@router.put("/library/source/{sourceId}/favorite", response_model=ControlActionResponse, summary="精确标记数据源")
 async def favorite_source(sourceId: int, session: AsyncSession = Depends(get_db_session)):
     """切换数据源的“精确标记”状态。一个作品只能有一个精确标记的源，它将在自动匹配时被优先使用。"""
     new_status = await crud.toggle_source_favorite_status(session, sourceId)
@@ -648,19 +641,19 @@ async def favorite_source(sourceId: int, session: AsyncSession = Depends(get_db_
     message = "数据源已标记为精确。" if new_status else "数据源已取消精确标记。"
     return {"message": message}
 
-@library_router.get("/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
+@router.get("/library/source/{sourceid}/episodes", response_model=List[models.EpisodeDetail], summary="获取源的分集列表")
 async def get_source_episodes(sourceid: int, session: AsyncSession = Depends(get_db_session)):
     """获取指定数据源下所有已收录的分集列表。"""
     return await crud.get_episodes_for_source(session, sourceid)
 
-@library_router.put("/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
+@router.put("/library/episode/{episodeid}", response_model=ControlActionResponse, summary="编辑分集信息")
 async def edit_episode(episodeid: int, payload: models.EpisodeInfoUpdate, session: AsyncSession = Depends(get_db_session)):
     """更新单个分集的标题、集数和官方链接。"""
     if not await crud.update_episode_info(session, episodeid, payload):
         raise HTTPException(404, "分集未找到")
     return {"message": "分集信息更新成功。"}
 
-@library_router.post("/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕", response_model=ControlTaskResponse)
+@router.post("/library/episode/{episodeId}/refresh", status_code=202, summary="刷新分集弹幕", response_model=ControlTaskResponse)
 async def refresh_episode(
     episodeId: int,
     session: AsyncSession = Depends(get_db_session),
@@ -677,7 +670,7 @@ async def refresh_episode(
     )
     return {"message": "刷新分集任务已提交", "taskId": task_id}
 
-@library_router.delete("/episode/{episodeId}", status_code=202, summary="删除分集", response_model=ControlTaskResponse)
+@router.delete("/library/episode/{episodeId}", status_code=202, summary="删除分集", response_model=ControlTaskResponse)
 async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_session), task_manager: TaskManager = Depends(get_task_manager)):
     """提交一个后台任务，以删除单个分集及其所有弹幕。"""
     info = await crud.get_episode_for_refresh(session, episodeId)
@@ -692,16 +685,15 @@ async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- 弹幕管理 ---
-danmaku_router = APIRouter(prefix="/danmaku", dependencies=[Depends(verify_api_key)])
 
-@danmaku_router.get("/{episodeId}", response_model=models.CommentResponse, summary="获取弹幕")
+@router.get("/danmaku/{episodeId}", response_model=models.CommentResponse, summary="获取弹幕")
 async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_session)):
     """获取指定分集的所有弹幕，返回dandanplay兼容格式。"""
     if not await crud.check_episode_exists(session, episodeId): raise HTTPException(404, "分集未找到")
     comments = await crud.fetch_comments(session, episodeId)
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
 
-@danmaku_router.post("/{episodeId}", status_code=202, summary="覆盖弹幕", response_model=ControlTaskResponse)
+@router.post("/danmaku/{episodeId}", status_code=202, summary="覆盖弹幕", response_model=ControlTaskResponse)
 async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
     """提交一个后台任务，用请求体中提供的弹幕列表完全覆盖指定分集的现有弹幕。"""
     async def overwrite_task(session: AsyncSession, cb: Callable):
@@ -729,15 +721,14 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 # --- Token 管理 ---
-token_router = APIRouter(prefix="/tokens", dependencies=[Depends(verify_api_key)])
 
-@token_router.get("", response_model=List[models.ApiTokenInfo], summary="获取所有Token")
+@router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有Token")
 async def get_tokens(session: AsyncSession = Depends(get_db_session)):
     """获取所有为dandanplay客户端创建的API Token。"""
     tokens = await crud.get_all_api_tokens(session)
     return [models.ApiTokenInfo.model_validate(t) for t in tokens]
 
-@token_router.post("", response_model=models.ApiTokenInfo, status_code=201, summary="创建Token")
+@router.post("/tokens", response_model=models.ApiTokenInfo, status_code=201, summary="创建Token")
 async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = Depends(get_db_session)):
     """
     创建一个新的API Token。
@@ -756,20 +747,20 @@ async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = D
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-@token_router.get("/{tokenId}", response_model=models.ApiTokenInfo, summary="获取单个Token详情")
+@router.get("/tokens/{tokenId}", response_model=models.ApiTokenInfo, summary="获取单个Token详情")
 async def get_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
     """获取单个API Token的详细信息。"""
     token = await crud.get_api_token_by_id(session, tokenId)
     if not token: raise HTTPException(404, "Token未找到")
     return models.ApiTokenInfo.model_validate(token)
 
-@token_router.get("/{tokenId}/logs", response_model=List[models.TokenAccessLog], summary="获取Token访问日志")
+@router.get("/tokens/{tokenId}/logs", response_model=List[models.TokenAccessLog], summary="获取Token访问日志")
 async def get_token_logs(tokenId: int, session: AsyncSession = Depends(get_db_session)):
     """获取单个API Token最近的访问日志。"""
     logs = await crud.get_token_access_logs(session, tokenId)
     return [models.TokenAccessLog.model_validate(log) for log in logs]
 
-@token_router.put("/{tokenId}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
+@router.put("/tokens/{tokenId}/toggle", response_model=ControlActionResponse, summary="启用/禁用Token")
 async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
     """切换API Token的启用/禁用状态。"""
     new_status = await crud.toggle_api_token(session, tokenId)
@@ -778,7 +769,7 @@ async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
     message = "Token 已启用。" if new_status else "Token 已禁用。"
     return {"message": message}
 
-@token_router.delete("/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
+@router.delete("/tokens/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
 async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
     """删除一个API Token。"""
     if not await crud.delete_api_token(session, tokenId):
@@ -786,16 +777,15 @@ async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
     return {"message": "Token 删除成功。"}
 
 # --- 设置管理 ---
-settings_router = APIRouter(prefix="/settings", dependencies=[Depends(verify_api_key)])
 
-@settings_router.get("/danmaku-output", response_model=DanmakuOutputSettings, summary="获取弹幕输出设置")
+@router.get("/settings/danmaku-output", response_model=DanmakuOutputSettings, summary="获取弹幕输出设置")
 async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_session)):
     """获取全局的弹幕输出设置，如数量限制和是否聚合。"""
     limit = await crud.get_config_value(session, 'danmaku_output_limit_per_source', '-1')
     enabled = await crud.get_config_value(session, 'danmaku_aggregation_enabled', 'true')
     return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
 
-@settings_router.put("/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
+@router.put("/settings/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
     """更新全局的弹幕输出设置。"""
     await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limitPerSource)) # type: ignore
@@ -804,16 +794,9 @@ async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session
     config_manager.invalidate('danmaku_aggregation_enabled')
     return {"message": "弹幕输出设置已更新。"}
 
-# --- 注册所有子路由 ---
-router.include_router(library_router)
-router.include_router(danmaku_router)
-router.include_router(token_router)
-router.include_router(settings_router)
-
 # --- 任务管理 ---
-tasks_router = APIRouter(prefix="/tasks", dependencies=[Depends(verify_api_key)])
 
-@tasks_router.get("", response_model=List[models.TaskInfo], summary="获取后台任务列表")
+@router.get("/tasks", response_model=List[models.TaskInfo], summary="获取后台任务列表")
 async def get_tasks(
     search: Optional[str] = Query(None, description="按标题搜索"),
     status: str = Query("all", description="按状态过滤: all, in_progress, completed"),
@@ -823,11 +806,10 @@ async def get_tasks(
     tasks_from_db = await crud.get_tasks_from_history(session, search, status)
     return [models.TaskInfo.model_validate(t) for t in tasks_from_db]
 
-@tasks_router.get("/{taskId}", response_model=models.TaskInfo, summary="获取单个任务状态")
+@router.get("/tasks/{taskId}", response_model=models.TaskInfo, summary="获取单个任务状态")
 async def get_task_status(
     taskId: str,
-    session: AsyncSession = Depends(get_db_session),
-    api_key: str = Depends(verify_api_key),
+    session: AsyncSession = Depends(get_db_session)
 ):
     """获取单个后台任务的详细状态。"""
     task_details = await crud.get_task_details_from_history(session, taskId)
@@ -835,7 +817,7 @@ async def get_task_status(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到。")
     return models.TaskInfo.model_validate(task_details)
 
-@tasks_router.delete("/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
+@router.delete("/tasks/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
 async def delete_task(
     taskId: str,
     session: AsyncSession = Depends(get_db_session),
@@ -866,21 +848,21 @@ async def delete_task(
     else:
         return {"message": "任务可能已被处理或不存在于历史记录中。"}
 
-@tasks_router.post("/{taskId}/abort", response_model=ControlActionResponse, summary="中止正在运行的任务")
+@router.post("/tasks/{taskId}/abort", response_model=ControlActionResponse, summary="中止正在运行的任务")
 async def abort_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
     """尝试中止一个当前正在运行或已暂停的任务。此操作会向任务发送一个取消信号，任务将在下一个检查点安全退出。"""
     if not await task_manager.abort_current_task(taskId):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
     return {"message": "中止任务的请求已发送。"}
 
-@tasks_router.post("/{taskId}/pause", response_model=ControlActionResponse, summary="暂停正在运行的任务")
+@router.post("/tasks/{taskId}/pause", response_model=ControlActionResponse, summary="暂停正在运行的任务")
 async def pause_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
     """暂停一个当前正在运行的任务。任务将在下一次进度更新时暂停。"""
     if not await task_manager.pause_task(taskId):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="暂停任务失败，可能任务未在运行。")
     return {"message": "任务已暂停。"}
 
-@tasks_router.post("/{taskId}/resume", response_model=ControlActionResponse, summary="恢复已暂停的任务")
+@router.post("/tasks/{taskId}/resume", response_model=ControlActionResponse, summary="恢复已暂停的任务")
 async def resume_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
     """恢复一个已暂停的任务。"""
     if not await task_manager.resume_task(taskId):
@@ -888,9 +870,8 @@ async def resume_task(taskId: str, task_manager: TaskManager = Depends(get_task_
     return {"message": "任务已恢复。"}
 
 # --- 定时任务管理 ---
-scheduler_router = APIRouter(prefix="/scheduler", dependencies=[Depends(verify_api_key)])
 
-@scheduler_router.get("/tasks", response_model=List[Dict[str, Any]], summary="获取所有定时任务")
+@router.get("/scheduler/tasks", response_model=List[Dict[str, Any]], summary="获取所有定时任务")
 async def list_scheduled_tasks(
     scheduler_manager: SchedulerManager = Depends(get_scheduler_manager),
 ):
@@ -899,7 +880,7 @@ async def list_scheduled_tasks(
     # 修正：将 'id' 键重命名为 'taskId' 以保持API一致性
     return tasks
 
-@scheduler_router.get("/{taskId}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
+@router.get("/scheduler/{taskId}/last_result", response_model=models.TaskInfo, summary="获取定时任务的最近一次运行结果")
 async def get_scheduled_task_last_result(
     taskId: str = Path(..., description="定时任务的ID"),
     session: AsyncSession = Depends(get_db_session),
@@ -912,7 +893,3 @@ async def get_scheduled_task_last_result(
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该定时任务的运行记录。")
     return models.TaskInfo.model_validate(result)
-
-
-router.include_router(tasks_router)
-router.include_router(scheduler_router)

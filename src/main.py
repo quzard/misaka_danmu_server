@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
-from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
-from .api import api_router, control_router
+from .database import init_db, close_db, create_initial_admin_user # type: ignore
+from .api import ui_api, control_api
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
     # --- Startup Logic ---
     setup_logging()
 
-    # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
-    await init_db_tables(app)
+    # init_db 现在处理数据库创建、引擎和会话工厂的创建
+    await init_db(app)
     session_factory = app.state.db_session_factory
 
     # 新增：在启动时清理任何未完成的任务
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
     # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
 
-    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
+    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata", include_in_schema=False)
 
 
 
@@ -143,20 +143,21 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
 
+# --- 主应用实例 ---
+# 文档只为外部控制API生成
 app = FastAPI(
     title="Misaka Danmaku External Control API",
     description="用于外部自动化和集成的API。所有端点都需要通过 `?api_key=` 进行鉴权。",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/api/control/docs",  # 为外部控制API设置专用的文档路径
-    redoc_url=None         # 禁用ReDoc
+    docs_url="/api/control/docs",  # 恢复为外部控制API专用的文档路径
+    redoc_url=None                # 禁用 ReDoc
 )
 
 # 新增：配置CORS，允许前端开发服务器访问API
 app.add_middleware(
     CORSMiddleware,
-    # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
-    allow_origins=["*"],
+    allow_origins=["*"], # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -240,12 +241,15 @@ async def cleanup_task(app: FastAPI):
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
 
-# 包含所有非 dandanplay 的 API 路由
-app.include_router(api_router, prefix="/api")
+# --- API 路由挂载 ---
+# 1. Web UI API (不对外暴露文档)
+app.include_router(ui_api.router, prefix="/api/ui", tags=["UI"], include_in_schema=False)
+app.include_router(ui_api.auth_router, prefix="/api/auth", tags=["Auth"], include_in_schema=False)
 
-# 新增：显式地挂载外部控制API路由，以确保其优先级
-app.include_router(control_router, prefix="/api/control", tags=["External Control API"])
+# 2. 外部控制 API (对外暴露文档)
+app.include_router(control_api.router, prefix="/api/control", tags=["External Control"])
 
+# 3. dandanplay 兼容 API (不对外暴露文档)
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
 # --- 前端服务 (生产环境) ---

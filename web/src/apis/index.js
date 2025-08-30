@@ -293,6 +293,17 @@ export const getAnimeDetail = data =>
 export const setAnimeDetail = data =>
   api.put(`/api/ui/library/anime/${data.animeId}`, data)
 
+/** 创建自定义作品条目 */
+export const createAnimeEntry = data => api.post('/api/ui/library/anime', data)
+
+/** 为作品添加数据源 */
+export const addSourceToAnime = data =>
+  api.post(`/api/ui/library/anime/${data.animeId}/sources`, data)
+
+/** 批量手动导入 */
+export const batchManualImport = data =>
+  api.post(`/api/ui/library/source/${data.sourceId}/batch-import`, data)
+
 /** 获取影视的资源 */
 export const getAnimeSource = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/sources`)

@@ -14,6 +14,7 @@ from . import crud, models, orm_models
 from .rate_limiter import RateLimiter, RateLimitExceededError
 from .image_utils import download_image
 from .config import settings
+from .danmaku_parser import parse_dandan_xml_to_comments
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword
@@ -720,22 +721,47 @@ async def manual_import_task(
     progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter
 ):
     """后台任务：从URL手动导入弹幕。"""
-    logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title}', url='{url}'")
+    logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title}', provider='{providerName}'")
     await progress_callback(10, "正在准备导入...")
     
     try:
+        # Case 1: Custom source with XML data
+        if providerName == 'custom':
+            await progress_callback(20, "正在解析XML文件...")
+            comments = parse_dandan_xml_to_comments(url) # Here 'url' is the XML content
+            if not comments:
+                raise TaskSuccess("未从XML中解析出任何弹幕。")
+            
+            await progress_callback(80, "正在写入数据库...")
+            final_title = title if title else f"第 {episodeIndex} 集"
+            episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, "from_xml", "custom_xml")
+            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+            await session.commit()
+            raise TaskSuccess(f"手动导入完成，从XML新增 {added_count} 条弹幕。")
+
+        # Case 2: Scraper source with URL
         scraper = manager.get_scraper(providerName)
-        # 修正：统一使用 get_id_from_url 方法，并检查其是否存在
         if not hasattr(scraper, 'get_id_from_url'):
             raise NotImplementedError(f"搜索源 '{providerName}' 不支持从URL手动导入。")
 
         provider_episode_id = await scraper.get_id_from_url(url)
-        
-        if not provider_episode_id: raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
+        if not provider_episode_id:
+            raise ValueError(f"无法从URL '{url}' 中解析出有效的视频ID。")
 
         episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
-
         await progress_callback(20, f"已解析视频ID: {episode_id_for_comments}")
+
+        # Auto-generate title if not provided
+        final_title = title
+        if not final_title:
+            if hasattr(scraper, 'get_title_from_url'):
+                try:
+                    final_title = await scraper.get_title_from_url(url)
+                except Exception:
+                    pass # Ignore errors, fallback to default
+            if not final_title:
+                final_title = f"第 {episodeIndex} 集"
+
         try:
             await rate_limiter.check(providerName)
         except RateLimitExceededError as e:
@@ -745,11 +771,10 @@ async def manual_import_task(
         if not comments:
             raise TaskSuccess("未找到任何弹幕。")
 
-        # 成功获取到弹幕后，增加计数
         await rate_limiter.increment(providerName)
 
         await progress_callback(90, "正在写入数据库...")
-        episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, title, url, episode_id_for_comments)
+        episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, url, episode_id_for_comments)
         added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
         await session.commit()
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
@@ -758,7 +783,68 @@ async def manual_import_task(
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
-        
+
+async def batch_manual_import_task(
+    sourceId: int, animeId: int, providerName: str, items: List[models.BatchManualImportItem],
+    progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter
+):
+    """后台任务：批量手动导入弹幕。"""
+    total_items = len(items)
+    logger.info(f"开始批量手动导入任务: sourceId={sourceId}, provider='{providerName}', items={total_items}")
+    await progress_callback(5, f"准备批量导入 {total_items} 个条目...")
+
+    total_added_comments = 0
+    failed_items = 0
+
+    for i, item in enumerate(items):
+        progress = 5 + int(((i + 1) / total_items) * 90) if total_items > 0 else 95
+        item_desc = item.episodeTitle or f"第 {item.episodeIndex} 集"
+        await progress_callback(progress, f"正在处理: {item_desc} ({i+1}/{total_items})")
+
+        try:
+            # 此处我们不能直接调用 manual_import_task 因为它会抛出 TaskSuccess 中断整个循环
+            # 因此我们在这里重新实现其核心逻辑
+            if providerName == 'custom':
+                comments = parse_dandan_xml_to_comments(item.content)
+                if not comments: continue
+                final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
+                episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
+                added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+                total_added_comments += added_count
+            else:
+                # URL-based import logic
+                scraper = manager.get_scraper(providerName)
+                provider_episode_id = await scraper.get_id_from_url(item.content)
+                if not provider_episode_id: raise ValueError("无法解析ID")
+                episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+                final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
+                
+                await rate_limiter.check(providerName)
+                comments = await scraper.get_comments(episode_id_for_comments)
+                await rate_limiter.increment(providerName)
+                
+                if comments:
+                    episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, item.content, episode_id_for_comments)
+                    added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+                    total_added_comments += added_count
+            
+            await session.commit()
+        except RateLimitExceededError as e:
+            logger.warning(f"批量导入任务因达到速率限制而暂停: {e}")
+            await progress_callback(progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
+            await asyncio.sleep(e.retry_after_seconds)
+            logger.warning(f"条目 '{item_desc}' 因速率限制被跳过，请稍后手动重试。")
+            failed_items += 1
+        except Exception as e:
+            logger.error(f"处理批量导入条目 '{item_desc}' 时失败: {e}", exc_info=True)
+            failed_items += 1
+            await session.rollback()
+    
+    final_message = f"批量导入完成。共处理 {total_items} 个条目，新增 {total_added_comments} 条弹幕。"
+    if failed_items > 0:
+        final_message += f" {failed_items} 个条目处理失败。"
+    raise TaskSuccess(final_message)
+
 async def auto_search_and_import_task(
     payload: "models.ControlAutoImportRequest",
     progress_callback: Callable,

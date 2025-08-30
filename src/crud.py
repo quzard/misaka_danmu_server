@@ -17,6 +17,7 @@ from .orm_models import (
     Anime, AnimeSource, Episode, Comment, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 , RateLimitState)
 from .config import settings
+from .danmaku_parser import parse_dandan_xml_to_comments
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,35 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
+
+async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Gets a single anime from the library by its ID, with counts.
+    """
+    stmt = (
+        select(
+            Anime.id.label("animeId"),
+            Anime.localImagePath.label("localImagePath"),
+            Anime.imageUrl.label("imageUrl"),
+            Anime.title,
+            Anime.type,
+            Anime.season,
+            Anime.year,
+            Anime.createdAt.label("createdAt"),
+            case(
+                (Anime.type == 'movie', 1),
+                else_=func.coalesce(func.max(Episode.episodeIndex), 0)
+            ).label("episodeCount"),
+            func.count(distinct(AnimeSource.id)).label("sourceCount")
+        )
+        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
+        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
+        .where(Anime.id == anime_id)
+        .group_by(Anime.id)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().one_or_none()
+    return dict(row) if row else None
 
 async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> Optional[Dict[str, Any]]:
     """获取指定源的最后一个分集。"""
@@ -106,6 +136,34 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     
     await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_anime.id
+
+async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) -> Anime:
+    """
+    Manually creates a new anime entry in the database.
+    """
+    # Check if an anime with the same title and season already exists
+    existing_anime = await find_anime_by_title_and_season(session, anime_data.title, anime_data.season)
+    if existing_anime:
+        raise ValueError(f"作品 '{anime_data.title}' (第 {anime_data.season} 季) 已存在。")
+
+    new_anime = Anime(
+        title=anime_data.title,
+        type=anime_data.type,
+        season=anime_data.season,
+        year=anime_data.year,
+        imageUrl=anime_data.imageUrl
+    )
+    session.add(new_anime)
+    await session.flush()
+    
+    # Create associated metadata and alias records
+    new_metadata = AnimeMetadata(animeId=new_anime.id)
+    new_alias = AnimeAlias(animeId=new_anime.id)
+    session.add_all([new_metadata, new_alias])
+    
+    await session.flush()
+    await session.refresh(new_anime)
+    return new_anime
 
 async def update_anime_details(session: AsyncSession, anime_id: int, update_data: models.AnimeDetailUpdate) -> bool:
     """在事务中更新番剧的核心信息、元数据和别名。"""
@@ -1667,3 +1725,15 @@ async def purge_binary_logs(session: AsyncSession, days: int) -> str:
     msg = f"成功执行 PURGE BINARY LOGS，清除了 {days} 天前的日志。"
     logger.info(msg)
     return msg
+
+async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_content: str) -> int:
+    """
+    Parses XML content and adds the comments to a given episode.
+    Returns the number of comments added.
+    """
+    comments = parse_dandan_xml_to_comments(xml_content)
+    if not comments:
+        return 0
+    
+    added_count = await bulk_insert_comments(session, episode_id, comments)
+    return added_count
