@@ -263,8 +263,8 @@ else:
     app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
     # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
     app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-    # pwa挂载
-    #app.mount("/manifest.json", StaticFiles(directory="web/dist/manifest.json"), name="manifest")
+    # dist挂载
+    app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
     # 挂载用户缓存的图片 (如海报)
     app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
     # 然后，为所有其他路径提供 index.html 以支持前端路由
