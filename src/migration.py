@@ -61,9 +61,14 @@ def _generate_xml_from_comments(comments: List[TmpComment], episode_id: int) -> 
 
 async def _add_danmaku_path_column_if_not_exists(session: AsyncSession):
     """如果 episode 表中不存在 danmaku_file_path 列，则添加它。"""
-    inspector = inspect(session.bind)
-    columns = await asyncio.to_thread(inspector.get_columns, 'episode')
-    if not any(c['name'] == 'danmaku_file_path' for c in columns):
+    def check_columns_sync(conn):
+        inspector = inspect(conn)
+        columns = inspector.get_columns('episode')
+        return any(c['name'] == 'danmaku_file_path' for c in columns)
+
+    has_column = await session.run_sync(check_columns_sync)
+
+    if not has_column:
         logger.info("检测到 'episode' 表中缺少 'danmaku_file_path' 列，正在添加...")
         await session.execute(text("ALTER TABLE episode ADD COLUMN danmaku_file_path VARCHAR(512);"))
         await session.commit()
@@ -75,8 +80,11 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
     """
     logger.info("--- 正在检查数据库迁移需求 ---")
     async with session_factory() as session:
-        inspector = inspect(session.bind)
-        has_comment_table = await asyncio.to_thread(inspector.has_table, 'comment')
+        def check_table_sync(conn):
+            inspector = inspect(conn)
+            return inspector.has_table('comment')
+
+        has_comment_table = await session.run_sync(check_table_sync)
         
         if not has_comment_table:
             logger.info("✅ 未找到 'comment' 表，无需迁移。")
