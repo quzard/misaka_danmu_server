@@ -123,6 +123,16 @@ async def lifespan(app: FastAPI):
     app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
     await app.state.scheduler_manager.start()
 
+    # --- API 路由挂载 ---
+    # 在所有管理器初始化后，再挂载所有路由，以确保动态路由（如OAuth回调）能被正确注册。
+    # 挂载顺序很重要：更具体的路径应该放在前面，以避免被通用路径覆盖。
+
+    app.include_router(control_router, prefix="/api/control", tags=["External Control"])
+    app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
+    app.include_router(api_router, prefix="/api", include_in_schema=False)
+    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata", tags=["Metadata"])
+
+
     yield
     
     # --- Shutdown Logic ---
@@ -239,19 +249,6 @@ async def cleanup_task(app: FastAPI):
             break
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
-
-# --- API 路由挂载 ---
-# 挂载顺序很重要：更具体的路径应该放在前面
-
-# 1. 外部控制 API (对外暴露文档)
-app.include_router(control_router, prefix="/api/control", tags=["External Control"])
-
-# 2. dandanplay 兼容 API (不对外暴露文档)
-app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
-
-# 3. UI 和其他 API (不对外暴露文档)
-# 恢复为原始的挂载方式，确保 /api/ui/auth/token 等路径正确
-app.include_router(api_router, prefix="/api", include_in_schema=False)
 
 # --- 前端服务 (生产环境) ---
 # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
