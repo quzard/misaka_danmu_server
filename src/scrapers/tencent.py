@@ -519,6 +519,52 @@ class TencentScraper(BaseScraper):
         """
         获取分集列表，优先使用新的“分页卡片”策略。
         """
+        # 修正：为电影类型提供专门的处理逻辑。
+        # 电影通常只有一个分集（即正片本身），其 episodeId 需要是 vid，而传入的 media_id 是 cid。
+        if db_media_type == 'movie':
+            self.logger.info(f"检测到媒体类型为电影 (media_id={media_id})，将获取正片 vid。")
+            try:
+                # 对于电影，我们需要从其主页获取真实的 vid
+                cover_url = f"https://v.qq.com/x/cover/{media_id}.html"
+                response = await self.client.get(cover_url)
+                response.raise_for_status()
+                html_content = response.text
+
+                vid = None
+                # 优先尝试从 window.__INITIAL_DATA__ 解析，更稳定
+                match = re.search(r'window\.__INITIAL_DATA__\s*=\s*({.*?});', html_content)
+                if match:
+                    try:
+                        initial_data = json.loads(match.group(1))
+                        vid = initial_data.get("video_info", {}).get("vid")
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        self.logger.warning("解析 __INITIAL_DATA__ 失败，将尝试备用方法。")
+
+                # 如果第一种方法失败，使用备用正则
+                if not vid:
+                    match = re.search(r'"vid"\s*:\s*"([a-zA-Z0-9]+)"', html_content)
+                    if match:
+                        vid = match.group(1)
+
+                if vid:
+                    self.logger.info(f"从页面成功解析到电影的 vid: {vid}")
+                    final_episode_id = vid
+                else:
+                    self.logger.warning(f"无法从页面解析电影的 vid，将回退使用 cid ({media_id}) 作为 vid。这可能导致弹幕获取失败。")
+                    final_episode_id = media_id
+
+                return [models.ProviderEpisodeInfo(
+                    provider=self.provider_name, episodeId=final_episode_id, title="正片", episodeIndex=1,
+                    url=f"https://v.qq.com/x/cover/{media_id}/{final_episode_id}.html"
+                )]
+            except Exception as e:
+                self.logger.error(f"获取电影 vid 时出错 (cid={media_id})，将回退使用 cid: {e}", exc_info=True)
+                # 发生异常时也回退
+                return [models.ProviderEpisodeInfo(
+                    provider=self.provider_name, episodeId=media_id, title="正片", episodeIndex=1,
+                    url=f"https://v.qq.com/x/cover/{media_id}.html"
+                )]
+
         episodes = []
         try:
             # 优先尝试新的“分页卡片”策略
