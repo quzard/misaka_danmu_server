@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
     app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
     await app.state.scheduler_manager.start()
-
+    
     # --- 前端服务 (生产环境) ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
     # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(request: Request, full_path: str):
             return FileResponse("web/dist/index.html")
-
+    
     yield
     
     # --- Shutdown Logic ---
