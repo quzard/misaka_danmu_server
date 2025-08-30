@@ -22,7 +22,23 @@ from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 
 logger = logging.getLogger(__name__)
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+
+# --- Helper Functions ---
+
+def _normalize_for_filtering(title: str) -> str:
+    """Removes brackets and standardizes a title for fuzzy matching."""
+    if not title:
+        return ""
+    # Remove content in brackets
+    title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+    # Normalize to lowercase, remove spaces, and standardize colons
+    return title.lower().replace(" ", "").replace("：", ":").strip()
+
+def _is_movie_by_title(title: str) -> bool:
+    """Checks if a title likely represents a movie based on keywords."""
+    if not title:
+        return False
+    return any(kw in title.lower() for kw in ["剧场版", "劇場版", "movie", "映画"])
 
 # --- 依赖项 ---
 
@@ -85,6 +101,8 @@ async def verify_api_key(
         session, ip_address, endpoint, status.HTTP_200_OK, "API Key验证通过"
     )
     return api_key
+
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 # --- Pydantic 模型 ---
 
@@ -211,7 +229,8 @@ async def auto_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    api_key: str = Depends(verify_api_key)
 ):
     """
     ### 功能
@@ -286,6 +305,7 @@ async def search_media(
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
+    api_key: str = Depends(verify_api_key)
 ):
     """
     ### 功能
@@ -322,21 +342,13 @@ async def search_media(
             logger.error(f"搜索媒体 '{keyword}' 时发生网络错误: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"搜索时发生网络错误: {e}")
 
-        def normalize_for_filtering(title: str) -> str:
-            if not title: return ""
-            return re.sub(r'[\[【(（].*?[\]】)）]', '', title).lower().replace(" ", "").replace("：", ":").strip()
-
-        normalized_search_title = normalize_for_filtering(keyword)
-        filtered_results = [item for item in all_results if fuzz.token_set_ratio(normalize_for_filtering(item.title), normalized_search_title) > 80]
+        normalized_search_title = _normalize_for_filtering(keyword)
+        filtered_results = [item for item in all_results if fuzz.token_set_ratio(_normalize_for_filtering(item.title), normalized_search_title) > 80]
         logger.info(f"模糊标题过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         results = filtered_results
 
-        def is_movie_by_title(title: str) -> bool:
-            if not title: return False
-            return any(kw in title.lower() for kw in ["剧场版", "劇場版", "movie", "映画"])
-
         for item in results:
-            if item.type == 'tv_series' and is_movie_by_title(item.title):
+            if item.type == 'tv_series' and _is_movie_by_title(item.title):
                 item.type = 'movie'
 
         if season:
