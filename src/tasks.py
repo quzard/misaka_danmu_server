@@ -3,6 +3,7 @@ from typing import Callable, List, Optional
 import asyncio
 import re
 import traceback
+import shutil
 from datetime import datetime, timedelta, timezone
 
 from thefuzz import fuzz
@@ -59,42 +60,15 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
             if not anime_exists:
                 raise TaskSuccess("作品未找到，无需删除。")
 
-            # 1. 找到所有关联的源ID
-            source_ids_res = await session.execute(select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == animeId))
-            source_ids = source_ids_res.scalars().all()
-            await progress_callback(10, f"找到 {len(source_ids)} 个关联数据源。")
+            # 1. 删除关联的弹幕文件目录
+            await progress_callback(50, "正在删除关联的弹幕文件...")
+            anime_danmaku_dir = crud.DANMAKU_BASE_DIR / str(animeId)
+            if anime_danmaku_dir.exists() and anime_danmaku_dir.is_dir():
+                shutil.rmtree(anime_danmaku_dir)
+                logger.info(f"已删除作品的弹幕目录: {anime_danmaku_dir}")
 
-            if source_ids:
-                # 2. 找到所有关联的分集ID
-                await progress_callback(20, "正在查找关联分集...")
-                episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId.in_(source_ids)))
-                episode_ids = episode_ids_res.scalars().all()
-                await progress_callback(30, f"找到 {len(episode_ids)} 个关联分集。")
-
-                if episode_ids:
-                    # 3. 删除所有弹幕
-                    comment_count_res = await session.execute(
-                        select(func.count(orm_models.Comment.id)).where(orm_models.Comment.episodeId.in_(episode_ids))
-                    )
-                    comment_count = comment_count_res.scalar_one()
-                    await progress_callback(40, f"正在删除 {comment_count} 条弹幕...")
-                    await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
-                    
-                    # 4. 删除所有分集
-                    await progress_callback(60, f"正在删除 {len(episode_ids)} 个分集...")
-                    await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
-
-                # 5. 删除所有源
-                await progress_callback(70, f"正在删除 {len(source_ids)} 个数据源...")
-                await session.execute(delete(orm_models.AnimeSource).where(orm_models.AnimeSource.id.in_(source_ids)))
-
-            # 6. 删除元数据和别名
-            await progress_callback(80, "正在删除元数据和别名...")
-            await session.execute(delete(orm_models.AnimeMetadata).where(orm_models.AnimeMetadata.animeId == animeId))
-            await session.execute(delete(orm_models.AnimeAlias).where(orm_models.AnimeAlias.animeId == animeId))
-
-            # 7. 删除作品本身
-            await progress_callback(90, "正在删除主作品记录...")
+            # 2. 删除作品本身 (数据库将通过级联删除所有关联记录)
+            await progress_callback(90, "正在删除数据库记录...")
             await session.delete(anime_exists)
             
             await session.commit()
@@ -126,22 +100,7 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
         if not source_exists:
             raise TaskSuccess("数据源未找到，无需删除。")
 
-        # 1. 找到所有关联的分集ID
-        episode_ids_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId == sourceId))
-        episode_ids = episode_ids_res.scalars().all()
-
-        if episode_ids:
-            # 2. 删除所有这些分集关联的弹幕
-            await progress_callback(30, f"正在删除 {len(episode_ids)} 个分集的弹幕...")
-            await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId.in_(episode_ids)))
-            
-            # 3. 删除所有这些分集
-            await progress_callback(60, "正在删除分集记录...")
-            await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id.in_(episode_ids)))
-
-        # 4. 删除源本身
-        await progress_callback(90, "正在删除源记录...")
-        await session.delete(source_exists)
+        await crud.delete_anime_source(session, sourceId)
         
         await session.commit()
         raise TaskSuccess("删除成功。")
@@ -162,11 +121,7 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
         if not episode_exists:
             raise TaskSuccess("分集未找到，无需删除。")
 
-        # 1. 显式删除关联的弹幕
-        await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId == episodeId))
-        
-        # 2. 删除分集本身
-        await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id == episodeId))
+        await crud.delete_episode(session, episodeId)
         
         await session.commit()
         raise TaskSuccess("删除成功。")
@@ -230,9 +185,12 @@ async def _process_episode_list(
         if comments:
             await rate_limiter.increment(scraper.provider_name)
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-            total_comments_added += added_count
-            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+            
+            added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+            if file_path:
+                await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+                total_comments_added += added_count
+                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
             await session.commit()
 
         i += 1
@@ -248,14 +206,8 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
             progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
             await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id}) 的数据...")
 
-            # 为每个分集单独执行删除操作，以减小事务大小和锁定的时间
-            # 1. 删除关联的弹幕
-            await session.execute(delete(orm_models.Comment).where(orm_models.Comment.episodeId == episode_id))
-            
-            # 2. 删除分集本身
-            result = await session.execute(delete(orm_models.Episode).where(orm_models.Episode.id == episode_id))
-            
-            # 检查是否有行被删除
+            # crud.delete_episode 会处理文件和数据库记录的删除
+            result = await crud.delete_episode(session, episode_id)
             if result.rowcount > 0:
                 deleted_count += 1
             
@@ -353,8 +305,10 @@ async def generic_import_task(
             episode_title = f"第 {currentEpisodeIndex} 集"
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, currentEpisodeIndex, episode_title, None, "failover")
             
-            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-            await session.commit()
+            added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+            if file_path:
+                await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+                await session.commit()
             
             final_message = f"通过故障转移导入完成，共新增 {added_count} 条弹幕。" + (" (警告：海报图片下载失败)" if image_download_failed else "")
             raise TaskSuccess(final_message)
@@ -580,19 +534,16 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         # 新增：成功获取到弹幕后，增加计数
         await rate_limiter.increment(provider_name)
 
-        # 新增：在插入前，先筛选出数据库中不存在的新弹幕，以避免产生大量的“重复条目”警告。
-        await progress_callback(95, "正在比对新旧弹幕...")
-        existing_cids = await crud.get_existing_comment_cids(session, episodeId)
-        new_comments = [c for c in all_comments_from_source if str(c.get('cid')) not in existing_cids]
-
-        if not new_comments:
+        # 逻辑简化：直接覆盖写入弹幕文件
+        await progress_callback(96, f"正在写入 {len(all_comments_from_source)} 条新弹幕...")
+        added_count, file_path = await crud.write_danmaku_to_file(session, episodeId, all_comments_from_source)
+        
+        if file_path:
+            await crud.update_episode_danmaku_info(session, episodeId, file_path, added_count)
+        else:
+            # 如果文件写入失败，至少更新获取时间
             await crud.update_episode_fetch_time(session, episodeId)
-            raise TaskSuccess("刷新完成，没有新增弹幕。")
 
-        await progress_callback(96, f"正在写入 {len(new_comments)} 条新弹幕...")
-        added_count = await crud.bulk_insert_comments(session, episodeId, new_comments)
-        await crud.update_episode_fetch_time(session, episodeId)
-        logger.info(f"分集 ID: {episodeId} 刷新完成，新增 {added_count} 条弹幕。")
         await session.commit()
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
@@ -735,9 +686,11 @@ async def manual_import_task(
             await progress_callback(80, "正在写入数据库...")
             final_title = title if title else f"第 {episodeIndex} 集"
             episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, "from_xml", "custom_xml")
-            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-            await session.commit()
-            raise TaskSuccess(f"手动导入完成，从XML新增 {added_count} 条弹幕。")
+            added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+            if file_path:
+                await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+                await session.commit()
+                raise TaskSuccess(f"手动导入完成，从XML新增 {added_count} 条弹幕。")
 
         # Case 2: Scraper source with URL
         scraper = manager.get_scraper(providerName)
@@ -775,9 +728,11 @@ async def manual_import_task(
 
         await progress_callback(90, "正在写入数据库...")
         episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, url, episode_id_for_comments)
-        added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-        await session.commit()
-        raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
+        added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+        if file_path:
+            await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+            await session.commit()
+            raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         raise
     except Exception as e:
@@ -809,8 +764,10 @@ async def batch_manual_import_task(
                 if not comments: continue
                 final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
                 episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
-                added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-                total_added_comments += added_count
+                added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+                if file_path:
+                    await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+                    total_added_comments += added_count
             else:
                 # URL-based import logic
                 scraper = manager.get_scraper(providerName)
@@ -825,8 +782,10 @@ async def batch_manual_import_task(
                 
                 if comments:
                     episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, item.content, episode_id_for_comments)
-                    added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
-                    total_added_comments += added_count
+                    added_count, file_path = await crud.write_danmaku_to_file(session, episode_db_id, comments)
+                    if file_path:
+                        await crud.update_episode_danmaku_info(session, episode_db_id, file_path, added_count)
+                        total_added_comments += added_count
             
             await session.commit()
         except RateLimitExceededError as e:

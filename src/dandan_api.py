@@ -11,7 +11,7 @@ from thefuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response, JSONResponse
 from fastapi.routing import APIRoute
 
 from . import crud, models, orm_models
@@ -884,32 +884,6 @@ async def get_external_comments_from_url(
     comments = [models.Comment.model_validate(c) for c in comments_data]
     return models.CommentResponse(count=len(comments), comments=comments)
 
-async def _get_real_episode_id(
-    session: AsyncSession,
-    anime_id: int,
-    source_order: int, # This is 1-based index
-    episode_index: int
-) -> Optional[int]:
-    """
-    根据复合信息（anime_id, source_order, episode_index）查找真实的数据库 episode.id。
-    此函数的逻辑必须与 crud.create_episode_if_not_exists 中生成ID的逻辑完全对应。
-    """
-    # 1. 获取该 anime 的所有 source_id，并按 id 排序，以复现ID生成时的顺序
-    source_ids_stmt = select(orm_models.AnimeSource.id).where(orm_models.AnimeSource.animeId == anime_id).order_by(orm_models.AnimeSource.id)
-    source_ids_res = await session.execute(source_ids_stmt)
-    source_ids = source_ids_res.scalars().all()
-
-    # 2. 使用 source_order (1-based) 作为索引找到目标 source_id
-    # source_order is 1-based, so we check against length and use index `source_order - 1`
-    if not source_ids or source_order > len(source_ids):
-        return None
-    
-    target_source_id = source_ids[source_order - 1]
-
-    # 3. 根据 source_id 和 episode_index 找到 episode.id
-    episode_id_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId == target_source_id, orm_models.Episode.episodeIndex == episode_index))
-    return episode_id_res.scalar_one_or_none()
-
 @implementation_router.get(
     "/comment/{episodeId}",
     response_model=models.CommentResponse,
@@ -927,55 +901,9 @@ async def get_comments_for_dandan(
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
-    注意：这里的 episode_id 实际上是我们数据库中的主键 ID。
-    新增：支持 withRelated 参数，用于聚合所有源的弹幕。
-    兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
-    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'false')
-    aggregation_enabled = aggregation_enabled_str.lower() == 'true'
-
-    episode_id_str = str(episodeId)
-    is_new_format = len(episode_id_str) == 14 and episode_id_str.startswith('25')
-
-    comments_data = []
-    if not is_new_format:
-        # 旧版ID，直接作为数据库主键使用
-        comments_data = await crud.fetch_comments(session, episodeId)
-    else:
-        # 新版复合ID，需要解析
-        try:
-            anime_id = int(episode_id_str[2:8])
-            source_order = int(episode_id_str[8:10])
-            episode_index = int(episode_id_str[10:14])
-
-            if withRelated and aggregation_enabled:
-                # 聚合弹幕逻辑
-                logger.info(f"聚合弹幕: anime_id={anime_id}, episode_index={episode_index}")
-                related_episode_ids = await crud.get_related_episode_ids(session, anime_id, episode_index)
-                if related_episode_ids:
-                    comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
-            else:
-                # 单集弹幕逻辑
-                if withRelated and not aggregation_enabled:
-                    logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
-                
-                real_episode_id = await _get_real_episode_id(session, anime_id, source_order, episode_index)
-                if real_episode_id:
-                    comments_data = await crud.fetch_comments(session, real_episode_id)
-                else:
-                    logger.warning(f"无法从复合信息中找到对应的分集: anime_id={anime_id}, source_order={source_order}, episode_index={episode_index}")
-
-        except (ValueError, IndexError) as e:
-            logger.error(f"解析新版格式的 episode_id '{episodeId}' 失败: {e}。")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的 episodeId 格式。")
-
-    # 新增：聚合后去重逻辑
-    unique_comments = {}
-    for comment in comments_data:
-        unique_key = (comment['p'], comment['m'])
-        if unique_key not in unique_comments:
-            unique_comments[unique_key] = comment
-    comments_data = list(unique_comments.values())
+    # 弹幕聚合功能已移除，直接从文件获取弹幕
+    comments_data = await crud.fetch_comments(session, episodeId)
 
     # 应用输出数量限制
     limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
