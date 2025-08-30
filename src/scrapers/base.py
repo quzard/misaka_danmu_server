@@ -156,8 +156,13 @@ class BaseScraper(ABC):
         if not self.is_loggable:
             return False
         
-        is_enabled_str = await self.config_manager.get("logRawResponses", "false")
-        return is_enabled_str.lower() == 'true'
+        # 修正：将配置键名标准化为 snake_case (log_raw_responses)，以提高项目内一致性。
+        # 之前的键名 "logRawResponses" 可能与前端或数据库中的实际键名不匹配。
+        is_enabled_str = await self.config_manager.get("log_raw_responses", "false")
+        # 健壮性检查：同时处理布尔值和字符串 "true"，以防配置值类型不确定。
+        if isinstance(is_enabled_str, bool):
+            return is_enabled_str
+        return str(is_enabled_str).lower() == 'true'
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -243,13 +248,6 @@ class BaseScraper(ABC):
         返回的字典列表应与 crud.bulk_insert_comments 的期望格式兼容。
         """
         raise NotImplementedError
-
-    async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
-        """
-        (新增) 统一的从URL解析ID的接口。
-        子类应重写此方法以支持从URL直接导入。
-        """
-        return None
 
     def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
         """
