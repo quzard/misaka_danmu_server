@@ -105,10 +105,6 @@ async def lifespan(app: FastAPI):
     await app.state.scraper_manager.initialize()
     await app.state.metadata_manager.initialize()
 
-    # --- 动态挂载元数据源的API路由 ---
-    # 在元数据管理器初始化（加载了所有插件的路由）后，将其动态生成的路由包含进来。
-    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
-
     # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
 
@@ -123,15 +119,8 @@ async def lifespan(app: FastAPI):
     app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
     await app.state.scheduler_manager.start()
 
-    # --- API 路由挂载 ---
-    # 在所有管理器初始化后，再挂载所有路由，以确保动态路由（如OAuth回调）能被正确注册。
-    # 挂载顺序很重要：更具体的路径应该放在前面，以避免被通用路径覆盖。
-
-    app.include_router(control_router, prefix="/api/control", tags=["External Control"])
-    app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
-    app.include_router(api_router, prefix="/api", include_in_schema=False)
+    # 关键：在 lifespan 中挂载动态路由
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata", tags=["Metadata"])
-
 
     yield
     
@@ -249,6 +238,17 @@ async def cleanup_task(app: FastAPI):
             break
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
+
+# --- API 路由挂载 ---
+# 挂载顺序很重要：更具体的路径应该放在前面。
+
+# 1. 挂载独立的、高优先级的路由
+app.include_router(control_router, prefix="/api/control", tags=["External Control"])
+app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
+
+# 2. 挂载包含所有静态UI路由的 api_router。
+# 注意：动态的 /api/metadata/... 路由将在 lifespan 中被添加到这里。
+app.include_router(api_router, prefix="/api", include_in_schema=False)
 
 # --- 前端服务 (生产环境) ---
 # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
