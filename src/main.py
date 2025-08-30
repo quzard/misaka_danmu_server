@@ -172,12 +172,6 @@ async def httpx_connect_error_handler(request: Request, exc: httpx.ConnectError)
         content={"detail": f"无法连接到外部服务 ({exc.request.url.host})。请检查您的网络连接、代理设置，或确认目标服务未屏蔽您的服务器IP。"},
     )
 
-# 只将 control_api 路由挂载到文档应用上
-docs_app.include_router(control_api.router, prefix="/api/control", tags=["External Control"])
-
-# 将文档应用作为子应用挂载到主应用上
-app.mount("/api/control/docs", docs_app)
-
 @app.exception_handler(httpx.TimeoutException)
 async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutException):
     """处理外部服务请求超时的错误。"""
