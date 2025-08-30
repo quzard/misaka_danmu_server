@@ -663,7 +663,7 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
 
 async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
     """从XML文件获取弹幕。"""
-    episode = await session.get(orm_models.Episode, episode_id)
+    episode = await session.get(Episode, episode_id)
     if not episode or not episode.danmakuFilePath:
         return []
     
@@ -720,9 +720,9 @@ async def write_danmaku_to_file(
         return 0, ""
 
     episode = await session.get(
-        orm_models.Episode, 
+        Episode, 
         episode_id, 
-        options=[selectinload(orm_models.Episode.source).selectinload(orm_models.AnimeSource.anime)]
+        options=[selectinload(Episode.source).selectinload(AnimeSource.anime)]
     )
     if not episode:
         raise ValueError(f"找不到ID为 {episode_id} 的分集")
@@ -1234,7 +1234,7 @@ async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
 
 async def update_episode_danmaku_info(session: AsyncSession, episode_id: int, file_path: str, count: int):
     """更新分集的弹幕文件路径和弹幕数量。"""
-    stmt = update(orm_models.Episode).where(orm_models.Episode.id == episode_id).values(
+    stmt = update(Episode).where(Episode.id == episode_id).values(
         danmakuFilePath=file_path, commentCount=count, fetchedAt=datetime.now(timezone.utc)
     )
     await session.execute(stmt)

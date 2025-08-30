@@ -19,7 +19,7 @@ const navItems = [
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
-const version = 'v1.1.7'
+const version = 'v2.0.0'
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)

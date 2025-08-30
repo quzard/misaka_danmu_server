@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 import xml.etree.ElementTree as ET
 
-from sqlalchemy import select, inspect, text
+from sqlalchemy import select, inspect, text, func
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlalchemy.orm import selectinload, DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import BigInteger, ForeignKey, Integer, String, TEXT
