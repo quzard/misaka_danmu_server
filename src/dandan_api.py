@@ -11,7 +11,8 @@ from thefuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from . import crud, models, orm_models
