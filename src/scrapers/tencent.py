@@ -229,7 +229,7 @@ class TencentScraper(BaseScraper):
             return None
 
         video_info = item.video_info
-        vid = item.doc.id
+        media_id = item.doc.id # 对于搜索结果，这个ID是cid
 
         # 关键修正：参考旧代码，过滤掉没有年份信息的条目。
         # 这通常是无效的或非正片内容（如“安利向”、“二创合集”等）。
@@ -242,8 +242,8 @@ class TencentScraper(BaseScraper):
         title = self._apply_title_mapping(title)
 
         # Basic validation
-        if not title or not vid:
-            self.logger.debug(f"跳过无效项目: title={title}, vid={vid}")
+        if not title or not media_id:
+            self.logger.debug(f"跳过无效项目: title={title}, media_id={media_id}")
             return None
 
         # Apply intelligent filtering based on keywords
@@ -290,7 +290,7 @@ class TencentScraper(BaseScraper):
         # Build ProviderSearchInfo
         return models.ProviderSearchInfo(
             provider=self.provider_name,
-            mediaId=vid,
+            mediaId=media_id,
             title=title,
             type=internal_media_type, # 使用映射后的标准类型
             season=get_season_from_title(title),
@@ -519,7 +519,7 @@ class TencentScraper(BaseScraper):
         if not episodes:
             # 方案2 (备): 回退到旧的分页逻辑
             self.logger.warning("Tencent: 新版API失败，正在回退到旧版分页API获取分集...")
-            episodes = await self._get_episodes_v1(media_id, db_media_type)
+            episodes = await self._get_episodes_v1(media_id)
 
         if target_episode_index:
             return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
@@ -558,7 +558,10 @@ class TencentScraper(BaseScraper):
             if module_data.module_datas and module_data.module_datas[0].module_params:
                 tabs_str = module_data.module_datas[0].module_params.tabs
                 if tabs_str:
-                    return [TencentEpisodeTabInfo.model_validate(t) for t in json.loads(tabs_str)]
+                    try:
+                        return [TencentEpisodeTabInfo.model_validate(t) for t in json.loads(tabs_str)]
+                    except json.JSONDecodeError:
+                        self.logger.error(f"Tencent: 解析分集卡片JSON失败: {tabs_str}")
         return None
 
     async def _fetch_episodes_by_tab(self, cid: str, tab: TencentEpisodeTabInfo) -> List[TencentEpisode]:
@@ -637,10 +640,10 @@ class TencentScraper(BaseScraper):
 
         return await self._process_and_format_tencent_episodes(list(all_episodes.values()), db_media_type, cid)
 
-    async def _get_episodes_v1(self, media_id: str, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
+    async def _get_episodes_v1(self, media_id: str) -> List[models.ProviderEpisodeInfo]:
         """旧版分集获取逻辑，作为备用方案。"""
         tencent_episodes = await self._internal_get_episodes_v1(media_id)
-        return await self._process_and_format_tencent_episodes(tencent_episodes, db_media_type, media_id)
+        return await self._process_and_format_tencent_episodes(tencent_episodes, None, media_id)
 
     async def _process_and_format_tencent_episodes(self, tencent_episodes: List[TencentEpisode], db_media_type: Optional[str], cid: str) -> List[models.ProviderEpisodeInfo]:
         """
@@ -913,15 +916,22 @@ class TencentScraper(BaseScraper):
 
         return formatted_comments
 
-    async def get_id_from_url(self, url: str) -> Optional[str]:
-        """从腾讯视频URL中提取 vid。"""
-        # 腾讯视频的URL格式多样，但通常vid是路径的最后一部分
-        match = re.search(r'/([a-zA-Z0-9]+)\.html', url)
-        if match:
-            vid = match.group(1)
+    async def get_media_id_from_url(self, url: str) -> Optional[str]:
+        """从腾讯视频URL中提取 media_id (cid 或 vid)。"""
+        # 优先匹配 cover URL 中的 cid
+        cid_match = re.search(r'/cover/([^/]+?)(/|\.html|$)', url)
+        if cid_match:
+            cid = cid_match.group(1)
+            self.logger.info(f"Tencent: 从URL {url} 解析到 cid: {cid}")
+            return cid
+
+        # 如果不是 cover URL，再尝试匹配普通视频页的 vid
+        vid_match = re.search(r'/([a-zA-Z0-9]+)\.html', url)
+        if vid_match:
+            vid = vid_match.group(1)
             self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
             return vid
-        self.logger.warning(f"Tencent: 无法从URL中解析出 vid: {url}")
+        self.logger.warning(f"Tencent: 无法从URL中解析出 cid 或 vid: {url}")
         return None
 
     def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
