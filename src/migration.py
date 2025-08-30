@@ -79,93 +79,107 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
     在应用启动时执行数据库迁移。
     """
     logger.info("--- 正在检查数据库迁移需求 ---")
+
+    # 首先，只检查一次 comment 表是否存在
     async with session_factory() as session:
         def check_table_sync(conn):
             inspector = inspect(conn.connection())
             return inspector.has_table('comment')
 
         has_comment_table = await session.run_sync(check_table_sync)
-        
         if not has_comment_table:
             logger.info("✅ 未找到 'comment' 表，无需迁移。")
             return
 
-        logger.info("检测到旧的 'comment' 表，将开始执行数据迁移...")
+    logger.info("检测到旧的 'comment' 表，将开始执行数据迁移...")
 
-        # 1. 确保新列存在
+    # 1. 确保新列存在
+    async with session_factory() as session:
         await _add_danmaku_path_column_if_not_exists(session)
 
-        # 2. 查询所有需要迁移的分集和弹幕
-        logger.info("正在查询所有分集和关联的弹幕数据，这可能需要一些时间...")
+    # 2. 轻量级查询，只获取需要迁移的分集ID列表
+    async with session_factory() as session:
+        logger.info("正在查询需要迁移的分集ID列表...")
         stmt = (
-            select(TmpEpisode)
-            .options(
-                selectinload(TmpEpisode.comments),
-                selectinload(TmpEpisode.source).selectinload(TmpAnimeSource.anime)
-            )
-            .where(TmpEpisode.comments.any(), TmpEpisode.danmakuFilePath == None)
+            select(TmpEpisode.id)
+            .join(TmpEpisode.comments)
+            .where(TmpEpisode.danmakuFilePath.is_(None))
+            .distinct()
         )
         result = await session.execute(stmt)
-        episodes_to_migrate = result.scalars().unique().all()
+        episode_ids_to_migrate = result.scalars().all()
 
-        if not episodes_to_migrate:
-            logger.info("✅ 数据库中没有找到需要迁移的弹幕数据。")
+    if not episode_ids_to_migrate:
+        logger.info("✅ 数据库中没有找到需要迁移的弹幕数据。")
+        async with session_factory() as session:
             logger.info("正在删除空的 'comment' 表...")
             await session.execute(text("DROP TABLE comment;"))
             await session.commit()
             logger.info("'comment' 表已删除。")
-            return
+        return
 
-        logger.info(f"共找到 {len(episodes_to_migrate)} 个分集需要迁移。")
+    total_episodes = len(episode_ids_to_migrate)
+    logger.info(f"共找到 {total_episodes} 个分集需要迁移。将逐一处理以降低服务器负载。")
 
-        # 3. 遍历并处理每个分集
-        migrated_count = 0
-        try:
-            for episode in episodes_to_migrate:
-                if not episode.comments:
+    migrated_count = 0
+    # 3. 逐个处理每个分集，每个都在自己的事务中
+    for i, episode_id in enumerate(episode_ids_to_migrate):
+        async with session_factory() as session:
+            try:
+                # 获取单个分集的完整数据
+                stmt = (
+                    select(TmpEpisode)
+                    .options(
+                        selectinload(TmpEpisode.comments),
+                        selectinload(TmpEpisode.source).selectinload(TmpAnimeSource.anime)
+                    )
+                    .where(TmpEpisode.id == episode_id)
+                )
+                result = await session.execute(stmt)
+                episode = result.scalar_one_or_none()
+
+                if not episode or not episode.comments:
+                    logger.warning(f"跳过分集 ID {episode_id}，因为它没有弹幕或已不存在。")
                     continue
 
                 anime_id = episode.source.anime.id
                 source_id = episode.source.id
-                episode_id = episode.id
 
-                # 4. 生成XML内容
                 xml_content = _generate_xml_from_comments(episode.comments, episode_id)
                 
-                # 5. 构建文件路径并写入
                 web_path = f"/data/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
                 absolute_path = DANMAKU_BASE_DIR / str(anime_id) / str(source_id) / f"{episode_id}.xml"
                 
-                try:
-                    absolute_path.parent.mkdir(parents=True, exist_ok=True)
-                    absolute_path.write_text(xml_content, encoding='utf-8')
-                except OSError as e:
-                    logger.error(f"❌ 写入文件失败: {absolute_path}。错误: {e}")
-                    continue # 跳过这个分集
+                absolute_path.parent.mkdir(parents=True, exist_ok=True)
+                absolute_path.write_text(xml_content, encoding='utf-8')
 
-                # 6. 更新数据库记录
                 episode.danmakuFilePath = web_path
                 episode.commentCount = len(episode.comments)
-                session.add(episode)
+                
+                # 清理当前分集的旧弹幕数据
+                await session.execute(text("DELETE FROM comment WHERE episode_id = :id").bindparams(id=episode_id))
+                
+                await session.commit()
+                
                 migrated_count += 1
-                if migrated_count % 100 == 0:
-                    logger.info(f"已处理 {migrated_count}/{len(episodes_to_migrate)} 个分集...")
-            
-            # 7. 提交所有数据库更改
-            logger.info("正在将所有文件路径更新提交到数据库...")
-            await session.commit()
-            logger.info("数据库更新完成。")
+                logger.info(f"({migrated_count}/{total_episodes}) 成功迁移分集 ID: {episode_id}，并已清理其旧弹幕数据。")
 
-            # 8. 删除旧的 comment 表
-            logger.info("正在删除旧的 'comment' 表...")
+            except Exception as e:
+                logger.error(f"迁移分集 ID {episode_id} 时发生错误: {e}", exc_info=True)
+                await session.rollback()
+                continue
+
+    # 4. 最终检查并尝试删除 comment 表
+    async with session_factory() as session:
+        remaining_comments_count_res = await session.execute(select(func.count()).select_from(TmpComment))
+        remaining_comments_count = remaining_comments_count_res.scalar_one()
+        
+        if remaining_comments_count == 0:
+            logger.info("所有弹幕已迁移，正在删除 'comment' 表...")
             await session.execute(text("DROP TABLE comment;"))
             await session.commit()
             logger.info("'comment' 表已成功删除。")
+        else:
+            logger.warning(f"'comment' 表中仍有 {remaining_comments_count} 条弹幕未被迁移（可能由于处理错误），将不会被删除。")
 
-        except Exception as e:
-            logger.error(f"迁移过程中发生严重错误: {e}", exc_info=True)
-            await session.rollback()
-            logger.error("数据库事务已回滚。请检查错误并手动重新运行迁移。")
-            raise
-
-    logger.info(f"🎉 --- 弹幕数据迁移成功！共迁移了 {migrated_count} 个分集的弹幕。 ---")
+    logger.info(f"🎉 --- 弹幕数据迁移完成！共成功迁移了 {migrated_count}/{total_episodes} 个分集的弹幕。 ---")
