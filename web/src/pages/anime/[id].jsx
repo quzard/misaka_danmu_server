@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  addSourceToAnime,
   deleteAnimeSource,
   deleteAnimeSourceSingle,
   fullSourceUpdate,
@@ -36,6 +37,7 @@ import { padStart } from 'lodash'
 import { HomeOutlined } from '@ant-design/icons'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
+import { AddSourceModal } from '../../components/AddSourceModal'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
@@ -48,6 +50,7 @@ export const AnimeDetail = () => {
   const [keyword, setKeyword] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
   const [libraryPageSisze, setLibraryPageSisze] = useState(10)
+  const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false)
 
   const navigate = useNavigate()
   const modalApi = useModal()
@@ -78,6 +81,11 @@ export const AnimeDetail = () => {
     } catch (error) {
       navigate('/library')
     }
+  }
+
+  const handleAddSourceSuccess = () => {
+    setIsAddSourceModalOpen(false)
+    getDetail() // 添加成功后刷新数据源列表
   }
 
   const handleEditSource = async () => {
@@ -486,16 +494,24 @@ export const AnimeDetail = () => {
           </Col>
         </Row>
         <div className="mt-6">
-          <Button
-            onClick={() => {
-              handleBatchDelete()
-            }}
-            type="primary"
-            disabled={!selectedRows.length}
-            style={{ marginBottom: 16 }}
-          >
-            删除选中
-          </Button>
+          <div className="flex items-center gap-4 mb-4">
+            <Button
+              onClick={() => {
+                handleBatchDelete()
+              }}
+              type="primary"
+              disabled={!selectedRows.length}
+            >
+              删除选中
+            </Button>
+            <Button
+              onClick={() => {
+                setIsAddSourceModalOpen(true)
+              }}
+            >
+              添加数据源
+            </Button>
+          </div>
           {!!sourceList?.length ? (
             <Table
               rowSelection={{ type: 'checkbox', ...rowSelection }}
@@ -576,6 +592,12 @@ export const AnimeDetail = () => {
           }}
         />
       </Modal>
+      <AddSourceModal
+        open={isAddSourceModalOpen}
+        animeId={id}
+        onCancel={() => setIsAddSourceModalOpen(false)}
+        onSuccess={handleAddSourceSuccess}
+      />
     </div>
   )
 }

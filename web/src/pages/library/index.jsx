@@ -15,6 +15,7 @@ import {
   Tooltip,
 } from 'antd'
 import {
+  createAnimeEntry,
   deleteAnime,
   getAllEpisode,
   getAnimeDetail,
@@ -33,6 +34,7 @@ import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
+import { CreateAnimeModal } from '../../components/CreateAnimeModal'
 import { RoutePaths } from '../../general/RoutePaths'
 import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
@@ -67,6 +69,7 @@ export const Library = () => {
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
   const [libraryPageSize, setLibraryPageSize] = useState(50)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -97,6 +100,11 @@ export const Library = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleCreateSuccess = () => {
+    setIsCreateModalOpen(false)
+    getList() // 创建成功后刷新列表
   }
 
   useEffect(() => {
@@ -592,12 +600,17 @@ export const Library = () => {
         loading={loading}
         title="弹幕库"
         extra={
-          <>
+          <Space>
             <Input
               placeholder="搜索已收录的影视"
               onChange={e => setKeyword(e.target.value)}
             />
-          </>
+            <Button
+              type="primary"
+              onClick={() => setIsCreateModalOpen(true)}>
+              自定义影视条目
+            </Button>
+          </Space>
         }
       >
         {!!renderData?.length ? (
@@ -625,6 +638,11 @@ export const Library = () => {
           <Empty />
         )}
       </Card>
+      <CreateAnimeModal
+        open={isCreateModalOpen}
+        onCancel={() => setIsCreateModalOpen(false)}
+        onSuccess={handleCreateSuccess}
+      />
       <Modal
         title="编辑影视信息"
         open={editOpen}

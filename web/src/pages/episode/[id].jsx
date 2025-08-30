@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  batchManualImport,
   deleteAnimeEpisode,
   deleteAnimeEpisodeSingle,
   editEpisode,
@@ -8,8 +9,8 @@ import {
   manualImportEpisode,
   refreshEpisodeDanmaku,
   resetEpisode,
-} from '../../apis'
-import { useEffect, useState } from 'react'
+} from '../../apis';
+import { useEffect, useMemo, useState } from 'react'
 import {
   Breadcrumb,
   Button,
@@ -30,6 +31,7 @@ import { HomeOutlined } from '@ant-design/icons'
 import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
+import { BatchImportModal } from '../../components/BatchImportModal'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()
@@ -48,6 +50,7 @@ export const EpisodeDetail = () => {
   const [resetOpen, setResetOpen] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
   const [resetInfo, setResetInfo] = useState({})
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -74,6 +77,26 @@ export const EpisodeDetail = () => {
   useEffect(() => {
     getDetail()
   }, [])
+
+  const sourceInfo = useMemo(() => {
+    if (!animeDetail?.sources) return null
+    const currentSource = animeDetail.sources.find(s => s.sourceId === Number(id))
+    if (!currentSource) return null
+    return {
+      sourceId: currentSource.sourceId,
+      title: animeDetail.title,
+      providerName: currentSource.providerName,
+    }
+  }, [animeDetail, id])
+
+  const handleBatchImportSuccess = (task) => {
+    setIsBatchModalOpen(false)
+    messageApi.success(
+      `批量导入任务已提交 (ID: ${task.taskId})，请在任务中心查看进度。`
+    )
+    // Optionally, navigate to the task page
+    // navigate(`${RoutePaths.TASK}?status=all`)
+  }
 
   const columns = [
     {
@@ -487,6 +510,14 @@ export const EpisodeDetail = () => {
             >
               手动导入
             </Button>
+            <Button
+              onClick={() => {
+                setIsBatchModalOpen(true)
+              }}
+              type="primary"
+            >
+              批量导入
+            </Button>
           </div>
         </div>
         {!!episodeList?.length ? (
@@ -592,6 +623,12 @@ export const EpisodeDetail = () => {
           scroll={{ x: '100%' }}
         />
       </Modal>
+      <BatchImportModal
+        open={isBatchModalOpen}
+        sourceInfo={sourceInfo}
+        onCancel={() => setIsBatchModalOpen(false)}
+        onSuccess={handleBatchImportSuccess}
+      />
     </div>
   )
 }
