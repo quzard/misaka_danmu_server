@@ -32,7 +32,7 @@ export const Domain = () => {
     <div className="my-6">
       <Card loading={loading} title="自定义域名设置">
         <div>
-          设置后，复制按钮将自动拼接 "http(s)://域名(ip):端口(port)/api/Token值"
+          设置后，复制按钮将自动拼接 "http(s)://域名(ip):端口(port)/api/v1/Token值"
           格式的完整URL。
         </div>
         <div className="flex items-center justify-start mt-4">

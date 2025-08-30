@@ -652,7 +652,7 @@ export const SearchResult = () => {
                             handleImportDanmu(item)
                           }}
                         >
-                          导入弹幕
+                          直接导入
                         </Button>
                       </Col>
                     </Row>
