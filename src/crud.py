@@ -49,6 +49,20 @@ def _generate_xml_from_comments(
         d.text = comment.get('m', '')
     return ET.tostring(root, encoding='unicode', xml_declaration=True)
 
+def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
+    """
+    将Web路径（例如 /data/danmaku/1/2.xml 或 /danmaku/1/2.xml）转换为文件系统路径。
+    这个辅助函数通过查找 '/danmaku/' 标记来健壮地处理新旧两种路径格式。
+    """
+    if not web_path:
+        return None
+    
+    if '/danmaku/' in web_path:
+        relative_part = web_path.split('/danmaku/', 1)[1]
+        return DANMAKU_BASE_DIR / relative_part
+    
+    logger.warning(f"无法从Web路径 '{web_path}' 解析文件系统路径，因为它不包含 '/danmaku/'。")
+    return None
 # --- Anime & Library ---
 
 async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
@@ -677,15 +691,9 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
         return []
     
     try:
-        # 关键修正：健壮地将Web路径映射到物理文件系统路径
-        # 1. 找到 /danmaku/ 之后的部分
-        path_parts = episode.danmakuFilePath.split('/danmaku/')
-        if len(path_parts) != 2:
-            logger.warning(f"弹幕文件路径格式不正确，无法解析: {episode.danmakuFilePath}")
-            return []
-        
-        relative_path = Path(path_parts[1])
-        absolute_path = DANMAKU_BASE_DIR / relative_path
+        absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
+        if not absolute_path:
+            return [] # 辅助函数会记录警告
         
         if not absolute_path.exists():
             logger.warning(f"数据库记录了弹幕文件路径，但文件不存在: {absolute_path}")
@@ -752,8 +760,9 @@ async def write_danmaku_to_file(
     }
     xml_content = _generate_xml_from_comments(comments, episode_id, provider_name, chat_server_map.get(provider_name, "danmaku.misaka.org"))
     
-    web_path = f"/danmaku/{anime_id}/{source_id}/{episode_id}.xml"
-    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / str(source_id) / f"{episode_id}.xml"
+    # 修正：统一文件路径结构，与 tasks.py 保持一致（不包含 source_id）
+    web_path = f"/danmaku/{anime_id}/{episode_id}.xml"
+    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
     
     try:
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
@@ -849,12 +858,12 @@ async def clear_episode_comments(session: AsyncSession, episode_id: int):
         return
     
     if episode.danmakuFilePath:
-        absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
-        if absolute_path.exists():
+        fs_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
+        if fs_path and fs_path.is_file():
             try:
-                absolute_path.unlink()
+                fs_path.unlink()
             except OSError as e:
-                logger.error(f"删除弹幕文件失败: {absolute_path}。错误: {e}")
+                logger.error(f"删除弹幕文件失败: {fs_path}。错误: {e}")
     
     episode.danmakuFilePath = None
     episode.commentCount = 0
@@ -901,14 +910,15 @@ async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: in
 async def delete_anime_source(session: AsyncSession, source_id: int) -> bool:
     source = await session.get(AnimeSource, source_id)
     if source:
-        import shutil
-        source_danmaku_dir = DANMAKU_BASE_DIR / str(source.animeId) / str(source_id)
-        if source_danmaku_dir.exists() and source_danmaku_dir.is_dir():
-            try:
-                shutil.rmtree(source_danmaku_dir)
-                logger.info(f"已删除数据源的弹幕目录: {source_danmaku_dir}")
-            except OSError as e:
-                logger.error(f"删除弹幕目录失败: {source_danmaku_dir}。错误: {e}")
+        # 修正：逐个删除文件，而不是删除整个目录，以提高健壮性并与 tasks.py 保持一致
+        episodes_to_delete_res = await session.execute(
+            select(Episode.danmakuFilePath).where(Episode.sourceId == source_id)
+        )
+        for file_path_str in episodes_to_delete_res.scalars().all():
+            if fs_path := _get_fs_path_from_web_path(file_path_str):
+                if fs_path.is_file():
+                    fs_path.unlink(missing_ok=True)
+
         await session.delete(source)
         await session.commit()
         return True
@@ -919,9 +929,9 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
     episode = await session.get(Episode, episode_id)
     if episode:
         if episode.danmakuFilePath:
-            absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
-            if absolute_path.exists():
-                absolute_path.unlink()
+            fs_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
+            if fs_path and fs_path.is_file():
+                fs_path.unlink(missing_ok=True)
         await session.delete(episode)
         await session.commit()
         return True
@@ -936,8 +946,26 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
     if not source_anime or not target_anime:
         return False
 
-    # 修正：遍历源列表的副本，以避免在迭代时修改集合
+    # 修正：遍历源列表的副本，并在移动数据库记录的同时，移动物理弹幕文件
     for src in list(source_anime.sources):
+        # 移动此源下的所有弹幕文件
+        episodes_res = await session.execute(select(Episode).where(Episode.sourceId == src.id))
+        episodes_to_move = episodes_res.scalars().all()
+        for ep in episodes_to_move:
+            if ep.danmakuFilePath:
+                old_fs_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
+                # 新的Web路径将使用目标作品的ID
+                new_web_path = f"/danmaku/{target_anime_id}/{ep.id}.xml"
+                new_fs_path = DANMAKU_BASE_DIR / str(target_anime_id) / f"{ep.id}.xml"
+                
+                if old_fs_path and old_fs_path.is_file():
+                    try:
+                        new_fs_path.parent.mkdir(parents=True, exist_ok=True)
+                        old_fs_path.rename(new_fs_path)
+                        ep.danmakuFilePath = new_web_path # 更新数据库中的路径
+                    except OSError as e:
+                        logger.error(f"合并作品时移动弹幕文件失败: 从 {old_fs_path} 到 {new_fs_path}。错误: {e}")
+
         # 检查目标作品上是否已存在重复的数据源
         existing_target_source = await session.execute(
             select(AnimeSource).where(
@@ -996,16 +1024,20 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     # 3. 重命名弹幕文件（如果存在）
     new_web_path = None
     if episode.danmakuFilePath:
-        old_absolute_path = DANMAKU_BASE_DIR / Path(episode.danmakuFilePath.replace("/danmaku/", "", 1))
-        new_web_path = f"/danmaku/{episode.source.animeId}/{episode.sourceId}/{new_episode_id}.xml"
-        new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / str(episode.sourceId) / f"{new_episode_id}.xml"
-        if old_absolute_path.exists():
+        old_absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
+        
+        # 修正：新的Web路径和文件系统路径应与 tasks.py 保持一致（不包含 source_id）
+        new_web_path = f"/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
+        new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / f"{new_episode_id}.xml"
+        
+        if old_absolute_path and old_absolute_path.exists():
             try:
+                new_absolute_path.parent.mkdir(parents=True, exist_ok=True)
                 old_absolute_path.rename(new_absolute_path)
                 logger.info(f"弹幕文件已重命名: {old_absolute_path} -> {new_absolute_path}")
             except OSError as e:
                 logger.error(f"重命名弹幕文件失败: {e}")
-                new_web_path = None # 如果重命名失败，则不更新路径
+                new_web_path = episode.danmakuFilePath # 如果重命名失败，则保留旧路径
     
     # 4. 创建一个新的分集对象
     new_episode = Episode(

@@ -19,8 +19,8 @@ from .image_utils import download_image
 from .config import settings
 from .danmaku_parser import parse_dandan_xml_to_comments
 from .scraper_manager import ScraperManager
-from .metadata_manager import MetadataSourceManager
-from .utils import parse_search_keyword
+from .metadata_manager import MetadataSourceManager 
+from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from sqlalchemy.exc import OperationalError
@@ -58,7 +58,7 @@ def _generate_dandan_xml(comments: List[dict]) -> str:
     xml_parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<i>',
-        '  <chatserver>danmu.misaka-mikoto.jp</chatserver>',
+        '  <chatserver>danmu</chatserver>',
         '  <chatid>0</chatid>',
         '  <mission>0</mission>',
         f'  <maxlimit>{len(comments)}</maxlimit>',
@@ -75,7 +75,7 @@ def _generate_dandan_xml(comments: List[dict]) -> str:
 async def _write_danmaku_file_and_update_db(session: AsyncSession, anime_id: int, episode_id: int, comments: List[dict]) -> int:
     """
     将弹幕写入指定路径的文件，并更新数据库记录。
-    新路径结构: /danmaku/{animeId}/{episodeId}.xml
+    路径结构: /danmaku/{animeId}/{episodeId}.xml
     """
     anime_dir = DANMAKU_BASE_DIR / str(anime_id)
     anime_dir.mkdir(parents=True, exist_ok=True)
@@ -84,9 +84,9 @@ async def _write_danmaku_file_and_update_db(session: AsyncSession, anime_id: int
     xml_content = _generate_dandan_xml(comments)
     danmaku_file_path.write_text(xml_content, encoding='utf-8')
 
-    # 关键修正：确保Web路径的格式绝对正确，以防止出现类似 /data181/... 或 /danmaku/... 的错误。
-    # 正确的、统一的Web路径应为 /data/danmaku/{animeId}/{episodeId}.xml
-    web_path = f"/data/danmaku/{anime_id}/{episode_id}.xml"
+    # 将相对Web路径存入数据库，不包含 /data 前缀，以实现解耦。
+    # 这样，如果未来静态文件服务路径改变，也无需修改数据库。
+    web_path = f"/danmaku/{anime_id}/{episode_id}.xml"
     await crud.update_episode_danmaku_info(session, episode_id, web_path, len(comments))
     return len(comments)
 
@@ -95,8 +95,9 @@ def _delete_danmaku_file(danmaku_file_path_str: Optional[str]):
     if not danmaku_file_path_str:
         return
     try:
-        # Web路径为 /data/danmaku/...，文件系统路径为 config/danmaku/...
-        relative_path = Path(danmaku_file_path_str).relative_to('/data')
+        # 从数据库读取的Web路径 (e.g., /danmaku/...) 转换为文件系统路径。
+        # 移除开头的 '/'，得到 'danmaku/...'
+        relative_path = Path(danmaku_file_path_str.lstrip('/'))
         full_path = DANMAKU_BASE_DIR.parent / relative_path
         if full_path.is_file():
             full_path.unlink()
@@ -746,7 +747,8 @@ async def manual_import_task(
         # Case 1: Custom source with XML data
         if providerName == 'custom':
             await progress_callback(20, "正在解析XML文件...")
-            comments = parse_dandan_xml_to_comments(content) # 'content' is the XML content
+            cleaned_content = clean_xml_string(content)
+            comments = parse_dandan_xml_to_comments(cleaned_content) # 'content' is the XML content
             if not comments:
                 raise TaskSuccess("未从XML中解析出任何弹幕。")
             
@@ -823,7 +825,8 @@ async def batch_manual_import_task(
 
         try:
             if providerName == 'custom':
-                comments = parse_dandan_xml_to_comments(item.content)
+                cleaned_content = clean_xml_string(item.content)
+                comments = parse_dandan_xml_to_comments(cleaned_content)
                 if not comments: continue
                 final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
                 episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
