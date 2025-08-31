@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 import httpx
 from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -1804,10 +1804,19 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
 class ManualImportRequest(models.BaseModel):
     title: Optional[str] = None
     episodeIndex: int = Field(..., alias="episodeIndex")
-    content: str # 修正：将 'url' 重命名为 'content' 以更准确地反映其用途（对于XML导入，它包含文件内容）
+    url: Optional[str] = None
+    content: Optional[str] = None
 
     class Config:
         populate_by_name = True # 允许使用 'episodeIndex' 或 'episode_index'
+
+    @model_validator(mode='after')
+    def check_url_or_content(self):
+        if self.url is None and self.content is None:
+            raise ValueError('必须提供 "url" 或 "content" 字段。')
+        if self.url is not None and self.content is not None:
+            raise ValueError('只能提供 "url" 或 "content" 之一，不能同时提供。')
+        return self
 
 @router.post("/library/source/{source_id}/manual-import", status_code=status.HTTP_202_ACCEPTED, summary="手动导入单个分集弹幕")
 async def manual_import_episode(
@@ -1826,20 +1835,25 @@ async def manual_import_episode(
 
     provider_name = source_info['providerName']
     
+    # 修正：使用 url 或 content 字段，优先使用 content
+    content_to_use = request_data.content if request_data.content is not None else request_data.url
+
     # 仅对非自定义源验证URL
     if provider_name != 'custom':
+        if not content_to_use: # Should be caught by validator, but for safety
+             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required for non-custom sources.")
         url_prefixes = {
             'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com', 'youku': 'youku.com',
             'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
         }
         expected_prefix = url_prefixes.get(provider_name)
-        if not expected_prefix or expected_prefix not in request_data.content:
+        if not expected_prefix or expected_prefix not in content_to_use:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
     task_coro = lambda session, callback: tasks.manual_import_task(
         sourceId=source_id, animeId=source_info['animeId'], title=request_data.title,
-        episodeIndex=request_data.episodeIndex, content=request_data.content, providerName=provider_name,
+        episodeIndex=request_data.episodeIndex, content=content_to_use, providerName=provider_name,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
