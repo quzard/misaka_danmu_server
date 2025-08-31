@@ -96,6 +96,7 @@ async def _add_danmaku_path_column_if_not_exists(session: AsyncSession):
         await session.commit()
         logger.info("'danmaku_file_path' 列已成功添加。")
 
+
 async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
     """
     在应用启动时执行数据库迁移。
@@ -118,6 +119,7 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
     # 1. 确保新列存在
     async with session_factory() as session:
         await _add_danmaku_path_column_if_not_exists(session)
+
 
     # 2. 轻量级查询，只获取需要迁移的分集ID列表
     async with session_factory() as session:
