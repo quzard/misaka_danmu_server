@@ -149,6 +149,19 @@ class ControlDirectImportRequest(_BaseOptionalIds):
     class Config:
         populate_by_name = True
 
+class ControlAnimeCreateRequest(_BaseOptionalIds):
+    """用于外部API自定义创建影视条目的请求模型"""
+    title: str = Field(..., description="作品主标题")
+    type: AutoImportMediaType = Field(..., description="媒体类型")
+    season: int = Field(..., description="季度号")
+    year: Optional[int] = Field(None, description="年份")
+    nameEn: Optional[str] = Field(None, description="英文标题")
+    nameJp: Optional[str] = Field(None, description="日文标题")
+    nameRomaji: Optional[str] = Field(None, description="罗马音标题")
+    aliasCn1: Optional[str] = Field(None, description="中文别名1")
+    aliasCn2: Optional[str] = Field(None, description="中文别名2")
+    aliasCn3: Optional[str] = Field(None, description="中文别名3")
+
 class ControlEditedImportRequest(_BaseOptionalIds):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要编辑的结果的索引 (从0开始)")
@@ -159,12 +172,22 @@ class ControlEditedImportRequest(_BaseOptionalIds):
     class Config:
         populate_by_name = True
 
-class ControlUrlImportRequest(_BaseOptionalIds):
-    """用于外部API通过URL导入的请求模型"""
-    url: str = Field(..., description="要导入的作品的URL (例如B站番剧主页)")
-    title: Optional[str] = Field(None, description="强制覆盖从URL页面获取的标题")
-    season: Optional[int] = Field(None, description="强制覆盖从URL页面获取的季度")
-    episodeIndex: Optional[int] = Field(None, alias="episode_index", description="要导入的特定集数。如果留空，则导入整季。", gt=0)
+class ControlUrlImportRequest(BaseModel):
+    """用于外部API通过URL导入到指定源的请求模型"""
+    sourceId: int = Field(..., description="要导入到的目标数据源ID")
+    episodeIndex: int = Field(..., alias="episode_index", description="要导入的特定集数", gt=0)
+    url: str = Field(..., description="包含弹幕的视频页面的URL")
+    title: Optional[str] = Field(None, description="（可选）强制指定分集标题")
+
+    class Config:
+        populate_by_name = True
+
+class ControlXmlImportRequest(BaseModel):
+    """用于外部API通过XML/文本导入到指定源的请求模型"""
+    sourceId: int = Field(..., description="要导入到的目标数据源ID")
+    episodeIndex: int = Field(..., alias="episode_index", description="要导入的特定集数", gt=0)
+    content: str = Field(..., description="XML或纯文本格式的弹幕内容")
+    title: Optional[str] = Field(None, description="（可选）强制指定分集标题")
 
     class Config:
         populate_by_name = True
@@ -525,63 +548,105 @@ async def edited_import(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-
-@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入", response_model=ControlTaskResponse)
-async def url_import(
-    payload: ControlUrlImportRequest,
+@router.post("/import/xml", status_code=status.HTTP_202_ACCEPTED, summary="从XML/文本导入弹幕", response_model=ControlTaskResponse)
+async def xml_import(
+    payload: ControlXmlImportRequest,
+    session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     ### 功能
-    从一个作品的URL（例如B站番剧主页、腾讯视频播放页等）直接导入弹幕。
-    如果提供了 `episodeIndex`，则只导入单集；否则导入整季。
+    为一个已存在的数据源，导入指定集数的弹幕（通过XML或纯文本内容）。
     ### 工作流程
-    1.  服务会尝试从URL中解析出对应的弹幕源和媒体ID。
-    2.  然后为该媒体创建一个后台导入任务。
+    1.  您需要提供一个已存在于系统中的 `sourceId`。
+    2.  提供要导入的 `episodeIndex` (集数) 和弹幕 `content`。
+    3.  系统会为该数据源创建一个后台任务，将内容解析并导入到指定分集。
+    
+    此接口非常适合用于对已有的数据源进行单集补全或更新。
     """
-    scraper = manager.get_scraper_by_domain(payload.url)
-    if not scraper:
-        raise HTTPException(status_code=400, detail="不支持的URL或视频源。")
+    source_info = await crud.get_anime_source_info(session, payload.sourceId)
+    if not source_info:
+        raise HTTPException(status_code=404, detail=f"数据源 ID: {payload.sourceId} 未找到。")
 
-    # This is the new method we need to implement for each scraper
+    # This type of import should only be for 'custom' provider
+    if source_info["providerName"] != 'custom':
+        raise HTTPException(status_code=400, detail=f"XML/文本导入仅支持 'custom' 类型的源，但目标源类型为 '{source_info['providerName']}'。")
+
+    anime_id = source_info["animeId"]
+    anime_title = source_info["title"]
+
+    task_title = f"外部API XML导入: {anime_title} - 第 {payload.episodeIndex} 集"
+    unique_key = f"manual-import-{payload.sourceId}-{payload.episodeIndex}"
+
     try:
-        media_info = await scraper.get_info_from_url(payload.url)
-        if not media_info:
-            raise HTTPException(status_code=404, detail="无法从提供的URL中获取有效的作品信息。")
-    except httpx.RequestError as e:
-        logger.error(f"从URL '{payload.url}' 导入时发生网络错误: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"从URL导入时发生网络错误: {e}")
-
-       # 获取指定分集的progress_callback
-    final_title = payload.title or media_info.title
-    final_season = payload.season if payload.season is not None else media_info.season
-
-    unique_key = f"import-{scraper.provider_name}-{media_info.mediaId}"
-    task_title = f"外部API URL导入: {final_title} ({scraper.provider_name})" # type: ignore
-    if payload.episodeIndex:
-        task_title += f" - 第 {payload.episodeIndex} 集"
-        message = f"'{final_title}' 的URL单集导入任务已提交。"
-    else:
-        message = f"'{final_title}' 的URL整季导入任务已提交。"
-    try:
-        task_coro = lambda session, cb: tasks.generic_import_task(
-            provider=scraper.provider_name,
-            mediaId=media_info.mediaId,
-            animeTitle=final_title,
-            mediaType=media_info.type, # type: ignore
-            currentEpisodeIndex=payload.episodeIndex,
-            season=final_season,
-            year=media_info.year,
-            imageUrl=media_info.imageUrl,
-            doubanId=payload.doubanId, metadata_manager=metadata_manager, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
-            tvdbId=payload.tvdbId, bangumiId=payload.bangumiId, rate_limiter=rate_limiter,
-            progress_callback=cb, session=session, manager=manager, task_manager=task_manager
+        task_coro = lambda s, cb: tasks.manual_import_task(
+            sourceId=payload.sourceId,
+            animeId=anime_id,
+            title=payload.title,
+            episodeIndex=payload.episodeIndex,
+            content=payload.content,
+            providerName='custom',
+            progress_callback=cb,
+            session=s,
+            manager=manager,
+            rate_limiter=rate_limiter
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-        return {"message": message, "taskId": task_id}
+        return {"message": "XML导入任务已提交", "taskId": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+@router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入", response_model=ControlTaskResponse)
+async def url_import(
+    payload: ControlUrlImportRequest,
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """
+    ### 功能
+    为一个已存在的数据源，导入指定集数的弹幕。
+    ### 工作流程
+    1.  您需要提供一个已存在于系统中的 `sourceId`。
+    2.  提供要导入的 `episodeIndex` (集数) 和包含弹幕的视频页面 `url`。
+    3.  系统会为该数据源创建一个后台任务，精确地获取并导入指定集数的弹幕。
+    
+    此接口非常适合用于对已有的数据源进行单集补全或更新。
+    """
+    source_info = await crud.get_anime_source_info(session, payload.sourceId)
+    if not source_info:
+        raise HTTPException(status_code=404, detail=f"数据源 ID: {payload.sourceId} 未找到。")
+
+    provider_name = source_info["providerName"]
+    anime_id = source_info["animeId"]
+    anime_title = source_info["title"]
+
+    scraper = manager.get_scraper(provider_name)
+    if not hasattr(scraper, 'get_info_from_url'):
+        raise HTTPException(status_code=400, detail=f"数据源 '{provider_name}' 不支持从URL导入。")
+
+    task_title = f"外部API URL导入: {anime_title} - 第 {payload.episodeIndex} 集 ({provider_name})"
+    unique_key = f"manual-import-{payload.sourceId}-{payload.episodeIndex}"
+
+    try:
+        task_coro = lambda s, cb: tasks.manual_import_task(
+            sourceId=payload.sourceId,
+            animeId=anime_id,
+            title=payload.title,
+            episodeIndex=payload.episodeIndex,
+            content=payload.url,
+            providerName=provider_name,
+            progress_callback=cb,
+            session=s,
+            manager=manager,
+            rate_limiter=rate_limiter
+        )
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        return {"message": "URL导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -592,6 +657,53 @@ async def get_library(session: AsyncSession = Depends(get_db_session)):
     """获取当前弹幕库中所有已收录的作品列表。"""
     db_results = await crud.get_library_anime(session)
     return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
+
+@router.post("/library/anime", response_model=ControlAnimeDetailsResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
+async def create_anime_entry(
+    payload: ControlAnimeCreateRequest,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    ### 功能
+    在数据库中手动创建一个新的影视作品条目。
+    ### 工作流程
+    1.  接收作品的标题、类型、季度等基本信息。
+    2.  （可选）接收TMDB、Bangumi等元数据ID和其他别名。
+    3.  在数据库中创建对应的 `anime`, `anime_metadata`, `anime_aliases` 记录。
+    4.  返回新创建的作品的完整信息。
+    """
+    # Check for duplicates first
+    existing_anime = await crud.find_anime_by_title_and_season(session, payload.title, payload.season)
+    if existing_anime:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="已存在同名同季度的作品。"
+        )
+    
+    new_anime_id = await crud.get_or_create_anime(
+        session,
+        title=payload.title,
+        media_type=payload.type.value,
+        season=payload.season,
+        year=payload.year,
+        image_url=None, # No image URL when creating manually
+        local_image_path=None
+    )
+
+    await crud.update_metadata_if_empty(
+        session, new_anime_id,
+        tmdb_id=payload.tmdbId, imdb_id=payload.imdbId, tvdb_id=payload.tvdbId,
+        douban_id=payload.doubanId, bangumi_id=payload.bangumiId
+    )
+    
+    await crud.update_anime_aliases(session, new_anime_id, payload)
+    await session.commit()
+
+    new_details = await crud.get_anime_full_details(session, new_anime_id)
+    if not new_details:
+        raise HTTPException(status_code=500, detail="创建作品后无法获取其详细信息。")
+
+    return ControlAnimeDetailsResponse.model_validate(new_details)
 
 @router.get("/library/anime/{animeId}", response_model=ControlAnimeDetailsResponse, summary="获取作品详情")
 async def get_anime_details(animeId: int, session: AsyncSession = Depends(get_db_session)):
