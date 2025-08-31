@@ -5,11 +5,12 @@ import {
   deleteAnimeEpisodeSingle,
   editEpisode,
   getAnimeDetail,
+  getAnimeSource,
   getEpisodes,
   manualImportEpisode,
   refreshEpisodeDanmaku,
   resetEpisode,
-} from '../../apis';
+} from '../../apis'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Breadcrumb,
@@ -22,6 +23,7 @@ import {
   message,
   Modal,
   Space,
+  Switch,
   Table,
   Tooltip,
 } from 'antd'
@@ -43,6 +45,7 @@ export const EpisodeDetail = () => {
   const [animeDetail, setAnimeDetail] = useState({})
   const [episodeList, setEpisodeList] = useState([])
   const [selectedRows, setSelectedRows] = useState([])
+  const [sourceInfo, setSourceInfo] = useState({})
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -52,24 +55,34 @@ export const EpisodeDetail = () => {
   const [resetInfo, setResetInfo] = useState({})
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  const [isXmlImport, setIsXmlImport] = useState(false)
 
   const modalApi = useModal()
   const messageApi = useMessage()
 
+  const isXmlImport = useMemo(() => {
+    return sourceInfo.providerName === 'custom'
+  }, [sourceInfo])
+
   const getDetail = async () => {
     setLoading(true)
     try {
-      const [detailRes, episodeRes] = await Promise.all([
+      const [detailRes, episodeRes, sourceRes] = await Promise.all([
         getAnimeDetail({
           animeId: Number(animeId),
         }),
         getEpisodes({
           sourceId: Number(id),
         }),
+        getAnimeSource({
+          animeId: Number(animeId),
+        }),
       ])
       setAnimeDetail(detailRes.data)
       setEpisodeList(episodeRes.data)
+      setSourceInfo({
+        ...sourceRes?.data?.filter(it => it.sourceId === Number(id))?.[0],
+        animeName: detailRes.data?.title,
+      })
       setLoading(false)
     } catch (error) {
       navigate(`/anime/${animeId}`)
@@ -80,24 +93,12 @@ export const EpisodeDetail = () => {
     getDetail()
   }, [])
 
-  const sourceInfo = useMemo(() => {
-    if (!animeDetail?.sources) return null
-    const currentSource = animeDetail.sources.find(s => s.sourceId === Number(id))
-    if (!currentSource) return null
-    return {
-      sourceId: currentSource.sourceId,
-      title: animeDetail.title,
-      providerName: currentSource.providerName,
-    }
-  }, [animeDetail, id])
-
-  const handleBatchImportSuccess = (task) => {
+  const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
     messageApi.success(
       `批量导入任务已提交 (ID: ${task.taskId})，请在任务中心查看进度。`
     )
-    // Optionally, navigate to the task page
-    // navigate(`${RoutePaths.TASK}?status=all`)
+    goTask(task)
   }
 
   const columns = [
@@ -505,14 +506,16 @@ export const EpisodeDetail = () => {
             >
               重整集数
             </Button>
-            <Button
-              onClick={() => {
-                setIsBatchModalOpen(true)
-              }}
-              type="primary"
-            >
-              批量导入
-            </Button>
+            {isXmlImport && (
+              <Button
+                onClick={() => {
+                  setIsBatchModalOpen(true)
+                }}
+                type="primary"
+              >
+                批量导入
+              </Button>
+            )}
             <Button
               onClick={() => {
                 form.resetFields()
@@ -547,7 +550,7 @@ export const EpisodeDetail = () => {
         cancelText="取消"
         okText="确认"
         onCancel={() => setEditOpen(false)}
-        destroyOnClose
+        destroyOnHidden
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -568,32 +571,36 @@ export const EpisodeDetail = () => {
               placeholder="请输入分集集数"
             />
           </Form.Item>
-          {!isEditing && (
-            <Form.Item label="导入方式">
-              <Switch
-                checkedChildren="XML"
-                unCheckedChildren="URL"
-                checked={isXmlImport}
-                onChange={setIsXmlImport}
+          {isXmlImport ? (
+            <Form.Item
+              name="content"
+              label="弹幕XML内容"
+              rules={[
+                {
+                  required: true,
+                  message: `请输入弹幕XML内容`,
+                },
+              ]}
+            >
+              <Input.TextArea
+                rows={6}
+                placeholder="请在此处粘贴弹幕XML文件的内容"
               />
             </Form.Item>
-          )}
-          <Form.Item
-            name="sourceUrl"
-            label={isXmlImport ? '弹幕XML内容' : '官方链接'}
-            rules={[
-              {
-                required: true,
-                message: `请输入${isXmlImport ? '弹幕XML内容' : '官方链接'}`,
-              },
-            ]}
-          >
-            {isXmlImport ? (
-              <Input.TextArea rows={6} placeholder="请在此处粘贴弹幕XML文件的内容" />
-            ) : (
+          ) : (
+            <Form.Item
+              name="sourceUrl"
+              label="官方链接"
+              rules={[
+                {
+                  required: true,
+                  message: `请输入官方链接`,
+                },
+              ]}
+            >
               <Input placeholder="请输入官方链接" />
-            )}
-          </Form.Item>
+            </Form.Item>
+          )}
           <Form.Item name="episodeId" hidden>
             <Input />
           </Form.Item>

@@ -1,6 +1,7 @@
 import { Form, Input, Modal, Select, message } from 'antd'
 import { useState } from 'react'
 import { addSourceToAnime } from '../apis'
+import { useMessage } from '../MessageContext'
 
 // 通用数据源列表，将来可以从后端动态获取
 const PROVIDER_OPTIONS = [
@@ -16,6 +17,7 @@ const PROVIDER_OPTIONS = [
 export const AddSourceModal = ({ open, animeId, onCancel, onSuccess }) => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
+  const messageApi = useMessage()
 
   const handleOk = async () => {
     if (!animeId) return
@@ -25,13 +27,13 @@ export const AddSourceModal = ({ open, animeId, onCancel, onSuccess }) => {
       // 修正：将 animeId 和表单值合并成一个对象再传递
       const res = await addSourceToAnime({ ...values, animeId })
       if (res.data) {
-        message.success('数据源添加成功！')
+        messageApi.success('数据源添加成功！')
         onSuccess(res.data) // 将新创建的数据源信息传递回去
         form.resetFields()
       }
     } catch (error) {
       console.error('添加数据源失败:', error)
-      message.error(error.detail || '添加数据源失败，请检查日志')
+      messageApi.error(error.detail || '添加数据源失败，请检查日志')
     } finally {
       setLoading(false)
     }
@@ -44,11 +46,25 @@ export const AddSourceModal = ({ open, animeId, onCancel, onSuccess }) => {
       onOk={handleOk}
       onCancel={onCancel}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
-      <Form form={form} layout="vertical" name="add_source_form" className="!px-4 !pt-6">
-        <Form.Item name="providerName" label="数据源平台" rules={[{ required: true, message: '请选择平台！' }]} initialValue="custom">
-          <Select showSearch options={PROVIDER_OPTIONS} placeholder="选择一个平台" />
+      <Form
+        form={form}
+        layout="vertical"
+        name="add_source_form"
+        className="!px-4 !pt-6"
+      >
+        <Form.Item
+          name="providerName"
+          label="数据源平台"
+          rules={[{ required: true, message: '请选择平台！' }]}
+          initialValue="custom"
+        >
+          <Select
+            showSearch
+            options={PROVIDER_OPTIONS}
+            placeholder="选择一个平台"
+          />
         </Form.Item>
         <Form.Item
           name="mediaId"
