@@ -68,7 +68,57 @@ def _generate_dandan_xml(comments: List[dict]) -> str:
         # 使用标准库进行安全的XML转义
         content = xml_escape(comment.get('m', ''))
         p_attr = comment.get('p', '0,1,25,16777215')
+
+        # 新增：健壮性修复，确保 p 属性包含字体大小（至少4个部分）
+        p_parts = p_attr.split(',')
+        
+        # 查找可选的用户标签，以确定核心参数的数量
+        core_parts_count = len(p_parts)
+        for i, part in enumerate(p_parts):
+            if '[' in part and ']' in part:
+                core_parts_count = i
+                break
+
+        # 如果核心参数只有3个（时间,模式,颜色），则在模式和颜色之间插入默认字体大小 "25"
+        if core_parts_count == 3:
+            p_parts.insert(2, '25')
+            p_attr = ','.join(p_parts)
+            
         xml_parts.append(f'  <d p="{p_attr}">{content}</d>')
+    xml_parts.append('</i>')
+    return '\n'.join(xml_parts)
+
+def _convert_text_danmaku_to_xml(text_content: str) -> str:
+    """
+    将非标准的、基于行的纯文本弹幕格式转换为标准的XML格式。
+    支持的格式: "时间,模式,?,颜色,... | 弹幕内容"
+    """
+    xml_parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<i>',
+        '  <chatserver>danmu</chatserver>',
+        '  <chatid>0</chatid>',
+        '  <mission>0</mission>',
+        '  <source>misaka</source>'
+    ]
+    comments = []
+    for line in text_content.strip().split('\n'):
+        if '|' not in line:
+            continue
+        params_str, text = line.split('|', 1)
+        params = params_str.split(',')
+        if len(params) >= 4:
+            # 提取关键参数: 时间, 模式, 颜色
+            # 格式: 756.103,1,25,16777215,...
+            time_sec = params[0]
+            mode     = params[1]
+            fontsize = params[2]
+            color    = params[3]
+            p_attr = f"{time_sec},{mode},{fontsize},{color},[custom_text]"
+            escaped_text = xml_escape(text.strip())
+            comments.append(f'  <d p="{p_attr}">{escaped_text}</d>')
+    xml_parts.insert(5, f'  <maxlimit>{len(comments)}</maxlimit>')
+    xml_parts.extend(comments)
     xml_parts.append('</i>')
     return '\n'.join(xml_parts)
 
@@ -746,8 +796,13 @@ async def manual_import_task(
     try:
         # Case 1: Custom source with XML data
         if providerName == 'custom':
+            # 新增：自动检测内容格式。如果不是XML，则尝试从纯文本格式转换。
+            content_to_parse = content.strip()
+            if not content_to_parse.startswith('<'):
+                logger.info("检测到非XML格式的自定义内容，正在尝试从纯文本格式转换...")
+                content_to_parse = _convert_text_danmaku_to_xml(content_to_parse)
             await progress_callback(20, "正在解析XML文件...")
-            cleaned_content = clean_xml_string(content)
+            cleaned_content = clean_xml_string(content_to_parse)
             comments = parse_dandan_xml_to_comments(cleaned_content) # 'content' is the XML content
             if not comments:
                 raise TaskSuccess("未从XML中解析出任何弹幕。")

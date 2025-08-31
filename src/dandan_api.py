@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from . import crud, models, orm_models
 from .config_manager import ConfigManager
 from .database import get_db_session
+from .utils import parse_search_keyword
 from .scraper_manager import ScraperManager
 
 logger = logging.getLogger(__name__)
@@ -118,65 +119,6 @@ class DandanAnimeInfo(BaseModel):
 class DandanSearchEpisodesResponse(DandanResponseBase):
     hasMore: bool = False
     animes: List[DandanAnimeInfo]
-
-def _roman_to_int(s: str) -> int:
-    """将罗马数字字符串转换为整数。"""
-    roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    s = s.upper()
-    result = 0
-    i = 0
-    while i < len(s):
-        # 处理减法规则 (e.g., IV, IX)
-        if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
-            result += roman_map[s[i+1]] - roman_map[s[i]]
-            i += 2
-        else:
-            result += roman_map[s[i]]
-            i += 1
-    return result
-
-def _parse_search_term(keyword: str) -> Dict[str, Any]:
-    """
-    解析搜索关键词，提取标题、季数和集数。
-    支持 "Title S01E01", "Title S01", "Title 2", "Title 第二季", "Title Ⅲ" 等格式。
-    """
-    keyword = keyword.strip()
-
-    # 1. 优先匹配 SXXEXX 格式
-    s_e_pattern = re.compile(r"^(?P<title>.+?)\s*[._-]*[Ss](?P<season>\d{1,2})[._-]*[Ee](?P<episode>\d{1,4})\b", re.IGNORECASE)
-    match = s_e_pattern.search(keyword)
-    if match:
-        data = match.groupdict()
-        return {"title": data["title"].strip(), "season": int(data["season"]), "episode": int(data["episode"])}
-
-    # 2. 匹配季度信息
-    chinese_num_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-    season_patterns = [
-        # 格式: Season 1, S01
-        (re.compile(r"^(.*?)\s*[._-]*(?:S|Season)\s*(\d{1,2})\b", re.I), lambda m: int(m.group(2))),
-        # 格式: 第 X 季/部
-        (re.compile(r"^(.*?)\s*第\s*([一二三四五六七八九十]|\d+)\s*[季部]", re.I),
-         lambda m: chinese_num_map.get(m.group(2)) if not m.group(2).isdigit() else int(m.group(2))),
-        # 格式: Unicode 罗马数字, e.g., Ⅲ
-        (re.compile(r"^(.*?)\s+([Ⅰ-Ⅻ])\b", re.I),
-         lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(2).upper())),
-        # 格式: ASCII 罗马数字, e.g., III
-        (re.compile(r"^(.*?)\s+([IVXLCDM]+)\b", re.I), lambda m: _roman_to_int(m.group(2))),
-    ]
-
-    for pattern, handler in season_patterns:
-        match = pattern.match(keyword)
-        if match:
-            try:
-                title = match.group(1).strip()
-                season = handler(match)
-                if season:
-                    return {"title": title, "season": season, "episode": None}
-            except (ValueError, KeyError, IndexError):
-                continue
-
-    # 3. 如果没有匹配到特定格式，则返回原始标题
-    return {"title": keyword, "season": None, "episode": None}
 
 # --- Models for /search/anime ---
 class DandanSearchAnimeItem(BaseModel):
@@ -307,8 +249,8 @@ async def _search_implementation(
             detail="Missing required query parameter: 'anime' or 'keyword'"
         )
 
-    # 新增：调用解析函数
-    parsed_info = _parse_search_term(search_term)
+    # 修正：调用 utils 中的全局解析函数，以保持逻辑统一
+    parsed_info = parse_search_keyword(search_term)
     title_to_search = parsed_info["title"]
     season_to_search = parsed_info.get("season")
     episode_from_title = parsed_info.get("episode")
@@ -861,11 +803,12 @@ async def get_external_comments_from_url(
             episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
             comments_data = await scraper.get_comments(episode_id_for_comments)
 
-            if not comments_data: logger.warning(f"未能从 {provider} URL 获取任何弹幕: {url}")
+            # 修正：使用 scraper.provider_name 修复未定义的 'provider' 变量
+            if not comments_data: logger.warning(f"未能从 {scraper.provider_name} URL 获取任何弹幕: {url}")
 
         except Exception as e:
-            logger.error(f"处理 {provider} 外部弹幕时出错: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"获取 {provider} 弹幕失败。")
+            logger.error(f"处理 {scraper.provider_name} 外部弹幕时出错: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"获取 {scraper.provider_name} 弹幕失败。")
 
         # 缓存结果5小时 (18000秒)
         await crud.set_cache(session, cache_key, comments_data, 18000)
@@ -952,10 +895,30 @@ async def get_comments_for_dandan(
     # UA 已由 get_token_from_path 依赖项记录
     # logger.info(f"弹幕接口响应 (episodeId: {episodeId}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
 
-    # 修正：当聚合弹幕时，原始的 cid 已经没有意义。我们为去重后的弹幕列表生成新的、连续的 cid。
-    # 这样可以确保客户端收到的 cid 是唯一的，避免潜在的渲染问题。
-    comments = [models.Comment(cid=i, p=item["p"], m=item["m"]) for i, item in enumerate(comments_data)]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    # 智能处理弹幕参数以兼容 dandanplay 客户端
+    processed_comments = []
+    for i, item in enumerate(comments_data):
+        p_attr = item.get("p", "")
+        p_parts = p_attr.split(',')
+
+        # 查找可选的用户标签，以确定核心参数的数量
+        core_parts_count = len(p_parts)
+        for j, part in enumerate(p_parts):
+            if '[' in part and ']' in part:
+                core_parts_count = j
+                break
+        
+        # 如果核心参数是4个（时间,模式,字体,颜色），则移除字体大小以兼容客户端
+        if core_parts_count == 4:
+            # 移除字体大小部分 (index 2)
+            del p_parts[2]
+        
+        # 重新组合 p 属性
+        new_p_attr = ','.join(p_parts)
+        
+        processed_comments.append(models.Comment(cid=i, p=new_p_attr, m=item["m"]))
+
+    return models.CommentResponse(count=len(processed_comments), comments=processed_comments)
 
 # --- 路由挂载 ---
 # 将实现路由挂载到主路由上，以支持两种URL结构。

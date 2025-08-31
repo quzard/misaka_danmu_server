@@ -61,6 +61,22 @@ def _generate_xml_from_comments(comments: List[TmpComment], episode_id: int) -> 
     for comment in comments:
         content = xml_escape(comment.m or '')
         p_attr = comment.p or '0,1,25,16777215'
+
+        # 新增：健壮性修复，确保 p 属性包含字体大小（至少4个部分）
+        p_parts = p_attr.split(',')
+        
+        # 查找可选的用户标签，以确定核心参数的数量
+        core_parts_count = len(p_parts)
+        for i, part in enumerate(p_parts):
+            if '[' in part and ']' in part:
+                core_parts_count = i
+                break
+
+        # 如果核心参数只有3个（时间,模式,颜色），则在模式和颜色之间插入默认字体大小 "25"
+        if core_parts_count == 3:
+            p_parts.insert(2, '25')
+            p_attr = ','.join(p_parts)
+            
         xml_parts.append(f'  <d p="{p_attr}">{content}</d>')
     xml_parts.append('</i>')
     return '\n'.join(xml_parts)
@@ -152,7 +168,8 @@ async def run_db_migration(session_factory: async_sessionmaker[AsyncSession]):
 
                 xml_content = _generate_xml_from_comments(episode.comments, episode_id)
                 
-                web_path = f"/data/danmaku/{anime_id}/{episode_id}.xml"
+                # 修正：存储不含 /data 前缀的相对路径，以与新系统保持一致
+                web_path = f"/danmaku/{anime_id}/{episode_id}.xml"
                 absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
                 
                 absolute_path.parent.mkdir(parents=True, exist_ok=True)
