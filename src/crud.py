@@ -207,6 +207,28 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     await session.refresh(new_anime)
     return new_anime
 
+async def update_anime_aliases(session: AsyncSession, anime_id: int, payload: Any):
+    """
+    Updates the aliases for a given anime.
+    The payload can be any object with the alias attributes.
+    """
+    stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
+    result = await session.execute(stmt)
+    alias_record = result.scalar_one_or_none()
+
+    if not alias_record:
+        alias_record = AnimeAlias(animeId=anime_id)
+        session.add(alias_record)
+    
+    alias_record.nameEn = getattr(payload, 'nameEn', alias_record.nameEn)
+    alias_record.nameJp = getattr(payload, 'nameJp', alias_record.nameJp)
+    alias_record.nameRomaji = getattr(payload, 'nameRomaji', alias_record.nameRomaji)
+    alias_record.aliasCn1 = getattr(payload, 'aliasCn1', alias_record.aliasCn1)
+    alias_record.aliasCn2 = getattr(payload, 'aliasCn2', alias_record.aliasCn2)
+    alias_record.aliasCn3 = getattr(payload, 'aliasCn3', alias_record.aliasCn3)
+    
+    await session.flush()
+
 async def update_anime_details(session: AsyncSession, anime_id: int, update_data: models.AnimeDetailUpdate) -> bool:
     """在事务中更新番剧的核心信息、元数据和别名。"""
     anime = await session.get(Anime, anime_id, options=[selectinload(Anime.metadataRecord), selectinload(Anime.aliases)])
@@ -611,25 +633,39 @@ async def update_source_media_id(session: AsyncSession, source_id: int, new_medi
     await session.execute(stmt)
     # 注意：这里不 commit，由调用方（任务）来决定何时提交事务
 
-async def update_metadata_if_empty(session: AsyncSession, anime_id: int, tmdbId: Optional[str], imdbId: Optional[str], tvdbId: Optional[str], doubanId: Optional[str], bangumiId: Optional[str] = None, tmdbEpisodeGroupId: Optional[str] = None):
-    """仅当字段为空时，才更新番剧的元数据ID。"""
+async def update_metadata_if_empty(
+    session: AsyncSession,
+    anime_id: int,
+    *,
+    tmdb_id: Optional[str] = None,
+    imdb_id: Optional[str] = None,
+    tvdb_id: Optional[str] = None,
+    douban_id: Optional[str] = None,
+    bangumi_id: Optional[str] = None,
+    tmdb_episode_group_id: Optional[str] = None
+):
+    """
+    如果 anime_metadata 记录中的字段为空，则使用提供的值进行更新。
+    如果记录不存在，则创建一个新记录。
+    使用关键字参数以提高可读性和安全性。
+    """
     stmt = select(AnimeMetadata).where(AnimeMetadata.animeId == anime_id)
     result = await session.execute(stmt)
-    metadata = result.scalar_one_or_none()
+    metadata_record = result.scalar_one_or_none()
 
-    if not metadata:
-        return
+    if not metadata_record:
+        metadata_record = AnimeMetadata(animeId=anime_id)
+        session.add(metadata_record)
+        await session.flush()
 
-    updated = False
-    if not metadata.tmdbId and tmdbId: metadata.tmdbId = tmdbId; updated = True
-    if not metadata.tmdbEpisodeGroupId and tmdbEpisodeGroupId: metadata.tmdbEpisodeGroupId = tmdbEpisodeGroupId; updated = True
-    if not metadata.imdbId and imdbId: metadata.imdbId = imdbId; updated = True
-    if not metadata.tvdbId and tvdbId: metadata.tvdbId = tvdbId; updated = True
-    if not metadata.doubanId and doubanId: metadata.doubanId = doubanId; updated = True
-    if not metadata.bangumiId and bangumiId: metadata.bangumiId = bangumiId; updated = True
+    if tmdb_id and not metadata_record.tmdbId: metadata_record.tmdbId = tmdb_id
+    if imdb_id and not metadata_record.imdbId: metadata_record.imdbId = imdb_id
+    if tvdb_id and not metadata_record.tvdbId: metadata_record.tvdbId = tvdb_id
+    if douban_id and not metadata_record.doubanId: metadata_record.doubanId = douban_id
+    if bangumi_id and not metadata_record.bangumiId: metadata_record.bangumiId = bangumi_id
+    if tmdb_episode_group_id and not metadata_record.tmdbEpisodeGroupId: metadata_record.tmdbEpisodeGroupId = tmdb_episode_group_id
 
-    if updated:
-        await session.commit()
+    await session.flush()
 
 # --- User & Auth ---
 
@@ -827,7 +863,8 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List
 async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.providerName, 
+            AnimeSource.providerName,
+            AnimeSource.animeId,
             Episode.providerEpisodeId,
             Episode.danmakuFilePath
         )
@@ -1290,6 +1327,7 @@ async def update_episode_danmaku_info(session: AsyncSession, episode_id: int, fi
         danmakuFilePath=file_path, commentCount=count, fetchedAt=datetime.now(timezone.utc)
     )
     await session.execute(stmt)
+    await session.flush()
 # --- API Token Management ---
 
 async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
@@ -1526,28 +1564,24 @@ async def update_anime_tmdb_group_id(session: AsyncSession, anime_id: int, group
     await session.commit()
 
 async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any]):
-    alias_record = await session.get(AnimeAlias, anime_id)
+    # 修正：使用 select().where() 而不是 session.get()，因为 anime_id 不是主键
+    stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
+    result = await session.execute(stmt)
+    alias_record = result.scalar_one_or_none()
+
     if not alias_record: return
 
-    updated = False
-    if not alias_record.nameEn and aliases.get('nameEn'):
-        alias_record.nameEn = aliases['nameEn']; updated = True
-    if not alias_record.nameJp and aliases.get('nameJp'):
-        alias_record.nameJp = aliases['nameJp']; updated = True
-    if not alias_record.nameRomaji and aliases.get('nameRomaji'):
-        alias_record.nameRomaji = aliases['nameRomaji']; updated = True
+    if not alias_record.nameEn and aliases.get('nameEn'): alias_record.nameEn = aliases['nameEn']
+    if not alias_record.nameJp and aliases.get('nameJp'): alias_record.nameJp = aliases['nameJp']
+    if not alias_record.nameRomaji and aliases.get('nameRomaji'): alias_record.nameRomaji = aliases['nameRomaji']
     
     cn_aliases = aliases.get('aliases_cn', [])
-    if not alias_record.aliasCn1 and len(cn_aliases) > 0:
-        alias_record.aliasCn1 = cn_aliases[0]; updated = True
-    if not alias_record.aliasCn2 and len(cn_aliases) > 1:
-        alias_record.aliasCn2 = cn_aliases[1]; updated = True
-    if not alias_record.aliasCn3 and len(cn_aliases) > 2:
-        alias_record.aliasCn3 = cn_aliases[2]; updated = True
+    if not alias_record.aliasCn1 and len(cn_aliases) > 0: alias_record.aliasCn1 = cn_aliases[0]
+    if not alias_record.aliasCn2 and len(cn_aliases) > 1: alias_record.aliasCn2 = cn_aliases[1]
+    if not alias_record.aliasCn3 and len(cn_aliases) > 2: alias_record.aliasCn3 = cn_aliases[2]
 
-    if updated:
-        await session.commit()
-        logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
+    await session.flush()
+    logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(

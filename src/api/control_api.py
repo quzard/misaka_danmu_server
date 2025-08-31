@@ -137,13 +137,18 @@ class ControlSearchResponse(BaseModel):
     searchId: str = Field(..., description="本次搜索操作的唯一ID，用于后续操作")
     results: List[ControlSearchResultItem] = Field(..., description="搜索结果列表")
 
-class _BaseOptionalIds(BaseModel):
-    """一个基础模型，用于统一处理可选的元数据ID，并确保None值被转换为空字符串。"""
+class ControlDirectImportRequest(BaseModel):
+    searchId: str = Field(..., description="来自搜索响应的searchId")
+    resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
+    # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
     tmdbId: Optional[str] = ""
     tvdbId: Optional[str] = ""
     bangumiId: Optional[str] = ""
     imdbId: Optional[str] = ""
     doubanId: Optional[str] = ""
+
+    class Config:
+        populate_by_name = True
 
     @model_validator(mode='before')
     @classmethod
@@ -154,18 +159,11 @@ class _BaseOptionalIds(BaseModel):
                     data[key] = ""
         return data
 
-class ControlDirectImportRequest(_BaseOptionalIds):
-    searchId: str = Field(..., description="来自搜索响应的searchId")
-    resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
-
-    class Config:
-        populate_by_name = True
-
-class ControlAnimeCreateRequest(_BaseOptionalIds):
+class ControlAnimeCreateRequest(BaseModel):
     """用于外部API自定义创建影视条目的请求模型"""
     title: str = Field(..., description="作品主标题")
     type: AutoImportMediaType = Field(..., description="媒体类型")
-    season: int = Field(..., description="季度号")
+    season: Optional[int] = Field(None, description="季度号 (tv_series 类型必需)")
     year: Optional[int] = Field(None, description="年份")
     nameEn: Optional[str] = Field(None, description="英文标题")
     nameJp: Optional[str] = Field(None, description="日文标题")
@@ -173,16 +171,52 @@ class ControlAnimeCreateRequest(_BaseOptionalIds):
     aliasCn1: Optional[str] = Field(None, description="中文别名1")
     aliasCn2: Optional[str] = Field(None, description="中文别名2")
     aliasCn3: Optional[str] = Field(None, description="中文别名3")
+    # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
+    tmdbId: Optional[str] = ""
+    tvdbId: Optional[str] = ""
+    bangumiId: Optional[str] = ""
+    imdbId: Optional[str] = ""
+    doubanId: Optional[str] = ""
 
-class ControlEditedImportRequest(_BaseOptionalIds):
+    @model_validator(mode='after')
+    def check_season_for_tv_series(self):
+        if self.type == 'tv_series' and self.season is None:
+            raise ValueError('对于电视节目 (tv_series)，季度 (season) 是必需的。')
+        return self
+    
+    @model_validator(mode='before')
+    @classmethod
+    def empty_str_for_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if key in cls.model_fields and value is None:
+                    data[key] = ""
+        return data
+
+class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要编辑的结果的索引 (从0开始)")
     title: Optional[str] = Field(None, description="覆盖原始标题")
-    tmdbEpisodeGroupId: Optional[str] = Field("", description="强制指定TMDB剧集组ID")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
+    # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
+    tmdbId: Optional[str] = ""
+    tvdbId: Optional[str] = ""
+    bangumiId: Optional[str] = ""
+    imdbId: Optional[str] = ""
+    doubanId: Optional[str] = ""
+    tmdbEpisodeGroupId: Optional[str] = Field("", description="强制指定TMDB剧集组ID")
 
     class Config:
         populate_by_name = True
+
+    @model_validator(mode='before')
+    @classmethod
+    def empty_str_for_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if key in cls.model_fields and value is None:
+                    data[key] = ""
+        return data
 
 class ControlUrlImportRequest(BaseModel):
     """用于外部API通过URL导入到指定源的请求模型"""
@@ -493,7 +527,8 @@ async def edited_import(
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """
     ### 功能
@@ -540,8 +575,9 @@ async def edited_import(
     unique_key = f"import-{task_payload.provider}-{task_payload.mediaId}"
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
-            request_data=task_payload, progress_callback=cb, session=session, manager=manager,
-            rate_limiter=rate_limiter
+            request_data=task_payload, progress_callback=cb, session=session,
+            manager=manager, rate_limiter=rate_limiter,
+            metadata_manager=metadata_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
@@ -673,18 +709,22 @@ async def create_anime_entry(
     4.  返回新创建的作品的完整信息。
     """
     # Check for duplicates first
-    existing_anime = await crud.find_anime_by_title_and_season(session, payload.title, payload.season)
+    # 修正：为非电视剧类型使用默认季度1进行重复检查
+    season_for_check = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
+    existing_anime = await crud.find_anime_by_title_and_season(session, payload.title, season_for_check)
     if existing_anime:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="已存在同名同季度的作品。"
         )
     
+    # 修正：为非电视剧类型使用默认季度1进行创建
+    season_for_create = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
     new_anime_id = await crud.get_or_create_anime(
         session,
         title=payload.title,
         media_type=payload.type.value,
-        season=payload.season,
+        season=season_for_create,
         year=payload.year,
         image_url=None, # No image URL when creating manually
         local_image_path=None

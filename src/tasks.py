@@ -447,7 +447,14 @@ async def generic_import_task(
             image_download_failed = bool(imageUrl and not local_image_path)
             
             anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year)
-            await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
+            await crud.update_metadata_if_empty(
+                session, anime_id,
+                tmdb_id=tmdbId,
+                imdb_id=imdbId,
+                tvdb_id=tvdbId,
+                douban_id=doubanId,
+                bangumi_id=bangumiId
+            )
             source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
             
             episode_title = f"第 {currentEpisodeIndex} 集"
@@ -477,7 +484,14 @@ async def generic_import_task(
     if imageUrl and not local_image_path:
         image_download_failed = True
     anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year)
-    await crud.update_metadata_if_empty(session, anime_id, tmdbId, imdbId, tvdbId, doubanId, bangumiId)
+    await crud.update_metadata_if_empty(
+        session, anime_id,
+        tmdb_id=tmdbId,
+        imdb_id=imdbId,
+        tvdb_id=tvdbId,
+        douban_id=doubanId,
+        bangumi_id=bangumiId
+    )
     source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
     logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
     await session.commit()
@@ -519,7 +533,7 @@ async def edited_import_task(
     if not episodes:
         raise TaskSuccess("没有提供任何分集，任务结束。")
 
-    # 新增：从标题中解析季和集，以确保数据一致性
+    # 从标题中解析季和集，以确保数据一致性
     parsed_info = parse_search_keyword(normalized_title)
     title_to_use = parsed_info["title"]
     season_to_use = parsed_info["season"] if parsed_info["season"] is not None else request_data.season
@@ -537,10 +551,14 @@ async def edited_import_task(
         session, title_to_use, request_data.mediaType,
         season_to_use, request_data.imageUrl, local_image_path, request_data.year
     )
-    await crud.update_metadata_if_empty(
-        session, anime_id, tmdbId=request_data.tmdbId, imdbId=request_data.imdbId,
-        tvdbId=request_data.tvdbId, doubanId=request_data.doubanId,
-        bangumiId=request_data.bangumiId, tmdbEpisodeGroupId=request_data.tmdbEpisodeGroupId
+    await crud.update_metadata_if_empty( # 修正：使用 snake_case 关键字参数
+        session, anime_id,
+        tmdb_id=request_data.tmdbId,
+        imdb_id=request_data.imdbId,
+        tvdb_id=request_data.tvdbId,
+        douban_id=request_data.doubanId,
+        bangumi_id=request_data.bangumiId,
+        tmdb_episode_group_id=request_data.tmdbEpisodeGroupId
     )
     source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
     await session.commit()
