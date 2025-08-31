@@ -6,9 +6,15 @@
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)
 [![telegram](https://img.shields.io/static/v1?label=telegram&message=misaka_danmu_server&color=blue)](https://t.me/misaka_danmu_server)
 
+
+
 一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
 本项目旨在通过刮削主流视频网站的弹幕，为您自己的媒体库提供一个统一、私有的弹幕API。它自带一个现代化的Web界面，方便您管理弹幕库、搜索源、API令牌和系统设置。
+
+> [!IMPORTANT]
+> **按需使用，请勿滥用**
+> 本项目旨在作为个人媒体库的弹幕补充工具。所有弹幕数据均实时从第三方公开API或网站获取。请合理使用，避免对源站造成不必要的负担。过度频繁的请求可能会导致您的IP被目标网站屏蔽。
 
 ## ✨ 核心功能
 
