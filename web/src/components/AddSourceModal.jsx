@@ -44,11 +44,25 @@ export const AddSourceModal = ({ open, animeId, onCancel, onSuccess }) => {
       onOk={handleOk}
       onCancel={onCancel}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
-      <Form form={form} layout="vertical" name="add_source_form" className="!px-4 !pt-6">
-        <Form.Item name="providerName" label="数据源平台" rules={[{ required: true, message: '请选择平台！' }]} initialValue="custom">
-          <Select showSearch options={PROVIDER_OPTIONS} placeholder="选择一个平台" />
+      <Form
+        form={form}
+        layout="vertical"
+        name="add_source_form"
+        className="!px-4 !pt-6"
+      >
+        <Form.Item
+          name="providerName"
+          label="数据源平台"
+          rules={[{ required: true, message: '请选择平台！' }]}
+          initialValue="custom"
+        >
+          <Select
+            showSearch
+            options={PROVIDER_OPTIONS}
+            placeholder="选择一个平台"
+          />
         </Form.Item>
         <Form.Item
           name="mediaId"

@@ -1,87 +1,420 @@
-import { Form, Input, Modal, message } from 'antd'
-import { useState } from 'react'
+import {
+  Button,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  List,
+  Modal,
+  Tag,
+  Upload,
+  message,
+} from 'antd'
+import { useEffect, useRef, useState } from 'react'
 import { batchManualImport } from '../apis'
+import { CloseCircleOutlined, UploadOutlined } from '@ant-design/icons'
+import { useMessage } from '../MessageContext'
 
-const { TextArea } = Input
+import { MyIcon } from '@/components/MyIcon'
+
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const [form] = Form.useForm()
+  const messageApi = useMessage()
   const [loading, setLoading] = useState(false)
+  // 存储解析后的XML数据列表
+  const [xmlDataList, setXmlDataList] = useState([])
+  // 存储上传状态
+  const [uploading, setUploading] = useState(false)
+  // 用于跟踪文件拖入顺序的计数器
+  const orderCounter = useRef(0)
+  // 存储文件ID与拖入顺序的映射
+  const fileOrderMap = useRef({})
+  const dragOverlayRef = useRef(null)
 
-  const isCustomSource = sourceInfo?.providerName === 'custom'
-  const placeholderText = isCustomSource
-    ? `请使用 ##EPISODE=集数## 作为分隔符来区分不同分集的XML内容。
-例如：
-##EPISODE=1##
-<?xml version="1.0" encoding="UTF-8"?><i>...</i>
+  const [pageSize, setPageSize] = useState(10)
+  const [activeItem, setActiveItem] = useState(null)
 
-##EPISODE=2##
-<?xml version="1.0" encoding="UTF-8"?><i>...</i>`
-    : `每行一个URL，格式为：集数=URL
-例如：
-1=https://www.bilibili.com/bangumi/play/ep12345
-2=https://www.bilibili.com/bangumi/play/ep12346`
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        distance: 8,
+        delay: 100,
+      },
+    })
+  )
 
   const handleOk = async () => {
     if (!sourceInfo?.sourceId) return
     try {
-      const values = await form.validateFields()
-      const content = values.content
-      let items = []
-
-      if (isCustomSource) {
-        const segments = content.split(/##EPISODE=(\d+)##/g).filter(s => s.trim() !== '')
-        if (segments.length > 0 && segments.length % 2 !== 0) {
-          throw new Error('自定义源内容格式错误，请确保每个 ##EPISODE=集数## 分隔符后都有XML内容。')
-        }
-        for (let i = 0; i < segments.length; i += 2) {
-          const episodeIndex = parseInt(segments[i], 10)
-          const xmlContent = segments[i + 1].trim()
-          if (!isNaN(episodeIndex) && xmlContent) {
-            items.push({ episodeIndex, content: xmlContent })
-          }
-        }
-      } else {
-        const lines = content.split('\n').filter(line => line.trim() !== '')
-        items = lines.map(line => {
-          const parts = line.split('=')
-          if (parts.length < 2 || !/^\d+$/.test(parts[0].trim())) {
-            throw new Error(`格式错误，应为 "集数=URL"，错误的行: ${line}`)
-          }
-          return {
-            episodeIndex: parseInt(parts[0].trim(), 10),
-            content: parts.slice(1).join('=').trim(), // 允许URL中包含'='
-          }
-        })
-      }
-
-      if (items.length === 0) {
-        message.warn('未解析到任何有效条目！')
+      if (xmlDataList.length === 0) {
+        messageApi.warn('未解析到任何有效条目！')
         return
       }
-
       setLoading(true)
-      const res = await batchManualImport({ sourceId: sourceInfo.sourceId, items })
+      const res = await batchManualImport({
+        sourceId: sourceInfo.sourceId,
+        items: xmlDataList.map(it => {
+          return {
+            episodeIndex: it.episodeIndex,
+            content: it.content,
+            title: it.title ?? undefined,
+          }
+        }),
+      })
       if (res.data) {
-        message.success('批量导入任务已提交！')
+        messageApi.success('批量导入任务已提交！')
         onSuccess(res.data) // 将任务数据传递回去
         form.resetFields()
       }
     } catch (error) {
       console.error('批量导入失败:', error)
-      message.error(error.detail || error.message || '批量导入失败，请检查内容格式和日志')
+      messageApi.error(
+        error.detail || error.message || '批量导入失败，请检查内容格式和日志'
+      )
     } finally {
       setLoading(false)
     }
   }
 
+  const handleDelete = item => {
+    setXmlDataList(list => {
+      const activeIndex = list.findIndex(o => o.id === item.id)
+      const newList = [...list]
+      newList.splice(activeIndex, 1)
+      return newList
+    })
+  }
+
+  const handleEditIndex = (item, value) => {
+    setXmlDataList(list => {
+      return list.map(it => {
+        if (it.id === item.id) {
+          return {
+            ...it,
+            episodeIndex: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
+  }
+
+  const handleEditTitle = (item, value) => {
+    setXmlDataList(list => {
+      return list.map(it => {
+        if (it.id === item.id) {
+          return {
+            ...it,
+            title: value,
+          }
+        } else {
+          return it
+        }
+      })
+    })
+  }
+
+  const handleDragStart = event => {
+    const { active } = event
+    // 找到当前拖拽的项
+    const item = xmlDataList.find(item => item.id === active.id)
+    setActiveItem(item)
+  }
+
+  const handleDragEnd = event => {
+    const { active, over } = event
+    // 拖拽无效或未改变位置
+    if (!over || active.id === over.id) {
+      setActiveItem(null)
+      return
+    }
+
+    setXmlDataList(list => {
+      const activeIndex = list.findIndex(
+        item => item.id === active.data.current.item.id
+      )
+      const overIndex = list.findIndex(
+        item => item.id === over.data.current.item.id
+      )
+
+      if (activeIndex !== -1 && overIndex !== -1) {
+        // 1. 重新排列数组
+        const newList = [...xmlDataList]
+        const [movedItem] = newList.splice(activeIndex, 1)
+        newList.splice(overIndex, 0, movedItem)
+
+        return newList
+      }
+      return list
+    })
+
+    setActiveItem(null)
+  }
+
+  /**
+   * 处理文件上传
+   * @param {Array} files - 上传的文件列表
+   */
+  const handleUpload = async ({ file }) => {
+    const fileOrder = orderCounter.current++
+    fileOrderMap.current[file.uid] = fileOrder
+    setUploading(true)
+
+    try {
+      // 创建文件读取器
+      const reader = new FileReader()
+
+      reader.onload = async e => {
+        try {
+          const xmlContent = e.target.result
+          // 将解析结果添加到列表
+          setXmlDataList(prev => {
+            const newItems = [
+              ...prev,
+              {
+                id: file.uid,
+                episodeIndex: fileOrder + 1,
+                title: file.name?.split('.')?.[0],
+                content: xmlContent,
+                size: file.size,
+                order: fileOrder,
+              },
+            ]
+
+            newItems.sort((a, b) => a.order - b.order)
+            return newItems
+          })
+        } catch (error) {
+          messageApi.error(`文件 ${file.name} 解析失败: ${error.message}`)
+        }
+      }
+
+      reader.readAsText(file)
+    } catch (error) {
+      messageApi.error(`文件处理失败: ${error.message}`)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const uploadProps = {
+    accept: '.xml',
+    multiple: true,
+    showUploadList: false,
+    beforeUpload: () => true,
+    customRequest: handleUpload,
+  }
+
+  const renderDragOverlay = () => {
+    if (!activeItem) return null
+
+    return (
+      <div ref={dragOverlayRef} style={{ width: '100%', maxWidth: '100%' }}>
+        <List.Item
+          style={{
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            opacity: 0.9,
+          }}
+        >
+          {/* 保留你原有的列表项渲染逻辑 */}
+          <div className="w-full flex items-center justify-between">
+            <div>
+              <MyIcon icon="drag" size={24} />
+            </div>
+            <div className="w-full flex items-center justify-start gap-3">
+              <InputNumber value={activeItem.episodeIndex} />
+              <Input
+                style={{
+                  width: '100%',
+                }}
+                value={activeItem.title}
+              />
+              <Input readOnly value={activeItem.content.slice(0, 100)} />
+              <div>
+                <CloseCircleOutlined />
+              </div>
+            </div>
+          </div>
+        </List.Item>
+      </div>
+    )
+  }
+
   return (
-    <Modal title={`批量导入 - ${sourceInfo?.title} (${sourceInfo?.providerName})`} open={open} onOk={handleOk} onCancel={onCancel} confirmLoading={loading} destroyOnClose width={720}>
-      <Form form={form} layout="vertical" name="batch_import_form" className="!px-4 !pt-6">
-        <Form.Item name="content" label={isCustomSource ? 'XML弹幕内容 (使用分隔符)' : '分集URL列表'} rules={[{ required: true, message: '请输入内容！' }]}>
-          <TextArea rows={15} placeholder={placeholderText} />
-        </Form.Item>
-      </Form>
+    <Modal
+      title={`批量导入 - ${sourceInfo?.animeName} (${sourceInfo?.providerName})`}
+      open={open}
+      onOk={handleOk}
+      onCancel={onCancel}
+      confirmLoading={loading}
+      destroyOnHidden
+      width={720}
+    >
+      <div className="p-4 text-center">
+        <Upload {...uploadProps}>
+          <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
+            选择XML文件
+          </Button>
+          <div className="mt-3">支持批量上传，仅接受.xml格式文件</div>
+        </Upload>
+      </div>
+      {xmlDataList.length === 0 ? (
+        <div className="text-center py-10 text-gray-500">
+          <Empty description="暂无解析数据，请上传XML文件" />
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={xmlDataList.map(item => item.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <List
+              itemLayout="vertical"
+              size="large"
+              pagination={{
+                pageSize: pageSize,
+                onShowSizeChange: (_, size) => {
+                  setPageSize(size)
+                },
+                hideOnSinglePage: true,
+              }}
+              dataSource={xmlDataList}
+              renderItem={(item, index) => (
+                <SortableItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  handleDelete={() => handleDelete(item)}
+                  handleEditTitle={value => handleEditTitle(item, value)}
+                  handleEditIndex={value => handleEditIndex(item, value)}
+                />
+              )}
+            />
+          </SortableContext>
+
+          {/* 拖拽覆盖层 */}
+          <DragOverlay>{renderDragOverlay()}</DragOverlay>
+        </DndContext>
+      )}
     </Modal>
+  )
+}
+
+const SortableItem = ({
+  item,
+  index,
+  handleDelete,
+  handleEditTitle,
+  handleEditIndex,
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: item.id,
+    data: {
+      item,
+      index,
+    },
+  })
+
+  const inputRef = useRef(null)
+  const [isFocused, setIsFocused] = useState(false)
+
+  const inputNumberRef = useRef(null)
+  const [isNumberFocused, setIsNumberFocused] = useState(false)
+
+  useEffect(() => {
+    if (isFocused && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isFocused, item.title])
+
+  useEffect(() => {
+    if (isNumberFocused && inputNumberRef.current) {
+      inputNumberRef.current.focus()
+    }
+  }, [isNumberFocused, item.episodeIndex])
+
+  // 拖拽样式
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: 'grab',
+    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
+    userSelect: 'none', // 防止拖拽时选中文本
+    ...(isDragging && { cursor: 'grabbing' }),
+  }
+
+  return (
+    <List.Item ref={setNodeRef} style={style} {...attributes}>
+      {/* 保留你原有的列表项渲染逻辑 */}
+      <div className="w-full flex items-center justify-between">
+        <div {...listeners} style={{ cursor: 'grab' }}>
+          <MyIcon icon="drag" size={24} />
+        </div>
+        <div className="w-full flex items-center justify-start gap-3">
+          <InputNumber
+            ref={inputNumberRef}
+            value={item.episodeIndex}
+            onChange={value => {
+              handleEditIndex(value)
+            }}
+            onFocus={() => setIsNumberFocused(true)}
+            onBlur={() => setIsNumberFocused(false)}
+          />
+          <Input
+            ref={inputRef}
+            style={{
+              width: '100%',
+            }}
+            key={item.title}
+            value={item.title}
+            onChange={e => {
+              console.log(e.target.value, 'e.target.value')
+              handleEditTitle(e.target.value)
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+          />
+          <Input readOnly value={item.content.slice(0, 100)} />
+          <div onClick={() => handleDelete(item)}>
+            <CloseCircleOutlined />
+          </div>
+        </div>
+      </div>
+    </List.Item>
   )
 }
