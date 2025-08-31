@@ -516,6 +516,10 @@ class BilibiliScraper(BaseScraper):
 
                     media_type = "movie" if item.season_type_name == "电影" else "tv_series"
                     
+                    # 修正：对于电影类型，即使API返回的ep_size为0或null，也应将总集数视为1。
+                    # 这可以改善前端UI的显示，使其更符合用户对电影的直观理解。
+                    episode_count = 1 if media_type == "movie" else item.ep_size
+                    
                     year = None
                     try:
                         if item.pubdate:
@@ -530,7 +534,7 @@ class BilibiliScraper(BaseScraper):
                     results.append(models.ProviderSearchInfo(
                         provider=self.provider_name, mediaId=media_id, title=cleaned_title,
                         type=media_type, season=get_season_from_title(cleaned_title),
-                        year=year, imageUrl=item.cover, episodeCount=item.ep_size,
+                        year=year, imageUrl=item.cover, episodeCount=episode_count,
                         currentEpisodeIndex=episode_info.get("episode") if episode_info else None
                     ))
             else:
