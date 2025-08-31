@@ -11,7 +11,7 @@ import {
   refreshEpisodeDanmaku,
   resetEpisode,
 } from '../../apis'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Breadcrumb,
   Button,
@@ -26,10 +26,11 @@ import {
   Switch,
   Table,
   Tooltip,
+  Upload,
 } from 'antd'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
-import { HomeOutlined } from '@ant-design/icons'
+import { HomeOutlined, UploadOutlined } from '@ant-design/icons'
 import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
@@ -55,6 +56,8 @@ export const EpisodeDetail = () => {
   const [resetInfo, setResetInfo] = useState({})
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const uploadRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -354,6 +357,11 @@ export const EpisodeDetail = () => {
       }
       getDetail()
       form.resetFields()
+      setUploading(false)
+      // 清空上传组件的内部文件列表
+      if (uploadRef.current) {
+        uploadRef.current.clearFiles()
+      }
       messageApi.success('分集信息更新成功！')
     } catch (error) {
       console.log(error)
@@ -419,6 +427,40 @@ export const EpisodeDetail = () => {
     },
   }
 
+  const handleUpload = async ({ file }) => {
+    setUploading(true)
+
+    try {
+      // 创建文件读取器
+      const reader = new FileReader()
+
+      reader.onload = async e => {
+        try {
+          const xmlContent = e.target.result
+          form.setFieldsValue({
+            content: xmlContent,
+          })
+        } catch (error) {
+          messageApi.error(`文件 ${file.name} 解析失败: ${error.message}`)
+        }
+      }
+
+      reader.readAsText(file)
+    } catch (error) {
+      messageApi.error(`文件处理失败: ${error.message}`)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const uploadProps = {
+    accept: '.xml',
+    multiple: false,
+    showUploadList: false,
+    beforeUpload: () => true,
+    customRequest: handleUpload,
+  }
+
   return (
     <div className="my-6">
       <Breadcrumb
@@ -460,7 +502,7 @@ export const EpisodeDetail = () => {
           >
             删除选中
           </Button>
-          <div className="w-full flex items-center justify-between md:justify-end gap-2 mb-4">
+          <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap md:justify-end gap-2 mb-4">
             <Button
               onClick={() => {
                 const validCounts = episodeList
@@ -572,21 +614,35 @@ export const EpisodeDetail = () => {
             />
           </Form.Item>
           {isXmlImport ? (
-            <Form.Item
-              name="content"
-              label="弹幕XML内容"
-              rules={[
-                {
-                  required: true,
-                  message: `请输入弹幕XML内容`,
-                },
-              ]}
-            >
-              <Input.TextArea
-                rows={6}
-                placeholder="请在此处粘贴弹幕XML文件的内容"
-              />
-            </Form.Item>
+            <>
+              <Form.Item
+                name="content"
+                label="弹幕XML内容"
+                rules={[
+                  {
+                    required: true,
+                    message: `请输入弹幕XML内容`,
+                  },
+                ]}
+              >
+                <Input.TextArea
+                  rows={6}
+                  placeholder="请在此处粘贴弹幕XML文件的内容"
+                />
+              </Form.Item>
+              <div className="text-right my-4">
+                <Upload
+                  {...uploadProps}
+                  ref={uploadRef}
+                  loading={uploading}
+                  disabled={uploading}
+                >
+                  <Button type="primary" icon={<UploadOutlined />}>
+                    选择文件导入XML
+                  </Button>
+                </Upload>
+              </div>
+            </>
           ) : (
             <Form.Item
               name="sourceUrl"
