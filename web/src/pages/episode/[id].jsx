@@ -35,6 +35,7 @@ import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { BatchImportModal } from '../../components/BatchImportModal'
+import { isUrl } from '../../utils/data'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()
@@ -58,6 +59,7 @@ export const EpisodeDetail = () => {
   const [isEditing, setIsEditing] = useState(false)
   const uploadRef = useRef(null)
   const [uploading, setUploading] = useState(false)
+  const [fileList, setFileList] = useState([])
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -153,13 +155,17 @@ export const EpisodeDetail = () => {
       render: (_, record) => {
         return (
           <div>
-            <a
-              href={record.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              跳转
-            </a>
+            {isUrl(record.sourceUrl) ? (
+              <a
+                href={record.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                跳转
+              </a>
+            ) : (
+              '--'
+            )}
           </div>
         )
       },
@@ -342,6 +348,7 @@ export const EpisodeDetail = () => {
       if (confirmLoading) return
       setConfirmLoading(true)
       const values = await form.validateFields()
+      console.log(values, 'values')
       if (values.episodeId) {
         await editEpisode({
           ...values,
@@ -349,9 +356,7 @@ export const EpisodeDetail = () => {
         })
       } else {
         await manualImportEpisode({
-          title: values.title,
-          episodeIndex: values.episodeIndex,
-          url: values.sourceUrl,
+          ...values,
           sourceId: Number(id),
         })
       }
@@ -359,9 +364,7 @@ export const EpisodeDetail = () => {
       form.resetFields()
       setUploading(false)
       // 清空上传组件的内部文件列表
-      if (uploadRef.current) {
-        uploadRef.current.clearFiles()
-      }
+      setFileList([])
       messageApi.success('分集信息更新成功！')
     } catch (error) {
       console.log(error)
@@ -453,12 +456,26 @@ export const EpisodeDetail = () => {
     }
   }
 
+  const handleChange = ({ file, fileList }) => {
+    // 更新文件列表状态
+    setFileList(fileList)
+
+    if (file.status === 'uploading') {
+      setUploading(true)
+    }
+    if (file.status === 'done' || file.status === 'error') {
+      setUploading(false)
+    }
+  }
+
   const uploadProps = {
     accept: '.xml',
     multiple: false,
     showUploadList: false,
     beforeUpload: () => true,
     customRequest: handleUpload,
+    onChange: handleChange,
+    fileList: fileList,
   }
 
   return (

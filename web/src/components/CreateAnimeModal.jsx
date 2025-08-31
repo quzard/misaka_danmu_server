@@ -57,8 +57,6 @@ export const CreateAnimeModal = ({ open, onCancel, onSuccess }) => {
           <Select>
             <Select.Option value="tv_series">电视剧/番剧</Select.Option>
             <Select.Option value="movie">电影/剧场版</Select.Option>
-            <Select.Option value="ova">OVA</Select.Option>
-            <Select.Option value="other">其他</Select.Option>
           </Select>
         </Form.Item>
         <Form.Item name="season" label="季度" initialValue={1}>
