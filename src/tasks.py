@@ -22,7 +22,7 @@ from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager 
 from .utils import parse_search_keyword, clean_xml_string
-from .crud import DANMAKU_BASE_DIR
+from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from sqlalchemy.exc import OperationalError
 
@@ -176,12 +176,10 @@ def _delete_danmaku_file(danmaku_file_path_str: Optional[str]):
     if not danmaku_file_path_str:
         return
     try:
-        # 从数据库读取的Web路径 (e.g., /danmaku/...) 转换为文件系统路径。
-        # 移除开头的 '/'，得到 'danmaku/...'
-        relative_path = Path(danmaku_file_path_str.lstrip('/'))
-        full_path = DANMAKU_BASE_DIR.parent / relative_path
-        if full_path.is_file():
-            full_path.unlink()
+        # 修正：使用 crud 中的辅助函数来获取正确的文件系统路径
+        fs_path = _get_fs_path_from_web_path(danmaku_file_path_str)
+        if fs_path and fs_path.is_file():
+            fs_path.unlink(missing_ok=True)
     except (ValueError, FileNotFoundError):
         # 如果路径无效或文件不存在，则忽略
         pass
@@ -618,9 +616,21 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
     if not new_episodes:
         raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
 
-    await progress_callback(20, f"获取到 {len(new_episodes)} 个新分集，正在获取弹幕...")
-    
-    new_data_package = []
+    # 修正：实现真正的“全量刷新”，删除不再存在的分集
+    await progress_callback(20, f"获取到 {len(new_episodes)} 个新分集，正在比对旧数据...")
+    old_episodes_res = await session.execute(select(orm_models.Episode).where(orm_models.Episode.sourceId == sourceId))
+    old_episodes = old_episodes_res.scalars().all()
+    old_provider_ids = {ep.providerEpisodeId for ep in old_episodes}
+    new_provider_ids = {ep.episodeId for ep in new_episodes}
+    ids_to_delete = old_provider_ids - new_provider_ids
+    episodes_to_delete = [ep for ep in old_episodes if ep.providerEpisodeId in ids_to_delete]
+    for ep in episodes_to_delete:
+        _delete_danmaku_file(ep.danmakuFilePath)
+        await session.delete(ep)
+    if episodes_to_delete:
+        await session.commit()
+        logger.info(f"全量刷新：删除了 {len(episodes_to_delete)} 个过时的分集。")
+        await progress_callback(25, f"已删除 {len(episodes_to_delete)} 个过时分集，准备获取新弹幕...")
 
     # 调用通用处理器来获取所有弹幕
     total_comments_fetched, failed_episodes_count = await _process_episode_list(
@@ -770,10 +780,11 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
                 if old_ep.id == new_id and old_ep.episodeIndex == new_index:
                     continue
 
-                new_danmaku_web_path = f"/data/danmaku/{anime_id}/{new_id}.xml" if old_ep.danmakuFilePath else None
+                # 修正：使用正确的Web路径格式，并使用辅助函数进行文件路径转换
+                new_danmaku_web_path = f"/danmaku/{anime_id}/{new_id}.xml" if old_ep.danmakuFilePath else None
                 if old_ep.danmakuFilePath:
-                    old_full_path = DANMAKU_BASE_DIR.parent / Path(old_ep.danmakuFilePath).relative_to('/data')
-                    new_full_path = DANMAKU_BASE_DIR.parent / Path(new_danmaku_web_path).relative_to('/data')
+                    old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
+                    new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
                     if old_full_path.is_file() and old_full_path != new_full_path:
                         new_full_path.parent.mkdir(parents=True, exist_ok=True)
                         old_full_path.rename(new_full_path)

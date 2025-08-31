@@ -827,28 +827,24 @@ async def get_metadata_source_settings(
 async def update_metadata_source_settings(
     settings: List[models.MetadataSourceSettingUpdate],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
     manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
     """批量更新元数据源的启用状态、辅助搜索状态和显示顺序。"""
-    # 修正：恢复使用专用的 `metadata_sources` 表来存储设置，
-    # 这将调用 `crud.py` 中正确的函数，并解决之前遇到的状态保存问题。
-    await crud.update_metadata_sources_settings(session, settings)
-    # 新增：触发 MetadataSourceManager 重新加载设置，以使更改立即生效。
-    await manager.load_and_sync_sources()
+    # 修正：调用管理器的专用更新方法，而不是直接操作CRUD。
+    # 管理器将负责更新数据库并刷新其内部缓存，确保设置立即生效。
+    await manager.update_source_settings(settings)
     logger.info(f"用户 '{current_user.username}' 更新了元数据源设置，已重新加载。")
 
 @router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
 async def update_scraper_settings(
     settings: List[models.ScraperSetting],
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """批量更新搜索源的启用状态和显示顺序。"""
-    await crud.update_scrapers_settings(session, settings)
-    # 更新数据库后，触发 ScraperManager 重新加载搜索源
-    await manager.load_and_sync_scrapers()
+    # 修正：与元数据源类似，调用管理器的专用方法来确保实时性。
+    # 这需要您在 ScraperManager 中也添加一个类似的 update_settings 方法。
+    await manager.update_settings(settings)
     logger.info(f"用户 '{current_user.username}' 更新了搜索源设置，已重新加载。")
     return
 

@@ -55,7 +55,7 @@ class Episode(Base):
     episodeIndex: Mapped[int] = mapped_column("episode_index", Integer)
     providerEpisodeId: Mapped[Optional[str]] = mapped_column("provider_episode_id", String(255))
     sourceUrl: Mapped[Optional[str]] = mapped_column("source_url", TEXT) # type: ignore
-    danmakuFilePath: Mapped[Optional[str]] = mapped_column("danmaku_file_path", String(512)) # 新增：存储弹幕文件的相对路径
+    danmakuFilePath: Mapped[Optional[str]] = mapped_column("danmaku_file_path", String(1024)) # 新增：存储弹幕文件的相对路径
     fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", TIMESTAMP(timezone=True))
     commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
 
