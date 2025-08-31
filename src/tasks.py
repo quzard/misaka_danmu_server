@@ -5,6 +5,7 @@ import re
 import traceback
 from pathlib import Path
 import shutil
+import io
 from datetime import datetime, timedelta, timezone
 import xml.etree.ElementTree as ET
 
@@ -29,24 +30,29 @@ logger = logging.getLogger(__name__)
 
 def _parse_xml_content(xml_content: str) -> List[Dict[str, str]]:
     """
-    直接解析XML弹幕内容，确保没有条数限制，并规范化p属性。
+    使用 iterparse 高效解析XML弹幕内容，无条数限制，并规范化p属性。
     """
     comments = []
     try:
-        root = ET.fromstring(xml_content)
-        for d_tag in root.findall('d'):
-            p_attr = d_tag.get('p')
-            text = d_tag.text
-            if p_attr is not None and text is not None:
-                p_parts = p_attr.split(',')
-                # 只要有至少4个核心参数，就进行处理
-                if len(p_parts) >= 4:
-                    # 提取前4个核心参数: 时间, 模式, 字体大小, 颜色
-                    processed_p_attr = f"{p_parts[0]},{p_parts[1]},{p_parts[2]},{p_parts[3]},[custom]"
-                    comments.append({'p': processed_p_attr, 'm': text})
-                else:
-                    # 如果参数不足4个，保持原样以避免数据损坏
-                    comments.append({'p': p_attr, 'm': text})
+        # 使用 io.StringIO 将字符串转换为文件流，以便 iterparse 处理
+        xml_stream = io.StringIO(xml_content)
+        # iterparse 以事件驱动的方式解析，内存效率高，适合大文件
+        for event, elem in ET.iterparse(xml_stream, events=('end',)):
+            # 当一个 <d> 标签结束时处理它
+            if elem.tag == 'd':
+                p_attr = elem.get('p')
+                text = elem.text
+                if p_attr is not None and text is not None:
+                    p_parts = p_attr.split(',')
+                    if len(p_parts) >= 4:
+                        # 提取前4个核心参数: 时间, 模式, 字体大小, 颜色
+                        processed_p_attr = f"{p_parts[0]},{p_parts[1]},{p_parts[2]},{p_parts[3]},[custom_xml]"
+                        comments.append({'p': processed_p_attr, 'm': text})
+                    else:
+                        # 如果参数不足4个，保持原样以避免数据损坏
+                        comments.append({'p': p_attr, 'm': text})
+                # 清理已处理的元素以释放内存
+                elem.clear()
     except ET.ParseError as e:
         logger.error(f"解析XML时出错: {e}")
         # 即使解析出错，也可能已经解析了一部分，返回已解析的内容
