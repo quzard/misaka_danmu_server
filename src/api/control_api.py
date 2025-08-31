@@ -106,6 +106,18 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 # --- Pydantic 模型 ---
 
+class AutoImportSearchType(str, Enum):
+    KEYWORD = "keyword"
+    TMDB = "tmdb"
+    TVDB = "tvdb"
+    DOUBAN = "douban"
+    IMDB = "imdb"
+    BANGUMI = "bangumi"
+
+class AutoImportMediaType(str, Enum):
+    TV_SERIES = "tv_series"
+    MOVIE = "movie"
+
 class ControlActionResponse(BaseModel):
     """通用操作成功响应模型"""
     message: str
@@ -220,18 +232,6 @@ class ControlAnimeDetailsResponse(BaseModel):
     aliasCn1: Optional[str] = None
     aliasCn2: Optional[str] = None
     aliasCn3: Optional[str] = None
-
-class AutoImportSearchType(str, Enum):
-    KEYWORD = "keyword"
-    TMDB = "tmdb"
-    TVDB = "tvdb"
-    DOUBAN = "douban"
-    IMDB = "imdb"
-    BANGUMI = "bangumi"
-
-class AutoImportMediaType(str, Enum):
-    TV_SERIES = "tv_series"
-    MOVIE = "movie"
 
 class ControlAutoImportRequest(BaseModel):
     searchType: AutoImportSearchType

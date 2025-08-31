@@ -322,17 +322,17 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
             progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
             await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id}) 的数据...")
 
-        episode = await session.get(orm_models.Episode, episode_id)
-        if episode:
-            _delete_danmaku_file(episode.danmakuFilePath)
-            await session.delete(episode)
-            deleted_count += 1
-            
-            # 3. 为每个分集提交一次事务，以尽快释放锁
-            await session.commit()
-            
-            # 短暂休眠，以允许其他数据库操作有机会执行
-            await asyncio.sleep(0.1)
+            episode = await session.get(orm_models.Episode, episode_id)
+            if episode:
+                _delete_danmaku_file(episode.danmakuFilePath)
+                await session.delete(episode)
+                deleted_count += 1
+                
+                # 3. 为每个分集提交一次事务，以尽快释放锁
+                await session.commit()
+                
+                # 短暂休眠，以允许其他数据库操作有机会执行
+                await asyncio.sleep(0.1)
 
         raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
     except TaskSuccess:
