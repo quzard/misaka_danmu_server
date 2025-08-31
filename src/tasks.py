@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict
 import asyncio
 import re
 import traceback
