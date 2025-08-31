@@ -7,6 +7,7 @@ import {
   List,
   Modal,
   Tag,
+  Tooltip,
   Upload,
   message,
 } from 'antd'
@@ -42,6 +43,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const [loading, setLoading] = useState(false)
   // 存储解析后的XML数据列表
   const [xmlDataList, setXmlDataList] = useState([])
+  const [fileList, setFileList] = useState([])
   // 存储上传状态
   const [uploading, setUploading] = useState(false)
   // 用于跟踪文件拖入顺序的计数器
@@ -109,9 +111,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     // 重置上传状态
     setUploading(false)
     // 清空上传组件的内部文件列表
-    if (uploadRef.current) {
-      uploadRef.current.clearFiles()
-    }
+    setFileList([])
   }
 
   const handleDelete = item => {
@@ -208,11 +208,12 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
           const xmlContent = e.target.result
           // 将解析结果添加到列表
           setXmlDataList(prev => {
+            const lastIndex = prev[prev.length - 1]?.episodeIndex ?? 0
             const newItems = [
               ...prev,
               {
                 id: file.uid,
-                episodeIndex: fileOrder + 1,
+                episodeIndex: lastIndex + 1,
                 title: file.name?.split('.')?.[0],
                 content: xmlContent,
                 size: file.size,
@@ -236,12 +237,26 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     }
   }
 
+  const handleChange = ({ file, fileList }) => {
+    // 更新文件列表状态
+    setFileList(fileList)
+
+    if (file.status === 'uploading') {
+      setUploading(true)
+    }
+    if (file.status === 'done' || file.status === 'error') {
+      setUploading(false)
+    }
+  }
+
   const uploadProps = {
     accept: '.xml',
     multiple: true,
     showUploadList: false,
     beforeUpload: () => true,
     customRequest: handleUpload,
+    fileList: fileList,
+    onChange: handleChange,
     maxCount: 20,
   }
 
@@ -314,43 +329,62 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
           <Empty description="暂无解析数据，请上传XML文件" />
         </div>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={xmlDataList.map(item => item.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <List
-              itemLayout="vertical"
-              size="large"
-              pagination={{
-                pageSize: pageSize,
-                onShowSizeChange: (_, size) => {
-                  setPageSize(size)
-                },
-                hideOnSinglePage: true,
+        <>
+          <Tooltip title="以第一个文件集为准依次自增1">
+            <Button
+              onClick={() => {
+                setXmlDataList(list => {
+                  const index = list[0]?.episodeIndex
+                  return list.map((it, i) => {
+                    return {
+                      ...it,
+                      episodeIndex: index + i,
+                    }
+                  })
+                })
               }}
-              dataSource={xmlDataList}
-              renderItem={(item, index) => (
-                <SortableItem
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  handleDelete={() => handleDelete(item)}
-                  handleEditTitle={value => handleEditTitle(item, value)}
-                  handleEditIndex={value => handleEditIndex(item, value)}
-                />
-              )}
-            />
-          </SortableContext>
+            >
+              一键应用集数
+            </Button>
+          </Tooltip>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={xmlDataList.map(item => item.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <List
+                itemLayout="vertical"
+                size="large"
+                pagination={{
+                  pageSize: pageSize,
+                  onShowSizeChange: (_, size) => {
+                    setPageSize(size)
+                  },
+                  hideOnSinglePage: true,
+                }}
+                dataSource={xmlDataList}
+                renderItem={(item, index) => (
+                  <SortableItem
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    handleDelete={() => handleDelete(item)}
+                    handleEditTitle={value => handleEditTitle(item, value)}
+                    handleEditIndex={value => handleEditIndex(item, value)}
+                  />
+                )}
+              />
+            </SortableContext>
 
-          {/* 拖拽覆盖层 */}
-          <DragOverlay>{renderDragOverlay()}</DragOverlay>
-        </DndContext>
+            {/* 拖拽覆盖层 */}
+            <DragOverlay>{renderDragOverlay()}</DragOverlay>
+          </DndContext>
+        </>
       )}
     </Modal>
   )
