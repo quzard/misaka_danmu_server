@@ -880,7 +880,12 @@ async def batch_manual_import_task(
 
         try:
             if providerName == 'custom':
-                cleaned_content = clean_xml_string(item.content)
+                content_to_parse = item.content.strip()
+                if not content_to_parse.startswith('<'):
+                    logger.info(f"批量导入条目 '{item_desc}' 检测到非XML格式，正在尝试从纯文本格式转换...")
+                    content_to_parse = _convert_text_danmaku_to_xml(content_to_parse)
+
+                cleaned_content = clean_xml_string(content_to_parse)
                 comments = parse_dandan_xml_to_comments(cleaned_content)
                 if not comments: continue
                 final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
