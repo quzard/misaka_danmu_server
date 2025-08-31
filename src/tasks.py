@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 import shutil
 from datetime import datetime, timedelta, timezone
+import xml.etree.ElementTree as ET
 
 from thefuzz import fuzz
 from sqlalchemy import delete, func, select, update, text
@@ -17,7 +18,6 @@ from . import crud, models, orm_models
 from .rate_limiter import RateLimiter, RateLimitExceededError
 from .image_utils import download_image
 from .config import settings
-from .danmaku_parser import parse_dandan_xml_to_comments
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager 
 from .utils import parse_search_keyword, clean_xml_string
@@ -26,6 +26,31 @@ from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
+
+def _parse_xml_content(xml_content: str) -> List[Dict[str, str]]:
+    """
+    直接解析XML弹幕内容，确保没有条数限制，并规范化p属性。
+    """
+    comments = []
+    try:
+        root = ET.fromstring(xml_content)
+        for d_tag in root.findall('d'):
+            p_attr = d_tag.get('p')
+            text = d_tag.text
+            if p_attr is not None and text is not None:
+                p_parts = p_attr.split(',')
+                # 只要有至少4个核心参数，就进行处理
+                if len(p_parts) >= 4:
+                    # 提取前4个核心参数: 时间, 模式, 字体大小, 颜色
+                    processed_p_attr = f"{p_parts[0]},{p_parts[1]},{p_parts[2]},{p_parts[3]},[custom]"
+                    comments.append({'p': processed_p_attr, 'm': text})
+                else:
+                    # 如果参数不足4个，保持原样以避免数据损坏
+                    comments.append({'p': p_attr, 'm': text})
+    except ET.ParseError as e:
+        logger.error(f"解析XML时出错: {e}")
+        # 即使解析出错，也可能已经解析了一部分，返回已解析的内容
+    return comments
 
 def _generate_episode_range_string(episode_indices: List[int]) -> str:
     """
@@ -803,7 +828,7 @@ async def manual_import_task(
                 content_to_parse = _convert_text_danmaku_to_xml(content_to_parse)
             await progress_callback(20, "正在解析XML文件...")
             cleaned_content = clean_xml_string(content_to_parse)
-            comments = parse_dandan_xml_to_comments(cleaned_content) # 'content' is the XML content
+            comments = _parse_xml_content(cleaned_content)
             if not comments:
                 raise TaskSuccess("未从XML中解析出任何弹幕。")
             
@@ -886,7 +911,7 @@ async def batch_manual_import_task(
                     content_to_parse = _convert_text_danmaku_to_xml(content_to_parse)
 
                 cleaned_content = clean_xml_string(content_to_parse)
-                comments = parse_dandan_xml_to_comments(cleaned_content)
+                comments = _parse_xml_content(cleaned_content)
                 if not comments: continue
                 final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
                 episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")

@@ -590,10 +590,28 @@ async def edit_episode_info(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """更新指定分集的标题、集数和链接。"""
+    """更新指定分集的标题、集数和链接。对于自定义源，链接是可选的。"""
+    # 1. 获取分集及其源提供商信息
+    # 修正：在更新前先获取分集信息，以进行条件验证
+    episode_info = await crud.get_episode_provider_info(session, episodeId)
+    if not episode_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+
+    # 2. 根据源类型验证输入
+    provider_name = episode_info.get("providerName")
+    if provider_name != 'custom':
+        # 对于非自定义源，链接是必需的
+        if not update_data.sourceUrl:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="对于非自定义源，分集链接(sourceUrl)是必需的。"
+            )
+
+    # 3. 执行更新
     try:
         updated = await crud.update_episode_info(session, episodeId, update_data)
         if not updated:
+            # This case might be redundant if get_episode_provider_info already confirmed existence, but it's safe.
             logger.warning(f"尝试更新一个不存在的分集 (ID: {episodeId})，操作被拒绝。")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
         logger.info(f"用户 '{current_user.username}' 更新了分集 ID: {episodeId} 的信息。")
