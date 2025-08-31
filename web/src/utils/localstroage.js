@@ -15,10 +15,11 @@ export function getStorage(key) {
     }
     return JSON.parse(value)
   } catch (error) {
-    console.error('解析本地存储失败:', error)
-    // 如果解析JSON失败，很可能是因为存储的是一个未被JSON化的原始字符串（例如旧版Token）。
-    // 在这种情况下，直接返回原始字符串值，以兼容旧数据格式。
-    return localStorage.getItem(key)
+    console.error(`解析本地存储 '${key}' 失败，数据可能已损坏:`, error)
+    // 如果解析JSON失败，说明存储的数据已损坏或格式不兼容。
+    // 清除损坏的数据并返回 null，以防止应用持续崩溃。
+    localStorage.removeItem(key)
+    return null
   }
 }
 
