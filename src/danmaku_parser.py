@@ -3,6 +3,8 @@ import re
 from typing import Dict, List
 from xml.etree import ElementTree
 
+from .utils import clean_xml_string
+
 logger = logging.getLogger(__name__)
 
 def parse_dandan_xml_to_comments(xml_content: str) -> List[Dict]:
@@ -11,6 +13,9 @@ def parse_dandan_xml_to_comments(xml_content: str) -> List[Dict]:
     """
     comments = []
     try:
+        # 关键修复：在解析之前，先清理XML内容，移除所有非法字符。
+        # 这可以防止因弹幕内容包含无效控制字符（如退格符）而导致的解析失败。
+        xml_content = clean_xml_string(xml_content)
         # Remove any XML declaration that might cause issues
         xml_content = re.sub(r'<\?xml.*?\?>', '', xml_content, count=1).strip()
         root = ElementTree.fromstring(xml_content)
