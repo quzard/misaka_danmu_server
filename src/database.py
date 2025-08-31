@@ -165,6 +165,23 @@ async def _run_migrations(conn):
     await _migrate_alter_danmaku_file_path_length(conn, db_type, db_name)
     await _migrate_alter_source_url_to_text(conn, db_type, db_name)
 
+def _log_db_connection_error(context_message: str, e: Exception):
+    """Logs a standardized, detailed error message for database connection failures."""
+    logger.error("="*60)
+    logger.error(f"=== {context_message}失败，应用无法启动。 ===")
+    logger.error(f"=== 错误类型: {type(e).__name__}")
+    logger.error(f"=== 错误详情: {e}")
+    logger.error("---")
+    logger.error("--- 可能的原因与排查建议: ---")
+    logger.error("--- 1. 数据库服务未运行: 请确认您的数据库服务正在运行。")
+    logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
+    logger.error(f"---    - 主机 (Host): {settings.database.host}")
+    logger.error(f"---    - 端口 (Port): {settings.database.port}")
+    logger.error(f"---    - 用户 (User): {settings.database.user}")
+    logger.error("--- 3. 网络问题: 如果应用和数据库在不同的容器或机器上，请检查它们之间的网络连接和防火墙设置。")
+    logger.error("--- 4. 权限问题: 确认提供的用户有权限从应用所在的IP地址连接，并有创建数据库的权限。")
+    logger.error("="*60)
+
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
     db_type = settings.database.type.lower()
@@ -202,20 +219,8 @@ async def create_db_engine_and_session(app: FastAPI):
         app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         logger.info("数据库引擎和会话工厂创建成功。")
     except Exception as e:
-        logger.error("="*60)
-        logger.error("=== 无法连接到数据库服务器，应用无法启动。 ===")
-        logger.error(f"=== 错误类型: {type(e).__name__}")
-        logger.error(f"=== 错误详情: {e}")
-        logger.error("---")
-        logger.error("--- 可能的原因与排查建议: ---")
-        logger.error("--- 1. 数据库服务未运行: 请确认您的 数据库 服务正在运行。")
-        logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
-        logger.error(f"---    - 主机 (Host): {settings.database.host}")
-        logger.error(f"---    - 端口 (Port): {settings.database.port}")
-        logger.error(f"---    - 用户 (User): {settings.database.user}")
-        logger.error("--- 3. 网络问题: 如果应用和数据库在不同的容器或机器上，请检查它们之间的网络连接和防火墙设置。")
-        logger.error("--- 4. 权限问题: 确认提供的用户有权限从应用所在的IP地址连接，并有创建数据库的权限。")
-        logger.error("="*60)
+        # 修正：调用标准化的错误日志函数，并提供更精确的上下文
+        _log_db_connection_error(f"连接目标数据库 '{settings.database.name}'", e)
         raise
 
 async def _create_db_if_not_exists():
@@ -265,22 +270,8 @@ async def _create_db_if_not_exists():
             else:
                 logger.info(f"数据库 '{db_name}' 已存在，跳过创建。")
     except Exception as e:
-        logger.error(f"检查或创建数据库时发生错误: {e}", exc_info=True)
-        # Provide detailed error message like the old code
-        logger.error("="*60)
-        logger.error("=== 无法连接到数据库服务器，应用无法启动。 ===")
-        logger.error(f"=== 错误类型: {type(e).__name__}")
-        logger.error(f"=== 错误详情: {e}")
-        logger.error("---")
-        logger.error("--- 可能的原因与排查建议: ---")
-        logger.error("--- 1. 数据库服务未运行: 请确认您的 数据库 服务正在运行。")
-        logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
-        logger.error(f"---    - 主机 (Host): {settings.database.host}")
-        logger.error(f"---    - 端口 (Port): {settings.database.port}")
-        logger.error(f"---    - 用户 (User): {settings.database.user}")
-        logger.error("--- 3. 网络问题: 如果应用和数据库在不同的容器或机器上，请检查它们之间的网络连接和防火墙设置。")
-        logger.error("--- 4. 权限问题: 确认提供的用户有权限从应用所在的IP地址连接，并有创建数据库的权限。")
-        logger.error("="*60)
+        # 修正：调用标准化的错误日志函数，并提供更精确的上下文
+        _log_db_connection_error("检查或创建数据库时连接服务器", e)
         raise
     finally:
         await engine.dispose()
