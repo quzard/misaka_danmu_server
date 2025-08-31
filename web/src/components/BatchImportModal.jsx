@@ -89,7 +89,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
         }),
       })
       if (res.data) {
-        messageApi.success('批量导入任务已提交！')
+        // messageApi.success('批量导入任务已提交！')
         onSuccess(res.data)
         clearAll()
       }
@@ -208,12 +208,11 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
           const xmlContent = e.target.result
           // 将解析结果添加到列表
           setXmlDataList(prev => {
-            const lastIndex = prev[prev.length - 1]?.episodeIndex ?? 0
             const newItems = [
               ...prev,
               {
                 id: file.uid,
-                episodeIndex: lastIndex + 1,
+                episodeIndex: fileOrder + 1,
                 title: file.name?.split('.')?.[0],
                 content: xmlContent,
                 size: file.size,
@@ -222,7 +221,13 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
             ]
 
             newItems.sort((a, b) => a.order - b.order)
-            return newItems
+            const firstIndex = newItems?.[0]?.episodeIndex ?? 1
+            return newItems.map((it, i) => {
+              return {
+                ...it,
+                episodeIndex: firstIndex + i,
+              }
+            })
           })
         } catch (error) {
           messageApi.error(`文件 ${file.name} 解析失败: ${error.message}`)
