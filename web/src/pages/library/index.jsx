@@ -145,6 +145,12 @@ export const Library = () => {
     if (Object.keys(newValues).length > 0) {
       form.setFieldsValue(newValues)
     }
+    // 没有封面时填充url
+    if (!imageUrl && !!fetchedMetadata?.imageUrl) {
+      form.setFieldsValue({
+        imageUrl: fetchedMetadata.imageUrl,
+      })
+    }
   }, [fetchedMetadata, form])
 
   const columns = [
@@ -605,9 +611,7 @@ export const Library = () => {
               placeholder="搜索已收录的影视"
               onChange={e => setKeyword(e.target.value)}
             />
-            <Button
-              type="primary"
-              onClick={() => setIsCreateModalOpen(true)}>
+            <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
               自定义影视条目
             </Button>
           </Space>
@@ -719,6 +723,22 @@ export const Library = () => {
               }
             />
           </Form.Item>
+          {!!fetchedMetadata?.imageUrl &&
+            fetchedMetadata?.imageUrl !== imageUrl && (
+              <Form.Item className="text-right">
+                <Button
+                  className="cursor-pointer"
+                  onClick={() => {
+                    form.setFieldsValue({
+                      imageUrl: fetchedMetadata.imageUrl,
+                    })
+                  }}
+                >
+                  应用URL
+                </Button>
+              </Form.Item>
+            )}
+
           <Form.Item name="tmdbId" label="TMDB ID">
             <Input.Search
               placeholder="例如：1396"
@@ -966,6 +986,7 @@ export const Library = () => {
                           currentId: item.id,
                         })
                         form.setFieldsValue({ tmdbId: res.data.id })
+
                         setFetchedMetadata(res.data)
                         setTmdbOpen(false)
                       }}
@@ -1022,6 +1043,7 @@ export const Library = () => {
                           currentId: item.id,
                         })
                         form.setFieldsValue({ imdbId: res.data.id })
+
                         setFetchedMetadata(res.data)
                         setImdbOpen(false)
                       }}
