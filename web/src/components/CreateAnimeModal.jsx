@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Form, Input, InputNumber, Modal, Select, message } from 'antd'
 import { createAnimeEntry } from '../apis'
+import { useMessage } from '../MessageContext'
 
 export const CreateAnimeModal = ({ open, onCancel, onSuccess }) => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
+  const messageApi = useMessage()
 
   const handleOk = async () => {
     try {
@@ -12,13 +14,13 @@ export const CreateAnimeModal = ({ open, onCancel, onSuccess }) => {
       setLoading(true)
       const res = await createAnimeEntry(values)
       if (res.data) {
-        message.success('作品创建成功！')
+        messageApi.success('作品创建成功！')
         onSuccess(res.data) // 将新创建的作品数据传递回去，以便刷新列表
         form.resetFields()
       }
     } catch (error) {
       console.error('创建作品失败:', error)
-      message.error(error.detail || '创建作品失败，请检查日志')
+      messageApi.error(error.detail || '创建作品失败，请检查日志')
     } finally {
       setLoading(false)
     }

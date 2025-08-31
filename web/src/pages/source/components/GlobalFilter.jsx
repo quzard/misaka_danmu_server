@@ -2,11 +2,13 @@ import { Button, Card, Form, Input, message, Tooltip } from 'antd'
 import { useEffect, useState } from 'react'
 import { getGlobalFilter, setGlobalFilter } from '../../../apis'
 import { QuestionCircleOutlined } from '@ant-design/icons'
+import { useMessage } from '../../../MessageContext'
 
 export const GlobalFilter = () => {
   const [loading, setLoading] = useState(true)
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
+  const messageApi = useMessage()
 
   useEffect(() => {
     getGlobalFilter()
@@ -23,9 +25,9 @@ export const GlobalFilter = () => {
       setIsSaveLoading(true)
       const values = await form.validateFields()
       await setGlobalFilter(values)
-      message.success('保存成功')
+      messageApi.success('保存成功')
     } catch (error) {
-      message.error('保存失败')
+      messageApi.error('保存失败')
     } finally {
       setIsSaveLoading(false)
     }
