@@ -100,9 +100,9 @@ export const EpisodeDetail = () => {
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
-    messageApi.success(
-      `批量导入任务已提交 (ID: ${task.taskId})，请在任务中心查看进度。`
-    )
+    // messageApi.success(
+    //   `批量导入任务已提交 (ID: ${task.taskId})，请在任务中心查看进度。`
+    // )
     goTask(task)
   }
 
@@ -172,7 +172,7 @@ export const EpisodeDetail = () => {
     },
     {
       title: '操作',
-      width: 120,
+      width: isXmlImport ? 90 : 120,
       fixed: 'right',
       render: (_, record) => {
         return (
@@ -193,15 +193,16 @@ export const EpisodeDetail = () => {
                 <MyIcon icon="edit" size={20} />
               </span>
             </Tooltip>
-
-            <Tooltip title="刷新分集弹幕">
-              <span
-                className="cursor-pointer hover:text-primary"
-                onClick={() => handleRefresh(record)}
-              >
-                <MyIcon icon="refresh" size={20}></MyIcon>
-              </span>
-            </Tooltip>
+            {!isXmlImport && (
+              <Tooltip title="刷新分集弹幕">
+                <span
+                  className="cursor-pointer hover:text-primary"
+                  onClick={() => handleRefresh(record)}
+                >
+                  <MyIcon icon="refresh" size={20}></MyIcon>
+                </span>
+              </Tooltip>
+            )}
 
             <Tooltip title="弹幕详情">
               <span
@@ -632,33 +633,37 @@ export const EpisodeDetail = () => {
           </Form.Item>
           {isXmlImport ? (
             <>
-              <Form.Item
-                name="content"
-                label="弹幕XML内容"
-                rules={[
-                  {
-                    required: true,
-                    message: `请输入弹幕XML内容`,
-                  },
-                ]}
-              >
-                <Input.TextArea
-                  rows={6}
-                  placeholder="请在此处粘贴弹幕XML文件的内容"
-                />
-              </Form.Item>
-              <div className="text-right my-4">
-                <Upload
-                  {...uploadProps}
-                  ref={uploadRef}
-                  loading={uploading}
-                  disabled={uploading}
-                >
-                  <Button type="primary" icon={<UploadOutlined />}>
-                    选择文件导入XML
-                  </Button>
-                </Upload>
-              </div>
+              {!isEditing && (
+                <>
+                  <Form.Item
+                    name="content"
+                    label="弹幕XML内容"
+                    rules={[
+                      {
+                        required: true,
+                        message: `请输入弹幕XML内容`,
+                      },
+                    ]}
+                  >
+                    <Input.TextArea
+                      rows={6}
+                      placeholder="请在此处粘贴弹幕XML文件的内容"
+                    />
+                  </Form.Item>
+                  <div className="text-right my-4">
+                    <Upload
+                      {...uploadProps}
+                      ref={uploadRef}
+                      loading={uploading}
+                      disabled={uploading}
+                    >
+                      <Button type="primary" icon={<UploadOutlined />}>
+                        选择文件导入XML
+                      </Button>
+                    </Upload>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <Form.Item
