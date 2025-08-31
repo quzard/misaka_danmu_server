@@ -12,7 +12,11 @@ import {
 } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { batchManualImport } from '../apis'
-import { CloseCircleOutlined, UploadOutlined } from '@ant-design/icons'
+import {
+  CloseCircleOutlined,
+  CloudUploadOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
 import { useMessage } from '../MessageContext'
 
 import { MyIcon } from '@/components/MyIcon'
@@ -34,7 +38,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 
 export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
-  const [form] = Form.useForm()
   const messageApi = useMessage()
   const [loading, setLoading] = useState(false)
   // 存储解析后的XML数据列表
@@ -46,6 +49,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   // 存储文件ID与拖入顺序的映射
   const fileOrderMap = useRef({})
   const dragOverlayRef = useRef(null)
+  const uploadRef = useRef(null)
 
   const [pageSize, setPageSize] = useState(10)
   const [activeItem, setActiveItem] = useState(null)
@@ -84,8 +88,8 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       })
       if (res.data) {
         messageApi.success('批量导入任务已提交！')
-        onSuccess(res.data) // 将任务数据传递回去
-        form.resetFields()
+        onSuccess(res.data)
+        clearAll()
       }
     } catch (error) {
       console.error('批量导入失败:', error)
@@ -94,6 +98,19 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       )
     } finally {
       setLoading(false)
+    }
+  }
+
+  const clearAll = () => {
+    // 清空文件列表
+    setXmlDataList([])
+    // 重置顺序计数器
+    orderCounter.current = 0
+    // 重置上传状态
+    setUploading(false)
+    // 清空上传组件的内部文件列表
+    if (uploadRef.current) {
+      uploadRef.current.clearFiles()
     }
   }
 
@@ -225,6 +242,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     showUploadList: false,
     beforeUpload: () => true,
     customRequest: handleUpload,
+    maxCount: 20,
   }
 
   const renderDragOverlay = () => {
@@ -251,7 +269,6 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
                 }}
                 value={activeItem.title}
               />
-              <Input readOnly value={activeItem.content.slice(0, 100)} />
               <div>
                 <CloseCircleOutlined />
               </div>
@@ -270,14 +287,26 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       onCancel={onCancel}
       confirmLoading={loading}
       destroyOnHidden
-      width={720}
     >
       <div className="p-4 text-center">
-        <Upload {...uploadProps}>
-          <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-            选择XML文件
-          </Button>
-          <div className="mt-3">支持批量上传，仅接受.xml格式文件</div>
+        <Upload {...uploadProps} ref={uploadRef}>
+          <div>
+            <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+            <div className="flex items-center justify-center">
+              <Button
+                type="primary"
+                icon={<UploadOutlined />}
+                loading={uploading}
+                disabled={uploading}
+              >
+                选择文件
+              </Button>
+              <div className="ml-2">或直接拖拽文件到此处</div>
+            </div>
+            <div className="mt-2">
+              支持批量上传，仅接受.xml格式文件，单次最多20个
+            </div>
+          </div>
         </Upload>
       </div>
       {xmlDataList.length === 0 ? (
@@ -409,7 +438,6 @@ const SortableItem = ({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
           />
-          <Input readOnly value={item.content.slice(0, 100)} />
           <div onClick={() => handleDelete(item)}>
             <CloseCircleOutlined />
           </div>
