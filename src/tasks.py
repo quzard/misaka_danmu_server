@@ -387,13 +387,10 @@ async def generic_import_task(
     """
     # 重构导入逻辑以避免创建空条目
     scraper = manager.get_scraper(provider)
-
-    # 修正：在创建作品前，再次从标题中解析季和集，以确保数据一致性
-    parsed_info = parse_search_keyword(animeTitle)
-    title_to_use = parsed_info["title"]
-    # 优先使用从标题解析出的季度，如果解析不出，则回退到传入的 season 参数
-    season_to_use = parsed_info["season"] if parsed_info["season"] is not None else season
-    normalized_title = animeTitle.replace(":", "：")
+    
+    # 使用从前端请求中直接传递的标题和季度，不再进行解析
+    title_to_use = animeTitle.strip()
+    season_to_use = season
 
     await progress_callback(10, "正在获取分集列表...")
     episodes = await scraper.get_episodes(
@@ -511,16 +508,14 @@ async def edited_import_task(
 ):
     """后台任务：处理编辑后的导入请求。"""
     scraper = manager.get_scraper(request_data.provider)
-    normalized_title = request_data.animeTitle.replace(":", "：")
     
     episodes = request_data.episodes
     if not episodes:
         raise TaskSuccess("没有提供任何分集，任务结束。")
 
-    # 从标题中解析季和集，以确保数据一致性
-    parsed_info = parse_search_keyword(normalized_title)
-    title_to_use = parsed_info["title"]
-    season_to_use = parsed_info["season"] if parsed_info["season"] is not None else request_data.season
+    # 使用从前端请求中直接传递的标题和季度，不再进行解析
+    title_to_use = request_data.animeTitle.strip()
+    season_to_use = request_data.season
     
     # --- 数据库写入阶段 (pre-loop) ---
     await progress_callback(15, "正在准备数据库...")

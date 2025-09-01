@@ -83,7 +83,7 @@ export const EpisodeDetail = () => {
         }),
       ])
       setAnimeDetail(detailRes.data)
-      setEpisodeList(episodeRes.data)
+      setEpisodeList(episodeRes.data?.episodes ?? [])
       setSourceInfo({
         ...sourceRes?.data?.filter(it => it.sourceId === Number(id))?.[0],
         animeName: detailRes.data?.title,
