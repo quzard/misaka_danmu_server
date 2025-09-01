@@ -581,9 +581,7 @@ async def get_source_episodes(
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    paginated_result = await crud.get_episodes_for_source(session, sourceId)
-    # 修正：从分页结果中提取分集列表，以匹配 response_model
-    return paginated_result.get("episodes", [])
+    return await crud.get_episodes_for_source(session, sourceId)
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
@@ -861,8 +859,8 @@ async def get_proxy_settings(
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取全局代理配置。"""
-    proxy_url_task = crud.get_config_value(session, "proxy_url", "")
-    proxy_enabled_task = crud.get_config_value(session, "proxy_enabled", "false")
+    proxy_url_task = crud.get_config_value(session, "proxyUrl", "")
+    proxy_enabled_task = crud.get_config_value(session, "proxyEnabled", "false")
     proxy_url, proxy_enabled_str = await asyncio.gather(proxy_url_task, proxy_enabled_task)
 
     proxy_enabled = proxy_enabled_str.lower() == 'true'
@@ -909,11 +907,11 @@ async def update_proxy_settings(
         
         proxy_url = f"{payload.proxyProtocol}://{userinfo}{payload.proxyHost}:{payload.proxyPort}"
 
-    await crud.update_config_value(session, "proxy_url", proxy_url)
-    config_manager.invalidate("proxy_url")
+    await crud.update_config_value(session, "proxyUrl", proxy_url)
+    config_manager.invalidate("proxyUrl")
     
-    await crud.update_config_value(session, "proxy_enabled", str(payload.proxyEnabled).lower())
-    config_manager.invalidate("proxy_enabled")
+    await crud.update_config_value(session, "proxyEnabled", str(payload.proxyEnabled).lower())
+    config_manager.invalidate("proxyEnabled")
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
 class ProxyTestRequest(BaseModel):
