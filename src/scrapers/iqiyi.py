@@ -797,30 +797,57 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺: 备用方案 (解析HTML) 也失败了: {fallback_e}", exc_info=True)
             return None
 
-    async def _get_tv_episodes(self, album_id: int, size: int = 500) -> List[IqiyiEpisodeInfo]:
+    async def _get_tv_episodes(self, album_id: int, page_size: int = 200) -> List[IqiyiEpisodeInfo]:
         """
-        获取剧集列表，实现主/备API端点回退机制以提高成功率。
-        优先尝试国际版API，失败则回退到国内版API。
+        获取剧集列表，实现主/备API端点回退和分页机制。
         """
-        endpoints = [
-            f"https://pcw-api.iq.com/api/album/album/avlistinfo?aid={album_id}&page=1&size={size}",  # 国际版 (主)
-            f"https://pcw-api.iqiyi.com/albums/album/avlistinfo?aid={album_id}&page=1&size={size}"  # 国内版 (备)
+        # Base URLs for the endpoints
+        base_endpoints = [
+            "https://pcw-api.iq.com/api/album/album/avlistinfo",  # International (main)
+            "https://pcw-api.iqiyi.com/albums/album/avlistinfo"  # Mainland China (fallback)
         ]
 
-        for i, url in enumerate(endpoints):
+        for i, base_url in enumerate(base_endpoints):
+            all_episodes = []
+            page_num = 1
+            self.logger.info(f"爱奇艺: 正在尝试从端点 #{i+1} ({base_url}) 获取剧集列表 (album_id: {album_id})")
+            
             try:
-                self.logger.info(f"爱奇艺: 正在尝试从端点 #{i+1} 获取剧集列表 (album_id: {album_id})")
-                response = await self._request("GET", url)
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"iQiyi Album List Response (album_id={album_id}, endpoint=#{i+1}): {response.text}")
-                response.raise_for_status()
-                data = IqiyiVideoResult.model_validate(response.json())
+                while True:
+                    params = {
+                        "aid": album_id,
+                        "page": page_num,
+                        "size": page_size
+                    }
+                    url = f"{base_url}?{urlencode(params)}"
+                    
+                    self.logger.debug(f"爱奇艺: 正在获取第 {page_num} 页...")
+                    response = await self._request("GET", url)
+                    
+                    # 如果第一页就404，说明此端点可能不可用
+                    if response.status_code == 404 and page_num == 1:
+                        raise httpx.HTTPStatusError(f"端点在第一页返回404", request=response.request, response=response)
+                    
+                    response.raise_for_status()
+                    
+                    data = IqiyiVideoResult.model_validate(response.json())
+                    
+                    if data.data and data.data.epsodelist:
+                        episodes_on_page = data.data.epsodelist
+                        all_episodes.extend(episodes_on_page)
+                        self.logger.debug(f"爱奇艺: 第 {page_num} 页成功获取 {len(episodes_on_page)} 个分集。")
+                        
+                        # 如果返回的条目数小于请求的页面大小，说明是最后一页
+                        if len(episodes_on_page) < page_size:
+                            break
+                        page_num += 1
+                    else:
+                        # API未返回更多分集，结束循环
+                        break
                 
-                if data.data and data.data.epsodelist:
-                    self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功获取 {len(data.data.epsodelist)} 个分集。")
-                    return data.data.epsodelist
-                
-                self.logger.warning(f"爱奇艺: 端点 #{i+1} 未返回分集数据。")
+                if all_episodes:
+                    self.logger.info(f"爱奇艺: 从端点 #{i+1} 成功获取 {len(all_episodes)} 个分集。")
+                    return all_episodes
             except Exception as e:
                 self.logger.error(f"爱奇艺: 尝试端点 #{i+1} 时发生错误 (album_id: {album_id}): {e}")
         
