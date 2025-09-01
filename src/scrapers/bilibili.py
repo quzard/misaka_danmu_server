@@ -647,27 +647,29 @@ class BilibiliScraper(BaseScraper):
             response.raise_for_status()
             data = BiliSeasonResult.model_validate(response.json())
             if data.code == 0 and data.result and data.result.episodes:
-                raw_episodes = data.result.episodes
-
-                # 统一过滤逻辑
-                blacklist_pattern = await self.get_episode_blacklist_pattern()
-                if blacklist_pattern:
-                    original_count = len(raw_episodes)
-                    raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep.long_title or ep.title)]
-                    self.logger.info(f"Bilibili: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个PGC分集。")
-
-                # 过滤后再编号
-                episodes = [
+                final_episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name,
                         episodeId=f"{ep.aid},{ep.cid}",
                         title=ep.long_title or ep.title,
                         episodeIndex=i + 1,
                         url=f"https://www.bilibili.com/bangumi/play/ep{ep.id}"
-                    ) for i, ep in enumerate(raw_episodes)
+                    ) for i, ep in enumerate(data.result.episodes)
                 ]
 
-                return [ep for ep in episodes if ep.episodeIndex == target_episode_index] if target_episode_index else episodes
+                # --- 开始：应用分集黑名单过滤 ---
+                blacklist_pattern = await self.get_episode_blacklist_pattern()
+                if blacklist_pattern:
+                    original_count = len(final_episodes)
+                    filtered_episodes = [ep for ep in final_episodes if not blacklist_pattern.search(ep.title)]
+                    # 重新为过滤后的分集列表编号
+                    for i, ep in enumerate(filtered_episodes):
+                        ep.episodeIndex = i + 1
+                    self.logger.info(f"Bilibili: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个PGC分集。")
+                    final_episodes = filtered_episodes
+                # --- 结束：应用分集黑名单过滤 ---
+
+                return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index] if target_episode_index else final_episodes
         except Exception as e:
             self.logger.error(f"Bilibili: 获取PGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)
         return []
@@ -683,27 +685,29 @@ class BilibiliScraper(BaseScraper):
             response.raise_for_status()
             data = BiliVideoViewResult.model_validate(response.json())
             if data.code == 0 and data.data and data.data.pages:
-                raw_episodes = data.data.pages
-
-                # 统一过滤逻辑
-                blacklist_pattern = await self.get_episode_blacklist_pattern()
-                if blacklist_pattern:
-                    original_count = len(raw_episodes)
-                    raw_episodes = [p for p in raw_episodes if not blacklist_pattern.search(p.part)]
-                    self.logger.info(f"Bilibili: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个UGC分集。")
-
-                # 过滤后再编号
-                episodes = [
+                final_episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name,
                         episodeId=f"{data.data.aid},{p.cid}",
                         title=p.part,
                         episodeIndex=i + 1, # 使用 enumerate 重新编号
                         url=f"https://www.bilibili.com/video/{bvid}?p={p.page}"
-                    ) for i, p in enumerate(raw_episodes)
+                    ) for i, p in enumerate(data.data.pages)
                 ]
 
-                return [ep for ep in episodes if ep.episodeIndex == target_episode_index] if target_episode_index else episodes
+                # --- 开始：应用分集黑名单过滤 ---
+                blacklist_pattern = await self.get_episode_blacklist_pattern()
+                if blacklist_pattern:
+                    original_count = len(final_episodes)
+                    filtered_episodes = [ep for ep in final_episodes if not blacklist_pattern.search(ep.title)]
+                    # 重新为过滤后的分集列表编号
+                    for i, ep in enumerate(filtered_episodes):
+                        ep.episodeIndex = i + 1
+                    self.logger.info(f"Bilibili: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个UGC分集。")
+                    final_episodes = filtered_episodes
+                # --- 结束：应用分集黑名单过滤 ---
+
+                return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index] if target_episode_index else final_episodes
         except Exception as e:
             self.logger.error(f"Bilibili: 获取UGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)
         return []
