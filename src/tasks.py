@@ -98,24 +98,30 @@ def _generate_dandan_xml(comments: List[dict]) -> str:
     for comment in comments:
         # 使用标准库进行安全的XML转义
         content = xml_escape(comment.get('m', ''))
-        p_attr = comment.get('p', '0,1,25,16777215')
+        p_attr_str = comment.get('p', '0,1,25,16777215')
 
-        # 新增：健壮性修复，确保 p 属性包含字体大小（至少4个部分）
-        p_parts = p_attr.split(',')
+        # 修正：增强健壮性，确保字体大小总是存在且有效
+        p_parts = p_attr_str.split(',')
         
         # 查找可选的用户标签，以确定核心参数的数量
-        core_parts_count = len(p_parts)
+        core_parts_end_index = len(p_parts)
         for i, part in enumerate(p_parts):
             if '[' in part and ']' in part:
-                core_parts_count = i
+                core_parts_end_index = i
                 break
+        
+        core_parts = p_parts[:core_parts_end_index]
+        optional_parts = p_parts[core_parts_end_index:]
 
-        # 如果核心参数只有3个（时间,模式,颜色），则在模式和颜色之间插入默认字体大小 "25"
-        if core_parts_count == 3:
-            p_parts.insert(2, '25')
-            p_attr = ','.join(p_parts)
-            
-        xml_parts.append(f'  <d p="{p_attr}">{content}</d>')
+        # 如果核心参数是3个（时间,模式,颜色），则插入默认字体大小
+        if len(core_parts) == 3:
+            core_parts.insert(2, '25')
+        # 如果核心参数是4个，但字体大小（索引2）为空或无效，则设置为默认值
+        elif len(core_parts) == 4 and (not core_parts[2] or not core_parts[2].strip().isdigit()):
+            core_parts[2] = '25'
+
+        final_p_attr = ','.join(core_parts + optional_parts)
+        xml_parts.append(f'  <d p="{final_p_attr}">{content}</d>')
     xml_parts.append('</i>')
     return '\n'.join(xml_parts)
 
