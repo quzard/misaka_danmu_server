@@ -743,23 +743,26 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
 
 async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
     """如果分集不存在则创建，并返回其确定性的ID。"""
-    stmt = select(Episode.id).where(Episode.sourceId == source_id, Episode.episodeIndex == episode_index)
-    result = await session.execute(stmt)
-    existing_id = result.scalar_one_or_none()
-    if existing_id:
-        return existing_id
-
+    # 1. 确定性地计算出新分集的ID
     source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == anime_id).order_by(AnimeSource.id)
     source_ids_res = await session.execute(source_ids_stmt)
     source_ids = source_ids_res.scalars().all()
     try:
         source_order = source_ids.index(source_id) + 1
     except ValueError:
-        raise ValueError(f"Source ID {source_id} does not belong to Anime ID {anime_id}")
+        # 修正：提供更明确的错误信息
+        raise ValueError(f"内部错误: 源 ID {source_id} 不属于作品 ID {anime_id}。这可能在合并作品后发生，请尝试刷新页面或重新导入。")
 
     new_episode_id_str = f"25{anime_id:06d}{source_order:02d}{episode_index:04d}"
     new_episode_id = int(new_episode_id_str)
 
+    # 2. 直接检查这个ID是否存在
+    existing_episode = await session.get(Episode, new_episode_id)
+    if existing_episode:
+        # 如果ID已存在，直接返回它。
+        return existing_episode.id
+
+    # 3. 如果ID不存在，则创建新分集
     new_episode = Episode(
         id=new_episode_id, sourceId=source_id, episodeIndex=episode_index,
         providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now(timezone.utc)

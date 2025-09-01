@@ -286,17 +286,15 @@ async def _process_episode_list(
     scraper: "BaseScraper",
     rate_limiter: RateLimiter,
     progress_callback: Callable,
-    session: AsyncSession,
-    anime_id: int,
-    source_id: int
-) -> tuple[int, int]:
+) -> tuple[List[Tuple[models.ProviderEpisodeInfo, List[dict]]], int]:
     """
-    一个通用的辅助函数，用于处理分集列表的弹幕获取和数据库写入。
-    它封装了循环、错误处理、速率限制和进度更新的逻辑。
+    一个通用的辅助函数，用于处理分集列表的弹幕获取，并将成功的结果返回。
+    它封装了循环、错误处理、速率限制和进度更新的逻辑，但 **不执行任何数据库写入**。
 
-    :return: 一个元组 (total_comments_added, failed_episodes_count)
+    :return: 一个元组 (successful_results, failed_episodes_count)，
+             其中 successful_results 是一个 (ProviderEpisodeInfo, comments_list) 的元组列表。
     """
-    total_comments_added = 0
+    successful_results: List[Tuple[models.ProviderEpisodeInfo, List[dict]]] = []
     failed_episodes_count = 0
     total_episodes = len(episodes)
     i = 0
@@ -332,14 +330,11 @@ async def _process_episode_list(
 
         if comments:
             await rate_limiter.increment(scraper.provider_name)
-            episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-            added_count = await _write_danmaku_file_and_update_db(session, anime_id, episode_db_id, comments)
-            total_comments_added += added_count
-            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
-            await session.commit()
+            successful_results.append((episode, comments))
+            logger.info(f"已成功获取分集 '{episode.title}' 的 {len(comments)} 条弹幕。")
 
         i += 1
-    return total_comments_added, failed_episodes_count
+    return successful_results, failed_episodes_count
 
 async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""
@@ -472,15 +467,26 @@ async def generic_import_task(
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
         episodes = episodes[:1]
 
-    anime_id: Optional[int] = None
-    source_id: Optional[int] = None
-    image_download_failed = False
+    # 调用新的 _process_episode_list，它只获取数据，不写入数据库
+    successful_results, failed_episodes_count = await _process_episode_list(
+        episodes=episodes,
+        scraper=scraper,
+        rate_limiter=rate_limiter,
+        progress_callback=progress_callback
+    )
 
-    # 首次处理，需要创建 Anime 和 Source 记录
-    logger.info("正在创建数据库主条目...")
+    if not successful_results:
+        msg = "导入完成，但未找到任何弹幕。"
+        if failed_episodes_count > 0:
+            msg += f" {failed_episodes_count} 个分集获取失败。"
+        raise TaskSuccess(msg)
+
+    # --- 数据库写入阶段 ---
+    # 只有在成功获取到弹幕后，才开始创建数据库条目
+    await progress_callback(95, "正在写入数据库...")
     local_image_path = await download_image(imageUrl, session, manager, provider)
-    if imageUrl and not local_image_path:
-        image_download_failed = True
+    image_download_failed = bool(imageUrl and not local_image_path)
+
     anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year)
     await crud.update_metadata_if_empty(
         session, anime_id,
@@ -491,24 +497,21 @@ async def generic_import_task(
         bangumi_id=bangumiId
     )
     source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
-    logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})。")
-    await session.commit()
 
-    # 调用通用处理器来处理分集
-    total_comments_added, failed_episodes_count = await _process_episode_list(
-        episodes=episodes, scraper=scraper, rate_limiter=rate_limiter,
-        progress_callback=progress_callback, session=session,
-        anime_id=anime_id, source_id=source_id
-    )
+    total_comments_added = 0
+    for episode, comments in successful_results:
+        episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+        added_count = await _write_danmaku_file_and_update_db(session, anime_id, episode_db_id, comments)
+        total_comments_added += added_count
+        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
 
-    episode_indices = [ep.episodeIndex for ep in episodes]
+    await session.commit()  # 在所有数据库操作完成后，执行一次总提交
+
+    episode_indices = [ep.episodeIndex for ep, _ in successful_results]
     episode_range_str = _generate_episode_range_string(episode_indices)
 
     final_message = ""
-    if total_comments_added == 0 and failed_episodes_count == 0:
-        final_message = f"导入完成，导入集: < {episode_range_str} >，但未找到任何新弹幕。"
-    else:
-        final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
+    final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
     if image_download_failed:
@@ -535,21 +538,30 @@ async def edited_import_task(
     parsed_info = parse_search_keyword(normalized_title)
     title_to_use = parsed_info["title"]
     season_to_use = parsed_info["season"] if parsed_info["season"] is not None else request_data.season
+    
+    # 调用新的 _process_episode_list，它只获取数据
+    successful_results, failed_episodes_count = await _process_episode_list(
+        episodes=episodes,
+        scraper=scraper,
+        rate_limiter=rate_limiter,
+        progress_callback=progress_callback
+    )
 
+    if not successful_results:
+        msg = "导入完成，但未找到任何弹幕。"
+        if failed_episodes_count > 0:
+            msg += f" {failed_episodes_count} 个分集获取失败。"
+        raise TaskSuccess(msg)
 
-    anime_id: Optional[int] = None
-    source_id: Optional[int] = None
-    image_download_failed = False
-
-    # 创建或获取主条目
+    # --- 数据库写入阶段 ---
+    await progress_callback(95, "正在写入数据库...")
     local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
-    if request_data.imageUrl and not local_image_path:
-        image_download_failed = True
+    image_download_failed = bool(request_data.imageUrl and not local_image_path)
     anime_id = await crud.get_or_create_anime(
         session, title_to_use, request_data.mediaType,
         season_to_use, request_data.imageUrl, local_image_path, request_data.year
     )
-    await crud.update_metadata_if_empty( # 修正：使用 snake_case 关键字参数
+    await crud.update_metadata_if_empty(
         session, anime_id,
         tmdb_id=request_data.tmdbId,
         imdb_id=request_data.imdbId,
@@ -559,22 +571,20 @@ async def edited_import_task(
         tmdb_episode_group_id=request_data.tmdbEpisodeGroupId
     )
     source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
+
+    total_comments_added = 0
+    for episode, comments in successful_results:
+        episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+        added_count = await _write_danmaku_file_and_update_db(session, anime_id, episode_db_id, comments)
+        total_comments_added += added_count
+
     await session.commit()
 
-    # 调用通用处理器
-    total_comments_added, failed_episodes_count = await _process_episode_list(
-        episodes=episodes, scraper=scraper, rate_limiter=rate_limiter,
-        progress_callback=progress_callback, session=session, anime_id=anime_id, source_id=source_id
-    )
-
-    episode_indices = [ep.episodeIndex for ep in episodes]
+    episode_indices = [ep.episodeIndex for ep, _ in successful_results]
     episode_range_str = _generate_episode_range_string(episode_indices)
 
     final_message = ""
-    if total_comments_added == 0 and failed_episodes_count == 0:
-        final_message = f"导入完成，导入集: < {episode_range_str} >，但未找到任何新弹幕。"
-    else:
-        final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
+    final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
     if image_download_failed:
@@ -616,35 +626,42 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
     if not new_episodes:
         raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
 
-    # 修正：实现真正的“全量刷新”，删除不再存在的分集
-    await progress_callback(20, f"获取到 {len(new_episodes)} 个新分集，正在比对旧数据...")
+    # 调用新的 _process_episode_list 来获取所有弹幕数据
+    successful_results, failed_episodes_count = await _process_episode_list(
+        episodes=new_episodes,
+        scraper=scraper,
+        rate_limiter=rate_limiter,
+        progress_callback=progress_callback
+    )
+
+    if not successful_results and failed_episodes_count == len(new_episodes):
+        raise TaskSuccess("刷新完成，但所有分集弹幕获取失败。旧数据已保留。")
+
+    # --- 数据库写入阶段 ---
+    await progress_callback(95, "正在更新数据库...")
+
+    # 1. 删除过时的分集
     old_episodes_res = await session.execute(select(orm_models.Episode).where(orm_models.Episode.sourceId == sourceId))
     old_episodes = old_episodes_res.scalars().all()
-    old_provider_ids = {ep.providerEpisodeId for ep in old_episodes}
-    new_provider_ids = {ep.episodeId for ep in new_episodes}
-    ids_to_delete = old_provider_ids - new_provider_ids
-    episodes_to_delete = [ep for ep in old_episodes if ep.providerEpisodeId in ids_to_delete]
+    successful_provider_ids = {ep.episodeId for ep, _ in successful_results}
+    episodes_to_delete = [ep for ep in old_episodes if ep.providerEpisodeId not in successful_provider_ids]
+
     for ep in episodes_to_delete:
         _delete_danmaku_file(ep.danmakuFilePath)
         await session.delete(ep)
     if episodes_to_delete:
-        await session.commit()
         logger.info(f"全量刷新：删除了 {len(episodes_to_delete)} 个过时的分集。")
-        await progress_callback(25, f"已删除 {len(episodes_to_delete)} 个过时分集，准备获取新弹幕...")
 
-    # 调用通用处理器来获取所有弹幕
-    total_comments_fetched, failed_episodes_count = await _process_episode_list(
-        episodes=new_episodes, scraper=scraper, rate_limiter=rate_limiter,
-        progress_callback=progress_callback, session=session,
-        anime_id=source_info["animeId"], source_id=sourceId
-    )
+    # 2. 创建/更新新的分集和弹幕
+    total_comments_added = 0
+    for episode, comments in successful_results:
+        episode_db_id = await crud.create_episode_if_not_exists(session, source_info["animeId"], sourceId, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+        added_count = await _write_danmaku_file_and_update_db(session, anime_id=source_info["animeId"], episode_id=episode_db_id, comments=comments)
+        total_comments_added += added_count
 
-    if total_comments_fetched == 0 and failed_episodes_count == len(new_episodes):
-        raise TaskSuccess("刷新完成，但未找到任何新弹幕。旧数据已保留。")
+    await session.commit()
 
-    # 全量刷新任务的逻辑是先获取所有数据，然后一次性清空并写入，所以这里不需要再处理数据库
-    # 最终的消息由 _process_episode_list 的返回值构建
-    final_message = f"全量刷新完成，共处理 {len(new_episodes)} 个分集，新增 {total_comments_fetched} 条弹幕。"
+    final_message = f"全量刷新完成，共处理 {len(new_episodes)} 个分集，新增 {total_comments_added} 条弹幕。"
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
     raise TaskSuccess(final_message)
