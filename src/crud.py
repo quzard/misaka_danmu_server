@@ -760,14 +760,13 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
         # 我们就为其分配一个新的、持久的序号。
         logger.warning(f"源 ID {source_id} 缺少 sourceOrder，将为其分配一个新的。这通常发生在从旧版本升级后。")
         source_order = await _assign_source_order_if_missing(session, anime_id, source_id)
-    
+
     new_episode_id_str = f"25{anime_id:06d}{source_order:02d}{episode_index:04d}"
     new_episode_id = int(new_episode_id_str)
 
     # 2. 直接检查这个ID是否存在
     existing_episode = await session.get(Episode, new_episode_id)
     if existing_episode:
-        # 如果ID已存在，直接返回它。
         return existing_episode.id
 
     # 3. 如果ID不存在，则创建新分集
@@ -776,7 +775,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
         providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now(timezone.utc)
     )
     session.add(new_episode)
-    await session.flush() # 使用 flush 获取新ID，但不提交事务
+    await session.flush()
     return new_episode_id
 
 async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, source_id: int) -> int:
@@ -855,6 +854,19 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
     return dict(row) if row else None
 
 async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[str, Any]]:
+    """获取指定作品的所有数据源，并高效地计算每个源的分集数。"""
+    # 步骤1: 创建一个子查询，用于高效地计算每个 source_id 对应的分集数量。
+    # 这种方式比在主查询中直接 JOIN 和 COUNT 更快，尤其是在 episode 表很大的情况下。
+    episode_count_subquery = (
+        select(
+            Episode.sourceId,
+            func.count(Episode.id).label("episode_count")
+        )
+        .group_by(Episode.sourceId)
+        .subquery()
+    )
+
+    # 步骤2: 构建主查询，LEFT JOIN 上面的子查询来获取分集数。
     stmt = (
         select(
             AnimeSource.id.label("sourceId"),
@@ -863,27 +875,36 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
             AnimeSource.isFavorited.label("isFavorited"),
             AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
             AnimeSource.createdAt.label("createdAt"),
-            func.count(Episode.id).label("episodeCount")
+            # 使用 coalesce 确保即使没有分集的源也返回 0 而不是 NULL
+            func.coalesce(episode_count_subquery.c.episode_count, 0).label("episodeCount")
         )
-        .outerjoin(Episode, AnimeSource.id == Episode.sourceId)
+        .outerjoin(episode_count_subquery, AnimeSource.id == episode_count_subquery.c.sourceId)
         .where(AnimeSource.animeId == anime_id)
-        .group_by(AnimeSource.id)
         .order_by(AnimeSource.createdAt)
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
+async def get_episodes_for_source(session: AsyncSession, source_id: int, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+    """获取指定源的分集列表，支持分页。"""
+    # 首先，获取总的分集数量，用于前端分页控件
+    count_stmt = select(func.count(Episode.id)).where(Episode.sourceId == source_id)
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    # 然后，根据分页参数查询特定页的数据
+    offset = (page - 1) * page_size
     stmt = (
         select(
             Episode.id.label("episodeId"), Episode.title, Episode.episodeIndex.label("episodeIndex"),
             Episode.sourceUrl.label("sourceUrl"), Episode.fetchedAt.label("fetchedAt"), Episode.commentCount.label("commentCount")
         )
         .where(Episode.sourceId == source_id)
-        .order_by(Episode.episodeIndex)
+        .order_by(Episode.episodeIndex).offset(offset).limit(page_size)
     )
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    episodes = [dict(row) for row in result.mappings()]
+    
+    return {"total": total_count, "episodes": episodes}
 async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
@@ -1071,14 +1092,12 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
         raise ValueError("该集数已存在，请使用其他集数。")
 
     # 2. 计算新的确定性ID
-    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == episode.source.animeId).order_by(AnimeSource.id)
-    source_ids_res = await session.execute(source_ids_stmt)
-    source_ids = source_ids_res.scalars().all()
-    try:
-        source_order = source_ids.index(episode.sourceId) + 1
-    except ValueError:
-        raise ValueError(f"内部错误: Source ID {episode.sourceId} 不属于 Anime ID {episode.source.animeId}")
-
+    source_order = episode.source.sourceOrder
+    if source_order is None:
+        # 这是一个重要的回退和迁移逻辑。如果一个旧的源没有 sourceOrder，
+        # 我们就为其分配一个新的、持久的序号。
+        logger.warning(f"源 ID {episode.sourceId} 缺少 sourceOrder，将为其分配一个新的。")
+        source_order = await _assign_source_order_if_missing(session, episode.source.animeId, episode.sourceId)
     new_episode_id_str = f"25{episode.source.animeId:06d}{source_order:02d}{update_data.episodeIndex:04d}"
     new_episode_id = int(new_episode_id_str)
 
