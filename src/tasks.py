@@ -909,6 +909,7 @@ async def batch_manual_import_task(
 
     total_added_comments = 0
     failed_items = 0
+    skipped_items = 0
 
     i = 0
     while i < total_items:
@@ -919,6 +920,18 @@ async def batch_manual_import_task(
 
         try:
             if providerName == 'custom':
+                # 新增：在处理前，先检查分集是否已存在
+                existing_episode_stmt = select(orm_models.Episode.id).where(
+                    orm_models.Episode.sourceId == sourceId,
+                    orm_models.Episode.episodeIndex == item.episodeIndex
+                )
+                existing_episode_res = await session.execute(existing_episode_stmt)
+                if existing_episode_res.scalar_one_or_none() is not None:
+                    logger.warning(f"批量导入条目 '{item_desc}' (集数: {item.episodeIndex}) 已存在，已跳过。")
+                    skipped_items += 1
+                    i += 1
+                    continue
+
                 content_to_parse = item.content.strip()
                 if not content_to_parse.startswith('<'):
                     logger.info(f"批量导入条目 '{item_desc}' 检测到非XML格式，正在尝试从纯文本格式转换...")
@@ -930,6 +943,7 @@ async def batch_manual_import_task(
                 if comments:
                     final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
                     episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
+
                     added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
                     total_added_comments += added_count
                 else:
@@ -965,6 +979,8 @@ async def batch_manual_import_task(
             i += 1 # 处理失败，移动到下一个
     
     final_message = f"批量导入完成。共处理 {total_items} 个条目，新增 {total_added_comments} 条弹幕。"
+    if skipped_items > 0:
+        final_message += f" {skipped_items} 个因已存在而被跳过。"
     if failed_items > 0:
         final_message += f" {failed_items} 个条目处理失败。"
     raise TaskSuccess(final_message)
