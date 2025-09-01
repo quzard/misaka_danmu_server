@@ -534,20 +534,35 @@ class TencentScraper(BaseScraper):
                 html_content = response.text
 
                 vid = None
-                # 优先尝试从 window.__INITIAL_DATA__ 解析，更稳定
-                match = re.search(r'window\.__INITIAL_DATA__\s*=\s*({.*?});', html_content)
-                if match:
+                # 1. 新增：最优先尝试从 COVER_INFO 变量解析，这是最可靠的方式
+                cover_info_match = re.search(r'var\s+COVER_INFO\s*=\s*({.*?});', html_content)
+                if cover_info_match:
                     try:
-                        initial_data = json.loads(match.group(1))
-                        vid = initial_data.get("video_info", {}).get("vid")
+                        cover_info_data = json.loads(cover_info_match.group(1))
+                        vid = cover_info_data.get("vid")
+                        if vid:
+                            self.logger.info("从 COVER_INFO 成功解析到电影的 vid。")
                     except (json.JSONDecodeError, KeyError, TypeError):
-                        self.logger.warning("解析 __INITIAL_DATA__ 失败，将尝试备用方法。")
+                        self.logger.warning("解析 COVER_INFO 失败，将尝试备用方法。")
 
-                # 如果第一种方法失败，使用备用正则
+                # 2. 备用方法1：尝试从 window.__INITIAL_DATA__ 解析
                 if not vid:
-                    match = re.search(r'"vid"\s*:\s*"([a-zA-Z0-9]+)"', html_content)
-                    if match:
-                        vid = match.group(1)
+                    initial_data_match = re.search(r'window\.__INITIAL_DATA__\s*=\s*({.*?});', html_content)
+                    if initial_data_match:
+                        try:
+                            initial_data = json.loads(initial_data_match.group(1))
+                            vid = initial_data.get("video_info", {}).get("vid")
+                            if vid:
+                                self.logger.info("从 __INITIAL_DATA__ 成功解析到电影的 vid。")
+                        except (json.JSONDecodeError, KeyError, TypeError):
+                            self.logger.warning("解析 __INITIAL_DATA__ 失败，将尝试备用方法。")
+
+                # 3. 备用方法2：使用通用正则表达式（风险较高）
+                if not vid:
+                    self.logger.warning("所有JSON解析方法均失败，将回退到通用正则表达式进行最终尝试。")
+                    vid_match = re.search(r'"vid"\s*:\s*"([a-zA-Z0-9]+)"', html_content)
+                    if vid_match:
+                        vid = vid_match.group(1)
 
                 if vid:
                     self.logger.info(f"从页面成功解析到电影的 vid: {vid}")
