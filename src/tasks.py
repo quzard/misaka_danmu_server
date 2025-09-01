@@ -742,19 +742,11 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             if not source_info:
                 raise ValueError(f"找不到源ID {sourceId} 的信息。")
             anime_id = source_info['animeId']
+            source_order = source_info.get('sourceOrder')
 
-            # 确定 source_order。我们假设它是基于源ID的升序排列。
-            all_sources_res = await session.execute(
-                select(orm_models.AnimeSource.id)
-                .where(orm_models.AnimeSource.animeId == anime_id)
-                .order_by(orm_models.AnimeSource.id)
-            )
-            all_source_ids = all_sources_res.scalars().all()
-            try:
-                # 1-based index
-                source_order = all_source_ids.index(sourceId) + 1
-            except ValueError:
-                raise ValueError(f"源 ID {sourceId} 未在作品 ID {anime_id} 的源列表中找到。")
+            if source_order is None:
+                # 如果由于某种原因（例如，非常旧的数据）没有 sourceOrder，则不允许重整
+                raise ValueError(f"源 ID {sourceId} 没有持久化的 sourceOrder，无法重整。请尝试重新添加此源。")
 
             # 2. 获取所有分集ORM对象，按现有顺序排序
             episodes_orm_res = await session.execute(

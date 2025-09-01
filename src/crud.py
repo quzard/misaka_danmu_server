@@ -618,10 +618,17 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
     if existing_id:
         return existing_id
 
+    # 如果源不存在，则创建一个新的，并为其分配一个持久的、唯一的顺序号
+    # 查找此作品当前最大的 sourceOrder
+    max_order_stmt = select(func.max(AnimeSource.sourceOrder)).where(AnimeSource.animeId == anime_id)
+    max_order_result = await session.execute(max_order_stmt)
+    current_max_order = max_order_result.scalar_one_or_none() or 0
+
     new_source = AnimeSource(
         animeId=anime_id,
         providerName=provider_name,
-        mediaId=media_id
+        mediaId=media_id,
+        sourceOrder=current_max_order + 1
     )
     session.add(new_source)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -743,16 +750,17 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
 
 async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
     """如果分集不存在则创建，并返回其确定性的ID。"""
-    # 1. 确定性地计算出新分集的ID
-    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == anime_id).order_by(AnimeSource.id)
-    source_ids_res = await session.execute(source_ids_stmt)
-    source_ids = source_ids_res.scalars().all()
-    try:
-        source_order = source_ids.index(source_id) + 1
-    except ValueError:
-        # 修正：提供更明确的错误信息
-        raise ValueError(f"内部错误: 源 ID {source_id} 不属于作品 ID {anime_id}。这可能在合并作品后发生，请尝试刷新页面或重新导入。")
+    # 1. 从数据库获取该源的持久化 sourceOrder
+    source_order_stmt = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
+    source_order_res = await session.execute(source_order_stmt)
+    source_order = source_order_res.scalar_one_or_none()
 
+    if source_order is None:
+        # 这是一个重要的回退和迁移逻辑。如果一个旧的源没有 sourceOrder，
+        # 我们就为其分配一个新的、持久的序号。
+        logger.warning(f"源 ID {source_id} 缺少 sourceOrder，将为其分配一个新的。这通常发生在从旧版本升级后。")
+        source_order = await _assign_source_order_if_missing(session, anime_id, source_id)
+    
     new_episode_id_str = f"25{anime_id:06d}{source_order:02d}{episode_index:04d}"
     new_episode_id = int(new_episode_id_str)
 
@@ -770,6 +778,17 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     session.add(new_episode)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_episode_id
+
+async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, source_id: int) -> int:
+    """一个辅助函数，用于为没有 sourceOrder 的旧记录分配一个新的、持久的序号。"""
+    async with session.begin_nested(): # 使用嵌套事务确保操作的原子性
+        max_order_stmt = select(func.max(AnimeSource.sourceOrder)).where(AnimeSource.animeId == anime_id)
+        max_order_res = await session.execute(max_order_stmt)
+        current_max_order = max_order_res.scalar_one_or_none() or 0
+        new_order = current_max_order + 1
+        
+        await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(sourceOrder=new_order))
+        return new_order
 
 async def save_danmaku_for_episode(
     session: AsyncSession,
@@ -823,7 +842,8 @@ async def save_danmaku_for_episode(
 async def get_anime_source_info(session: AsyncSession, source_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
-            AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"), AnimeSource.mediaId.label("mediaId"), Anime.year,
+            AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"),
+            AnimeSource.mediaId.label("mediaId"), AnimeSource.sourceOrder.label("sourceOrder"), Anime.year,
             Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
