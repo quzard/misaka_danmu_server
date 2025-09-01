@@ -771,14 +771,14 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     await session.flush() # 使用 flush 获取新ID，但不提交事务
     return new_episode_id
 
-async def write_danmaku_to_file(
+async def save_danmaku_for_episode(
     session: AsyncSession,
     episode_id: int,
     comments: List[Dict[str, Any]]
-) -> Tuple[int, str]:
-    """将弹幕写入XML文件，并返回新增数量和文件路径。"""
+) -> int:
+    """将弹幕写入XML文件，并更新数据库记录，返回新增数量。"""
     if not comments:
-        return 0, ""
+        return 0
 
     episode = await session.get(
         Episode, 
@@ -810,8 +810,9 @@ async def write_danmaku_to_file(
     except OSError as e:
         logger.error(f"写入弹幕文件失败: {absolute_path}。错误: {e}")
         raise
-        
-    return len(comments), web_path
+    
+    await update_episode_danmaku_info(session, episode_id, web_path, len(comments))
+    return len(comments)
 
 # ... (rest of the file needs to be refactored similarly) ...
 
@@ -1888,9 +1889,7 @@ async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_cont
     if not comments:
         return 0
     
-    added_count, file_path = await write_danmaku_to_file(session, episode_id, comments)
-    if file_path:
-        await update_episode_danmaku_info(session, episode_id, file_path, added_count)
-        await session.commit()
+    added_count = await save_danmaku_for_episode(session, episode_id, comments)
+    await session.commit()
     
     return added_count
