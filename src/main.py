@@ -20,7 +20,6 @@ from .webhook_manager import WebhookManager
 from .scheduler import SchedulerManager
 from .config import settings
 from . import crud, security
-from . import migration
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 
@@ -41,9 +40,6 @@ async def lifespan(app: FastAPI):
     # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
     await init_db_tables(app)
     session_factory = app.state.db_session_factory
-
-    # 新增：在所有管理器初始化之前，执行数据库迁移
-    await migration.run_db_migration(session_factory)
 
     # 新增：在启动时清理任何未完成的任务
     async with session_factory() as session:
