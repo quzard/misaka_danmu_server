@@ -574,14 +574,16 @@ async def get_anime_sources_for_anime(
     """获取指定作品关联的所有数据源列表。"""
     return await crud.get_anime_sources(session, animeId)
 
-@router.get("/library/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取数据源的所有分集")
+@router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
 async def get_source_episodes(
     sourceId: int,
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(100, ge=1, le=200, description="每页项目数"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """获取指定数据源下的所有已收录分集列表。"""
-    return await crud.get_episodes_for_source(session, sourceId)
+    """获取指定数据源下的所有已收录分集列表，支持分页。"""
+    return await crud.get_episodes_for_source(session, sourceId, page=page, page_size=page_size)
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(

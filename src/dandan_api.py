@@ -275,9 +275,17 @@ async def _search_implementation(
             dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
             dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
 
+            # 根据季度号拼接标题
+            title_to_use = res['animeTitle']
+            season = res.get('season')
+            if season and season > 1:
+                season_map = {2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十'}
+                season_str = season_map.get(season, str(season))
+                title_to_use = f"{title_to_use} 第 {season_str} 季"
+
             grouped_animes[anime_id] = DandanAnimeInfo(
                 animeId=anime_id,
-                animeTitle=res['animeTitle'],
+                animeTitle=title_to_use,
                 imageUrl=res.get('imageUrl') or "",
                 searchKeyword=search_term or "",
                 type=dandan_type,
@@ -468,10 +476,18 @@ async def search_anime_for_dandan(
         year = res.get('year')
         start_date_str = f"{year}-01-01T00:00:00Z" if year else (res.get('startDate').isoformat() if res.get('startDate') else None)
 
+        # 根据季度号拼接标题
+        title_to_use = res['animeTitle']
+        season = res.get('season')
+        if season and season > 1:
+            season_map = {2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十'}
+            season_str = season_map.get(season, str(season))
+            title_to_use = f"{title_to_use} 第 {season_str} 季"
+
         animes.append(DandanSearchAnimeItem(
             animeId=res['animeId'],
             bangumiId=res.get('bangumiId') or f"A{res['animeId']}",
-            animeTitle=res['animeTitle'],
+            animeTitle=title_to_use,
             type=dandan_type,
             typeDescription=dandan_type_desc,
             imageUrl=res.get('imageUrl'),
