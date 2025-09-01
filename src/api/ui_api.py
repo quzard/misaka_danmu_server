@@ -581,7 +581,9 @@ async def get_source_episodes(
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    return await crud.get_episodes_for_source(session, sourceId)
+    paginated_result = await crud.get_episodes_for_source(session, sourceId)
+    # 修正：从分页结果中提取分集列表，以匹配 response_model
+    return paginated_result.get("episodes", [])
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
@@ -2083,21 +2085,6 @@ async def get_available_jobs(request: Request):
     jobs = scheduler_manager.get_available_jobs()
     logger.info(f"可用的任务类型: {jobs}")
     return jobs
-@router.get("/scheduled-tasks", response_model=List[models.ScheduledTaskInfo], summary="获取所有定时任务")
-async def get_all_scheduled_tasks(
-    session: AsyncSession = Depends(get_db_session),
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """
-    获取所有已配置的定时任务列表。
-    此实现确保即使没有任务，也总是返回一个空的JSON数组 `[]`，而不是 `null` 或空白响应。
-    """
-    tasks = await crud.get_scheduled_tasks(session)
-    # 关键修复：确保在没有任务时返回一个空列表，而不是 None
-    return tasks or []
-
-
-# --- Scheduled Tasks API ---
 
 @router.get("/scheduled-tasks", response_model=List[models.ScheduledTaskInfo], summary="获取所有定时任务")
 async def get_scheduled_tasks(
