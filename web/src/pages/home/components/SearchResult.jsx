@@ -133,6 +133,17 @@ export const SearchResult = () => {
     lastSearchResultData.results || []
   )
 
+  useEffect(() => {
+    setSelectList([])
+  }, [renderData])
+
+  useEffect(() => {
+    if (searchLoading) {
+      setYearFilter('all')
+      setProviderFilter('all')
+    }
+  }, [searchLoading])
+
   const importModeText = useMemo(() => {
     const uniqueTitles = new Set(selectList.map(item => item.title))
     if (uniqueTitles.size === 1) {
