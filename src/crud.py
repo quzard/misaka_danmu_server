@@ -760,14 +760,13 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
         # 我们就为其分配一个新的、持久的序号。
         logger.warning(f"源 ID {source_id} 缺少 sourceOrder，将为其分配一个新的。这通常发生在从旧版本升级后。")
         source_order = await _assign_source_order_if_missing(session, anime_id, source_id)
-    
+
     new_episode_id_str = f"25{anime_id:06d}{source_order:02d}{episode_index:04d}"
     new_episode_id = int(new_episode_id_str)
 
     # 2. 直接检查这个ID是否存在
     existing_episode = await session.get(Episode, new_episode_id)
     if existing_episode:
-        # 如果ID已存在，直接返回它。
         return existing_episode.id
 
     # 3. 如果ID不存在，则创建新分集
@@ -776,7 +775,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
         providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now(timezone.utc)
     )
     session.add(new_episode)
-    await session.flush() # 使用 flush 获取新ID，但不提交事务
+    await session.flush()
     return new_episode_id
 
 async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, source_id: int) -> int:
@@ -1071,14 +1070,12 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
         raise ValueError("该集数已存在，请使用其他集数。")
 
     # 2. 计算新的确定性ID
-    source_ids_stmt = select(AnimeSource.id).where(AnimeSource.animeId == episode.source.animeId).order_by(AnimeSource.id)
-    source_ids_res = await session.execute(source_ids_stmt)
-    source_ids = source_ids_res.scalars().all()
-    try:
-        source_order = source_ids.index(episode.sourceId) + 1
-    except ValueError:
-        raise ValueError(f"内部错误: Source ID {episode.sourceId} 不属于 Anime ID {episode.source.animeId}")
-
+    source_order = episode.source.sourceOrder
+    if source_order is None:
+        # 这是一个重要的回退和迁移逻辑。如果一个旧的源没有 sourceOrder，
+        # 我们就为其分配一个新的、持久的序号。
+        logger.warning(f"源 ID {episode.sourceId} 缺少 sourceOrder，将为其分配一个新的。")
+        source_order = await _assign_source_order_if_missing(session, episode.source.animeId, episode.sourceId)
     new_episode_id_str = f"25{episode.source.animeId:06d}{source_order:02d}{update_data.episodeIndex:04d}"
     new_episode_id = int(new_episode_id_str)
 
