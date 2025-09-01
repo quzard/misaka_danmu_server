@@ -530,7 +530,8 @@ class YoukuScraper(BaseScraper):
                 pass
 
             timestamp = c.playat / 1000.0
-            p_string = f"{timestamp:.2f},{mode},{color},[{self.provider_name}]"
+            # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
+            p_string = f"{timestamp:.2f},{mode},25,{color},[{self.provider_name}]"
             formatted.append({"cid": str(c.id), "p": p_string, "m": c.content, "t": round(timestamp, 2)})
         return formatted
 

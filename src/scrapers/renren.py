@@ -570,7 +570,7 @@ class RenrenScraper(BaseScraper):
             timestamp = float(c["timestamp"]) if isinstance(c["timestamp"], (int, float)) else 0.0
             color = int(c["color"]) if isinstance(c["color"], int) else 16777215
             mode = int(c["mode"]) if isinstance(c["mode"], int) else 1
-            p_string = f"{timestamp:.2f},{mode},{color},[{self.provider_name}]"
+            p_string = f"{timestamp:.2f},{mode},25,{color},[{self.provider_name}]"
             out.append({
                 "cid": c["content_id"],
                 "p": p_string,

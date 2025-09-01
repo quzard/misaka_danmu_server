@@ -1176,7 +1176,8 @@ class IqiyiScraper(BaseScraper):
                 color = 16777215 # Default white
 
             timestamp = float(c.show_time)
-            p_string = f"{timestamp:.2f},{mode},{color},[{self.provider_name}]"
+            # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
+            p_string = f"{timestamp:.2f},{mode},25,{color},[{self.provider_name}]"
             formatted.append({
                 "cid": c.content_id,
                 "p": p_string,
