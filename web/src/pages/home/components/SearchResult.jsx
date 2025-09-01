@@ -923,6 +923,7 @@ export const SearchResult = () => {
                     setEpisodePageSize(size)
                   },
                   hideOnSinglePage: true,
+                  showLessItems: true,
                 }}
                 dataSource={editEpisodeList}
                 renderItem={(item, index) => (
