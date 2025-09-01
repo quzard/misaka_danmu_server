@@ -574,16 +574,14 @@ async def get_anime_sources_for_anime(
     """获取指定作品关联的所有数据源列表。"""
     return await crud.get_anime_sources(session, animeId)
 
-@router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
+@router.get("/library/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取数据源的所有分集")
 async def get_source_episodes(
     sourceId: int,
-    page: int = Query(1, ge=1, description="页码，从1开始"),
-    page_size: int = Query(100, ge=1, le=200, description="每页项目数"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """获取指定数据源下的所有已收录分集列表，支持分页。"""
-    return await crud.get_episodes_for_source(session, sourceId, page=page, page_size=page_size)
+    """获取指定数据源下的所有已收录分集列表。"""
+    return await crud.get_episodes_for_source(session, sourceId)
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
@@ -1488,7 +1486,13 @@ async def get_comments(
 
     comments_data = await crud.fetch_comments(session, episodeId)
     
-    comments = [models.Comment(cid=item["cid"], p=item["p"], m=item["m"]) for item in comments_data]
+    # 修正：使用 enumerate 为弹幕生成一个从0开始的自增ID (cid)。
+    # 弹幕文件本身不包含此ID，而API响应需要它，尤其对于前端（例如作为React的key）。
+    # 这也使其行为与 dandan_api 中的弹幕接口保持一致。
+    comments = [
+        models.Comment(cid=i, p=item.get("p", ""), m=item.get("m", ""))
+        for i, item in enumerate(comments_data)
+    ]
     return models.CommentResponse(count=len(comments), comments=comments)
 
 @router.get("/webhooks/available", response_model=List[str], summary="获取所有可用的Webhook类型")
