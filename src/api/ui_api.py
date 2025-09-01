@@ -581,7 +581,9 @@ async def get_source_episodes(
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    return await crud.get_episodes_for_source(session, sourceId)
+    paginated_result = await crud.get_episodes_for_source(session, sourceId)
+    # 修正：从分页结果中提取分集列表，以匹配 response_model
+    return paginated_result.get("episodes", [])
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
