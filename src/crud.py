@@ -854,6 +854,19 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
     return dict(row) if row else None
 
 async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[str, Any]]:
+    """获取指定作品的所有数据源，并高效地计算每个源的分集数。"""
+    # 步骤1: 创建一个子查询，用于高效地计算每个 source_id 对应的分集数量。
+    # 这种方式比在主查询中直接 JOIN 和 COUNT 更快，尤其是在 episode 表很大的情况下。
+    episode_count_subquery = (
+        select(
+            Episode.sourceId,
+            func.count(Episode.id).label("episode_count")
+        )
+        .group_by(Episode.sourceId)
+        .subquery()
+    )
+
+    # 步骤2: 构建主查询，LEFT JOIN 上面的子查询来获取分集数。
     stmt = (
         select(
             AnimeSource.id.label("sourceId"),
@@ -862,27 +875,36 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
             AnimeSource.isFavorited.label("isFavorited"),
             AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
             AnimeSource.createdAt.label("createdAt"),
-            func.count(Episode.id).label("episodeCount")
+            # 使用 coalesce 确保即使没有分集的源也返回 0 而不是 NULL
+            func.coalesce(episode_count_subquery.c.episode_count, 0).label("episodeCount")
         )
-        .outerjoin(Episode, AnimeSource.id == Episode.sourceId)
+        .outerjoin(episode_count_subquery, AnimeSource.id == episode_count_subquery.c.sourceId)
         .where(AnimeSource.animeId == anime_id)
-        .group_by(AnimeSource.id)
         .order_by(AnimeSource.createdAt)
     )
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def get_episodes_for_source(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
+async def get_episodes_for_source(session: AsyncSession, source_id: int, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+    """获取指定源的分集列表，支持分页。"""
+    # 首先，获取总的分集数量，用于前端分页控件
+    count_stmt = select(func.count(Episode.id)).where(Episode.sourceId == source_id)
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    # 然后，根据分页参数查询特定页的数据
+    offset = (page - 1) * page_size
     stmt = (
         select(
             Episode.id.label("episodeId"), Episode.title, Episode.episodeIndex.label("episodeIndex"),
             Episode.sourceUrl.label("sourceUrl"), Episode.fetchedAt.label("fetchedAt"), Episode.commentCount.label("commentCount")
         )
         .where(Episode.sourceId == source_id)
-        .order_by(Episode.episodeIndex)
+        .order_by(Episode.episodeIndex).offset(offset).limit(page_size)
     )
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    episodes = [dict(row) for row in result.mappings()]
+    
+    return {"total": total_count, "episodes": episodes}
 async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     stmt = (
         select(
