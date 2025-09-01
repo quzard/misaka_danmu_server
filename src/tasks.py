@@ -263,60 +263,72 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
         logger.error(f"删除分集任务 (ID: {episodeId}) 失败: {e}", exc_info=True)
         raise
 
-async def _process_episode_list(
-    episodes: List[models.ProviderEpisodeInfo],
-    scraper: "BaseScraper",
+async def _import_episodes_iteratively(
+    session: AsyncSession,
+    scraper: "ScraperManager.BaseScraper",
     rate_limiter: RateLimiter,
     progress_callback: Callable,
-) -> tuple[List[Tuple[models.ProviderEpisodeInfo, List[dict]]], int]:
+    episodes: List[models.ProviderEpisodeInfo],
+    anime_id: int,
+    source_id: int
+) -> Tuple[int, List[int], int]:
     """
-    一个通用的辅助函数，用于处理分集列表的弹幕获取，并将成功的结果返回。
-    它封装了循环、错误处理、速率限制和进度更新的逻辑，但 **不执行任何数据库写入**。
+    一个健壮的辅助函数，用于迭代处理分集列表。
+    它为每一集下载弹幕、保存到数据库，并立即提交事务。
+    这确保了即使任务中断，已完成的部分也能被保留。
 
-    :return: 一个元组 (successful_results, failed_episodes_count)，
-             其中 successful_results 是一个 (ProviderEpisodeInfo, comments_list) 的元组列表。
+    :return: 一个元组 (新增弹幕总数, 成功处理的分集索引列表, 失败的分集数)
     """
-    successful_results: List[Tuple[models.ProviderEpisodeInfo, List[dict]]] = []
+    total_comments_added = 0
+    successful_episodes_indices = []
     failed_episodes_count = 0
     total_episodes = len(episodes)
+    
     i = 0
     while i < total_episodes:
         episode = episodes[i]
         logger.info(f"--- 开始处理分集 {i+1}/{total_episodes}: '{episode.title}' (ID: {episode.episodeId}) ---")
-        base_progress = 10 + int((i / total_episodes) * 85 if total_episodes > 0 else 85)
+        base_progress = 20 + int((i / total_episodes) * 75 if total_episodes > 0 else 75)
         await progress_callback(base_progress, f"正在处理: {episode.title} ({i+1}/{total_episodes})")
 
-        comments = None
         try:
             await rate_limiter.check(scraper.provider_name)
 
             async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
-                progress_slice = 85 / total_episodes if total_episodes > 0 else 0
+                progress_slice = 75 / total_episodes if total_episodes > 0 else 0
                 current_total_progress = base_progress + (danmaku_progress / 100) * progress_slice
                 await progress_callback(int(current_total_progress), f"处理: {episode.title} - {danmaku_description}")
 
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+            
+            if comments is not None:  # 即使是空列表也表示成功获取
+                await rate_limiter.increment(scraper.provider_name)
+                
+                episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
+                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                await session.commit()  # 为每一集成功处理后提交一次
+                
+                total_comments_added += added_count
+                successful_episodes_indices.append(episode.episodeIndex)
+                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+            else:
+                failed_episodes_count += 1
+                logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
+
         except RateLimitExceededError as e:
             logger.warning(f"任务因达到速率限制而暂停: {e}")
             await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
             await asyncio.sleep(e.retry_after_seconds)
             continue  # 重试当前分集
-        except httpx.RequestError as e:
-            logger.error(f"获取分集 '{episode.title}' 的弹幕时发生网络错误: {e}")
-            failed_episodes_count += 1
-            await progress_callback(base_progress, f"处理: {episode.title} - 网络错误，已跳过", status=TaskStatus.RUNNING)
         except Exception as e:
-            logger.error(f"获取分集 '{episode.title}' 的弹幕时发生未知错误: {e}", exc_info=True)
+            logger.error(f"获取或保存分集 '{episode.title}' 的弹幕时发生错误: {e}", exc_info=True)
             failed_episodes_count += 1
-            await progress_callback(base_progress, f"处理: {episode.title} - 未知错误，已跳过", status=TaskStatus.RUNNING)
+            await progress_callback(base_progress, f"处理: {episode.title} - 错误，已跳过", status=TaskStatus.RUNNING)
+            await session.rollback()  # 回滚此分集的失败操作
 
-        if comments:
-            await rate_limiter.increment(scraper.provider_name)
-            successful_results.append((episode, comments))
-            logger.info(f"已成功获取分集 '{episode.title}' 的 {len(comments)} 条弹幕。")
-
-        i += 1
-    return successful_results, failed_episodes_count
+        i += 1  # 移动到下一集
+    
+    return total_comments_added, successful_episodes_indices, failed_episodes_count
 
 async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""
@@ -449,23 +461,8 @@ async def generic_import_task(
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
         episodes = episodes[:1]
 
-    # 调用新的 _process_episode_list，它只获取数据，不写入数据库
-    successful_results, failed_episodes_count = await _process_episode_list(
-        episodes=episodes,
-        scraper=scraper,
-        rate_limiter=rate_limiter,
-        progress_callback=progress_callback
-    )
-
-    if not successful_results:
-        msg = "导入完成，但未找到任何弹幕。"
-        if failed_episodes_count > 0:
-            msg += f" {failed_episodes_count} 个分集获取失败。"
-        raise TaskSuccess(msg)
-
-    # --- 数据库写入阶段 ---
-    # 只有在成功获取到弹幕后，才开始创建数据库条目
-    await progress_callback(95, "正在写入数据库...")
+    # --- 数据库写入阶段 (pre-loop) ---
+    await progress_callback(15, "正在准备数据库...")
     local_image_path = await download_image(imageUrl, session, manager, provider)
     image_download_failed = bool(imageUrl and not local_image_path)
 
@@ -479,20 +476,24 @@ async def generic_import_task(
         bangumi_id=bangumiId
     )
     source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
+    # 关键：先提交一次，确保 Anime 和 Source 记录已创建
+    await session.commit()
 
-    total_comments_added = 0
-    for episode, comments in successful_results:
-        episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-        total_comments_added += added_count
-        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+    # --- 循环处理每一集 ---
+    total_comments_added, successful_episodes_indices, failed_episodes_count = await _import_episodes_iteratively(
+        session=session,
+        scraper=scraper,
+        rate_limiter=rate_limiter,
+        progress_callback=progress_callback,
+        episodes=episodes,
+        anime_id=anime_id,
+        source_id=source_id
+    )
 
-    await session.commit()  # 在所有数据库操作完成后，执行一次总提交
-
-    episode_indices = [ep.episodeIndex for ep, _ in successful_results]
-    episode_range_str = _generate_episode_range_string(episode_indices)
-
-    final_message = ""
+    if not successful_episodes_indices and failed_episodes_count > 0:
+        raise TaskSuccess("导入完成，但所有分集弹幕获取失败。")
+    
+    episode_range_str = _generate_episode_range_string(successful_episodes_indices)
     final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
@@ -521,24 +522,11 @@ async def edited_import_task(
     title_to_use = parsed_info["title"]
     season_to_use = parsed_info["season"] if parsed_info["season"] is not None else request_data.season
     
-    # 调用新的 _process_episode_list，它只获取数据
-    successful_results, failed_episodes_count = await _process_episode_list(
-        episodes=episodes,
-        scraper=scraper,
-        rate_limiter=rate_limiter,
-        progress_callback=progress_callback
-    )
-
-    if not successful_results:
-        msg = "导入完成，但未找到任何弹幕。"
-        if failed_episodes_count > 0:
-            msg += f" {failed_episodes_count} 个分集获取失败。"
-        raise TaskSuccess(msg)
-
-    # --- 数据库写入阶段 ---
-    await progress_callback(95, "正在写入数据库...")
+    # --- 数据库写入阶段 (pre-loop) ---
+    await progress_callback(15, "正在准备数据库...")
     local_image_path = await download_image(request_data.imageUrl, session, manager, request_data.provider)
     image_download_failed = bool(request_data.imageUrl and not local_image_path)
+
     anime_id = await crud.get_or_create_anime(
         session, title_to_use, request_data.mediaType,
         season_to_use, request_data.imageUrl, local_image_path, request_data.year
@@ -553,19 +541,24 @@ async def edited_import_task(
         tmdb_episode_group_id=request_data.tmdbEpisodeGroupId
     )
     source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
-
-    total_comments_added = 0
-    for episode, comments in successful_results:
-        episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-        total_comments_added += added_count
-
     await session.commit()
 
-    episode_indices = [ep.episodeIndex for ep, _ in successful_results]
-    episode_range_str = _generate_episode_range_string(episode_indices)
+    # --- 循环处理每一集 ---
+    total_comments_added, successful_episodes_indices, failed_episodes_count = await _import_episodes_iteratively(
+        session=session,
+        scraper=scraper,
+        rate_limiter=rate_limiter,
+        progress_callback=progress_callback,
+        episodes=episodes,
+        anime_id=anime_id,
+        source_id=source_id
+    )
 
-    final_message = ""
+    if not successful_episodes_indices and failed_episodes_count > 0:
+        raise TaskSuccess("导入完成，但所有分集弹幕获取失败。")
+
+    episode_range_str = _generate_episode_range_string(successful_episodes_indices)
+
     final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
@@ -578,75 +571,75 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
     后台任务：全量刷新一个已存在的番剧，采用先获取后删除的安全策略。
     """
     logger.info(f"开始刷新源 ID: {sourceId}")
-    source_info = await crud.get_anime_source_info(session, sourceId)
-    if not source_info:
-        await progress_callback(100, "失败: 找不到源信息")
-        logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
-        raise TaskSuccess("刷新失败: 找不到源信息")
+    try:
+        source_info = await crud.get_anime_source_info(session, sourceId)
+        if not source_info:
+            raise ValueError(f"找不到源ID {sourceId} 的信息。")
 
-    scraper = scraper_manager.get_scraper(source_info["providerName"])
+        scraper = scraper_manager.get_scraper(source_info["providerName"])
 
-    # 步骤 1: 获取所有新数据，但不写入数据库
-    await progress_callback(10, "正在获取新分集列表...")
-    current_media_id = source_info["mediaId"]
-    new_episodes = await scraper.get_episodes(current_media_id)
-    
-    # --- Start of new failover logic ---
-    if not new_episodes:
-        logger.info(f"主源 '{source_info['providerName']}' 未能找到分集，尝试使用元数据源进行故障转移以查找新的 mediaId...")
-        await progress_callback(15, "主源未找到分集，尝试故障转移...")
+        # 步骤 1: 获取新分集列表的元数据
+        await progress_callback(10, "正在获取新分集列表...")
+        current_media_id = source_info["mediaId"]
+        new_episodes_meta = await scraper.get_episodes(current_media_id)
         
-        new_media_id = await metadata_manager.find_new_media_id(source_info)
-        
-        if new_media_id and new_media_id != current_media_id:
-            logger.info(f"通过故障转移为 '{source_info['title']}' 找到新的 mediaId: '{new_media_id}'，将重试获取分集。")
-            await progress_callback(18, f"找到新的媒体ID，正在重试...")
-            await crud.update_source_media_id(session, sourceId, new_media_id)
-            new_episodes = await scraper.get_episodes(new_media_id)
-    # --- End of new failover logic ---
+        # --- 故障转移逻辑 ---
+        if not new_episodes_meta:
+            logger.info(f"主源 '{source_info['providerName']}' 未能找到分集，尝试故障转移...")
+            await progress_callback(15, "主源未找到分集，尝试故障转移...")
+            new_media_id = await metadata_manager.find_new_media_id(source_info)
+            if new_media_id and new_media_id != current_media_id:
+                logger.info(f"通过故障转移为 '{source_info['title']}' 找到新的 mediaId: '{new_media_id}'，将重试。")
+                await progress_callback(18, f"找到新的媒体ID，正在重试...")
+                await crud.update_source_media_id(session, sourceId, new_media_id)
+                await session.commit() # 提交 mediaId 的更新
+                new_episodes_meta = await scraper.get_episodes(new_media_id)
 
-    if not new_episodes:
-        raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
+        if not new_episodes_meta:
+            raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
 
-    # 调用新的 _process_episode_list 来获取所有弹幕数据
-    successful_results, failed_episodes_count = await _process_episode_list(
-        episodes=new_episodes,
-        scraper=scraper,
-        rate_limiter=rate_limiter,
-        progress_callback=progress_callback
-    )
+        # 步骤 2: 迭代地导入/更新分集
+        total_comments_added, successful_indices, failed_count = await _import_episodes_iteratively(
+            session=session,
+            scraper=scraper,
+            rate_limiter=rate_limiter,
+            progress_callback=progress_callback,
+            episodes=new_episodes_meta,
+            anime_id=source_info["animeId"],
+            source_id=sourceId
+        )
 
-    if not successful_results and failed_episodes_count == len(new_episodes):
-        raise TaskSuccess("刷新完成，但所有分集弹幕获取失败。旧数据已保留。")
+        # 步骤 3: 在所有导入/更新操作完成后，清理过时的分集
+        await progress_callback(95, "正在清理过时分集...")
+        new_provider_ids = {ep.episodeId for ep in new_episodes_meta}
+        old_episodes_res = await session.execute(
+            select(orm_models.Episode).where(orm_models.Episode.sourceId == sourceId)
+        )
+        episodes_to_delete = [ep for ep in old_episodes_res.scalars().all() if ep.providerEpisodeId not in new_provider_ids]
 
-    # --- 数据库写入阶段 ---
-    await progress_callback(95, "正在更新数据库...")
+        if episodes_to_delete:
+            logger.info(f"全量刷新：找到 {len(episodes_to_delete)} 个过时的分集，正在删除...")
+            for ep in episodes_to_delete:
+                _delete_danmaku_file(ep.danmakuFilePath)
+                await session.delete(ep)
+            await session.commit()
+            logger.info("过时的分集已删除。")
 
-    # 1. 删除过时的分集
-    old_episodes_res = await session.execute(select(orm_models.Episode).where(orm_models.Episode.sourceId == sourceId))
-    old_episodes = old_episodes_res.scalars().all()
-    successful_provider_ids = {ep.episodeId for ep, _ in successful_results}
-    episodes_to_delete = [ep for ep in old_episodes if ep.providerEpisodeId not in successful_provider_ids]
+        # 步骤 4: 构造最终的成功消息
+        episode_range_str = _generate_episode_range_string(successful_indices)
+        final_message = f"全量刷新完成，处理了 {len(new_episodes_meta)} 个分集，新增 {total_comments_added} 条弹幕。"
+        if failed_count > 0:
+            final_message += f" {failed_count} 个分集获取失败。"
+        if episodes_to_delete:
+            final_message += f" 删除了 {len(episodes_to_delete)} 个过时分集。"
+        raise TaskSuccess(final_message)
 
-    for ep in episodes_to_delete:
-        _delete_danmaku_file(ep.danmakuFilePath)
-        await session.delete(ep)
-    if episodes_to_delete:
-        logger.info(f"全量刷新：删除了 {len(episodes_to_delete)} 个过时的分集。")
-
-    # 2. 创建/更新新的分集和弹幕
-    total_comments_added = 0
-    for episode, comments in successful_results:
-        episode_db_id = await crud.create_episode_if_not_exists(session, source_info["animeId"], sourceId, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
-        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-        total_comments_added += added_count
-
-    await session.commit()
-
-    final_message = f"全量刷新完成，共处理 {len(new_episodes)} 个分集，新增 {total_comments_added} 条弹幕。"
-    if failed_episodes_count > 0:
-        final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
-    raise TaskSuccess(final_message)
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"全量刷新任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
+        raise    
 
 async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, progress_callback: Callable):
     """Background task to delete multiple sources."""
@@ -938,11 +931,15 @@ async def batch_manual_import_task(
 
                 cleaned_content = clean_xml_string(content_to_parse)
                 comments = _parse_xml_content(cleaned_content)
-                if not comments: continue
-                final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
-                episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
-                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-                total_added_comments += added_count
+                
+                if comments:
+                    final_title = item.episodeTitle or f"第 {item.episodeIndex} 集"
+                    episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    total_added_comments += added_count
+                else:
+                    logger.warning(f"批量导入条目 '{item_desc}' 解析失败或不含弹幕，已跳过。")
+                    failed_items += 1
             else:
                 scraper = manager.get_scraper(providerName)
                 provider_episode_id = await scraper.get_id_from_url(item.content)

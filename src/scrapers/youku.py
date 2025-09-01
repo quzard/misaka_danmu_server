@@ -535,14 +535,25 @@ class YoukuScraper(BaseScraper):
         return formatted
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
-        """从优酷视频URL中提取 vid。"""
+        """从优酷视频URL中提取 vid，并处理末尾可能存在的多余'=='。"""
         # 优酷的URL格式通常是 v.youku.com/v_show/id_XXXXXXXX.html
-        # 修正：移除对 .html 后缀的强制要求，以兼容新版URL
         match = re.search(r'id_([a-zA-Z0-9=]+)', url)
         if match:
-            vid = match.group(1)
-            self.logger.info(f"Youku: 从URL {url} 解析到 vid: {vid}")
-            return vid
+            # 1. 提取出ID部分，例如 "XNjQ4MjcyMDkxMg=="
+            media_id_with_suffix = match.group(1)
+            
+            # 2. 去掉可能存在的 ".html" 后缀 (虽然当前正则不捕获它，但为了健壮性加上)
+            media_id = media_id_with_suffix.split('.')[0]
+            
+            # 3. 核心修正：根据您的反馈，移除末尾多余的 "=="
+            if media_id.endswith('=='):
+                cleaned_id = media_id[:-2]
+                self.logger.info(f"Youku: 从URL {url} 解析到 vid: {media_id}，清理后为: {cleaned_id}")
+                return cleaned_id
+            
+            self.logger.info(f"Youku: 从URL {url} 解析到 vid: {media_id}")
+            return media_id
+            
         self.logger.warning(f"Youku: 无法从URL中解析出 vid: {url}")
         return None
 
