@@ -892,11 +892,16 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int, page: i
     total_count = (await session.execute(count_stmt)).scalar_one()
 
     # 然后，根据分页参数查询特定页的数据
+    # 修正：确保返回一个包含完整信息的字典列表，以修复UI中的TypeError
     offset = (page - 1) * page_size
     stmt = (
         select(
-            Episode.id.label("episodeId"), Episode.title, Episode.episodeIndex.label("episodeIndex"),
-            Episode.sourceUrl.label("sourceUrl"), Episode.fetchedAt.label("fetchedAt"), Episode.commentCount.label("commentCount")
+            Episode.id.label("episodeId"),
+            Episode.title,
+            Episode.episodeIndex.label("episodeIndex"),
+            Episode.sourceUrl.label("sourceUrl"),
+            Episode.fetchedAt.label("fetchedAt"),
+            Episode.commentCount.label("commentCount")
         )
         .where(Episode.sourceId == source_id)
         .order_by(Episode.episodeIndex).offset(offset).limit(page_size)
