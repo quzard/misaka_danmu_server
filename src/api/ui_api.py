@@ -1824,27 +1824,10 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
-class ManualImportRequest(models.BaseModel):
-    title: Optional[str] = None
-    episodeIndex: int = Field(..., alias="episodeIndex")
-    url: Optional[str] = None
-    content: Optional[str] = None
-
-    class Config:
-        populate_by_name = True # 允许使用 'episodeIndex' 或 'episode_index'
-
-    @model_validator(mode='after')
-    def check_url_or_content(self):
-        if self.url is None and self.content is None:
-            raise ValueError('必须提供 "url" 或 "content" 字段。')
-        if self.url is not None and self.content is not None:
-            raise ValueError('只能提供 "url" 或 "content" 之一，不能同时提供。')
-        return self
-
 @router.post("/library/source/{source_id}/manual-import", status_code=status.HTTP_202_ACCEPTED, summary="手动导入单个分集弹幕")
 async def manual_import_episode(
     source_id: int,
-    request_data: ManualImportRequest,
+    request_data: models.ManualImportRequest,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
