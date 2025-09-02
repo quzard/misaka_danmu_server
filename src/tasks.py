@@ -917,7 +917,10 @@ async def batch_manual_import_task(
     while i < total_items:
         item = items[i]
         progress = 5 + int(((i + 1) / total_items) * 90) if total_items > 0 else 95
-        item_desc = item.title or f"第 {item.episodeIndex} 集"
+        # 修正：使用 getattr 安全地访问可能不存在的 'title' 属性，
+        # 以修复当请求体中的项目不包含 title 字段时引发的 AttributeError。
+        # 这提供了向后兼容性，并使 title 字段成为可选。
+        item_desc = getattr(item, 'title', None) or f"第 {item.episodeIndex} 集"
         await progress_callback(progress, f"正在处理: {item_desc} ({i+1}/{total_items})")
 
         try:
@@ -943,7 +946,7 @@ async def batch_manual_import_task(
                 comments = _parse_xml_content(cleaned_content)
                 
                 if comments:
-                    final_title = item.title or f"第 {item.episodeIndex} 集"
+                    final_title = getattr(item, 'title', None) or f"第 {item.episodeIndex} 集"
                     episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
 
                     added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
@@ -956,7 +959,7 @@ async def batch_manual_import_task(
                 provider_episode_id = await scraper.get_id_from_url(item.content)
                 if not provider_episode_id: raise ValueError("无法解析ID")
                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
-                final_title = item.title or f"第 {item.episodeIndex} 集"
+                final_title = getattr(item, 'title', None) or f"第 {item.episodeIndex} 集"
                 
                 await rate_limiter.check(providerName)
                 comments = await scraper.get_comments(episode_id_for_comments)
