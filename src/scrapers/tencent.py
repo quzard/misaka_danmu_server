@@ -1074,10 +1074,17 @@ class TencentScraper(BaseScraper):
                 elif c.content_style.position == 3:
                     mode = 4  # 底部
                 
-                if c.content_style.color:
+                # 确定颜色：优先使用渐变色中的第一个颜色，如果存在的话
+                target_color_hex = None
+                if c.content_style.gradient_colors and len(c.content_style.gradient_colors) > 0:
+                    target_color_hex = c.content_style.gradient_colors[0]
+                elif c.content_style.color:
+                    target_color_hex = c.content_style.color
+                
+                if target_color_hex:
                     try:
-                        # 修正：腾讯的颜色值是十进制字符串，直接转换为整数
-                        color = int(c.content_style.color)
+                        # 颜色值是十六进制字符串，需要转换为十进制整数
+                        color = int(target_color_hex.lstrip('#'), 16)
                     except (ValueError, TypeError):
                         pass # 转换失败则使用默认白色
             
