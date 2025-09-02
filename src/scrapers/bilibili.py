@@ -718,26 +718,37 @@ class BilibiliScraper(BaseScraper):
                     except ValidationError as e:
                         self.logger.warning(f"Bilibili: 跳过一个无效的PGC分集数据: {ep_data}, 错误: {e}")
 
-                # 新增：根据 "预告" 徽章进行二次过滤
-                episodes_without_previews = []
-                for ep in validated_episodes:
-                    is_preview = False
-                    if ep.badges:
-                        if any(badge.get("text") == "预告" for badge in ep.badges):
-                            is_preview = True
-                            self.logger.info(f"Bilibili: 根据 '预告' 标签过滤掉分集: '{ep.long_title}'")
-                    
-                    if not is_preview:
-                        episodes_without_previews.append(ep)
+                # 修正：使用通用的黑名单规则来过滤标签，而不仅仅是硬编码的“预告”
+                episodes_after_badge_filter = []
+                blacklist_pattern = await self.get_episode_blacklist_pattern()
+                
+                if not blacklist_pattern:
+                    # 如果没有黑名单，则不进行标签过滤
+                    episodes_after_badge_filter = validated_episodes
+                else:
+                    for ep in validated_episodes:
+                        is_filtered_by_badge = False
+                        if ep.badges:
+                            for badge in ep.badges:
+                                badge_text = badge.get("text")
+                                if badge_text and blacklist_pattern.search(badge_text):
+                                    self.logger.info(f"Bilibili: 根据标签 '{badge_text}' 过滤掉分集: '{(ep.show_title or ep.long_title or ep.title)}'")
+                                    is_filtered_by_badge = True
+                                    break  # 一个标签匹配就足够了
+                        
+                        if not is_filtered_by_badge:
+                            episodes_after_badge_filter.append(ep)
 
+                # 修正：优先使用 show_title，因为它包含最完整的信息（如“预告”），
+                # 其次是 long_title，最后是 title。这确保了后续的黑名单过滤能正确生效。
                 initial_episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name,
                         episodeId=f"{ep.aid},{ep.cid}",
-                        title=ep.long_title or ep.title,
+                        title=(ep.show_title or ep.long_title or ep.title).strip(),
                         episodeIndex=0,  # Will be renumbered by the helper
                         url=f"https://www.bilibili.com/bangumi/play/ep{ep.id}"
-                    ) for ep in episodes_without_previews
+                    ) for ep in episodes_after_badge_filter
                 ]
 
                 final_episodes = await self._filter_and_renumber_episodes(initial_episodes, "PGC")
@@ -758,11 +769,12 @@ class BilibiliScraper(BaseScraper):
             response.raise_for_status()
             data = BiliVideoViewResult.model_validate(response.json())
             if data.code == 0 and data.data and data.data.pages:
+                # 对于UGC内容，标题就是 'part' 字段，这里确保它被正确地清理空格。
                 initial_episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name,
                         episodeId=f"{data.data.aid},{p.cid}",
-                        title=p.part,
+                        title=p.part.strip(),
                         episodeIndex=0,  # Will be renumbered by the helper
                         url=f"https://www.bilibili.com/video/{bvid}?p={p.page}"
                     ) for p in data.data.pages
