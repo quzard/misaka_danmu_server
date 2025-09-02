@@ -378,6 +378,10 @@ class ProxySettingsResponse(BaseModel):
 class ReassociationRequest(BaseModel):
     targetAnimeId: int
 
+class EpisodeOffsetRequest(BaseModel):
+    episodeIds: List[int]
+    offset: int
+
 class BulkDeleteEpisodesRequest(BaseModel):
     episodeIds: List[int]
 

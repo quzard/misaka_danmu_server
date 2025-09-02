@@ -13,6 +13,7 @@ from thefuzz import fuzz
 from sqlalchemy import delete, func, select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import selectinload
 from xml.sax.saxutils import escape as xml_escape
 
 from . import crud, models, orm_models
@@ -798,6 +799,133 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             await session.commit()
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
+        raise
+
+async def offset_episodes_task(episode_ids: List[int], offset: int, session: AsyncSession, progress_callback: Callable):
+    """后台任务：对选中的分集进行集数偏移，并同步更新其ID和物理文件。"""
+    if not episode_ids:
+        raise TaskSuccess("没有选中任何分集。")
+
+    logger.info(f"开始集数偏移任务，偏移量: {offset}, 分集IDs: {episode_ids}")
+    await progress_callback(0, "正在验证偏移操作...")
+
+    dialect_name = session.bind.dialect.name
+    is_mysql = dialect_name == 'mysql'
+    is_postgres = dialect_name == 'postgresql'
+
+    try:
+        # --- Validation Phase ---
+        # 1. Fetch all selected episodes and ensure they belong to the same source
+        selected_episodes_res = await session.execute(
+            select(orm_models.Episode)
+            .where(orm_models.Episode.id.in_(episode_ids))
+            .options(selectinload(orm_models.Episode.source))
+        )
+        selected_episodes = selected_episodes_res.scalars().all()
+
+        if len(selected_episodes) != len(set(episode_ids)):
+            raise ValueError("部分选中的分集未找到。")
+
+        first_ep = selected_episodes[0]
+        source_id = first_ep.sourceId
+        anime_id = first_ep.source.animeId
+        source_order = first_ep.source.sourceOrder
+
+        if any(ep.sourceId != source_id for ep in selected_episodes):
+            raise ValueError("选中的分集必须属于同一个数据源。")
+        
+        if source_order is None:
+            raise ValueError(f"源 ID {source_id} 没有持久化的 sourceOrder，无法进行偏移操作。")
+
+        # 2. Check for conflicts
+        selected_indices = {ep.episodeIndex for ep in selected_episodes}
+        new_indices = {idx + offset for idx in selected_indices}
+
+        if any(idx <= 0 for idx in new_indices):
+            # 此检查作为最后的安全防线，API层应已进行初步验证
+            raise ValueError("偏移后的集数必须大于0。")
+
+        all_source_episodes_res = await session.execute(
+            select(orm_models.Episode.episodeIndex).where(orm_models.Episode.sourceId == source_id)
+        )
+        all_existing_indices = set(all_source_episodes_res.scalars().all())
+        unselected_indices = all_existing_indices - selected_indices
+
+        conflicts = new_indices.intersection(unselected_indices)
+        if conflicts:
+            raise ValueError(f"操作将导致集数冲突，无法执行。冲突集数: {sorted(list(conflicts))}")
+
+        await progress_callback(20, "验证通过，准备迁移数据...")
+
+        # --- Execution Phase ---
+        # Temporarily disable foreign key checks
+        if is_mysql:
+            await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+        elif is_postgres:
+            await session.execute(text("SET session_replication_role = 'replica';"))
+        await session.commit()
+
+        try:
+            old_episodes_to_delete = []
+            new_episodes_to_add = []
+            
+            total_to_migrate = len(selected_episodes)
+            for i, old_ep in enumerate(selected_episodes):
+                await progress_callback(20 + int((i / total_to_migrate) * 70), f"正在处理分集 {i+1}/{total_to_migrate}...")
+
+                new_index = old_ep.episodeIndex + offset
+                new_id = int(f"25{anime_id:06d}{source_order:02d}{new_index:04d}")
+                
+                new_danmaku_web_path = None
+                if old_ep.danmakuFilePath:
+                    new_danmaku_web_path = f"/danmaku/{anime_id}/{new_id}.xml"
+                    old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
+                    new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
+                    if old_full_path and old_full_path.is_file() and old_full_path != new_full_path:
+                        new_full_path.parent.mkdir(parents=True, exist_ok=True)
+                        old_full_path.rename(new_full_path)
+
+                new_episodes_to_add.append(orm_models.Episode(
+                    id=new_id,
+                    sourceId=old_ep.sourceId,
+                    episodeIndex=new_index,
+                    title=old_ep.title,
+                    sourceUrl=old_ep.sourceUrl,
+                    providerEpisodeId=old_ep.providerEpisodeId,
+                    fetchedAt=old_ep.fetchedAt,
+                    commentCount=old_ep.commentCount,
+                    danmakuFilePath=new_danmaku_web_path
+                ))
+                old_episodes_to_delete.append(old_ep)
+
+            # Perform DB operations
+            for old_ep in old_episodes_to_delete:
+                await session.delete(old_ep)
+            await session.flush()
+            
+            session.add_all(new_episodes_to_add)
+            await session.commit()
+
+            raise TaskSuccess(f"集数偏移完成，共迁移了 {len(new_episodes_to_add)} 个分集。")
+
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"集数偏移任务 (源ID: {source_id}) 事务中失败: {e}", exc_info=True)
+            raise
+        finally:
+            # Re-enable foreign key checks
+            if is_mysql:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+            elif is_postgres:
+                await session.execute(text("SET session_replication_role = 'origin';"))
+            await session.commit()
+
+    except ValueError as e:
+        # Catch validation errors and report them as task failures
+        logger.error(f"集数偏移任务验证失败: {e}")
+        raise TaskSuccess(f"操作失败: {e}")
+    except Exception as e:
+        logger.error(f"集数偏移任务失败: {e}", exc_info=True)
         raise
 
 async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
