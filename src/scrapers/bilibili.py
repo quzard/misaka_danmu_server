@@ -118,6 +118,7 @@ class BiliEpisode(BaseModel):
     title: str
     long_title: str
     show_title: Optional[str] = None
+    badges: Optional[List[Dict[str, Any]]] = None
 
 class BiliSeasonData(BaseModel):
     episodes: List[BiliEpisode]
@@ -717,6 +718,18 @@ class BilibiliScraper(BaseScraper):
                     except ValidationError as e:
                         self.logger.warning(f"Bilibili: 跳过一个无效的PGC分集数据: {ep_data}, 错误: {e}")
 
+                # 新增：根据 "预告" 徽章进行二次过滤
+                episodes_without_previews = []
+                for ep in validated_episodes:
+                    is_preview = False
+                    if ep.badges:
+                        if any(badge.get("text") == "预告" for badge in ep.badges):
+                            is_preview = True
+                            self.logger.info(f"Bilibili: 根据 '预告' 标签过滤掉分集: '{ep.long_title}'")
+                    
+                    if not is_preview:
+                        episodes_without_previews.append(ep)
+
                 initial_episodes = [
                     models.ProviderEpisodeInfo(
                         provider=self.provider_name,
@@ -724,7 +737,7 @@ class BilibiliScraper(BaseScraper):
                         title=ep.long_title or ep.title,
                         episodeIndex=0,  # Will be renumbered by the helper
                         url=f"https://www.bilibili.com/bangumi/play/ep{ep.id}"
-                    ) for ep in validated_episodes
+                    ) for ep in episodes_without_previews
                 ]
 
                 final_episodes = await self._filter_and_renumber_episodes(initial_episodes, "PGC")
@@ -806,13 +819,13 @@ class BilibiliScraper(BaseScraper):
                 break
         return all_comments
 
-    async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
+    async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> Optional[List[dict]]:
         try:
             aid_str, main_cid_str = episode_id.split(',')
             aid, main_cid = int(aid_str), int(main_cid_str)
         except (ValueError, IndexError):
             self.logger.error(f"Bilibili: 无效的 episode_id 格式: '{episode_id}'")
-            return []
+            return None
 
         await self._ensure_config_and_cookie()
 
@@ -853,9 +866,12 @@ class BilibiliScraper(BaseScraper):
             if len(group) == 1:
                 processed_comments.append(group[0])
             else:
+                # 修正：创建一个新的弹幕对象来处理重复项，而不是修改原始对象，以避免副作用。
                 first_comment = min(group, key=lambda x: x.progress)
-                first_comment.content = f"{first_comment.content} X{len(group)}"
-                processed_comments.append(first_comment)
+                new_comment = DanmakuElem()
+                new_comment.CopyFrom(first_comment)
+                new_comment.content = f"{new_comment.content} X{len(group)}"
+                processed_comments.append(new_comment)
 
         formatted = []
         for c in processed_comments:
