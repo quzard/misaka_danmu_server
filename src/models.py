@@ -183,7 +183,6 @@ class ScraperSetting(BaseModel):
     providerName: str
     isEnabled: bool
     useProxy: bool
-    isFailoverEnabled: bool
     displayOrder: int
 
 class MetadataSourceSettingUpdate(BaseModel):
@@ -321,13 +320,11 @@ class ManualImportRequest(BaseModel):
     url: Optional[str] = Field(None, alias='sourceUrl')
     content: Optional[str] = None
 
-    @model_validator(mode='before')
-    def check_url_or_content(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            # 同时检查 'url'、其别名 'sourceUrl' 和 'content'
-            if not data.get('url') and not data.get('sourceUrl') and not data.get('content'):
-                raise ValueError('必须提供 "url" 或 "content" 字段。')
-        return data
+    @model_validator(mode='after')
+    def check_url_or_content(self) -> "ManualImportRequest":
+        if not self.url and not self.content:
+            raise ValueError('必须提供 "url" 或 "content" 字段。')
+        return self
 
 class DanmakuOutputSettings(BaseModel):
     limit_per_source: int
