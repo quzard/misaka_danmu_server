@@ -885,7 +885,7 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def get_episodes_for_source(session: AsyncSession, source_id: int, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+async def get_episodes_for_source(session: AsyncSession, source_id: int, page: int = 1, page_size: int = 5000) -> Dict[str, Any]:
     """获取指定源的分集列表，支持分页。"""
     # 首先，获取总的分集数量，用于前端分页控件
     count_stmt = select(func.count(Episode.id)).where(Episode.sourceId == source_id)
