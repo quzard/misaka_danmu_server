@@ -578,7 +578,7 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
         # 步骤 1: 获取新分集列表的元数据
         await progress_callback(10, "正在获取新分集列表...")
         current_media_id = source_info["mediaId"]
-        new_episodes_meta = await scraper.get_episodes(current_media_id)
+        new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"))
         
         # --- 故障转移逻辑 ---
         if not new_episodes_meta:
