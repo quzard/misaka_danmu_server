@@ -23,6 +23,7 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 class TencentCommentContentStyle(BaseModel):
     color: Optional[str] = None
     position: Optional[int] = None
+    gradient_colors: Optional[List[str]] = None
 
 class TencentEpisode(BaseModel):
     vid: str = Field(..., description="分集视频ID")
