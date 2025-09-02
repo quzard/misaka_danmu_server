@@ -1086,16 +1086,6 @@ class IqiyiScraper(BaseScraper):
                 self.logger.info(f"爱奇艺: 标准剧集接口未返回分集，尝试使用综艺节目接口作为备用方案 (album_id={base_info.album_id})。")
                 episodes = await self._get_zongyi_episodes(base_info.album_id)
 
-            if target_episode_index:
-                target_episode_from_list = next((ep for ep in episodes if ep.order == target_episode_index), None)
-                if target_episode_from_list:
-                    episodes = [target_episode_from_list]
-                else:
-                    self.logger.warning(f"爱奇艺: 目标分集 {target_episode_index} 在获取的列表中未找到 (album_id={base_info.album_id})")
-                    return []
-
-            # 移除低效的标题更新循环，直接使用列表API返回的标题
-
         provider_episodes = [
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
@@ -1222,7 +1212,7 @@ class IqiyiScraper(BaseScraper):
         except (etree.XMLSyntaxError, Exception) as e:
             if isinstance(e, etree.XMLSyntaxError):
                 self._log_error_context(xml_str, e.lineno, e.position[1])
-            self.logger.error(f"处理失败: {str(e)}", exc_info=True)
+            self.logger.error(f"处理弹幕分段时发生错误", exc_info=True)
 
         return []
 
