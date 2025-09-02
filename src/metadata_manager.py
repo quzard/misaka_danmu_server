@@ -300,7 +300,7 @@ class MetadataSourceManager:
             "tvdb": ["tvdbApiKey"],
             "imdb": [],  # IMDb 目前没有特定配置
             # Scrapers
-            "gamer": ["gamerCookie", "gamerUserAgent"],
+            "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
         }
 
         keys_to_fetch = config_keys_map.get(providerName)
@@ -321,7 +321,8 @@ class MetadataSourceManager:
         
         # 新增：为Gamer也返回单值value，以简化前端处理
         if providerName == "gamer":
-            return {"value": config_values.get("gamerCookie", "")}
+            # 修正：此前的实现有误，只返回了Cookie。现在返回所有为Gamer获取的配置。
+            return config_values
 
         # 新增：为Bangumi添加 authMode 字段，以明确告知前端当前应显示哪种模式
         if providerName == "bangumi":
@@ -344,7 +345,7 @@ class MetadataSourceManager:
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
             # Scrapers
-            "gamer": ["gamerCookie", "gamerUserAgent"],
+            "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
         }
 
         allowed_keys = allowed_keys_map.get(providerName)
@@ -357,6 +358,8 @@ class MetadataSourceManager:
                     await crud.update_config_value(session, key, str(value if value is not None else ""))
                 else:
                     self.logger.warning(f"尝试为提供商 '{providerName}' 更新一个不允许的配置项 '{key}'，已忽略。")
+            # 修正：添加 commit() 以确保更改被保存到数据库。
+            await session.commit()
         
         # 如果是元数据源的配置更新，重新加载它们以使更改生效
         if providerName in self.sources:
