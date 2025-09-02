@@ -1032,19 +1032,19 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
 async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int, target_anime_id: int) -> bool:
     """
     将一个番剧的所有源智能地合并到另一个番剧，然后删除原始番剧。
-    - 如果目标番剧已存在相同提供商的源，则丢弃来自源番剧的冲突源。
+    - 如果目标番剧已存在相同提供商的源，则合并其下的分集，而不是直接删除。
     - 移动不冲突的源，并同时移动其下的弹幕文件。
     - 在合并后重新为目标番剧的所有源编号，以确保顺序正确。
     """
     if source_anime_id == target_anime_id:
         return False  # 不能将一个作品与它自己合并
 
-    # 1. 高效地预加载所有需要的数据
+    # 1. 高效地预加载所有需要的数据，包括目标作品的分集
     source_anime_stmt = select(Anime).where(Anime.id == source_anime_id).options(
         selectinload(Anime.sources).selectinload(AnimeSource.episodes)
     )
     target_anime_stmt = select(Anime).where(Anime.id == target_anime_id).options(
-        selectinload(Anime.sources)
+        selectinload(Anime.sources).selectinload(AnimeSource.episodes)
     )
     source_anime = (await session.execute(source_anime_stmt)).scalar_one_or_none()
     target_anime = (await session.execute(target_anime_stmt)).scalar_one_or_none()
@@ -1053,30 +1053,57 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
         logger.error(f"重新关联失败：源番剧(ID: {source_anime_id})或目标番剧(ID: {target_anime_id})未找到。")
         return False
 
-    # 2. 识别目标番剧已有的提供商，用于冲突检测
-    target_providers = {s.providerName for s in target_anime.sources}
-    logger.info(f"目标番剧 (ID: {target_anime_id}) 已有源: {target_providers}")
+    # 2. 识别目标番剧已有的提供商及其源对象，用于冲突检测和分集合并
+    target_sources_map = {s.providerName: s for s in target_anime.sources}
+    logger.info(f"目标番剧 (ID: {target_anime_id}) 已有源: {list(target_sources_map.keys())}")
 
     # 3. 遍历源番剧的源，处理冲突或移动
     for source_to_process in list(source_anime.sources):  # 使用副本进行迭代
-        if source_to_process.providerName in target_providers:
-            # 冲突：删除此源及其所有弹幕文件
-            logger.warning(f"发现冲突源: 提供商 '{source_to_process.providerName}' 已存在于目标番剧中。将删除源 {source_to_process.id}。")
-            for ep in source_to_process.episodes:
-                if ep.danmakuFilePath:
-                    fs_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
-                    if fs_path and fs_path.is_file():
-                        fs_path.unlink(missing_ok=True)
+        provider = source_to_process.providerName
+        if provider in target_sources_map:
+            # 冲突：合并分集
+            target_source = target_sources_map[provider]
+            logger.warning(f"发现冲突源: 提供商 '{provider}'。将尝试合并分集到目标源 {target_source.id}。")
+            
+            target_episode_indices = {ep.episodeIndex for ep in target_source.episodes}
+
+            for episode_to_move in list(source_to_process.episodes):
+                if episode_to_move.episodeIndex not in target_episode_indices:
+                    # 移动不重复的分集
+                    logger.info(f"正在移动分集 {episode_to_move.episodeIndex} (ID: {episode_to_move.id}) 到目标源 {target_source.id}")
+                    
+                    # 移动弹幕文件
+                    if episode_to_move.danmakuFilePath:
+                        old_path = _get_fs_path_from_web_path(episode_to_move.danmakuFilePath)
+                        new_web_path = f"/danmaku/{target_anime_id}/{episode_to_move.id}.xml"
+                        new_fs_path = _get_fs_path_from_web_path(new_web_path)
+                        if old_path and old_path.exists() and new_fs_path:
+                            new_fs_path.parent.mkdir(parents=True, exist_ok=True)
+                            old_path.rename(new_fs_path)
+                            episode_to_move.danmakuFilePath = new_web_path
+                    
+                    episode_to_move.sourceId = target_source.id
+                    target_source.episodes.append(episode_to_move)
+                else:
+                    # 删除重复的分集
+                    logger.info(f"分集 {episode_to_move.episodeIndex} 在目标源中已存在，将删除源分集 {episode_to_move.id}")
+                    if episode_to_move.danmakuFilePath:
+                        fs_path = _get_fs_path_from_web_path(episode_to_move.danmakuFilePath)
+                        if fs_path and fs_path.is_file():
+                            fs_path.unlink(missing_ok=True)
+                    await session.delete(episode_to_move)
+            
+            # 删除现已为空的源
             await session.delete(source_to_process)
         else:
             # 不冲突：移动此源及其弹幕文件
-            logger.info(f"正在将源 '{source_to_process.providerName}' (ID: {source_to_process.id}) 移动到目标番剧 (ID: {target_anime_id})。")
+            logger.info(f"正在将源 '{provider}' (ID: {source_to_process.id}) 移动到目标番剧 (ID: {target_anime_id})。")
             for ep in source_to_process.episodes:
                 if ep.danmakuFilePath:
                     old_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
                     new_web_path = f"/danmaku/{target_anime_id}/{ep.id}.xml"
                     new_fs_path = _get_fs_path_from_web_path(new_web_path)
-                    if old_path and old_path.exists():
+                    if old_path and old_path.exists() and new_fs_path:
                         new_fs_path.parent.mkdir(parents=True, exist_ok=True)
                         old_path.rename(new_fs_path)
                         ep.danmakuFilePath = new_web_path
