@@ -38,6 +38,18 @@ class TencentComment(BaseModel):
     # API 对普通弹幕返回空字符串 ""，对特殊弹幕返回对象。Union可以同时处理这两种情况。
     content_style: Union[TencentCommentContentStyle, str, None] = Field(None)
 
+    @field_validator("content_style", mode="before")
+    @classmethod
+    def _validate_content_style(cls, v: Any) -> Any:
+        """在Pydantic验证前，尝试将JSON字符串解析为字典。"""
+        if isinstance(v, str) and v.startswith('{') and v.endswith('}'):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # 如果解析失败，则返回原始字符串，保持健壮性
+                return v
+        return v
+
 
 # --- 用于搜索API的新模型 ---
 class TencentSubjectDoc(BaseModel):
