@@ -1148,7 +1148,8 @@ class IqiyiScraper(BaseScraper):
         # 构建弹幕URL
         s1 = tv_id[-4:-2]
         s2 = tv_id[-2:]
-        url = f"http://cmts.iqiyi.com/bullet/{s1}/{s2}/{tv_id}_300_{mat}.z"
+        # 修正：将弹幕服务器地址从 http 改为 https，以修复404错误
+        url = f"https://cmts.iqiyi.com/bullet/{s1}/{s2}/{tv_id}_300_{mat}.z"
         self.logger.debug(f"URL构建: s1={s1}, s2={s2}, 完整URL={url}")
 
         try:
