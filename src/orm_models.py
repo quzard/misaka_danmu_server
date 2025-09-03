@@ -216,7 +216,7 @@ class TaskHistory(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[Optional[str]] = mapped_column(TEXT)
     createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
-    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP(timezone=True))
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)

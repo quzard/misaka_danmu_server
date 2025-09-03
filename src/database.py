@@ -7,9 +7,42 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy import text
 from .config import settings
 from .orm_models import Base
+from .timezone import get_app_timezone
 
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
+
+def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
+    """
+    根据配置生成数据库连接URL。
+    :param include_db_name: URL中是否包含数据库名称。
+    :param for_server: 是否为连接到服务器（而不是特定数据库）生成URL，主要用于PostgreSQL。
+    """
+    db_type = settings.database.type.lower()
+    
+    if db_type == "mysql":
+        drivername = "mysql+aiomysql"
+        query = {"charset": "utf8mb4"}
+        database = settings.database.name if include_db_name else None
+    elif db_type == "postgresql":
+        drivername = "postgresql+asyncpg"
+        query = None
+        if for_server:
+            database = "postgres"
+        else:
+            database = settings.database.name if include_db_name else None
+    else:
+        raise ValueError(f"不支持的数据库类型: '{db_type}'。请使用 'mysql' 或 'postgresql'。")
+
+    return URL.create(
+        drivername=drivername,
+        username=settings.database.user,
+        password=settings.database.password,
+        host=settings.database.host,
+        port=settings.database.port,
+        database=database,
+        query=query,
+    )
 
 async def _migrate_add_source_order(conn, db_type, db_name):
     """
@@ -168,29 +201,10 @@ def _log_db_connection_error(context_message: str, e: Exception):
 
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
-    db_type = settings.database.type.lower()
-    if db_type == "mysql":
-        db_url = URL.create(
-            drivername="mysql+aiomysql",
-            username=settings.database.user,
-            password=settings.database.password,
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-            query={"charset": "utf8mb4"},
-        )
-    elif db_type == "postgresql":
-        db_url = URL.create(
-            drivername="postgresql+asyncpg",
-            username=settings.database.user,
-            password=settings.database.password,
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-        )
-    else:
-        raise ValueError(f"不支持的数据库类型: '{db_type}'。请使用 'mysql' 或 'postgresql'。")
     try:
+        db_url = _get_db_url()
+        db_type = settings.database.type.lower()
+        app_tz_str = str(get_app_timezone())
         engine_args = {
             "echo": False,
             "pool_recycle": 3600,
@@ -199,8 +213,11 @@ async def create_db_engine_and_session(app: FastAPI):
             "pool_timeout": 30
         }
         if db_type == "mysql":
-            # 强制MySQL会话使用UTC时区，以确保时间戳的一致性
-            engine_args['connect_args'] = {'init_command': "SET time_zone = '+00:00'"}
+            # 强制MySQL会话使用应用配置的时区
+            engine_args['connect_args'] = {'init_command': f"SET time_zone = '{app_tz_str}'"}
+        elif db_type == "postgresql":
+            # 强制PostgreSQL会话使用应用配置的时区
+            engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
 
         engine = create_async_engine(db_url, **engine_args)
         app.state.db_engine = engine
@@ -217,27 +234,12 @@ async def _create_db_if_not_exists():
     db_name = settings.database.name
 
     if db_type == "mysql":
-        # 创建一个不带数据库名称的连接URL
-        server_url = URL.create(
-            drivername="mysql+aiomysql",
-            username=settings.database.user,
-            password=settings.database.password,
-            host=settings.database.host,
-            port=settings.database.port,
-            query={"charset": "utf8mb4"},
-        )
+        server_url = _get_db_url(include_db_name=False)
         check_sql = text(f"SHOW DATABASES LIKE '{db_name}'")
         create_sql = text(f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
     elif db_type == "postgresql":
         # 对于PostgreSQL，连接到默认的 'postgres' 数据库来执行创建操作
-        server_url = URL.create(
-            drivername="postgresql+asyncpg",
-            username=settings.database.user,
-            password=settings.database.password,
-            host=settings.database.host,
-            port=settings.database.port,
-            database="postgres",
-        )
+        server_url = _get_db_url(for_server=True)
         check_sql = text(f"SELECT 1 FROM pg_database WHERE datname = '{db_name}'")
         create_sql = text(f'CREATE DATABASE "{db_name}"')
     else:
@@ -249,8 +251,11 @@ async def _create_db_if_not_exists():
         "echo": False,
         "isolation_level": "AUTOCOMMIT"
     }
+    app_tz_str = str(get_app_timezone())
     if db_type == "mysql":
-        engine_args['connect_args'] = {'init_command': "SET time_zone = '+00:00'"}
+        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{app_tz_str}'"}
+    elif db_type == "postgresql":
+        engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
 
     engine = create_async_engine(server_url, **engine_args)
     try:

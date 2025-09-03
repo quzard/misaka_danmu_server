@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -19,6 +19,7 @@ from .orm_models import (
     Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 , RateLimitState)
 from .config import settings
+from .timezone import get_now, get_app_timezone
 from .danmaku_parser import parse_dandan_xml_to_comments
 
 logger = logging.getLogger(__name__)
@@ -165,8 +166,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     # Create new anime
     new_anime = Anime(
-        title=title, type=media_type, season=season, imageUrl=image_url, localImagePath=local_image_path,
-        createdAt=datetime.now(timezone.utc), year=year
+        title=title, type=media_type, season=season, imageUrl=image_url, localImagePath=local_image_path, year=year # createdAt will be set by ORM default
     )
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
@@ -696,7 +696,7 @@ async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
     from . import security
     hashed_password = security.get_password_hash(user.password) # type: ignore
-    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=datetime.now(timezone.utc))
+    new_user = User(username=user.username, hashedPassword=hashed_password) # createdAt will be set by ORM default
     session.add(new_user)
     await session.commit()
 
@@ -708,7 +708,7 @@ async def update_user_password(session: AsyncSession, username: str, new_hashed_
 
 async def update_user_login_info(session: AsyncSession, username: str, token: str):
     """更新用户的最后登录时间和当前令牌"""
-    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=datetime.now(timezone.utc))
+    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=get_now())
     await session.execute(stmt)
     await session.commit()
 
@@ -771,8 +771,8 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
 
     # 3. 如果ID不存在，则创建新分集
     new_episode = Episode(
-        id=new_episode_id, sourceId=source_id, episodeIndex=episode_index,
-        providerEpisodeId=provider_episode_id, title=title, sourceUrl=url, fetchedAt=datetime.now(timezone.utc)
+        id=new_episode_id, sourceId=source_id, episodeIndex=episode_index, providerEpisodeId=provider_episode_id,
+        title=title, sourceUrl=url, fetchedAt=get_now() # fetchedAt is explicitly set here
     )
     session.add(new_episode)
     await session.flush()
@@ -1450,8 +1450,8 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     
     expires_at = None
     if validityPeriod != "permanent":
-        days = int(validityPeriod.replace('d', ''))
-        expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+        days = int(validityPeriod.replace('d', '')) # type: ignore
+        expires_at = get_now() + timedelta(days=days) # type: ignore
     new_token = ApiToken(name=name, token=token, expiresAt=expires_at)
     session.add(new_token)
     await session.commit()
@@ -1482,7 +1482,7 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
     # 因此，可以直接进行比较。
     if token_info.expiresAt:
-        if token_info.expiresAt < datetime.now(timezone.utc):
+        if token_info.expiresAt < get_now(): # Compare aware datetimes
             return None # Token 已过期
     return {"id": token_info.id, "expiresAt": token_info.expiresAt}
 
@@ -1573,14 +1573,14 @@ async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> 
 
 async def create_oauth_state(session: AsyncSession, user_id: int) -> str:
     state = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-    new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at)
+    expires_at = get_now() + timedelta(minutes=10)
+    new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at) # expiresAt is explicitly set here
     session.add(new_state)
     await session.commit()
     return state
 
 async def consume_oauth_state(session: AsyncSession, state: str) -> Optional[int]:
-    stmt = select(OauthState).where(OauthState.stateKey == state, OauthState.expiresAt > func.now())
+    stmt = select(OauthState).where(OauthState.stateKey == state, OauthState.expiresAt > get_now())
     result = await session.execute(stmt)
     state_obj = result.scalar_one_or_none()
     if state_obj:
@@ -1617,9 +1617,7 @@ async def save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict
         auth.refreshToken = auth_data.get('refreshToken')
         auth.expiresAt = auth_data.get('expiresAt')
     else:
-        auth = BangumiAuth(
-            userId=user_id, authorizedAt=datetime.now(timezone.utc), **auth_data
-        )
+        auth = BangumiAuth(userId=user_id, authorizedAt=get_now(), **auth_data) # authorizedAt is explicitly set here
         session.add(auth)
     await session.commit()
 
@@ -1740,15 +1738,23 @@ async def create_task_in_history(
     await session.commit()
 
 async def update_task_progress_in_history(session: AsyncSession, task_id: str, status: str, progress: int, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, progress=progress, description=description))
+    await session.execute(
+        update(TaskHistory)
+        .where(TaskHistory.taskId == task_id)
+        .values(status=status, progress=progress, description=description, updatedAt=get_now())
+    )
     await session.commit()
 
 async def finalize_task_in_history(session: AsyncSession, task_id: str, status: str, description: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, description=description, progress=100, finishedAt=datetime.now(timezone.utc)))
+    await session.execute(
+        update(TaskHistory)
+        .where(TaskHistory.taskId == task_id)
+        .values(status=status, description=description, progress=100, finishedAt=get_now(), updatedAt=get_now())
+    )
     await session.commit()
 
 async def update_task_status(session: AsyncSession, task_id: str, status: str):
-    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status))
+    await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, updatedAt=get_now()))
     await session.commit()
 
 async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
@@ -1807,7 +1813,7 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (
         update(TaskHistory)
         .where(TaskHistory.status.in_(['运行中', '已暂停']))
-        .values(status='失败', description='因程序重启而中断', finishedAt=datetime.now(timezone.utc))
+        .values(status='失败', description='因程序重启而中断', finishedAt=get_now(), updatedAt=get_now()) # finishedAt and updatedAt are explicitly set here
     )
     result = await session.execute(stmt)
     await session.commit()
@@ -1884,13 +1890,13 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
         state = RateLimitState(
             providerName=provider_name,
             requestCount=0,
-            lastResetTime=datetime.now(timezone.utc)
+            lastResetTime=get_now() # lastResetTime is explicitly set here
         )
         session.add(state)
         await session.flush()
     # 关键修复：确保从数据库读取的时间是 "aware" 的
     if state and state.lastResetTime and state.lastResetTime.tzinfo is None:
-        state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
+        state.lastResetTime = state.lastResetTime.replace(tzinfo=get_app_timezone())
     return state
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
@@ -1900,14 +1906,14 @@ async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitStat
     # 关键修复：确保从数据库读取的时间是 "aware" 的
     for state in states:
         if state.lastResetTime and state.lastResetTime.tzinfo is None:
-            state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
+            state.lastResetTime = state.lastResetTime.replace(tzinfo=get_app_timezone())
     return states
 
 async def reset_all_rate_limit_states(session: AsyncSession):
     """重置所有速率限制状态的请求计数和重置时间。"""
     stmt = update(RateLimitState).values(
         requestCount=0,
-        lastResetTime=datetime.now(timezone.utc)
+        lastResetTime=get_now() # lastResetTime is explicitly set here
     )
     await session.execute(stmt)
 
@@ -1937,9 +1943,15 @@ async def optimize_database(session: AsyncSession, db_type: str) -> str:
     
     elif db_type == "postgresql":
         logger.info("检测到 PostgreSQL，正在执行 VACUUM...")
+        from .database import _get_db_url # Local import to avoid circular dependency
+        from .timezone import get_app_timezone # Local import
         # VACUUM 不能在事务块内运行。我们创建一个具有自动提交功能的新引擎来执行此特定操作。
-        db_url = f"postgresql+asyncpg://{settings.database.user}:{settings.database.password}@{settings.database.host}:{settings.database.port}/{settings.database.name}"
-        auto_commit_engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
+        db_url_obj = _get_db_url()
+        engine_args = {
+            "isolation_level": "AUTOCOMMIT",
+            "connect_args": {'server_settings': {'timezone': str(get_app_timezone())}}
+        }
+        auto_commit_engine = create_async_engine(db_url_obj, **engine_args)
         try:
             async with auto_commit_engine.connect() as connection:
                 await connection.execute(text("VACUUM;"))

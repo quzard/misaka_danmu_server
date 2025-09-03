@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
-from datetime import timedelta, datetime
+from datetime import datetime
 from sqlalchemy import update, select, func, exc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -2353,8 +2353,8 @@ async def get_rate_limit_status(
     global_state = states_map.get("__global__")
     seconds_until_reset = 0
     if global_state:
-        # crud.py 中已确保 lastResetTime 是 aware datetime
-        time_since_reset = datetime.now(timezone.utc) - global_state.lastResetTime
+        # 使用 get_now() 确保时区一致性
+        time_since_reset = get_now() - global_state.lastResetTime
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
