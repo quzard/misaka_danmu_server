@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy import text
 from .config import settings
 from .orm_models import Base
-from .timezone import get_app_timezone
-
+from .timezone import get_app_timezone, get_timezone_offset_str
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
@@ -204,7 +203,6 @@ async def create_db_engine_and_session(app: FastAPI):
     try:
         db_url = _get_db_url()
         db_type = settings.database.type.lower()
-        app_tz_str = str(get_app_timezone())
         engine_args = {
             "echo": False,
             "pool_recycle": 3600,
@@ -213,10 +211,12 @@ async def create_db_engine_and_session(app: FastAPI):
             "pool_timeout": 30
         }
         if db_type == "mysql":
-            # 强制MySQL会话使用应用配置的时区
-            engine_args['connect_args'] = {'init_command': f"SET time_zone = '{app_tz_str}'"}
+            # 修正：使用UTC偏移量字符串，以兼容未加载时区信息的MySQL服务器
+            tz_offset_str = get_timezone_offset_str()
+            engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
         elif db_type == "postgresql":
-            # 强制PostgreSQL会话使用应用配置的时区
+            # PostgreSQL可以直接使用IANA时区名称
+            app_tz_str = str(get_app_timezone())
             engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
 
         engine = create_async_engine(db_url, **engine_args)
@@ -253,7 +253,8 @@ async def _create_db_if_not_exists():
     }
     app_tz_str = str(get_app_timezone())
     if db_type == "mysql":
-        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{app_tz_str}'"}
+        tz_offset_str = get_timezone_offset_str()
+        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
     elif db_type == "postgresql":
         engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
 

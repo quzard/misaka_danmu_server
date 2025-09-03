@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from src import crud, security
 from src.config import settings
 from src.database import _get_db_url
-from src.timezone import get_app_timezone
+from src.timezone import get_app_timezone, get_timezone_offset_str
 
 async def reset_password(username: str):
     """
@@ -29,13 +29,13 @@ async def reset_password(username: str):
         return
 
     db_type = settings.database.type.lower()
-    app_tz_str = str(get_app_timezone())
     engine_args = {}
     if db_type == "mysql":
-        # 强制MySQL会话使用应用配置的时区
-        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{app_tz_str}'"}
+        # 修正：使用UTC偏移量字符串，以兼容未加载时区信息的MySQL服务器
+        tz_offset_str = get_timezone_offset_str()
+        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
     elif db_type == "postgresql":
-        # 强制PostgreSQL会话使用应用配置的时区
+        app_tz_str = str(get_app_timezone())
         engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
 
     engine = create_async_engine(db_url, **engine_args)
