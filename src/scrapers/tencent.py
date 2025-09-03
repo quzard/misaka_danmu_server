@@ -741,34 +741,70 @@ class TencentScraper(BaseScraper):
         return await self._process_and_format_tencent_episodes(list(all_episodes.values()), db_media_type, cid)
 
     async def _fetch_episodes_paginated(self, cid: str, db_media_type: Optional[str]) -> List[models.ProviderEpisodeInfo]:
-        """备用策略：通用的分页获取逻辑。"""
+        """备用策略：通用的分页获取逻辑。参考了外部脚本的实现以提高健壮性。"""
         all_episodes: Dict[str, TencentEpisode] = {}
-        max_pages = 15 if db_media_type == 'tv_series' else 5
+        
+        # 根据内容类型设置最大页数限制
+        if db_media_type == 'tv_series':
+            # 动漫和电视剧都属于 tv_series
+            max_pages = 15 # 保持原有的较高值
+        else:
+            max_pages = 5 # 电影等其他类型
+        
         items_per_page = 30
+        no_new_data_count = 0
 
         for page_num in range(max_pages):
+            # 关键优化：使用参考脚本中更详细的 page_context
+            page_context_str = f"cid={cid}&detail_page_type=1&id_type=1&is_skp_style=false&lid=&mvl_strategy_id=&order=&req_from=web_vsite&req_from_second_type=detail_operation&req_type=0&should_apply_tab_in_player=false&should_apply_tab_in_sub_page=false&show_all_episode=false&tab_data_key=lid%3D%26cid%3D{cid}&un_strategy_id=ea35cb94195c48c091172a047da3e761"
+            
             payload = {
+                "has_cache": 1, # 参考脚本中包含此参数
                 "page_params": {
-                    "cid": cid, "page_type": "detail_operation", "page_id": "vsite_episode_list_search",
-                    "id_type": "1", "page_size": str(items_per_page), "lid": "", "req_from": "web_vsite",
-                    "page_context": f"cid={cid}&req_from=web_vsite", "page_num": str(page_num)
+                    "cid": cid,
+                    "page_type": "detail_operation",
+                    "page_id": "vsite_episode_list_search",
+                    "id_type": "1",
+                    "page_size": str(items_per_page),
+                    "lid": "",
+                    "req_from": "web_vsite",
+                    "page_context": page_context_str,
+                    "page_num": str(page_num),
+                    "detail_page_type": "1" # 参考脚本中包含此参数
                 }
             }
-            response = await self.client.post(self.episodes_api_url, json=payload)
-            response.raise_for_status()
-            result = TencentPageResult.model_validate(response.json())
+            try:
+                response = await self.client.post(self.episodes_api_url, json=payload)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Tencent Paginated Episodes Response (cid={cid}, page={page_num}): {response.text}")
+                response.raise_for_status()
+                result = TencentPageResult.model_validate(response.json())
+            except Exception as e:
+                self.logger.error(f"Tencent: 获取分页分集时出错 (cid={cid}, page={page_num}): {e}", exc_info=True)
+                break # 网络或解析错误时，终止分页
 
             new_episodes_this_page = 0
             if result.data and result.data.module_list_datas:
-                module_data = result.data.module_list_datas[0]
-                if module_data.module_datas and module_data.module_datas[0].item_data_lists:
-                    for item in module_data.module_datas[0].item_data_lists.item_datas:
-                        if item.item_params and item.item_params.vid and item.item_params.vid not in all_episodes:
-                            all_episodes[item.item_params.vid] = TencentEpisode.model_validate(item.item_params.model_dump())
-                            new_episodes_this_page += 1
+                # 修正：更安全地遍历可能为空的列表
+                for module_list_data in result.data.module_list_datas:
+                    for module_data in module_list_data.module_datas:
+                        if module_data.item_data_lists:
+                            for item in module_data.item_data_lists.item_datas:
+                                if item.item_params and item.item_params.vid and item.item_params.vid not in all_episodes:
+                                    all_episodes[item.item_params.vid] = TencentEpisode.model_validate(item.item_params.model_dump())
+                                    new_episodes_this_page += 1
             
-            if new_episodes_this_page == 0 and page_num > 0:
-                break
+            self.logger.debug(f"Tencent: 分页获取 (cid={cid}, page={page_num})，新增 {new_episodes_this_page} 个分集。")
+
+            # 优化：使用更健壮的循环终止逻辑
+            if new_episodes_this_page == 0:
+                no_new_data_count += 1
+                if no_new_data_count >= 2:
+                    self.logger.info(f"Tencent: 连续 {no_new_data_count} 页未获取到新分集，终止分页 (cid={cid})。")
+                    break
+            else:
+                no_new_data_count = 0 # 重置计数器
+            
             await asyncio.sleep(0.3)
 
         return await self._process_and_format_tencent_episodes(list(all_episodes.values()), db_media_type, cid)
