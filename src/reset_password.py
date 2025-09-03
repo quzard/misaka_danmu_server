@@ -29,7 +29,12 @@ async def reset_password(username: str):
         print(f"❌ 不支持的数据库类型: '{db_type}'。请使用 'mysql' 或 'postgresql'。")
         return
 
-    engine = create_async_engine(db_url)
+    engine_args = {}
+    if db_type == "mysql":
+        # 强制MySQL会话使用UTC时区，以确保时间戳的一致性
+        engine_args['connect_args'] = {'init_command': "SET time_zone = '+00:00'"}
+
+    engine = create_async_engine(db_url, **engine_args)
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async with session_factory() as session:

@@ -119,7 +119,7 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     if not auth:
         return {"isAuthenticated": False}
     
-    if auth.expiresAt and auth.expiresAt.replace(tzinfo=None) < datetime.utcnow():
+    if auth.expiresAt and auth.expiresAt < datetime.now(timezone.utc):
         return {"isAuthenticated": False, "isExpired": True}
 
     return {
@@ -136,9 +136,9 @@ async def _save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dic
     if existing_auth:
         for key, value in auth_data.items():
             setattr(existing_auth, key, value)
-        existing_auth.authorizedAt = datetime.utcnow()
+        existing_auth.authorizedAt = datetime.now(timezone.utc)
     else:
-        new_auth = orm_models.BangumiAuth(userId=user_id, **auth_data, authorizedAt=datetime.utcnow())
+        new_auth = orm_models.BangumiAuth(userId=user_id, **auth_data, authorizedAt=datetime.now(timezone.utc))
         session.add(new_auth)
     await session.flush()
 
@@ -183,7 +183,7 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         if avatar_url and avatar_url.startswith("//"):
             avatar_url = "https:" + avatar_url
 
-        auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": avatar_url, "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 0))}
+        auth_to_save = {"bangumiUserId": user_info.get("id"), "nickname": user_info.get("nickname"), "avatarUrl": avatar_url, "accessToken": token_data.get("access_token"), "refreshToken": token_data.get("refresh_token"), "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 0))}
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
         return HTMLResponse("""

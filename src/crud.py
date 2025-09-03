@@ -1479,11 +1479,10 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     token_info = result.scalar_one_or_none()
     if not token_info:
         return None
-    # 修正：使用带时区的当前时间进行比较，以避免 naive 和 aware datetime 的比较错误
+    # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
+    # 因此，可以直接进行比较。
     if token_info.expiresAt:
-        # 关键修复：将从数据库读取的 naive datetime 对象转换为 aware datetime 对象
-        expires_at_aware = token_info.expiresAt.replace(tzinfo=timezone.utc)
-        if expires_at_aware < datetime.now(timezone.utc):
+        if token_info.expiresAt < datetime.now(timezone.utc):
             return None # Token 已过期
     return {"id": token_info.id, "expiresAt": token_info.expiresAt}
 
@@ -1889,19 +1888,12 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
         )
         session.add(state)
         await session.flush()
-    # 确保从数据库读取的时间是 "aware" 的
-    if state and state.lastResetTime and state.lastResetTime.tzinfo is None:
-        state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
     return state
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
     """获取所有速率限制状态。"""
     result = await session.execute(select(RateLimitState))
     states = result.scalars().all()
-    # 确保从数据库读取的时间是 "aware" 的
-    for state in states:
-        if state.lastResetTime and state.lastResetTime.tzinfo is None:
-            state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
     return states
 
 async def reset_all_rate_limit_states(session: AsyncSession):

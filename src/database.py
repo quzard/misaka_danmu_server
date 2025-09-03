@@ -162,14 +162,18 @@ async def create_db_engine_and_session(app: FastAPI):
     else:
         raise ValueError(f"不支持的数据库类型: '{db_type}'。请使用 'mysql' 或 'postgresql'。")
     try:
-        engine = create_async_engine(
-            db_url,
-            echo=False,
-            pool_recycle=3600,
-            pool_size=10,
-            max_overflow=20,
-            pool_timeout=30
-        )
+        engine_args = {
+            "echo": False,
+            "pool_recycle": 3600,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_timeout": 30
+        }
+        if db_type == "mysql":
+            # 强制MySQL会话使用UTC时区，以确保时间戳的一致性
+            engine_args['connect_args'] = {'init_command': "SET time_zone = '+00:00'"}
+
+        engine = create_async_engine(db_url, **engine_args)
         app.state.db_engine = engine
         app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         logger.info("数据库引擎和会话工厂创建成功。")
@@ -212,8 +216,14 @@ async def _create_db_if_not_exists():
         return
 
     # 设置隔离级别以允许 DDL 语句
-    engine = create_async_engine(server_url, echo=False, isolation_level="AUTOCOMMIT")
-    
+    engine_args = {
+        "echo": False,
+        "isolation_level": "AUTOCOMMIT"
+    }
+    if db_type == "mysql":
+        engine_args['connect_args'] = {'init_command': "SET time_zone = '+00:00'"}
+
+    engine = create_async_engine(server_url, **engine_args)
     try:
         async with engine.connect() as conn:
             # 检查数据库是否存在
