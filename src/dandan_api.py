@@ -4,7 +4,7 @@ import json
 import re
 from typing import List, Optional, Dict, Any
 from typing import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from opencc import OpenCC
 from thefuzz import fuzz
 
@@ -388,11 +388,11 @@ async def get_token_from_path(
         token_record = await crud.get_api_token_by_token_str(session, token)
         if token_record:
             expires_at = token_record.get('expiresAt')
-        is_expired = False
-        if expires_at:
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=get_app_timezone())
-            is_expired = expires_at < get_now()
+            is_expired = False
+            if expires_at:
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=get_app_timezone())
+                is_expired = expires_at < get_now()
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
             await crud.create_token_access_log(session, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")

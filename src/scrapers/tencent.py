@@ -9,7 +9,7 @@ from urllib.parse import quote
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from collections import defaultdict
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from datetime import datetime
+from datetime import datetime, timezone
 from ..config_manager import ConfigManager
 from ..utils import parse_search_keyword
 from .base import BaseScraper, get_season_from_title
