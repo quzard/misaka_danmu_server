@@ -117,18 +117,18 @@ class TaskManager:
     async def _worker(self):
         """从队列中获取并执行任务。"""
         while True:
+            # 1. 首先，阻塞等待一个任务。如果在这里被取消，后续代码不会执行。
+            task: Task = await self._queue.get()
             try:
-                self._current_task = None # 清理上一个任务
-                task: Task = await self._queue.get()
+                self._current_task = None  # 清理上一个任务
                 # 从待处理集合中移除
                 async with self._lock:
                     self._pending_titles.discard(task.title)
                 self._current_task = task
                 # 关键变更：不再 await 任务，而是将其作为后台任务运行
                 asyncio.create_task(self._run_task_wrapper(task))
-            except Exception as e:
-                self.logger.error(f"任务管理器主循环发生严重错误: {e}", exc_info=True)
             finally:
+                # 2. 确保成功获取任务后，其 task_done() 一定会被调用。
                 self._queue.task_done()
 
     async def submit_task(
