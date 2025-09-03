@@ -906,20 +906,34 @@ class TencentScraper(BaseScraper):
             if blacklist_pattern:
                 original_count = len(episodes_to_format)
             
-            temp_episodes = []
-            for ep in episodes_to_format:
-                title_to_check = ep.union_title or ep.title or ""
+                temp_episodes = []
+                filtered_reasons = defaultdict(int)
+                for ep in episodes_to_format:
+                    title_to_check = ep.union_title or ep.title or ""
+                    
+                    # 修正：使用更可靠的启发式规则来识别正片。
+                    # 检查 `ep.title` (通常是纯数字) 是否为数字，或检查 `title_to_check` (完整标题) 是否包含 "第" 字。
+                    is_likely_main_episode = bool(re.fullmatch(r'\d+', ep.title.strip())) or '第' in title_to_check
+                    
+                    # 如果是正片，则无论如何都保留。
+                    if is_likely_main_episode:
+                        temp_episodes.append(ep)
+                        continue
+
+                    # 如果不是正片，则检查是否匹配黑名单。
+                    match = blacklist_pattern.search(title_to_check)
+                    if not match:
+                        temp_episodes.append(ep)
+                    else:
+                        filtered_reasons[match.group(0)] += 1
                 
-                # 启发式规则，用于识别正片（例如，标题是纯数字 "1"，或包含 "第1集"）
-                is_likely_main_episode = bool(re.fullmatch(r'\d+', title_to_check.strip())) or '第' in title_to_check
-                
-                # 如果是正片，则无论如何都保留。
-                # 如果不是正片，则检查是否匹配黑名单。
-                if is_likely_main_episode or not blacklist_pattern.search(title_to_check):
-                    temp_episodes.append(ep)
-            
-            self.logger.info(f"Tencent: 根据黑名单规则过滤掉了 {original_count - len(temp_episodes)} 个分集。")
-            episodes_to_format = temp_episodes
+                filtered_count = original_count - len(temp_episodes)
+                if filtered_count > 0:
+                    reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in filtered_reasons.items()])
+                    self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个分集。")
+                else:
+                    self.logger.info(f"Tencent: 根据黑名单规则过滤掉了 0 个分集。")
+                episodes_to_format = temp_episodes
 
         # 5. 最终格式化 (后编号)
         final_episodes = []

@@ -210,14 +210,7 @@ async def create_db_engine_and_session(app: FastAPI):
             "max_overflow": 20,
             "pool_timeout": 30
         }
-        if db_type == "mysql":
-            # 修正：使用UTC偏移量字符串，以兼容未加载时区信息的MySQL服务器
-            tz_offset_str = get_timezone_offset_str()
-            engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
-        elif db_type == "postgresql":
-            # PostgreSQL可以直接使用IANA时区名称
-            app_tz_str = str(get_app_timezone())
-            engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
+        # 移除时区设置，让数据库使用其默认时区
 
         engine = create_async_engine(db_url, **engine_args)
         app.state.db_engine = engine
@@ -251,12 +244,7 @@ async def _create_db_if_not_exists():
         "echo": False,
         "isolation_level": "AUTOCOMMIT"
     }
-    app_tz_str = str(get_app_timezone())
-    if db_type == "mysql":
-        tz_offset_str = get_timezone_offset_str()
-        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
-    elif db_type == "postgresql":
-        engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
+    # 移除时区设置
 
     engine = create_async_engine(server_url, **engine_args)
     try:
