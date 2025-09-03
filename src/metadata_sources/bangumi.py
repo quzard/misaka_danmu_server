@@ -119,7 +119,9 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     if not auth:
         return {"isAuthenticated": False}
     
-    if auth.expiresAt and auth.expiresAt < datetime.now(timezone.utc):
+    # 修正：由于数据库驱动可能返回不带时区的（naive）datetime对象，
+    # 我们在比较前，先假设它是UTC时间并为其附加时区信息，以确保与 aware datetime 的正确比较。
+    if auth.expiresAt and auth.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         return {"isAuthenticated": False, "isExpired": True}
 
     return {

@@ -1888,12 +1888,19 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
         )
         session.add(state)
         await session.flush()
+    # 关键修复：确保从数据库读取的时间是 "aware" 的
+    if state and state.lastResetTime and state.lastResetTime.tzinfo is None:
+        state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
     return state
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
     """获取所有速率限制状态。"""
     result = await session.execute(select(RateLimitState))
     states = result.scalars().all()
+    # 关键修复：确保从数据库读取的时间是 "aware" 的
+    for state in states:
+        if state.lastResetTime and state.lastResetTime.tzinfo is None:
+            state.lastResetTime = state.lastResetTime.replace(tzinfo=timezone.utc)
     return states
 
 async def reset_all_rate_limit_states(session: AsyncSession):
