@@ -28,3 +28,22 @@ def get_app_timezone() -> ZoneInfo:
 def get_now() -> datetime:
     """获取附加了应用程序时区的当前时间。"""
     return datetime.now(get_app_timezone())
+
+def get_timezone_offset_str() -> str:
+    """
+    获取应用程序时区的UTC偏移量，并格式化为 '+HH:MM' 或 '-HH:MM' 字符串，
+    以便与MySQL的 `SET time_zone` 命令兼容。
+    """
+    tz = get_app_timezone()
+    # 我们需要一个 datetime 对象来正确计算偏移量，特别是对于有夏令时的时区
+    now = datetime.now(tz)
+    offset = tz.utcoffset(now)
+    
+    if offset is None:
+        return "+00:00"
+
+    total_seconds = offset.total_seconds()
+    sign = '+' if total_seconds >= 0 else '-'
+    hours = int(abs(total_seconds) // 3600)
+    minutes = int((abs(total_seconds) % 3600) // 60)
+    return f"{sign}{hours:02d}:{minutes:02d}"
