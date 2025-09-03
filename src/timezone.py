@@ -10,19 +10,19 @@ _app_timezone: ZoneInfo | None = None
 def get_app_timezone() -> ZoneInfo:
     """
     获取并缓存由环境变量 TZ 定义的应用程序时区。
-    如果 TZ 无效或未设置，则默认为 UTC。
+    如果 TZ 无效或未设置，则默认为东八区 (Asia/Shanghai)。
     """
     global _app_timezone
     if _app_timezone is None:
         try:
             tz_str = settings.tz
             if not tz_str:
-                logger.warning("环境变量 TZ 未设置，将默认使用 UTC 时区。")
-                tz_str = "UTC"
+                logger.warning("环境变量 TZ 未设置，将默认使用东八区 (Asia/Shanghai) 时区。")
+                tz_str = "Asia/Shanghai"
             _app_timezone = ZoneInfo(tz_str)
         except ZoneInfoNotFoundError:
-            logger.error(f"环境变量 TZ 的值 '{settings.tz}' 是一个无效的时区，将默认使用 UTC。")
-            _app_timezone = ZoneInfo("UTC")
+            logger.error(f"环境变量 TZ 的值 '{settings.tz}' 是一个无效的时区，将默认使用东八区 (Asia/Shanghai)。")
+            _app_timezone = ZoneInfo("Asia/Shanghai")
     return _app_timezone
 
 def get_now() -> datetime:
