@@ -1,12 +1,14 @@
 from __future__ import annotations
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, Index, Integer,
-    String, TEXT, TIMESTAMP, UniqueConstraint, DECIMAL, func,
+    String, TEXT, TIMESTAMP, UniqueConstraint, DECIMAL, func
 )
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from .timezone import get_now
 
 class Base(DeclarativeBase):
     pass
@@ -21,7 +23,7 @@ class Anime(Base):
     season: Mapped[int] = mapped_column(Integer, default=1)
     episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer)
     year: Mapped[Optional[int]] = mapped_column("year", Integer)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
     metadataRecord: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
@@ -41,7 +43,7 @@ class AnimeSource(Base):
     isFavorited: Mapped[bool] = mapped_column("is_favorited", Boolean, default=False)
     incrementalRefreshEnabled: Mapped[bool] = mapped_column("incremental_refresh_enabled", Boolean, default=False)
     incrementalRefreshFailures: Mapped[int] = mapped_column("incremental_refresh_failures", Integer, default=0)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
 
     anime: Mapped["Anime"] = relationship(back_populates="sources")
     episodes: Mapped[List["Episode"]] = relationship(back_populates="source", cascade="all, delete-orphan")
@@ -73,8 +75,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True)
     hashedPassword: Mapped[str] = mapped_column("hashed_password", String(255))
     token: Mapped[Optional[str]] = mapped_column(TEXT)
-    tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", TIMESTAMP(timezone=True))
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
+    tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", TIMESTAMP(timezone=True), default=get_now)
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
 
 class Scraper(Base):
     __tablename__ = "scrapers"
@@ -115,7 +117,7 @@ class CacheData(Base):
     __tablename__ = "cache_data"
     cacheProvider: Mapped[Optional[str]] = mapped_column("cache_provider", String(50))
     cacheKey: Mapped[str] = mapped_column("cache_key", String(255), primary_key=True)
-    cacheValue: Mapped[str] = mapped_column("cache_value", TEXT)
+    cacheValue: Mapped[str] = mapped_column("cache_value", MEDIUMTEXT)
     expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP(timezone=True), index=True)
 
 class ApiToken(Base):
@@ -124,7 +126,7 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(String(100))
     token: Mapped[str] = mapped_column(String(50), unique=True)
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
     expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", TIMESTAMP(timezone=True))
 
 class TokenAccessLog(Base):
@@ -133,7 +135,7 @@ class TokenAccessLog(Base):
     tokenId: Mapped[int] = mapped_column("token_id", Integer)
     ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
     userAgent: Mapped[Optional[str]] = mapped_column("user_agent", TEXT)
-    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now())
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
     status: Mapped[str] = mapped_column(String(50))
     path: Mapped[Optional[str]] = mapped_column(String(512))
 
@@ -143,7 +145,7 @@ class UaRule(Base):
     __tablename__ = "ua_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uaString: Mapped[str] = mapped_column("ua_string", String(255), unique=True)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
 
 class BangumiAuth(Base):
     __tablename__ = "bangumi_auth"
@@ -213,8 +215,8 @@ class TaskHistory(Base):
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[Optional[str]] = mapped_column(TEXT)
-    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=lambda: datetime.now(timezone.utc))
-    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now, default=lambda: datetime.now(timezone.utc))
+    createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now, default=get_now)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP(timezone=True))
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
@@ -222,7 +224,7 @@ class TaskHistory(Base):
 class ExternalApiLog(Base):
     __tablename__ = "external_api_logs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now())
+    accessTime: Mapped[datetime] = mapped_column("access_time", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)
     ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
     endpoint: Mapped[str] = mapped_column(String(255))
     statusCode: Mapped[int] = mapped_column("status_code", Integer)
@@ -232,4 +234,4 @@ class RateLimitState(Base):
     __tablename__ = "rate_limit_state"
     providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
     requestCount: Mapped[int] = mapped_column("request_count", Integer, default=0)
-    lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", TIMESTAMP(timezone=True), server_default=func.now())
+    lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", TIMESTAMP(timezone=True), server_default=func.now(), default=get_now)

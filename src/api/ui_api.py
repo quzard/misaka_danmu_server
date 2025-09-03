@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
-from datetime import timedelta, datetime, timezone
+from datetime import timedelta, datetime
 from sqlalchemy import update, select, func, exc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,6 +32,7 @@ from ..image_utils import download_image
 from ..scheduler import SchedulerManager
 from thefuzz import fuzz
 from ..config import settings
+from ..timezone import get_now
 from ..database import get_db_session
 
 router = APIRouter()

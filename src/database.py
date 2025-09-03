@@ -105,6 +105,34 @@ async def _migrate_add_danmaku_file_path(conn, db_type, db_name):
     
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+async def _migrate_cache_value_to_mediumtext(conn, db_type, db_name):
+    """
+    迁移任务: 确保 cache_data.cache_value 列有足够大的容量 (MEDIUMTEXT)。
+    """
+    migration_id = "migrate_cache_value_to_mediumtext"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    if db_type == "mysql":
+        # 检查列是否存在且类型不是MEDIUMTEXT
+        check_sql = text(
+            "SELECT DATA_TYPE FROM information_schema.columns "
+            f"WHERE table_schema = '{db_name}' AND table_name = 'cache_data' AND column_name = 'cache_value'"
+        )
+        result = await conn.execute(check_sql)
+        current_type = result.scalar_one_or_none()
+
+        if current_type and current_type.lower() != 'mediumtext':
+            logger.info(f"列 'cache_data.cache_value' 类型为 '{current_type}'，正在修改为 MEDIUMTEXT...")
+            alter_sql = text("ALTER TABLE cache_data MODIFY COLUMN `cache_value` MEDIUMTEXT")
+            await conn.execute(alter_sql)
+            logger.info("成功将 'cache_data.cache_value' 列类型修改为 MEDIUMTEXT。")
+        else:
+            logger.info("列 'cache_data.cache_value' 类型已是 MEDIUMTEXT 或不存在，跳过迁移。")
+    elif db_type == "postgresql":
+        logger.info("PostgreSQL 的 TEXT 类型已支持大容量数据，无需为 cache_value 列执行迁移。")
+    
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+
 
 async def _run_migrations(conn):
     """
@@ -119,6 +147,7 @@ async def _run_migrations(conn):
 
     await _migrate_add_source_order(conn, db_type, db_name)
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
+    await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """Logs a standardized, detailed error message for database connection failures."""

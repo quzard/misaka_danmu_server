@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 import shutil
 import io
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 
 from thefuzz import fuzz
@@ -25,6 +25,7 @@ from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
+from .timezone import get_now
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
@@ -1324,7 +1325,7 @@ async def database_maintenance_task(session: AsyncSession, progress_callback: Ca
     
     if retention_days > 0:
         logger.info(f"将清理 {retention_days} 天前的日志记录。")
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_date = get_now() - timedelta(days=retention_days)
         
         tables_to_prune = {
             "任务历史": (orm_models.TaskHistory, orm_models.TaskHistory.createdAt),
