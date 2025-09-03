@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
