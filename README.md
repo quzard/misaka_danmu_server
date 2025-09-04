@@ -323,7 +323,7 @@ networks:
 
 ## 🤖 Telegram Bot 集成
 
-[balge](https://github.com/balge) 开发了一个功能强大的 Telegram Bot，可以帮助您通过聊天界面管理您的弹幕服务器。
+[balge](https://github.com/balge) 开发了一个功能强大的 Telegram Bot，可以帮助您通过聊天界面管理您的弹幕服务器。（弹幕库版本要大于v2.0.4才可以使用）
 
 **项目地址**: [misaka-danmuku-bot](https://github.com/balge/misaka-danmuku-bot)
 
