@@ -1318,14 +1318,14 @@ async def database_maintenance_task(session: AsyncSession, progress_callback: Ca
     
     try:
         # 日志保留天数，默认为30天。
-        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "3")
+        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "30")
         retention_days = int(retention_days_str)
     except (ValueError, TypeError):
-        retention_days = 3
+        retention_days = 30
     
     if retention_days > 0:
         logger.info(f"将清理 {retention_days} 天前的日志记录。")
-        cutoff_date = get_now() - timedelta(days=retention_days)
+        cutoff_date = get_now().replace(tzinfo=None) - timedelta(days=retention_days)
         
         tables_to_prune = {
             "任务历史": (orm_models.TaskHistory, orm_models.TaskHistory.createdAt),
@@ -1349,10 +1349,19 @@ async def database_maintenance_task(session: AsyncSession, progress_callback: Ca
     if db_type == "mysql":
         await progress_callback(50, "正在清理 MySQL Binlog...")
         try:
-            # 用户指定清理3天前的日志
-            binlog_cleanup_message = await crud.purge_binary_logs(session, days=3)
-            logger.info(binlog_cleanup_message)
-            await progress_callback(60, binlog_cleanup_message)
+            # 新增：从配置中读取binlog保留天数
+            binlog_retention_days_str = await crud.get_config_value(session, "mysqlBinlogRetentionDays", "3")
+            binlog_retention_days = int(binlog_retention_days_str)
+
+            if binlog_retention_days > 0:
+                # 用户指定清理N天前的日志
+                binlog_cleanup_message = await crud.purge_binary_logs(session, days=binlog_retention_days)
+                logger.info(binlog_cleanup_message)
+                await progress_callback(60, binlog_cleanup_message)
+            else:
+                binlog_cleanup_message = "Binlog自动清理已禁用。"
+                logger.info(binlog_cleanup_message)
+                await progress_callback(60, binlog_cleanup_message)
         except OperationalError as e:
             # 检查是否是权限不足的错误 (MySQL error code 1227)
             if e.orig and hasattr(e.orig, 'args') and len(e.orig.args) > 0 and e.orig.args[0] == 1227:

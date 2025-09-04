@@ -28,17 +28,8 @@ async def reset_password(username: str):
         print(f"❌ {e}")
         return
 
-    db_type = settings.database.type.lower()
-    engine_args = {}
-    if db_type == "mysql":
-        # 修正：使用UTC偏移量字符串，以兼容未加载时区信息的MySQL服务器
-        tz_offset_str = get_timezone_offset_str()
-        engine_args['connect_args'] = {'init_command': f"SET time_zone = '{tz_offset_str}'"}
-    elif db_type == "postgresql":
-        app_tz_str = str(get_app_timezone())
-        engine_args['connect_args'] = {'server_settings': {'timezone': app_tz_str}}
-
-    engine = create_async_engine(db_url, **engine_args)
+    # 关键修复：不设置连接时区，确保所有操作都使用 naive datetime
+    engine = create_async_engine(db_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async with session_factory() as session:
