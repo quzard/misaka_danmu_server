@@ -849,19 +849,27 @@ async def get_comments_for_dandan(
     for i, item in enumerate(comments_data):
         p_attr = item.get("p", "")
         p_parts = p_attr.split(',')
+        
+        # 修正：使用更健壮的逻辑来处理 p 属性，以兼容各种格式
+        # 目标格式: 时间,模式,颜色
+        if len(p_parts) >= 4:
+            # 原始格式: 时间,模式,字体大小,颜色,...
+            # 移除字体大小 (index 2)
+            p_parts.pop(2)
+            # 只保留前3个部分
+            p_parts = p_parts[:3]
+        elif len(p_parts) == 3:
+            # 可能是 时间,模式,颜色 (缺少字体大小)
+            # 已经是期望的格式，无需处理
+            pass
+        else:
+            # 对于格式不正确的 p 属性，提供一个安全的默认值
+            try:
+                time_sec = float(p_parts[0]) if p_parts else 0.0
+            except (ValueError, IndexError):
+                time_sec = 0.0
+            p_parts = [f"{time_sec:.3f}", "1", "16777215"]
 
-        # 查找可选的用户标签，以确定核心参数的数量
-        core_parts_count = len(p_parts)
-        for j, part in enumerate(p_parts):
-            if '[' in part and ']' in part:
-                core_parts_count = j
-                break
-        
-        # 如果核心参数是4个（时间,模式,字体,颜色），则移除字体大小以兼容客户端
-        if core_parts_count == 4:
-            # 移除字体大小部分 (index 2)
-            del p_parts[2]
-        
         # 重新组合 p 属性
         new_p_attr = ','.join(p_parts)
         

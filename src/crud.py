@@ -1589,8 +1589,8 @@ async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> 
 
 async def create_oauth_state(session: AsyncSession, user_id: int) -> str:
     state = secrets.token_urlsafe(32)
-    expires_at = get_now().replace(tzinfo=None) + timedelta(minutes=10)
-    new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at) # expiresAt is explicitly set here
+    expires_at = (get_now() + timedelta(minutes=10)).replace(tzinfo=None)
+    new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at)
     session.add(new_state)
     await session.commit()
     return state
