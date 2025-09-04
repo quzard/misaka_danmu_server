@@ -1842,6 +1842,22 @@ async def delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
         return True
     return False
 
+async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
+    """
+    从一个调度任务的最终描述中，解析并返回其触发的执行任务ID。
+    """
+    stmt = select(TaskHistory.description).where(
+        TaskHistory.taskId == scheduler_task_id,
+        TaskHistory.status == '已完成'
+    )
+    result = await session.execute(stmt)
+    description = result.scalar_one_or_none()
+    if description:
+        match = re.search(r'执行任务ID:\s*([a-f0-9\-]+)', description)
+        if match:
+            return match.group(1)
+    return None
+
 async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (
         update(TaskHistory)

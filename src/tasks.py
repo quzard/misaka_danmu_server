@@ -1241,8 +1241,14 @@ async def auto_search_and_import_task(
                     progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
                     rate_limiter=rate_limiter
                 )
-                await task_manager.submit_task(task_coro, f"自动导入 (库内): {main_title}", unique_key=unique_key)
-                raise TaskSuccess("作品已在库中，已为已有源创建导入任务。")
+                # 修正：提交执行任务，并将其ID作为调度任务的结果
+                execution_task_id, _ = await task_manager.submit_task(
+                    task_coro, 
+                    f"自动导入 (库内): {main_title}", 
+                    unique_key=unique_key
+                )
+                final_message = f"作品已在库中，已为已有源创建导入任务。执行任务ID: {execution_task_id}"
+                raise TaskSuccess(final_message)
 
         # 3. 如果库中不存在，则进行全网搜索
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
@@ -1301,8 +1307,14 @@ async def auto_search_and_import_task(
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
             rate_limiter=rate_limiter
         )
-        await task_manager.submit_task(task_coro, f"自动导入 (新): {main_title}", unique_key=unique_key)
-        raise TaskSuccess("已为最佳匹配源创建导入任务。")
+        # 修正：提交执行任务，并将其ID作为调度任务的结果
+        execution_task_id, _ = await task_manager.submit_task(
+            task_coro, 
+            f"自动导入 (新): {main_title}", 
+            unique_key=unique_key
+        )
+        final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
+        raise TaskSuccess(final_message)
     finally:
         if api_key:
             await scraper_manager.release_search_lock(api_key)
