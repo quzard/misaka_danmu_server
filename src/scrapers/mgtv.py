@@ -79,6 +79,9 @@ class MgtvEpisode(BaseModel):
     time: Optional[str] = None
     video_id: str = Field(alias="video_id")
     timestamp: Optional[str] = Field(None, alias="ts")
+    # 新增：添加 isIntact 和 isnew 字段以支持电影正片过滤
+    isIntact: Optional[str] = None
+    isnew: Optional[str] = None
 
 class MgtvEpisodeListTab(BaseModel):
     month: str = Field(alias="m")
