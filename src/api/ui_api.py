@@ -2354,7 +2354,7 @@ async def get_rate_limit_status(
     seconds_until_reset = 0
     if global_state:
         # 使用 get_now() 确保时区一致性
-        time_since_reset = get_now() - global_state.lastResetTime
+        time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []

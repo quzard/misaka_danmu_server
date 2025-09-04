@@ -165,6 +165,48 @@ async def _migrate_cache_value_to_mediumtext(conn, db_type, db_name):
     
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+async def _migrate_add_source_url_to_episode(conn, db_type, db_name):
+    """
+    迁移任务: 确保 episode 表有 source_url 字段，并处理旧的命名。
+    - 如果存在旧的 'sourceUrl' 列，则将其重命名为 'source_url'。
+    - 如果两者都不存在，则添加新的 'source_url' 列。
+    """
+    migration_id = "add_or_rename_source_url_in_episode"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    old_column_name = "sourceUrl"
+    new_column_name = "source_url"
+    table_name = "episode"
+
+    if db_type == "mysql":
+        check_old_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = '{table_name}' AND column_name = '{old_column_name}'")
+        check_new_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = '{table_name}' AND column_name = '{new_column_name}'")
+        rename_column_sql = text(f"ALTER TABLE `{table_name}` CHANGE COLUMN `{old_column_name}` `{new_column_name}` TEXT NULL")
+        add_column_sql = text(f"ALTER TABLE `{table_name}` ADD COLUMN `{new_column_name}` TEXT NULL")
+    elif db_type == "postgresql":
+        check_old_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_name = '{table_name}' AND column_name = '{old_column_name}'")
+        check_new_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_name = '{table_name}' AND column_name = '{new_column_name}'")
+        rename_column_sql = text(f'ALTER TABLE "{table_name}" RENAME COLUMN "{old_column_name}" TO "{new_column_name}"')
+        add_column_sql = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{new_column_name}" TEXT NULL')
+    else:
+        return
+
+    old_col_exists = (await conn.execute(check_old_column_sql)).scalar_one_or_none() is not None
+    new_col_exists = (await conn.execute(check_new_column_sql)).scalar_one_or_none() is not None
+
+    if old_col_exists and not new_col_exists:
+        logger.info(f"在表 '{table_name}' 中发现旧列 '{old_column_name}'，正在重命名为 '{new_column_name}'...")
+        await conn.execute(rename_column_sql)
+        logger.info(f"成功重命名表 '{table_name}' 中的列。")
+    elif not old_col_exists and not new_col_exists:
+        logger.info(f"列 '{table_name}.{new_column_name}' 不存在。正在添加...")
+        await conn.execute(add_column_sql)
+        logger.info(f"成功添加列 '{table_name}.{new_column_name}'。")
+    elif new_col_exists:
+        logger.info(f"列 '{table_name}.{new_column_name}' 已存在，跳过迁移。")
+    
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+
 async def _migrate_text_to_mediumtext(conn, db_type, db_name):
     """
     迁移任务: 将多个表中可能存在的 TEXT 字段修改为 MEDIUMTEXT (仅MySQL)。
@@ -215,6 +257,7 @@ async def _run_migrations(conn):
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
     await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
     await _migrate_text_to_mediumtext(conn, db_type, db_name)
+    await _migrate_add_source_url_to_episode(conn, db_type, db_name)
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """Logs a standardized, detailed error message for database connection failures."""
