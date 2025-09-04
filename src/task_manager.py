@@ -125,8 +125,8 @@ class TaskManager:
                 async with self._lock:
                     self._pending_titles.discard(task.title)
                 self._current_task = task
-                # 关键变更：不再 await 任务，而是将其作为后台任务运行
-                asyncio.create_task(self._run_task_wrapper(task))
+                # 恢复为 await，确保任务按顺序、一次一个地执行
+                await self._run_task_wrapper(task)
             finally:
                 # 2. 确保成功获取任务后，其 task_done() 一定会被调用。
                 self._queue.task_done()
