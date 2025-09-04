@@ -110,14 +110,14 @@ class AnimeMetadata(Base):
 class Config(Base):
     __tablename__ = "config"
     configKey: Mapped[str] = mapped_column("config_key", String(100), primary_key=True)
-    configValue: Mapped[str] = mapped_column("config_value", TEXT)
+    configValue: Mapped[str] = mapped_column("config_value", TEXT().with_variant(MEDIUMTEXT, "mysql"))
     description: Mapped[Optional[str]] = mapped_column(TEXT)
 
 class CacheData(Base):
     __tablename__ = "cache_data"
     cacheProvider: Mapped[Optional[str]] = mapped_column("cache_provider", String(50))
     cacheKey: Mapped[str] = mapped_column("cache_key", String(255), primary_key=True)
-    cacheValue: Mapped[str] = mapped_column("cache_value", MEDIUMTEXT)
+    cacheValue: Mapped[str] = mapped_column("cache_value", TEXT().with_variant(MEDIUMTEXT, "mysql"))
     expiresAt: Mapped[datetime] = mapped_column("expires_at", TIMESTAMP, index=True)
 
 class ApiToken(Base):
@@ -214,7 +214,7 @@ class TaskHistory(Base):
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(Integer, default=0)
-    description: Mapped[Optional[str]] = mapped_column(TEXT)
+    description: Mapped[Optional[str]] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
     createdAt: Mapped[datetime] = mapped_column("created_at", TIMESTAMP)
     updatedAt: Mapped[datetime] = mapped_column("updated_at", TIMESTAMP)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", TIMESTAMP)
@@ -228,7 +228,7 @@ class ExternalApiLog(Base):
     ipAddress: Mapped[str] = mapped_column("ip_address", String(45))
     endpoint: Mapped[str] = mapped_column(String(255))
     statusCode: Mapped[int] = mapped_column("status_code", Integer)
-    message: Mapped[Optional[str]] = mapped_column(TEXT)
+    message: Mapped[Optional[str]] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
 
 class RateLimitState(Base):
     __tablename__ = "rate_limit_state"

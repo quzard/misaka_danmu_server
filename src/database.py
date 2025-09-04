@@ -165,6 +165,40 @@ async def _migrate_cache_value_to_mediumtext(conn, db_type, db_name):
     
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+async def _migrate_text_to_mediumtext(conn, db_type, db_name):
+    """
+    迁移任务: 将多个表中可能存在的 TEXT 字段修改为 MEDIUMTEXT (仅MySQL)。
+    这是为了确保在旧版本上创建的表有足够大的容量。
+    """
+    migration_id = "migrate_text_to_mediumtext"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    if db_type != "mysql":
+        logger.info("非MySQL数据库，跳过 TEXT 到 MEDIUMTEXT 的迁移。")
+        return
+
+    tables_and_columns = {
+        "cache_data": "cache_value",
+        "config": "config_value",
+        "task_history": "description",
+        "external_api_logs": "message"
+    }
+
+    for table, column in tables_and_columns.items():
+        check_sql = text(
+            "SELECT DATA_TYPE FROM information_schema.columns "
+            f"WHERE table_schema = '{db_name}' AND table_name = '{table}' AND column_name = '{column}'"
+        )
+        result = await conn.execute(check_sql)
+        current_type = result.scalar_one_or_none()
+
+        if current_type and current_type.lower() == 'text':
+            logger.info(f"列 '{table}.{column}' 类型为 TEXT，正在修改为 MEDIUMTEXT...")
+            alter_sql = text(f"ALTER TABLE {table} MODIFY COLUMN `{column}` MEDIUMTEXT")
+            await conn.execute(alter_sql)
+            logger.info(f"成功将 '{table}.{column}' 列类型修改为 MEDIUMTEXT。")
+
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
 async def _run_migrations(conn):
     """
@@ -180,6 +214,7 @@ async def _run_migrations(conn):
     await _migrate_add_source_order(conn, db_type, db_name)
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
     await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
+    await _migrate_text_to_mediumtext(conn, db_type, db_name)
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """Logs a standardized, detailed error message for database connection failures."""
