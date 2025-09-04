@@ -3,7 +3,7 @@ import secrets
 import uuid
 import re
 from enum import Enum
-from typing import List, Optional, Dict, Any, Callable
+from typing import List, Optional, Dict, Any, Callable, Union
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Path
@@ -21,6 +21,7 @@ from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 
+from ..timezone import get_now
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
@@ -1052,6 +1053,59 @@ async def get_execution_task_id(
     """
     execution_id = await crud.get_execution_task_id_from_scheduler_task(session, taskId)
     return ExecutionTaskResponse(schedulerTaskId=taskId, executionTaskId=execution_id)
+
+@router.get("/rate-limit/status", response_model=models.ControlRateLimitStatusResponse, summary="获取流控状态")
+async def get_rate_limit_status(
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """
+    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+    """
+    # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
+    try:
+        await rate_limiter.check("__global__")
+    except RateLimitExceededError:
+        # 我们只关心检查和重置的副作用，不关心它是否真的超限，所以忽略此错误
+        pass
+    except Exception as e:
+        # 记录其他潜在错误，但不中断状态获取
+        logger.error(f"在获取流控状态时，检查全局流控失败: {e}")
+
+    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "true")
+    global_enabled = global_enabled_str.lower() == 'true'
+    global_limit_str = await config_manager.get("globalRateLimitCount", "50")
+    global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50
+    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
+    period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
+
+    all_states = await crud.get_all_rate_limit_states(session)
+    states_map = {s.providerName: s for s in all_states}
+
+    global_state = states_map.get("__global__")
+    seconds_until_reset = 0
+    if global_state:
+        time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
+        seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
+
+    provider_items = []
+    all_scrapers = await crud.get_all_scraper_settings(session)
+    for scraper_setting in all_scrapers:
+        provider_name = scraper_setting['providerName']
+        provider_state = states_map.get(provider_name)
+        quota: Union[int, str] = "∞"
+        try:
+            scraper_instance = scraper_manager.get_scraper(provider_name)
+            provider_quota = getattr(scraper_instance, 'rate_limit_quota', None)
+            if provider_quota is not None and provider_quota > 0:
+                quota = provider_quota
+        except ValueError:
+            pass
+        provider_items.append(models.ControlRateLimitProviderStatus(providerName=provider_name, requestCount=provider_state.requestCount if provider_state else 0, quota=quota))
+
+    return models.ControlRateLimitStatusResponse(globalEnabled=global_enabled, globalRequestCount=global_state.requestCount if global_state else 0, globalLimit=global_limit, globalPeriod=global_period, secondsUntilReset=seconds_until_reset, providers=provider_items)
 
 
 # --- 定时任务管理 ---
