@@ -39,17 +39,15 @@ export const TrustedProxies = () => {
   return (
     <div className="my-6">
       <Card loading={loading} title="受信任的反向代理">
-        <div className="mb-4">
-          当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。多个IP请用英文逗号(,)分隔。
-        </div>
+        <div className="mb-4">当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。多个IP或CIDR网段请用英文逗号(,)分隔。</div>
         <Form
           form={form}
           layout="horizontal"
           onFinish={handleSave}
           className="px-6 pb-6"
         >
-          <Form.Item name="trustedProxies" label="IP列表" className="mb-6">
-            <Input.TextArea rows={4} placeholder="例如: 127.0.0.1,192.168.1.1" />
+          <Form.Item name="trustedProxies" label="IP或CIDR列表" className="mb-6">
+            <Input.TextArea rows={4} placeholder="例如: 127.0.0.1, 192.168.1.0/24, 10.0.0.1/32" />
           </Form.Item>
 
           <Form.Item>

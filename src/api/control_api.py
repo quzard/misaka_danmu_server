@@ -2,6 +2,7 @@ import logging
 import secrets
 import uuid
 import re
+import ipaddress
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable, Union
 
@@ -76,25 +77,39 @@ async def verify_api_key(
     session: AsyncSession = Depends(get_db_session),
 ) -> str:
     """依赖项：验证API密钥并记录请求。如果验证成功，返回 API Key。"""
-    # --- 新增：解析真实客户端IP ---
+    # --- 新增：解析真实客户端IP，支持CIDR ---
     config_manager: ConfigManager = request.app.state.config_manager
     trusted_proxies_str = await config_manager.get("trustedProxies", "")
-    trusted_proxies = {p.strip() for p in trusted_proxies_str.split(',') if p.strip()}
+    trusted_networks = []
+    if trusted_proxies_str:
+        for proxy_entry in trusted_proxies_str.split(','):
+            try:
+                trusted_networks.append(ipaddress.ip_network(proxy_entry.strip()))
+            except ValueError:
+                logger.warning(f"无效的受信任代理IP或CIDR: '{proxy_entry.strip()}'，已忽略。")
     
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    if client_ip in trusted_proxies:
+    client_ip_str = request.client.host if request.client else "127.0.0.1"
+    is_trusted = False
+    if trusted_networks:
+        try:
+            client_addr = ipaddress.ip_address(client_ip_str)
+            is_trusted = any(client_addr in network for network in trusted_networks)
+        except ValueError:
+            logger.warning(f"无法将客户端IP '{client_ip_str}' 解析为有效的IP地址。")
+
+    if is_trusted:
         x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
-            client_ip = x_forwarded_for.split(',')[0].strip()
+            client_ip_str = x_forwarded_for.split(',')[0].strip()
         else:
-            client_ip = request.headers.get("x-real-ip", client_ip)
+            client_ip_str = request.headers.get("x-real-ip", client_ip_str)
     # --- IP解析结束 ---
 
     endpoint = request.url.path
 
     if not api_key:
         await crud.create_external_api_log(
-            session, client_ip, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
+            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -105,14 +120,14 @@ async def verify_api_key(
 
     if not stored_key or not secrets.compare_digest(api_key, stored_key):
         await crud.create_external_api_log(
-            session, client_ip, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
+            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的API密钥"
         )
     # 记录成功的API Key验证
     await crud.create_external_api_log(
-        session, client_ip, endpoint, status.HTTP_200_OK, "API Key验证通过"
+        session, client_ip_str, endpoint, status.HTTP_200_OK, "API Key验证通过"
     )
     return api_key
 

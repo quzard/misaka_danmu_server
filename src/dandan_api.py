@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import re
+import ipaddress
 from typing import List, Optional, Dict, Any
 from typing import Callable
 from datetime import datetime, timezone
@@ -379,18 +380,33 @@ async def get_token_from_path(
     此函数现在还负责UA过滤和访问日志记录。
     """
     # --- 新增：解析真实客户端IP ---
+    # --- 新增：解析真实客户端IP，支持CIDR ---
     config_manager: ConfigManager = request.app.state.config_manager
     trusted_proxies_str = await config_manager.get("trustedProxies", "")
-    trusted_proxies = {p.strip() for p in trusted_proxies_str.split(',') if p.strip()}
+    trusted_networks = []
+    if trusted_proxies_str:
+        for proxy_entry in trusted_proxies_str.split(','):
+            try:
+                trusted_networks.append(ipaddress.ip_network(proxy_entry.strip()))
+            except ValueError:
+                logger.warning(f"无效的受信任代理IP或CIDR: '{proxy_entry.strip()}'，已忽略。")
     
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    if client_ip in trusted_proxies:
+    client_ip_str = request.client.host if request.client else "127.0.0.1"
+    is_trusted = False
+    if trusted_networks:
+        try:
+            client_addr = ipaddress.ip_address(client_ip_str)
+            is_trusted = any(client_addr in network for network in trusted_networks)
+        except ValueError:
+            logger.warning(f"无法将客户端IP '{client_ip_str}' 解析为有效的IP地址。")
+
+    if is_trusted:
         x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
-            client_ip = x_forwarded_for.split(',')[0].strip()
+            client_ip_str = x_forwarded_for.split(',')[0].strip()
         else:
             # 如果没有 X-Forwarded-For，则回退到 X-Real-IP
-            client_ip = request.headers.get("x-real-ip", client_ip)
+            client_ip_str = request.headers.get("x-real-ip", client_ip_str)
     # --- IP解析结束 ---
 
     # 1. 验证 token 是否存在、启用且未过期
@@ -409,7 +425,7 @@ async def get_token_from_path(
                     expires_at = expires_at.replace(tzinfo=get_app_timezone())
                 is_expired = expires_at < get_now()
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
-            await crud.create_token_access_log(session, token_record['id'], client_ip, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
+            await crud.create_token_access_log(session, token_record['id'], client_ip_str, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
 
     # 2. UA 过滤
@@ -423,15 +439,15 @@ async def get_token_from_path(
         is_matched = any(rule in user_agent for rule in ua_list)
 
         if ua_filter_mode == 'blacklist' and is_matched:
-            await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='denied_ua_blacklist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_blacklist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent is blacklisted")
         
         if ua_filter_mode == 'whitelist' and not is_matched:
-            await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='denied_ua_whitelist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
     # 3. 记录成功访问
-    await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='allowed', path=log_path)
+    await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='allowed', path=log_path)
 
     return token
 
