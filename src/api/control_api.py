@@ -76,30 +76,43 @@ async def verify_api_key(
     session: AsyncSession = Depends(get_db_session),
 ) -> str:
     """依赖项：验证API密钥并记录请求。如果验证成功，返回 API Key。"""
+    # --- 新增：解析真实客户端IP ---
+    config_manager: ConfigManager = request.app.state.config_manager
+    trusted_proxies_str = await config_manager.get("trustedProxies", "")
+    trusted_proxies = {p.strip() for p in trusted_proxies_str.split(',') if p.strip()}
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if client_ip in trusted_proxies:
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        if x_forwarded_for:
+            client_ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            client_ip = request.headers.get("x-real-ip", client_ip)
+    # --- IP解析结束 ---
+
     endpoint = request.url.path
-    ip_address = request.client.host
 
     if not api_key:
         await crud.create_external_api_log(
-            session, ip_address, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
+            session, client_ip, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated: API Key is missing.",
         )
 
-    stored_key = await crud.get_config_value(session, "externalApiKey", "")
+    stored_key = await config_manager.get("externalApiKey", "")
 
     if not stored_key or not secrets.compare_digest(api_key, stored_key):
         await crud.create_external_api_log(
-            session, ip_address, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
+            session, client_ip, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的API密钥"
         )
     # 记录成功的API Key验证
     await crud.create_external_api_log(
-        session, ip_address, endpoint, status.HTTP_200_OK, "API Key验证通过"
+        session, client_ip, endpoint, status.HTTP_200_OK, "API Key验证通过"
     )
     return api_key
 

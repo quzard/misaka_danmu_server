@@ -369,15 +369,30 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_token_from_path(
+    request: Request,
     token: str = Path(..., description="路径中的API授权令牌"),
     session: AsyncSession = Depends(get_db_session),
-    request: Request = None,
 ):
     """
     一个 FastAPI 依赖项，用于验证路径中的 token。
     这是为 dandanplay 客户端设计的特殊鉴权方式。
     此函数现在还负责UA过滤和访问日志记录。
     """
+    # --- 新增：解析真实客户端IP ---
+    config_manager: ConfigManager = request.app.state.config_manager
+    trusted_proxies_str = await config_manager.get("trustedProxies", "")
+    trusted_proxies = {p.strip() for p in trusted_proxies_str.split(',') if p.strip()}
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if client_ip in trusted_proxies:
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        if x_forwarded_for:
+            client_ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            # 如果没有 X-Forwarded-For，则回退到 X-Real-IP
+            client_ip = request.headers.get("x-real-ip", client_ip)
+    # --- IP解析结束 ---
+
     # 1. 验证 token 是否存在、启用且未过期
     request_path = request.url.path
     log_path = re.sub(r'^/api/v1/[^/]+', '', request_path) # 从路径中移除 /api/v1/{token} 部分
@@ -394,7 +409,7 @@ async def get_token_from_path(
                     expires_at = expires_at.replace(tzinfo=get_app_timezone())
                 is_expired = expires_at < get_now()
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
-            await crud.create_token_access_log(session, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
+            await crud.create_token_access_log(session, token_record['id'], client_ip, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
 
     # 2. UA 过滤
@@ -408,15 +423,15 @@ async def get_token_from_path(
         is_matched = any(rule in user_agent for rule in ua_list)
 
         if ua_filter_mode == 'blacklist' and is_matched:
-            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_blacklist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='denied_ua_blacklist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent is blacklisted")
         
         if ua_filter_mode == 'whitelist' and not is_matched:
-            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_whitelist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
     # 3. 记录成功访问
-    await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='allowed', path=log_path)
+    await crud.create_token_access_log(session, token_info['id'], client_ip, user_agent, log_status='allowed', path=log_path)
 
     return token
 
