@@ -43,6 +43,33 @@ METADATA_KEYWORDS_PATTERN = re.compile(
 # 它将被挂载到主路由的不同路径上。
 implementation_router = APIRouter()
 
+def _process_comments_for_dandanplay(comments_data: List[Dict[str, Any]]) -> List[models.Comment]:
+    """
+    将弹幕字典列表处理为符合 dandanplay 客户端规范的格式。
+    核心逻辑是移除 p 属性中的字体大小参数，同时保留其他所有部分。
+    原始格式: "时间,模式,字体大小,颜色,[来源]"
+    目标格式: "时间,模式,颜色,[来源]"
+    """
+    processed_comments = []
+    for i, item in enumerate(comments_data):
+        p_attr = item.get("p", "")
+        p_parts = p_attr.split(',')
+
+        # 查找可选的用户标签（如[bilibili]），以确定核心参数的数量
+        core_parts_count = len(p_parts)
+        for j, part in enumerate(p_parts):
+            if '[' in part and ']' in part:
+                core_parts_count = j
+                break
+        
+        if core_parts_count == 4:
+            del p_parts[2] # 移除字体大小 (index 2)
+        
+        new_p_attr = ','.join(p_parts)
+        processed_comments.append(models.Comment(cid=i, p=new_p_attr, m=item.get("m", "")))
+    return processed_comments
+
+
 class DandanApiRoute(APIRoute):
     """
     自定义的 APIRoute 类，用于为 dandanplay 兼容接口定制异常处理。
@@ -805,8 +832,9 @@ async def get_external_comments_from_url(
             for comment in comments_data:
                 comment['m'] = converter.convert(comment['m'])
 
-    comments = [models.Comment.model_validate(c) for c in comments_data]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
+    processed_comments = _process_comments_for_dandanplay(comments_data)
+    return models.CommentResponse(count=len(processed_comments), comments=processed_comments)
 
 @implementation_router.get(
     "/comment/{episodeId}",
@@ -875,36 +903,8 @@ async def get_comments_for_dandan(
     # UA 已由 get_token_from_path 依赖项记录
     # logger.info(f"弹幕接口响应 (episodeId: {episodeId}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
 
-    # 智能处理弹幕参数以兼容 dandanplay 客户端
-    processed_comments = []
-    for i, item in enumerate(comments_data):
-        p_attr = item.get("p", "")
-        p_parts = p_attr.split(',')
-        
-        # 修正：使用更健壮的逻辑来处理 p 属性，以兼容各种格式
-        # 目标格式: 时间,模式,颜色
-        if len(p_parts) >= 4:
-            # 原始格式: 时间,模式,字体大小,颜色,...
-            # 移除字体大小 (index 2)
-            p_parts.pop(2)
-            # 只保留前3个部分
-            p_parts = p_parts[:3]
-        elif len(p_parts) == 3:
-            # 可能是 时间,模式,颜色 (缺少字体大小)
-            # 已经是期望的格式，无需处理
-            pass
-        else:
-            # 对于格式不正确的 p 属性，提供一个安全的默认值
-            try:
-                time_sec = float(p_parts[0]) if p_parts else 0.0
-            except (ValueError, IndexError):
-                time_sec = 0.0
-            p_parts = [f"{time_sec:.3f}", "1", "16777215"]
-
-        # 重新组合 p 属性
-        new_p_attr = ','.join(p_parts)
-        
-        processed_comments.append(models.Comment(cid=i, p=new_p_attr, m=item["m"]))
+    # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
+    processed_comments = _process_comments_for_dandanplay(comments_data)
 
     return models.CommentResponse(count=len(processed_comments), comments=processed_comments)
 
