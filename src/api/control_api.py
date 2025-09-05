@@ -2,6 +2,7 @@ import logging
 import secrets
 import uuid
 import re
+import hashlib
 import ipaddress
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable, Union
@@ -381,14 +382,16 @@ async def auto_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=f"auto-import-{payload.searchType}-{payload.searchTerm}")
         return {"message": "自动导入任务已提交", "taskId": task_id}
+    except HTTPException as e:
+        # 捕获已知的冲突错误并重新抛出
+        raise e
     except Exception as e:
         # 捕获任何在任务提交阶段发生的异常，并确保释放锁
+        logger.error(f"提交自动导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
+    finally:
+        # 确保释放锁
         await manager.release_search_lock(api_key)
-        if isinstance(e, ValueError):
-            # 如果是已知的重复任务错误，返回 409
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-        # 对于其他未知错误，重新抛出，由FastAPI处理
-        raise
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
@@ -515,8 +518,11 @@ async def direct_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "导入任务已提交", "taskId": task_id}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"提交直接导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 @router.get("/episodes", response_model=List[models.ProviderEpisodeInfo], summary="获取搜索结果的分集列表")
 async def get_episodes(
@@ -606,7 +612,12 @@ async def edited_import(
     )
 
     task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
-    unique_key = f"import-{task_payload.provider}-{task_payload.mediaId}"
+    # 修正：使 unique_key 更具体，以允许对同一媒体的不同分集列表进行排队导入。
+    # 这解决了在一次导入完成后，无法立即为同一媒体提交另一次导入的问题。
+    episode_indices_str = ",".join(sorted([str(ep.episodeIndex) for ep in payload.episodes]))
+    episodes_hash = hashlib.md5(episode_indices_str.encode('utf-8')).hexdigest()[:8]
+    unique_key = f"import-{task_payload.provider}-{task_payload.mediaId}-{episodes_hash}"
+
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
             request_data=task_payload, progress_callback=cb, session=session,
@@ -615,8 +626,13 @@ async def edited_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException as e:
+        # 修正：捕获正确的 HTTPException 并重新抛出
+        raise e
+    except Exception as e:
+        # 捕获其他意外错误
+        logger.error(f"提交编辑后导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 @router.post("/import/xml", status_code=status.HTTP_202_ACCEPTED, summary="从XML/文本导入弹幕", response_model=ControlTaskResponse)
 async def xml_import(
@@ -665,8 +681,11 @@ async def xml_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "XML导入任务已提交", "taskId": task_id}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"提交XML导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 
 @router.post("/import/url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入", response_model=ControlTaskResponse)
@@ -717,8 +736,11 @@ async def url_import(
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "URL导入任务已提交", "taskId": task_id}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"提交URL导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 # --- 媒体库管理 ---
 
