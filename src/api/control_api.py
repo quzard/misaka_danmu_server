@@ -399,6 +399,7 @@ async def search_media(
     episode: Optional[int] = Query(None, description="要搜索的集数 (可选)"),
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -428,28 +429,65 @@ async def search_media(
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
     try:
-        # --- Start of WebUI Search Logic ---
-        try:
-            episode_info = {"season": season, "episode": episode} if season is not None or episode is not None else None
-            all_results = await manager.search_all([keyword], episode_info=episode_info)
-        except httpx.RequestError as e:
-            logger.error(f"搜索媒体 '{keyword}' 时发生网络错误: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"搜索时发生网络错误: {e}")
+        # --- Start of new logic, copied and adapted from ui_api.py ---
+        parsed_keyword = utils.parse_search_keyword(keyword)
+        search_title = parsed_keyword["title"]
+        # Prioritize explicit query params over parsed ones
+        final_season = season if season is not None else parsed_keyword.get("season")
+        final_episode = episode if episode is not None else parsed_keyword.get("episode")
 
-        normalized_search_title = _normalize_for_filtering(keyword)
-        filtered_results = [item for item in all_results if fuzz.token_set_ratio(_normalize_for_filtering(item.title), normalized_search_title) > 80]
-        logger.info(f"模糊标题过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        episode_info = {"season": final_season, "episode": final_episode} if final_season is not None or final_episode is not None else None
+
+        # Create a dummy user for metadata calls, as this API is not user-specific
+        user = models.User(id=0, username="control_api")
+
+        logger.info(f"Control API 正在搜索: '{keyword}' (解析为: title='{search_title}', season={final_season}, episode={final_episode})")
+        if not manager.has_enabled_scrapers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
+            )
+
+        # Get aliases from metadata sources
+        all_possible_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, user)
+        
+        # Validate aliases
+        validated_aliases = set()
+        for alias in all_possible_aliases:
+            if fuzz.token_set_ratio(search_title, alias) > 70:
+                validated_aliases.add(alias)
+            else:
+                logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{search_title}' 相比)")
+        
+        filter_aliases = validated_aliases
+        filter_aliases.add(search_title)
+        logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
+        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
+
+        # Search all scrapers using the main title
+        all_results = await manager.search_all([search_title], episode_info=episode_info)
+
+        # Filter with aliases
+        normalized_filter_aliases = {_normalize_for_filtering(alias) for alias in filter_aliases if alias}
+        filtered_results = []
+        for item in all_results:
+            normalized_item_title = _normalize_for_filtering(item.title)
+            if not normalized_item_title: continue
+            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+                filtered_results.append(item)
+        
+        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         results = filtered_results
 
         for item in results:
             if item.type == 'tv_series' and _is_movie_by_title(item.title):
                 item.type = 'movie'
 
-        if season:
+        if final_season:
             original_count = len(results)
             filtered_by_type = [item for item in results if item.type == 'tv_series']
-            results = [item for item in filtered_by_type if item.season == season]
-            logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(results)} 个。")
+            results = [item for item in filtered_by_type if item.season == final_season]
+            logger.info(f"根据指定的季度 ({final_season}) 进行过滤，从 {original_count} 个结果中保留了 {len(results)} 个。")
 
         source_settings = await crud.get_all_scraper_settings(session)
         source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
@@ -458,7 +496,6 @@ async def search_media(
             return (source_order_map.get(item.provider, 999), -fuzz.token_set_ratio(keyword, item.title))
 
         sorted_results = sorted(results, key=sort_key)
-        # --- End of WebUI Search Logic ---
 
         search_id = str(uuid.uuid4())
         indexed_results = [ControlSearchResultItem(**r.model_dump(), resultIndex=i) for i, r in enumerate(sorted_results)]
