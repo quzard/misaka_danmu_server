@@ -242,6 +242,44 @@ async def _migrate_text_to_mediumtext(conn, db_type, db_name):
 
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
 
+async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
+    """
+    迁移任务: 检查是否需要执行一次性的速率限制状态表清理。
+    这用于解决从旧版本升级时可能存在的脏数据问题。
+    """
+    migration_id = "clear_rate_limit_state_on_first_run"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    config_key = "rate_limit_state_cleaned_v1"
+
+    # 检查标志位是否存在
+    check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
+    flag_exists = (await conn.execute(check_flag_sql, {"key": config_key})).scalar_one_or_none() is not None
+
+    if flag_exists:
+        logger.info(f"标志 '{config_key}' 已存在，跳过速率限制状态表的清理。")
+        return
+
+    logger.warning(f"未找到标志 '{config_key}'。将执行一次性的速率限制状态表清理，以确保数据兼容性。")
+    
+    try:
+        # 清空 rate_limit_state 表
+        truncate_sql = text("TRUNCATE TABLE rate_limit_state;")
+        await conn.execute(truncate_sql)
+        logger.info("成功清空 'rate_limit_state' 表。")
+
+        # 插入标志位
+        insert_flag_sql = text(
+            "INSERT INTO config (config_key, config_value, description) "
+            "VALUES (:key, :value, :desc)"
+        )
+        await conn.execute(
+            insert_flag_sql,
+            {"key": config_key, "value": "true", "desc": ""}
+        )
+        logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
+    except Exception as e:
+        logger.error(f"执行一次性清理任务 '{migration_id}' 时发生错误: {e}", exc_info=True)
 async def _run_migrations(conn):
     """
     执行所有一次性的数据库架构迁移。
@@ -253,6 +291,7 @@ async def _run_migrations(conn):
         logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
         return
 
+    await _migrate_clear_rate_limit_state(conn, db_type, db_name)
     await _migrate_add_source_order(conn, db_type, db_name)
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
     await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
