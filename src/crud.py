@@ -1944,6 +1944,12 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
         )
         session.add(state)
         await session.flush()
+
+    # 关键修复：无论数据来自数据库还是新创建，都确保返回的时间是 naive 的。
+    # 这可以解决 PostgreSQL 驱动返回带时区时间对象的问题。
+    if state.lastResetTime and state.lastResetTime.tzinfo:
+        state.lastResetTime = state.lastResetTime.replace(tzinfo=None)
+
     return state
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
