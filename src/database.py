@@ -275,7 +275,7 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         )
         await conn.execute(
             insert_flag_sql,
-            {"key": config_key, "value": "true", "desc": "标志位，表示已为兼容性问题执行过一次性的速率限制状态表清理。"}
+            {"key": config_key, "value": "true", "desc": ""}
         )
         logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
     except Exception as e:
