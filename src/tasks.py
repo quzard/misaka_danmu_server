@@ -1270,7 +1270,8 @@ async def auto_search_and_import_task(
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
-            if any((alias in normalized_item_title) or (normalized_item_title in alias) for alias in normalized_filter_aliases):
+            # 修正：使用更智能的模糊匹配来提高准确率，与UI搜索逻辑保持一致
+            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
                 filtered_results.append(item)
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         all_results = filtered_results

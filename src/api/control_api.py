@@ -305,7 +305,7 @@ class ControlAnimeDetailsResponse(BaseModel):
 class ControlAutoImportRequest(BaseModel):
     searchType: AutoImportSearchType
     searchTerm: str
-    season: Optional[int] = 1
+    season: Optional[int] = None
     episode: Optional[int] = None
     mediaType: Optional[AutoImportMediaType] = None
 
@@ -315,8 +315,8 @@ class ControlAutoImportRequest(BaseModel):
 async def auto_import(
     searchType: AutoImportSearchType = Query(..., description="搜索类型。可选值: 'keyword', 'tmdb', 'tvdb', 'douban', 'imdb', 'bangumi'。"),
     searchTerm: str = Query(..., description="搜索内容。根据 searchType 的不同，这里应填入关键词或对应的平台ID。"),
-    season: Optional[int] = Query(1, description="季度号。"),
-    episode: Optional[int] = Query(None, description="集数。如果提供，将只导入单集。"),
+    season: Optional[int] = Query(None, description="季度号。如果未提供，将自动推断或默认为1。"),
+    episode: Optional[int] = Query(None, description="集数。如果提供，将只导入单集（此时必须提供季度）。"),
     mediaType: Optional[AutoImportMediaType] = Query(None, description="媒体类型。当 searchType 为 'keyword' 时必填。如果留空，将根据有无 'season' 参数自动推断。"),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
@@ -348,7 +348,7 @@ async def auto_import(
         -   **电影**:
             -   `season` 和 `episode` 参数会被忽略。
     -   `mediaType`:
-        -   当 `searchType` 为 `keyword` 时，此字段为必填项。
+        -   当 `searchType` 为 `keyword` 时，此字段为**必填项**。
         -   当 `searchType` 为其他ID类型时，此字段为可选项。如果留空，系统将根据 `season` 参数是否存在来自动推断媒体类型（有 `season` 则为电视剧，否则为电影）。
     """
     if episode is not None and season is None:
