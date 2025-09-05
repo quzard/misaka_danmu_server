@@ -1959,12 +1959,18 @@ async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitStat
     return states
 
 async def reset_all_rate_limit_states(session: AsyncSession):
-    """重置所有速率限制状态的请求计数和重置时间。"""
-    stmt = update(RateLimitState).values(
-        requestCount=0,
-        lastResetTime=get_now().replace(tzinfo=None) # lastResetTime is explicitly set here
-    )
-    await session.execute(stmt)
+    """
+    重置所有速率限制状态的请求计数和重置时间。
+    """
+    # 修正：从批量更新改为获取并更新对象。
+    # 这确保了会话中已加载的ORM对象的状态能与数据库同步，
+    # 解决了在 expire_on_commit=False 的情况下，对象状态陈旧的问题。
+    states = (await session.execute(select(RateLimitState))).scalars().all()
+    now_naive = get_now().replace(tzinfo=None)
+    for state in states:
+        state.requestCount = 0
+        state.lastResetTime = now_naive
+    # The commit will be handled by the calling function (e.g., RateLimiter.check)
 
 async def increment_rate_limit_count(session: AsyncSession, provider_name: str):
     """为指定的提供商增加请求计数。如果状态不存在，则会创建它。"""

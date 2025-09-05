@@ -63,8 +63,13 @@ class RateLimiter:
                 self.logger.info(f"全局速率限制周期已过，正在重置所有计数器。")
                 await crud.reset_all_rate_limit_states(session)
                 await session.commit()
-                global_state = await crud.get_or_create_rate_limit_state(session, "__global__")
-                provider_state = await crud.get_or_create_rate_limit_state(session, provider_name)
+                
+                # 关键修复：在提交后，显式刷新会话中的对象，以从数据库加载最新状态。
+                # 这解决了因 expire_on_commit=False 导致的对象状态陈旧问题。
+                await session.refresh(global_state)
+                await session.refresh(provider_state)
+                
+                # 重新计算时间差，因为 lastResetTime 已经更新
                 time_since_reset = now - global_state.lastResetTime # Re-calculate with the new reset time
 
             if global_state.requestCount >= global_limit:
