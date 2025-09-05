@@ -170,17 +170,20 @@ class BilibiliScraper(BaseScraper):
     ]
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.bilibili.com/",
-            },
-            timeout=20.0,
-            follow_redirects=True,
-        )
+        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         self._min_interval = 0.5
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.bilibili.com/",
+            }
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -216,6 +219,8 @@ class BilibiliScraper(BaseScraper):
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         """封装了速率限制的请求方法。"""
+        await self._ensure_client()
+        assert self.client is not None
         async with self._api_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
@@ -229,7 +234,9 @@ class BilibiliScraper(BaseScraper):
             return response
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def _ensure_config_and_cookie(self):
         """
@@ -241,6 +248,8 @@ class BilibiliScraper(BaseScraper):
         self.logger.debug("Bilibili: 正在从数据库加载Cookie...")
         cookie_str = await self.config_manager.get("bilibiliCookie", "")
         
+        await self._ensure_client()
+        assert self.client is not None
         self.client.cookies.clear()
 
         if cookie_str:

@@ -26,11 +26,14 @@ class GamerScraper(BaseScraper):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
-        self.client = httpx.AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-            timeout=20.0,
-            follow_redirects=True
-        )
+        self.client: Optional[httpx.AsyncClient] = None
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -68,6 +71,8 @@ class GamerScraper(BaseScraper):
         实时从数据库加载并应用Cookie和User-Agent配置。
         此方法在每次请求前调用，以确保配置实时生效。
         """
+        await self._ensure_client()
+        assert self.client is not None
         cookie = await self.config_manager.get("gamerCookie", "")
         user_agent = await self.config_manager.get("gamerUserAgent", "")
 
@@ -85,6 +90,8 @@ class GamerScraper(BaseScraper):
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """一个简单的请求包装器。"""
         await self._ensure_config()
+        # _ensure_config already calls _ensure_client
+        assert self.client is not None
         response = await self.client.request(method, url, **kwargs)
         if await self._should_log_responses():
             # 截断HTML以避免日志过长
@@ -92,7 +99,9 @@ class GamerScraper(BaseScraper):
         return response
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

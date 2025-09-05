@@ -256,15 +256,7 @@ class IqiyiScraper(BaseScraper):
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
         # 实体引用匹配正则
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": self.mobile_user_agent,
-                "Referer": "https://www.iqiyi.com/",
-            },
-            cookies=self.cookies,
-            timeout=30.0, # 增加默认超时时间
-            follow_redirects=True
-        )
+        self.client: Optional[httpx.AsyncClient] = None
         self.entity_pattern = re.compile(r'&#[xX]?[0-9a-fA-F]+;')
 
         # XML 1.0规范允许的字符编码范围
@@ -276,6 +268,18 @@ class IqiyiScraper(BaseScraper):
             list(range(0xE000, 0xFDCF + 1)) +
             list(range(0xFDE0, 0xFFFD + 1))
          )
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            headers = {
+                "User-Agent": self.mobile_user_agent,
+                "Referer": "https://www.iqiyi.com/",
+            }
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            self.client = await self._create_client(
+                headers=headers, cookies=self.cookies, timeout=30.0, follow_redirects=True
+            )
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -310,7 +314,9 @@ class IqiyiScraper(BaseScraper):
 
     async def close(self):
         """关闭HTTP客户端"""
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     def _xor_operation(self, num: int) -> int:
         """实现JavaScript中的异或运算函数"""
@@ -364,6 +370,8 @@ class IqiyiScraper(BaseScraper):
         return md5_hash
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response: # type: ignore
+        await self._ensure_client()
+        assert self.client is not None
         return await self.client.request(method, url, **kwargs)
 
     async def _request_with_retry(self, method: str, url: str, retries: int = 3, **kwargs) -> httpx.Response:

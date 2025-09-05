@@ -153,22 +153,25 @@ class MgtvScraper(BaseScraper):
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.mgtv.com/",
-                "Sec-Fetch-Site": "same-site",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Dest": "empty",
-            },
-            timeout=20.0,
-            follow_redirects=True
-        )
+        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，
         # 适当增加延迟以提高稳定性。
         self._min_interval = 1.0
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.mgtv.com/",
+                "Sec-Fetch-Site": "same-site",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Dest": "empty",
+            }
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -202,6 +205,8 @@ class MgtvScraper(BaseScraper):
         return None
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
+        await self._ensure_client()
+        assert self.client is not None
         async with self._api_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
@@ -212,7 +217,9 @@ class MgtvScraper(BaseScraper):
             return response
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

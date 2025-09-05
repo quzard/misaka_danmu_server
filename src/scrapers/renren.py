@@ -207,10 +207,16 @@ class RenrenScraper(BaseScraper):
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0
         self._min_interval = 0.4
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            self.client = await self._create_client(timeout=20.0, follow_redirects=True)
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -252,10 +258,14 @@ class RenrenScraper(BaseScraper):
         return str(uuid.uuid4()).upper()
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def _request(self, method: str, url: str, *, params: Optional[Dict[str, Any]] = None) -> httpx.Response:
         # This method is now a simple wrapper, the rate limiting and signing is handled in _perform_network_search
+        await self._ensure_client()
+        assert self.client is not None
         device_id = self._generate_device_id()
         headers = build_signed_headers(method=method, url=url, params=params or {}, device_id=device_id)
         resp = await self.client.request(method, url, params=params, headers=headers)
