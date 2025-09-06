@@ -537,7 +537,12 @@ async def direct_import(
     item_to_import = cached_results[payload.resultIndex]
 
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
+    # 修正：为单集导入任务生成更具体的唯一键，以允许对同一作品的不同单集进行排队。
+    # 这修复了在一次单集导入完成后，立即为同一作品提交另一次单集导入时，因任务键冲突而被拒绝的问题。
     unique_key = f"import-{item_to_import.provider}-{item_to_import.mediaId}"
+    if item_to_import.currentEpisodeIndex is not None:
+        unique_key += f"-ep{item_to_import.currentEpisodeIndex}"
+
     try:
         task_coro = lambda session, cb: tasks.generic_import_task(
             provider=item_to_import.provider,
@@ -867,9 +872,11 @@ async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_sess
     details = await crud.get_anime_full_details(session, animeId)
     if not details: raise HTTPException(404, "作品未找到")
     try:
+        unique_key = f"delete-anime-{animeId}"
         task_id, _ = await task_manager.submit_task(
             lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
-            f"外部API删除作品: {details['title']}"
+            f"外部API删除作品: {details['title']}",
+            unique_key=unique_key
         )
         return {"message": "删除作品任务已提交", "taskId": task_id}
     except ValueError as e:

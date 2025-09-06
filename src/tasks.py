@@ -1213,7 +1213,32 @@ async def auto_search_and_import_task(
 
         # 2. 检查媒体库中是否已存在
         await progress_callback(20, "正在检查媒体库...")
-        existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+        
+        # 新增：优先通过元数据ID检查作品是否存在，以防止因标题不一致而重复入库
+        existing_anime_id: Optional[int] = None
+        id_check_map = {
+            "tmdb": (tmdb_id, crud.get_anime_id_by_tmdb_id),
+            "tvdb": (tvdb_id, crud.get_anime_id_by_tvdb_id),
+            "imdb": (imdb_id, crud.get_anime_id_by_imdb_id),
+            "douban": (douban_id, crud.get_anime_id_by_douban_id),
+            "bangumi": (bangumi_id, crud.get_anime_id_by_bangumi_id),
+        }
+        
+        # 如果是按ID搜索，则直接使用该ID进行检查
+        if search_type != "keyword":
+            id_to_check, crud_func = id_check_map[search_type]
+            if id_to_check:
+                existing_anime_id = await crud_func(session, id_to_check)
+                if existing_anime_id:
+                    logger.info(f"通过 {search_type.upper()} ID '{id_to_check}' 在库中找到已存在的作品 (Anime ID: {existing_anime_id})。")
+
+        existing_anime = None
+        if existing_anime_id:
+            existing_anime = await crud.get_anime_full_details(session, existing_anime_id)
+        else:
+            # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
+            existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+
         if existing_anime:
             favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
             if favorited_source:

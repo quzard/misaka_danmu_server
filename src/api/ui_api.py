@@ -2,6 +2,7 @@ import re
 from typing import Optional, List, Any, Dict, Callable, Union
 import asyncio
 import secrets
+import hashlib
 import importlib
 import string
 import time
@@ -802,9 +803,11 @@ async def delete_anime_from_library(
     if not anime_details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
     
+    # 修正：为删除任务添加基于 animeId 的唯一键，以防止因作品重名导致的任务冲突。
     task_title = f"删除作品: {anime_details['title']}"
+    unique_key = f"delete-anime-{animeId}"
     task_coro = lambda session, callback: tasks.delete_anime_task(animeId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "taskId": task_id}
@@ -2085,7 +2088,21 @@ async def import_edited_episodes(
         rate_limiter=rate_limiter,
         metadata_manager=metadata_manager
     )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    # 修正：为编辑后导入任务添加一个唯一的键，以防止重复提交，同时允许对同一作品的不同分集范围进行排队。
+    # 这个键基于提供商、媒体ID和正在导入的分集索引列表的哈希值。
+    # 这修复了在一次导入完成后，立即为同一作品提交另一次导入时，因任务标题相同而被拒绝的问题。
+    episode_indices_str = ",".join(sorted([str(ep.episodeIndex) for ep in request_data.episodes]))
+    episodes_hash = hashlib.md5(episode_indices_str.encode('utf-8')).hexdigest()[:8]
+    unique_key = f"import-{request_data.provider}-{request_data.mediaId}-{episodes_hash}"
+
+    try:
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+    except HTTPException as e:
+        # 重新抛出由 task_manager 引发的冲突错误
+        raise e
+    except Exception as e:
+        logger.error(f"提交编辑后导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
