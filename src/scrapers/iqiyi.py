@@ -490,10 +490,16 @@ class IqiyiScraper(BaseScraper):
 
                 episode_count = len(album.videos) if album.videos else None
                 if album.subscriptContent:
-                    count_match = re.search(r'(\d+)', album.subscriptContent)
+                    # 修正：使用更精确的正则表达式来解析总集数，避免将日期误认为集数。
+                    # 此正则寻找 "更新至XX集/期" 或 "全XX集/期" 格式。
+                    count_match = re.search(r'(?:更新至|全|共)\s*(\d+)\s*(?:集|话|期)', album.subscriptContent)
                     if count_match:
                         episode_count = int(count_match.group(1))
-
+                    else:
+                        # 如果不匹配特定格式，但内容只包含数字，则可能是总集数
+                        simple_count_match = re.fullmatch(r'(\d+)', album.subscriptContent.strip())
+                        if simple_count_match:
+                            episode_count = int(simple_count_match.group(1))
                 cleaned_title = re.sub(r'<[^>]+>', '', album.title).replace(":", "：")
                 
                 provider_search_info = models.ProviderSearchInfo(
@@ -623,7 +629,8 @@ class IqiyiScraper(BaseScraper):
 
                 episode_count = album.item_total_number
                 if album.video_lib_meta and album.video_lib_meta.filmtv_update_strategy:
-                    count_match = re.search(r'(\d+)', album.video_lib_meta.filmtv_update_strategy)
+                    # 修正：使用更精确的正则表达式来解析总集数，避免将日期误认为集数。
+                    count_match = re.search(r'(?:更新至|全|共)\s*(\d+)\s*(?:集|话|期)', album.video_lib_meta.filmtv_update_strategy)
                     if count_match:
                         episode_count = int(count_match.group(1))
 
@@ -1122,15 +1129,21 @@ class IqiyiScraper(BaseScraper):
         """对分集列表应用黑名单过滤并返回最终结果。"""
         # 统一过滤逻辑
         blacklist_pattern = await self.get_episode_blacklist_pattern()
+        
+        filtered_episodes = episodes
         if blacklist_pattern:
             original_count = len(episodes)
-            episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
-            if original_count > len(episodes):
-                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {original_count - len(episodes)} 个分集。")
+            filtered_episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
+            if original_count > len(filtered_episodes):
+                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个分集。")
+
+        # 新增：在过滤后重新为分集编号，以确保 episodeIndex 是连续的
+        for i, ep in enumerate(filtered_episodes):
+            ep.episodeIndex = i + 1
 
         if target_episode_index:
-            return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
-        return episodes
+            return [ep for ep in filtered_episodes if ep.episodeIndex == target_episode_index]
+        return filtered_episodes
 
 
     async def _get_danmu_content_by_mat(self, tv_id: str, mat: int) -> List[IqiyiComment]:
