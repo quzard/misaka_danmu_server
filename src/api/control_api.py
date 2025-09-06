@@ -13,6 +13,7 @@ from fastapi.security import APIKeyQuery
 from thefuzz import fuzz
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import exc
 
 from .. import crud, models, tasks, utils
 from ..rate_limiter import RateLimiter
@@ -858,6 +859,45 @@ async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db
     if not anime_exists:
         raise HTTPException(status_code=404, detail="作品未找到")
     return await crud.get_anime_sources(session, animeId)
+
+@router.post("/library/anime/{animeId}/sources", response_model=models.SourceInfo, status_code=status.HTTP_201_CREATED, summary="为作品添加数据源")
+async def add_source(
+    animeId: int,
+    payload: models.SourceCreate,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    ### 功能
+    为一个已存在的作品手动关联一个新的数据源。
+
+    ### 工作流程
+    1.  提供一个已存在于弹幕库中的 `animeId`。
+    2.  在请求体中提供 `providerName` 和 `mediaId`。
+    3.  系统会将此数据源关联到指定的作品。
+
+    ### 使用场景
+    -   **添加自定义源**: 您可以为任何作品添加一个 `custom` 类型的源，以便后续通过 `/import/xml` 接口为其上传弹幕文件。
+        -   `providerName`: "custom"
+        -   `mediaId`: 任意唯一的字符串，例如 `custom_123`。
+    -   **手动关联刮削源**: 如果自动搜索未能找到正确的结果，您可以通过此接口手动将一个已知的 `providerName` 和 `mediaId` 关联到作品上。
+    """
+    anime = await crud.get_anime_full_details(session, animeId)
+    if not anime:
+        raise HTTPException(status_code=404, detail="作品未找到")
+
+    try:
+        source_id = await crud.link_source_to_anime(session, animeId, payload.providerName, payload.mediaId)
+        await session.commit()
+        # After committing, fetch the full source info including counts
+        all_sources = await crud.get_anime_sources(session, animeId)
+        newly_created_source = next((s for s in all_sources if s['sourceId'] == source_id), None)
+        if not newly_created_source:
+            # This should not happen if creation was successful
+            raise HTTPException(status_code=500, detail="创建数据源后无法立即获取其信息。")
+        return models.SourceInfo.model_validate(newly_created_source)
+    except exc.IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该数据源已存在于此作品下，无法重复添加。")
 
 @router.put("/library/anime/{animeId}", response_model=ControlActionResponse, summary="编辑作品信息")
 async def edit_anime(animeId: int, payload: models.AnimeDetailUpdate, session: AsyncSession = Depends(get_db_session)):

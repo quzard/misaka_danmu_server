@@ -184,7 +184,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
 async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) -> Anime:
     """
-    Manually creates a new anime entry in the database.
+    Manually creates a new anime entry in the database, and automatically
+    creates and links a default 'custom' source for it.
     """
     # Check if an anime with the same title and season already exists
     existing_anime = await find_anime_by_title_and_season(session, anime_data.title, anime_data.season)
@@ -206,6 +207,13 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     new_metadata = AnimeMetadata(animeId=new_anime.id)
     new_alias = AnimeAlias(animeId=new_anime.id)
     session.add_all([new_metadata, new_alias])
+    
+    # 修正：在创建新作品时，自动为其创建一个'custom'数据源。
+    # 这简化了用户操作，并从根源上确保了数据完整性，
+    # 因为 link_source_to_anime 会负责在 scrapers 表中创建对应的条目。
+    logger.info(f"为新作品 '{anime_data.title}' 自动创建 'custom' 数据源。")
+    custom_media_id = f"custom_{new_anime.id}"
+    await link_source_to_anime(session, new_anime.id, "custom", custom_media_id)
     
     await session.flush()
     await session.refresh(new_anime)
@@ -637,6 +645,22 @@ async def check_source_exists_by_media_id(session: AsyncSession, provider_name: 
 
 async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_name: str, media_id: str) -> int:
     """将一个外部数据源关联到一个番剧条目，如果关联已存在则直接返回其ID。"""
+    # 修正：在链接源之前，确保该提供商在 scrapers 表中存在。
+    # 这修复了当创建 'custom' 等非文件型源时，因 scrapers 表中缺少对应条目而导致后续查询失败的问题。
+    # 这是比 LEFT JOIN 更根本的解决方案。
+    scraper_entry = await session.get(Scraper, provider_name)
+    if not scraper_entry:
+        logger.info(f"提供商 '{provider_name}' 在 scrapers 表中不存在，将为其创建新条目。")
+        max_order_stmt = select(func.max(Scraper.displayOrder))
+        max_order = (await session.execute(max_order_stmt)).scalar_one_or_none() or 0
+        new_scraper_entry = Scraper(
+            providerName=provider_name,
+            displayOrder=max_order + 1,
+            isEnabled=True, # 自定义源默认启用
+            useProxy=False
+        )
+        session.add(new_scraper_entry)
+        await session.flush() # Flush to make it available within the transaction
     stmt = select(AnimeSource.id).where(
         AnimeSource.animeId == anime_id,
         AnimeSource.providerName == provider_name,
