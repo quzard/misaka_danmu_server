@@ -562,7 +562,12 @@ class IqiyiScraper(BaseScraper):
             if isinstance(res_list, list):
                 all_results.extend(res_list)
             elif isinstance(res_list, Exception):
-                self.logger.error(f"爱奇艺 ({api_name}): 搜索子任务失败: {res_list}", exc_info=True)
+                # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
+                if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError)):
+                    self.logger.warning(f"爱奇艺 ({api_name}): 搜索时连接超时或网络错误: {res_list}")
+                else:
+                    # 对于其他意外错误，仍然记录完整的堆栈跟踪以供调试。
+                    self.logger.error(f"爱奇艺 ({api_name}): 搜索子任务失败: {res_list}", exc_info=True)
 
         # 基于 mediaId 去重
         unique_results = list({item.mediaId: item for item in all_results}.values())

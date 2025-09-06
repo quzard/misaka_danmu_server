@@ -336,6 +336,9 @@ class RenrenScraper(BaseScraper):
                     episodeCount=episode_count,
                     currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
                 ))
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
+            self.logger.warning(f"renren: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
         except Exception as e:
             self.logger.error(f"renren: 网络搜索 '{keyword}' 失败: {e}", exc_info=True)
 
