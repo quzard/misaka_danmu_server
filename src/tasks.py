@@ -1240,12 +1240,19 @@ async def auto_search_and_import_task(
             existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
 
         if existing_anime:
-            favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
+            # 修正：从 existing_anime 字典中安全地获取ID。
+            # 不同的查询路径可能返回 'id' 或 'animeId' 作为键。
+            # 此更改确保无论哪个键存在，我们都能正确获取ID。
+            anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
+            if not anime_id_to_use:
+                raise ValueError("在已存在的作品记录中未能找到有效的ID。")
+
+            favorited_source = await crud.find_favorited_source_for_anime(session, anime_id_to_use)
             if favorited_source:
                 source_to_use = favorited_source
                 logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['providerName']}")
             else:
-                all_sources = await crud.get_anime_sources(session, existing_anime['id'])
+                all_sources = await crud.get_anime_sources(session, anime_id_to_use)
                 if all_sources:
                     ordered_settings = await crud.get_all_scraper_settings(session)
                     provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}

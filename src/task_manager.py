@@ -62,6 +62,11 @@ class TaskManager:
         """
         self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id})")
         try:
+            # This task is now running, remove it from pending titles
+            # This is now the single point of responsibility for this cleanup.
+            async with self._lock:
+                self._pending_titles.discard(task.title)
+                
             async with self._session_factory() as session:
                 await crud.update_task_progress_in_history(
                     session, task.task_id, TaskStatus.RUNNING, 0, "正在初始化..."
@@ -101,6 +106,8 @@ class TaskManager:
             async with self._lock:
                 if task.unique_key:
                     self._active_unique_keys.discard(task.unique_key)
+                # Also remove from pending_titles again just in case of race conditions.
+                self._pending_titles.discard(task.title)
             task.done_event.set()
 
     async def stop(self):
@@ -117,18 +124,13 @@ class TaskManager:
     async def _worker(self):
         """从队列中获取并执行任务。"""
         while True:
-            # 1. 首先，阻塞等待一个任务。如果在这里被取消，后续代码不会执行。
             task: Task = await self._queue.get()
             try:
-                self._current_task = None  # 清理上一个任务
-                # 从待处理集合中移除
-                async with self._lock:
-                    self._pending_titles.discard(task.title)
                 self._current_task = task
-                # 恢复为 await，确保任务按顺序、一次一个地执行
+                # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task)
             finally:
-                # 2. 确保成功获取任务后，其 task_done() 一定会被调用。
+                self._current_task = None
                 self._queue.task_done()
 
     async def submit_task(
@@ -136,7 +138,8 @@ class TaskManager:
         coro_factory: Callable[[AsyncSession, Callable], Coroutine],
         title: str,
         scheduled_task_id: Optional[str] = None,
-        unique_key: Optional[str] = None
+        unique_key: Optional[str] = None,
+        run_immediately: bool = False
     ) -> Tuple[str, asyncio.Event]:
         """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。"""
         async with self._lock:
@@ -157,7 +160,7 @@ class TaskManager:
                 if unique_key in self._active_unique_keys:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail=f"一个针对此媒体的导入任务已在队列中或正在运行，请勿重复提交。"
+                        detail=f"一个针对此媒体的相似任务已在队列中或正在运行，请勿重复提交。"
                     )
                 self._active_unique_keys.add(unique_key)
             self._pending_titles.add(title)
@@ -170,8 +173,12 @@ class TaskManager:
                 session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id
             )
         
-        await self._queue.put(task)
-        self.logger.info(f"任务 '{title}' 已提交，ID: {task_id}")
+        if run_immediately:
+            self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过主队列。")
+            asyncio.create_task(self._run_task_wrapper(task))
+        else:
+            await self._queue.put(task)
+            self.logger.info(f"任务 '{title}' 已提交到队列，ID: {task_id}")
         return task_id, task.done_event
 
     def _get_progress_callback(self, task: Task) -> Callable:
@@ -210,22 +217,33 @@ class TaskManager:
         注意：此操作不是线程安全的，但对于单工作线程模型是可接受的。
         """
         found_and_removed = False
+        task_to_remove: Optional[Task] = None
         temp_list = []
         while not self._queue.empty():
             try:
                 task = self._queue.get_nowait()
                 if task.task_id == task_id:
                     found_and_removed = True
+                    task_to_remove = task
                     task.done_event.set()
                     self.logger.info(f"已从队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                 else:
                     temp_list.append(task)
             except asyncio.QueueEmpty:
                 break
-        
+
         for task in temp_list:
             await self._queue.put(task)
-            
+
+        # 修正：如果一个待处理任务被取消，必须同时清理其在管理器中的状态（任务标题和唯一键），
+        # 以允许用户重新提交该任务。
+        if found_and_removed and task_to_remove:
+            async with self._lock:
+                self._pending_titles.discard(task_to_remove.title)
+                if task_to_remove.unique_key:
+                    self._active_unique_keys.discard(task_to_remove.unique_key)
+                    self.logger.info(f"已为已取消的待处理任务释放唯一键: {task_to_remove.unique_key}")
+
         return found_and_removed
 
     async def abort_current_task(self, task_id: str) -> bool:

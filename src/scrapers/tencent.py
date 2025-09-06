@@ -1178,18 +1178,33 @@ class TencentScraper(BaseScraper):
         return formatted_comments
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
-        """从腾讯视频URL中提取 media_id (cid 或 vid)，以实现基类的抽象方法。"""
-        # 使用一个正则表达式同时匹配 cover URL 的 cid 和普通视频页的 vid
-        # 模式1: /cover/cid/...  模式2: /vid.html
-        match = re.search(r'/cover/([^/]+?)(?:/|\.html|$)|/([a-zA-Z0-9]{11,})\.html', url)
+        """
+        从腾讯视频URL中提取视频ID (vid)。
+        对于手动导入，我们总是需要 vid 来获取弹幕。
+        """
+        # 模式1: /cover/{cid}/{vid}.html (最常见)
+        match = re.search(r'/cover/[^/]+/([a-zA-Z0-9]+)\.html', url)
         if match:
-            # match.group(1) 对应 cid, match.group(2) 对应 vid
-            media_id = match.group(1) or match.group(2)
-            id_type = "cid" if match.group(1) else "vid"
-            self.logger.info(f"Tencent: 从URL {url} 解析到 {id_type}: {media_id}")
+            vid = match.group(1)
+            self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
+            return vid
+
+        # 模式2: /page/{vid}.html 或 /x/page/{vid}.html (独立视频)
+        match = re.search(r'/(?:x/)?page/([a-zA-Z0-9]+)\.html', url)
+        if match:
+            vid = match.group(1)
+            self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
+            return vid
+
+        # 备用方案：如果以上都不匹配，尝试提取最后一个路径部分作为ID
+        # 这可能会错误地提取到 cid，但作为最后的尝试
+        fallback_match = re.search(r'/([^/]+)\.html', url)
+        if fallback_match:
+            media_id = fallback_match.group(1)
+            self.logger.warning(f"Tencent: 未能精确匹配vid，回退提取最后一个路径部分作为ID: {media_id}")
             return media_id
-        
-        self.logger.warning(f"Tencent: 无法从URL中解析出有效的 media_id: {url}")
+
+        self.logger.error(f"Tencent: 无法从URL中解析出有效的视频ID: {url}")
         return None
 
     def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:

@@ -876,7 +876,7 @@ async def delete_anime(animeId: int, session: AsyncSession = Depends(get_db_sess
         task_id, _ = await task_manager.submit_task(
             lambda s, cb: tasks.delete_anime_task(animeId, s, cb),
             f"外部API删除作品: {details['title']}",
-            unique_key=unique_key
+            unique_key=unique_key, run_immediately=True
         )
         return {"message": "删除作品任务已提交", "taskId": task_id}
     except ValueError as e:
@@ -888,9 +888,11 @@ async def delete_source(sourceId: int, session: AsyncSession = Depends(get_db_se
     info = await crud.get_anime_source_info(session, sourceId)
     if not info: raise HTTPException(404, "数据源未找到")
     try:
+        unique_key = f"delete-source-{sourceId}"
         task_id, _ = await task_manager.submit_task(
             lambda s, cb: tasks.delete_source_task(sourceId, s, cb),
-            f"外部API删除源: {info['title']} ({info['providerName']})"
+            f"外部API删除源: {info['title']} ({info['providerName']})",
+            unique_key=unique_key, run_immediately=True
         )
         return {"message": "删除源任务已提交", "taskId": task_id}
     except ValueError as e:
@@ -941,9 +943,11 @@ async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     try:
+        unique_key = f"delete-episode-{episodeId}"
         task_id, _ = await task_manager.submit_task(
             lambda s, cb: tasks.delete_episode_task(episodeId, s, cb),
-            f"外部API删除分集: {info['title']}"
+            f"外部API删除分集: {info['title']}",
+            unique_key=unique_key, run_immediately=True
         )
         return {"message": "删除分集任务已提交", "taskId": task_id}
     except ValueError as e:

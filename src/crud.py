@@ -384,19 +384,20 @@ async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, 
     result = await session.execute(stmt)
     return result.scalars().all()
 
-async def find_favorited_source_for_anime(session: AsyncSession, title: str, season: int) -> Optional[Dict[str, Any]]:
-    """通过标题和季度查找已存在于库中且被标记为“精确”的数据源。"""
+async def find_favorited_source_for_anime(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
+    """通过 anime_id 查找已存在于库中且被标记为“精确”的数据源。"""
     stmt = (
         select(
             AnimeSource.providerName.label("providerName"),
             AnimeSource.mediaId.label("mediaId"),
             Anime.id.label("animeId"),
-            Anime.title.label("animeTitle"),
+            Anime.title.label("animeTitle"), # 保留标题以用于任务创建
             Anime.type.label("mediaType"),
-            Anime.imageUrl.label("imageUrl")
+            Anime.imageUrl.label("imageUrl"),
+            Anime.year.label("year") # 新增年份以保持数据完整性
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
-        .where(Anime.title == title, Anime.season == season, AnimeSource.isFavorited == True)
+        .where(AnimeSource.animeId == anime_id, AnimeSource.isFavorited == True)
         .limit(1)
     )
     result = await session.execute(stmt)

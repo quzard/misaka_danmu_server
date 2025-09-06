@@ -511,8 +511,9 @@ async def delete_source_from_anime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
+    unique_key = f"delete-source-{sourceId}"
     task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除源 '{source_info['providerName']}' 的任务已提交。", "taskId": task_id}
@@ -534,11 +535,13 @@ async def delete_bulk_episodes(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Episode IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.episodeIds)} 个分集"
+    ids_str = ",".join(sorted([str(eid) for eid in request_data.episodeIds]))
+    unique_key = f"delete-bulk-episodes-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
     
     # 注意：这里我们将整个列表传递给任务
     task_coro = lambda session, callback: tasks.delete_bulk_episodes_task(request_data.episodeIds, session, callback)
     
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episodeIds)} 个分集的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
@@ -715,8 +718,9 @@ async def delete_episode_from_source(
 
     provider_name = episode_info.get('providerName', '未知源')
     task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
+    unique_key = f"delete-episode-{episodeId}"
     task_coro = lambda session, callback: tasks.delete_episode_task(episodeId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "taskId": task_id}
@@ -807,7 +811,7 @@ async def delete_anime_from_library(
     task_title = f"删除作品: {anime_details['title']}"
     unique_key = f"delete-anime-{animeId}"
     task_coro = lambda session, callback: tasks.delete_anime_task(animeId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "taskId": task_id}
@@ -829,8 +833,10 @@ async def delete_bulk_sources(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.sourceIds)} 个数据源"
+    ids_str = ",".join(sorted([str(sid) for sid in request_data.sourceIds]))
+    unique_key = f"delete-bulk-sources-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
     task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
