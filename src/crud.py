@@ -1832,7 +1832,8 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
     elif status_filter == 'completed':
         stmt = stmt.where(TaskHistory.status == '已完成')
 
-    stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(100)
+    # 保留一个上限是为了防止在任务历史非常庞大时，一次性加载过多数据导致性能问题。
+    stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(1000)
     result = await session.execute(stmt)
     return [
         {"taskId": row.taskId, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}

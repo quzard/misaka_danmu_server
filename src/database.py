@@ -268,6 +268,17 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         await conn.execute(truncate_sql)
         logger.info("成功清空 'rate_limit_state' 表。")
 
+        # 同时，从 config 表中移除旧的、现已废弃的速率限制配置键
+        logger.info("正在从 config 表中移除旧的速率限制配置键...")
+        delete_old_keys_sql = text(
+            "DELETE FROM config WHERE config_key IN (:key1, :key2, :key3)"
+        )
+        await conn.execute(
+            delete_old_keys_sql,
+            {"key1": "globalRateLimitEnabled", "key2": "globalRateLimitCount", "key3": "globalRateLimitPeriod"}
+        )
+        logger.info("成功移除旧的速率限制配置键。")
+
         # 插入标志位
         insert_flag_sql = text(
             "INSERT INTO config (config_key, config_value, description) "
@@ -275,7 +286,7 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         )
         await conn.execute(
             insert_flag_sql,
-            {"key": config_key, "value": "true", "desc": ""}
+            {"key": config_key, "value": "true", "desc": "标志位，表示已为兼容性问题执行过一次性的速率限制状态表清理。"}
         )
         logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
     except Exception as e:

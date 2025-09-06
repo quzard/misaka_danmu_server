@@ -1155,7 +1155,6 @@ async def get_execution_task_id(
 @router.get("/rate-limit/status", response_model=models.ControlRateLimitStatusResponse, summary="获取流控状态")
 async def get_rate_limit_status(
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
@@ -1164,7 +1163,7 @@ async def get_rate_limit_status(
     """
     # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
     try:
-        await rate_limiter.check("__global__")
+        await rate_limiter.check("__control_api_status_check__")
     except RateLimitExceededError:
         # 我们只关心检查和重置的副作用，不关心它是否真的超限，所以忽略此错误
         pass
@@ -1172,11 +1171,9 @@ async def get_rate_limit_status(
         # 记录其他潜在错误，但不中断状态获取
         logger.error(f"在获取流控状态时，检查全局流控失败: {e}")
 
-    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "true")
-    global_enabled = global_enabled_str.lower() == 'true'
-    global_limit_str = await config_manager.get("globalRateLimitCount", "50")
-    global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50
-    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
+    global_enabled = rate_limiter.enabled
+    global_limit = rate_limiter.global_limit
+    global_period = rate_limiter.global_period
     period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
 
     all_states = await crud.get_all_rate_limit_states(session)

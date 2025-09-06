@@ -106,16 +106,15 @@ async def lifespan(app: FastAPI):
     await app.state.metadata_manager.initialize()
 
     # 5. 初始化其他依赖于上述管理器的组件
-    app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
+    app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
 
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
 
 
     app.state.task_manager = TaskManager(session_factory)
-    # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager, app.state.rate_limiter, app.state.metadata_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
