@@ -1254,27 +1254,40 @@ class TencentScraper(BaseScraper):
         从腾讯视频URL中提取视频ID (vid)。
         对于手动导入，我们总是需要 vid 来获取弹幕。
         """
-        # 模式1: /cover/{cid}/{vid}.html (最常见)
-        match = re.search(r'/cover/[^/]+/([a-zA-Z0-9]+)\.html', url)
-        if match:
-            vid = match.group(1)
-            self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
-            return vid
+        # 模式1: /cover/{cid}/{vid}.html (最常见，直接包含vid)
+        vid_match = re.search(r'/cover/[^/]+/([a-zA-Z0-9]+)\.html', url)
+        if vid_match:
+            # 检查URL路径段数来确认最后一个部分是vid而不是cid
+            from urllib.parse import urlparse
+            path_parts = urlparse(url).path.split('/')
+            if len(path_parts) >= 5 and path_parts[-2] != 'cover':
+                vid = vid_match.group(1)
+                self.logger.info(f"Tencent: 从URL {url} 直接解析到 vid: {vid}")
+                return vid
 
         # 模式2: /page/{vid}.html 或 /x/page/{vid}.html (独立视频)
-        match = re.search(r'/(?:x/)?page/([a-zA-Z0-9]+)\.html', url)
-        if match:
-            vid = match.group(1)
+        page_match = re.search(r'/(?:x/)?page/([a-zA-Z0-9]+)\.html', url)
+        if page_match:
+            vid = page_match.group(1)
             self.logger.info(f"Tencent: 从URL {url} 解析到 vid: {vid}")
             return vid
 
-        # 备用方案：如果以上都不匹配，尝试提取最后一个路径部分作为ID
-        # 这可能会错误地提取到 cid，但作为最后的尝试
-        fallback_match = re.search(r'/([^/]+)\.html', url)
-        if fallback_match:
-            media_id = fallback_match.group(1)
-            self.logger.warning(f"Tencent: 未能精确匹配vid，回退提取最后一个路径部分作为ID: {media_id}")
-            return media_id
+        # 模式3: /cover/{cid}.html (不含vid的封面页)
+        # 这种情况下，我们需要获取分集列表并返回第一集的vid
+        cid_match = re.search(r'/cover/([^/]+?)(?:\.html|$)', url)
+        if cid_match:
+            cid = cid_match.group(1)
+            self.logger.info(f"Tencent: URL是封面页 (cid={cid})，正在尝试获取第一集vid...")
+            try:
+                episodes = await self.get_episodes(media_id=cid)
+                if episodes:
+                    first_episode_vid = episodes[0].episodeId
+                    self.logger.info(f"Tencent: 成功获取到第一集的 vid: {first_episode_vid}")
+                    return first_episode_vid
+                else:
+                    self.logger.warning(f"Tencent: 无法为封面页 (cid={cid}) 获取任何分集。")
+            except Exception as e:
+                self.logger.error(f"Tencent: 为封面页 (cid={cid}) 获取分集时出错: {e}", exc_info=True)
 
         self.logger.error(f"Tencent: 无法从URL中解析出有效的视频ID: {url}")
         return None
