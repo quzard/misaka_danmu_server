@@ -586,6 +586,34 @@ class TencentScraper(BaseScraper):
         
         self.logger.warning(f"通过API未能获取到电影 (cid={cid}) 的 vid。")
         return None
+    async def _get_cover_info(self, cid: str) -> Optional[Dict[str, Any]]:
+        """获取封面信息，主要为了其中的 chapter_info (季/章信息)。"""
+        payload = {
+            "page_params": {
+                "req_from": "web_vsite",
+                "page_id": "vsite_cover_info",
+                "page_type": "detail_operation",
+                "id_type": "1",
+                "cid": cid,
+            }
+        }
+        try:
+            response = await self._request("POST", self.episodes_api_url, json=payload)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Cover Info Response (cid={cid}): {response.text}")
+            response.raise_for_status()
+            result = response.json()
+            if result.get("ret") == 0 and result.get("data"):
+                for module_list_data in result["data"].get("module_list_datas", []):
+                    for module_data in module_list_data.get("module_datas", []):
+                        if module_data.get("module_id") == "vsite_episode_list":
+                            if chapter_info := module_data.get("module_params", {}).get("chapter_info"):
+                                self.logger.info(f"Tencent: 成功获取到 chapter_info (cid={cid})")
+                                return chapter_info
+        except Exception as e:
+            self.logger.error(f"Tencent: 获取封面信息(chapterInfo)失败 (cid={cid}): {e}", exc_info=True)
+        return None
+    
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         """
         获取分集列表，优先使用新的“分页卡片”策略。
@@ -675,8 +703,33 @@ class TencentScraper(BaseScraper):
             self.logger.info(f"Tencent: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             try:
-                # 优先尝试新的“分页卡片”策略
-                network_episodes = await self._fetch_episodes_with_tabs(media_id)
+                # 策略1: 尝试获取季/章信息，并据此获取所有分集
+                chapter_info = await self._get_cover_info(media_id)
+                if chapter_info and chapter_info.get("chapters"):
+                    self.logger.info(f"Tencent: 找到 {len(chapter_info['chapters'])} 个季/章，将分别获取分集。")
+                    all_episodes_from_chapters: Dict[str, TencentEpisode] = {}
+                    
+                    chapter_tabs = [
+                        TencentEpisodeTabInfo(begin=0, end=0, page_context=chap['tabId'])
+                        for chap in chapter_info['chapters']
+                    ]
+                    
+                    tasks = [self._fetch_episodes_by_tab(media_id, tab) for tab in chapter_tabs]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    for res in results:
+                        if isinstance(res, list):
+                            for ep in res:
+                                all_episodes_from_chapters[ep.vid] = ep
+                        elif isinstance(res, Exception):
+                            self.logger.error(f"获取分集章节时出错: {res}")
+                    
+                    network_episodes = list(all_episodes_from_chapters.values())
+                else:
+                    # 策略2: 如果没有章节信息，回退到分页卡片策略
+                    self.logger.info(f"Tencent: 未找到章节信息，回退到分页卡片策略 (cid={media_id})")
+                    network_episodes = await self._fetch_episodes_with_tabs(media_id)
+
                 if not network_episodes:
                     # 如果卡片策略失败，回退到通用的分页策略
                     self.logger.info(f"Tencent: 分页卡片策略未返回结果，回退到通用分页策略 (cid={media_id})")
