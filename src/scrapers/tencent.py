@@ -797,6 +797,7 @@ class TencentScraper(BaseScraper):
     async def _get_episode_tabs_info(self, cid: str) -> Optional[List[TencentEpisodeTabInfo]]:
         """获取分集列表的分页卡片信息。"""
         payload = {
+            "has_cache": 1,
             "page_params": {
                 "req_from": "web_vsite", "page_id": "vsite_episode_list", "page_type": "detail_operation",
                 "id_type": "1", "page_size": "", "cid": cid, "vid": "", "lid": "", "page_num": "",
@@ -822,13 +823,15 @@ class TencentScraper(BaseScraper):
     async def _fetch_episodes_by_tab(self, cid: str, tab: TencentEpisodeTabInfo) -> List[TencentEpisode]:
         """根据单个分页卡片信息获取分集。"""
         payload = {
+            "has_cache": 1,
             "page_params": {
                 "req_from": "web_vsite", "page_id": "vsite_episode_list", "page_type": "detail_operation",
                 "id_type": "1", "page_size": "", "cid": cid, "vid": "", "lid": "", "page_num": "",
                 "page_context": tab.page_context, "detail_page_type": "1"
             }
         }
-        response = await self.client.post(self.episodes_api_url, json=payload)
+        # 修正：使用 self._request 方法以确保代理和通用头部被应用
+        response = await self._request("POST", self.episodes_api_url, json=payload)
         response.raise_for_status()
         result = TencentPageResult.model_validate(response.json())
         
@@ -849,21 +852,28 @@ class TencentScraper(BaseScraper):
 
         self.logger.info(f"Tencent: 找到 {len(tabs)} 个分集卡片，开始并发获取...")
         all_episodes: Dict[str, TencentEpisode] = {}
-        
-        tasks = [self._fetch_episodes_by_tab(cid, tab) for tab in tabs]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # 新增：批处理逻辑，参考JS实现，避免一次性发送过多请求
+        batch_size = 3
+        for i in range(0, len(tabs), batch_size):
+            batch = tabs[i:i + batch_size]
+            self.logger.debug(f"Tencent: 正在处理分集卡片批次 {i//batch_size + 1}...")
+            tasks = [self._fetch_episodes_by_tab(cid, tab) for tab in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for res in results:
-            if isinstance(res, list):
-                for ep in res:
-                    all_episodes[ep.vid] = ep
-            elif isinstance(res, Exception):
-                self.logger.error(f"获取分集卡片时出错: {res}")
+            for res in results:
+                if isinstance(res, list):
+                    for ep in res:
+                        all_episodes[ep.vid] = ep
+                elif isinstance(res, Exception):
+                    self.logger.error(f"获取分集卡片时出错: {res}")
+            
+            # 批次间延时
+            if i + batch_size < len(tabs):
+                await asyncio.sleep(0.3)
 
         return list(all_episodes.values())
 
     async def _fetch_episodes_paginated(self, cid: str) -> List[TencentEpisode]:
-        """备用策略：通用的分页获取逻辑。参考了外部脚本的实现以提高健壮性。"""
         all_episodes: Dict[str, TencentEpisode] = {}
         
         # 默认尝试较多页数，由智能停止逻辑来提前终止
@@ -917,7 +927,7 @@ class TencentScraper(BaseScraper):
             # 优化：使用更健壮的循环终止逻辑
             if new_episodes_this_page == 0:
                 no_new_data_count += 1
-                if no_new_data_count >= 2:
+                if no_new_data_count >= 3: # 修正：增加容错，连续3页没有新数据才停止
                     self.logger.info(f"Tencent: 连续 {no_new_data_count} 页未获取到新分集，终止分页 (cid={cid})。")
                     break
             else:
