@@ -63,6 +63,8 @@ class TencentSearchVideoInfo(BaseModel):
     img_url: Optional[str] = Field(None, alias="imgUrl")
     subject_doc: Optional[TencentSubjectDoc] = Field(None, alias="subjectDoc") # type: ignore
     play_sites: Optional[List[Dict[str, Any]]] = Field(None, alias="playSites") # Added for filtering
+    sub_title: Optional[str] = Field(None, alias="subTitle")
+    play_flag: Optional[int] = Field(None, alias="playFlag")
 
 class TencentSearchDoc(BaseModel):
     id: str  # 这是 cid
@@ -277,6 +279,11 @@ class TencentScraper(BaseScraper):
         # 这通常是无效的或非正片内容（如“安利向”、“二创合集”等）。
         if not video_info.year or video_info.year == 0:
             self.logger.debug(f"跳过无年份信息的项目: {video_info.title}")
+            return None
+
+        # 新增：过滤掉“全网搜”等非直接播放的结果
+        if video_info.sub_title == "全网搜" or video_info.play_flag == 2:
+            self.logger.debug(f"跳过“全网搜”或非直接播放的结果: {video_info.title}")
             return None
 
         # Extract and clean title
