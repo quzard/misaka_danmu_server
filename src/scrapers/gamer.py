@@ -12,6 +12,7 @@ from opencc import OpenCC
 
 from .. import crud, models
 from ..config_manager import ConfigManager
+from ..utils import parse_search_keyword
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
@@ -21,109 +22,117 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
-
-    # 新增：声明此源是可配置的，并定义了配置字段
-    # 键 (key) 是数据库中 config 表的 config_key
-    # 值 (value) 是在UI中显示的标签
-    configurable_fields: Dict[str, str] = {
-        "gamer_cookie": "Cookie",
-        "gamer_user_agent": "User-Agent",
-    }
-    _EPISODE_BLACKLIST_PATTERN = re.compile(r"加更|走心|解忧|纯享", re.IGNORECASE)
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
-        self.client = httpx.AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-            timeout=20.0,
-            follow_redirects=True
-        )
-        self._cookie = ""
-        self._config_loaded = False
+        self.client: Optional[httpx.AsyncClient] = None
+
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+
+    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
+        """
+        获取并编译用于过滤分集的正则表达式。
+        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
+        """
+        # 1. 构造该源特定的配置键，确保与数据库键名一致
+        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
+        
+        # 2. 从数据库动态获取用户自定义规则
+        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
+
+        # 3. 仅当用户配置了非空的规则时才进行过滤
+        if custom_blacklist_str and custom_blacklist_str.strip():
+            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
+            try:
+                return re.compile(custom_blacklist_str, re.IGNORECASE)
+            except re.error as e:
+                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
+        
+        # 4. 如果规则为空或未配置，则不进行过滤
+        return None
 
     async def _ensure_config(self):
-        """从数据库配置中加载Cookie和User-Agent。"""
-        if self._config_loaded:
-            return
-        
-        async with self._session_factory() as session:
-            self._cookie = await crud.get_config_value(session, "gamerCookie", "")
-            user_agent = await crud.get_config_value(session, "gamerUserAgent", "")
+        """
+        实时从数据库加载并应用Cookie和User-Agent配置。
+        此方法在每次请求前调用，以确保配置实时生效。
+        """
+        await self._ensure_client()
+        assert self.client is not None
+        cookie = await self.config_manager.get("gamerCookie", "")
+        user_agent = await self.config_manager.get("gamerUserAgent", "")
 
-        if self._cookie:
-            self.client.headers["Cookie"] = self._cookie
+        if cookie:
+            self.client.headers["Cookie"] = cookie
+        elif "Cookie" in self.client.headers:
+            del self.client.headers["Cookie"]
+
         if user_agent:
             self.client.headers["User-Agent"] = user_agent
-        
-        self._config_loaded = True
+        else:
+            # 如果数据库中没有，则恢复为默认值
+            self.client.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    async def _refresh_cookie(self) -> bool:
-        """
-        尝试通过调用 token 端点来刷新 gamer.com.tw 的 cookie。
-        如果 cookie 成功刷新并更新，则返回 True，否则返回 False。
-        """
-        self.logger.info("Gamer: Cookie可能已过期，正在尝试刷新...")
-        try:
-            # 刷新端点。客户端会自动发送现有的 cookie。
-            refresh_url = "https://ani.gamer.com.tw/ajax/token.php"
-            response = await self.client.post(refresh_url, headers={"Referer": "https://ani.gamer.com.tw/"})
-            response.raise_for_status()
-
-            # httpx 会自动使用 Set-Cookie 头更新其 cookie jar。
-            # 我们现在需要提取新的 cookie 并将其保存回数据库。
-            new_cookie_str = "; ".join([f"{name}={value}" for name, value in self.client.cookies.items()])
-            
-            if new_cookie_str and new_cookie_str != self._cookie:
-                self.logger.info("Gamer: Cookie 刷新成功，正在更新数据库...")
-                async with self._session_factory() as session:
-                    await crud.update_config_value(session, "gamerCookie", new_cookie_str)
-                self._cookie = new_cookie_str # 更新内部状态
-                return True
-            else:
-                self.logger.warning("Gamer: Cookie 刷新请求已发送，但未收到新的 Cookie 值。")
-                return False
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403:
-                self.logger.error(f"Gamer: 刷新 Cookie 失败 (403 Forbidden)。这通常意味着您的 Cookie 已完全失效或 IP 被临时阻止。请尝试在设置中更新 Cookie。")
-            else:
-                self.logger.error(f"Gamer: 刷新 Cookie 时发生 HTTP 错误: {e}", exc_info=True)
-            return False
-        except Exception as e:
-            self.logger.error(f"Gamer: 刷新 Cookie 时发生未知错误: {e}", exc_info=True)
-            return False
-
-    async def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
-        """一个可以进行请求的包装器，在 cookie 刷新后可以重试一次。"""
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """一个简单的请求包装器。"""
         await self._ensure_config()
+        # _ensure_config already calls _ensure_client
+        assert self.client is not None
         response = await self.client.request(method, url, **kwargs)
         if await self._should_log_responses():
             # 截断HTML以避免日志过长
             scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
-        is_login_required = "登入" in response.text and "animeVideo" in url
-        if response.status_code == 200 and not is_login_required:
-            return response
-        self.logger.warning(f"Gamer: 请求 {url} 疑似需要登录或已失败 (状态码: {response.status_code})。")
-        if await self._refresh_cookie():
-            self.logger.info(f"Gamer: Cookie 刷新后，正在重试请求 {url}...")
-            response = await self.client.request(method, url, **kwargs)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Gamer Retry Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
         return response
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """
+        Performs a cached search for Gamer content.
+        It caches the base results for a title and then filters them based on season.
+        """
         await self._ensure_config()
-        trad_keyword = self.cc_s2t.convert(keyword)
-        self.logger.info(f"Gamer: 正在搜索 '{keyword}' (繁体: '{trad_keyword}')...")
+        
+        parsed = parse_search_keyword(keyword)
+        search_title = parsed['title']
+        search_season = parsed['season']
+        
+        trad_search_title = self.cc_s2t.convert(search_title)
+        cache_key = f"search_base_{self.provider_name}_{trad_search_title}"
+        cached_results = await self._get_from_cache(cache_key)
 
+        if cached_results:
+            self.logger.info(f"Gamer: 从缓存中命中基础搜索结果 (title='{search_title}')")
+            all_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
+        else:
+            self.logger.info(f"Gamer: 缓存未命中，正在为标题 '{search_title}' (繁体: '{trad_search_title}') 执行网络搜索...")
+            all_results = await self._perform_network_search(trad_search_title, episode_info)
+            if all_results:
+                await self._set_to_cache(cache_key, [r.model_dump() for r in all_results], 'search_ttl_seconds', 3600)
+
+        if search_season is None:
+            return all_results
+
+        # Filter results by season
+        final_results = [item for item in all_results if item.season == search_season]
+        self.logger.info(f"Gamer: 为 S{search_season} 过滤后，剩下 {len(final_results)} 个结果。")
+        return final_results
+
+    async def _perform_network_search(self, trad_keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """Performs the actual network search for Gamer."""
         url = "https://ani.gamer.com.tw/search.php"
         params = {"keyword": trad_keyword}
         
         try:
-            response = await self._request_with_retry("GET", url, params=params)
+            response = await self._request("GET", url, params=params)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml")
 
@@ -181,35 +190,101 @@ class GamerScraper(BaseScraper):
                 )
                 results.append(provider_search_info)
             
-            self.logger.info(f"Gamer: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+            self.logger.info(f"Gamer: 网络搜索 '{trad_keyword}' 完成，找到 {len(results)} 个结果。")
             if results:
                 log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
                 self.logger.info(f"Gamer: 搜索结果列表:\n{log_results}")
             return results
 
         except (httpx.TimeoutException, httpx.ConnectError) as e:
-            self.logger.warning(f"Gamer: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
+            self.logger.warning(f"Gamer: 搜索 '{trad_keyword}' 时连接超时或网络错误: {e}")
             return []
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:
-                self.logger.error(f"Gamer: 搜索 '{keyword}' 失败 (403 Forbidden)。这通常是由于无效或过期的 Cookie 导致的。请尝试在“搜索源”设置中更新巴哈姆特动画疯的 Cookie。")
+                self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 失败 (403 Forbidden)。这通常是由于无效或过期的 Cookie 导致的。请尝试在“搜索源”设置中更新巴哈姆特动画疯的 Cookie。")
             else:
-                self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生 HTTP 错误: {e}", exc_info=True)
+                self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 时发生 HTTP 错误: {e}", exc_info=True)
             return []
         except Exception as e:
-            self.logger.error(f"Gamer: 搜索 '{keyword}' 时发生未知错误: {e}", exc_info=True)
+            self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 时发生未知错误: {e}", exc_info=True)
             return []
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
-        """(未实现) 从URL中提取作品信息。"""
-        self.logger.warning(f"从URL导入功能尚未为 {self.provider_name} 实现。")
-        raise NotImplementedError(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+        """从动画疯URL中提取作品信息。"""
+        await self._ensure_config()
+        self.logger.info(f"Gamer: 正在从URL提取信息: {url}")
+
+        sn_match = re.search(r"sn=(\d+)", url)
+        if not sn_match:
+            self.logger.warning(f"Gamer: 无法从URL中解析出sn号: {url}")
+            return None
+        
+        sn = sn_match.group(1)
+
+        try:
+            response = await self._request("GET", url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "lxml")
+        except Exception as e:
+            self.logger.error(f"Gamer: 访问URL失败 {url}: {e}", exc_info=True)
+            return None
+
+        # 检查是否是分集页面，如果是，则找到系列页面的链接
+        media_id = sn
+        if "animeVideo.php" in url:
+            back_to_list_link = soup.select_one(".v-info__title a[href*='animeRef.php']")
+            if back_to_list_link:
+                series_sn_match = re.search(r"sn=(\d+)", back_to_list_link['href'])
+                if series_sn_match:
+                    media_id = series_sn_match.group(1)
+                    self.logger.info(f"Gamer: 从分集页面 (sn={sn}) 找到系列ID: {media_id}")
+                    # 获取系列页面的内容
+                    series_url = f"https://ani.gamer.com.tw/animeRef.php?sn={media_id}"
+                    try:
+                        response = await self._request("GET", series_url)
+                        response.raise_for_status()
+                        soup = BeautifulSoup(response.text, "lxml")
+                    except Exception as e:
+                        self.logger.error(f"Gamer: 访问系列页面失败 {series_url}: {e}", exc_info=True)
+                        return None
+                else:
+                    self.logger.warning(f"Gamer: 在分集页面上找到了返回链接，但无法解析出系列sn号。")
+                    return None
+        
+        try:
+            title_tag = soup.select_one(".anime_name h1")
+            if not title_tag:
+                self.logger.error(f"Gamer: 无法从系列页面 (sn={media_id}) 解析标题。")
+                return None
+            title_trad = title_tag.text.strip()
+            title_simp = self.cc_t2s.convert(title_trad)
+
+            image_url = None
+            img_tag = soup.select_one(".anime_info_pic img")
+            if img_tag:
+                image_url = img_tag.get("src")
+
+            episode_count = len(soup.select(".season a[href*='animeVideo.php']"))
+            media_type = "movie" if episode_count == 1 else "tv_series"
+
+            return models.ProviderSearchInfo(
+                provider=self.provider_name, mediaId=media_id, title=title_simp,
+                type=media_type, season=get_season_from_title(title_simp),
+                imageUrl=image_url, episodeCount=episode_count
+            )
+        except Exception as e:
+            self.logger.error(f"Gamer: 解析系列页面 (sn={media_id}) 时发生错误: {e}", exc_info=True)
+            return None
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
         """从动画疯URL中提取sn号。"""
         sn_match = re.search(r"sn=(\d+)", url)
         if sn_match: return sn_match.group(1)
         return None
+
+    def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
+        """For Gamer, the episode ID is a simple string (sn), so no formatting is needed."""
+        return str(provider_episode_id)
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         await self._ensure_config()
@@ -219,54 +294,48 @@ class GamerScraper(BaseScraper):
         url = f"https://ani.gamer.com.tw/animeRef.php?sn={media_id}"
         
         try:
-            response = await self._request_with_retry("GET", url)
+            response = await self._request("GET", url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml")
 
-            episodes = []
+            raw_episodes = []
             season_section = soup.find("section", class_="season")
             if season_section:
                 ep_links = season_section.find_all("a")
-                for i, link in enumerate(ep_links):
-                    href = link.get("href")
-                    sn_match = re.search(r"\?sn=(\d+)", href)
-                    if not sn_match: continue
-                    
-                    episodes.append(models.ProviderEpisodeInfo(
-                        provider=self.provider_name, episodeId=sn_match.group(1),
-                        title=self.cc_t2s.convert(link.text.strip()),
-                        episodeIndex=i + 1,
-                        url=f"https://ani.gamer.com.tw{href}"
-                    ))
+                for link in ep_links:
+                    raw_episodes.append({'link': link, 'title': link.text.strip()})
             else:
                 script_content = soup.find("script", string=re.compile("animefun.videoSn"))
                 if script_content:
                     sn_match = re.search(r"animefun.videoSn\s*=\s*(\d+);", script_content.string)
                     title_match = re.search(r"animefun.title\s*=\s*'([^']+)';", script_content.string)
                     if sn_match and title_match:
-                        ep_sn = sn_match.group(1)
-                        episodes.append(models.ProviderEpisodeInfo(
-                            provider=self.provider_name, episodeId=ep_sn,
-                            title=self.cc_t2s.convert(title_match.group(1)), episodeIndex=1,
-                            url=f"https://ani.gamer.com.tw/animeVideo.php?sn={ep_sn}"
-                        ))
+                        raw_episodes.append({'link': None, 'sn': sn_match.group(1), 'title': title_match.group(1)})
 
-            # 根据黑名单过滤分集
-            if self._EPISODE_BLACKLIST_PATTERN:
-                original_count = len(episodes)
-                episodes = [ep for ep in episodes if not self._EPISODE_BLACKLIST_PATTERN.search(ep.title)]
-                filtered_count = original_count - len(episodes)
-                if filtered_count > 0:
-                    self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {filtered_count} 个分集。")
-            
-            # Apply custom blacklist from config
+            # 统一过滤逻辑
             blacklist_pattern = await self.get_episode_blacklist_pattern()
+            filtered_raw_episodes = raw_episodes
             if blacklist_pattern:
-                original_count = len(episodes)
-                episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
-                filtered_count = original_count - len(episodes)
-                if filtered_count > 0:
-                    self.logger.info(f"Gamer: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
+                original_count = len(raw_episodes)
+                filtered_raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep['title'])]
+                self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {original_count - len(filtered_raw_episodes)} 个分集。")
+
+            # 过滤后再编号
+            episodes = []
+            for i, raw_ep in enumerate(filtered_raw_episodes):
+                if raw_ep.get('link'):
+                    href = raw_ep['link'].get("href")
+                    sn_match = re.search(r"\?sn=(\d+)", href)
+                    if not sn_match: continue
+                    episodes.append(models.ProviderEpisodeInfo(
+                        provider=self.provider_name, episodeId=sn_match.group(1), title=self.cc_t2s.convert(raw_ep['title']),
+                        episodeIndex=i + 1, url=f"https://ani.gamer.com.tw{href}"
+                    ))
+                else: # 单集视频
+                    episodes.append(models.ProviderEpisodeInfo(
+                        provider=self.provider_name, episodeId=raw_ep['sn'], title=self.cc_t2s.convert(raw_ep['title']),
+                        episodeIndex=1, url=f"https://ani.gamer.com.tw/animeVideo.php?sn={raw_ep['sn']}"
+                    ))
 
             if target_episode_index:
                 return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
@@ -291,21 +360,8 @@ class GamerScraper(BaseScraper):
             if progress_callback: await progress_callback(10, "正在请求弹幕数据...")
             
             await self._ensure_config()
-            response = await self.client.post(url, data=data)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Gamer Danmaku Response (episode_id={episode_id}): {response.text}")
-            try:
-                danmu_data = response.json()
-            except json.JSONDecodeError:
-                danmu_data = None
-
-            if not isinstance(danmu_data, list):
-                self.logger.warning(f"Gamer: 弹幕API未返回列表或有效JSON，尝试刷新Cookie后重试。响应: {response.text[:100]}")
-                if await self._refresh_cookie():
-                    response = await self.client.post(url, data=data)
-                    if await self._should_log_responses():
-                        scraper_responses_logger.debug(f"Gamer Danmaku Retry Response (episode_id={episode_id}): {response.text}")
-                danmu_data = response.json()
+            response = await self._request("POST", url, data=data)
+            danmu_data = response.json()
 
             if not isinstance(danmu_data, list):
                 self.logger.error(f"Gamer: 刷新Cookie后，弹幕API仍未返回列表 (episode_id={episode_id})")
@@ -351,7 +407,8 @@ class GamerScraper(BaseScraper):
                     
                     color = int(hex_color.lstrip('#'), 16)
                     
-                    p_string = f"{time_sec:.2f},{mode},{color},[{self.provider_name}]"
+                    # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
+                    p_string = f"{time_sec:.2f},{mode},25,{color},[{self.provider_name}]"
                     
                     formatted_comments.append({
                         # 修正：使用 'sn' (弹幕流水号) 作为唯一的弹幕ID (cid)，而不是 'userid'，以避免同一用户发送多条弹幕时出现重复键错误。

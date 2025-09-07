@@ -206,10 +206,7 @@ export const getWebhookServices = () => api.get('/api/ui/webhooks/available')
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */
 export const getBangumiConfig = () => api.get('/api/ui/config/provider/bangumi')
-/** 设置bangumi api配置
- * bangumi_client_id
- * bangumi_client_secret
- */
+/** 设置bangumi api配置 */
 export const setBangumiConfig = data =>
   api.put('/api/ui/config/provider/bangumi', data)
 /** 获取授权信息 */
@@ -244,6 +241,12 @@ export const getProxyConfig = () => api.get('/api/ui/config/proxy')
 /** 设置代理配置 */
 export const setProxyConfig = data => api.put('/api/ui/config/proxy', data)
 
+/** 获取受信任的反向代理IP */
+export const getTrustedProxiesConfig = () =>
+  api.get('/api/ui/config/trustedProxies')
+/** 设置受信任的反向代理IP */
+export const setTrustedProxiesConfig = data =>
+  api.put('/api/ui/config/trustedProxies', data)
 /** ---------------------------------------------- 搜索源配置----------------------------------------------  */
 /** 获取刮削器配置 */
 export const getScrapers = () => api.get('/api/ui/scrapers')
@@ -260,6 +263,14 @@ export const getSingleScraper = data =>
 export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */
 export const setMetaData = data => api.put('/api/ui/metadata-sources', data)
+
+/** ---------------------------------------------- 全局过滤设置 ----------------------------------------------  */
+/** 获取全局过滤规则 */
+export const getGlobalFilter = () =>
+  api.get('/api/ui/settings/global-filter')
+/** 更新全局过滤规则 */
+export const setGlobalFilter = data =>
+  api.put('/api/ui/settings/global-filter', data)
 
 /** 获取bi站登录信息 */
 export const getbiliUserinfo = () =>
@@ -287,6 +298,17 @@ export const getAnimeDetail = data =>
 /** 保存影视信息 */
 export const setAnimeDetail = data =>
   api.put(`/api/ui/library/anime/${data.animeId}`, data)
+
+/** 创建自定义作品条目 */
+export const createAnimeEntry = data => api.post('/api/ui/library/anime', data)
+
+/** 为作品添加数据源 */
+export const addSourceToAnime = data =>
+  api.post(`/api/ui/library/anime/${data.animeId}/sources`, data)
+
+/** 批量手动导入 */
+export const batchManualImport = data =>
+  api.post(`/api/ui/library/source/${data.sourceId}/batch-import`, data)
 
 /** 获取影视的资源 */
 export const getAnimeSource = data =>
@@ -348,6 +370,10 @@ export const deleteAnimeEpisodeSingle = data =>
 /** 重整集数 */
 export const resetEpisode = data =>
   api.post(`/api/ui/library/source/${data.sourceId}/reorder-episodes`)
+
+/** 集数偏移 */
+export const offsetEpisodes = data =>
+  api.post('/api/ui/library/episodes/offset', data)
 
 /** 获取弹幕详情 */
 export const getDanmakuDetail = data => api.get(`/api/ui/comment/${data.id}`)

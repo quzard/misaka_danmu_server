@@ -51,3 +51,24 @@ export function parseSearchKeyword(keyword) {
   }
   return { title: keyword, season: null, episode: null }
 }
+
+export function isUrl(str) {
+  const urlRegex = /^https?:\/\//i
+  return urlRegex.test(str)
+}
+
+export function generateRandomStr(len = 15) {
+  const numbers = '0123456789'
+  const upperLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const lowerLetters = 'abcdefghijklmnopqrstuvwxyz'
+  const charPool = numbers + upperLetters + lowerLetters
+
+  let result = ''
+  const poolLength = charPool.length
+  for (let i = 0; i < len; i++) {
+    const randomIndex = Math.floor(Math.random() * poolLength)
+    result += charPool[randomIndex]
+  }
+
+  return result
+}

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..config_manager import ConfigManager
 from .. import models, crud
+from ..utils import parse_search_keyword
 from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
@@ -147,37 +149,55 @@ class MgtvScraper(BaseScraper):
     provider_name = "mgtv"
     handled_domains = ["www.mgtv.com"]
     referer = "https://www.mgtv.com/"
-
-    # English keywords that often appear as standalone acronyms or words
-    _ENG_JUNK = r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot'
-    # Chinese keywords that are often embedded in titles.
-    _CN_JUNK = r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇|纪录片|访谈|番外|短片|加更|走心|解忧|纯享'
-
-    _JUNK_TITLE_PATTERN = re.compile(
-        r'(\[|\【|\b)(' + _ENG_JUNK + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)|(' + _CN_JUNK + r')',
-        re.IGNORECASE
-    )
+    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)|加更(版)?|花絮|预告|特辑|(特别|惊喜|纳凉)?企划|彩蛋|专访|幕后(花絮)?|直播|纯享|未播|衍生|番外|合伙人手记|会员(专享|加长)|片花|精华|看点|速看|解读|reaction|超前营业|超前(vlog)?|陪看(记)?|.{3,}篇|影评)(.*?)$"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.mgtv.com/",
-                "Sec-Fetch-Site": "same-site",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Dest": "empty",
-            },
-            timeout=20.0,
-            follow_redirects=True
-        )
+        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，
         # 适当增加延迟以提高稳定性。
         self._min_interval = 1.0
 
+    async def _ensure_client(self):
+        """Ensures the httpx client is initialized, with proxy support."""
+        if self.client is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.mgtv.com/",
+                "Sec-Fetch-Site": "same-site",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Dest": "empty",
+            }
+            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+
+    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
+        """
+        获取并编译用于过滤分集的正则表达式。
+        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
+        """
+        # 1. 构造该源特定的配置键，确保与数据库键名一致
+        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
+        
+        # 2. 从数据库动态获取用户自定义规则
+        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
+
+        # 3. 仅当用户配置了非空的规则时才进行过滤
+        if custom_blacklist_str and custom_blacklist_str.strip():
+            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
+            try:
+                return re.compile(custom_blacklist_str, re.IGNORECASE)
+            except re.error as e:
+                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
+        
+        # 4. 如果规则为空或未配置，则不进行过滤
+        return None
+
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
+        await self._ensure_client()
+        assert self.client is not None
         async with self._api_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
@@ -188,10 +208,61 @@ class MgtvScraper(BaseScraper):
             return response
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        self.logger.info(f"MGTV: 正在搜索 '{keyword}'...")
+        """
+        Performs a cached search for Mgtv content.
+        It caches the base results for a title and then filters them based on season.
+        """
+        parsed = parse_search_keyword(keyword)
+        search_title = parsed['title']
+        search_season = parsed['season']
+
+        cache_key = f"search_base_{self.provider_name}_{search_title}"
+        cached_results = await self._get_from_cache(cache_key)
+
+        if cached_results:
+            self.logger.info(f"MGTV: 从缓存中命中基础搜索结果 (title='{search_title}')")
+            all_results = [models.ProviderSearchInfo.model_validate(r) for r in cached_results]
+        else:
+            self.logger.info(f"MGTV: 缓存未命中，正在为标题 '{search_title}' 执行网络搜索...")
+            all_results = await self._perform_network_search(search_title, episode_info)
+            if all_results:
+                await self._set_to_cache(cache_key, [r.model_dump() for r in all_results], 'search_ttl_seconds', 3600)
+
+        if search_season is None:
+            return all_results
+
+        # Filter results by season
+        final_results = [item for item in all_results if item.season == search_season]
+        self.logger.info(f"MGTV: 为 S{search_season} 过滤后，剩下 {len(final_results)} 个结果。")
+        return final_results
+
+    async def _get_episode_count(self, media_id: str) -> Optional[int]:
+        """Helper to fetch only the episode count for a given media_id."""
+        try:
+            # Use a small size to minimize data transfer, as we only need the 'total' count.
+            url = f"https://pcweb.api.mgtv.com/variety/showlist?collection_id={media_id}&page=1&size=1&_support=10000000"
+            response = await self._request_with_rate_limit("GET", url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"MGTV Episode Count Response (media_id={media_id}): {response.text}")
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200 and data.get("data"):
+                total = data["data"].get("total")
+                if total is not None:
+                    self.logger.info(f"MGTV: 成功获取 media_id={media_id} 的总集数: {total}")
+                    return int(total)
+        except Exception as e:
+            self.logger.warning(f"MGTV: 获取 media_id={media_id} 的总集数失败: {e}")
+        return None
+
+    async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """Performs the actual network search for Mgtv."""
+        self.logger.info(f"MGTV: 正在为 '{keyword}' 执行网络搜索...")
         url = f"https://mobileso.bz.mgtv.com/msite/search/v2?q={keyword}&pc=30&pn=1&sort=-99&ty=0&du=0&pt=0&corr=1&abroad=0&_support=10000000000000000"
         
         try:
@@ -215,16 +286,14 @@ class MgtvScraper(BaseScraper):
                                 self.logger.debug(f"MGTV: 跳过一个非芒果TV自有的搜索结果: {item.title} (源: {item.source})")
                                 continue
 
-                            # 新增：使用正则表达式过滤掉预告、花絮等非正片内容
-                            if self._JUNK_TITLE_PATTERN.search(item.title):
-                                self.logger.debug(f"MGTV: 过滤掉非正片内容: '{item.title}'")
-                                continue
-
                             if not item.id:
                                 continue
                             
                             media_type = "movie" if item.type_name == "电影" else "tv_series"
                             
+                            # For movies, episode count is always 1. For TV, it will be fetched later.
+                            episode_count = 1 if media_type == "movie" else None
+
                             provider_search_info = models.ProviderSearchInfo(
                                 provider=self.provider_name,
                                 mediaId=item.id,
@@ -233,19 +302,30 @@ class MgtvScraper(BaseScraper):
                                 season=get_season_from_title(item.title),
                                 year=item.year,
                                 imageUrl=item.img,
-                                # 搜索结果中不包含总集数，设为None
-                                episodeCount=None,
+                                episodeCount=episode_count,
                                 currentEpisodeIndex=episode_info.get("episode") if episode_info else None
                             )
                             results.append(provider_search_info)
                         except ValidationError:
                             # 安全地跳过不符合我们期望结构的项目（如广告、按钮等）
                             self.logger.debug(f"MGTV: 跳过一个不符合预期的搜索结果项: {item_dict}")
-                            continue
+                            continue            
             
-            self.logger.info(f"MGTV: 搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
+            # Concurrently fetch episode counts for TV series
+            async def fetch_and_set_count(p_info: models.ProviderSearchInfo):
+                if p_info.type == "tv_series" and p_info.mediaId:
+                    count = await self._get_episode_count(p_info.mediaId)
+                    if count is not None:
+                        p_info.episodeCount = count
+            
+            tasks = [fetch_and_set_count(res) for res in results if res.type == 'tv_series']
+            if tasks:
+                self.logger.info(f"MGTV: 正在为 {len(tasks)} 个电视剧/动漫结果并发获取总集数...")
+                await asyncio.gather(*tasks)
+
+            self.logger.info(f"MGTV: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
             if results:
-                log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in results])
+                log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'}, 集数: {r.episodeCount or 'N/A'})" for r in results])
                 self.logger.info(f"MGTV: 搜索结果列表:\n{log_results}")
             return results
         except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -256,12 +336,87 @@ class MgtvScraper(BaseScraper):
             return []
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
-        """(未实现) 从URL中提取作品信息。"""
-        self.logger.warning(f"从URL导入功能尚未为 {self.provider_name} 实现。")
-        raise NotImplementedError(f"从URL导入功能尚未为 {self.provider_name} 实现。")
+        """从芒果TV URL中提取作品信息。"""
+        self.logger.info(f"MGTV: 正在从URL提取信息: {url}")
+        
+        # 从URL中提取 collection_id
+        match = re.search(r'/b/(\d+)', url)
+        if not match:
+            self.logger.warning(f"MGTV: 无法从URL中解析出 collection_id: {url}")
+            return None
+        
+        collection_id = match.group(1)
+        series_url = f"https://www.mgtv.com/b/{collection_id}/"
+
+        try:
+            response = await self._request_with_rate_limit("GET", series_url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "lxml")
+
+            title_tag = soup.select_one("h1.title")
+            if not title_tag:
+                self.logger.error(f"MGTV: 无法从系列页面 (collection_id={collection_id}) 解析标题。")
+                return None
+            
+            title = title_tag.text.strip()
+            image_url = soup.select_one("div.v-img img")["src"] if soup.select_one("div.v-img img") else None
+            
+            # 尝试通过计算分集链接数量来获取总集数
+            episode_count = len(soup.select(".episode-list-box a[href*='/b/']"))
+            media_type = "movie" if episode_count == 1 else "tv_series"
+
+            return models.ProviderSearchInfo(
+                provider=self.provider_name, mediaId=collection_id, title=title,
+                type=media_type, season=get_season_from_title(title),
+                imageUrl=image_url, episodeCount=episode_count if episode_count > 0 else None
+            )
+        except Exception as e:
+            self.logger.error(f"MGTV: 解析系列页面 (collection_id={collection_id}) 时发生错误: {e}", exc_info=True)
+            return None
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         self.logger.info(f"MGTV: 正在为 media_id={media_id} 获取分集列表...")
+
+        # --- 新增：电影类型的专门处理逻辑 ---
+        if db_media_type == 'movie':
+            self.logger.info(f"MGTV: 检测到媒体类型为电影 (media_id={media_id})，将获取正片。")
+            url = f"https://pcweb.api.mgtv.com/variety/showlist?allowedRC=1&collection_id={media_id}&month=&page=1&_support=10000000"
+            try:
+                response = await self._request_with_rate_limit("GET", url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"MGTV Movie Episodes Response (media_id={media_id}): {response.text}")
+                response.raise_for_status()
+                result = MgtvEpisodeListResult.model_validate(response.json())
+
+                if result.data and result.data.list:
+                    # 智能地寻找正片：
+                    # 1. 优先寻找 `isIntact` 为 "1" 的条目，这通常是正片。
+                    main_feature = next((ep for ep in result.data.list if ep.isIntact == "1"), None)
+                    
+                    # 2. 如果找不到，则回退到寻找第一个不是预告片 (`isnew` 不为 "2") 的条目。
+                    if not main_feature:
+                        main_feature = next((ep for ep in result.data.list if ep.isnew != "2"), None)
+
+                    # 3. 如果还是找不到，作为最后的备用方案，直接使用列表中的第一个条目。
+                    if not main_feature:
+                        main_feature = result.data.list[0] if result.data.list else None
+
+                    if main_feature:
+                        # 电影的真实标题通常在 t3 字段，t1 是描述。
+                        title = main_feature.title3 or main_feature.title or "正片"
+                        return [
+                            models.ProviderEpisodeInfo(
+                                provider=self.provider_name,
+                                episodeId=f"{media_id},{main_feature.video_id}",
+                                title=title,
+                                episodeIndex=1, # 电影总是第1集
+                                url=f"https://www.mgtv.com/b/{media_id}/{main_feature.video_id}.html"
+                            )
+                        ]
+            except Exception as e:
+                self.logger.error(f"MGTV: 获取电影分集失败 (media_id={media_id}): {e}", exc_info=True)
+                return []
+        # --- 电影处理逻辑结束 ---
         
         all_episodes: List[MgtvEpisode] = []
         month = ""
@@ -290,51 +445,38 @@ class MgtvScraper(BaseScraper):
                 else:
                     break # No more pages
 
-            # 新增：在排序前，过滤掉预告、花絮等非正片内容
-            filtered_episodes = []
-            for ep in all_episodes:
-                # 优先使用更具描述性的 t3 标题进行检查，如果不存在则使用 t1
-                title_to_check = ep.title3 or ep.title
-                if self._JUNK_TITLE_PATTERN.search(title_to_check):
-                    self.logger.debug(f"MGTV: 在分集列表中过滤掉非正片内容: '{title_to_check}'")
-                    continue
-                filtered_episodes.append(ep)
+            raw_episodes = all_episodes
 
-            # 修正：API返回的默认顺序和 video_id 都不可靠。
-            # 优先使用标题中的“第N集”进行排序，如果无法解析，则回退到使用发布时间戳排序。
-            # 这种复合排序策略比单独依赖 video_id 或 API 顺序更健壮。
+            # 统一过滤逻辑
+            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            if blacklist_pattern:
+                original_count = len(raw_episodes)
+                raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
+                self.logger.info(f"MGTV: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
+
+            # Apply custom blacklist from config
+            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            if blacklist_pattern:
+                raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
+
+            # 排序和编号
             def get_sort_keys(episode: MgtvEpisode) -> tuple:
-                # 主排序键：从标题 't2' (例如 "第1集") 中解析出的集数
                 ep_num_match = re.search(r'第(\d+)集', episode.title2)
                 ep_num = int(ep_num_match.group(1)) if ep_num_match else float('inf')
-                
-                # 次排序键：发布时间戳
-                # 如果时间戳不存在，则给一个很大的默认值，使其排在后面
                 timestamp = episode.timestamp or "9999-99-99 99:99:99.9"
-
                 return (ep_num, timestamp)
 
-            sorted_episodes = sorted(filtered_episodes, key=get_sort_keys)
-            
+            sorted_episodes = sorted(raw_episodes, key=get_sort_keys)
+
             provider_episodes = [
                 models.ProviderEpisodeInfo(
                     provider=self.provider_name,
-                    # The comment ID is a combination of collection_id and video_id
                     episodeId=f"{media_id},{ep.video_id}",
                     title=f"{ep.title2} {ep.title}".strip(),
                     episodeIndex=i + 1,
                     url=f"https://www.mgtv.com/b/{media_id}/{ep.video_id}.html"
                 ) for i, ep in enumerate(sorted_episodes)
             ]
-
-            # Apply custom blacklist from config
-            blacklist_pattern = await self.get_episode_blacklist_pattern()
-            if blacklist_pattern:
-                original_count = len(provider_episodes)
-                provider_episodes = [ep for ep in provider_episodes if not blacklist_pattern.search(ep.title)]
-                filtered_count = original_count - len(provider_episodes)
-                if filtered_count > 0:
-                    self.logger.info(f"Mgtv: 根据自定义黑名单规则过滤掉了 {filtered_count} 个分集。")
 
             if target_episode_index:
                 return [ep for ep in provider_episodes if ep.episodeIndex == target_episode_index]
@@ -475,7 +617,8 @@ class MgtvScraper(BaseScraper):
                 color = (rgb.r << 16) | (rgb.g << 8) | rgb.b
 
             timestamp = c.time / 1000.0
-            p_string = f"{timestamp:.3f},{mode},{color},[{self.provider_name}]"
+            # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
+            p_string = f"{timestamp:.3f},{mode},25,{color},[{self.provider_name}]"
             
             formatted_comments.append({
                 "cid": str(c.id),

@@ -2,20 +2,25 @@ import asyncio
 import logging
 import json
 import re
+import ipaddress
 from typing import List, Optional, Dict, Any
 from typing import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from opencc import OpenCC
+from thefuzz import fuzz
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from . import crud, models, orm_models
 from .config_manager import ConfigManager
+from .timezone import get_now, get_app_timezone
 from .database import get_db_session
+from .utils import parse_search_keyword
 from .scraper_manager import ScraperManager
 
 logger = logging.getLogger(__name__)
@@ -37,6 +42,33 @@ METADATA_KEYWORDS_PATTERN = re.compile(
 # 这个子路由将包含所有接口的实际实现。
 # 它将被挂载到主路由的不同路径上。
 implementation_router = APIRouter()
+
+def _process_comments_for_dandanplay(comments_data: List[Dict[str, Any]]) -> List[models.Comment]:
+    """
+    将弹幕字典列表处理为符合 dandanplay 客户端规范的格式。
+    核心逻辑是移除 p 属性中的字体大小参数，同时保留其他所有部分。
+    原始格式: "时间,模式,字体大小,颜色,[来源]"
+    目标格式: "时间,模式,颜色,[来源]"
+    """
+    processed_comments = []
+    for i, item in enumerate(comments_data):
+        p_attr = item.get("p", "")
+        p_parts = p_attr.split(',')
+
+        # 查找可选的用户标签（如[bilibili]），以确定核心参数的数量
+        core_parts_count = len(p_parts)
+        for j, part in enumerate(p_parts):
+            if '[' in part and ']' in part:
+                core_parts_count = j
+                break
+        
+        if core_parts_count == 4:
+            del p_parts[2] # 移除字体大小 (index 2)
+        
+        new_p_attr = ','.join(p_parts)
+        processed_comments.append(models.Comment(cid=i, p=new_p_attr, m=item.get("m", "")))
+    return processed_comments
+
 
 class DandanApiRoute(APIRoute):
     """
@@ -116,65 +148,6 @@ class DandanAnimeInfo(BaseModel):
 class DandanSearchEpisodesResponse(DandanResponseBase):
     hasMore: bool = False
     animes: List[DandanAnimeInfo]
-
-def _roman_to_int(s: str) -> int:
-    """将罗马数字字符串转换为整数。"""
-    roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    s = s.upper()
-    result = 0
-    i = 0
-    while i < len(s):
-        # 处理减法规则 (e.g., IV, IX)
-        if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
-            result += roman_map[s[i+1]] - roman_map[s[i]]
-            i += 2
-        else:
-            result += roman_map[s[i]]
-            i += 1
-    return result
-
-def _parse_search_term(keyword: str) -> Dict[str, Any]:
-    """
-    解析搜索关键词，提取标题、季数和集数。
-    支持 "Title S01E01", "Title S01", "Title 2", "Title 第二季", "Title Ⅲ" 等格式。
-    """
-    keyword = keyword.strip()
-
-    # 1. 优先匹配 SXXEXX 格式
-    s_e_pattern = re.compile(r"^(?P<title>.+?)\s*[._-]*[Ss](?P<season>\d{1,2})[._-]*[Ee](?P<episode>\d{1,4})\b", re.IGNORECASE)
-    match = s_e_pattern.search(keyword)
-    if match:
-        data = match.groupdict()
-        return {"title": data["title"].strip(), "season": int(data["season"]), "episode": int(data["episode"])}
-
-    # 2. 匹配季度信息
-    chinese_num_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-    season_patterns = [
-        # 格式: Season 1, S01
-        (re.compile(r"^(.*?)\s*[._-]*(?:S|Season)\s*(\d{1,2})\b", re.I), lambda m: int(m.group(2))),
-        # 格式: 第 X 季/部
-        (re.compile(r"^(.*?)\s*第\s*([一二三四五六七八九十]|\d+)\s*[季部]", re.I),
-         lambda m: chinese_num_map.get(m.group(2)) if not m.group(2).isdigit() else int(m.group(2))),
-        # 格式: Unicode 罗马数字, e.g., Ⅲ
-        (re.compile(r"^(.*?)\s+([Ⅰ-Ⅻ])\b", re.I),
-         lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(2).upper())),
-        # 格式: ASCII 罗马数字, e.g., III
-        (re.compile(r"^(.*?)\s+([IVXLCDM]+)\b", re.I), lambda m: _roman_to_int(m.group(2))),
-    ]
-
-    for pattern, handler in season_patterns:
-        match = pattern.match(keyword)
-        if match:
-            try:
-                title = match.group(1).strip()
-                season = handler(match)
-                if season:
-                    return {"title": title, "season": season, "episode": None}
-            except (ValueError, KeyError, IndexError):
-                continue
-
-    # 3. 如果没有匹配到特定格式，则返回原始标题
-    return {"title": keyword, "season": None, "episode": None}
 
 # --- Models for /search/anime ---
 class DandanSearchAnimeItem(BaseModel):
@@ -305,8 +278,8 @@ async def _search_implementation(
             detail="Missing required query parameter: 'anime' or 'keyword'"
         )
 
-    # 新增：调用解析函数
-    parsed_info = _parse_search_term(search_term)
+    # 修正：调用 utils 中的全局解析函数，以保持逻辑统一
+    parsed_info = parse_search_keyword(search_term)
     title_to_search = parsed_info["title"]
     season_to_search = parsed_info.get("season")
     episode_from_title = parsed_info.get("episode")
@@ -424,27 +397,62 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_token_from_path(
+    request: Request,
     token: str = Path(..., description="路径中的API授权令牌"),
     session: AsyncSession = Depends(get_db_session),
-    request: Request = None,
 ):
     """
     一个 FastAPI 依赖项，用于验证路径中的 token。
     这是为 dandanplay 客户端设计的特殊鉴权方式。
     此函数现在还负责UA过滤和访问日志记录。
     """
+    # --- 新增：解析真实客户端IP ---
+    # --- 新增：解析真实客户端IP，支持CIDR ---
+    config_manager: ConfigManager = request.app.state.config_manager
+    trusted_proxies_str = await config_manager.get("trustedProxies", "")
+    trusted_networks = []
+    if trusted_proxies_str:
+        for proxy_entry in trusted_proxies_str.split(','):
+            try:
+                trusted_networks.append(ipaddress.ip_network(proxy_entry.strip()))
+            except ValueError:
+                logger.warning(f"无效的受信任代理IP或CIDR: '{proxy_entry.strip()}'，已忽略。")
+    
+    client_ip_str = request.client.host if request.client else "127.0.0.1"
+    is_trusted = False
+    if trusted_networks:
+        try:
+            client_addr = ipaddress.ip_address(client_ip_str)
+            is_trusted = any(client_addr in network for network in trusted_networks)
+        except ValueError:
+            logger.warning(f"无法将客户端IP '{client_ip_str}' 解析为有效的IP地址。")
+
+    if is_trusted:
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        if x_forwarded_for:
+            client_ip_str = x_forwarded_for.split(',')[0].strip()
+        else:
+            # 如果没有 X-Forwarded-For，则回退到 X-Real-IP
+            client_ip_str = request.headers.get("x-real-ip", client_ip_str)
+    # --- IP解析结束 ---
+
     # 1. 验证 token 是否存在、启用且未过期
     request_path = request.url.path
     log_path = re.sub(r'^/api/v1/[^/]+', '', request_path) # 从路径中移除 /api/v1/{token} 部分
 
     token_info = await crud.validate_api_token(session, token)
-    if not token_info:
+    if not token_info: 
         # 尝试记录失败的访问
         token_record = await crud.get_api_token_by_token_str(session, token)
         if token_record:
-            is_expired = token_record.get('expiresAt') and token_record['expiresAt'].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
+            expires_at = token_record.get('expiresAt')
+            is_expired = False
+            if expires_at:
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=get_app_timezone())
+                is_expired = expires_at < get_now()
             status_to_log = 'denied_expired' if is_expired else 'denied_disabled'
-            await crud.create_token_access_log(session, token_record['id'], request.client.host, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
+            await crud.create_token_access_log(session, token_record['id'], client_ip_str, request.headers.get("user-agent"), log_status=status_to_log, path=log_path)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API token")
 
     # 2. UA 过滤
@@ -458,15 +466,15 @@ async def get_token_from_path(
         is_matched = any(rule in user_agent for rule in ua_list)
 
         if ua_filter_mode == 'blacklist' and is_matched:
-            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_blacklist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_blacklist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent is blacklisted")
         
         if ua_filter_mode == 'whitelist' and not is_matched:
-            await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='denied_ua_whitelist', path=log_path)
+            await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
     # 3. 记录成功访问
-    await crud.create_token_access_log(session, token_info['id'], request.client.host, user_agent, log_status='allowed', path=log_path)
+    await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='allowed', path=log_path)
 
     return token
 
@@ -522,7 +530,11 @@ async def search_anime_for_dandan(
         dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
         dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
         year = res.get('year')
-        start_date_str = f"{year}-01-01T00:00:00Z" if year else (res.get('startDate').isoformat() if res.get('startDate') else None)
+        start_date_str = None
+        if year:
+            start_date_str = datetime(year, 1, 1, tzinfo=get_app_timezone()).isoformat()
+        elif res.get('startDate'):
+            start_date_str = res.get('startDate').isoformat()
 
         animes.append(DandanSearchAnimeItem(
             animeId=res['animeId'],
@@ -611,97 +623,89 @@ async def get_bangumi_details(
 
     return BangumiDetailsResponse(bangumi=bangumi_details)
 
-async def _process_single_batch_match(item: DandanBatchMatchRequestItem, session: AsyncSession) -> DandanMatchResponse:
-    """处理批量匹配中的单个文件，仅在精确匹配（1个结果）时返回成功。"""
+async def _get_match_for_item(item: DandanBatchMatchRequestItem, session: AsyncSession) -> DandanMatchResponse:
+    """
+    通过文件名匹配弹幕库的核心逻辑。此接口不使用文件Hash。
+    优先进行库内直接匹配，失败后回退到TMDB剧集组映射。
+    """
+    logger.info(f"执行匹配逻辑, 文件名: '{item.fileName}'")
     parsed_info = _parse_filename_for_match(item.fileName)
+    logger.info(f"文件名解析结果: {parsed_info}")
     if not parsed_info:
-        return DandanMatchResponse(isMatched=False)
+        response = DandanMatchResponse(isMatched=False)
+        logger.info(f"发送匹配响应 (解析失败): {response.model_dump_json(indent=2)}")
+        return response
 
-    # --- 步骤 1: 尝试 TMDB 精确匹配 ---
-    potential_animes = await crud.find_animes_for_matching(session, parsed_info["title"])
-    for anime in potential_animes:
-        if anime.get("tmdbId") and anime.get("tmdbEpisodeGroupId"):
-            tmdb_results = await crud.find_episode_via_tmdb_mapping(
-                session,
-                tmdb_id=anime["tmdbId"],
-                group_id=anime["tmdbEpisodeGroupId"],
-                custom_season=parsed_info.get("season"),
-                custom_episode=parsed_info["episode"]
-            )
-            if tmdb_results:
-                # TMDB 映射是高置信度的，直接取第一个结果
-                res = tmdb_results[0]
+    # --- 步骤 1: 优先进行库内直接搜索 ---
+    logger.info("正在进行库内直接搜索...")
+    results = await crud.search_episodes_in_library(
+        session, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
+    )
+    logger.info(f"直接搜索为 '{parsed_info['title']}' (季:{parsed_info.get('season')} 集:{parsed_info.get('episode')}) 找到 {len(results)} 条记录")
+    
+    if results:
+        # 对结果进行严格的标题过滤，避免模糊匹配带来的问题
+        normalized_search_title = parsed_info["title"].replace("：", ":").replace(" ", "")
+        exact_matches = []
+        for r in results:
+            all_titles_to_check = [
+                r.get('animeTitle'), r.get('nameEn'), r.get('nameJp'), r.get('nameRomaji'),
+                r.get('aliasCn1'), r.get('aliasCn2'), r.get('aliasCn3'),
+            ]
+            aliases_to_check = {t for t in all_titles_to_check if t}
+            if any(fuzz.partial_ratio(alias, parsed_info["title"]) > 85 for alias in aliases_to_check):
+                exact_matches.append(r)
+
+        if len(exact_matches) < len(results):
+            logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
+            results = exact_matches
+
+        if results:
+            # 优先处理被精确标记的源
+            favorited_results = [r for r in results if r.get('isFavorited')]
+            if favorited_results:
+                res = favorited_results[0]
                 dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
                 dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
                 match = DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
                 )
-                return DandanMatchResponse(isMatched=True, matches=[match])
+                response = DandanMatchResponse(isMatched=True, matches=[match])
+                logger.info(f"发送匹配响应 (精确标记匹配): {response.model_dump_json(indent=2)}")
+                return response
 
-    # --- 步骤 2: 回退到旧的模糊搜索逻辑 ---
-    results = await crud.search_episodes_in_library(
-        session, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
-    )
+            # 如果没有精确标记，检查所有匹配项是否都指向同一个番剧ID
+            first_animeId = results[0]['animeId']
+            all_from_same_anime = all(res['animeId'] == first_animeId for res in results)
 
-    # 优先处理被精确标记的源
-    favorited_results = [r for r in results if r.get('isFavorited')]
-    if favorited_results:
-        res = favorited_results[0]
-        dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-        dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+            if all_from_same_anime:
+                res = results[0]
+                dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
+                dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+                match = DandanMatchInfo(
+                    episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
+                    episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                )
+                response = DandanMatchResponse(isMatched=True, matches=[match])
+                logger.info(f"发送匹配响应 (单一作品匹配): {response.model_dump_json(indent=2)}")
+                return response
 
-        match = DandanMatchInfo(
-            episodeId=res['episodeId'],
-            animeId=res['animeId'],
-            animeTitle=res['animeTitle'],
-            episodeTitle=res['episodeTitle'],
-            type=dandan_type,
-            typeDescription=dandan_type_desc,
-        )
-        return DandanMatchResponse(isMatched=True, matches=[match])
+            # 如果匹配到了多个不同的番剧，则返回所有结果让用户选择
+            matches = []
+            for res in results:
+                dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
+                dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+                matches.append(DandanMatchInfo(
+                    episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
+                    episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                ))
+            response = DandanMatchResponse(isMatched=False, matches=matches)
+            logger.info(f"发送匹配响应 (多个匹配): {response.model_dump_json(indent=2)}")
+            return response
 
-    # 如果没有精确标记，则只有当结果唯一时才算成功
-    if len(results) == 1:
-        res = results[0]
-        dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-        dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
-
-        match = DandanMatchInfo(
-            episodeId=res['episodeId'],
-            animeId=res['animeId'],
-            animeTitle=res['animeTitle'],
-            episodeTitle=res['episodeTitle'],
-            type=dandan_type,
-            typeDescription=dandan_type_desc,
-        )
-        return DandanMatchResponse(isMatched=True, matches=[match])
-    
-    return DandanMatchResponse(isMatched=False)
-
-@implementation_router.post(
-    "/match",
-    response_model=DandanMatchResponse,
-    summary="[dandanplay兼容] 匹配单个文件"
-)
-async def match_single_file(
-    request: DandanBatchMatchRequestItem,
-    token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """
-    通过文件名匹配弹幕库。此接口不使用文件Hash。
-    优先使用 TMDB 映射进行精确匹配，失败则回退到标题模糊搜索。
-    """
-    logger.info(f"收到 /match 请求, 文件名: '{request.fileName}'")
-    parsed_info = _parse_filename_for_match(request.fileName)
-    logger.info(f"文件名解析结果: {parsed_info}")
-    if not parsed_info:
-        response = DandanMatchResponse(isMatched=False)
-        logger.info(f"发送 /match 响应 (解析失败): {response.model_dump_json(indent=2)}")
-        return response
-
-    # --- 步骤 1: 尝试 TMDB 精确匹配 ---
+    # --- 步骤 2: 如果直接搜索无果，则回退到 TMDB 映射 ---
+    logger.info("直接搜索未找到精确匹配，回退到 TMDB 映射匹配。")
     potential_animes = await crud.find_animes_for_matching(session, parsed_info["title"])
     logger.info(f"为标题 '{parsed_info['title']}' 找到 {len(potential_animes)} 个可能的库内作品进行TMDB匹配。")
 
@@ -717,7 +721,6 @@ async def match_single_file(
             )
             if tmdb_results:
                 logger.info(f"TMDB 映射匹配成功，找到 {len(tmdb_results)} 个结果。")
-                # TMDB 映射是高置信度的，直接取第一个结果（已按收藏和源排序）
                 res = tmdb_results[0]
                 dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
                 dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
@@ -726,108 +729,29 @@ async def match_single_file(
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match])
-                logger.info(f"发送 /match 响应 (TMDB 映射匹配): {response.model_dump_json(indent=2)}")
+                logger.info(f"发送匹配响应 (TMDB 映射匹配): {response.model_dump_json(indent=2)}")
                 return response
 
-    # --- 步骤 2: 回退到旧的模糊搜索逻辑 ---
-    logger.info("TMDB 映射匹配失败或无可用映射，回退到标题模糊搜索。")
-    results = await crud.search_episodes_in_library(
-        session, parsed_info["title"], parsed_info["episode"], parsed_info.get("season")
-    )
-    logger.info(f"模糊搜索为 '{parsed_info['title']}' (季:{parsed_info.get('season')} 集:{parsed_info.get('episode')}) 找到 {len(results)} 条记录")
-    
-    # 新增：对结果进行严格的标题过滤，避免模糊匹配带来的问题
-    normalized_search_title = parsed_info["title"].replace("：", ":").replace(" ", "")
-    if normalized_search_title:
-        exact_matches = []
-        for r in results:
-            # 将主标题和所有别名都收集起来进行检查
-            all_titles_to_check = [
-                r.get('animeTitle'),
-                r.get('nameEn'),
-                r.get('nameJp'),
-                r.get('nameRomaji'),
-                r.get('aliasCn1'),
-                r.get('aliasCn2'),
-                r.get('aliasCn3'),
-            ]
-            # 规范化并移除空值
-            normalized_aliases = {
-                t.replace("：", ":").replace(" ", "") for t in all_titles_to_check if t
-            }
-            
-            # 检查搜索词是否是任何一个标题/别名的子串
-            if any(normalized_search_title in alias for alias in normalized_aliases):
-                exact_matches.append(r)
-
-        if len(exact_matches) < len(results):
-            logger.info(f"过滤掉 {len(results) - len(exact_matches)} 条模糊匹配的结果。")
-            results = exact_matches
-
-    if not results:
-        response = DandanMatchResponse(isMatched=False, matches=[])
-        logger.info(f"发送 /match 响应 (无精确匹配): {response.model_dump_json(indent=2)}")
-        return response
-
-    # 优先处理被精确标记的源
-    favorited_results = [r for r in results if r.get('isFavorited')]
-    if favorited_results:
-        res = favorited_results[0]
-        dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-        dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
-
-        match = DandanMatchInfo(
-            episodeId=res['episodeId'],
-            animeId=res['animeId'],
-            animeTitle=res['animeTitle'],
-            episodeTitle=res['episodeTitle'],
-            type=dandan_type,
-            typeDescription=dandan_type_desc,
-        )
-        response = DandanMatchResponse(isMatched=True, matches=[match])
-        logger.info(f"发送 /match 响应 (精确标记匹配): {response.model_dump_json(indent=2)}")
-        return response
-
-    # 如果没有精确标记，检查所有匹配项是否都指向同一个番剧ID
-    first_animeId = results[0]['animeId']
-    all_from_same_anime = all(res['animeId'] == first_animeId for res in results)
-
-    if all_from_same_anime:
-        # 结果已由数据库按 标题长度和源顺序 排序，直接取第一个
-        res = results[0]
-        dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-        dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
-
-        match = DandanMatchInfo(
-            episodeId=res['episodeId'],
-            animeId=res['animeId'],
-            animeTitle=res['animeTitle'],
-            episodeTitle=res['episodeTitle'],
-            type=dandan_type,
-            typeDescription=dandan_type_desc,
-        )
-        response = DandanMatchResponse(isMatched=True, matches=[match])
-        logger.info(f"发送 /match 响应 (单一作品匹配): {response.model_dump_json(indent=2)}")
-        return response
-
-    # 如果匹配到了多个不同的番剧，则返回所有结果让用户选择
-    matches = []
-    for res in results:
-        dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-        dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
-
-        matches.append(DandanMatchInfo(
-            episodeId=res['episodeId'],
-            animeId=res['animeId'],
-            animeTitle=res['animeTitle'],
-            episodeTitle=res['episodeTitle'],
-            type=dandan_type,
-            typeDescription=dandan_type_desc,
-        ))
-
-    response = DandanMatchResponse(isMatched=False, matches=matches)
-    logger.info(f"发送 /match 响应 (多个匹配): {response.model_dump_json(indent=2)}")
+    # --- 步骤 3: 如果所有方法都失败 ---
+    response = DandanMatchResponse(isMatched=False, matches=[])
+    logger.info(f"发送匹配响应 (所有方法均未匹配): {response.model_dump_json(indent=2)}")
     return response
+
+@implementation_router.post(
+    "/match",
+    response_model=DandanMatchResponse,
+    summary="[dandanplay兼容] 匹配单个文件"
+)
+async def match_single_file(
+    request: DandanBatchMatchRequestItem,
+    token: str = Depends(get_token_from_path),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    通过文件名匹配弹幕库。此接口不使用文件Hash。
+    优先进行库内直接匹配，失败后回退到TMDB剧集组映射。
+    """
+    return await _get_match_for_item(request, session)
 
 
 @implementation_router.post(
@@ -841,12 +765,12 @@ async def match_batch_files(
     session: AsyncSession = Depends(get_db_session)
 ):
     """
-    批量匹配文件，只返回精确匹配（1个结果）的项。
+    批量匹配文件。
     """
     if len(request.requests) > 32:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="批量匹配请求不能超过32个文件。")
 
-    tasks = [_process_single_batch_match(item, session) for item in request.requests]
+    tasks = [_get_match_for_item(item, session) for item in request.requests]
     results = await asyncio.gather(*tasks)
     return results
 
@@ -886,11 +810,12 @@ async def get_external_comments_from_url(
             episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
             comments_data = await scraper.get_comments(episode_id_for_comments)
 
-            if not comments_data: logger.warning(f"未能从 {provider} URL 获取任何弹幕: {url}")
+            # 修正：使用 scraper.provider_name 修复未定义的 'provider' 变量
+            if not comments_data: logger.warning(f"未能从 {scraper.provider_name} URL 获取任何弹幕: {url}")
 
         except Exception as e:
-            logger.error(f"处理 {provider} 外部弹幕时出错: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"获取 {provider} 弹幕失败。")
+            logger.error(f"处理 {scraper.provider_name} 外部弹幕时出错: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"获取 {scraper.provider_name} 弹幕失败。")
 
         # 缓存结果5小时 (18000秒)
         await crud.set_cache(session, cache_key, comments_data, 18000)
@@ -907,40 +832,10 @@ async def get_external_comments_from_url(
             for comment in comments_data:
                 comment['m'] = converter.convert(comment['m'])
 
-    comments = [models.Comment.model_validate(c) for c in comments_data]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
+    processed_comments = _process_comments_for_dandanplay(comments_data)
+    return models.CommentResponse(count=len(processed_comments), comments=processed_comments)
 
-async def _get_real_episode_id(
-    session: AsyncSession,
-    anime_id: int,
-    source_order: int,
-    episode_index: int
-) -> Optional[int]:
-    """
-    根据复合信息（anime_id, source_order, episode_index）查找真实的数据库 episode.id。
-    """
-    # 1. 根据 source_order 找到 provider_name
-    provider_name_res = await session.execute(
-        select(orm_models.Scraper.providerName).where(orm_models.Scraper.displayOrder == source_order)
-    )
-    provider_name = provider_name_res.scalar_one_or_none()
-    if not provider_name:
-        return None
-
-    # 2. 根据 anime_id 和 provider_name 找到 source_id
-    source_id_res = await session.execute(
-        select(orm_models.AnimeSource.id).where(
-            orm_models.AnimeSource.animeId == anime_id,
-            orm_models.AnimeSource.providerName == provider_name
-        )
-    )
-    source_id = source_id_res.scalar_one_or_none()
-    if not source_id:
-        return None
-
-    # 3. 根据 source_id 和 episode_index 找到 episode.id
-    episode_id_res = await session.execute(select(orm_models.Episode.id).where(orm_models.Episode.sourceId == source_id, orm_models.Episode.episodeIndex == episode_index))
-    return episode_id_res.scalar_one_or_none()
 @implementation_router.get(
     "/comment/{episodeId}",
     response_model=models.CommentResponse,
@@ -958,55 +853,9 @@ async def get_comments_for_dandan(
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
-    注意：这里的 episode_id 实际上是我们数据库中的主键 ID。
-    新增：支持 withRelated 参数，用于聚合所有源的弹幕。
-    兼容性：如果 episode_id 不符合新版格式 (25xxxx)，则回退到只获取当前分集的弹幕。
     """
-    aggregation_enabled_str = await config_manager.get('danmaku_aggregation_enabled', 'false')
-    aggregation_enabled = aggregation_enabled_str.lower() == 'true'
-
-    episode_id_str = str(episodeId)
-    is_new_format = len(episode_id_str) == 14 and episode_id_str.startswith('25')
-
-    comments_data = []
-    if not is_new_format:
-        # 旧版ID，直接作为数据库主键使用
-        comments_data = await crud.fetch_comments(session, episodeId)
-    else:
-        # 新版复合ID，需要解析
-        try:
-            anime_id = int(episode_id_str[2:8])
-            source_order = int(episode_id_str[8:10])
-            episode_index = int(episode_id_str[10:14])
-
-            if withRelated and aggregation_enabled:
-                # 聚合弹幕逻辑
-                logger.info(f"聚合弹幕: anime_id={anime_id}, episode_index={episode_index}")
-                related_episode_ids = await crud.get_related_episode_ids(session, anime_id, episode_index)
-                if related_episode_ids:
-                    comments_data = await crud.fetch_comments_for_episodes(session, related_episode_ids)
-            else:
-                # 单集弹幕逻辑
-                if withRelated and not aggregation_enabled:
-                    logger.info("弹幕聚合功能已在后台关闭，仅返回当前源弹幕。")
-                
-                real_episode_id = await _get_real_episode_id(session, anime_id, source_order, episode_index)
-                if real_episode_id:
-                    comments_data = await crud.fetch_comments(session, real_episode_id)
-                else:
-                    logger.warning(f"无法从复合信息中找到对应的分集: anime_id={anime_id}, source_order={source_order}, episode_index={episode_index}")
-
-        except (ValueError, IndexError) as e:
-            logger.error(f"解析新版格式的 episode_id '{episodeId}' 失败: {e}。")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的 episodeId 格式。")
-
-    # 新增：聚合后去重逻辑
-    unique_comments = {}
-    for comment in comments_data:
-        unique_key = (comment['p'], comment['m'])
-        if unique_key not in unique_comments:
-            unique_comments[unique_key] = comment
-    comments_data = list(unique_comments.values())
+    # 弹幕聚合功能已移除，直接从文件获取弹幕
+    comments_data = await crud.fetch_comments(session, episodeId)
 
     # 应用输出数量限制
     limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
@@ -1054,10 +903,10 @@ async def get_comments_for_dandan(
     # UA 已由 get_token_from_path 依赖项记录
     # logger.info(f"弹幕接口响应 (episodeId: {episodeId}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
 
-    # 修正：当聚合弹幕时，原始的 cid 已经没有意义。我们为去重后的弹幕列表生成新的、连续的 cid。
-    # 这样可以确保客户端收到的 cid 是唯一的，避免潜在的渲染问题。
-    comments = [models.Comment(cid=i, p=item["p"], m=item["m"]) for i, item in enumerate(comments_data)]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
+    processed_comments = _process_comments_for_dandanplay(comments_data)
+
+    return models.CommentResponse(count=len(processed_comments), comments=processed_comments)
 
 # --- 路由挂载 ---
 # 将实现路由挂载到主路由上，以支持两种URL结构。

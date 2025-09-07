@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   List,
@@ -29,6 +30,8 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import classNames from 'classnames'
+import { useModal } from '../../../ModalContext'
+import { useMessage } from '../../../MessageContext'
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
@@ -37,27 +40,26 @@ export const ImportTask = () => {
   const [selectList, setSelectList] = useState([])
 
   const navigate = useNavigate()
+  const modalApi = useModal()
+  const messageApi = useMessage()
 
-  const allSelected = useMemo(() => {
-    if (!taskList.length) return false
-    return selectList.length === taskList.length
-  }, [selectList, taskList])
-
-  const [canPause, isPause, canStop] = useMemo(() => {
+  const [canPause, isPause] = useMemo(() => {
     return [
       (selectList.every(item => item.status === '运行中') &&
         !!selectList.length) ||
         (selectList.every(item => item.status === '已暂停') &&
           !!selectList.length),
       selectList.every(item => item.status === '已暂停'),
-      selectList.every(item => item.status === '运行中') && !!selectList.length,
     ]
   }, [selectList])
 
   const canDelete = useMemo(() => {
     return (
       selectList.every(
-        item => item.status === '已完成' || item.status === '失败'
+        item =>
+          item.status === '已完成' ||
+          item.status === '失败' ||
+          item.status === '排队中'
       ) && !!selectList.length
     )
   }, [selectList])
@@ -85,7 +87,6 @@ export const ImportTask = () => {
     }
   }
 
-  //   TODO 接口有变更
   const handlePause = async () => {
     if (isPause) {
       try {
@@ -93,7 +94,7 @@ export const ImportTask = () => {
           selectList.map(it => resumeTask({ taskId: it.taskId }))
         )
       } catch (error) {
-        message.error(`操作失败: ${error.message}`)
+        messageApi.error(`操作失败: ${error.message}`)
       }
     } else {
       try {
@@ -101,7 +102,7 @@ export const ImportTask = () => {
           selectList.map(it => pauseTask({ taskId: it.taskId }))
         )
       } catch (error) {
-        message.error(`操作失败: ${error.message}`)
+        messageApi.error(`操作失败: ${error.message}`)
       }
     }
     refreshTasks()
@@ -109,7 +110,7 @@ export const ImportTask = () => {
   }
 
   const handleStop = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: '中止任务',
       zIndex: 1002,
       content: (
@@ -117,11 +118,13 @@ export const ImportTask = () => {
           您确定要中止任务任务吗？
           <br />
           此操作会尝试停止任务，如果无法停止，则会将其强制标记为“失败”状态。
-          {selectList.map((it, i) => (
-            <div>
-              {i + 1}、{it.title}
-            </div>
-          ))}
+          <div className="max-h-[310px] overflow-y-auto mt-3">
+            {selectList.map((it, i) => (
+              <div>
+                {i + 1}、{it.title}
+              </div>
+            ))}
+          </div>
         </div>
       ),
       okText: '确认',
@@ -133,26 +136,28 @@ export const ImportTask = () => {
           )
           setSelectList([])
           refreshTasks()
-          message.success('中止成功')
+          messageApi.success('中止成功')
         } catch (error) {
-          message.error(`中止任务失败: ${error.message}`)
+          messageApi.error(`中止任务失败: ${error.message}`)
         }
       },
     })
   }
 
   const handleDelete = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: '删除任务',
       zIndex: 1002,
       content: (
         <div>
           您确定要从历史记录中删除任务吗？
-          {selectList.map((it, i) => (
-            <div>
-              {i + 1}、{it.title}
-            </div>
-          ))}
+          <div className="max-h-[310px] overflow-y-auto mt-3">
+            {selectList.map((it, i) => (
+              <div>
+                {i + 1}、{it.title}
+              </div>
+            ))}
+          </div>
         </div>
       ),
       okText: '确认',
@@ -164,21 +169,12 @@ export const ImportTask = () => {
           )
           setSelectList([])
           refreshTasks()
-          message.success('删除成功')
+          messageApi.success('删除成功')
         } catch (error) {
           alert(`删除任务失败: ${error.message}`)
         }
       },
     })
-  }
-
-  const handleSelectAll = () => {
-    if (allSelected) {
-      setSelectList([])
-    } else {
-      // Select all currently displayed tasks
-      setSelectList([...taskList])
-    }
   }
 
   useEffect(() => {
@@ -241,7 +237,7 @@ export const ImportTask = () => {
             </Tooltip>
             <Tooltip title="中止任务">
               <Button
-                disabled={!canStop}
+                disabled={!canPause}
                 type="default"
                 shape="circle"
                 icon={<StopOutlined />}
@@ -265,7 +261,7 @@ export const ImportTask = () => {
         <div className="flex items-center justify-center gap-4 py-3 text-base font-semibold">
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'all',
+              'bg-primary text-white': status === 'all',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=all`, {
@@ -277,7 +273,7 @@ export const ImportTask = () => {
           </div>
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'completed',
+              'bg-primary text-white': status === 'completed',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=completed`, {
@@ -289,7 +285,7 @@ export const ImportTask = () => {
           </div>
           <div
             className={classNames('cursor-pointer px-3 py-1 rounded-full', {
-              'bg-primary': status === 'in_progress',
+              'bg-primary text-white': status === 'in_progress',
             })}
             onClick={() => {
               navigate(`/task?search=${search}&status=in_progress`, {
@@ -317,6 +313,7 @@ export const ImportTask = () => {
                     extra={
                       <>
                         <Tag
+                          className="!mb-3"
                           color={item.status.includes('失败') ? 'red' : 'green'}
                         >
                           {item.status}
@@ -337,10 +334,12 @@ export const ImportTask = () => {
                       })}
                     >
                       {isActive && (
-                        <div className="w-6 h-6 border-2 border-base-text rounded-full flex items-center justify-center absolute top-1/2 left-0 transform -translate-y-1/2">
-                          <CheckOutlined className="font-base font-bold" />
-                        </div>
+                        <Checkbox
+                          checked={isActive}
+                          className="absolute top-1/2 left-0 transform -translate-y-1/2"
+                        />
                       )}
+
                       <div className="text-base mb-1">{item.title}</div>
                       <div className="mb-2">{item.description}</div>
                       <Progress

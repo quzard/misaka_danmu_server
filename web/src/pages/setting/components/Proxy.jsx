@@ -6,20 +6,25 @@ import {
   Input,
   message,
   Row,
+  Tooltip,
   Select,
   Switch,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { getProxyConfig, setProxyConfig } from '../../../apis'
+import { useMessage } from '../../../MessageContext'
 
 export const Proxy = () => {
+  const [proxyEnabled, setProxyEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
+  const messageApi = useMessage()
 
   useEffect(() => {
     getProxyConfig()
       .then(res => {
+        setProxyEnabled(res.data?.proxyEnabled ?? false)
         form.setFieldsValue(res.data ?? {})
       })
       .finally(() => {
@@ -31,11 +36,12 @@ export const Proxy = () => {
     try {
       setIsSaveLoading(true)
       const values = await form.validateFields()
+      setProxyEnabled(values.proxyEnabled)
       await setProxyConfig(values)
       setIsSaveLoading(false)
-      message.success('保存成功')
+      messageApi.success('保存成功')
     } catch (error) {
-      message.error('保存失败')
+      messageApi.error('保存失败')
     } finally {
       setIsSaveLoading(false)
     }
@@ -104,9 +110,30 @@ export const Proxy = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="proxyEnabled" label="开启全局代理" className="mb-4">
-            <Switch />
-          </Form.Item>
+          <Row gutter={[12, 12]}>
+            <Col md={12} xs={24}>
+              <Form.Item
+                name="proxyEnabled"
+                label="开启全局代理"
+                className="mb-4"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col md={12} xs={24}>
+              <Form.Item
+                label="跳过SSL证书验证"
+                name="proxySslVerify"
+                valuePropName="checked"
+                tooltip="当您的HTTPS代理使用自签名证书时，请开启此项以避免SSL验证错误。"
+                className="mb-4"
+              >
+                <Switch disabled={!proxyEnabled} />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item>
             <div className="flex justify-end">
               <Button type="primary" htmlType="submit" loading={isSaveLoading}>

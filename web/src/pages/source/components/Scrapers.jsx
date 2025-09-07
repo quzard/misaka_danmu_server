@@ -9,6 +9,7 @@ import {
   Modal,
   Switch,
   Tag,
+  Tooltip,
 } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import {
@@ -41,6 +42,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { QRCodeCanvas } from 'qrcode.react'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store'
+import { useModal } from '../../../ModalContext'
+import { useMessage } from '../../../MessageContext'
 
 const SortableItem = ({
   item,
@@ -112,9 +115,11 @@ const SortableItem = ({
           ) : (
             <Tag color="red">未启用</Tag>
           )}
-          <div onClick={handleChangeStatus}>
-            <MyIcon icon="exchange" size={24} />
-          </div>
+          <Tooltip title="切换启用状态">
+            <div onClick={handleChangeStatus}>
+              <MyIcon icon="exchange" size={24} />
+            </div>
+          </Tooltip>
         </div>
       </div>
     </List.Item>
@@ -143,6 +148,9 @@ export const Scrapers = () => {
   const [biliQrcodeChecked, setBiliQrcodeChecked] = useState(false)
   /** 扫码登录轮训 */
   const timer = useRef(0)
+
+  const modalApi = useModal()
+  const messageApi = useMessage()
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -207,7 +215,7 @@ export const Scrapers = () => {
       console.log(updatedList, 'updatedList')
       setList(updatedList)
       setScrapers(updatedList)
-      message.success(
+      messageApi.success(
         `已更新排序，${movedItem.providerName} 移动到位置 ${overIndex + 1}`
       )
     }
@@ -249,9 +257,7 @@ export const Scrapers = () => {
     const setNameCapitalize = `${item.providerName.charAt(0).toUpperCase()}${item.providerName.slice(1)}`
     form.setFieldsValue({
       [`scraper${setNameCapitalize}LogResponses`]:
-        res.data?.[`scraper${setNameCapitalize}LogResponses`] === 'true'
-          ? true
-          : false,
+        res.data?.[`scraper${setNameCapitalize}LogResponses`] ?? false,
       [`${item.providerName}EpisodeBlacklistRegex`]:
         res.data?.[`${item.providerName}EpisodeBlacklistRegex`] || '',
       [`${item.providerName}Cookie`]:
@@ -267,19 +273,17 @@ export const Scrapers = () => {
       setConfirmLoading(true)
       const values = await form.validateFields()
       const setNameCapitalize = `${setname.charAt(0).toUpperCase()}${setname.slice(1)}`
-      const status =
-        values[`scraper${setNameCapitalize}LogResponses`] === 'on'
-          ? 'true'
-          : values[`scraper${setNameCapitalize}LogResponses`]?.toString()
+
       await setSingleScraper({
         ...values,
-        [`scraper${setNameCapitalize}LogResponses`]: status,
+        [`scraper${setNameCapitalize}LogResponses`]:
+          values[`scraper${setNameCapitalize}LogResponses`],
         name: setname,
       })
-      message.success('保存成功')
+      messageApi.success('保存成功')
     } catch (error) {
       console.error(error)
-      message.error('保存失败')
+      messageApi.error('保存失败')
     } finally {
       setConfirmLoading(false)
       setOpen(false)
@@ -328,7 +332,7 @@ export const Scrapers = () => {
       startBiliLoginPoll(res.data)
       setBiliQrcodeStatus('')
     } catch (error) {
-      message.error('获取二维码失败')
+      messageApi.error('获取二维码失败')
     } finally {
       setBiliQrcodeLoading(false)
     }
@@ -341,7 +345,7 @@ export const Scrapers = () => {
   }
 
   const handleBiliLogout = () => {
-    Modal.confirm({
+    modalApi.confirm({
       title: '清除缓存',
       zIndex: 1002,
       content: <div>确定要注销当前的Bilibili登录吗？</div>,

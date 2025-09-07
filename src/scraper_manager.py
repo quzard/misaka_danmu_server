@@ -1,21 +1,25 @@
 import asyncio
 import importlib
+import re
 import pkgutil
 import inspect
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Type
+from typing import Dict, List, Optional, Any, Type, Tuple, TYPE_CHECKING
 from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization, asymmetric
 
 from .scrapers.base import BaseScraper
 from .config_manager import ConfigManager
-from .models import ProviderSearchInfo
+from .models import ProviderSearchInfo, ScraperSetting
 from . import crud
 
+if TYPE_CHECKING:
+    from .metadata_manager import MetadataSourceManager
+
 class ScraperManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager"):
         self.scrapers: Dict[str, BaseScraper] = {}
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
@@ -27,7 +31,7 @@ class ScraperManager:
         self._verified_scrapers: set[str] = set()
         self._verification_enabled: bool = False
         self.config_manager = config_manager
-        # 注意：加载逻辑现在是异步的，将在应用启动时调用
+        self.metadata_manager = metadata_manager
 
     async def acquire_search_lock(self, api_key: str) -> bool:
         """Acquires a search lock for a given API key. Returns False if already locked."""
@@ -61,27 +65,6 @@ class ScraperManager:
         except Exception as e:
             logging.getLogger(__name__).error(f"加载公钥失败: {e}", exc_info=True)
             self._public_key = None
-    def _load_scrapers(self):
-        """
-        动态发现并加载 'scrapers' 目录下的所有搜索源类。
-        """
-        scrapers_dir = Path(__file__).parent / "scrapers"
-        for file in scrapers_dir.glob("*.py"):
-            if file.name.startswith("_") or file.name == "base.py":
-                continue
-
-            module_name = f".scrapers.{file.stem}"
-            try:
-                module = importlib.import_module(module_name, package="src")
-                for name, obj in inspect.getmembers(module, inspect.isclass):
-                    if issubclass(obj, BaseScraper) and obj is not BaseScraper:
-                        scraper_instance = obj()
-                        if scraper_instance.provider_name in self.scrapers:
-                            print(f"警告: 发现重复的搜索源 '{scraper_instance.provider_name}'。将被覆盖。")
-                        self.scrapers[scraper_instance.provider_name] = scraper_instance
-                        print(f"搜索源 '{scraper_instance.provider_name}' 已加载。")
-            except Exception as e:
-                print(f"从 {file.name} 加载搜索源失败: {e}")
     
     async def load_and_sync_scrapers(self):
         """
@@ -98,6 +81,7 @@ class ScraperManager:
         self._domain_map.clear()
         discovered_providers = []
         scraper_classes = {}
+        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
 
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
@@ -134,6 +118,14 @@ class ScraperManager:
                         # (新增) 注册该刮削器能处理的域名
                         for domain in getattr(obj, 'handled_domains', []):
                             self._domain_map[domain] = provider_name
+                        
+                        # 在加载时直接发现并收集提供商特定的默认配置
+                        if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
+                            config_key = f"{provider_name}_episode_blacklist_regex"
+                            default_value = getattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT')
+                            description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
+                            default_configs_to_register[config_key] = (default_value, description)
+
                         self._scraper_classes[provider_name] = obj
 
             except TypeError as e:
@@ -152,6 +144,11 @@ class ScraperManager:
                 # 使用标准日志记录器
                 logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)
         
+        # 在同步数据库之前，注册所有发现的默认配置
+        if default_configs_to_register:
+            await self.config_manager.register_defaults(default_configs_to_register)
+            logging.getLogger(__name__).info(f"已为 {len(default_configs_to_register)} 个搜索源注册默认分集黑名单。")
+
         # 新增：在同步新搜索源之前，先从数据库中移除不再存在的过时搜索源。
         async with self._session_factory() as session:
             await crud.remove_stale_scrapers(session, discovered_providers)
@@ -192,6 +189,21 @@ class ScraperManager:
 
         await self.load_and_sync_scrapers()
 
+    async def update_settings(self, settings: List[ScraperSetting]):
+        """
+        更新多个搜索源的设置，并立即重新加载以使更改生效。
+        这是更新设置的正确方式，因为它能确保内存中的缓存失效。
+        """
+        async with self._session_factory() as session:
+            # CRUD函数负责处理更新逻辑并提交事务。
+            await crud.update_scrapers_settings(session, settings)
+        
+        # 更新数据库后，重新加载所有搜索源以应用新设置。
+        # 这能确保启用/禁用、代理设置等立即生效。
+        await self.load_and_sync_scrapers()
+        # 使用标准日志记录器
+        logging.getLogger(__name__).info("搜索源设置已更新并重新加载。")
+
     @property
     def has_enabled_scrapers(self) -> bool:
         """检查是否有任何已启用的搜索源。"""
@@ -216,21 +228,45 @@ class ScraperManager:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        all_search_results = []
+        all_results = []
         seen_results = set() # 用于去重
 
-        for result in results:
+        for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logging.getLogger(__name__).error(f"搜索任务中出现错误: {result}")
+                # This assumes enabled_scrapers order is preserved in tasks
+                provider_name = enabled_scrapers[i // len(keywords)].provider_name
+                logging.getLogger(__name__).error(f"搜索源 '{provider_name}' 的搜索子任务失败: {result}", exc_info=True)
             elif result:
                 for item in result:
                     # 使用 (provider, mediaId) 作为唯一标识符
                     unique_id = (item.provider, item.mediaId)
                     if unique_id not in seen_results:
-                        all_search_results.append(item)
+                        all_results.append(item)
                         seen_results.add(unique_id)
 
-        return all_search_results
+        # 新增：在此处应用全局标题过滤
+        cn_pattern_str = await self.config_manager.get("search_result_global_blacklist_cn", "")
+        eng_pattern_str = await self.config_manager.get("search_result_global_blacklist_eng", "")
+
+        cn_pattern = re.compile(cn_pattern_str, re.IGNORECASE) if cn_pattern_str else None
+        eng_pattern = re.compile(r'(\[|\【|\b)(' + eng_pattern_str + r')(\d{1,2})?(\s|_ALL)?(\]|\】|\b)', re.IGNORECASE) if eng_pattern_str else None
+
+        if not cn_pattern and not eng_pattern:
+            return all_results
+
+        filtered_results = []
+        for item in all_results:
+            is_junk = False
+            if cn_pattern and cn_pattern.search(item.title):
+                is_junk = True
+            if not is_junk and eng_pattern and eng_pattern.search(item.title):
+                is_junk = True
+            
+            if not is_junk:
+                filtered_results.append(item)
+        
+        logging.getLogger(__name__).info(f"全局标题过滤: 从 {len(all_results)} 个结果中保留了 {len(filtered_results)} 个。")
+        return filtered_results
 
     async def search_sequentially(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> Optional[tuple[str, List[ProviderSearchInfo]]]:
         """
@@ -259,6 +295,26 @@ class ScraperManager:
                 logging.getLogger(__name__).error(f"顺序搜索时，提供方 '{provider_name}' 发生错误: {e}", exc_info=True)
         
         return None, None
+
+    async def search(self, provider: str, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[ProviderSearchInfo]:
+        """
+        在指定的搜索源上搜索，如果失败则尝试故障转移。
+        """
+        scraper = self.get_scraper(provider)
+        results = await scraper.search(keyword, episode_info)
+        
+        # 如果主搜索源没有结果，则尝试故障转移
+        if not results and self.metadata_manager:
+            logging.getLogger(__name__).info(f"主搜索源 '{provider}' 未找到结果，正在尝试使用元数据源进行故障转移...")
+            try:
+                failover_results = await self.metadata_manager.supplement_search_result(provider, keyword, episode_info)
+                if failover_results:
+                    logging.getLogger(__name__).info(f"通过故障转移找到 {len(failover_results)} 个结果。")
+                    return failover_results
+            except Exception as e:
+                logging.getLogger(__name__).error(f"搜索故障转移过程中发生错误: {e}", exc_info=True)
+        
+        return results
 
     async def close_all(self):
         """关闭所有搜索源的客户端。"""

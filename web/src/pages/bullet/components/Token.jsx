@@ -9,6 +9,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import {
@@ -23,6 +24,8 @@ import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon.jsx'
 import copy from 'copy-to-clipboard'
 import { EyeInvisibleOutlined, EyeTwoTone } from '@ant-design/icons'
+import { useModal } from '../../../ModalContext'
+import { useMessage } from '../../../MessageContext'
 
 export const Token = () => {
   const [loading, setLoading] = useState(false)
@@ -33,6 +36,8 @@ export const Token = () => {
   const [tokenLogs, setTokenLogs] = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
   const [domain, setDomain] = useState('')
+  const modalApi = useModal()
+  const messageApi = useMessage()
 
   const getTokens = async () => {
     try {
@@ -57,7 +62,7 @@ export const Token = () => {
       setTokenLogs(res.data)
       setLogsOpen(true)
     } catch (error) {
-      message.error('获取日志失败')
+      messageApi.error('获取日志失败')
     }
   }
 
@@ -67,14 +72,14 @@ export const Token = () => {
         tokenId: record.id,
       })
     } catch (error) {
-      message.error('操作失败')
+      messageApi.error('操作失败')
     } finally {
       getTokens()
     }
   }
 
   const handleDelete = record => {
-    Modal.confirm({
+    modalApi.confirm({
       title: '删除',
       zIndex: 1002,
       content: <div>您确定要删除{record.name}吗？</div>,
@@ -86,10 +91,10 @@ export const Token = () => {
             tokenId: record.id,
           })
           getTokens()
-          message.success('删除成功')
+          messageApi.success('删除成功')
         } catch (error) {
           console.error(error)
-          message.error('删除失败')
+          messageApi.error('删除失败')
         }
       },
     })
@@ -102,7 +107,7 @@ export const Token = () => {
       setConfirmLoading(true)
       await addToken(values)
     } catch (error) {
-      message.error('添加失败')
+      messageApi.error('添加失败')
     } finally {
       setConfirmLoading(false)
       setAddTokenOpen(false)
@@ -189,41 +194,51 @@ export const Token = () => {
       render: (_, record) => {
         return (
           <Space>
-            <span
-              className="cursor-pointer hover:text-primary"
-              onClick={() => {
-                copy(`${domain || window.location.href}/api/v1/${record.token}`)
-                message.success('复制成功')
-              }}
-            >
-              <MyIcon icon="copy" size={20}></MyIcon>
-            </span>
-            <span
-              className="cursor-pointer hover:text-primary"
-              onClick={() => handleTokenLogs(record)}
-            >
-              <MyIcon icon="rizhi" size={20}></MyIcon>
-            </span>
-            <span
-              className="cursor-pointer hover:text-primary"
-              onClick={() => {
-                handleToggleStatus(record)
-              }}
-            >
-              <div>
-                {record.isEnabled ? (
-                  <MyIcon icon="pause" size={20}></MyIcon>
-                ) : (
-                  <MyIcon icon="start" size={20}></MyIcon>
-                )}
-              </div>
-            </span>
-            <span
-              className="cursor-pointer hover:text-primary"
-              onClick={() => handleDelete(record)}
-            >
-              <MyIcon icon="delete" size={20}></MyIcon>
-            </span>
+            <Tooltip title="复制">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => {
+                  copy(
+                    `${domain || window.location.origin}/api/v1/${record.token}`
+                  )
+                  messageApi.success('复制成功')
+                }}
+              >
+                <MyIcon icon="copy" size={20}></MyIcon>
+              </span>
+            </Tooltip>
+            <Tooltip title="Token访问日志">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => handleTokenLogs(record)}
+              >
+                <MyIcon icon="rizhi" size={20}></MyIcon>
+              </span>
+            </Tooltip>
+            <Tooltip title="切换启用状态">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => {
+                  handleToggleStatus(record)
+                }}
+              >
+                <div>
+                  {record.isEnabled ? (
+                    <MyIcon icon="pause" size={20}></MyIcon>
+                  ) : (
+                    <MyIcon icon="start" size={20}></MyIcon>
+                  )}
+                </div>
+              </span>
+            </Tooltip>
+            <Tooltip title="删除Token">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => handleDelete(record)}
+              >
+                <MyIcon icon="delete" size={20}></MyIcon>
+              </span>
+            </Tooltip>
           </Space>
         )
       },

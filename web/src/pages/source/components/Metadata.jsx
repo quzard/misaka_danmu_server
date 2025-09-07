@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, List, message, Tag } from 'antd'
+import { Button, Card, Form, Input, List, message, Tag, Tooltip } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import { getMetaData, setMetaData } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
@@ -17,6 +17,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { ContainerOutlined } from '@ant-design/icons'
+import { useMessage } from '../../../MessageContext'
 
 const SortableItem = ({ item, index, handleChangeStatus }) => {
   const {
@@ -57,10 +59,16 @@ const SortableItem = ({ item, index, handleChangeStatus }) => {
           <div>{item.providerName}</div>
         </div>
         <div className="flex items-center justify-around gap-4">
-          {item.status !== '未配置' ? (
-            <Tag color="green">{item.status}</Tag>
-          ) : (
-            <Tag color="red">{item.status}</Tag>
+          {item.status !== '未配置' && (
+            <Tooltip title={item.status} trigger={['click', 'hover']}>
+              <ContainerOutlined
+                style={{
+                  color: item.status?.includes('失败')
+                    ? 'var(--color-red-400)'
+                    : 'var(--color-green-400)',
+                }}
+              />
+            </Tooltip>
           )}
           {item.isAuxSearchEnabled ? (
             <Tag color="green">已启用</Tag>
@@ -68,9 +76,11 @@ const SortableItem = ({ item, index, handleChangeStatus }) => {
             <Tag color="red">未启用</Tag>
           )}
           {item.providerName !== 'tmdb' ? (
-            <div onClick={handleChangeStatus}>
-              <MyIcon icon="exchange" size={24} />
-            </div>
+            <Tooltip title="切换启用状态">
+              <div onClick={handleChangeStatus}>
+                <MyIcon icon="exchange" size={24} />
+              </div>
+            </Tooltip>
           ) : (
             <div className="w-6"></div>
           )}
@@ -85,6 +95,8 @@ export const Metadata = () => {
   const [list, setList] = useState([])
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
+
+  const messageApi = useMessage()
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -143,7 +155,7 @@ export const Metadata = () => {
       console.log(updatedList, 'updatedList')
       setList(updatedList)
       setMetaData(updatedList)
-      message.success(
+      messageApi.success(
         `已更新排序，${movedItem.providerName} 移动到位置 ${overIndex + 1}`
       )
     }
@@ -193,10 +205,16 @@ export const Metadata = () => {
               <div>{activeItem.providerName}</div>
             </div>
             <div className="flex items-center justify-around gap-4">
-              {activeItem.status !== '未配置' ? (
-                <Tag color="green">{activeItem.status}</Tag>
-              ) : (
-                <Tag color="red">{activeItem.status}</Tag>
+              {activeItem.status !== '未配置' && (
+                <Tooltip title={activeItem.status}>
+                  <ContainerOutlined
+                    style={{
+                      color: activeItem.status?.includes('失败')
+                        ? 'var(--color-red-400)'
+                        : 'var(--color-green-400)',
+                    }}
+                  />
+                </Tooltip>
               )}
               {activeItem.isAuxSearchEnabled ? (
                 <Tag color="green">已启用</Tag>

@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
-from .database import init_db_tables, close_db_engine, create_initial_admin_user
-from .api import api_router
+from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
+from .api import api_router, control_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
@@ -60,12 +60,14 @@ async def lifespan(app: FastAPI):
         # API 和 Webhook
         'customApiDomain': ('', '用于拼接弹幕API地址的自定义域名。'),
         'webhookApiKey': ('', '用于Webhook调用的安全密钥。'),
+        'trustedProxies': ('', '受信任的反向代理IP列表，用逗号分隔。当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。'),
         'externalApiKey': ('', '用于外部API调用的安全密钥。'),
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
         # 认证
         # 代理
         'proxyUrl': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),
         'proxyEnabled': ('false', '是否全局启用代理。'),
+        'proxySslVerify': ('true', '使用HTTPS代理时是否验证SSL证书。设为false可解决自签名证书问题。'),
         'jwtExpireMinutes': (settings.jwt.access_token_expire_minutes, 'JWT令牌的有效期（分钟）。-1 表示永不过期。'),
         # 元数据源
         'tmdbApiKey': ('', '用于访问 The Movie Database API 的密钥。'),
@@ -82,29 +84,68 @@ async def lifespan(app: FastAPI):
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
-        "rate_limit_global_limit": ("50", ""),
-        "rate_limit_global_period_seconds": ("3600", ""),
+        # 全局过滤
+        'search_result_global_blacklist_cn': (r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇|纪录片|访谈|番外|短片|加更|走心|解忧|纯享|解读|揭秘|赏析', '用于过滤搜索结果标题的全局中文黑名单(正则表达式)。'),
+        'search_result_global_blacklist_eng': (r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot', '用于过滤搜索结果标题的全局英文黑名单(正则表达式)。'),
+        'mysqlBinlogRetentionDays': (3, '（仅MySQL）自动清理多少天前的二进制日志（binlog）。0为不清理。需要SUPER或BINLOG_ADMIN权限。'),
     }
     await app.state.config_manager.register_defaults(default_configs)
 
-    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager)
+    # --- 新的初始化顺序以解决循环依赖 ---
+    # 1. 初始化元数据管理器，但暂时不传入 scraper_manager
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None) # type: ignore
+
+    # 2. 初始化搜索源管理器，并传入元数据管理器
+    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager)
+
+    # 3. 将 scraper_manager 实例回填到 metadata_manager 中
+    app.state.metadata_manager.scraper_manager = app.state.scraper_manager
+
+    # 4. 现在可以安全地初始化所有管理器
     await app.state.scraper_manager.initialize()
+    await app.state.metadata_manager.initialize()
+
+    # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
 
-    # 新增：初始化元数据源管理器
-    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager)
-    await app.state.metadata_manager.initialize()
+    app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
+
+
 
     app.state.task_manager = TaskManager(session_factory)
     # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager, app.state.rate_limiter
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager, app.state.rate_limiter, app.state.metadata_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter)
+    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
     await app.state.scheduler_manager.start()
+    
+    # --- 前端服务 (生产环境) ---
+    # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
+    # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
+    # 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
+    if settings.environment == "development":
+        # 开发环境：所有非API请求都重定向到Vite开发服务器
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_react_app_dev(request: Request, full_path: str):
+            base_url = f"http://{settings.client.host}:{settings.client.port}"
+            return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
+    else:
+        # 生产环境：显式挂载静态资源目录
+        app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
+        # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
+        app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
+        # dist挂载
+        app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
+        # 挂载用户缓存的图片 (如海报)
+        app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
+        # 然后，为所有其他路径提供 index.html 以支持前端路由
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(request: Request, full_path: str):
+            return FileResponse("web/dist/index.html")
     
     yield
     
@@ -120,6 +161,9 @@ async def lifespan(app: FastAPI):
         await app.state.scraper_manager.close_all()
     if hasattr(app.state, "task_manager"):
         await app.state.task_manager.stop()
+    # 新增：在关闭时也关闭元数据管理器
+    if hasattr(app.state, "metadata_manager"):
+        await app.state.metadata_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
 
@@ -135,11 +179,8 @@ app = FastAPI(
 # 新增：配置CORS，允许前端开发服务器访问API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        f"http://{settings.client.host}:{settings.client.port}",  # 前端开发服务器
-        "http://localhost:5173",  # 默认Vite开发端口
-        "http://127.0.0.1:5173",
-    ],
+    # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -223,31 +264,17 @@ async def cleanup_task(app: FastAPI):
         except Exception as e:
             logging.getLogger(__name__).error(f"缓存清理任务出错: {e}")
 
-# 包含所有非 dandanplay 的 API 路由
-app.include_router(api_router, prefix="/api")
+
+
+
+
+# 新增：显式地挂载外部控制API路由，以确保其优先级
+app.include_router(control_router, prefix="/api/control", tags=["External Control API"])
 
 app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible"], include_in_schema=False)
 
-# --- 前端服务 (生产环境) ---
-# 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-# 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
-if settings.environment == "development":
-    # 开发环境：所有非API请求都重定向到Vite开发服务器
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_react_app_dev(request: Request, full_path: str):
-        base_url = f"http://{settings.client.host}:{settings.client.port}"
-        return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-else:
-    # 生产环境：显式挂载静态资源目录
-    app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-    # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
-    app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-    # 挂载用户缓存的图片 (如海报)
-    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-    # 然后，为所有其他路径提供 index.html 以支持前端路由
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(request: Request, full_path: str):
-        return FileResponse("web/dist/index.html")
+# 包含所有非 dandanplay 的 API 路由
+app.include_router(api_router, prefix="/api")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
