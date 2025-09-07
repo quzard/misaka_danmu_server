@@ -588,13 +588,19 @@ class TencentScraper(BaseScraper):
         return None
     async def _get_cover_info(self, cid: str) -> Optional[Dict[str, Any]]:
         """获取封面信息，主要为了其中的 chapter_info (季/章信息)。"""
+        # 修正：使用更可靠的 page_id 和 payload 来获取包含 chapter_info 的数据
+        # 这个 payload 模拟了分页获取第一页的请求，该请求的响应中包含了所有章节信息。
+        page_context_str = f"cid={cid}&req_from=web_vsite"
         payload = {
             "page_params": {
                 "req_from": "web_vsite",
-                "page_id": "vsite_cover_info",
+                "page_id": "vsite_episode_list_search", # 使用这个 page_id
                 "page_type": "detail_operation",
                 "id_type": "1",
                 "cid": cid,
+                "page_context": page_context_str,
+                "page_num": "0",
+                "page_size": "30" # 请求一页分集以获取章节信息
             }
         }
         try:
@@ -606,10 +612,10 @@ class TencentScraper(BaseScraper):
             if result.get("ret") == 0 and result.get("data"):
                 for module_list_data in result["data"].get("module_list_datas", []):
                     for module_data in module_list_data.get("module_datas", []):
-                        if module_data.get("module_id") == "vsite_episode_list":
-                            if chapter_info := module_data.get("module_params", {}).get("chapter_info"):
-                                self.logger.info(f"Tencent: 成功获取到 chapter_info (cid={cid})")
-                                return chapter_info
+                        # 修正：chapter_info 可能在 module_params 中
+                        if chapter_info := module_data.get("module_params", {}).get("chapter_info"):
+                            self.logger.info(f"Tencent: 成功从 module_params 获取到 chapter_info (cid={cid})")
+                            return chapter_info
         except Exception as e:
             self.logger.error(f"Tencent: 获取封面信息(chapterInfo)失败 (cid={cid}): {e}", exc_info=True)
         return None
