@@ -17,7 +17,7 @@ class EmbyWebhook(BaseWebhook):
         except Exception:
             self.logger.error("Emby Webhook: 无法解析请求体为JSON。")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
-
+        logger.info(f"Emby Webhook: 收到请求，请求: {payload}")
         event_type = payload.get("Event")
         # 我们只关心新媒体入库的事件, 兼容 emby 的 'library.new' 和 jellyfin 的 'item.add'
         if event_type not in ["library.new"]:
