@@ -16,6 +16,10 @@ from ..timezone import get_now
 
 logger = logging.getLogger(__name__)
 
+# 当多个候选条目的模糊匹配分数与最高分差值 <= 该阈值时，视为“同等最优”并全部下载。
+# 目前为 0 表示只有完全相同最高分的才一起下载，后续如果需要放宽可改成 1~3。
+FUZZY_TIE_SCORE_DELTA = 0
+
 
 def _is_movie_by_title(title: str) -> bool:
     """
@@ -110,31 +114,90 @@ async def webhook_search_and_dispatch_task(
         if not valid_candidates:
             raise ValueError(f"未找到 '{animeTitle}' 的精确匹配项。")
 
+        # 对候选进行排序：先按标题相似度得分，其次按 provider 的显示顺序
         valid_candidates.sort(
             key=lambda item: (fuzz.token_set_ratio(animeTitle, item.title), -provider_order.get(item.provider, 999)),
             reverse=True
         )
-        best_match = valid_candidates[0]
+        # info 输出 valid_candidates
+        logger.info(f"Webhook 任务: 找到 {len(valid_candidates)} 个有效候选源，按相似度排序如下:")
+        for idx, candidate in enumerate(valid_candidates, start=1):
+            score = fuzz.token_set_ratio(animeTitle, candidate.title)
+            logger.info(f"  {idx}. {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}) [Score: {score}]")
 
-        logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
-        progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+        # 取得最高的匹配分数
+        top_score = fuzz.token_set_ratio(animeTitle, valid_candidates[0].title)
+        # 收集与最高分差值 <= 阈值 的所有候选（即视为“同等最优”）
+        top_matches = []
+        for c in valid_candidates:
+            score = fuzz.token_set_ratio(animeTitle, c.title)
+            if top_score - score <= FUZZY_TIE_SCORE_DELTA:
+                top_matches.append((c, score))
+            else:
+                break  # 因为已排序，后续分数只会更低
 
-        # 根据媒体类型格式化任务标题，以包含季集信息和时间戳
+        # 去重（以 provider + mediaId 作为唯一键）
+        seen_keys = set()
+        unique_top_matches = []
+        for c, score in top_matches:
+            key_ = (c.provider, c.mediaId)
+            if key_ not in seen_keys:
+                seen_keys.add(key_)
+                unique_top_matches.append((c, score))
+
+        best_match = unique_top_matches[0][0]
+
+        if len(unique_top_matches) > 1:
+            logger.info(
+                "Webhook 任务: 发现多个同分最高匹配 (分数: %s)。将全部创建导入任务: %s", 
+                top_score,
+                [f"{c.provider}:{c.title}" for c, _ in unique_top_matches]
+            )
+        else:
+            logger.info(
+                "Webhook 任务: 在所有源中找到唯一最佳匹配项 '%s' (来自: %s) 分数: %s", 
+                best_match.title, best_match.provider, top_score
+            )
+
+        if len(unique_top_matches) == 1:
+            logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
+        else:
+            logger.info(
+                "Webhook 任务: 将为 %d 个同分最高的匹配项创建导入任务。", len(unique_top_matches)
+            )
+
+        progress_callback(55, f"准备创建 {len(unique_top_matches)} 个导入任务")
+
+        # 批量创建任务
         current_time = get_now().strftime("%H:%M:%S")
-        if mediaType == "tv_series":
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
-        else: # movie
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
-        task_coro = lambda session, cb: generic_import_task(
-            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
-            animeTitle=best_match.title, mediaType=best_match.type,
-            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, metadata_manager=metadata_manager,
-            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-            progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
-            task_manager=task_manager
+        created_titles = []
+        for idx, (match_item, score) in enumerate(unique_top_matches, start=1):
+            if mediaType == "tv_series":
+                task_title = (
+                    f"Webhook（{webhookSource}）自动导入[{idx}/{len(unique_top_matches)}]："
+                    f"{match_item.title} - S{season:02d}E{currentEpisodeIndex:02d} ({match_item.provider}) [{current_time}]"
+                )
+            else:
+                task_title = (
+                    f"Webhook（{webhookSource}）自动导入[{idx}/{len(unique_top_matches)}]："
+                    f"{match_item.title} ({match_item.provider}) [{current_time}]"
+                )
+
+            task_coro = lambda session, cb, mi=match_item: generic_import_task(
+                provider=mi.provider, mediaId=mi.mediaId, year=year,
+                animeTitle=mi.title, mediaType=mi.type,
+                season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=mi.imageUrl, metadata_manager=metadata_manager,
+                doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                progress_callback=cb, session=session, manager=manager,
+                task_manager=task_manager
+            )
+            await task_manager.submit_task(task_coro, task_title)
+            created_titles.append(task_title)
+
+        progress_callback(90, f"已创建 {len(created_titles)} 个导入任务")
+        raise TaskSuccess(
+            f"Webhook: 已为 {len(created_titles)} 个最高匹配源创建导入任务。"
         )
-        await task_manager.submit_task(task_coro, task_title)
-        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
     except TaskSuccess:
         raise
     except Exception as e:
