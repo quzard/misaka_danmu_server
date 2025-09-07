@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # 当多个候选条目的模糊匹配分数与最高分差值 <= 该阈值时，视为“同等最优”并全部下载。
 # 目前为 0 表示只有完全相同最高分的才一起下载，后续如果需要放宽可改成 1~3。
-FUZZY_TIE_SCORE_DELTA = 0
+FUZZY_TIE_SCORE_DELTA = 10
 
 
 def _is_movie_by_title(title: str) -> bool:
