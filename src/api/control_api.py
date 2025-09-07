@@ -310,6 +310,10 @@ class ControlAutoImportRequest(BaseModel):
     episode: Optional[int] = None
     mediaType: Optional[AutoImportMediaType] = None
 
+class ControlMetadataSearchResponse(BaseModel):
+    """用于外部API的元数据搜索响应模型"""
+    results: List[models.MetadataDetailsResponse]
+
 # --- API 路由 ---
 
 @router.post("/import/auto", status_code=status.HTTP_202_ACCEPTED, summary="全自动搜索并导入", response_model=ControlTaskResponse)
@@ -393,6 +397,7 @@ async def auto_import(
     finally:
         # 确保释放锁
         await manager.release_search_lock(api_key)
+
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
     keyword: str,
@@ -784,6 +789,63 @@ async def url_import(
     except Exception as e:
         logger.error(f"提交URL导入任务时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
+
+# --- 元信息搜索 ---
+
+@router.get("/metadata/search", response_model=ControlMetadataSearchResponse, summary="查找元数据信息")
+async def search_metadata_source(
+    provider: str = Query(..., description="要查询的元数据源，例如: 'tmdb', 'bangumi'。"),
+    keyword: Optional[str] = Query(None, description="按关键词搜索。'keyword' 和 'id' 必须提供一个。"),
+    id: Optional[str] = Query(None, description="按ID精确查找。'keyword' 和 'id' 必须提供一个。"),
+    mediaType: Optional[AutoImportMediaType] = Query(None, description="媒体类型。可选值: 'tv_series', 'movie'。"),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """
+    ### 功能
+    从指定的元数据源（如TMDB, Bangumi）中查找媒体信息。
+
+    ### 工作流程
+    1.  提供 `provider` 来指定要查询的源。
+    2.  提供 `keyword` 或 `id` 中的一个来进行搜索。
+    3.  对于某些源（如TMDB），可能需要提供 `mediaType` 来区分电视剧和电影。
+
+    ### 返回
+    返回一个包含元数据详情的列表。如果通过ID查找且成功，列表中将只有一个元素。
+    """
+    if not keyword and not id:
+        raise HTTPException(status_code=400, detail="必须提供 'keyword' 或 'id' 参数之一。")
+    if keyword and id:
+        raise HTTPException(status_code=400, detail="不能同时提供 'keyword' 和 'id' 参数。")
+
+    # --- 新增：将通用媒体类型映射到特定于提供商的类型 ---
+    provider_media_type: Optional[str] = None
+    if mediaType:
+        if provider == 'tmdb':
+            provider_media_type = 'tv' if mediaType == AutoImportMediaType.TV_SERIES else 'movie'
+        elif provider == 'tvdb':
+            provider_media_type = 'series' if mediaType == AutoImportMediaType.TV_SERIES else 'movies'
+        # 对于其他源，如果它们使用 'tv_series'/'movie'，则无需映射
+        # 否则，需要在此处添加更多 case
+    # --- 映射结束 ---
+
+    # 创建一个虚拟用户，因为元数据管理器的核心方法需要它
+    user = models.User(id=0, username="control_api")
+    results = []
+
+    try:
+        if id:
+            details = await metadata_manager.get_details(provider, id, user, mediaType=provider_media_type)
+            if details:
+                results.append(details)
+        elif keyword:
+            results = await metadata_manager.search(provider, keyword, user, mediaType=provider_media_type)
+    except HTTPException as e:
+        raise e # 重新抛出已知的HTTP异常
+    except Exception as e:
+        logger.error(f"从元数据源 '{provider}' 搜索时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"从元数据源 '{provider}' 搜索时发生内部错误。")
+
+    return ControlMetadataSearchResponse(results=results)
 
 # --- 媒体库管理 ---
 
