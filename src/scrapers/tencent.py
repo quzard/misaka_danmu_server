@@ -63,6 +63,7 @@ class TencentSearchVideoInfo(BaseModel):
     img_url: Optional[str] = Field(None, alias="imgUrl")
     subject_doc: Optional[TencentSubjectDoc] = Field(None, alias="subjectDoc") # type: ignore
     play_sites: Optional[List[Dict[str, Any]]] = Field(None, alias="playSites") # Added for filtering
+    episode_sites: Optional[List[Dict[str, Any]]] = Field(None, alias="episodeSites")
     sub_title: Optional[str] = Field(None, alias="subTitle")
     play_flag: Optional[int] = Field(None, alias="playFlag")
 
@@ -319,16 +320,16 @@ class TencentScraper(BaseScraper):
             return None
 
         # Filter non-QQ platform content
-        if video_info.play_sites:
-            has_qq_site = any(site.get("enName") == 'qq' for site in video_info.play_sites)
-            if not has_qq_site:
-                self.logger.debug(f"跳过非腾讯视频内容: {title} (无qq平台)")
-                return None
-            
-            # New logic to cache chapterInfo
-            qq_site = next((site for site in video_info.play_sites if site.get("enName") == 'qq'), None)
-            if qq_site and qq_site.get("chapterInfo"):
-                chapter_info = qq_site["chapterInfo"]
+        all_sites = (video_info.play_sites or []) + (video_info.episode_sites or [])
+        if all_sites and not any(site.get("enName") == 'qq' for site in all_sites):
+            self.logger.debug(f"跳过非腾讯视频内容: {title} (无qq平台)")
+            return None
+
+        # New logic to cache chapterInfo from episodeSites
+        qq_episode_site = next((site for site in (video_info.episode_sites or []) if site.get("enName") == 'qq'), None)
+        if qq_episode_site and qq_episode_site.get("chapterInfo"):
+            chapter_info = qq_episode_site["chapterInfo"]
+            if chapter_info:
                 chapter_cache_key = f"chapter_info_{media_id}"
                 await self._set_to_cache(chapter_cache_key, chapter_info, 'episodes_ttl_seconds', 1800)
                 self.logger.info(f"Tencent: Cached chapterInfo for media_id={media_id}")
@@ -736,8 +737,8 @@ class TencentScraper(BaseScraper):
                     all_episodes_from_chapters: Dict[str, TencentEpisode] = {}
                     
                     chapter_tabs = [
-                        TencentEpisodeTabInfo(begin=0, end=0, page_context=chap['tabId'])
-                        for chap in chapter_info['chapters']
+                        TencentEpisodeTabInfo(begin=0, end=0, page_context=chap['pageContext'])
+                        for chap in chapter_info['chapters'] if 'pageContext' in chap
                     ]
                     
                     tasks = [self._fetch_episodes_by_tab(media_id, tab) for tab in chapter_tabs]
