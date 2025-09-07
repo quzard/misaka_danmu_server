@@ -31,7 +31,7 @@ class EmbyWebhook(BaseWebhook):
             return
 
         item_type = item.get("Type")
-        if item_type not in ["Episode", "Movie"]:
+        if item_type not in ["Episode", "Movie", "Series"]:
             logger.info(f"Webhook: 忽略非 'Episode' 或 'Movie' 的媒体项 (类型: {item_type})")
             return
 
