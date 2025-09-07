@@ -793,6 +793,15 @@ async def get_library(session: AsyncSession = Depends(get_db_session)):
     db_results = await crud.get_library_anime(session)
     return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
 
+@router.get("/library/search", response_model=List[models.LibraryAnimeInfo], summary="搜索媒体库")
+async def search_library(
+    keyword: str = Query(..., description="搜索关键词"),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """根据关键词搜索弹幕库中已收录的作品。"""
+    db_results = await crud.search_library_anime(session, keyword)
+    return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
+
 @router.post("/library/anime", response_model=ControlAnimeDetailsResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
 async def create_anime_entry(
     payload: ControlAnimeCreateRequest,

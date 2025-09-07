@@ -135,6 +135,7 @@ services:
       - PUID=1000
       - PGID=1000
       - UMASK=0022
+      - TZ=Asia/Shanghai
       # --- 数据库连接配置 ---
       - DANMUAPI_DATABASE__TYPE=mysql                         # 数据库类型
       - DANMUAPI_DATABASE__HOST=mysql                         # 使用服务名
@@ -195,6 +196,7 @@ services:
       - PUID=1000
       - PGID=1000
       - UMASK=0022
+      - TZ=Asia/Shanghai
       # --- 数据库连接配置 ---
       - DANMUAPI_DATABASE__TYPE=postgresql                              # 数据库类型
       - DANMUAPI_DATABASE__HOST=postgres                                # 使用服务名

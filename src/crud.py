@@ -92,6 +92,42 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
+async def search_library_anime(session: AsyncSession, keyword: str) -> List[Dict[str, Any]]:
+    """通过关键词搜索媒体库中的番剧。"""
+    clean_keyword = keyword.strip()
+    if not clean_keyword:
+        return []
+
+    stmt = (
+        select(
+            Anime.id.label("animeId"),
+            Anime.localImagePath.label("localImagePath"),
+            Anime.imageUrl.label("imageUrl"),
+            Anime.title,
+            Anime.type,
+            Anime.season,
+            Anime.year,
+            Anime.createdAt.label("createdAt"),
+            case(
+                (Anime.type == 'movie', 1),
+                else_=func.coalesce(func.max(Episode.episodeIndex), 0)
+            ).label("episodeCount"),
+            func.count(distinct(AnimeSource.id)).label("sourceCount")
+        )
+        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
+        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
+        .group_by(Anime.id)
+    )
+
+    # Add search condition
+    normalized_like_keyword = f"%{clean_keyword.replace('：', ':').replace(' ', '')}%"
+    like_conditions = [func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_keyword) for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji, AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]]
+    stmt = stmt.where(or_(*like_conditions)).order_by(Anime.createdAt.desc())
+
+    result = await session.execute(stmt)
+    return [dict(row) for row in result.mappings()]
+
 async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     """
     Gets a single anime from the library by its ID, with counts.
