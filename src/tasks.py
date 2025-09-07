@@ -1316,18 +1316,25 @@ async def auto_search_and_import_task(
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
         
         # 修正：使用更智能的排序逻辑来选择最佳匹配
-        # 1. 媒体类型是否匹配
-        # 2. 标题相似度 (使用 a_main_title 确保与原始元数据标题比较)
-        # 3. 用户设置的源优先级
+        # 1. 媒体类型是否匹配 (最优先)
+        # 2. 如果请求指定了季度，季度是否匹配 (次优先)
+        # 3. 标题相似度
+        # 4. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
+        # 5. 用户设置的源优先级 (最后)
         all_results.sort(
             key=lambda item: (
-                1 if item.type == media_type else 0,  # 媒体类型匹配得1分，否则0分
-                fuzz.token_set_ratio(main_title, item.title), # 标题相似度得分
-                -provider_order.get(item.provider, 999) # 源优先级，取负数因为值越小优先级越高
+                1 if item.type == media_type else 0,
+                1 if season is not None and item.season == season else 0,
+                fuzz.token_set_ratio(main_title, item.title),
+                -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
+                -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
         )
         best_match = all_results[0]
+
+        # 记录选择的最佳匹配项，以便调试
+        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
