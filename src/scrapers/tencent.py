@@ -207,7 +207,7 @@ class TencentScraper(BaseScraper):
             "Referer": "https://v.qq.com/",
         }
         # 根据C#代码，这个特定的cookie对于成功请求至关重要
-        self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
+        self.cookies = {"pgv_pvid": "40b67e3b06027f3d", "video_platform": "2", "vversion_name": "8.2.95", "video_bucketid": "4", "video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}
         
         # Headers and cookies for the new MultiTerminalSearch API
         self.multiterminal_headers = {
@@ -263,7 +263,7 @@ class TencentScraper(BaseScraper):
             await self.client.aclose()
             self.client = None
 
-    def _filter_search_item(self, item: TencentSearchItem, keyword: str) -> Optional[models.ProviderSearchInfo]:
+    async def _filter_search_item(self, item: TencentSearchItem, keyword: str) -> Optional[models.ProviderSearchInfo]:
         """
         Ported from JS: processSearchItemQuick, focusing on filtering.
         Processes a single search item and applies filtering rules.
@@ -324,6 +324,14 @@ class TencentScraper(BaseScraper):
             if not has_qq_site:
                 self.logger.debug(f"跳过非腾讯视频内容: {title} (无qq平台)")
                 return None
+            
+            # New logic to cache chapterInfo
+            qq_site = next((site for site in video_info.play_sites if site.get("enName") == 'qq'), None)
+            if qq_site and qq_site.get("chapterInfo"):
+                chapter_info = qq_site["chapterInfo"]
+                chapter_cache_key = f"chapter_info_{media_id}"
+                await self._set_to_cache(chapter_cache_key, chapter_info, 'episodes_ttl_seconds', 1800)
+                self.logger.info(f"Tencent: Cached chapterInfo for media_id={media_id}")
 
         # Filter movie-like non-formal content (e.g., documentaries, behind-the-scenes)
         if content_type == "电影":
@@ -369,9 +377,9 @@ class TencentScraper(BaseScraper):
             data = TencentSearchResult.model_validate(response_json)
 
             if data.data and data.data.normal_list:
-                for item in data.data.normal_list.item_list:
-                    # Apply filtering logic here
-                    filtered_item = self._filter_search_item(item, keyword)
+                tasks = [self._filter_search_item(item, keyword) for item in data.data.normal_list.item_list]
+                filtered_items = await asyncio.gather(*tasks)
+                for filtered_item in filtered_items:
                     if filtered_item:
                         results.append(filtered_item)
         except httpx.HTTPStatusError as e:
@@ -400,9 +408,9 @@ class TencentScraper(BaseScraper):
             data = TencentSearchResult.model_validate(response_json)
 
             if data.data and data.data.normal_list:
-                for item in data.data.normal_list.item_list:
-                    # Apply filtering logic here
-                    filtered_item = self._filter_search_item(item, keyword)
+                tasks = [self._filter_search_item(item, keyword) for item in data.data.normal_list.item_list]
+                filtered_items = await asyncio.gather(*tasks)
+                for filtered_item in filtered_items:
                     if filtered_item:
                         results.append(filtered_item)
         except httpx.HTTPStatusError as e:
@@ -452,8 +460,9 @@ class TencentScraper(BaseScraper):
                 self.logger.debug("Tencent (MultiTerminal API): MainNeed box 未找到或为空, 回退到 normalList。")
                 items_to_process.extend(data.data.normalList.item_list)
 
-            for item in items_to_process:
-                filtered_item = self._filter_search_item(item, keyword)
+            tasks = [self._filter_search_item(item, keyword) for item in items_to_process]
+            filtered_items = await asyncio.gather(*tasks)
+            for filtered_item in filtered_items:
                 if filtered_item:
                     results.append(filtered_item)
         except (httpx.HTTPStatusError, ValidationError, KeyError, json.JSONDecodeError) as e:
@@ -716,8 +725,12 @@ class TencentScraper(BaseScraper):
             self.logger.info(f"Tencent: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             try:
-                # 策略1: 尝试获取季/章信息，并据此获取所有分集
-                chapter_info = await self._get_cover_info(media_id)
+                # 策略1: 尝试从缓存或API获取季/章信息，并据此获取所有分集
+                chapter_info = await self._get_from_cache(f"chapter_info_{media_id}")
+                if not chapter_info:
+                    self.logger.info(f"Tencent: 未在缓存中找到章节信息，将尝试从API获取 (cid={media_id})")
+                    chapter_info = await self._get_cover_info(media_id)
+
                 if chapter_info and chapter_info.get("chapters"):
                     self.logger.info(f"Tencent: 找到 {len(chapter_info['chapters'])} 个季/章，将分别获取分集。")
                     all_episodes_from_chapters: Dict[str, TencentEpisode] = {}
