@@ -542,6 +542,14 @@ async def direct_import(
         
     item_to_import = cached_results[payload.resultIndex]
 
+    # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
+    existing_anime = await crud.find_anime_by_title_and_season(session, item_to_import.title, item_to_import.season)
+    if existing_anime:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"作品 '{item_to_import.title}' (第 {item_to_import.season} 季) 已存在于媒体库中，无需重复导入。"
+        )
+
     task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
     # 修正：为单集导入任务生成更具体的唯一键，以允许对同一作品的不同单集进行排队。
     # 这修复了在一次单集导入完成后，立即为同一作品提交另一次单集导入时，因任务键冲突而被拒绝的问题。
