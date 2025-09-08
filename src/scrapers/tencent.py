@@ -765,7 +765,7 @@ class TencentScraper(BaseScraper):
                 self.logger.error(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {e}", exc_info=True)
 
             if not network_episodes:
-                # 方案2 (备): 回退到旧的分页逻辑
+                # 方案3 (最终兜底): 回退到旧版分页逻辑
                 self.logger.warning("Tencent: 新版API失败，正在回退到旧版分页API获取分集...")
                 network_episodes = await self._internal_get_episodes_v1(media_id)
             
@@ -810,14 +810,14 @@ class TencentScraper(BaseScraper):
         result = TencentPageResult.model_validate(response.json())
 
         if result.data and result.data.module_list_datas:
-            module_data = result.data.module_list_datas[0]
-            if module_data.module_datas and module_data.module_datas[0].module_params:
-                tabs_str = module_data.module_datas[0].module_params.tabs
-                if tabs_str:
-                    try:
-                        return [TencentEpisodeTabInfo.model_validate(t) for t in json.loads(tabs_str)]
-                    except json.JSONDecodeError:
-                        self.logger.error(f"Tencent: 解析分集卡片JSON失败: {tabs_str}")
+            for module_list_data in result.data.module_list_datas:
+                for module_data in module_list_data.module_datas:
+                    if module_data.module_params and module_data.module_params.tabs:
+                        tabs_str = module_data.module_params.tabs
+                        try:
+                            return [TencentEpisodeTabInfo.model_validate(t) for t in json.loads(tabs_str)]
+                        except json.JSONDecodeError:
+                            self.logger.error(f"Tencent: 解析分集卡片JSON失败: {tabs_str}")
         return None
 
     async def _fetch_episodes_by_tab(self, cid: str, tab: TencentEpisodeTabInfo) -> List[TencentEpisode]:
@@ -837,11 +837,12 @@ class TencentScraper(BaseScraper):
         
         episodes = []
         if result.data and result.data.module_list_datas:
-            module_data = result.data.module_list_datas[0]
-            if module_data.module_datas and module_data.module_datas[0].item_data_lists:
-                for item in module_data.module_datas[0].item_data_lists.item_datas:
-                    if item.item_params and item.item_params.vid:
-                        episodes.append(TencentEpisode.model_validate(item.item_params.model_dump()))
+            for module_list_data in result.data.module_list_datas:
+                for module_data in module_list_data.module_datas:
+                    if module_data.item_data_lists:
+                        for item in module_data.item_data_lists.item_datas:
+                            if item.item_params and item.item_params.vid:
+                                episodes.append(TencentEpisode.model_validate(item.item_params.model_dump()))
         return episodes
 
     async def _fetch_episodes_with_tabs(self, cid: str) -> List[TencentEpisode]:
