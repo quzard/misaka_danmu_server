@@ -389,7 +389,14 @@ async def auto_import(
         unique_key_parts.append(payload.mediaType.value)
     unique_key = f"auto-import-{'-'.join(unique_key_parts)}"
 
-    task_title = f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"
+    # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+    title_parts = [f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"]
+    if payload.season is not None:
+        title_parts.append(f"S{payload.season:02d}")
+    if payload.episode is not None:
+        title_parts.append(f"E{payload.episode:02d}")
+    task_title = " ".join(title_parts)
+
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
             payload, cb, session, manager, metadata_manager, task_manager,
@@ -561,7 +568,12 @@ async def direct_import(
             detail=f"作品 '{item_to_import.title}' (第 {item_to_import.season} 季) 已存在于媒体库中，无需重复导入。"
         )
 
-    task_title = f"外部API导入: {item_to_import.title} ({item_to_import.provider})"
+    # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+    title_parts = [f"外部API导入: {item_to_import.title} ({item_to_import.provider})"]
+    if item_to_import.currentEpisodeIndex is not None and item_to_import.season is not None:
+        title_parts.append(f"S{item_to_import.season:02d}E{item_to_import.currentEpisodeIndex:02d}")
+    task_title = " ".join(title_parts)
+
     # 修正：为单集导入任务生成更具体的唯一键，以允许对同一作品的不同单集进行排队。
     # 这修复了在一次单集导入完成后，立即为同一作品提交另一次单集导入时，因任务键冲突而被拒绝的问题。
     unique_key = f"import-{item_to_import.provider}-{item_to_import.mediaId}"
@@ -678,7 +690,18 @@ async def edited_import(
         episodes=payload.episodes
     )
 
-    task_title = f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"
+    # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+    title_parts = [f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"]
+    if task_payload.season is not None:
+        title_parts.append(f"S{task_payload.season:02d}")
+    if payload.episodes:
+        episode_indices = sorted([ep.episodeIndex for ep in payload.episodes])
+        if len(episode_indices) == 1:
+            title_parts.append(f"E{episode_indices[0]:02d}")
+        else:
+            title_parts.append(f"({len(episode_indices)}集)")
+    task_title = " ".join(title_parts)
+
     # 修正：使 unique_key 更具体，以允许对同一媒体的不同分集列表进行排队导入。
     # 这解决了在一次导入完成后，无法立即为同一媒体提交另一次导入的问题。
     episode_indices_str = ",".join(sorted([str(ep.episodeIndex) for ep in payload.episodes]))

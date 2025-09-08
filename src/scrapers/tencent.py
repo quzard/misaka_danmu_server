@@ -482,7 +482,7 @@ class TencentScraper(BaseScraper):
         return results
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        """并发执行桌面端和移动端搜索，并合并去重结果。"""
+        """使用 MultiTerminal API 作为主API进行搜索，并在失败时回退到其他API。"""
         # 智能缓存逻辑
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
@@ -511,37 +511,45 @@ class TencentScraper(BaseScraper):
     async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         实际执行网络搜索的内部方法。
+        优先使用 MultiTerminal API，如果失败或无结果，则回退到其他API。
         """
+        # 1. 优先尝试 MultiTerminal API
+        self.logger.info(f"Tencent: 正在尝试使用主API (MultiTerminal) 搜索 '{keyword}'...")
+        try:
+            multiterminal_results = await self._search_multiterminal_api(keyword, episode_info)
+            if multiterminal_results:
+                self.logger.info(f"Tencent: 主API (MultiTerminal) 成功找到 {len(multiterminal_results)} 个结果。")
+                # 基于 mediaId 去重
+                unique_results = list({item.mediaId: item for item in multiterminal_results}.values())
+                if unique_results:
+                    log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in unique_results])
+                    self.logger.info(f"Tencent (主API): 搜索结果列表:\n{log_results}")
+                return unique_results
+        except Exception as e:
+            self.logger.warning(f"Tencent: 主API (MultiTerminal) 搜索失败: {e}", exc_info=True)
 
+        # 2. 如果主API失败或无结果，则回退到备用API
+        self.logger.info(f"Tencent: 主API未找到结果或失败，正在回退到备用API (桌面/移动)...")
         desktop_task = self._search_desktop_api(keyword, episode_info)
         mobile_task = self._search_mobile_api(keyword, episode_info)
-        multiterminal_task = self._search_multiterminal_api(keyword, episode_info)
         
-        results_lists = await asyncio.gather(desktop_task, mobile_task, multiterminal_task, return_exceptions=True)
+        results_lists = await asyncio.gather(desktop_task, mobile_task, return_exceptions=True)
         
-        all_results = []
-        api_names = ["桌面API", "移动API", "MultiTerminal API"]
+        all_fallback_results = []
+        api_names = ["桌面API", "移动API"]
         for i, res_list in enumerate(results_lists):
             api_name = api_names[i]
             if isinstance(res_list, list):
-                all_results.extend(res_list)
+                all_fallback_results.extend(res_list)
             elif isinstance(res_list, Exception):
-                # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
                 if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError)):
-                    self.logger.warning(f"Tencent ({api_name}): 搜索时连接超时或网络错误: {res_list}")
+                    self.logger.warning(f"Tencent (备用 - {api_name}): 搜索时连接超时或网络错误: {res_list}")
                 else:
-                    # 对于其他意外错误，仍然记录完整的堆栈跟踪以供调试。
-                    self.logger.error(f"Tencent ({api_name}): 搜索子任务失败", exc_info=res_list)
+                    self.logger.error(f"Tencent (备用 - {api_name}): 搜索子任务失败", exc_info=res_list)
 
         # 基于 mediaId 去重
-        unique_results = list({item.mediaId: item for item in all_results}.values())
-
-        self.logger.info(f"Tencent (合并): 网络搜索 '{keyword}' 完成，找到 {len(unique_results)} 个唯一结果。")
-        if unique_results:
-            log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'})" for r in unique_results])
-            self.logger.info(f"Tencent (合并): 搜索结果列表:\n{log_results}")
-
-        return unique_results
+        unique_fallback_results = list({item.mediaId: item for item in all_fallback_results}.values())
+        return unique_fallback_results
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从腾讯视频URL中提取作品信息。"""
@@ -742,14 +750,10 @@ class TencentScraper(BaseScraper):
             self.logger.info(f"Tencent: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             try:
-                # 策略1: 尝试从缓存或API获取季/章信息，并据此获取所有分集
+                # 策略1: 优先尝试从搜索时缓存的 chapter_info 获取分集
                 chapter_info = await self._get_from_cache(f"chapter_info_{media_id}")
-                if not chapter_info:
-                    self.logger.info(f"Tencent: 未在缓存中找到章节信息，将尝试从API获取 (cid={media_id})")
-                    chapter_info = await self._get_cover_info(media_id)
-
                 if chapter_info and chapter_info.get("chapters"):
-                    self.logger.info(f"Tencent: 找到 {len(chapter_info['chapters'])} 个季/章，将分别获取分集。")
+                    self.logger.info(f"Tencent: 从缓存中找到 {len(chapter_info['chapters'])} 个季/章，将分别获取分集。")
                     all_episodes_from_chapters: Dict[str, TencentEpisode] = {}
                     
                     chapter_tabs = [
@@ -768,22 +772,37 @@ class TencentScraper(BaseScraper):
                             self.logger.error(f"获取分集章节时出错: {res}")
                     
                     network_episodes = list(all_episodes_from_chapters.values())
-                else:
-                    # 策略2: 如果没有章节信息，回退到分页卡片策略
-                    self.logger.info(f"Tencent: 未找到章节信息，回退到分页卡片策略 (cid={media_id})")
-                    network_episodes = await self._fetch_episodes_with_tabs(media_id)
 
+                # 策略2: 如果缓存策略失败或无缓存，则执行完整的网络获取流程
                 if not network_episodes:
-                    # 如果卡片策略失败，回退到通用的分页策略
-                    self.logger.info(f"Tencent: 分页卡片策略未返回结果，回退到通用分页策略 (cid={media_id})")
-                    network_episodes = await self._fetch_episodes_paginated(media_id)
+                    if chapter_info: # Log if we tried cache and it failed
+                        self.logger.info("Tencent: 缓存的章节信息未能获取到分集，回退到完整网络获取。")
+                    
+                    # 遵循JS逻辑：优先尝试分页卡片API，然后是通用分页API，最后是旧版API。
+                    self.logger.info(f"Tencent: 正在尝试使用分页卡片API获取分集 (cid={media_id})")
+                    network_episodes = await self._fetch_episodes_with_tabs(media_id)
+                    
+                    if network_episodes:
+                        self.logger.info(f"Tencent: 分页卡片API成功获取 {len(network_episodes)} 集。")
+                    else:
+                        self.logger.info(f"Tencent: 分页卡片API未获取到数据，回退到通用分页方法。")
+                        network_episodes = await self._fetch_episodes_paginated(media_id)
+                        if network_episodes:
+                            self.logger.info(f"Tencent: 通用分页方法成功获取 {len(network_episodes)} 集。")
+                        else:
+                            self.logger.info(f"Tencent: 通用分页方法未获取到数据。")
+
+                    if not network_episodes:
+                        # 如果上述方法都失败，则使用旧版API作为最终兜底
+                        self.logger.warning("Tencent: 新版分集API均失败，正在回退到旧版分页API获取分集...")
+                        network_episodes = await self._internal_get_episodes_v1(media_id)
+
             except Exception as e:
                 self.logger.error(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {e}", exc_info=True)
-
-            if not network_episodes:
-                # 方案3 (最终兜底): 回退到旧版分页逻辑
-                self.logger.warning("Tencent: 新版API失败，正在回退到旧版分页API获取分集...")
-                network_episodes = await self._internal_get_episodes_v1(media_id)
+                # 如果发生未知错误，也尝试最终兜底
+                if not network_episodes:
+                    self.logger.warning("Tencent: 因发生错误，正在回退到旧版分页API获取分集...")
+                    network_episodes = await self._internal_get_episodes_v1(media_id)
             
             raw_episodes = network_episodes
             # 仅当请求完整列表且成功获取到数据时，才缓存原始数据
