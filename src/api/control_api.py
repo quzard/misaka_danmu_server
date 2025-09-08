@@ -378,6 +378,17 @@ async def auto_import(
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
 
+    # 修正：将 season 和 episode 纳入 unique_key，以允许同一作品不同季/集的导入
+    unique_key_parts = [payload.searchType.value, payload.searchTerm]
+    if payload.season is not None:
+        unique_key_parts.append(f"s{payload.season}")
+    if payload.episode is not None:
+        unique_key_parts.append(f"e{payload.episode}")
+    # 如果 mediaType 存在且不是默认值，也加入 unique_key，以区分同名但不同类型的作品
+    if payload.mediaType is not None and payload.mediaType != AutoImportMediaType.TV_SERIES:
+        unique_key_parts.append(payload.mediaType.value)
+    unique_key = f"auto-import-{'-'.join(unique_key_parts)}"
+
     task_title = f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
@@ -385,7 +396,7 @@ async def auto_import(
             rate_limiter=rate_limiter,
             api_key=api_key
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=f"auto-import-{payload.searchType}-{payload.searchTerm}")
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "自动导入任务已提交", "taskId": task_id}
     except HTTPException as e:
         # 捕获已知的冲突错误并重新抛出

@@ -606,12 +606,12 @@ class TencentScraper(BaseScraper):
     async def _get_cover_info(self, cid: str) -> Optional[Dict[str, Any]]:
         """获取封面信息，主要为了其中的 chapter_info (季/章信息)。"""
         # 修正：使用更可靠的 page_id 和 payload 来获取包含 chapter_info 的数据
-        # 这个 payload 模拟了分页获取第一页的请求，该请求的响应中包含了所有章节信息。
+        # 这个 payload 模拟了分页获取第一页的请求，该请求的响应中包含了所有章节信息或tabs信息。
         page_context_str = f"cid={cid}&req_from=web_vsite"
         payload = {
             "page_params": {
                 "req_from": "web_vsite",
-                "page_id": "vsite_episode_list_search", # 使用这个 page_id
+                "page_id": "vsite_episode_list", # 使用这个 page_id，与JS实现一致
                 "page_type": "detail_operation",
                 "id_type": "1",
                 "cid": cid,
@@ -629,7 +629,11 @@ class TencentScraper(BaseScraper):
             if result.get("ret") == 0 and result.get("data"):
                 for module_list_data in result["data"].get("module_list_datas", []):
                     for module_data in module_list_data.get("module_datas", []):
-                        # 修正：chapter_info 可能在 module_params 中
+                        # 优先从 module_params 中获取 tabs (新版API的分页信息)
+                        if module_data.get("module_params", {}).get("tabs"):
+                            self.logger.info(f"Tencent: 成功从 module_params 获取到 tabs (cid={cid})")
+                            return {"chapters": json.loads(module_data["module_params"]["tabs"])} # 包装成chapters格式
+                        # 如果没有tabs，再尝试获取 chapter_info
                         if chapter_info := module_data.get("module_params", {}).get("chapter_info"):
                             self.logger.info(f"Tencent: 成功从 module_params 获取到 chapter_info (cid={cid})")
                             return chapter_info
