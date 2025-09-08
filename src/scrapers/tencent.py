@@ -2,6 +2,7 @@ import asyncio
 import httpx
 import re
 import logging
+import time
 import html
 import json
 from typing import List, Dict, Any, Optional, Union, Callable, Tuple
@@ -227,6 +228,10 @@ class TencentScraper(BaseScraper):
         # 此处通过 cookies 参数传入字典，httpx 会自动将其格式化为正确的 Cookie 请求头，效果与C#代码一致
         self.client: Optional[httpx.AsyncClient] = None
 
+        self._api_lock = asyncio.Lock()
+        self._last_request_time = 0
+        self._min_interval = 0.5 # A reasonable default
+
         # 新增：用于分集获取的API端点
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
@@ -249,10 +254,45 @@ class TencentScraper(BaseScraper):
                 headers=self.base_headers, cookies=self.cookies, timeout=20.0
             )
 
-    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
+        """
+        获取并编译用于过滤分集的正则表达式。
+        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
+        """
+        # 1. 构造该源特定的配置键
+        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
+        
+        # 2. 从数据库动态获取用户自定义规则
+        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
+
+        # 3. 仅当用户配置了非空的规则时才进行过滤
+        if custom_blacklist_str and custom_blacklist_str.strip():
+            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
+            try:
+                return re.compile(custom_blacklist_str, re.IGNORECASE)
+            except re.error as e:
+                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
+        
+        # 4. 如果规则为空或未配置，则不进行过滤
+        return None
+
+    async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """封装了速率限制的请求方法。"""
         await self._ensure_client()
         assert self.client is not None
-        return await self.client.request(method, url, **kwargs)
+        async with self._api_lock:
+            now = time.time()
+            time_since_last = now - self._last_request_time
+            if time_since_last < self._min_interval:
+                sleep_duration = self._min_interval - time_since_last
+                self.logger.debug(f"Tencent: 速率限制，等待 {sleep_duration:.2f} 秒...")
+                await asyncio.sleep(sleep_duration)
+
+            response = await self.client.request(method, url, **kwargs)
+            self._last_request_time = time.time()
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Tencent Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
+            return response
 
     # Porting TITLE_MAPPING from JS
     _TITLE_MAPPING = {
@@ -372,17 +412,15 @@ class TencentScraper(BaseScraper):
             currentEpisodeIndex=None # This is a quick search, detailed episode info is fetched later
         )
 
-    async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        """通过腾讯桌面搜索API查找番剧。"""
+    async def _search_with_payload(self, keyword: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> List[models.ProviderSearchInfo]:
         url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.HttpMobileRecall/MbSearchHttp"
-        request_model = TencentSearchRequest(query=keyword)
-        payload = request_model.model_dump(by_alias=True)
         results = []
         try:
-            self.logger.info(f"Tencent (桌面API): 正在搜索 '{keyword}'...")
-            response = await self._request("POST", url, json=payload)
+            api_name = "移动API" if headers else "桌面API"
+            self.logger.info(f"Tencent ({api_name}): 正在搜索 '{keyword}'...")
+            response = await self._request_with_rate_limit("POST", url, json=payload, headers=headers)
             if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Tencent Desktop Search Response (keyword='{keyword}'): {response.text}")
+                scraper_responses_logger.debug(f"Tencent Search Response ({api_name}, keyword='{keyword}'): {response.text}")
 
             response.raise_for_status()
             response_json = response.json()
@@ -395,41 +433,24 @@ class TencentScraper(BaseScraper):
                     if filtered_item:
                         results.append(filtered_item)
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"Tencent (桌面API): 搜索请求失败: {e}")
+            self.logger.error(f"Tencent ({api_name}): 搜索请求失败: {e}")
         except (ValidationError, KeyError) as e:
-            self.logger.error(f"Tencent (桌面API): 解析搜索结果失败: {e}", exc_info=True)
+            self.logger.error(f"Tencent ({api_name}): 解析搜索结果失败: {e}", exc_info=True)
         return results
+
+    async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """通过腾讯桌面搜索API查找番剧。"""
+        request_model = TencentSearchRequest(query=keyword)
+        payload = request_model.model_dump(by_alias=True)
+        return await self._search_with_payload(keyword, payload)
 
     async def _search_mobile_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """通过腾讯移动端搜索API查找番剧。"""
-        url = "https://pbaccess.video.qq.com/trpc.videosearch.mobile_search.HttpMobileRecall/MbSearchHttp"
         request_model = TencentSearchRequest(query=keyword)
         payload = request_model.model_dump(by_alias=True)
         headers = self.base_headers.copy()
         headers['User-Agent'] = 'live4iphoneRel/9.01.46 (iPhone; iOS 18.5; Scale/3.00)'
-        
-        results = []
-        try:
-            self.logger.info(f"Tencent (移动API): 正在搜索 '{keyword}'...")
-            response = await self._request("POST", url, json=payload, headers=headers)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Tencent Mobile Search Response (keyword='{keyword}'): {response.text}")
-
-            response.raise_for_status()
-            response_json = response.json()
-            data = TencentSearchResult.model_validate(response_json)
-
-            if data.data and data.data.normal_list:
-                tasks = [self._filter_search_item(item, keyword) for item in data.data.normal_list.item_list]
-                filtered_items = await asyncio.gather(*tasks)
-                for filtered_item in filtered_items:
-                    if filtered_item:
-                        results.append(filtered_item)
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"Tencent (移动API): 搜索请求失败: {e}")
-        except (ValidationError, KeyError) as e:
-            self.logger.error(f"Tencent (移动API): 解析搜索结果失败: {e}", exc_info=True)
-        return results
+        return await self._search_with_payload(keyword, payload, headers)
 
     async def _search_multiterminal_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """通过腾讯新的 MultiTerminalSearch API 查找番剧 (基于JS代码)。"""
@@ -562,7 +583,7 @@ class TencentScraper(BaseScraper):
         cid = cid_match.group(1)
         
         try:
-            response = await self._request("GET", url)
+            response = await self._request_with_rate_limit("GET", url)
             response.raise_for_status()
             html_content = response.text
 
@@ -603,7 +624,7 @@ class TencentScraper(BaseScraper):
             }
         }
         try:
-            response = await self._request("POST", self.episodes_api_url, json=payload)
+            response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload)
             response.raise_for_status()
             result = TencentPageResult.model_validate(response.json())
 
@@ -641,7 +662,7 @@ class TencentScraper(BaseScraper):
         }
         try:
             headers = self._get_episode_headers(cid)
-            response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
+            response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload, headers=headers)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Tencent Cover Info Response (cid={cid}): {response.text}")
             response.raise_for_status()
@@ -677,8 +698,8 @@ class TencentScraper(BaseScraper):
                 # 如果API失败，回退到HTML解析
                 self.logger.warning(f"API获取电影vid失败，回退到HTML页面解析 (cid={media_id})。")
                 try:
-                    cover_url = f"https://v.qq.com/x/cover/{media_id}.html"
-                    response = await self._request("GET", cover_url)
+                    cover_url = f"https://v.qq.com/x/cover/{media_id}.html" # type: ignore
+                    response = await self._request_with_rate_limit("GET", cover_url)
                     response.raise_for_status()
                     html_content = response.text
 
@@ -841,7 +862,7 @@ class TencentScraper(BaseScraper):
             }
         }
         headers = self._get_episode_headers(cid)
-        response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
+        response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload, headers=headers)
         response.raise_for_status()
         result = TencentPageResult.model_validate(response.json())
 
@@ -868,7 +889,7 @@ class TencentScraper(BaseScraper):
         }
         headers = self._get_episode_headers(cid)
         # 修正：使用 self._request 方法以确保代理和通用头部被应用
-        response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
+        response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload, headers=headers)
         response.raise_for_status()
         result = TencentPageResult.model_validate(response.json())
         
@@ -941,7 +962,7 @@ class TencentScraper(BaseScraper):
             }
             try:
                 headers = self._get_episode_headers(cid)
-                response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
+                response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload, headers=headers)
                 if await self._should_log_responses():
                     scraper_responses_logger.debug(f"Tencent Paginated Episodes Response (cid={cid}, page={page_num}): {response.text}")
                 response.raise_for_status()
@@ -971,15 +992,8 @@ class TencentScraper(BaseScraper):
                     break
             else:
                 no_new_data_count = 0 # 重置计数器
-            
-            await asyncio.sleep(0.5) # 增加延迟以提高稳定性
 
         return list(all_episodes.values())
-
-    async def _get_episodes_v1(self, media_id: str) -> List[models.ProviderEpisodeInfo]:
-        """旧版分集获取逻辑，作为备用方案。"""
-        tencent_episodes = await self._internal_get_episodes_v1(media_id)
-        return await self._process_and_format_tencent_episodes(tencent_episodes, "tv_series", media_id)
 
     async def _process_and_format_tencent_episodes(self, tencent_episodes: List[TencentEpisode], db_media_type: Optional[str], cid: str) -> List[models.ProviderEpisodeInfo]:
         """
@@ -1066,7 +1080,7 @@ class TencentScraper(BaseScraper):
 
         # 4. 应用自定义黑名单 (对非综艺节目)
         if not is_variety_show:
-            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            blacklist_pattern = await self.get_episode_blacklist_pattern() # type: ignore
             if blacklist_pattern:
                 original_count = len(episodes_to_format)
             
@@ -1123,7 +1137,7 @@ class TencentScraper(BaseScraper):
         # 1. 获取弹幕分段索引
         index_url = f"https://dm.video.qq.com/barrage/base/{vid}"
         try:
-            response = await self._request("GET", index_url)
+            response = await self._request_with_rate_limit("GET", index_url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Tencent Danmaku Index Response (vid={vid}): {response.text}")
             response.raise_for_status()
@@ -1158,7 +1172,7 @@ class TencentScraper(BaseScraper):
 
             segment_url = f"https://dm.video.qq.com/barrage/segment/{vid}/{segment_name}"
             try:
-                response = await self._request("GET", segment_url)
+                response = await self._request_with_rate_limit("GET", segment_url)
                 if await self._should_log_responses():
                     scraper_responses_logger.debug(f"Tencent Danmaku Segment Response (vid={vid}, segment={segment_name}): status={response.status_code}")
                 response.raise_for_status()
@@ -1172,8 +1186,6 @@ class TencentScraper(BaseScraper):
                         # 腾讯的弹幕列表里有时会混入非弹幕数据（如广告、推荐等），这些数据结构不同
                         # 我们在这里捕获验证错误，记录并跳过这些无效数据，以保证程序健壮性
                         self.logger.warning(f"跳过一个无效的弹幕项目，因为它不符合预期的格式。原始数据: {comment_item}, 错误: {e}")
-                
-                await asyncio.sleep(0.2) # 礼貌性等待
 
             except Exception as e:
                 self.logger.error(f"获取分段 {segment_name} 失败 (vid={vid}): {e}", exc_info=True)
@@ -1212,7 +1224,7 @@ class TencentScraper(BaseScraper):
             
             try:
                 self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
-                response = await self._request("POST", url, json=payload) # type: ignore
+                response = await self._request_with_rate_limit("POST", url, json=payload) # type: ignore
                 if await self._should_log_responses():
                     scraper_responses_logger.debug(f"Tencent V1 Episodes Response (cid={cid}, page_context='{page_context}'): {response.text}")
                 response.raise_for_status()
@@ -1245,8 +1257,6 @@ class TencentScraper(BaseScraper):
                 begin_num = len(all_episodes) + 1
                 end_num = begin_num + page_size - 1
                 page_context = f"episode_begin={begin_num}&episode_end={end_num}&episode_step={page_size}"
-                
-                await asyncio.sleep(0.5)
     
             except Exception as e:
                 self.logger.error(f"请求分集列表失败 (v1, cid={cid}): {e}", exc_info=True)

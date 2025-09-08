@@ -1274,9 +1274,17 @@ async def auto_search_and_import_task(
                     rate_limiter=rate_limiter
                 )
                 # 修正：提交执行任务，并将其ID作为调度任务的结果
+                # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+                title_parts = [f"自动导入 (库内): {main_title}"]
+                if payload.season is not None:
+                    title_parts.append(f"S{payload.season:02d}")
+                if payload.episode is not None:
+                    title_parts.append(f"E{payload.episode:02d}")
+                task_title = " ".join(title_parts)
+
                 execution_task_id, _ = await task_manager.submit_task(
                     task_coro, 
-                    f"自动导入 (库内): {main_title}", 
+                    task_title, 
                     unique_key=unique_key
                 )
                 final_message = f"作品已在库中，已为已有源创建导入任务。执行任务ID: {execution_task_id}"
@@ -1355,9 +1363,23 @@ async def auto_search_and_import_task(
             rate_limiter=rate_limiter
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
+        # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+        title_parts = [f"自动导入 (库内): {main_title}"]
+        if media_type == 'movie':
+            # 对于电影，添加源和ID以确保唯一性，因为电影没有季/集
+            if search_type != "keyword":
+                title_parts.append(f"({payload.searchType.value}:{payload.searchTerm})")
+        else:
+            # 对于电视剧，添加季/集信息
+            if payload.season is not None:
+                title_parts.append(f"S{payload.season:02d}")
+            if payload.episode is not None:
+                title_parts.append(f"E{payload.episode:02d}")
+        task_title = " ".join(title_parts)
+
         execution_task_id, _ = await task_manager.submit_task(
             task_coro, 
-            f"自动导入 (新): {main_title}", 
+                    task_title, 
             unique_key=unique_key
         )
         final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
