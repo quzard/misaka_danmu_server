@@ -78,7 +78,7 @@ class RateLimiter:
             global_state = await crud.get_or_create_rate_limit_state(session, "__global__")
             provider_state = await crud.get_or_create_rate_limit_state(session, provider_name)
 
-            now = get_now().replace(tzinfo=None)
+            now = get_now()
             time_since_reset = now - global_state.lastResetTime
             
             if time_since_reset.total_seconds() >= period_seconds:

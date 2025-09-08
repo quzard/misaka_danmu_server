@@ -58,7 +58,7 @@ async def create_access_token(data: dict, session: AsyncSession, expires_delta: 
     to_encode = data.copy()
     
     # 新增：添加标准声明以增强安全性和互操作性
-    now = get_now().replace(tzinfo=None) # 使用服务器本地时间的 naive datetime
+    now = get_now() # 使用服务器本地时间的 naive datetime
     to_encode.update({
         "iat": now,  # Issued At: 令牌签发时间
         "jti": str(uuid.uuid4()), # JWT ID: 每个令牌的唯一标识符，可用于防止重放攻击

@@ -6,8 +6,8 @@ from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
 from .config import settings
-from .orm_models import Base
-from .timezone import get_app_timezone, get_timezone_offset_str
+from .orm_models import Base # type: ignore
+from .timezone import get_app_timezone, get_timezone_offset_str, get_now
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         database = settings.database.name if include_db_name else None
     elif db_type == "postgresql":
         drivername = "postgresql+asyncpg"
-        query = None
+        # 修正：移除在连接URL中设置时区的逻辑。
+        # 这确保了应用与数据库的交互在时间处理上是“时区无关”的，
+        # 避免了因驱动程序自动转换时区而导致的数据不一致问题。
+        query = None # 确保不通过查询参数传递时区
         if for_server:
             database = "postgres"
         else:
@@ -42,6 +45,66 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         database=database,
         query=query,
     )
+
+async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
+    """
+    迁移任务: 将可能被错误存储为UTC时间的datetime字段，转换为服务器的本地时间。
+    这是一个一次性修复任务，用于解决旧版本中时间处理不一致的问题。
+    """
+    migration_id = "convert_utc_datetimes_to_local_v1"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    # 此迁移仅针对MySQL，因为PostgreSQL驱动(asyncpg)在早期版本中会直接报错，
+    # 不会写入错误的时间数据。
+    if db_type != "mysql":
+        logger.info(f"数据库类型为 '{db_type}'，跳过UTC到本地时间的迁移。")
+        return
+
+    # 1. 检查迁移是否已执行过
+    check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
+    flag_exists = (await conn.execute(check_flag_sql, {"key": migration_id})).scalar_one_or_none() is not None
+    if flag_exists:
+        logger.info(f"迁移 '{migration_id}' 已执行过，跳过。")
+        return
+
+    logger.warning(f"将执行一次性数据库时间迁移 '{migration_id}'。")
+    logger.warning("此操作会将所有时间戳字段从假定的UTC时间转换为服务器配置的本地时间。")
+    logger.warning("在继续之前，强烈建议您备份数据库。")
+    
+    # 2. 获取时区偏移量
+    tz_offset = get_timezone_offset_str()
+    logger.info(f"检测到服务器时区偏移量为: {tz_offset}")
+
+    # 3. 定义所有需要迁移的表和列
+    tables_and_columns = {
+        "anime": ["created_at"], "anime_sources": ["created_at"], "episode": ["fetched_at"],
+        "users": ["token_update", "created_at"], "api_tokens": ["created_at", "expires_at"],
+        "token_access_logs": ["access_time"], "ua_rules": ["created_at"],
+        "bangumi_auth": ["expires_at", "authorized_at"], "oauth_states": ["expires_at"],
+        "scheduled_tasks": ["last_run_at", "next_run_at"],
+        "task_history": ["created_at", "updated_at", "finished_at"],
+        "external_api_logs": ["access_time"], "rate_limit_state": ["last_reset_time"],
+        "cache_data": ["expires_at"],
+    }
+
+    # 4. 执行迁移
+    try:
+        sign = tz_offset[0]
+        interval_value = tz_offset[1:]
+        for table, columns in tables_and_columns.items():
+            for column in columns:
+                logger.info(f"正在迁移 {table}.{column}...")
+                update_sql = text(f"UPDATE `{table}` SET `{column}` = `{column}` {sign} INTERVAL '{interval_value}' HOUR_MINUTE WHERE `{column}` IS NOT NULL")
+                await conn.execute(update_sql)
+        logger.info("所有时间字段迁移完成。")
+        # 5. 插入标志位，防止重复执行
+        await conn.execute(text("INSERT INTO config (config_key, config_value, description) VALUES (:key, :value, :desc)"), {"key": migration_id, "value": "true", "desc": "标志位，表示已将旧的UTC时间戳迁移到本地时间。"})
+        logger.info(f"成功设置迁移标志 '{migration_id}'。")
+    except Exception as e:
+        logger.error(f"执行时间迁移时发生错误: {e}", exc_info=True)
+        logger.error("时间迁移失败，数据库可能处于不一致状态。请从备份中恢复或手动修复。")
+        raise
+    logger.info(f"迁移任务 '{migration_id}' 成功完成。")
 
 async def _migrate_add_source_order(conn, db_type, db_name):
     """
@@ -302,6 +365,9 @@ async def _run_migrations(conn):
         logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
         return
 
+    # 新增：在所有其他迁移之前，首先运行时间校正迁移
+    await _migrate_utc_to_local_datetime(conn, db_type, db_name)
+
     await _migrate_clear_rate_limit_state(conn, db_type, db_name)
     await _migrate_add_source_order(conn, db_type, db_name)
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
@@ -338,7 +404,6 @@ async def create_db_engine_and_session(app: FastAPI):
             "max_overflow": 20,
             "pool_timeout": 30
         }
-        # 移除时区设置，让数据库使用其默认时区
 
         engine = create_async_engine(db_url, **engine_args)
         app.state.db_engine = engine
@@ -372,7 +437,6 @@ async def _create_db_if_not_exists():
         "echo": False,
         "isolation_level": "AUTOCOMMIT"
     }
-    # 移除时区设置
 
     engine = create_async_engine(server_url, **engine_args)
     try:

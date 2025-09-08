@@ -19,6 +19,12 @@ class NaiveDateTime(TypeDecorator):
     impl = TIMESTAMP
     cache_ok = True
 
+    def process_bind_param(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
+        """在写入数据库时，移除时区信息。"""
+        if value is not None and value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+
     def process_result_value(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
         """从数据库读取时，移除时区信息。"""
         if value is not None and value.tzinfo is not None:

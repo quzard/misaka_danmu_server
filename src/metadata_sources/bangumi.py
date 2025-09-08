@@ -120,14 +120,9 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     if not auth:
         return {"isAuthenticated": False}
     
-    if auth.expiresAt:
-        expires_at = auth.expiresAt
-        # Fallback for DBs that don't store timezone info (like SQLite)
-        if expires_at.tzinfo is None:
-            # Assume the naive datetime is in the app's configured timezone
-            expires_at = expires_at.replace(tzinfo=get_app_timezone())
-        if expires_at < get_now():
-         return {"isAuthenticated": False, "isExpired": True}
+    # 修正：由于所有时间都以 naive UTC-like 形式存储，直接与当前的 naive UTC-like 时间比较
+    if auth.expiresAt and auth.expiresAt < get_now():
+        return {"isAuthenticated": False, "isExpired": True}
 
     return {
         "isAuthenticated": True, "bangumiUserId": auth.bangumiUserId,

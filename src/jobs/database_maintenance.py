@@ -37,7 +37,7 @@ class DatabaseMaintenanceJob(BaseJob):
         
         if retention_days > 0:
             self.logger.info(f"将清理 {retention_days} 天前的日志记录。")
-            cutoff_date = get_now().replace(tzinfo=None) - timedelta(days=retention_days)
+            cutoff_date = get_now() - timedelta(days=retention_days)
             
             tables_to_prune = {
                 "任务历史": (orm_models.TaskHistory, orm_models.TaskHistory.createdAt),
