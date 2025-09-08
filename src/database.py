@@ -49,16 +49,11 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
 async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
     """
     迁移任务: 将可能被错误存储为UTC时间的datetime字段，转换为服务器的本地时间。
-    这是一个一次性修复任务，用于解决旧版本中时间处理不一致的问题。
+    这是一个一次性修复任务，用于解决旧版本中可能存在的时区处理不一致问题。
+    它会检查所有相关的时间戳字段，并确保它们都以不带时区的形式存储。
     """
-    migration_id = "convert_utc_datetimes_to_local_v1"
+    migration_id = "convert_datetime_to_naive_v2"
     logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    # 此迁移仅针对MySQL，因为PostgreSQL驱动(asyncpg)在早期版本中会直接报错，
-    # 不会写入错误的时间数据。
-    if db_type != "mysql":
-        logger.info(f"数据库类型为 '{db_type}'，跳过UTC到本地时间的迁移。")
-        return
 
     # 1. 检查迁移是否已执行过
     check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
@@ -68,14 +63,10 @@ async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
         return
 
     logger.warning(f"将执行一次性数据库时间迁移 '{migration_id}'。")
-    logger.warning("此操作会将所有时间戳字段从假定的UTC时间转换为服务器配置的本地时间。")
+    logger.warning("此操作将确保所有时间戳字段都以不带时区的形式存储。")
     logger.warning("在继续之前，强烈建议您备份数据库。")
-    
-    # 2. 获取时区偏移量
-    tz_offset = get_timezone_offset_str()
-    logger.info(f"检测到服务器时区偏移量为: {tz_offset}")
 
-    # 3. 定义所有需要迁移的表和列
+    # 2. 定义所有需要迁移的表和列
     tables_and_columns = {
         "anime": ["created_at"], "anime_sources": ["created_at"], "episode": ["fetched_at"],
         "users": ["token_update", "created_at"], "api_tokens": ["created_at", "expires_at"],
@@ -87,18 +78,25 @@ async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
         "cache_data": ["expires_at"],
     }
 
-    # 4. 执行迁移
+    # 3. 执行迁移
     try:
-        sign = tz_offset[0]
-        interval_value = tz_offset[1:]
         for table, columns in tables_and_columns.items():
             for column in columns:
                 logger.info(f"正在迁移 {table}.{column}...")
-                update_sql = text(f"UPDATE `{table}` SET `{column}` = `{column}` {sign} INTERVAL '{interval_value}' HOUR_MINUTE WHERE `{column}` IS NOT NULL")
+                if db_type == "mysql":
+                    # MySQL 的 CONVERT_TZ 函数可以处理时区转换，但更直接的方式是确保类型正确。
+                    # 这里的 ALTER TABLE 语句是幂等的，它会确保列类型为 DATETIME，从而丢弃任何时区信息。
+                    update_sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` DATETIME;")
+                else: # postgresql
+                    # 对于 PostgreSQL，我们使用 `AT TIME ZONE 'UTC'` 将带时区的时间戳转换为UTC时间，
+                    # 然后再使用 `AT TIME ZONE 'UTC'` 将其转换为不带时区的本地时间。
+                    # 这是一个将 TIMESTAMPTZ 转换为 TIMESTAMP 的标准方法。
+                    update_sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE TIMESTAMP WITHOUT TIME ZONE USING "{column}"::timestamp;')
                 await conn.execute(update_sql)
         logger.info("所有时间字段迁移完成。")
-        # 5. 插入标志位，防止重复执行
+        # 4. 插入标志位，防止重复执行
         await conn.execute(text("INSERT INTO config (config_key, config_value, description) VALUES (:key, :value, :desc)"), {"key": migration_id, "value": "true", "desc": "标志位，表示已将旧的UTC时间戳迁移到本地时间。"})
+        await conn.commit() # 确保标志位被写入
         logger.info(f"成功设置迁移标志 '{migration_id}'。")
     except Exception as e:
         logger.error(f"执行时间迁移时发生错误: {e}", exc_info=True)

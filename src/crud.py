@@ -2069,6 +2069,8 @@ async def prune_logs(session: AsyncSession, model: type[DeclarativeBase], date_c
     """通用函数，用于删除指定模型中早于截止日期的记录。"""
     stmt = delete(model).where(date_column < cutoff_date)
     result = await session.execute(stmt)
+    # 提交由调用方（任务）处理
+    return result.rowcount
 
 async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_content: str) -> int:
     """

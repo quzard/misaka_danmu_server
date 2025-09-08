@@ -92,7 +92,13 @@ class DatabaseMaintenanceJob(BaseJob):
             
             total_deleted = 0
             for name, (model, date_column) in tables_to_prune.items():
-                deleted_count = await crud.prune_logs(session, model, date_column, cutoff_date)
+                deleted_count: Optional[int] = await crud.prune_logs(session, model, date_column, cutoff_date)
+                
+                # 修正：增加对 deleted_count 的 None 值检查，以提高代码的健壮性。
+                # 这可以防止当底层数据库操作（如某些驱动下的DELETE）不返回行数时，任务意外失败。
+                if deleted_count is None:
+                    deleted_count = 0
+
                 if deleted_count > 0:
                     self.logger.info(f"从 {name} 表中删除了 {deleted_count} 条旧记录。")
                 total_deleted += deleted_count
