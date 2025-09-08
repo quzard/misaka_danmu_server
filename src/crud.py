@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case
+from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import selectinload, joinedload, aliased, DeclarativeBase
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -2069,52 +2069,6 @@ async def prune_logs(session: AsyncSession, model: type[DeclarativeBase], date_c
     """通用函数，用于删除指定模型中早于截止日期的记录。"""
     stmt = delete(model).where(date_column < cutoff_date)
     result = await session.execute(stmt)
-    # 提交由调用方（任务）处理
-    return result.rowcount
-
-async def optimize_database(session: AsyncSession, db_type: str) -> str:
-    """根据数据库类型执行表优化。"""
-    tables_to_optimize = ["comment", "task_history", "token_access_logs", "external_api_logs"]
-    
-    if db_type == "mysql":
-        logger.info("检测到 MySQL，正在执行 OPTIMIZE TABLE...")
-        await session.execute(text(f"OPTIMIZE TABLE {', '.join(tables_to_optimize)};"))
-        # 提交由调用方（任务）处理
-        return "OPTIMIZE TABLE 执行成功。"
-    
-    elif db_type == "postgresql":
-        logger.info("检测到 PostgreSQL，正在执行 VACUUM...")
-        from .database import _get_db_url # Local import to avoid circular dependency
-        from .timezone import get_app_timezone # Local import
-        # VACUUM 不能在事务块内运行。我们创建一个具有自动提交功能的新引擎来执行此特定操作。
-        db_url_obj = _get_db_url()
-        engine_args = {
-            "isolation_level": "AUTOCOMMIT",
-        }
-        auto_commit_engine = create_async_engine(db_url_obj, **engine_args)
-        try:
-            async with auto_commit_engine.connect() as connection:
-                await connection.execute(text("VACUUM;"))
-            return "VACUUM 执行成功。"
-        finally:
-            await auto_commit_engine.dispose()
-            
-    else:
-        message = f"不支持的数据库类型 '{db_type}'，跳过优化。"
-        logger.warning(message)
-        return message
-
-async def purge_binary_logs(session: AsyncSession, days: int) -> str:
-    """
-    执行 PURGE BINARY LOGS 命令来清理早于指定天数的 binlog 文件。
-    警告：这是一个高风险操作，需要 SUPER 或 REPLICATION_CLIENT 权限。
-    """
-    logger.info(f"准备执行 PURGE BINARY LOGS BEFORE NOW() - INTERVAL {days} DAY...")
-    await session.execute(text(f"PURGE BINARY LOGS BEFORE NOW() - INTERVAL {days} DAY"))
-    # 这个操作不需要 commit，因为它不是DML
-    msg = f"成功执行 PURGE BINARY LOGS，清除了 {days} 天前的日志。"
-    logger.info(msg)
-    return msg
 
 async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_content: str) -> int:
     """
