@@ -230,6 +230,17 @@ class TencentScraper(BaseScraper):
         # 新增：用于分集获取的API端点
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
+    def _get_episode_headers(self, cid: str) -> Dict[str, str]:
+        """获取用于分集API请求的移动端头部。"""
+        return {
+            'Content-Type': 'application/json',
+            'Origin': 'https://v.qq.com',
+            'Referer': f"https://v.qq.com/x/cover/{cid}.html",
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+        }
+
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
         if self.client is None:
@@ -809,7 +820,8 @@ class TencentScraper(BaseScraper):
                 "detail_page_type": "1"
             }
         }
-        response = await self._request("POST", self.episodes_api_url, json=payload)
+        headers = self._get_episode_headers(cid)
+        response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
         response.raise_for_status()
         result = TencentPageResult.model_validate(response.json())
 
@@ -834,8 +846,9 @@ class TencentScraper(BaseScraper):
                 "page_context": tab.page_context, "detail_page_type": "1"
             }
         }
+        headers = self._get_episode_headers(cid)
         # 修正：使用 self._request 方法以确保代理和通用头部被应用
-        response = await self._request("POST", self.episodes_api_url, json=payload)
+        response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
         response.raise_for_status()
         result = TencentPageResult.model_validate(response.json())
         
@@ -907,7 +920,8 @@ class TencentScraper(BaseScraper):
                 }
             }
             try:
-                response = await self._request("POST", self.episodes_api_url, json=payload)
+                headers = self._get_episode_headers(cid)
+                response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
                 if await self._should_log_responses():
                     scraper_responses_logger.debug(f"Tencent Paginated Episodes Response (cid={cid}, page={page_num}): {response.text}")
                 response.raise_for_status()
