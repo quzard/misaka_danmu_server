@@ -632,7 +632,8 @@ class TencentScraper(BaseScraper):
             }
         }
         try:
-            response = await self._request("POST", self.episodes_api_url, json=payload)
+            headers = self._get_episode_headers(cid)
+            response = await self._request("POST", self.episodes_api_url, json=payload, headers=headers)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Tencent Cover Info Response (cid={cid}): {response.text}")
             response.raise_for_status()
@@ -1192,7 +1193,9 @@ class TencentScraper(BaseScraper):
             
             try:
                 self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
-                response = await self._request("POST", url, json=payload)
+                response = await self._request("POST", url, json=payload) # type: ignore
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Tencent V1 Episodes Response (cid={cid}, page_context='{page_context}'): {response.text}")
                 response.raise_for_status()
                 data = response.json()
     
