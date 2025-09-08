@@ -96,7 +96,6 @@ async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
         logger.info("所有时间字段迁移完成。")
         # 4. 插入标志位，防止重复执行
         await conn.execute(text("INSERT INTO config (config_key, config_value, description) VALUES (:key, :value, :desc)"), {"key": migration_id, "value": "true", "desc": "标志位，表示已将旧的UTC时间戳迁移到本地时间。"})
-        await conn.commit() # 确保标志位被写入
         logger.info(f"成功设置迁移标志 '{migration_id}'。")
     except Exception as e:
         logger.error(f"执行时间迁移时发生错误: {e}", exc_info=True)
