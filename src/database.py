@@ -362,9 +362,11 @@ async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
     if db_type == "mysql":
         check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'unique_key'")
         add_column_sql = text("ALTER TABLE task_history ADD COLUMN `unique_key` VARCHAR(255) NULL, ADD INDEX `idx_unique_key` (`unique_key`)")
+        create_index_sql = None # MySQL 在一条语句中完成
     elif db_type == "postgresql":
         check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'unique_key'")
-        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "unique_key" VARCHAR(255) NULL; CREATE INDEX IF NOT EXISTS idx_task_history_unique_key ON task_history (unique_key);')
+        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "unique_key" VARCHAR(255) NULL')
+        create_index_sql = text('CREATE INDEX IF NOT EXISTS idx_task_history_unique_key ON task_history (unique_key)')
     else:
         return
 
@@ -372,6 +374,9 @@ async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
     if not column_exists:
         logger.info("列 'task_history.unique_key' 不存在。正在添加...")
         await conn.execute(add_column_sql)
+        if create_index_sql:
+            logger.info("正在为 'task_history.unique_key' 创建索引...")
+            await conn.execute(create_index_sql)
         logger.info("成功添加列 'task_history.unique_key'。")
     logger.info(f"迁移任务 '{migration_id}' 检查完成。")
             
