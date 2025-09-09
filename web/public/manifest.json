@@ -11,26 +11,22 @@
     {
       "src": "images/pwa-48x48.png",
       "type": "image/png",
-      "sizes": "48x48",
-      "purpose": "maskable any"
+      "sizes": "48x48"
     },
     {
       "src": "images/pwa-96x96.png",
       "type": "image/png",
-      "sizes": "96x96",
-      "purpose": "maskable any"
+      "sizes": "96x96"
     },
     {
       "src": "images/pwa-192x192.png",
       "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "maskable any"
+      "sizes": "192x192"
     },
     {
       "src": "images/pwa-512x512.png",
       "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "maskable any"
+      "sizes": "512x512"
     }
   ]
 }
