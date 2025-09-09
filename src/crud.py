@@ -2019,7 +2019,7 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
 
 # --- Rate Limiter CRUD ---
 
-async def find_recent_task_by_unique_key(session: AsyncSession, unique_key: str, within_hours: int) -> Optional[orm_models.TaskHistory]:
+async def find_recent_task_by_unique_key(session: AsyncSession, unique_key: str, within_hours: int) -> Optional[TaskHistory]:
     """
     Finds a task by its unique_key that is either currently active 
     or was completed within the specified time window.
