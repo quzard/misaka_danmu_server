@@ -686,73 +686,6 @@ class TencentScraper(BaseScraper):
         """
         获取分集列表，优先使用新的“分页卡片”策略。
         """
-        # 修正：为电影类型提供专门的处理逻辑。
-        # 电影通常只有一个分集（即正片本身），其 episodeId 需要是 vid，而传入的 media_id 是 cid。
-        if db_media_type == 'movie':
-            self.logger.info(f"检测到媒体类型为电影 (media_id={media_id})，将获取正片 vid。")
-            
-            # 优先尝试通过API获取，更稳定
-            final_episode_id = await self._get_movie_vid_from_api(media_id)
-
-            if not final_episode_id:
-                # 如果API失败，回退到HTML解析
-                self.logger.warning(f"API获取电影vid失败，回退到HTML页面解析 (cid={media_id})。")
-                try:
-                    cover_url = f"https://v.qq.com/x/cover/{media_id}.html" # type: ignore
-                    response = await self._request_with_rate_limit("GET", cover_url)
-                    response.raise_for_status()
-                    html_content = response.text
-
-                    vid = None
-                    # 1. 最优先尝试从 COVER_INFO 变量解析
-                    cover_info_match = re.search(r'var\s+COVER_INFO\s*=\s*({.*?});', html_content)
-                    if cover_info_match:
-                        try:
-                            cover_info_data = json.loads(cover_info_match.group(1))
-                            vid = cover_info_data.get("vid")
-                            if vid: self.logger.info("从 COVER_INFO 成功解析到电影的 vid。")
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            self.logger.warning("解析 COVER_INFO 失败，将尝试备用方法。")
-
-                    # 2. 备用方法：尝试从 __INITIAL_DATA__ 解析
-                    if not vid:
-                        initial_data_match = re.search(r'window\.__INITIAL_DATA__\s*=\s*({.*?});', html_content)
-                        if initial_data_match:
-                            try:
-                                initial_data = json.loads(initial_data_match.group(1))
-                                vid = initial_data.get("video_info", {}).get("vid")
-                                if vid: self.logger.info("从 __INITIAL_DATA__ 成功解析到电影的 vid。")
-                            except (json.JSONDecodeError, KeyError, TypeError):
-                                self.logger.warning("解析 __INITIAL_DATA__ 失败，将尝试备用方法。")
-                    
-                    if vid:
-                        self.logger.info(f"从页面成功解析到电影的 vid: {vid}")
-                        final_episode_id = vid
-
-                except Exception as e:
-                    self.logger.error(f"HTML解析电影 vid 时出错 (cid={media_id})，将回退使用 cid: {e}", exc_info=True)
-            
-            # 如果所有方法都失败，则回退使用cid
-            if not final_episode_id:
-                self.logger.warning(f"所有方法均无法解析电影的 vid，将回退使用 cid ({media_id}) 作为 vid。这可能导致弹幕获取失败。")
-                final_episode_id = media_id
-
-            # 改进：尝试获取电影的实际标题，而不是写死为“正片”
-            # 我们已经通过 _get_movie_vid_from_api 获取了所有可能的“正片”分集
-            # 这里我们直接使用第一个分集的标题作为电影标题
-            final_episode_title = "正片" # 默认标题
-            try:
-                episodes_list = await self._fetch_episodes_paginated(media_id, db_media_type)
-                if episodes_list:
-                    final_episode_title = episodes_list[0].title
-            except Exception as e:
-                self.logger.warning(f"为电影 (cid={media_id}) 获取分集标题失败，将使用默认标题'正片': {e}")
-
-            return [models.ProviderEpisodeInfo(
-                provider=self.provider_name, episodeId=final_episode_id, title=final_episode_title, episodeIndex=1,
-                url=f"https://v.qq.com/x/cover/{media_id}/{final_episode_id}.html"
-            )]
-
         # 仅当请求完整列表时才使用缓存
         # 修正：缓存键应表示缓存的是原始数据
         cache_key = f"episodes_raw_{media_id}"
@@ -815,10 +748,6 @@ class TencentScraper(BaseScraper):
 
             except Exception as e:
                 self.logger.error(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {e}", exc_info=True)
-                # 如果发生未知错误，也尝试最终兜底
-                if not network_episodes:
-                    self.logger.warning("Tencent: 因发生错误，正在回退到旧版分页API获取分集...")
-                    network_episodes = await self._fetch_episodes_paginated(media_id, db_media_type)
             
             raw_episodes = network_episodes
             # 仅当请求完整列表且成功获取到数据时，才缓存原始数据
