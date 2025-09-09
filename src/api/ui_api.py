@@ -769,6 +769,7 @@ async def refresh_anime(
     if not source_info or not source_info.get("providerName") or not source_info.get("mediaId"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
     
+    unique_key = ""
     if mode == "incremental":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
         # 修正：crud.get_episodes_for_source 现在返回一个带分页的字典
@@ -776,6 +777,7 @@ async def refresh_anime(
         latest_episode_index = max((ep['episodeIndex'] for ep in paginated_result.get("episodes", [])), default=0)
         next_episode_index = latest_episode_index + 1
         
+        unique_key = f"import-{source_info['providerName']}-{source_info['mediaId']}-ep{next_episode_index}"
         task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
@@ -785,13 +787,14 @@ async def refresh_anime(
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
+        unique_key = f"full-refresh-{sourceId}"
         task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
         task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb, metadata_manager)
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
 
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
     return {"message": message_to_return, "taskId": task_id}
 
 @router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务", response_model=UITaskResponse)
@@ -2070,8 +2073,13 @@ async def import_from_provider(
     if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
         task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
 
+    # 修正：为导入任务添加唯一的键，以防止与Webhook等其他任务冲突。
+    unique_key = f"import-{request_data.provider}-{request_data.mediaId}"
+    if request_data.currentEpisodeIndex is not None:
+        unique_key += f"-ep{request_data.currentEpisodeIndex}"
+
     # 提交任务并获取任务ID
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     return {"message": f"'{request_data.animeTitle}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
