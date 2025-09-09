@@ -45,6 +45,9 @@ class IncrementalRefreshJob(BaseJob):
 
                 unique_key = f"import-{source_info['providerName']}-{source_info['mediaId']}-ep{next_episode_index}"
                 task_title = f"定时追更: {source_info['title']} - S{source_info.get('season', 1):02d}E{next_episode_index:02d}"
+                
+                # 生成unique_key用于重复任务检测
+                unique_key = f"incremental-refresh:{source_info['providerName']}:{source_info['mediaId']}:{source_info.get('season', 1)}:{next_episode_index}"
 
                 # 使用闭包捕获当前循环的变量
                 def create_task_coro_factory(info, next_ep):
