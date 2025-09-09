@@ -399,7 +399,8 @@ async def auto_import(
         threshold_hours = 3
 
     if threshold_hours > 0:
-        async with get_db_session(request) as session: # type: ignore
+        session_factory = request.app.state.db_session_factory
+        async with session_factory() as session:
             recent_task = await crud.find_recent_task_by_unique_key(session, unique_key, threshold_hours)
             if recent_task:
                 time_since_creation = get_now() - recent_task.createdAt
