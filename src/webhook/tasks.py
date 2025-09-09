@@ -77,7 +77,10 @@ async def webhook_search_and_dispatch_task(
                     progress_callback=cb, session=session, manager=manager,
                     task_manager=task_manager
                 )
-                await task_manager.submit_task(task_coro, task_title)
+                # 生成unique_key用于重复任务检测
+                unique_key = f"webhook-favorited:{favorited_source['providerName']}:{favorited_source['mediaId']}:{season}:{currentEpisodeIndex}"
+                
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
                 raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
@@ -138,7 +141,10 @@ async def webhook_search_and_dispatch_task(
             progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
             task_manager=task_manager
         )
-        await task_manager.submit_task(task_coro, task_title)
+        # 生成unique_key用于重复任务检测
+        unique_key = f"webhook-bestmatch:{best_match.provider}:{best_match.mediaId}:{season}:{currentEpisodeIndex}"
+        
+        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
     except TaskSuccess:
         raise

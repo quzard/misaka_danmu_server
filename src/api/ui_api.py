@@ -1925,12 +1925,16 @@ async def manual_import_episode(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
+    
+    # 生成unique_key以防止重复任务
+    unique_key = f"manual-import-{source_id}-{request_data.episodeIndex}-{provider_name}"
+    
     task_coro = lambda session, callback: tasks.manual_import_task(
         sourceId=source_id, animeId=source_info['animeId'], title=request_data.title,
         episodeIndex=request_data.episodeIndex, content=content_to_use, providerName=provider_name,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
 
 @router.post("/library/source/{sourceId}/batch-import", status_code=status.HTTP_202_ACCEPTED, summary="批量手动导入分集", response_model=UITaskResponse)
@@ -2070,8 +2074,18 @@ async def import_from_provider(
     if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
         task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
 
+    # 生成unique_key以避免重复任务
+    unique_key_parts = [request_data.provider, request_data.mediaId]
+    if request_data.season is not None:
+        unique_key_parts.append(f"season-{request_data.season}")
+    if request_data.currentEpisodeIndex is not None:
+        unique_key_parts.append(f"episode-{request_data.currentEpisodeIndex}")
+    if request_data.type:
+        unique_key_parts.append(request_data.type)
+    unique_key = f"ui-import-{'-'.join(unique_key_parts)}"
+
     # 提交任务并获取任务ID
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     return {"message": f"'{request_data.animeTitle}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
@@ -2256,8 +2270,14 @@ async def import_from_url(
         rate_limiter=rate_limiter
     )
     
+    # 生成unique_key以避免重复任务
+    unique_key_parts = ["url-import", provider, media_id_for_scraper, request_data.media_type]
+    if request_data.season:
+        unique_key_parts.append(f"season-{request_data.season}")
+    unique_key = "-".join(unique_key_parts)
+    
     task_title = f"URL导入: {title} ({provider})"
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     return {"message": f"'{title}' 的URL导入任务已提交。", "taskId": task_id}
 
