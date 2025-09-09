@@ -1467,12 +1467,10 @@ async def get_ua_rules(
     rules = await crud.get_ua_rules(session)
     return [models.UaRule.model_validate(r) for r in rules]
 
-class UaRuleCreate(models.BaseModel):
-    uaString: str = Field(..., alias="ua_string")
 
 @router.post("/ua-rules", response_model=models.UaRule, status_code=201, summary="添加UA规则")
 async def add_ua_rule(
-    ruleData: UaRuleCreate,
+    ruleData: models.UaRuleCreate,
     currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):

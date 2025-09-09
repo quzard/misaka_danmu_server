@@ -1197,73 +1197,114 @@ class TencentScraper(BaseScraper):
         self.logger.info(f"vid='{vid}' 弹幕获取完成，共 {len(all_comments)} 条。")
         return all_comments
 
+    def _build_page_context(self, cid: str, config: Dict[str, Any]) -> str:
+        """构建page_context参数，参考 tx.py。"""
+        context_params = {
+            'chapter_name': '',
+            'cid': cid,
+            'detail_page_type': '1',
+            'episode_begin': str(config['episode_begin']),
+            'episode_end': str(config['episode_end']),
+            'episode_step': str(config['episode_step']),
+            'filter_rule_id': '',
+            'id_type': '1',
+            'is_nocopyright': 'false',
+            'is_skp_style': 'false',
+            'lid': '',
+            'list_page_context': '',
+            'mvl_strategy_id': '',
+            'need_tab': '1',
+            'order': '',
+            'page_num': str(config['page_num']),
+            'page_size': str(config['page_size']),
+            'req_from': 'web_vsite',
+            'req_from_second_type': '',
+            'req_type': '0',
+            'siteName': '',
+            'tab_type': '1',
+            'title_style': '',
+            'ui_type': 'null',
+            'un_strategy_id': '13dc6f30819942eb805250fb671fb082',
+            'watch_together_pay_status': '0',
+            'year': ''
+        }
+        return "&".join([f"{key}={value}" for key, value in context_params.items()])
+
     async def _internal_get_episodes_v1(self, cid: str) -> List[TencentEpisode]:
-        """旧版分集获取逻辑的内部实现。"""
+        """旧版分集获取逻辑的内部实现，已根据 tx.py 的逻辑进行优化。"""
         cache_key = f"episodes_v1_{cid}"
         cached_episodes = await self._get_from_cache(cache_key)
         if cached_episodes is not None:
             self.logger.info(f"Tencent (v1): 从缓存中命中分集列表 (cid={cid})")
             return [TencentEpisode.model_validate(e) for e in cached_episodes]
 
-        url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vplatform=2"
-        all_episodes: Dict[str, TencentEpisode] = {}
-        page_size = 100
-        page_context = ""
-        last_vid_of_page = ""
-    
         self.logger.info(f"开始为 cid='{cid}' 获取分集列表 (v1)...")
-    
-        while True:
+        
+        # 智能请求策略 - 支持到1000集
+        request_configs = [
+            {'episode_begin': 1, 'episode_end': 100, 'episode_step': 100, 'page_size': 100, 'page_num': 0},
+            {'episode_begin': 101, 'episode_end': 200, 'episode_step': 100, 'page_size': 100, 'page_num': 1},
+            {'episode_begin': 201, 'episode_end': 300, 'episode_step': 100, 'page_size': 100, 'page_num': 2},
+            {'episode_begin': 301, 'episode_end': 400, 'episode_step': 100, 'page_size': 100, 'page_num': 3},
+            {'episode_begin': 401, 'episode_end': 500, 'episode_step': 100, 'page_size': 100, 'page_num': 4},
+            {'episode_begin': 501, 'episode_end': 600, 'episode_step': 100, 'page_size': 100, 'page_num': 5},
+            {'episode_begin': 601, 'episode_end': 700, 'episode_step': 100, 'page_size': 100, 'page_num': 6},
+            {'episode_begin': 701, 'episode_end': 800, 'episode_step': 100, 'page_size': 100, 'page_num': 7},
+            {'episode_begin': 801, 'episode_end': 900, 'episode_step': 100, 'page_size': 100, 'page_num': 8},
+            {'episode_begin': 901, 'episode_end': 1000, 'episode_step': 100, 'page_size': 100, 'page_num': 9}
+        ]
+
+        all_episodes: Dict[str, TencentEpisode] = {}
+
+        for i, config in enumerate(request_configs):
+            self.logger.debug(f"Tencent (v1): 请求页面 {i+1}/{len(request_configs)}...")
+            page_context = self._build_page_context(cid, config)
+            
             payload = {
-                "pageParams": {
-                    "cid": cid, "page_type": "detail_operation", "page_id": "vsite_episode_list",
-                    "id_type": "1", "page_size": str(page_size), "lid": "0", "req_from": "web_mobile",
-                    "page_context": page_context,
+                "page_params": {
+                    "req_from": "web_vsite", "page_id": "vsite_episode_list", "page_type": "detail_operation",
+                    "id_type": "1", "page_size": "", "cid": cid, "vid": "", "lid": "", "page_num": "",
+                    "page_context": page_context, "detail_page_type": "1"
                 },
+                "has_cache": 1
             }
             
             try:
-                self.logger.debug(f"请求分集列表 (cid={cid}), PageContext='{page_context}'")
-                response = await self._request_with_rate_limit("POST", url, json=payload) # type: ignore
+                headers = self._get_episode_headers(cid)
+                response = await self._request_with_rate_limit("POST", self.episodes_api_url, json=payload, headers=headers)
                 if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Tencent V1 Episodes Response (cid={cid}, page_context='{page_context}'): {response.text}")
+                    scraper_responses_logger.debug(f"Tencent V1 Episodes Response (cid={cid}, page={i}): {response.text}")
                 response.raise_for_status()
-                data = response.json()
-    
-                all_item_datas_from_page = []
-                for module_list_data in data.get("data", {}).get("module_list_datas", []):
-                    for module_data in module_list_data.get("module_datas", []):
-                        item_data_lists = module_data.get("item_data_lists", {})
-                        if found_items := item_data_lists.get("item_datas"):
-                            all_item_datas_from_page.extend(found_items)
-    
-                if not all_item_datas_from_page:
-                    break
-    
-                current_page_vids = []
-                for item in all_item_datas_from_page:
-                    params = item.get("item_params", {})
-                    if not params.get("vid"): continue
-                    episode = TencentEpisode.model_validate(params)
-                    if episode.vid not in all_episodes:
-                        all_episodes[episode.vid] = episode
-                    current_page_vids.append(episode.vid)
-    
-                if not current_page_vids or current_page_vids[-1] == last_vid_of_page:
-                    break
-    
-                last_vid_of_page = current_page_vids[-1]
                 
-                begin_num = len(all_episodes) + 1
-                end_num = begin_num + page_size - 1
-                page_context = f"episode_begin={begin_num}&episode_end={end_num}&episode_step={page_size}"
+                result = TencentPageResult.model_validate(response.json())
+                if not result.data:
+                    self.logger.info(f"Tencent (v1): 页面 {i+1} 未返回数据，停止分页。")
+                    break
     
+                new_episodes_this_page = 0
+                for module_list_data in result.data.module_list_datas:
+                    for module_data in module_list_data.module_datas:
+                        if module_data.item_data_lists:
+                            for item in module_data.item_data_lists.item_datas:
+                                if item.item_params and item.item_params.vid:
+                                    episode = TencentEpisode.model_validate(item.item_params.model_dump())
+                                    if episode.vid not in all_episodes:
+                                        all_episodes[episode.vid] = episode
+                                        new_episodes_this_page += 1
+                
+                if new_episodes_this_page == 0:
+                    self.logger.info(f"Tencent (v1): 页面 {i+1} 未返回新分集，停止分页。")
+                    break
+                
+                await asyncio.sleep(0.3)
+
             except Exception as e:
-                self.logger.error(f"请求分集列表失败 (v1, cid={cid}): {e}", exc_info=True)
+                self.logger.error(f"请求分集列表失败 (v1, cid={cid}, page={i}): {e}", exc_info=True)
                 break
     
         final_episodes = list(all_episodes.values())
-        await self._set_to_cache(cache_key, [e.model_dump() for e in final_episodes], 'episodes_ttl_seconds', 1800)
+        if final_episodes:
+            await self._set_to_cache(cache_key, [e.model_dump() for e in final_episodes], 'episodes_ttl_seconds', 1800)
         return final_episodes
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:

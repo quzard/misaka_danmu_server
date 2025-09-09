@@ -151,10 +151,10 @@ export const getRateLimitStatus = () => api.get('/api/ui/rate-limit/status')
 export const getTokenList = () => api.get('/api/ui/tokens')
 /** 增加token */
 export const addToken = data => api.post('/api/ui/tokens', data)
-/** 获取ua配置 */
-export const getUaMode = () => api.get('/api/ui/config/ua_filter_mode')
-/** 获取ua配置 */
-export const setUaMode = data => api.put('/api/ui/config/ua_filter_mode', data)
+/** 获取UA过滤模式 */
+export const getUaMode = () => api.get('/api/ui/config/uaFilterMode')
+/** 设置UA过滤模式 */
+export const setUaMode = data => api.put('/api/ui/config/uaFilterMode', data)
 /** 获取自定义域名 */
 export const getCustomDomain = () => api.get('/api/ui/config/custom_api_domain')
 /** 设置自定义域名 */
