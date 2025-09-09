@@ -389,6 +389,21 @@ async def auto_import(
         unique_key_parts.append(payload.mediaType.value)
     unique_key = f"auto-import-{'-'.join(unique_key_parts)}"
 
+    # 新增：检查最近是否有重复任务
+    config_manager = get_config_manager(request)
+    threshold_hours_str = await config_manager.get("externalApiDuplicateTaskThresholdHours", "3")
+    try:
+        threshold_hours = int(threshold_hours_str)
+    except (ValueError, TypeError):
+        threshold_hours = 3
+
+    if threshold_hours > 0:
+        async with get_db_session(request) as session: # type: ignore
+            recent_task = await crud.find_recent_task_by_unique_key(session, unique_key, threshold_hours)
+            if recent_task:
+                time_since_creation = get_now() - recent_task.createdAt
+                hours_ago = time_since_creation.total_seconds() / 3600
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
     title_parts = [f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"]
     if payload.season is not None:

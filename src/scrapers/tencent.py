@@ -972,85 +972,107 @@ class TencentScraper(BaseScraper):
         将原始腾讯分集列表处理并格式化为通用格式。
         参考了JS实现，为综艺和普通剧集应用不同的、更精确的过滤和排序逻辑。
         """
-        # 1. 初始过滤：移除明确标记为预告片的内容
+        # 步骤 1: 初始过滤
         pre_filtered = [ep for ep in tencent_episodes if ep.is_trailer != "1" and ep.vid]
 
-        # 2. 判断是否为综艺节目
+        # 步骤 2: 根据媒体类型应用不同的处理策略
         is_variety_show = False
-        if db_media_type == 'tv_series' or not db_media_type: # 如果类型未知，也进行猜测
-            # 如果标题中普遍包含“期”字，则认为是综艺
-            qi_count = sum(1 for ep in pre_filtered if "期" in (ep.union_title or ep.title or ""))
-            if pre_filtered and qi_count > len(pre_filtered) / 2:
-                is_variety_show = True
+        episodes_to_format: List[TencentEpisode]
 
-        # 3. 根据类型进行处理
-        if is_variety_show:
-            episodes_to_format: List[TencentEpisode]
-            self.logger.info("检测到综艺节目，正在应用特殊排序和过滤规则...")
-            
-            # 检查是否存在 "第N期" 格式
-            has_qi_format = any(re.search(r'第\d+期', ep.union_title or ep.title or "") for ep in pre_filtered)
-            
-            episode_infos = []
-            for ep in pre_filtered:
-                title = ep.union_title or ep.title or ""
-                
-                if has_qi_format:
-                    qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE)
-                    if qi_updown_match:
-                        qi_num_str, part = qi_updown_match.groups()
-                        qi_text = f"第{qi_num_str}期{part}"
-                        after_text = title[title.find(qi_text) + len(qi_text):]
-                        if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text, re.IGNORECASE):
-                            episode_infos.append({'ep': ep, 'qi_num': int(qi_num_str), 'part': part})
-                    else:
-                        qi_match = re.search(r'第(\d+)期', title)
-                        if qi_match and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
-                            episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
+        if db_media_type == 'movie':
+            self.logger.info(f"检测到电影类型，正在尝试将正片置于列表首位 (cid={cid})")
+            main_feature_vid = await self._get_movie_vid_from_api(cid)
+
+            sorted_episodes = []
+            if main_feature_vid:
+                main_feature_ep = next((ep for ep in pre_filtered if ep.vid == main_feature_vid), None)
+                if main_feature_ep:
+                    sorted_episodes.append(main_feature_ep)
+                    # 添加所有其他非正片的分集
+                    sorted_episodes.extend([ep for ep in pre_filtered if ep.vid != main_feature_vid])
+                    self.logger.info(f"已将正片 (vid={main_feature_vid}) 置于列表首位。")
                 else:
-                    # 如果没有"第N期"格式，则保留所有非广告内容
-                    if "广告" not in title and "推广" not in title:
-                        episode_infos.append({'ep': ep, 'qi_num': 0, 'part': ''})
-
-            # 排序
-            def sort_key_variety(e: Dict) -> Tuple:
-                part_order = {'上': 1, '': 2, '下': 3}
-                if e['qi_num'] == 0:
-                    return (float('inf'), e['ep'].union_title or e['ep'].title or "")
-                return (e['qi_num'], part_order.get(e['part'], 99))
-            
-            episode_infos.sort(key=sort_key_variety)
-            
-            # URL去重，选择最佳标题
-            url_to_episodes: Dict[str, List[Dict]] = defaultdict(list)
-            for info in episode_infos:
-                url = f"https://v.qq.com/x/cover/{cid}/{info['ep'].vid}.html"
-                url_to_episodes[url].append(info)
-
-            final_ep_infos = []
-            for url, infos in url_to_episodes.items():
-                if len(infos) == 1:
-                    final_ep_infos.append(infos[0]['ep'])
-                else:
-                    # 选择最佳标题：优先不带日期的
-                    no_date_infos = [info for info in infos if not re.search(r'\d{4}-\d{2}-\d{2}', info['ep'].union_title or info['ep'].title or "")]
-                    best_info = no_date_infos[0] if no_date_infos else infos[0]
-                    final_ep_infos.append(best_info['ep'])
-            
-            episodes_to_format = final_ep_infos
+                    self.logger.warning(f"通过API找到了正片vid '{main_feature_vid}'，但在分集列表中未找到对应条目。")
+                    sorted_episodes = pre_filtered
+            else:
+                self.logger.warning(f"无法通过API获取电影正片vid，将使用原始顺序。")
+                sorted_episodes = pre_filtered
+            episodes_to_format = sorted_episodes
         else:
-            # 普通电视剧/动漫处理
-            def sort_key_regular(ep: TencentEpisode):
-                title = ep.union_title or ep.title or ""
-                match = re.search(r'第(\d+)[集话]', title)
-                if match: return int(match.group(1))
-                match = re.match(r'(\d+)', title)
-                if match: return int(match.group(1))
-                return float('inf') # 没有数字的排在最后
+            # 步骤 2a: 判断是否为综艺节目 (仅当不是电影时)
+            if db_media_type == 'tv_series' or not db_media_type: # 如果类型未知，也进行猜测
+                # 如果标题中普遍包含“期”字，则认为是综艺
+                qi_count = sum(1 for ep in pre_filtered if "期" in (ep.union_title or ep.title or ""))
+                if pre_filtered and qi_count > len(pre_filtered) / 2:
+                    is_variety_show = True
+            
+            # 步骤 2b: 根据类型进行处理
+            if is_variety_show:
+                self.logger.info("检测到综艺节目，正在应用特殊排序和过滤规则...")
+                
+                # 检查是否存在 "第N期" 格式
+                has_qi_format = any(re.search(r'第\d+期', ep.union_title or ep.title or "") for ep in pre_filtered)
+                
+                episode_infos = []
+                for ep in pre_filtered:
+                    title = ep.union_title or ep.title or ""
+                    
+                    if has_qi_format:
+                        qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE)
+                        if qi_updown_match:
+                            qi_num_str, part = qi_updown_match.groups()
+                            qi_text = f"第{qi_num_str}期{part}"
+                            after_text = title[title.find(qi_text) + len(qi_text):]
+                            if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text, re.IGNORECASE):
+                                episode_infos.append({'ep': ep, 'qi_num': int(qi_num_str), 'part': part})
+                        else:
+                            qi_match = re.search(r'第(\d+)期', title)
+                            if qi_match and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
+                                episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
+                    else:
+                        # 如果没有"第N期"格式，则保留所有非广告内容
+                        if "广告" not in title and "推广" not in title:
+                            episode_infos.append({'ep': ep, 'qi_num': 0, 'part': ''})
 
-            episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
+                # 排序
+                def sort_key_variety(e: Dict) -> Tuple:
+                    part_order = {'上': 1, '': 2, '下': 3}
+                    if e['qi_num'] == 0:
+                        return (float('inf'), e['ep'].union_title or e['ep'].title or "")
+                    return (e['qi_num'], part_order.get(e['part'], 99))
+                
+                episode_infos.sort(key=sort_key_variety)
+                
+                # URL去重，选择最佳标题
+                url_to_episodes: Dict[str, List[Dict]] = defaultdict(list)
+                for info in episode_infos:
+                    url = f"https://v.qq.com/x/cover/{cid}/{info['ep'].vid}.html"
+                    url_to_episodes[url].append(info)
 
-        # 4. 应用自定义黑名单 (对非综艺节目)
+                final_ep_infos = []
+                for url, infos in url_to_episodes.items():
+                    if len(infos) == 1:
+                        final_ep_infos.append(infos[0]['ep'])
+                    else:
+                        # 选择最佳标题：优先不带日期的
+                        no_date_infos = [info for info in infos if not re.search(r'\d{4}-\d{2}-\d{2}', info['ep'].union_title or info['ep'].title or "")]
+                        best_info = no_date_infos[0] if no_date_infos else infos[0]
+                        final_ep_infos.append(best_info['ep'])
+                
+                episodes_to_format = final_ep_infos
+            else:
+                # 普通电视剧/动漫处理
+                def sort_key_regular(ep: TencentEpisode):
+                    title = ep.union_title or ep.title or ""
+                    match = re.search(r'第(\d+)[集话]', title)
+                    if match: return int(match.group(1))
+                    match = re.match(r'(\d+)', title)
+                    if match: return int(match.group(1))
+                    return float('inf') # 没有数字的排在最后
+
+                episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
+
+        # 步骤 3: 应用自定义黑名单 (对非综艺节目)
         if not is_variety_show:
             blacklist_pattern = await self.get_episode_blacklist_pattern() # type: ignore
             if blacklist_pattern:
@@ -1082,7 +1104,7 @@ class TencentScraper(BaseScraper):
                     self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
                 episodes_to_format = temp_episodes
 
-        # 5. 最终格式化 (后编号)
+        # 步骤 4: 最终格式化 (后编号)
         final_episodes = []
         for i, ep in enumerate(episodes_to_format):
             display_title = ep.union_title or ep.title or ""

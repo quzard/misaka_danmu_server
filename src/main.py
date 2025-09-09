@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
         'webhookApiKey': ('', '用于Webhook调用的安全密钥。'),
         'trustedProxies': ('', '受信任的反向代理IP列表，用逗号分隔。当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。'),
         'externalApiKey': ('', '用于外部API调用的安全密钥。'),
+        'externalApiDuplicateTaskThresholdHours': (3, '（外部API）重复任务提交阈值（小时）。在此时长内，不允许为同一媒体提交重复的自动导入任务。0为禁用。'),
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
         # 认证
         # 代理

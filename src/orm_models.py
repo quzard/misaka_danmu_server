@@ -239,6 +239,7 @@ class TaskHistory(Base):
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
     updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", NaiveDateTime)
+    uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 

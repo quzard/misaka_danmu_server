@@ -351,6 +351,30 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
     except Exception as e:
         logger.error(f"执行一次性清理任务 '{migration_id}' 时发生错误: {e}", exc_info=True)
+
+async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
+    """
+    迁移任务: 确保 task_history 表有 unique_key 字段和索引。
+    """
+    migration_id = "add_unique_key_to_task_history"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    if db_type == "mysql":
+        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'unique_key'")
+        add_column_sql = text("ALTER TABLE task_history ADD COLUMN `unique_key` VARCHAR(255) NULL, ADD INDEX `idx_unique_key` (`unique_key`)")
+    elif db_type == "postgresql":
+        check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'unique_key'")
+        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "unique_key" VARCHAR(255) NULL; CREATE INDEX IF NOT EXISTS idx_task_history_unique_key ON task_history (unique_key);')
+    else:
+        return
+
+    column_exists = (await conn.execute(check_column_sql)).scalar_one_or_none() is not None
+    if not column_exists:
+        logger.info("列 'task_history.unique_key' 不存在。正在添加...")
+        await conn.execute(add_column_sql)
+        logger.info("成功添加列 'task_history.unique_key'。")
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+            
 async def _run_migrations(conn):
     """
     执行所有一次性的数据库架构迁移。
@@ -371,6 +395,7 @@ async def _run_migrations(conn):
     await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
     await _migrate_text_to_mediumtext(conn, db_type, db_name)
     await _migrate_add_source_url_to_episode(conn, db_type, db_name)
+    await _migrate_add_unique_key_to_task_history(conn, db_type, db_name)
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """Logs a standardized, detailed error message for database connection failures."""

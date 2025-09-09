@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -19,7 +19,7 @@ from .orm_models import (
     Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 , RateLimitState)
 from .config import settings
-from .timezone import get_now, get_app_timezone
+from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
 
 logger = logging.getLogger(__name__)
@@ -1843,13 +1843,15 @@ async def create_task_in_history(
     title: str,
     status: str,
     description: str,
-    scheduled_task_id: Optional[str] = None
+    scheduled_task_id: Optional[str] = None,
+    unique_key: Optional[str] = None
 ):
     now = get_now()
     new_task = TaskHistory(
         taskId=task_id, title=title, status=status, 
         description=description, scheduledTaskId=scheduled_task_id,
-        createdAt=now,
+        createdAt=now, # type: ignore
+        uniqueKey=unique_key,
         updatedAt=now
     )
     session.add(new_task)
@@ -2016,6 +2018,31 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
     logging.getLogger(__name__).info("默认配置检查完成。")
 
 # --- Rate Limiter CRUD ---
+
+async def find_recent_task_by_unique_key(session: AsyncSession, unique_key: str, within_hours: int) -> Optional[orm_models.TaskHistory]:
+    """
+    Finds a task by its unique_key that is either currently active 
+    or was completed within the specified time window.
+    """
+    if not unique_key:
+        return None
+
+    cutoff_time = get_now() - timedelta(hours=within_hours)
+    
+    stmt = (
+        select(TaskHistory)
+        .where(
+            TaskHistory.uniqueKey == unique_key,
+            or_(
+                TaskHistory.status.in_(['排队中', '运行中', '已暂停']),
+                TaskHistory.finishedAt >= cutoff_time
+            )
+        )
+        .order_by(TaskHistory.createdAt.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: str) -> RateLimitState:
     """获取或创建特定提供商的速率限制状态。"""
