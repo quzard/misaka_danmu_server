@@ -22,6 +22,10 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
+    configurable_fields = {
+        "gamerCookie": "巴哈姆特动画疯 Cookie",
+        "gamerUserAgent": "巴哈姆特动画疯 User-Agent",
+    }
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases

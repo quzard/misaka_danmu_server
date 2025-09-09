@@ -1126,29 +1126,35 @@ async def update_scraper_config(
             await crud.update_scraper_proxy(session, providerName, use_proxy_value)
 
         # 2. 构建所有期望处理的配置键 (camelCase)
+        # 修正：使用一个映射来处理前端camelCase键到后端DB键的转换，以兼容混合命名法
         expected_camel_keys = set()
-        # 修正：定义正确的 to_camel 辅助函数
+        camel_to_db_key_map = {}
+
         def to_camel(snake_str):
             components = snake_str.split('_')
             return components[0] + ''.join(x.title() for x in components[1:])
 
         if hasattr(scraper_class, 'configurable_fields'):
-            for snake_key in scraper_class.configurable_fields.keys():
-                expected_camel_keys.add(to_camel(snake_key))
+            for db_key in scraper_class.configurable_fields.keys():
+                camel_key = to_camel(db_key)
+                expected_camel_keys.add(camel_key)
+                camel_to_db_key_map[camel_key] = db_key
         
         if getattr(scraper_class, 'is_loggable', False):
-            expected_camel_keys.add(f"scraper{providerName.capitalize()}LogResponses")
+            camel_key = f"scraper{providerName.capitalize()}LogResponses"
+            db_key = f"scraper_{providerName}_log_responses"
+            expected_camel_keys.add(camel_key)
+            camel_to_db_key_map[camel_key] = db_key
         
-        expected_camel_keys.add(f"{providerName}EpisodeBlacklistRegex")
+        camel_key = f"{providerName}EpisodeBlacklistRegex"
+        db_key = f"{providerName}_episode_blacklist_regex"
+        expected_camel_keys.add(camel_key)
+        camel_to_db_key_map[camel_key] = db_key
 
         # 3. 遍历 payload，只处理期望的键
-        def to_snake(camel_str):
-            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
-            return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-
         for camel_key, value in payload.items():
             if camel_key in expected_camel_keys:
-                db_key = to_snake(camel_key)
+                db_key = camel_to_db_key_map[camel_key]
                 value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
                 await crud.update_config_value(session, db_key, value_to_save)
                 config_manager.invalidate(db_key)
