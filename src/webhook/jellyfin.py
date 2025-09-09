@@ -134,4 +134,7 @@ class JellyfinWebhook(BaseWebhook):
             task_manager=self.task_manager,
             rate_limiter=self.rate_limiter
         )
-        await self.task_manager.submit_task(task_coro, task_title)
+        # 生成unique_key用于重复任务检测
+        unique_key = f"webhook-jellyfin:{tmdb_id or imdb_id or tvdb_id or douban_id or anime_title}:{season_number}:{episode_number}"
+        
+        await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

@@ -5,28 +5,32 @@
   "display": "standalone",
   "background_color": "#fff",
   "theme_color": "#000",
-  "prefer_related_applications": true,
+  "prefer_related_applications": false,
   "description": "一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 dandanplay API 规范。",
   "icons": [
     {
       "src": "images/pwa-48x48.png",
       "type": "image/png",
-      "sizes": "48x48"
+      "sizes": "48x48",
+      "purpose": "maskable any"
     },
     {
       "src": "images/pwa-96x96.png",
       "type": "image/png",
-      "sizes": "96x96"
+      "sizes": "96x96",
+      "purpose": "maskable any"
     },
     {
       "src": "images/pwa-192x192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "maskable any"
     },
     {
       "src": "images/pwa-512x512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "maskable any"
     }
   ]
 }
