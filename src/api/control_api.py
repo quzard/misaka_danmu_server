@@ -318,6 +318,7 @@ class ControlMetadataSearchResponse(BaseModel):
 
 @router.post("/import/auto", status_code=status.HTTP_202_ACCEPTED, summary="全自动搜索并导入", response_model=ControlTaskResponse)
 async def auto_import(
+    request: Request,
     searchType: AutoImportSearchType = Query(..., description="搜索类型。可选值: 'keyword', 'tmdb', 'tvdb', 'douban', 'imdb', 'bangumi'。"),
     searchTerm: str = Query(..., description="搜索内容。根据 searchType 的不同，这里应填入关键词或对应的平台ID。"),
     season: Optional[int] = Query(None, description="季度号。如果未提供，将自动推断或默认为1。"),
