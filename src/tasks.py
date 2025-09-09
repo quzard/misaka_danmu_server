@@ -1263,7 +1263,13 @@ async def auto_search_and_import_task(
             
             if source_to_use:
                 await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
-                unique_key = f"import-{source_to_use['providerName']}-{source_to_use['mediaId']}"
+                # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
+                unique_key_parts = ["import", source_to_use['providerName'], source_to_use['mediaId']]
+                if season is not None:
+                    unique_key_parts.append(f"s{season}")
+                if payload.episode is not None:
+                    unique_key_parts.append(f"e{payload.episode}")
+                unique_key = "-".join(unique_key_parts)
                 task_coro = lambda s, cb: generic_import_task(
                     provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
                     animeTitle=main_title, mediaType=media_type, season=season,
@@ -1352,7 +1358,13 @@ async def auto_search_and_import_task(
             image_url = best_match.imageUrl
             logger.info(f"使用最佳匹配源 '{best_match.provider}' 的海报URL: {image_url}")
 
-        unique_key = f"import-{best_match.provider}-{best_match.mediaId}"
+        # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
+        unique_key_parts = ["import", best_match.provider, best_match.mediaId]
+        if season is not None:
+            unique_key_parts.append(f"s{season}")
+        if payload.episode is not None:
+            unique_key_parts.append(f"e{payload.episode}")
+        unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=best_match.title, mediaType=media_type, season=season, year=best_match.year,
