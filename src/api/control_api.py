@@ -378,14 +378,14 @@ async def auto_import(
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
 
-    # 修正：将 season 和 episode 纳入 unique_key，以允许同一作品不同季/集的导入
+    # 修正：将 season、episode 和 mediaType 纳入 unique_key，以允许同一作品不同季/集的导入
     unique_key_parts = [payload.searchType.value, payload.searchTerm]
     if payload.season is not None:
         unique_key_parts.append(f"s{payload.season}")
     if payload.episode is not None:
         unique_key_parts.append(f"e{payload.episode}")
-    # 如果 mediaType 存在且不是默认值，也加入 unique_key，以区分同名但不同类型的作品
-    if payload.mediaType is not None and payload.mediaType != AutoImportMediaType.TV_SERIES:
+    # 始终包含 mediaType 以区分同名但不同类型的作品，避免重复任务检测问题
+    if payload.mediaType is not None:
         unique_key_parts.append(payload.mediaType.value)
     unique_key = f"auto-import-{'-'.join(unique_key_parts)}"
 
