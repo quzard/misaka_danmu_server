@@ -88,8 +88,7 @@ export const ImportTask = () => {
     }))
   }, [search, status])
 
-  // 第一页数据缓存，用于跨页面实时更新
-  const firstPageDataRef = useRef([])
+
 
   /**
    * 轮询刷新当前页面任务列表
@@ -106,15 +105,7 @@ export const ImportTask = () => {
       const newData = res.data?.list || []
       setTaskList(newData)
 
-      // 如果是第一页数据，同步更新缓存
-      if (pagination.current === 1) {
-        firstPageDataRef.current = newData
-      }
 
-      setPagination(prev => ({
-        ...prev,
-        total: res.data?.total || 0,
-      }))
     } catch (error) {
       console.error('轮询获取数据失败:', error)
     }
@@ -136,10 +127,7 @@ export const ImportTask = () => {
 
       const newData = res.data?.list || []
       setTaskList(newData)
-      // 如果是第一页数据，同步更新缓存
-      if (pagination.current === 1) {
-        firstPageDataRef.current = newData
-      }
+
 
       setLoading(false)
       setPagination(prev => ({
@@ -255,15 +243,9 @@ export const ImportTask = () => {
 
   useEffect(() => {
     const isLoadMore = pagination.current > 1
-    // 如果切换到第一页且有缓存数据，优先使用缓存数据
-    if (pagination.current === 1 && firstPageDataRef.current.length > 0) {
-      setTaskList(firstPageDataRef.current)
+    refreshTasks(isLoadMore)
+    if (!isLoadMore) {
       setSelectList([])
-    } else {
-      refreshTasks(isLoadMore)
-      if (!isLoadMore) {
-        setSelectList([])
-      }
     }
   }, [search, status, pagination.current, pagination.pageSize])
 
