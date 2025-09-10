@@ -305,7 +305,7 @@ class YoukuScraper(BaseScraper):
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             page = 1
-            page_size = 20
+            page_size = 100
             
             while True:
                 try:
