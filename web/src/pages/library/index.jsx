@@ -65,12 +65,11 @@ const ApplyField = ({ name, label, fetchedValue, form }) => {
 export const Library = () => {
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
-  const [renderData, setRenderData] = useState([])
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 10,
+    pageSize: 50,
     total: 0,
   })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -92,25 +91,21 @@ export const Library = () => {
   const modalApi = useModal()
   const messageApi = useMessage()
 
-  const getList = async (page = 1, pageSize = 10) => {
+  const getList = async () => {
     try {
       setLoading(true)
       const res = await getAnimeLibrary({
         keyword: keyword,
-        page: page,
-        pageSize: pageSize,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
       })
       setList(res.data?.list || [])
-      setRenderData(res.data?.list || [])
       setPagination(prev => ({
         ...prev,
         total: res.data?.total || 0,
-        current: page,
-        pageSize: pageSize,
       }))
     } catch (error) {
       setList([])
-      setRenderData([])
     } finally {
       setLoading(false)
     }
@@ -118,12 +113,17 @@ export const Library = () => {
 
   const handleCreateSuccess = () => {
     setIsCreateModalOpen(false)
-    getList(pagination.current, pagination.pageSize) // 创建成功后刷新列表
+    setPagination(n => {
+      return {
+        ...n,
+        current: 1,
+      }
+    })
   }
 
   useEffect(() => {
-    getList(1, pagination.pageSize)
-  }, [keyword])
+    getList()
+  }, [keyword, pagination.current, pagination.pageSize])
 
   useEffect(() => {
     if (!fetchedMetadata) return
@@ -162,10 +162,6 @@ export const Library = () => {
       })
     }
   }, [fetchedMetadata, form])
-
-  const handleTableChange = (page, pageSize) => {
-    getList(page, pageSize)
-  }
 
   const columns = [
     {
@@ -631,19 +627,32 @@ export const Library = () => {
           </Space>
         }
       >
-        {!!renderData?.length ? (
+        {!!list?.length ? (
           <Table
-            pagination={
-              pagination.total > 0
-                ? {
-                    ...pagination,
-                    showTotal: total => `共 ${total} 条数据`,
-                    onChange: handleTableChange,
+            pagination={{
+              ...pagination,
+              showTotal: total => `共 ${total} 条数据`,
+              onChange: (page, pageSize) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    current: page,
+                    pageSize,
                   }
-                : false
-            }
+                })
+              },
+              onShowSizeChange: (_, size) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    pageSize: size,
+                  }
+                })
+              },
+              hideOnSinglePage: true,
+            }}
             size="small"
-            dataSource={renderData}
+            dataSource={list}
             columns={columns}
             rowKey={'animeId'}
             scroll={{ x: '100%' }}
