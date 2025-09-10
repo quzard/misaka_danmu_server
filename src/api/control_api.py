@@ -911,8 +911,8 @@ async def search_metadata_source(
 @router.get("/library", response_model=List[models.LibraryAnimeInfo], summary="获取媒体库列表")
 async def get_library(session: AsyncSession = Depends(get_db_session)):
     """获取当前弹幕库中所有已收录的作品列表。"""
-    db_results = await crud.get_library_anime(session)
-    return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
+    paginated_results = await crud.get_library_anime(session)
+    return [models.LibraryAnimeInfo.model_validate(item) for item in paginated_results["list"]]
 
 @router.get("/library/search", response_model=List[models.LibraryAnimeInfo], summary="搜索媒体库")
 async def search_library(
@@ -920,8 +920,8 @@ async def search_library(
     session: AsyncSession = Depends(get_db_session)
 ):
     """根据关键词搜索弹幕库中已收录的作品。"""
-    db_results = await crud.search_library_anime(session, keyword)
-    return [models.LibraryAnimeInfo.model_validate(item) for item in db_results]
+    paginated_results = await crud.get_library_anime(session, keyword=keyword)
+    return [models.LibraryAnimeInfo.model_validate(item) for item in paginated_results["list"]]
 
 @router.post("/library/anime", response_model=ControlAnimeDetailsResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
 async def create_anime_entry(
