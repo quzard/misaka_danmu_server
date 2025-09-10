@@ -6,7 +6,7 @@ import {
   resumeTask,
   stopTask,
 } from '@/apis'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -32,13 +32,13 @@ import {
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+// 移除useScroll导入，改用分页模式
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
   const [taskList, setTaskList] = useState([])
-  const timer = useRef()
   const [selectList, setSelectList] = useState([])
-  const [loadingMore, setLoadingMore] = useState(false)
+  const timer = useRef()
 
   const [pagination, setPagination] = useState({
     current: 1,
@@ -92,48 +92,56 @@ export const ImportTask = () => {
   const firstPageDataRef = useRef([])
 
   /**
-   * 刷新任务列表
-   * @param {boolean} isLoadMore - 是否为加载更多操作
-   * @param {boolean} isPolling - 是否为轮询操作
+   * 轮询刷新当前页面任务列表
    */
-  const refreshTasks = async (isLoadMore = false, isPolling = false) => {
+  const pollTasks = useCallback(async () => {
     try {
-      if (isLoadMore) {
-        setLoadingMore(true)
+      const res = await getTaskList({
+        search,
+        status,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
+      })
+
+      const newData = res.data?.list || []
+      setTaskList(newData)
+
+      // 如果是第一页数据，同步更新缓存
+      if (pagination.current === 1) {
+        firstPageDataRef.current = newData
       }
 
-      // 轮询时始终获取第一页最新数据
-      const requestPage = isPolling ? 1 : pagination.current
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+      }))
+    } catch (error) {
+      console.error('轮询获取数据失败:', error)
+    }
+  }, [search, status, pagination.current, pagination.pageSize])
+
+  /**
+   * 刷新任务列表
+   */
+  const refreshTasks = useCallback(async () => {
+    try {
+      setLoading(true)
 
       const res = await getTaskList({
         search,
         status,
-        page: requestPage,
+        page: pagination.current,
         pageSize: pagination.pageSize,
       })
 
-      if (isLoadMore) {
-        // 加载更多时追加数据
-        setTaskList(prev => [...prev, ...(res.data?.list || [])])
-      } else if (isPolling) {
-        // 轮询操作：更新第一页数据缓存
-        firstPageDataRef.current = res.data?.list || []
-        // 如果当前正在浏览第一页，则同步更新显示数据
-        if (pagination.current === 1) {
-          setTaskList(res.data?.list || [])
-        }
-      } else {
-        // 非轮询的刷新操作，替换数据
-        const newData = res.data?.list || []
-        setTaskList(newData)
-        // 如果是第一页数据，同步更新缓存
-        if (pagination.current === 1) {
-          firstPageDataRef.current = newData
-        }
+      const newData = res.data?.list || []
+      setTaskList(newData)
+      // 如果是第一页数据，同步更新缓存
+      if (pagination.current === 1) {
+        firstPageDataRef.current = newData
       }
 
       setLoading(false)
-      setLoadingMore(false)
       setPagination(prev => ({
         ...prev,
         total: res.data?.total || 0,
@@ -141,32 +149,39 @@ export const ImportTask = () => {
     } catch (error) {
       console.error(error)
       setLoading(false)
-      setLoadingMore(false)
     }
-  }
+  }, [search, status, pagination.current, pagination.pageSize])
 
+  /**
+   * 处理暂停/恢复任务操作
+   */
   const handlePause = async () => {
     if (isPause) {
       try {
         await Promise.all(
           selectList.map(it => resumeTask({ taskId: it.taskId }))
         )
+        refreshTasks()
+        setSelectList([])
       } catch (error) {
-        messageApi.error(`操作失败: ${error.message}`)
+        message.error(`操作失败: ${error.message}`)
       }
     } else {
       try {
         await Promise.all(
           selectList.map(it => pauseTask({ taskId: it.taskId }))
         )
+        refreshTasks()
+        setSelectList([])
       } catch (error) {
-        messageApi.error(`操作失败: ${error.message}`)
+        message.error(`操作失败: ${error.message}`)
       }
     }
-    refreshTasks()
-    setSelectList([])
   }
 
+  /**
+   * 处理中止任务操作
+   */
   const handleStop = () => {
     modalApi.confirm({
       title: '中止任务',
@@ -192,8 +207,8 @@ export const ImportTask = () => {
           await Promise.all(
             selectList.map(it => stopTask({ taskId: it.taskId }))
           )
-          setSelectList([])
           refreshTasks()
+          setSelectList([])
           messageApi.success('中止成功')
         } catch (error) {
           messageApi.error(`中止任务失败: ${error.message}`)
@@ -202,6 +217,9 @@ export const ImportTask = () => {
     })
   }
 
+  /**
+   * 处理删除任务操作
+   */
   const handleDelete = () => {
     modalApi.confirm({
       title: '删除任务',
@@ -225,32 +243,14 @@ export const ImportTask = () => {
           await Promise.all(
             selectList.map(it => deleteTask({ taskId: it.taskId }))
           )
-          setSelectList([])
           refreshTasks()
+          setSelectList([])
           messageApi.success('删除成功')
         } catch (error) {
-          alert(`删除任务失败: ${error.message}`)
+          messageApi.error(`删除任务失败: ${error.message}`)
         }
       },
     })
-  }
-
-  /**
-   * 处理滚动事件，检测是否需要加载更多
-   */
-  const handleScroll = () => {
-    if (loadingMore || taskList.length >= pagination.total) {
-      return
-    }
-
-    const { scrollTop, scrollHeight, clientHeight } = document.documentElement
-    // 当滚动到距离底部100px时触发加载更多
-    if (scrollTop + clientHeight >= scrollHeight - 100) {
-      setPagination(prev => ({
-        ...prev,
-        current: prev.current + 1,
-      }))
-    }
   }
 
   useEffect(() => {
@@ -265,58 +265,21 @@ export const ImportTask = () => {
         setSelectList([])
       }
     }
-  }, [search, status, pagination.current])
+  }, [search, status, pagination.current, pagination.pageSize])
 
   useEffect(() => {
     // 清除之前的定时器
     clearInterval(timer.current)
 
-    // 始终启动轮询定时器，确保第一页数据实时更新
+    // 启动轮询定时器，每3秒刷新当前页面任务列表
     timer.current = setInterval(() => {
-      // 轮询时传入isPolling=true标识，始终更新第一页数据
-      refreshTasks(false, true)
+      pollTasks()
     }, 3000)
 
     return () => {
       clearInterval(timer.current)
     }
-  }, [search, status])
-
-  useEffect(() => {
-    window.addEventListener('scroll', handleScroll)
-    return () => {
-      window.removeEventListener('scroll', handleScroll)
-    }
-  }, [loadingMore, pagination.total])
-
-  /**
-   * 加载更多指示器
-   */
-  const loadMoreIndicator = loadingMore ? (
-    <div
-      style={{
-        textAlign: 'center',
-        marginTop: 12,
-        height: 32,
-        lineHeight: '32px',
-        color: '#999',
-      }}
-    >
-      正在加载更多...
-    </div>
-  ) : taskList.length < pagination.total ? (
-    <div
-      style={{
-        textAlign: 'center',
-        marginTop: 12,
-        height: 32,
-        lineHeight: '32px',
-        color: '#999',
-      }}
-    >
-      下拉加载更多
-    </div>
-  ) : null
+  }, [pollTasks])
 
   return (
     <div className="my-6">
@@ -434,7 +397,29 @@ export const ImportTask = () => {
               itemLayout="vertical"
               size="small"
               dataSource={taskList}
-              loadMore={loadMoreIndicator}
+              pagination={{
+                ...pagination,
+                showLessItems: true,
+                align: 'center',
+                onChange: (page, pageSize) => {
+                  setPagination(n => {
+                    return {
+                      ...n,
+                      current: page,
+                      pageSize,
+                    }
+                  })
+                },
+                onShowSizeChange: (_, size) => {
+                  setPagination(n => {
+                    return {
+                      ...n,
+                      pageSize: size,
+                    }
+                  })
+                },
+                hideOnSinglePage: true,
+              }}
               renderItem={(item, index) => {
                 const isActive = selectList.some(
                   it => it.taskId === item.taskId

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getDanmakuDetail, getEpisodes } from '../../apis'
 import { Breadcrumb, Card, Empty } from 'antd'
 import { HomeOutlined } from '@ant-design/icons'
+import { useScroll } from '../../hooks/useScroll'
 
 export const CommentDetail = () => {
   const { id } = useParams()
@@ -20,6 +21,28 @@ export const CommentDetail = () => {
   })
 
   const navigate = useNavigate()
+
+  /**
+   * 处理加载更多逻辑
+   */
+  const handleLoadMore = () => {
+    if (!loadingMore && commentList.length < pagination.total) {
+      setPagination(prev => ({
+        ...prev,
+        current: prev.current + 1,
+      }))
+    }
+  }
+
+  /**
+   * 使用自定义滚动hook实现下拉加载
+   */
+  const [setScrollTarget] = useScroll({
+    canLoadMore: !loadingMore && commentList.length < pagination.total,
+    onLoadMore: handleLoadMore,
+  })
+
+  console.log(!loadingMore, commentList.length, pagination.total)
 
   /**
    * 获取弹幕详情
@@ -60,7 +83,7 @@ export const CommentDetail = () => {
 
       setPagination(prev => ({
         ...prev,
-        total: commentRes.data?.count || 0,
+        total: commentRes.data?.total || 0,
       }))
 
       setLoading(false)
@@ -71,35 +94,10 @@ export const CommentDetail = () => {
     }
   }
 
-  /**
-   * 处理滚动事件，检测是否需要加载更多
-   */
-  const handleScroll = () => {
-    if (loadingMore || commentList.length >= pagination.total) {
-      return
-    }
-
-    const { scrollTop, scrollHeight, clientHeight } = document.documentElement
-    // 当滚动到距离底部100px时触发加载更多
-    if (scrollTop + clientHeight >= scrollHeight - 100) {
-      setPagination(prev => ({
-        ...prev,
-        current: prev.current + 1,
-      }))
-    }
-  }
-
   useEffect(() => {
     const isLoadMore = pagination.current > 1
     getDetail(isLoadMore)
   }, [pagination.current])
-
-  useEffect(() => {
-    window.addEventListener('scroll', handleScroll)
-    return () => {
-      window.removeEventListener('scroll', handleScroll)
-    }
-  }, [loadingMore, pagination.total])
 
   return (
     <div className="my-6">
@@ -149,8 +147,10 @@ export const CommentDetail = () => {
                   </div>
                 </div>
               ))}
-              {loadingMore && (
+              {/* 加载更多触发元素 */}
+              {commentList.length < pagination.total && (
                 <div
+                  ref={setScrollTarget}
                   style={{
                     textAlign: 'center',
                     marginTop: 12,
@@ -159,20 +159,7 @@ export const CommentDetail = () => {
                     color: '#999',
                   }}
                 >
-                  正在加载更多...
-                </div>
-              )}
-              {!loadingMore && commentList.length < pagination.total && (
-                <div
-                  style={{
-                    textAlign: 'center',
-                    marginTop: 12,
-                    height: 32,
-                    lineHeight: '32px',
-                    color: '#999',
-                  }}
-                >
-                  下拉加载更多
+                  {loadingMore ? '正在加载更多...' : '下拉加载更多'}
                 </div>
               )}
             </>
