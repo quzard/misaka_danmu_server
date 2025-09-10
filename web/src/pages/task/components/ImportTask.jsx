@@ -6,7 +6,7 @@ import {
   resumeTask,
   stopTask,
 } from '@/apis'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -32,12 +32,19 @@ import {
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+// 移除useScroll导入，改用分页模式
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
   const [taskList, setTaskList] = useState([])
-  const timer = useRef()
   const [selectList, setSelectList] = useState([])
+  const timer = useRef()
+
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 100,
+    total: 0,
+  })
 
   const navigate = useNavigate()
   const modalApi = useModal()
@@ -73,42 +80,96 @@ export const ImportTask = () => {
     ]
   }, [searchParams])
 
-  const refreshTasks = async () => {
+  useEffect(() => {
+    setPagination(n => ({
+      ...n,
+      pageSize: 100,
+      current: 1,
+    }))
+  }, [search, status])
+
+
+
+  /**
+   * 轮询刷新当前页面任务列表
+   */
+  const pollTasks = useCallback(async () => {
     try {
       const res = await getTaskList({
         search,
         status,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
       })
-      setTaskList(res.data)
+
+      const newData = res.data?.list || []
+      setTaskList(newData)
+
+
+    } catch (error) {
+      console.error('轮询获取数据失败:', error)
+    }
+  }, [search, status, pagination.current, pagination.pageSize])
+
+  /**
+   * 刷新任务列表
+   */
+  const refreshTasks = useCallback(async () => {
+    try {
+      setLoading(true)
+
+      const res = await getTaskList({
+        search,
+        status,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
+      })
+
+      const newData = res.data?.list || []
+      setTaskList(newData)
+
+
       setLoading(false)
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+      }))
     } catch (error) {
       console.error(error)
       setLoading(false)
     }
-  }
+  }, [search, status, pagination.current, pagination.pageSize])
 
+  /**
+   * 处理暂停/恢复任务操作
+   */
   const handlePause = async () => {
     if (isPause) {
       try {
         await Promise.all(
           selectList.map(it => resumeTask({ taskId: it.taskId }))
         )
+        refreshTasks()
+        setSelectList([])
       } catch (error) {
-        messageApi.error(`操作失败: ${error.message}`)
+        message.error(`操作失败: ${error.message}`)
       }
     } else {
       try {
         await Promise.all(
           selectList.map(it => pauseTask({ taskId: it.taskId }))
         )
+        refreshTasks()
+        setSelectList([])
       } catch (error) {
-        messageApi.error(`操作失败: ${error.message}`)
+        message.error(`操作失败: ${error.message}`)
       }
     }
-    refreshTasks()
-    setSelectList([])
   }
 
+  /**
+   * 处理中止任务操作
+   */
   const handleStop = () => {
     modalApi.confirm({
       title: '中止任务',
@@ -134,8 +195,8 @@ export const ImportTask = () => {
           await Promise.all(
             selectList.map(it => stopTask({ taskId: it.taskId }))
           )
-          setSelectList([])
           refreshTasks()
+          setSelectList([])
           messageApi.success('中止成功')
         } catch (error) {
           messageApi.error(`中止任务失败: ${error.message}`)
@@ -144,6 +205,9 @@ export const ImportTask = () => {
     })
   }
 
+  /**
+   * 处理删除任务操作
+   */
   const handleDelete = () => {
     modalApi.confirm({
       title: '删除任务',
@@ -167,24 +231,37 @@ export const ImportTask = () => {
           await Promise.all(
             selectList.map(it => deleteTask({ taskId: it.taskId }))
           )
-          setSelectList([])
           refreshTasks()
+          setSelectList([])
           messageApi.success('删除成功')
         } catch (error) {
-          alert(`删除任务失败: ${error.message}`)
+          messageApi.error(`删除任务失败: ${error.message}`)
         }
       },
     })
   }
 
   useEffect(() => {
-    refreshTasks()
-    setSelectList([])
-    timer.current = setInterval(refreshTasks, 3000)
+    const isLoadMore = pagination.current > 1
+    refreshTasks(isLoadMore)
+    if (!isLoadMore) {
+      setSelectList([])
+    }
+  }, [search, status, pagination.current, pagination.pageSize])
+
+  useEffect(() => {
+    // 清除之前的定时器
+    clearInterval(timer.current)
+
+    // 启动轮询定时器，每3秒刷新当前页面任务列表
+    timer.current = setInterval(() => {
+      pollTasks()
+    }, 3000)
+
     return () => {
       clearInterval(timer.current)
     }
-  }, [search, status])
+  }, [pollTasks])
 
   return (
     <div className="my-6">
@@ -300,8 +377,31 @@ export const ImportTask = () => {
           {!!taskList?.length ? (
             <List
               itemLayout="vertical"
-              size="large"
+              size="small"
               dataSource={taskList}
+              pagination={{
+                ...pagination,
+                showLessItems: true,
+                align: 'center',
+                onChange: (page, pageSize) => {
+                  setPagination(n => {
+                    return {
+                      ...n,
+                      current: page,
+                      pageSize,
+                    }
+                  })
+                },
+                onShowSizeChange: (_, size) => {
+                  setPagination(n => {
+                    return {
+                      ...n,
+                      pageSize: size,
+                    }
+                  })
+                },
+                hideOnSinglePage: true,
+              }}
               renderItem={(item, index) => {
                 const isActive = selectList.some(
                   it => it.taskId === item.taskId

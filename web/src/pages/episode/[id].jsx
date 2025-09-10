@@ -55,7 +55,7 @@ export const EpisodeDetail = () => {
   const [sourceInfo, setSourceInfo] = useState({})
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 25,
+    pageSize: 50,
     total: 0,
   })
 
@@ -78,7 +78,7 @@ export const EpisodeDetail = () => {
     return sourceInfo.providerName === 'custom'
   }, [sourceInfo])
 
-  const getDetail = async (page = 1, pageSize = 25) => {
+  const getDetail = async () => {
     setLoading(true)
     try {
       const [detailRes, episodeRes, sourceRes] = await Promise.all([
@@ -87,8 +87,8 @@ export const EpisodeDetail = () => {
         }),
         getEpisodes({
           sourceId: Number(id),
-          page: page,
-          pageSize: pageSize,
+          page: pagination.current,
+          pageSize: pagination.pageSize,
         }),
         getAnimeSource({
           animeId: Number(animeId),
@@ -99,8 +99,6 @@ export const EpisodeDetail = () => {
       setPagination(prev => ({
         ...prev,
         total: episodeRes.data?.total || 0,
-        current: page,
-        pageSize: pageSize,
       }))
       setSourceInfo({
         ...sourceRes?.data?.filter(it => it.sourceId === Number(id))?.[0],
@@ -113,12 +111,8 @@ export const EpisodeDetail = () => {
   }
 
   useEffect(() => {
-    getDetail(pagination.current, pagination.pageSize)
-  }, [])
-
-  const handleTableChange = (page, pageSize) => {
-    getDetail(page, pageSize)
-  }
+    getDetail()
+  }, [pagination.current, pagination.pageSize])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -663,15 +657,28 @@ export const EpisodeDetail = () => {
         {!!episodeList?.length ? (
           <Table
             rowSelection={{ type: 'checkbox', ...rowSelection }}
-            pagination={
-              pagination.total > 0
-                ? {
-                    ...pagination,
-                    showTotal: total => `共 ${total} 条数据`,
-                    onChange: handleTableChange,
+            pagination={{
+              ...pagination,
+              showTotal: total => `共 ${total} 条数据`,
+              onChange: (page, pageSize) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    current: page,
+                    pageSize,
                   }
-                : false
-            }
+                })
+              },
+              onShowSizeChange: (_, size) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    pageSize: size,
+                  }
+                })
+              },
+              hideOnSinglePage: true,
+            }}
             size="small"
             dataSource={episodeList}
             columns={columns}
