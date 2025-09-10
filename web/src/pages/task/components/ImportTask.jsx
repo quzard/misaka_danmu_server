@@ -38,6 +38,13 @@ export const ImportTask = () => {
   const [taskList, setTaskList] = useState([])
   const timer = useRef()
   const [selectList, setSelectList] = useState([])
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 100,
+    total: 0,
+  })
 
   const navigate = useNavigate()
   const modalApi = useModal()
@@ -73,17 +80,68 @@ export const ImportTask = () => {
     ]
   }, [searchParams])
 
-  const refreshTasks = async () => {
+  useEffect(() => {
+    setPagination(n => ({
+      ...n,
+      pageSize: 100,
+      current: 1,
+    }))
+  }, [search, status])
+
+  // 第一页数据缓存，用于跨页面实时更新
+  const firstPageDataRef = useRef([])
+
+  /**
+   * 刷新任务列表
+   * @param {boolean} isLoadMore - 是否为加载更多操作
+   * @param {boolean} isPolling - 是否为轮询操作
+   */
+  const refreshTasks = async (isLoadMore = false, isPolling = false) => {
     try {
+      if (isLoadMore) {
+        setLoadingMore(true)
+      }
+
+      // 轮询时始终获取第一页最新数据
+      const requestPage = isPolling ? 1 : pagination.current
+
       const res = await getTaskList({
         search,
         status,
+        page: requestPage,
+        pageSize: pagination.pageSize,
       })
-      setTaskList(res.data)
+
+      if (isLoadMore) {
+        // 加载更多时追加数据
+        setTaskList(prev => [...prev, ...(res.data?.list || [])])
+      } else if (isPolling) {
+        // 轮询操作：更新第一页数据缓存
+        firstPageDataRef.current = res.data?.list || []
+        // 如果当前正在浏览第一页，则同步更新显示数据
+        if (pagination.current === 1) {
+          setTaskList(res.data?.list || [])
+        }
+      } else {
+        // 非轮询的刷新操作，替换数据
+        const newData = res.data?.list || []
+        setTaskList(newData)
+        // 如果是第一页数据，同步更新缓存
+        if (pagination.current === 1) {
+          firstPageDataRef.current = newData
+        }
+      }
+
       setLoading(false)
+      setLoadingMore(false)
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+      }))
     } catch (error) {
       console.error(error)
       setLoading(false)
+      setLoadingMore(false)
     }
   }
 
@@ -177,14 +235,89 @@ export const ImportTask = () => {
     })
   }
 
+  /**
+   * 处理滚动事件，检测是否需要加载更多
+   */
+  const handleScroll = () => {
+    if (loadingMore || taskList.length >= pagination.total) {
+      return
+    }
+
+    const { scrollTop, scrollHeight, clientHeight } = document.documentElement
+    // 当滚动到距离底部100px时触发加载更多
+    if (scrollTop + clientHeight >= scrollHeight - 100) {
+      setPagination(prev => ({
+        ...prev,
+        current: prev.current + 1,
+      }))
+    }
+  }
+
   useEffect(() => {
-    refreshTasks()
-    setSelectList([])
-    timer.current = setInterval(refreshTasks, 3000)
+    const isLoadMore = pagination.current > 1
+    // 如果切换到第一页且有缓存数据，优先使用缓存数据
+    if (pagination.current === 1 && firstPageDataRef.current.length > 0) {
+      setTaskList(firstPageDataRef.current)
+      setSelectList([])
+    } else {
+      refreshTasks(isLoadMore)
+      if (!isLoadMore) {
+        setSelectList([])
+      }
+    }
+  }, [search, status, pagination.current])
+
+  useEffect(() => {
+    // 清除之前的定时器
+    clearInterval(timer.current)
+
+    // 始终启动轮询定时器，确保第一页数据实时更新
+    timer.current = setInterval(() => {
+      // 轮询时传入isPolling=true标识，始终更新第一页数据
+      refreshTasks(false, true)
+    }, 3000)
+
     return () => {
       clearInterval(timer.current)
     }
   }, [search, status])
+
+  useEffect(() => {
+    if (!taskList.length || !pagination.total) return
+    window.addEventListener('scroll', handleScroll)
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+    }
+  }, [loadingMore, taskList.length, pagination.total])
+
+  /**
+   * 加载更多指示器
+   */
+  const loadMoreIndicator = loadingMore ? (
+    <div
+      style={{
+        textAlign: 'center',
+        marginTop: 12,
+        height: 32,
+        lineHeight: '32px',
+        color: '#999',
+      }}
+    >
+      正在加载更多...
+    </div>
+  ) : taskList.length < pagination.total ? (
+    <div
+      style={{
+        textAlign: 'center',
+        marginTop: 12,
+        height: 32,
+        lineHeight: '32px',
+        color: '#999',
+      }}
+    >
+      下拉加载更多
+    </div>
+  ) : null
 
   return (
     <div className="my-6">
@@ -300,8 +433,9 @@ export const ImportTask = () => {
           {!!taskList?.length ? (
             <List
               itemLayout="vertical"
-              size="large"
+              size="small"
               dataSource={taskList}
+              loadMore={loadMoreIndicator}
               renderItem={(item, index) => {
                 const isActive = selectList.some(
                   it => it.taskId === item.taskId
