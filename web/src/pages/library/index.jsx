@@ -68,7 +68,11 @@ export const Library = () => {
   const [renderData, setRenderData] = useState([])
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
-  const [libraryPageSize, setLibraryPageSize] = useState(50)
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0,
+  })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   const [form] = Form.useForm()
@@ -88,12 +92,22 @@ export const Library = () => {
   const modalApi = useModal()
   const messageApi = useMessage()
 
-  const getList = async () => {
+  const getList = async (page = 1, pageSize = 10) => {
     try {
       setLoading(true)
-      const res = await getAnimeLibrary()
-      setList(res.data?.animes || [])
-      setRenderData(res.data?.animes || [])
+      const res = await getAnimeLibrary({
+        keyword: keyword,
+        page: page,
+        pageSize: pageSize,
+      })
+      setList(res.data?.list || [])
+      setRenderData(res.data?.list || [])
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+        current: page,
+        pageSize: pageSize,
+      }))
     } catch (error) {
       setList([])
       setRenderData([])
@@ -104,16 +118,12 @@ export const Library = () => {
 
   const handleCreateSuccess = () => {
     setIsCreateModalOpen(false)
-    getList() // 创建成功后刷新列表
+    getList(pagination.current, pagination.pageSize) // 创建成功后刷新列表
   }
 
   useEffect(() => {
-    getList()
-  }, [])
-
-  useEffect(() => {
-    setRenderData(list?.filter(it => it.title.includes(keyword)) || [])
-  }, [list, keyword])
+    getList(1, pagination.pageSize)
+  }, [keyword])
 
   useEffect(() => {
     if (!fetchedMetadata) return
@@ -152,6 +162,10 @@ export const Library = () => {
       })
     }
   }, [fetchedMetadata, form])
+
+  const handleTableChange = (page, pageSize) => {
+    getList(page, pageSize)
+  }
 
   const columns = [
     {
@@ -619,16 +633,15 @@ export const Library = () => {
       >
         {!!renderData?.length ? (
           <Table
-            pagination={{
-              pageSize: libraryPageSize,
-              showTotal: total => `共 ${total} 条数据`,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              hideOnSinglePage: true,
-              onShowSizeChange: (_, size) => {
-                setLibraryPageSize(size)
-              },
-            }}
+            pagination={
+              pagination.total > 0
+                ? {
+                    ...pagination,
+                    showTotal: total => `共 ${total} 条数据`,
+                    onChange: handleTableChange,
+                  }
+                : false
+            }
             size="small"
             dataSource={renderData}
             columns={columns}

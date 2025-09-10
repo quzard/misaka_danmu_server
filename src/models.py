@@ -208,7 +208,8 @@ class LibraryAnimeInfo(BaseModel):
     createdAt: datetime
 
 class LibraryResponse(BaseModel):
-    animes: List[LibraryAnimeInfo]
+    total: int
+    list: List[LibraryAnimeInfo]
 
 # --- 分集管理模型 ---
 class EpisodeDetail(BaseModel):
@@ -222,7 +223,7 @@ class EpisodeDetail(BaseModel):
 class PaginatedEpisodesResponse(BaseModel):
     """用于分集列表分页的响应模型"""
     total: int
-    episodes: List[EpisodeDetail]
+    list: List[EpisodeDetail]
 
 # --- 任务管理器模型 ---
 class TaskInfo(BaseModel):
@@ -232,6 +233,11 @@ class TaskInfo(BaseModel):
     progress: int
     description: str
     createdAt: datetime
+
+class PaginatedTasksResponse(BaseModel):
+    """用于任务列表分页的响应模型"""
+    total: int
+    list: List[TaskInfo]
 
 # --- API Token 管理模型 ---
 class ApiTokenInfo(BaseModel):
@@ -282,6 +288,11 @@ class TokenData(BaseModel):
 class PasswordChange(BaseModel):
     oldPassword: str = Field(..., description="当前密码")
     newPassword: str = Field(..., min_length=8, description="新密码 (至少8位)")
+
+class PaginatedCommentResponse(BaseModel):
+    """用于UI弹幕列表分页的响应模型"""
+    total: int
+    list: List[Comment]
 
 class BangumiAuthStatus(BaseModel):
     isAuthenticated: bool

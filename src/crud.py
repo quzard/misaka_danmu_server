@@ -66,38 +66,8 @@ def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     return None
 # --- Anime & Library ---
 
-async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
-    """获取媒体库中的所有番剧及其关联信息（如分集数）"""
-    stmt = (
-        select(
-            Anime.id.label("animeId"),
-            Anime.localImagePath.label("localImagePath"),
-            Anime.imageUrl.label("imageUrl"),
-            Anime.title,
-            Anime.type,
-            Anime.season,
-            Anime.year,
-            Anime.createdAt.label("createdAt"),
-            case(
-                (Anime.type == 'movie', 1),
-                else_=func.coalesce(func.max(Episode.episodeIndex), 0)
-            ).label("episodeCount"),
-            func.count(distinct(AnimeSource.id)).label("sourceCount")
-        )
-        .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
-        .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
-        .group_by(Anime.id)
-        .order_by(Anime.createdAt.desc())
-    )
-    result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
-
-async def search_library_anime(session: AsyncSession, keyword: str) -> List[Dict[str, Any]]:
-    """通过关键词搜索媒体库中的番剧。"""
-    clean_keyword = keyword.strip()
-    if not clean_keyword:
-        return []
-
+async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
+    """获取媒体库中的所有番剧及其关联信息（如分集数），支持搜索和分页。"""
     stmt = (
         select(
             Anime.id.label("animeId"),
@@ -120,13 +90,28 @@ async def search_library_anime(session: AsyncSession, keyword: str) -> List[Dict
         .group_by(Anime.id)
     )
 
-    # Add search condition
-    normalized_like_keyword = f"%{clean_keyword.replace('：', ':').replace(' ', '')}%"
-    like_conditions = [func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_keyword) for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji, AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]]
-    stmt = stmt.where(or_(*like_conditions)).order_by(Anime.createdAt.desc())
+    if keyword:
+        clean_keyword = keyword.strip()
+        if clean_keyword:
+            normalized_like_keyword = f"%{clean_keyword.replace('：', ':').replace(' ', '')}%"
+            like_conditions = [
+                func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_keyword)
+                for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji, AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
+            ]
+            stmt = stmt.where(or_(*like_conditions))
 
-    result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    count_subquery = stmt.alias("count_subquery")
+    count_stmt = select(func.count()).select_from(count_subquery)
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    data_stmt = stmt.order_by(Anime.createdAt.desc())
+    if page_size > 0:
+        offset = (page - 1) * page_size
+        data_stmt = data_stmt.offset(offset).limit(page_size)
+    
+    result = await session.execute(data_stmt)
+    items = [dict(row) for row in result.mappings()]
+    return {"total": total_count, "list": items}
 
 async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     """
@@ -1877,9 +1862,9 @@ async def update_task_status(session: AsyncSession, task_id: str, status: str):
     await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, updatedAt=get_now().replace(tzinfo=None)))
     await session.commit()
 
-async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
+async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str, page: int, page_size: int) -> Dict[str, Any]:
     # 修正：显式选择需要的列，以避免在旧的数据库模式上查询不存在的列（如 scheduled_task_id）
-    stmt = select(
+    base_stmt = select(
         TaskHistory.taskId,
         TaskHistory.title,
         TaskHistory.status,
@@ -1887,20 +1872,26 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         TaskHistory.description,
         TaskHistory.createdAt
     )
+    
     if search_term:
-        stmt = stmt.where(TaskHistory.title.like(f"%{search_term}%"))
+        base_stmt = base_stmt.where(TaskHistory.title.like(f"%{search_term}%"))
     if status_filter == 'in_progress':
-        stmt = stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
+        base_stmt = base_stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
     elif status_filter == 'completed':
-        stmt = stmt.where(TaskHistory.status == '已完成')
+        base_stmt = base_stmt.where(TaskHistory.status == '已完成')
 
-    # 保留一个上限是为了防止在任务历史非常庞大时，一次性加载过多数据导致性能问题。
-    stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(1000)
-    result = await session.execute(stmt)
-    return [
+    count_stmt = select(func.count()).select_from(base_stmt.alias("count_subquery"))
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    offset = (page - 1) * page_size
+    data_stmt = base_stmt.order_by(TaskHistory.createdAt.desc()).offset(offset).limit(page_size)
+    
+    result = await session.execute(data_stmt)
+    items = [
         {"taskId": row.taskId, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
         for row in result.mappings()
     ]
+    return {"total": total_count, "list": items}
 
 async def get_task_details_from_history(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     """获取单个任务的详细信息。"""

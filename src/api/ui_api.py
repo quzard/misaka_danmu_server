@@ -338,34 +338,18 @@ async def get_episodes_for_search_result(
 
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
+    keyword: Optional[str] = Query(None, description="按标题搜索"),
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(10, ge=1, description="每页数量"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
-    # 修正：直接在此处执行正确的查询，以确保 episodeCount 和 sourceCount 是实时计算的。
-    stmt = (
-        select(
-            orm_models.Anime.id.label("animeId"),
-            orm_models.Anime.title,
-            orm_models.Anime.type,
-            orm_models.Anime.season,
-            orm_models.Anime.year,
-            orm_models.Anime.imageUrl,
-            orm_models.Anime.localImagePath,
-            orm_models.Anime.createdAt,
-            func.count(func.distinct(orm_models.AnimeSource.id)).label("sourceCount"),
-            func.count(func.distinct(orm_models.Episode.id)).label("episodeCount")
-        )
-        .select_from(orm_models.Anime)
-        .outerjoin(orm_models.Anime.sources)
-        .outerjoin(orm_models.AnimeSource.episodes)
-        .group_by(orm_models.Anime.id)
-        .order_by(orm_models.Anime.createdAt.desc())
+    """获取数据库中所有已收录的番剧信息，支持搜索和分页。"""
+    paginated_result = await crud.get_library_anime(session, keyword=keyword, page=page, page_size=pageSize)
+    return models.LibraryResponse(
+        total=paginated_result["total"],
+        list=[models.LibraryAnimeInfo.model_validate(item) for item in paginated_result["list"]]
     )
-    result = await session.execute(stmt)
-    db_results = result.mappings().all()
-    # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
-    return models.LibraryResponse(animes=[models.LibraryAnimeInfo.model_validate(item) for item in db_results])
 
 @router.get("/library/anime/{animeId}/details", response_model=models.AnimeFullDetails, summary="获取影视完整详情")
 async def get_anime_full_details(
@@ -579,16 +563,21 @@ async def get_anime_sources_for_anime(
     """获取指定作品关联的所有数据源列表。"""
     return await crud.get_anime_sources(session, animeId)
 
-@router.get("/library/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取数据源的所有分集")
+@router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
 async def get_source_episodes(
     sourceId: int,
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(25, ge=1, description="每页数量"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    paginated_result = await crud.get_episodes_for_source(session, sourceId)
-    # 修正：从分页结果中提取分集列表，以匹配 response_model
-    return paginated_result.get("episodes", [])
+    paginated_result = await crud.get_episodes_for_source(session, sourceId, page, pageSize)
+    # 修正：返回完整的分页响应对象
+    return models.PaginatedEpisodesResponse(
+        total=paginated_result["total"],
+        list=paginated_result.get("episodes", [])
+    )
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
@@ -1265,16 +1254,21 @@ async def clear_all_caches(
     logger.info(f"用户 '{current_user.username}' 清除了所有缓存，共 {deleted_count} 条。")
     return {"message": f"成功清除了 {deleted_count} 条缓存记录。"}
 
-@router.get("/tasks", response_model=List[models.TaskInfo], summary="获取所有后台任务的状态")
+@router.get("/tasks", response_model=models.PaginatedTasksResponse, summary="获取所有后台任务的状态")
 async def get_all_tasks(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     search: Optional[str] = Query(None, description="按标题搜索"),
-    status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed")
+    status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed"),
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(20, ge=1, description="每页数量")
 ):
     """获取后台任务的列表和状态，支持搜索和过滤。"""
-    tasks = await crud.get_tasks_from_history(session, search, status)
-    return [models.TaskInfo.model_validate(t) for t in tasks]
+    paginated_result = await crud.get_tasks_from_history(session, search, status, page, pageSize)
+    return models.PaginatedTasksResponse(
+        total=paginated_result["total"],
+        list=[models.TaskInfo.model_validate(t) for t in paginated_result["list"]]
+    )
 
 
 @router.post("/tasks/{task_id}/pause", status_code=status.HTTP_204_NO_CONTENT, summary="暂停一个正在运行的任务")
@@ -1551,11 +1545,13 @@ async def get_token_logs(
 
 @router.get(
     "/comment/{episodeId}",
-    response_model=models.CommentResponse,
+    response_model=models.PaginatedCommentResponse,
     summary="获取指定分集的弹幕",
 )
 async def get_comments(
     episodeId: int,
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(100, ge=1, description="每页数量"),
     session: AsyncSession = Depends(get_db_session)
 ):
     # 检查episode是否存在，如果不存在则返回404
@@ -1564,14 +1560,16 @@ async def get_comments(
 
     comments_data = await crud.fetch_comments(session, episodeId)
     
-    # 修正：使用 enumerate 为弹幕生成一个从0开始的自增ID (cid)。
-    # 弹幕文件本身不包含此ID，而API响应需要它，尤其对于前端（例如作为React的key）。
-    # 这也使其行为与 dandan_api 中的弹幕接口保持一致。
+    total = len(comments_data)
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    paginated_data = comments_data[start:end]
+
     comments = [
-        models.Comment(cid=i, p=item.get("p", ""), m=item.get("m", ""))
-        for i, item in enumerate(comments_data)
+        models.Comment(cid=i + start, p=item.get("p", ""), m=item.get("m", ""))
+        for i, item in enumerate(paginated_data)
     ]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    return models.PaginatedCommentResponse(total=total, list=comments)
 
 @router.get("/webhooks/available", response_model=List[str], summary="获取所有可用的Webhook类型")
 async def get_available_webhook_types(
