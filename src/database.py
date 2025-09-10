@@ -374,7 +374,7 @@ async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
     if not column_exists:
         logger.info("列 'task_history.unique_key' 不存在。正在添加...")
         await conn.execute(add_column_sql)
-        if create_index_sql:
+        if create_index_sql is not None:
             logger.info("正在为 'task_history.unique_key' 创建索引...")
             await conn.execute(create_index_sql)
         logger.info("成功添加列 'task_history.unique_key'。")
