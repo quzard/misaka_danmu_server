@@ -1,12 +1,13 @@
 import asyncio
 import logging
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import crud
-from .config_manager import ConfigManager
 from .scraper_manager import ScraperManager
 from .timezone import get_now
 
@@ -17,13 +18,39 @@ class RateLimitExceededError(Exception):
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
 
+XOR_KEY = b'mb2%bFSu$D9x3K9xG%W8N&$h0@&I$y7n#@#y9gU&#PGv891NA!RPs@3tDJ46M03v'
+
 class RateLimiter:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], scraper_manager: ScraperManager):
         self._session_factory = session_factory
-        self._config_manager = config_manager
         self._scraper_manager = scraper_manager
         self._period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.enabled: bool = True
+        self.global_limit: int = 50
+        self.global_period: str = "hour"
+
+        try:
+            config_path = Path(__file__).parent / "rate_limit.bin"
+            if config_path.exists():
+                with open(config_path, 'rb') as f:
+                    obfuscated_bytes = f.read()
+
+                json_bytes = bytearray()
+                for i, byte in enumerate(obfuscated_bytes):
+                    json_bytes.append(byte ^ XOR_KEY[i % len(XOR_KEY)])
+
+                config_data = json.loads(json_bytes.decode('utf-8'))
+                
+                self.enabled = config_data.get("enabled", self.enabled)
+                self.global_limit = config_data.get("global_limit", self.global_limit)
+                self.global_period = config_data.get("global_period", self.global_period)
+                self.logger.info(f"成功加载速率限制参数。")
+            else:
+                self.logger.warning("未找到配置，将使用默认的速率限制参数。")
+        except Exception as e:
+            self.logger.error(f"加载配置失败，将使用默认值。错误: {e}", exc_info=True)
 
     async def _get_provider_quota(self, provider_name: str) -> Optional[int]:
         try:
@@ -35,18 +62,13 @@ class RateLimiter:
             pass
         return None
 
-    async def _get_global_limit(self) -> tuple[int, str]:
-        global_enabled_str = await self._config_manager.get("globalRateLimitEnabled", "true")
-        if global_enabled_str.lower() != 'true':
+    def _get_global_limit(self) -> tuple[int, str]:
+        if not self.enabled:
             return 0, "hour"
-
-        global_limit_str = await self._config_manager.get("globalRateLimitCount", "50")
-        global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50
-        global_period = await self._config_manager.get("globalRateLimitPeriod", "hour")
-        return global_limit, global_period
+        return self.global_limit, self.global_period
 
     async def check(self, provider_name: str):
-        global_limit, period_str = await self._get_global_limit()
+        global_limit, period_str = self._get_global_limit()
         if global_limit <= 0:
             return
         
@@ -56,7 +78,7 @@ class RateLimiter:
             global_state = await crud.get_or_create_rate_limit_state(session, "__global__")
             provider_state = await crud.get_or_create_rate_limit_state(session, provider_name)
 
-            now = get_now().replace(tzinfo=None)
+            now = get_now()
             time_since_reset = now - global_state.lastResetTime
             
             if time_since_reset.total_seconds() >= period_seconds:
@@ -64,12 +86,9 @@ class RateLimiter:
                 await crud.reset_all_rate_limit_states(session)
                 await session.commit()
                 
-                # 关键修复：在提交后，显式刷新会话中的对象，以从数据库加载最新状态。
-                # 这解决了因 expire_on_commit=False 导致的对象状态陈旧问题。
                 await session.refresh(global_state)
                 await session.refresh(provider_state)
                 
-                # 重新计算时间差，因为 lastResetTime 已经更新
                 time_since_reset = now - global_state.lastResetTime # Re-calculate with the new reset time
 
             if global_state.requestCount >= global_limit:
@@ -86,7 +105,7 @@ class RateLimiter:
                 raise RateLimitExceededError(msg, retry_after_seconds=max(0, retry_after))
 
     async def increment(self, provider_name: str):
-        global_limit, _ = await self._get_global_limit()
+        global_limit, _ = self._get_global_limit()
         if global_limit <= 0:
             return
 

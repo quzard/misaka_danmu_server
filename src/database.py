@@ -6,8 +6,8 @@ from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
 from .config import settings
-from .orm_models import Base
-from .timezone import get_app_timezone, get_timezone_offset_str
+from .orm_models import Base # type: ignore
+from .timezone import get_app_timezone, get_timezone_offset_str, get_now
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         database = settings.database.name if include_db_name else None
     elif db_type == "postgresql":
         drivername = "postgresql+asyncpg"
-        query = None
+        # 修正：移除在连接URL中设置时区的逻辑。
+        # 这确保了应用与数据库的交互在时间处理上是“时区无关”的，
+        # 避免了因驱动程序自动转换时区而导致的数据不一致问题。
+        query = None # 确保不通过查询参数传递时区
         if for_server:
             database = "postgres"
         else:
@@ -42,6 +45,63 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         database=database,
         query=query,
     )
+
+async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
+    """
+    迁移任务: 将可能被错误存储为UTC时间的datetime字段，转换为服务器的本地时间。
+    这是一个一次性修复任务，用于解决旧版本中可能存在的时区处理不一致问题。
+    它会检查所有相关的时间戳字段，并确保它们都以不带时区的形式存储。
+    """
+    migration_id = "convert_datetime_to_naive_v2"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    # 1. 检查迁移是否已执行过
+    check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
+    flag_exists = (await conn.execute(check_flag_sql, {"key": migration_id})).scalar_one_or_none() is not None
+    if flag_exists:
+        logger.info(f"迁移 '{migration_id}' 已执行过，跳过。")
+        return
+
+    logger.warning(f"将执行一次性数据库时间迁移 '{migration_id}'。")
+    logger.warning("此操作将确保所有时间戳字段都以不带时区的形式存储。")
+    logger.warning("在继续之前，强烈建议您备份数据库。")
+
+    # 2. 定义所有需要迁移的表和列
+    tables_and_columns = {
+        "anime": ["created_at"], "anime_sources": ["created_at"], "episode": ["fetched_at"],
+        "users": ["token_update", "created_at"], "api_tokens": ["created_at", "expires_at"],
+        "token_access_logs": ["access_time"], "ua_rules": ["created_at"],
+        "bangumi_auth": ["expires_at", "authorized_at"], "oauth_states": ["expires_at"],
+        "scheduled_tasks": ["last_run_at", "next_run_at"],
+        "task_history": ["created_at", "updated_at", "finished_at"],
+        "external_api_logs": ["access_time"], "rate_limit_state": ["last_reset_time"],
+        "cache_data": ["expires_at"],
+    }
+
+    # 3. 执行迁移
+    try:
+        for table, columns in tables_and_columns.items():
+            for column in columns:
+                logger.info(f"正在迁移 {table}.{column}...")
+                if db_type == "mysql":
+                    # MySQL 的 CONVERT_TZ 函数可以处理时区转换，但更直接的方式是确保类型正确。
+                    # 这里的 ALTER TABLE 语句是幂等的，它会确保列类型为 DATETIME，从而丢弃任何时区信息。
+                    update_sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` DATETIME;")
+                else: # postgresql
+                    # 对于 PostgreSQL，我们使用 `AT TIME ZONE 'UTC'` 将带时区的时间戳转换为UTC时间，
+                    # 然后再使用 `AT TIME ZONE 'UTC'` 将其转换为不带时区的本地时间。
+                    # 这是一个将 TIMESTAMPTZ 转换为 TIMESTAMP 的标准方法。
+                    update_sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE TIMESTAMP WITHOUT TIME ZONE USING "{column}"::timestamp;')
+                await conn.execute(update_sql)
+        logger.info("所有时间字段迁移完成。")
+        # 4. 插入标志位，防止重复执行
+        await conn.execute(text("INSERT INTO config (config_key, config_value, description) VALUES (:key, :value, :desc)"), {"key": migration_id, "value": "true", "desc": "标志位，表示已将旧的UTC时间戳迁移到本地时间。"})
+        logger.info(f"成功设置迁移标志 '{migration_id}'。")
+    except Exception as e:
+        logger.error(f"执行时间迁移时发生错误: {e}", exc_info=True)
+        logger.error("时间迁移失败，数据库可能处于不一致状态。请从备份中恢复或手动修复。")
+        raise
+    logger.info(f"迁移任务 '{migration_id}' 成功完成。")
 
 async def _migrate_add_source_order(conn, db_type, db_name):
     """
@@ -268,6 +328,17 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         await conn.execute(truncate_sql)
         logger.info("成功清空 'rate_limit_state' 表。")
 
+        # 同时，从 config 表中移除旧的、现已废弃的速率限制配置键
+        logger.info("正在从 config 表中移除旧的速率限制配置键...")
+        delete_old_keys_sql = text(
+            "DELETE FROM config WHERE config_key IN (:key1, :key2, :key3)"
+        )
+        await conn.execute(
+            delete_old_keys_sql,
+            {"key1": "globalRateLimitEnabled", "key2": "globalRateLimitCount", "key3": "globalRateLimitPeriod"}
+        )
+        logger.info("成功移除旧的速率限制配置键。")
+
         # 插入标志位
         insert_flag_sql = text(
             "INSERT INTO config (config_key, config_value, description) "
@@ -275,11 +346,40 @@ async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
         )
         await conn.execute(
             insert_flag_sql,
-            {"key": config_key, "value": "true", "desc": ""}
+            {"key": config_key, "value": "true", "desc": "标志位，表示已为兼容性问题执行过一次性的速率限制状态表清理。"}
         )
         logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
     except Exception as e:
         logger.error(f"执行一次性清理任务 '{migration_id}' 时发生错误: {e}", exc_info=True)
+
+async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
+    """
+    迁移任务: 确保 task_history 表有 unique_key 字段和索引。
+    """
+    migration_id = "add_unique_key_to_task_history"
+    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
+
+    if db_type == "mysql":
+        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'unique_key'")
+        add_column_sql = text("ALTER TABLE task_history ADD COLUMN `unique_key` VARCHAR(255) NULL, ADD INDEX `idx_unique_key` (`unique_key`)")
+        create_index_sql = None # MySQL 在一条语句中完成
+    elif db_type == "postgresql":
+        check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'unique_key'")
+        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "unique_key" VARCHAR(255) NULL')
+        create_index_sql = text('CREATE INDEX IF NOT EXISTS idx_task_history_unique_key ON task_history (unique_key)')
+    else:
+        return
+
+    column_exists = (await conn.execute(check_column_sql)).scalar_one_or_none() is not None
+    if not column_exists:
+        logger.info("列 'task_history.unique_key' 不存在。正在添加...")
+        await conn.execute(add_column_sql)
+        if create_index_sql is not None:
+            logger.info("正在为 'task_history.unique_key' 创建索引...")
+            await conn.execute(create_index_sql)
+        logger.info("成功添加列 'task_history.unique_key'。")
+    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
+            
 async def _run_migrations(conn):
     """
     执行所有一次性的数据库架构迁移。
@@ -291,12 +391,16 @@ async def _run_migrations(conn):
         logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
         return
 
+    # 新增：在所有其他迁移之前，首先运行时间校正迁移
+    await _migrate_utc_to_local_datetime(conn, db_type, db_name)
+
     await _migrate_clear_rate_limit_state(conn, db_type, db_name)
     await _migrate_add_source_order(conn, db_type, db_name)
     await _migrate_add_danmaku_file_path(conn, db_type, db_name)
     await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
     await _migrate_text_to_mediumtext(conn, db_type, db_name)
     await _migrate_add_source_url_to_episode(conn, db_type, db_name)
+    await _migrate_add_unique_key_to_task_history(conn, db_type, db_name)
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """Logs a standardized, detailed error message for database connection failures."""
@@ -327,7 +431,6 @@ async def create_db_engine_and_session(app: FastAPI):
             "max_overflow": 20,
             "pool_timeout": 30
         }
-        # 移除时区设置，让数据库使用其默认时区
 
         engine = create_async_engine(db_url, **engine_args)
         app.state.db_engine = engine
@@ -361,7 +464,6 @@ async def _create_db_if_not_exists():
         "echo": False,
         "isolation_level": "AUTOCOMMIT"
     }
-    # 移除时区设置
 
     engine = create_async_engine(server_url, **engine_args)
     try:

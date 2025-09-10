@@ -19,6 +19,9 @@ export function ThemeProvider({ children }) {
 
     setIsDark(prefersDark)
     document.documentElement.classList.toggle('dark', prefersDark)
+
+    // 初始化时也更新meta标签主题色
+    updateMetaThemeColor(prefersDark)
   }, [])
 
   // 切换暗黑模式
@@ -27,6 +30,29 @@ export function ThemeProvider({ children }) {
     setIsDark(newDarkState)
     document.documentElement.classList.toggle('dark', newDarkState)
     localStorage.theme = newDarkState ? 'dark' : 'light'
+
+    // 动态更新meta标签的主题色
+    updateMetaThemeColor(newDarkState)
+  }
+
+  // 更新meta标签主题色的函数
+  const updateMetaThemeColor = isDarkMode => {
+    const themeColor = isDarkMode ? '#0f172a' : '#fff9fb'
+    const statusBarStyle = isDarkMode ? '#0f172a' : '#fff9fb'
+
+    // 更新theme-color meta标签
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]')
+    if (themeColorMeta) {
+      themeColorMeta.setAttribute('content', themeColor)
+    }
+
+    // 更新apple-mobile-web-app-status-bar-style meta标签
+    const statusBarMeta = document.querySelector(
+      'meta[name="apple-mobile-web-app-status-bar-style"]'
+    )
+    if (statusBarMeta) {
+      statusBarMeta.setAttribute('content', statusBarStyle)
+    }
   }
 
   // AntD 5 主题配置（核心）

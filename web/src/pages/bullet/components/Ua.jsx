@@ -161,7 +161,7 @@ export const Ua = () => {
               style={{ width: '100%' }}
               value={mode}
               options={[
-                { value: 'permanent', label: '关闭 (Off)' },
+                { value: 'off', label: '关闭 (Off)' },
                 { value: 'blacklist', label: '黑名单 (Blacklist)' },
                 { value: 'whitelist', label: '白名单 (Whitelist)' },
               ]}

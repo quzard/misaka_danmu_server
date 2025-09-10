@@ -79,6 +79,7 @@ class EmbyWebhook(BaseWebhook):
             anime_title = movie_title
         
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
+        unique_key = f"webhook-search-{anime_title}-S{season_number}-E{episode_number}"
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
 
         # 使用新的、专门的 webhook 任务
@@ -102,4 +103,4 @@ class EmbyWebhook(BaseWebhook):
             task_manager=self.task_manager,
             rate_limiter=self.rate_limiter
         )
-        await self.task_manager.submit_task(task_coro, task_title)
+        await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

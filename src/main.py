@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
         'webhookApiKey': ('', '用于Webhook调用的安全密钥。'),
         'trustedProxies': ('', '受信任的反向代理IP列表，用逗号分隔。当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。'),
         'externalApiKey': ('', '用于外部API调用的安全密钥。'),
+        'externalApiDuplicateTaskThresholdHours': (3, '（外部API）重复任务提交阈值（小时）。在此时长内，不允许为同一媒体提交重复的自动导入任务。0为禁用。'),
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
         # 认证
         # 代理
@@ -106,16 +107,15 @@ async def lifespan(app: FastAPI):
     await app.state.metadata_manager.initialize()
 
     # 5. 初始化其他依赖于上述管理器的组件
-    app.state.rate_limiter = RateLimiter(session_factory, app.state.config_manager, app.state.scraper_manager)
+    app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
 
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
 
 
     app.state.task_manager = TaskManager(session_factory)
-    # 修正：将 ConfigManager 传递给 WebhookManager
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.config_manager, app.state.rate_limiter, app.state.metadata_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)

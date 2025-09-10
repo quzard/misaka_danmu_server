@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 import shutil
 import io
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 
 from thefuzz import fuzz
@@ -1213,14 +1213,46 @@ async def auto_search_and_import_task(
 
         # 2. 检查媒体库中是否已存在
         await progress_callback(20, "正在检查媒体库...")
-        existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+        
+        # 新增：优先通过元数据ID检查作品是否存在，以防止因标题不一致而重复入库
+        existing_anime_id: Optional[int] = None
+        id_check_map = {
+            "tmdb": (tmdb_id, crud.get_anime_id_by_tmdb_id),
+            "tvdb": (tvdb_id, crud.get_anime_id_by_tvdb_id),
+            "imdb": (imdb_id, crud.get_anime_id_by_imdb_id),
+            "douban": (douban_id, crud.get_anime_id_by_douban_id),
+            "bangumi": (bangumi_id, crud.get_anime_id_by_bangumi_id),
+        }
+        
+        # 如果是按ID搜索，则直接使用该ID进行检查
+        if search_type != "keyword":
+            id_to_check, crud_func = id_check_map[search_type]
+            if id_to_check:
+                existing_anime_id = await crud_func(session, id_to_check)
+                if existing_anime_id:
+                    logger.info(f"通过 {search_type.upper()} ID '{id_to_check}' 在库中找到已存在的作品 (Anime ID: {existing_anime_id})。")
+
+        existing_anime = None
+        if existing_anime_id:
+            existing_anime = await crud.get_anime_full_details(session, existing_anime_id)
+        else:
+            # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
+            existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+
         if existing_anime:
-            favorited_source = await crud.find_favorited_source_for_anime(session, main_title, season)
+            # 修正：从 existing_anime 字典中安全地获取ID。
+            # 不同的查询路径可能返回 'id' 或 'animeId' 作为键。
+            # 此更改确保无论哪个键存在，我们都能正确获取ID。
+            anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
+            if not anime_id_to_use:
+                raise ValueError("在已存在的作品记录中未能找到有效的ID。")
+
+            favorited_source = await crud.find_favorited_source_for_anime(session, anime_id_to_use)
             if favorited_source:
                 source_to_use = favorited_source
                 logger.info(f"媒体库中已存在作品，并找到精确标记源: {source_to_use['providerName']}")
             else:
-                all_sources = await crud.get_anime_sources(session, existing_anime['id'])
+                all_sources = await crud.get_anime_sources(session, anime_id_to_use)
                 if all_sources:
                     ordered_settings = await crud.get_all_scraper_settings(session)
                     provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
@@ -1231,7 +1263,13 @@ async def auto_search_and_import_task(
             
             if source_to_use:
                 await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
-                unique_key = f"import-{source_to_use['providerName']}-{source_to_use['mediaId']}"
+                # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
+                unique_key_parts = ["import", source_to_use['providerName'], source_to_use['mediaId']]
+                if season is not None:
+                    unique_key_parts.append(f"s{season}")
+                if payload.episode is not None:
+                    unique_key_parts.append(f"e{payload.episode}")
+                unique_key = "-".join(unique_key_parts)
                 task_coro = lambda s, cb: generic_import_task(
                     provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
                     animeTitle=main_title, mediaType=media_type, season=season,
@@ -1242,9 +1280,17 @@ async def auto_search_and_import_task(
                     rate_limiter=rate_limiter
                 )
                 # 修正：提交执行任务，并将其ID作为调度任务的结果
+                # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+                title_parts = [f"自动导入 (库内): {main_title}"]
+                if payload.season is not None:
+                    title_parts.append(f"S{payload.season:02d}")
+                if payload.episode is not None:
+                    title_parts.append(f"E{payload.episode:02d}")
+                task_title = " ".join(title_parts)
+
                 execution_task_id, _ = await task_manager.submit_task(
                     task_coro, 
-                    f"自动导入 (库内): {main_title}", 
+                    task_title, 
                     unique_key=unique_key
                 )
                 final_message = f"作品已在库中，已为已有源创建导入任务。执行任务ID: {execution_task_id}"
@@ -1284,18 +1330,25 @@ async def auto_search_and_import_task(
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
         
         # 修正：使用更智能的排序逻辑来选择最佳匹配
-        # 1. 媒体类型是否匹配
-        # 2. 标题相似度 (使用 a_main_title 确保与原始元数据标题比较)
-        # 3. 用户设置的源优先级
+        # 1. 媒体类型是否匹配 (最优先)
+        # 2. 如果请求指定了季度，季度是否匹配 (次优先)
+        # 3. 标题相似度
+        # 4. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
+        # 5. 用户设置的源优先级 (最后)
         all_results.sort(
             key=lambda item: (
-                1 if item.type == media_type else 0,  # 媒体类型匹配得1分，否则0分
-                fuzz.token_set_ratio(main_title, item.title), # 标题相似度得分
-                -provider_order.get(item.provider, 999) # 源优先级，取负数因为值越小优先级越高
+                1 if item.type == media_type else 0,
+                1 if season is not None and item.season == season else 0,
+                fuzz.token_set_ratio(main_title, item.title),
+                -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
+                -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
         )
         best_match = all_results[0]
+
+        # 记录选择的最佳匹配项，以便调试
+        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
@@ -1305,10 +1358,16 @@ async def auto_search_and_import_task(
             image_url = best_match.imageUrl
             logger.info(f"使用最佳匹配源 '{best_match.provider}' 的海报URL: {image_url}")
 
-        unique_key = f"import-{best_match.provider}-{best_match.mediaId}"
+        # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
+        unique_key_parts = ["import", best_match.provider, best_match.mediaId]
+        if season is not None:
+            unique_key_parts.append(f"s{season}")
+        if payload.episode is not None:
+            unique_key_parts.append(f"e{payload.episode}")
+        unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
-            animeTitle=main_title, mediaType=media_type, season=season, year=best_match.year,
+            animeTitle=best_match.title, mediaType=media_type, season=season, year=best_match.year,
             metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
@@ -1316,9 +1375,23 @@ async def auto_search_and_import_task(
             rate_limiter=rate_limiter
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
+        # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
+        title_parts = [f"自动导入 (库内): {main_title}"]
+        if media_type == 'movie':
+            # 对于电影，添加源和ID以确保唯一性，因为电影没有季/集
+            if search_type != "keyword":
+                title_parts.append(f"({payload.searchType.value}:{payload.searchTerm})")
+        else:
+            # 对于电视剧，添加季/集信息
+            if payload.season is not None:
+                title_parts.append(f"S{payload.season:02d}")
+            if payload.episode is not None:
+                title_parts.append(f"E{payload.episode:02d}")
+        task_title = " ".join(title_parts)
+
         execution_task_id, _ = await task_manager.submit_task(
             task_coro, 
-            f"自动导入 (新): {main_title}", 
+                    task_title, 
             unique_key=unique_key
         )
         final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
@@ -1327,90 +1400,3 @@ async def auto_search_and_import_task(
         if api_key:
             await scraper_manager.release_search_lock(api_key)
             logger.info(f"自动导入任务已为 API key 释放搜索锁。")
-async def database_maintenance_task(session: AsyncSession, progress_callback: Callable):
-    """
-    执行数据库维护的核心任务：清理旧日志和优化表。
-    """
-    logger.info("开始执行数据库维护任务...")
-    
-    # --- 1. 应用日志清理 ---
-    await progress_callback(10, "正在清理旧日志...")
-    
-    try:
-        # 日志保留天数，默认为30天。
-        retention_days_str = await crud.get_config_value(session, "logRetentionDays", "30")
-        retention_days = int(retention_days_str)
-    except (ValueError, TypeError):
-        retention_days = 30
-    
-    if retention_days > 0:
-        logger.info(f"将清理 {retention_days} 天前的日志记录。")
-        cutoff_date = get_now().replace(tzinfo=None) - timedelta(days=retention_days)
-        
-        tables_to_prune = {
-            "任务历史": (orm_models.TaskHistory, orm_models.TaskHistory.createdAt),
-            "Token访问日志": (orm_models.TokenAccessLog, orm_models.TokenAccessLog.accessTime),
-            "外部API访问日志": (orm_models.ExternalApiLog, orm_models.ExternalApiLog.accessTime),
-        }
-        
-        total_deleted = 0
-        for name, (model, date_column) in tables_to_prune.items():
-            deleted_count = await crud.prune_logs(session, model, date_column, cutoff_date)
-            if deleted_count > 0:
-                logger.info(f"从 {name} 表中删除了 {deleted_count} 条旧记录。")
-            total_deleted += deleted_count
-        await progress_callback(40, f"应用日志清理完成，共删除 {total_deleted} 条记录。")
-    else:
-        logger.info("日志保留天数设为0或无效，跳过清理。")
-        await progress_callback(40, "日志保留天数设为0，跳过清理。")
-
-    # --- 2. Binlog 清理 (仅MySQL) ---
-    db_type = settings.database.type.lower()
-    if db_type == "mysql":
-        await progress_callback(50, "正在清理 MySQL Binlog...")
-        try:
-            # 新增：从配置中读取binlog保留天数
-            binlog_retention_days_str = await crud.get_config_value(session, "mysqlBinlogRetentionDays", "3")
-            binlog_retention_days = int(binlog_retention_days_str)
-
-            if binlog_retention_days > 0:
-                # 用户指定清理N天前的日志
-                binlog_cleanup_message = await crud.purge_binary_logs(session, days=binlog_retention_days)
-                logger.info(binlog_cleanup_message)
-                await progress_callback(60, binlog_cleanup_message)
-            else:
-                binlog_cleanup_message = "Binlog自动清理已禁用。"
-                logger.info(binlog_cleanup_message)
-                await progress_callback(60, binlog_cleanup_message)
-        except OperationalError as e:
-            # 检查是否是权限不足的错误 (MySQL error code 1227)
-            if e.orig and hasattr(e.orig, 'args') and len(e.orig.args) > 0 and e.orig.args[0] == 1227:
-                binlog_cleanup_message = "Binlog 清理失败: 数据库用户缺少 SUPER 或 BINLOG_ADMIN 权限。此为正常现象，可安全忽略。"
-                logger.warning(binlog_cleanup_message)
-                await progress_callback(60, binlog_cleanup_message)
-            else:
-                # 其他操作错误，仍然记录详细信息
-                binlog_cleanup_message = f"Binlog 清理失败: {e}"
-                logger.error(binlog_cleanup_message, exc_info=True)
-                await progress_callback(60, binlog_cleanup_message)
-        except Exception as e:
-            # 记录错误，但不中断任务
-            binlog_cleanup_message = f"Binlog 清理失败: {e}"
-            logger.error(binlog_cleanup_message, exc_info=True)
-            await progress_callback(60, binlog_cleanup_message)
-
-    # --- 3. 数据库表优化 ---
-    await progress_callback(70, "正在执行数据库表优化...")
-    
-    try:
-        optimization_message = await crud.optimize_database(session, db_type)
-        logger.info(f"数据库优化结果: {optimization_message}")
-    except Exception as e:
-        optimization_message = f"数据库优化失败: {e}"
-        logger.error(optimization_message, exc_info=True)
-        # 即使优化失败，也不应导致整个任务失败，仅记录错误
-
-    await progress_callback(90, optimization_message)
-
-    final_message = f"数据库维护完成。{optimization_message}"
-    raise TaskSuccess(final_message)

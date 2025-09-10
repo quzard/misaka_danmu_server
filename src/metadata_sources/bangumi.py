@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, model_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .. import crud, models, orm_models, security
@@ -120,14 +120,9 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     if not auth:
         return {"isAuthenticated": False}
     
-    if auth.expiresAt:
-        expires_at = auth.expiresAt
-        # Fallback for DBs that don't store timezone info (like SQLite)
-        if expires_at.tzinfo is None:
-            # Assume the naive datetime is in the app's configured timezone
-            expires_at = expires_at.replace(tzinfo=get_app_timezone())
-        if expires_at < get_now():
-         return {"isAuthenticated": False, "isExpired": True}
+    # 修正：由于所有时间都以 naive UTC-like 形式存储，直接与当前的 naive UTC-like 时间比较
+    if auth.expiresAt and auth.expiresAt < get_now():
+        return {"isAuthenticated": False, "isExpired": True}
 
     return {
         "isAuthenticated": True, "bangumiUserId": auth.bangumiUserId,
@@ -378,7 +373,22 @@ class BangumiMetadataSource(BaseMetadataSource):
         # 2. 如果没有Token，检查OAuth是否已配置
         client_id = await self.config_manager.get("bangumiClientId")
         if client_id:
-            return "已配置 OAuth，等待用户授权"
+            # 检查是否有任何用户已通过OAuth授权
+            try:
+                async with self._session_factory() as session:
+                    # 查找所有未过期的授权记录
+                    stmt = select(func.count(orm_models.BangumiAuth.userId)).where(
+                        orm_models.BangumiAuth.expiresAt > get_now()
+                    )
+                    valid_token_count = (await session.execute(stmt)).scalar_one()
+
+                if valid_token_count > 0:
+                    return f"已通过 OAuth 连接 ({valid_token_count} 个用户已授权)"
+                else:
+                    return "已配置 OAuth，等待用户授权"
+            except Exception as e:
+                self.logger.error(f"检查Bangumi OAuth授权状态时出错: {e}")
+                return "OAuth 状态检查失败"
 
         # 3. 如果两者都没有，只检查网络连通性
         proxy_to_use = None

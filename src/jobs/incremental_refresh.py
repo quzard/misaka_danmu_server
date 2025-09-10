@@ -1,9 +1,10 @@
 import logging
 from typing import Callable
 import asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession # type: ignore
 from sqlalchemy import select, func
 
+from fastapi import HTTPException, status
 from .. import crud, orm_models
 from .base import BaseJob
 from ..task_manager import TaskSuccess
@@ -42,7 +43,11 @@ class IncrementalRefreshJob(BaseJob):
                 next_episode_index = latest_episode_index + 1
                 self.logger.info(f"为 '{source_info['title']}' (源ID: {source_id}) 尝试获取第 {next_episode_index} 集...")
 
+                unique_key = f"import-{source_info['providerName']}-{source_info['mediaId']}-ep{next_episode_index}"
                 task_title = f"定时追更: {source_info['title']} - S{source_info.get('season', 1):02d}E{next_episode_index:02d}"
+                
+                # 生成unique_key用于重复任务检测
+                unique_key = f"incremental-refresh:{source_info['providerName']}:{source_info['mediaId']}:{source_info.get('season', 1)}:{next_episode_index}"
 
                 # 使用闭包捕获当前循环的变量
                 def create_task_coro_factory(info, next_ep):
@@ -57,10 +62,13 @@ class IncrementalRefreshJob(BaseJob):
                     )
                 
                 try:
-                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index), task_title)
+                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index), task_title, unique_key=unique_key)
                     submitted_count += 1
-                except ValueError as e:
-                    self.logger.info(f"跳过创建任务 '{task_title}'，因为它已在队列中或正在运行。")
+                except HTTPException as e:
+                    if e.status_code == status.HTTP_409_CONFLICT:
+                        self.logger.info(f"跳过创建任务 '{task_title}'，因为它已在队列中或正在运行。")
+                    else:
+                        self.logger.error(f"为源 '{source_info['title']}' (ID: {source_id}) 创建追更任务时发生HTTP错误: {e.detail}")
                 except Exception as e:
                     self.logger.error(f"为源 '{source_info['title']}' (ID: {source_id}) 创建追更任务时失败: {e}")
 

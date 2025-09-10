@@ -2,12 +2,12 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case
+from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import selectinload, joinedload, aliased, DeclarativeBase
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -19,7 +19,7 @@ from .orm_models import (
     Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 , RateLimitState)
 from .config import settings
-from .timezone import get_now, get_app_timezone
+from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
 
 logger = logging.getLogger(__name__)
@@ -66,8 +66,8 @@ def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     return None
 # --- Anime & Library ---
 
-async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
-    """获取媒体库中的所有番剧及其关联信息（如分集数）"""
+async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
+    """获取媒体库中的所有番剧及其关联信息（如分集数），支持搜索和分页。"""
     stmt = (
         select(
             Anime.id.label("animeId"),
@@ -86,11 +86,32 @@ async def get_library_anime(session: AsyncSession) -> List[Dict[str, Any]]:
         )
         .join(AnimeSource, Anime.id == AnimeSource.animeId, isouter=True)
         .join(Episode, AnimeSource.id == Episode.sourceId, isouter=True)
+        .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
         .group_by(Anime.id)
-        .order_by(Anime.createdAt.desc())
     )
-    result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+
+    if keyword:
+        clean_keyword = keyword.strip()
+        if clean_keyword:
+            normalized_like_keyword = f"%{clean_keyword.replace('：', ':').replace(' ', '')}%"
+            like_conditions = [
+                func.replace(func.replace(col, '：', ':'), ' ', '').like(normalized_like_keyword)
+                for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji, AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
+            ]
+            stmt = stmt.where(or_(*like_conditions))
+
+    count_subquery = stmt.alias("count_subquery")
+    count_stmt = select(func.count()).select_from(count_subquery)
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    data_stmt = stmt.order_by(Anime.createdAt.desc())
+    if page_size > 0:
+        offset = (page - 1) * page_size
+        data_stmt = data_stmt.offset(offset).limit(page_size)
+    
+    result = await session.execute(data_stmt)
+    items = [dict(row) for row in result.mappings()]
+    return {"total": total_count, "list": items}
 
 async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
     """
@@ -169,7 +190,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
         title=title, type=media_type, season=season, 
         imageUrl=image_url, localImagePath=local_image_path, 
         year=year, 
-        createdAt=get_now().replace(tzinfo=None)
+        createdAt=get_now()
     )
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
@@ -184,7 +205,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
 async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) -> Anime:
     """
-    Manually creates a new anime entry in the database.
+    Manually creates a new anime entry in the database, and automatically
+    creates and links a default 'custom' source for it.
     """
     # Check if an anime with the same title and season already exists
     existing_anime = await find_anime_by_title_and_season(session, anime_data.title, anime_data.season)
@@ -206,6 +228,13 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     new_metadata = AnimeMetadata(animeId=new_anime.id)
     new_alias = AnimeAlias(animeId=new_anime.id)
     session.add_all([new_metadata, new_alias])
+    
+    # 修正：在创建新作品时，自动为其创建一个'custom'数据源。
+    # 这简化了用户操作，并从根源上确保了数据完整性，
+    # 因为 link_source_to_anime 会负责在 scrapers 表中创建对应的条目。
+    logger.info(f"为新作品 '{anime_data.title}' 自动创建 'custom' 数据源。")
+    custom_media_id = f"custom_{new_anime.id}"
+    await link_source_to_anime(session, new_anime.id, "custom", custom_media_id)
     
     await session.flush()
     await session.refresh(new_anime)
@@ -384,19 +413,20 @@ async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, 
     result = await session.execute(stmt)
     return result.scalars().all()
 
-async def find_favorited_source_for_anime(session: AsyncSession, title: str, season: int) -> Optional[Dict[str, Any]]:
-    """通过标题和季度查找已存在于库中且被标记为“精确”的数据源。"""
+async def find_favorited_source_for_anime(session: AsyncSession, anime_id: int) -> Optional[Dict[str, Any]]:
+    """通过 anime_id 查找已存在于库中且被标记为“精确”的数据源。"""
     stmt = (
         select(
             AnimeSource.providerName.label("providerName"),
             AnimeSource.mediaId.label("mediaId"),
             Anime.id.label("animeId"),
-            Anime.title.label("animeTitle"),
+            Anime.title.label("animeTitle"), # 保留标题以用于任务创建
             Anime.type.label("mediaType"),
-            Anime.imageUrl.label("imageUrl")
+            Anime.imageUrl.label("imageUrl"),
+            Anime.year.label("year") # 新增年份以保持数据完整性
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
-        .where(Anime.title == title, Anime.season == season, AnimeSource.isFavorited == True)
+        .where(AnimeSource.animeId == anime_id, AnimeSource.isFavorited == True)
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -601,6 +631,30 @@ async def get_anime_id_by_bangumi_id(session: AsyncSession, bangumi_id: str) -> 
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
+async def get_anime_id_by_tmdb_id(session: AsyncSession, tmdb_id: str) -> Optional[int]:
+    """通过 tmdb_id 查找 anime_id。"""
+    stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tmdbId == tmdb_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+async def get_anime_id_by_tvdb_id(session: AsyncSession, tvdb_id: str) -> Optional[int]:
+    """通过 tvdb_id 查找 anime_id。"""
+    stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tvdbId == tvdb_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+async def get_anime_id_by_imdb_id(session: AsyncSession, imdb_id: str) -> Optional[int]:
+    """通过 imdb_id 查找 anime_id。"""
+    stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.imdbId == imdb_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+async def get_anime_id_by_douban_id(session: AsyncSession, douban_id: str) -> Optional[int]:
+    """通过 douban_id 查找 anime_id。"""
+    stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.doubanId == douban_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
 async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
     """检查具有给定提供商和媒体ID的源是否已存在。"""
     stmt = select(AnimeSource.id).where(
@@ -612,6 +666,22 @@ async def check_source_exists_by_media_id(session: AsyncSession, provider_name: 
 
 async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_name: str, media_id: str) -> int:
     """将一个外部数据源关联到一个番剧条目，如果关联已存在则直接返回其ID。"""
+    # 修正：在链接源之前，确保该提供商在 scrapers 表中存在。
+    # 这修复了当创建 'custom' 等非文件型源时，因 scrapers 表中缺少对应条目而导致后续查询失败的问题。
+    # 这是比 LEFT JOIN 更根本的解决方案。
+    scraper_entry = await session.get(Scraper, provider_name)
+    if not scraper_entry:
+        logger.info(f"提供商 '{provider_name}' 在 scrapers 表中不存在，将为其创建新条目。")
+        max_order_stmt = select(func.max(Scraper.displayOrder))
+        max_order = (await session.execute(max_order_stmt)).scalar_one_or_none() or 0
+        new_scraper_entry = Scraper(
+            providerName=provider_name,
+            displayOrder=max_order + 1,
+            isEnabled=True, # 自定义源默认启用
+            useProxy=False
+        )
+        session.add(new_scraper_entry)
+        await session.flush() # Flush to make it available within the transaction
     stmt = select(AnimeSource.id).where(
         AnimeSource.animeId == anime_id,
         AnimeSource.providerName == provider_name,
@@ -633,7 +703,7 @@ async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_na
         providerName=provider_name,
         mediaId=media_id,
         sourceOrder=current_max_order + 1,
-        createdAt=get_now().replace(tzinfo=None)
+        createdAt=get_now()
     )
     session.add(new_source)
     await session.flush() # 使用 flush 获取新ID，但不提交事务
@@ -701,7 +771,7 @@ async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
     from . import security
     hashed_password = security.get_password_hash(user.password)
-    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=get_now().replace(tzinfo=None))
+    new_user = User(username=user.username, hashedPassword=hashed_password, createdAt=get_now())
     session.add(new_user)
     await session.commit()
 
@@ -713,7 +783,7 @@ async def update_user_password(session: AsyncSession, username: str, new_hashed_
 
 async def update_user_login_info(session: AsyncSession, username: str, token: str):
     """更新用户的最后登录时间和当前令牌"""
-    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=get_now().replace(tzinfo=None))
+    stmt = update(User).where(User.username == username).values(token=token, tokenUpdate=get_now())
     await session.execute(stmt)
     await session.commit()
 
@@ -777,7 +847,7 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     # 3. 如果ID不存在，则创建新分集
     new_episode = Episode(
         id=new_episode_id, sourceId=source_id, episodeIndex=episode_index, providerEpisodeId=provider_episode_id,
-        title=title, sourceUrl=url, fetchedAt=get_now().replace(tzinfo=None) # fetchedAt is explicitly set here
+        title=title, sourceUrl=url, fetchedAt=get_now() # fetchedAt is explicitly set here
     )
     session.add(new_episode)
     await session.flush()
@@ -1348,7 +1418,7 @@ async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
 
 async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: int, provider: Optional[str] = None):
     json_value = json.dumps(value, ensure_ascii=False)
-    expires_at = get_now().replace(tzinfo=None) + timedelta(seconds=ttl_seconds)
+    expires_at = get_now() + timedelta(seconds=ttl_seconds)
 
     dialect = session.bind.dialect.name
     values_to_insert = {"cacheProvider": provider, "cacheKey": key, "cacheValue": json_value, "expiresAt": expires_at}
@@ -1394,11 +1464,11 @@ async def update_config_value(session: AsyncSession, key: str, value: str):
     await session.commit()
 
 async def clear_expired_cache(session: AsyncSession):
-    await session.execute(delete(CacheData).where(CacheData.expiresAt <= get_now().replace(tzinfo=None)))
+    await session.execute(delete(CacheData).where(CacheData.expiresAt <= get_now()))
     await session.commit()
 
 async def clear_expired_oauth_states(session: AsyncSession):
-    await session.execute(delete(OauthState).where(OauthState.expiresAt <= get_now().replace(tzinfo=None)))
+    await session.execute(delete(OauthState).where(OauthState.expiresAt <= get_now()))
     await session.commit()
 
 async def clear_all_cache(session: AsyncSession) -> int:
@@ -1412,13 +1482,13 @@ async def delete_cache(session: AsyncSession, key: str) -> bool:
     return result.rowcount > 0
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
-    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now().replace(tzinfo=None)))
+    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now()))
     await session.commit()
 
 async def update_episode_danmaku_info(session: AsyncSession, episode_id: int, file_path: str, count: int):
     """更新分集的弹幕文件路径和弹幕数量。"""
     stmt = update(Episode).where(Episode.id == episode_id).values(
-        danmakuFilePath=file_path, commentCount=count, fetchedAt=get_now().replace(tzinfo=None)
+        danmakuFilePath=file_path, commentCount=count, fetchedAt=get_now()
     )
     await session.execute(stmt) # type: ignore
     await session.flush()
@@ -1457,11 +1527,11 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     if validityPeriod != "permanent":
         days = int(validityPeriod.replace('d', '')) # type: ignore
         # 修正：确保写入数据库的时间是 naive 的
-        expires_at = (get_now() + timedelta(days=days)).replace(tzinfo=None)
+        expires_at = get_now() + timedelta(days=days)
     new_token = ApiToken(
         name=name, token=token, 
         expiresAt=expires_at, 
-        createdAt=get_now().replace(tzinfo=None)
+        createdAt=get_now()
     )
     session.add(new_token)
     await session.commit()
@@ -1492,7 +1562,7 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
     # 修正：现在所有时间都是naive的，可以直接比较
     if token_info.expiresAt:
-        if token_info.expiresAt < get_now().replace(tzinfo=None): # Compare naive datetimes
+        if token_info.expiresAt < get_now(): # Compare naive datetimes
             return None # Token 已过期
     return {"id": token_info.id, "expiresAt": token_info.expiresAt} # type: ignore
 
@@ -1504,7 +1574,7 @@ async def get_ua_rules(session: AsyncSession) -> List[Dict[str, Any]]:
     return [{"id": r.id, "uaString": r.uaString, "createdAt": r.createdAt} for r in result.scalars()]
 
 async def add_ua_rule(session: AsyncSession, ua_string: str) -> int:
-    new_rule = UaRule(uaString=ua_string, createdAt=get_now().replace(tzinfo=None))
+    new_rule = UaRule(uaString=ua_string, createdAt=get_now())
     session.add(new_rule)
     await session.commit()
     return new_rule.id
@@ -1524,7 +1594,7 @@ async def create_token_access_log(session: AsyncSession, token_id: int, ip_addre
         userAgent=user_agent, 
         status=log_status, 
         path=path, 
-        accessTime=get_now().replace(tzinfo=None))
+        accessTime=get_now())
     session.add(new_log)
     await session.commit()
 
@@ -1589,14 +1659,14 @@ async def disable_incremental_refresh(session: AsyncSession, source_id: int) -> 
 
 async def create_oauth_state(session: AsyncSession, user_id: int) -> str:
     state = secrets.token_urlsafe(32)
-    expires_at = (get_now() + timedelta(minutes=10)).replace(tzinfo=None)
+    expires_at = get_now() + timedelta(minutes=10)
     new_state = OauthState(stateKey=state, userId=user_id, expiresAt=expires_at)
     session.add(new_state)
     await session.commit()
     return state
 
 async def consume_oauth_state(session: AsyncSession, state: str) -> Optional[int]:
-    stmt = select(OauthState).where(OauthState.stateKey == state, OauthState.expiresAt > get_now().replace(tzinfo=None))
+    stmt = select(OauthState).where(OauthState.stateKey == state, OauthState.expiresAt > get_now())
     result = await session.execute(stmt)
     state_obj = result.scalar_one_or_none()
     if state_obj:
@@ -1636,11 +1706,11 @@ async def save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict
         auth.accessToken = auth_data.get('accessToken')
         auth.refreshToken = auth_data.get('refreshToken')
         auth.expiresAt = expires_at
-        auth.authorizedAt = get_now().replace(tzinfo=None)
+        auth.authorizedAt = get_now()
     else:
         auth_data_copy = auth_data.copy()
         auth_data_copy['expiresAt'] = expires_at
-        auth = BangumiAuth(userId=user_id, authorizedAt=get_now().replace(tzinfo=None), **auth_data_copy)
+        auth = BangumiAuth(userId=user_id, authorizedAt=get_now(), **auth_data_copy)
         session.add(auth)
     await session.commit()
 
@@ -1758,14 +1828,16 @@ async def create_task_in_history(
     title: str,
     status: str,
     description: str,
-    scheduled_task_id: Optional[str] = None
+    scheduled_task_id: Optional[str] = None,
+    unique_key: Optional[str] = None
 ):
-    now_naive = get_now().replace(tzinfo=None)
+    now = get_now()
     new_task = TaskHistory(
         taskId=task_id, title=title, status=status, 
         description=description, scheduledTaskId=scheduled_task_id,
-        createdAt=now_naive,
-        updatedAt=now_naive
+        createdAt=now, # type: ignore
+        uniqueKey=unique_key,
+        updatedAt=now
     )
     session.add(new_task)
     await session.commit()
@@ -1774,7 +1846,7 @@ async def update_task_progress_in_history(session: AsyncSession, task_id: str, s
     await session.execute(
         update(TaskHistory)
         .where(TaskHistory.taskId == task_id)
-        .values(status=status, progress=progress, description=description, updatedAt=get_now().replace(tzinfo=None))
+        .values(status=status, progress=progress, description=description, updatedAt=get_now())
     )
     await session.commit()
 
@@ -1782,7 +1854,7 @@ async def finalize_task_in_history(session: AsyncSession, task_id: str, status: 
     await session.execute(
         update(TaskHistory)
         .where(TaskHistory.taskId == task_id)
-        .values(status=status, description=description, progress=100, finishedAt=get_now().replace(tzinfo=None), updatedAt=get_now().replace(tzinfo=None))
+        .values(status=status, description=description, progress=100, finishedAt=get_now(), updatedAt=get_now())
     )
     await session.commit()
 
@@ -1790,9 +1862,9 @@ async def update_task_status(session: AsyncSession, task_id: str, status: str):
     await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, updatedAt=get_now().replace(tzinfo=None)))
     await session.commit()
 
-async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str) -> List[Dict[str, Any]]:
+async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str, page: int, page_size: int) -> Dict[str, Any]:
     # 修正：显式选择需要的列，以避免在旧的数据库模式上查询不存在的列（如 scheduled_task_id）
-    stmt = select(
+    base_stmt = select(
         TaskHistory.taskId,
         TaskHistory.title,
         TaskHistory.status,
@@ -1800,19 +1872,26 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         TaskHistory.description,
         TaskHistory.createdAt
     )
+    
     if search_term:
-        stmt = stmt.where(TaskHistory.title.like(f"%{search_term}%"))
+        base_stmt = base_stmt.where(TaskHistory.title.like(f"%{search_term}%"))
     if status_filter == 'in_progress':
-        stmt = stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
+        base_stmt = base_stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
     elif status_filter == 'completed':
-        stmt = stmt.where(TaskHistory.status == '已完成')
+        base_stmt = base_stmt.where(TaskHistory.status == '已完成')
 
-    stmt = stmt.order_by(TaskHistory.createdAt.desc()).limit(100)
-    result = await session.execute(stmt)
-    return [
+    count_stmt = select(func.count()).select_from(base_stmt.alias("count_subquery"))
+    total_count = (await session.execute(count_stmt)).scalar_one()
+
+    offset = (page - 1) * page_size
+    data_stmt = base_stmt.order_by(TaskHistory.createdAt.desc()).offset(offset).limit(page_size)
+    
+    result = await session.execute(data_stmt)
+    items = [
         {"taskId": row.taskId, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
         for row in result.mappings()
     ]
+    return {"total": total_count, "list": items}
 
 async def get_task_details_from_history(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     """获取单个任务的详细信息。"""
@@ -1862,7 +1941,7 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (
         update(TaskHistory)
         .where(TaskHistory.status.in_(['运行中', '已暂停']))
-        .values(status='失败', description='因程序重启而中断', finishedAt=get_now().replace(tzinfo=None), updatedAt=get_now().replace(tzinfo=None)) # finishedAt and updatedAt are explicitly set here
+        .values(status='失败', description='因程序重启而中断', finishedAt=get_now(), updatedAt=get_now()) # finishedAt and updatedAt are explicitly set here
     )
     result = await session.execute(stmt)
     await session.commit()
@@ -1898,7 +1977,7 @@ async def get_last_run_result_for_scheduled_task(session: AsyncSession, schedule
 async def create_external_api_log(session: AsyncSession, ip_address: str, endpoint: str, status_code: int, message: Optional[str] = None):
     """创建一个外部API访问日志。"""
     new_log = ExternalApiLog(
-        accessTime=get_now().replace(tzinfo=None),
+        accessTime=get_now(),
         ipAddress=ip_address,
         endpoint=endpoint,
         statusCode=status_code,
@@ -1931,6 +2010,31 @@ async def initialize_configs(session: AsyncSession, defaults: Dict[str, tuple[An
 
 # --- Rate Limiter CRUD ---
 
+async def find_recent_task_by_unique_key(session: AsyncSession, unique_key: str, within_hours: int) -> Optional[TaskHistory]:
+    """
+    Finds a task by its unique_key that is either currently active 
+    or was completed within the specified time window.
+    """
+    if not unique_key:
+        return None
+
+    cutoff_time = get_now() - timedelta(hours=within_hours)
+    
+    stmt = (
+        select(TaskHistory)
+        .where(
+            TaskHistory.uniqueKey == unique_key,
+            or_(
+                TaskHistory.status.in_(['排队中', '运行中', '已暂停']),
+                TaskHistory.finishedAt >= cutoff_time
+            )
+        )
+        .order_by(TaskHistory.createdAt.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
 async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: str) -> RateLimitState:
     """获取或创建特定提供商的速率限制状态。"""
     stmt = select(RateLimitState).where(RateLimitState.providerName == provider_name)
@@ -1940,7 +2044,7 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
         state = RateLimitState(
             providerName=provider_name,
             requestCount=0,
-            lastResetTime=get_now().replace(tzinfo=None) # lastResetTime is explicitly set here
+            lastResetTime=get_now() # lastResetTime is explicitly set here
         )
         session.add(state)
         await session.flush()
@@ -1966,7 +2070,7 @@ async def reset_all_rate_limit_states(session: AsyncSession):
     # 这确保了会话中已加载的ORM对象的状态能与数据库同步，
     # 解决了在 expire_on_commit=False 的情况下，对象状态陈旧的问题。
     states = (await session.execute(select(RateLimitState))).scalars().all()
-    now_naive = get_now().replace(tzinfo=None)
+    now_naive = get_now()
     for state in states:
         state.requestCount = 0
         state.lastResetTime = now_naive
@@ -1985,51 +2089,6 @@ async def prune_logs(session: AsyncSession, model: type[DeclarativeBase], date_c
     result = await session.execute(stmt)
     # 提交由调用方（任务）处理
     return result.rowcount
-
-async def optimize_database(session: AsyncSession, db_type: str) -> str:
-    """根据数据库类型执行表优化。"""
-    tables_to_optimize = ["comment", "task_history", "token_access_logs", "external_api_logs"]
-    
-    if db_type == "mysql":
-        logger.info("检测到 MySQL，正在执行 OPTIMIZE TABLE...")
-        await session.execute(text(f"OPTIMIZE TABLE {', '.join(tables_to_optimize)};"))
-        # 提交由调用方（任务）处理
-        return "OPTIMIZE TABLE 执行成功。"
-    
-    elif db_type == "postgresql":
-        logger.info("检测到 PostgreSQL，正在执行 VACUUM...")
-        from .database import _get_db_url # Local import to avoid circular dependency
-        from .timezone import get_app_timezone # Local import
-        # VACUUM 不能在事务块内运行。我们创建一个具有自动提交功能的新引擎来执行此特定操作。
-        db_url_obj = _get_db_url()
-        engine_args = {
-            "isolation_level": "AUTOCOMMIT",
-            "connect_args": {'server_settings': {'timezone': str(get_app_timezone())}}
-        }
-        auto_commit_engine = create_async_engine(db_url_obj, **engine_args)
-        try:
-            async with auto_commit_engine.connect() as connection:
-                await connection.execute(text("VACUUM;"))
-            return "VACUUM 执行成功。"
-        finally:
-            await auto_commit_engine.dispose()
-            
-    else:
-        message = f"不支持的数据库类型 '{db_type}'，跳过优化。"
-        logger.warning(message)
-        return message
-
-async def purge_binary_logs(session: AsyncSession, days: int) -> str:
-    """
-    执行 PURGE BINARY LOGS 命令来清理早于指定天数的 binlog 文件。
-    警告：这是一个高风险操作，需要 SUPER 或 REPLICATION_CLIENT 权限。
-    """
-    logger.info(f"准备执行 PURGE BINARY LOGS BEFORE NOW() - INTERVAL {days} DAY...")
-    await session.execute(text(f"PURGE BINARY LOGS BEFORE NOW() - INTERVAL {days} DAY"))
-    # 这个操作不需要 commit，因为它不是DML
-    msg = f"成功执行 PURGE BINARY LOGS，清除了 {days} 天前的日志。"
-    logger.info(msg)
-    return msg
 
 async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_content: str) -> int:
     """

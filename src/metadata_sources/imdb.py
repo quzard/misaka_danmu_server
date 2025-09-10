@@ -84,9 +84,18 @@ class ImdbMetadataSource(BaseMetadataSource):
                         imageUrl=item.i.imageUrl if item.i else None
                     ))
                 return results
+        except httpx.ConnectError as e:
+            self.logger.error(f"IMDb API 搜索失败: 无法连接到服务器。 {e}", exc_info=True)
+            raise HTTPException(status_code=503, detail="无法连接到 IMDb 服务，请检查网络或代理设置。")
+        except httpx.TimeoutException as e:
+            self.logger.error(f"IMDb API 搜索失败: 请求超时。 {e}", exc_info=True)
+            raise HTTPException(status_code=504, detail="连接 IMDb 服务超时。")
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"IMDb API 搜索失败: HTTP 状态码 {e.response.status_code}。响应: {e.response.text[:200]}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"IMDb 服务返回错误状态码: {e.response.status_code}")
         except Exception as e:
             self.logger.error(f"IMDb API 搜索失败: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="IMDb API 搜索失败。")
+            raise HTTPException(status_code=500, detail=f"IMDb API 搜索失败: {e}")
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         self.logger.info(f"IMDb: 正在获取详情 item_id={item_id}")

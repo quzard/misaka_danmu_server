@@ -135,6 +135,7 @@ services:
       - PUID=1000
       - PGID=1000
       - UMASK=0022
+      - TZ=Asia/Shanghai
       # --- 数据库连接配置 ---
       - DANMUAPI_DATABASE__TYPE=mysql                         # 数据库类型
       - DANMUAPI_DATABASE__HOST=mysql                         # 使用服务名
@@ -195,6 +196,7 @@ services:
       - PUID=1000
       - PGID=1000
       - UMASK=0022
+      - TZ=Asia/Shanghai
       # --- 数据库连接配置 ---
       - DANMUAPI_DATABASE__TYPE=postgresql                              # 数据库类型
       - DANMUAPI_DATABASE__HOST=postgres                                # 使用服务名
@@ -346,11 +348,11 @@ networks:
 3.  执行以下命令来重置指定用户的密码。请将 `<username>` 替换为您要重置密码的用户名（例如 `admin`）。
 
     ```bash
-    docker-compose exec danmu-api python -m scripts.reset_password <username>
+     docker-compose exec danmu-api python -m src.reset_password <username>
     ```
 
     > **注意**: 如果您没有使用 `docker-compose`，或者您的容器名称不是 `danmu-api`，请使用 `docker exec` 命令：
-    > `docker exec <您的容器名称> python -m scripts.reset_password <username>`
+    > `docker exec <您的容器名称> python -m src.reset_password <username>`
 
 4.  命令执行后，终端会输出一个新的随机密码。请立即使用此密码登录，并在 "设置" -> "账户安全" 页面中修改为您自己的密码。
 
