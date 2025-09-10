@@ -95,12 +95,11 @@ export const CommentDetail = () => {
   }, [pagination.current])
 
   useEffect(() => {
-    if (!commentList.length || !pagination.total) return
     window.addEventListener('scroll', handleScroll)
     return () => {
       window.removeEventListener('scroll', handleScroll)
     }
-  }, [loadingMore, commentList.length, pagination.total])
+  }, [loadingMore, pagination.total])
 
   return (
     <div className="my-6">
@@ -133,7 +132,18 @@ export const CommentDetail = () => {
               {commentList?.map((it, index) => (
                 <div key={index}>
                   <div className="my-1">
-                    <pre>
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        overflowWrap: 'break-word',
+                        wordBreak: 'break-all',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        margin: 0,
+                        fontFamily: 'inherit',
+                      }}
+                    >
                       {it.p} | {it.m}
                     </pre>
                   </div>

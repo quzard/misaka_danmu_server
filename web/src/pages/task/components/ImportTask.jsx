@@ -283,12 +283,11 @@ export const ImportTask = () => {
   }, [search, status])
 
   useEffect(() => {
-    if (!taskList.length || !pagination.total) return
     window.addEventListener('scroll', handleScroll)
     return () => {
       window.removeEventListener('scroll', handleScroll)
     }
-  }, [loadingMore, taskList.length, pagination.total])
+  }, [loadingMore, pagination.total])
 
   /**
    * 加载更多指示器
