@@ -46,10 +46,10 @@ export const CommentDetail = () => {
 
       if (isLoadMore) {
         // 加载更多时追加数据
-        setCommentList(prev => [...prev, ...(commentRes.data?.comments || [])])
+        setCommentList(prev => [...prev, ...(commentRes.data?.list || [])])
       } else {
         // 刷新时替换数据
-        setCommentList(commentRes.data?.comments || [])
+        setCommentList(commentRes.data?.list || [])
       }
 
       setEpisode(
