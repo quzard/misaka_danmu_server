@@ -1212,30 +1212,28 @@ async def auto_search_and_import_task(
                 # Don't fail the whole task, just proceed with the original search term
 
         # 2. 检查媒体库中是否已存在
+        existing_anime: Optional[Dict[str, Any]] = None
         await progress_callback(20, "正在检查媒体库...")
         
-        # 新增：优先通过元数据ID检查作品是否存在，以防止因标题不一致而重复入库
-        existing_anime_id: Optional[int] = None
-        id_check_map = {
-            "tmdb": (tmdb_id, crud.get_anime_id_by_tmdb_id),
-            "tvdb": (tvdb_id, crud.get_anime_id_by_tvdb_id),
-            "imdb": (imdb_id, crud.get_anime_id_by_imdb_id),
-            "douban": (douban_id, crud.get_anime_id_by_douban_id),
-            "bangumi": (bangumi_id, crud.get_anime_id_by_bangumi_id),
-        }
-        
-        # 如果是按ID搜索，则直接使用该ID进行检查
-        if search_type != "keyword":
-            id_to_check, crud_func = id_check_map[search_type]
-            if id_to_check:
-                existing_anime_id = await crud_func(session, id_to_check)
-                if existing_anime_id:
-                    logger.info(f"通过 {search_type.upper()} ID '{id_to_check}' 在库中找到已存在的作品 (Anime ID: {existing_anime_id})。")
+        # 步骤 2a: 优先通过元数据ID和季度号进行精确查找
+        if search_type != "keyword" and season is not None:
+            id_column_map = {
+                "tmdb": "tmdbId", "tvdb": "tvdbId", "imdb": "imdbId",
+                "douban": "doubanId", "bangumi": "bangumiId"
+            }
+            id_type = id_column_map.get(search_type.value)
+            if id_type:
+                logger.info(f"正在通过 {search_type.upper()} ID '{search_term}' 和季度 {season} 精确查找...")
+                existing_anime = await crud.find_anime_by_metadata_id_and_season(
+                    session, id_type, search_term, season
+                )
+                if existing_anime:
+                    logger.info(f"精确查找到已存在的作品: {existing_anime['title']} (ID: {existing_anime['id']})")
 
-        existing_anime = None
-        if existing_anime_id:
-            existing_anime = await crud.get_anime_full_details(session, existing_anime_id)
-        else:
+        # 步骤 2b: 如果精确查找未找到，则回退到按标题和季度查找
+        if not existing_anime:
+            if search_type != "keyword":
+                logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
 

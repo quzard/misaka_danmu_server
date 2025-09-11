@@ -113,6 +113,9 @@ class BaseScraper(ABC):
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
+    async def _log_proxy_usage(self, proxy_url: Optional[str]):
+        if proxy_url:
+            self.logger.debug(f"通过代理 '{proxy_url}' 发起请求...")
 
     async def _create_client(self, **kwargs) -> httpx.AsyncClient:
         """
@@ -120,6 +123,7 @@ class BaseScraper(ABC):
         子类可以传递额外的 httpx.AsyncClient 参数。
         """
         proxy_to_use = await self._get_proxy_for_provider()
+        await self._log_proxy_usage(proxy_to_use)
         client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 

@@ -153,13 +153,21 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
 
     async def check_connectivity(self) -> str:
         try:
+            is_using_proxy = False
             async with await self._create_client() as client:
+                if client.proxy:
+                    is_using_proxy = True
+                    self.logger.debug(f"Douban: 连接性检查将使用代理: {client.proxy.url}")
+
                 response = await client.get("https://movie.douban.com", timeout=10.0)
                 if "sec.douban.com" in str(response.url):
-                    return "连接失败 (被重定向到验证页面，请检查Cookie)"
-                return "连接成功" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
+                    return "通过代理连接失败 (需验证)" if is_using_proxy else "连接失败 (需验证)"
+                if response.status_code == 200:
+                    return "通过代理连接成功" if is_using_proxy else "连接成功"
+                else:
+                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
         except Exception as e:
-            return f"连接失败: {e}"
+            return f"连接失败: {e}" # 代理信息已包含在异常中
 
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """Douban source does not support custom actions."""

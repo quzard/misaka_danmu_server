@@ -395,6 +395,29 @@ async def find_anime_by_title_and_season(session: AsyncSession, title: str, seas
     row = result.mappings().first()
     return dict(row) if row else None
 
+async def find_anime_by_metadata_id_and_season(
+    session: AsyncSession, 
+    id_type: str,
+    media_id: str, 
+    season: int
+) -> Optional[Dict[str, Any]]:
+    """
+    通过元数据ID和季度号精确查找一个作品。
+    """
+    id_column = getattr(AnimeMetadata, id_type, None)
+    if id_column is None:
+        raise ValueError(f"无效的元数据ID类型: {id_type}")
+
+    stmt = (
+        select(Anime.id, Anime.title, Anime.season)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId)
+        .where(id_column == media_id, Anime.season == season)
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
+
 async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, season: Optional[int] = None) -> List[int]:
     """根据作品标题和可选的季度号获取已存在的所有分集序号列表。"""
     stmt = (
@@ -629,31 +652,31 @@ async def get_anime_id_by_bangumi_id(session: AsyncSession, bangumi_id: str) -> 
     """通过 bangumi_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.bangumiId == bangumi_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_tmdb_id(session: AsyncSession, tmdb_id: str) -> Optional[int]:
     """通过 tmdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tmdbId == tmdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_tvdb_id(session: AsyncSession, tvdb_id: str) -> Optional[int]:
     """通过 tvdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tvdbId == tvdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_imdb_id(session: AsyncSession, imdb_id: str) -> Optional[int]:
     """通过 imdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.imdbId == imdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_douban_id(session: AsyncSession, douban_id: str) -> Optional[int]:
     """通过 douban_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.doubanId == douban_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
     """检查具有给定提供商和媒体ID的源是否已存在。"""

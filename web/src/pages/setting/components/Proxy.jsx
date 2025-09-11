@@ -54,6 +54,15 @@ export const Proxy = () => {
           配置一个全局代理，可用于访问受限的网络资源。支持 http, https, socks5
           协议。
         </div>
+        <Form.Item
+          name="proxyEnabled"
+          label="启用代理"
+          className="mb-6"
+          valuePropName="checked"
+        >
+          <Switch onChange={checked => setProxyEnabled(checked)} />
+        </Form.Item>
+
         <Form
           form={form}
           layout="horizontal"
@@ -62,6 +71,7 @@ export const Proxy = () => {
         >
           <Form.Item name="proxyProtocol" label="协议" className="mb-6">
             <Select
+              disabled={!proxyEnabled}
               options={[
                 {
                   value: 'http',
@@ -81,12 +91,12 @@ export const Proxy = () => {
           <Row gutter={[12, 12]}>
             <Col md={12} xs={24}>
               <Form.Item name="proxyHost" label="主机" className="mb-4">
-                <Input placeholder="例如：127.0.0.1" />
+                <Input placeholder="例如：127.0.0.1" disabled={!proxyEnabled} />
               </Form.Item>
             </Col>
             <Col md={12} xs={24}>
               <Form.Item name="proxyPort" label="端口" className="mb-4">
-                <Input placeholder="例如：7890" />
+                <Input placeholder="例如：7890" disabled={!proxyEnabled} />
               </Form.Item>
             </Col>
           </Row>
@@ -97,7 +107,7 @@ export const Proxy = () => {
                 label="用户名(可选)"
                 className="mb-4"
               >
-                <Input />
+                <Input disabled={!proxyEnabled} />
               </Form.Item>
             </Col>
             <Col md={12} xs={24}>
@@ -106,19 +116,7 @@ export const Proxy = () => {
                 label="密码(可选)"
                 className="mb-4"
               >
-                <Input />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={[12, 12]}>
-            <Col md={12} xs={24}>
-              <Form.Item
-                name="proxyEnabled"
-                label="开启全局代理"
-                className="mb-4"
-                valuePropName="checked"
-              >
-                <Switch />
+                <Input disabled={!proxyEnabled} />
               </Form.Item>
             </Col>
             <Col md={12} xs={24}>

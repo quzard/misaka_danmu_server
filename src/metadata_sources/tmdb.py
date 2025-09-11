@@ -21,6 +21,21 @@ def _clean_movie_title(title: Optional[str]) -> Optional[str]:
     cleaned_title = re.sub(r'\s{2,}', ' ', cleaned_title).strip().strip(':- ')
     return cleaned_title
 
+async def _get_proxy_for_tmdb(config_manager: ConfigManager, session_factory: async_sessionmaker[AsyncSession]) -> Optional[str]:
+    """Helper to determine if a proxy should be used for TMDB."""
+    proxy_url = await config_manager.get("proxy_url", "")
+    proxy_enabled_globally = (await config_manager.get("proxy_enabled", "false")).lower() == 'true'
+    if not proxy_enabled_globally or not proxy_url:
+        return None
+    
+    async with session_factory() as session:
+        metadata_settings = await crud.get_all_metadata_source_settings(session)
+    
+    provider_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
+    use_proxy = provider_setting.get('useProxy', False) if provider_setting else False
+    
+    return proxy_url if use_proxy else None
+
 class TmdbMetadataSource(BaseMetadataSource):
     provider_name = "tmdb"
 
@@ -49,7 +64,10 @@ class TmdbMetadataSource(BaseMetadataSource):
         base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
         
         params = {"api_key": api_key, "language": "zh-CN"}
-        return httpx.AsyncClient(base_url=base_url, params=params, timeout=20.0, follow_redirects=True)
+        proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
+        if proxy_to_use:
+            self.logger.debug(f"TMDB: 将使用代理: {proxy_to_use}")
+        return httpx.AsyncClient(base_url=base_url, params=params, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         if not mediaType:
@@ -209,13 +227,20 @@ class TmdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
+            is_using_proxy = False
             async with await self._create_client() as client:
+                if client.proxy:
+                    is_using_proxy = True
+                    self.logger.debug(f"TMDB: 连接性检查将使用代理: {client.proxy.url}")
                 response = await client.get("/configuration")
-                return "连接成功" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
+                if response.status_code == 200:
+                    return "通过代理连接成功" if is_using_proxy else "连接成功"
+                else:
+                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
         except ValueError as e: # API Key not configured
             return f"未配置: {e}"
         except Exception as e:
-            return f"连接失败: {e}"
+            return f"连接失败: {e}" # 代理信息已包含在异常中
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Any) -> Any:
         try:

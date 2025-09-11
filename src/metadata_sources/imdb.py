@@ -183,11 +183,18 @@ class ImdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
+            is_using_proxy = False
             async with await self._create_client() as client:
+                if client.proxy:
+                    is_using_proxy = True
+                    self.logger.debug(f"IMDb: 连接性检查将使用代理: {client.proxy.url}")
                 response = await client.get("https://www.imdb.com", timeout=10.0)
-                return "连接成功" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
+                if response.status_code == 200:
+                    return "通过代理连接成功" if is_using_proxy else "连接成功"
+                else:
+                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
         except Exception as e:
-            return f"连接失败: {e}"
+            return f"连接失败: {e}" # 代理信息已包含在异常中
 
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """IMDb source does not support custom actions."""
