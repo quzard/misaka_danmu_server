@@ -39,6 +39,7 @@ import { RoutePaths } from '../../general/RoutePaths'
 import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
+import { useDebounce } from '../../hooks/useDebounce'
 
 const ApplyField = ({ name, label, fetchedValue, form }) => {
   const currentValue = Form.useWatch(name, form)
@@ -120,6 +121,15 @@ export const Library = () => {
       }
     })
   }
+
+  useEffect(() => {
+    setPagination(n => {
+      return {
+        ...n,
+        current: 1,
+      }
+    })
+  }, [keyword])
 
   useEffect(() => {
     getList()
@@ -587,6 +597,10 @@ export const Library = () => {
     }
   }
 
+  const handleKeywordChange = useDebounce(e => {
+    setKeyword(e.target.value)
+  }, 500)
+
   const [bgmResult, setBgmResult] = useState([])
   const [bgmOpen, setBgmOpen] = useState(false)
   const [searchBgmLoading, setSearchBgmLoading] = useState(false)
@@ -619,7 +633,7 @@ export const Library = () => {
           <Space>
             <Input
               placeholder="搜索已收录的影视"
-              onChange={e => setKeyword(e.target.value)}
+              onChange={e => handleKeywordChange(e)}
             />
             <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
               自定义影视条目
