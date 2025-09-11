@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set, cast
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
