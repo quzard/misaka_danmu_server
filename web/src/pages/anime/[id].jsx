@@ -38,6 +38,7 @@ import { HomeOutlined } from '@ant-design/icons'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
+import { useDebounce } from '../../hooks/useDebounce'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
@@ -45,12 +46,16 @@ export const AnimeDetail = () => {
   const [sourceList, setSourceList] = useState([])
   const [animeDetail, setAnimeDetail] = useState({})
   const [libraryList, setLibraryList] = useState([])
-  const [renderList, setRenderList] = useState([])
   const [editOpen, setEditOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
-  const [libraryPageSisze, setLibraryPageSisze] = useState(10)
   const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false)
+
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0,
+  })
 
   const navigate = useNavigate()
   const modalApi = useModal()
@@ -88,22 +93,43 @@ export const AnimeDetail = () => {
     getDetail() // 添加成功后刷新数据源列表
   }
 
-  const handleEditSource = async () => {
+  const handleEditSource = async (init = true) => {
     try {
-      const res = await getAnimeLibrary()
-      const list =
-        res.data?.animes?.filter(it => it.animeId !== animeDetail.animeId) || []
-      setLibraryList(list)
-      setRenderList(list)
-      setEditOpen(true)
+      const res = await getAnimeLibrary({
+        keyword: keyword,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
+      })
+      setLibraryList(res.data?.list || [])
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+      }))
+      if (init) {
+        setEditOpen(true)
+      }
     } catch (error) {
       messageApi.error('获取数据源失败')
     }
   }
 
+  const handleKeywordChange = useDebounce(e => {
+    setKeyword(e.target.value)
+  }, 500)
+
   useEffect(() => {
-    setRenderList(libraryList.filter(it => it.title.includes(keyword)))
-  }, [keyword, libraryList])
+    setPagination(n => {
+      return {
+        ...n,
+        current: 1,
+      }
+    })
+  }, [keyword])
+
+  useEffect(() => {
+    console.log(keyword, pagination.pageSize, pagination.current)
+    handleEditSource(false)
+  }, [keyword, pagination.pageSize, pagination.current])
 
   const handleConfirmSource = item => {
     modalApi.confirm({
@@ -553,18 +579,34 @@ export const AnimeDetail = () => {
           <div>
             <Input
               placeholder="搜索目标作品"
-              onChange={e => setKeyword(e.target.value)}
+              onChange={e => handleKeywordChange(e)}
             />
           </div>
         </div>
         <List
           itemLayout="vertical"
           size="large"
-          dataSource={renderList}
+          dataSource={libraryList}
           pagination={{
-            pageSize: libraryPageSisze,
+            ...pagination,
+            align: 'center',
+            showLessItems: true,
+            onChange: (page, pageSize) => {
+              setPagination(n => {
+                return {
+                  ...n,
+                  current: page,
+                  pageSize,
+                }
+              })
+            },
             onShowSizeChange: (_, size) => {
-              setLibraryPageSisze(size)
+              setPagination(n => {
+                return {
+                  ...n,
+                  pageSize: size,
+                }
+              })
             },
             hideOnSinglePage: true,
           }}
@@ -588,6 +630,7 @@ export const AnimeDetail = () => {
                   </div>
                   <div>
                     <Button
+                      disabled={item.animeId === animeDetail.animeId}
                       type="primary"
                       onClick={() => {
                         handleConfirmSource(item)
