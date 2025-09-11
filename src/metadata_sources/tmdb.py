@@ -7,6 +7,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import crud, models, utils
+from ..config_manager import ConfigManager
 from .base import BaseMetadataSource
 
 from fastapi import HTTPException, status
