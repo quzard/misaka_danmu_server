@@ -362,6 +362,7 @@ class TencentScraper(BaseScraper):
         type_mapping = {
             "电视剧": "tv_series", "动漫": "tv_series",
             "电影": "movie",
+            "纪录片": "tv_series",
             "综艺": "tv_series", "综艺节目": "tv_series",
         }
         internal_media_type = type_mapping.get(content_type)
@@ -1017,18 +1018,12 @@ class TencentScraper(BaseScraper):
                 for ep in pre_filtered:
                     title = ep.union_title or ep.title or ""
                     
-                    if has_qi_format:
-                        qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE)
+                    if has_qi_format: # 如果是按“期”的综艺
+                        qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE) # 匹配“第N期上/下”
                         if qi_updown_match:
-                            qi_num_str, part = qi_updown_match.groups()
-                            qi_text = f"第{qi_num_str}期{part}"
-                            after_text = title[title.find(qi_text) + len(qi_text):]
-                            if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text, re.IGNORECASE):
-                                episode_infos.append({'ep': ep, 'qi_num': int(qi_num_str), 'part': part})
-                        else:
-                            qi_match = re.search(r'第(\d+)期', title)
-                            if qi_match and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
-                                episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
+                            episode_infos.append({'ep': ep, 'qi_num': int(qi_updown_match.group(1)), 'part': qi_updown_match.group(2)})
+                        elif qi_match := re.search(r'第(\d+)期', title): # 匹配“第N期”
+                            episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
                     else:
                         # 如果没有"第N期"格式，则保留所有非广告内容
                         if "广告" not in title and "推广" not in title:

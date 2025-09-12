@@ -30,14 +30,11 @@ class GamerScraper(BaseScraper):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
-        self.client: Optional[httpx.AsyncClient] = None
 
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
-        if self.client is None:
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+        # This method is now a no-op as clients are created per-request.
+        pass
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -61,49 +58,31 @@ class GamerScraper(BaseScraper):
         # 4. 如果规则为空或未配置，则不进行过滤
         return None
 
-    async def _ensure_config(self):
-        """
-        实时从数据库加载并应用Cookie和User-Agent配置。
-        此方法在每次请求前调用，以确保配置实时生效。
-        """
-        await self._ensure_client()
-        assert self.client is not None
-        cookie = await self.config_manager.get("gamerCookie", "")
-        user_agent = await self.config_manager.get("gamerUserAgent", "")
-
-        if cookie:
-            self.client.headers["Cookie"] = cookie
-        elif "Cookie" in self.client.headers:
-            del self.client.headers["Cookie"]
-
-        if user_agent:
-            self.client.headers["User-Agent"] = user_agent
-        else:
-            # 如果数据库中没有，则恢复为默认值
-            self.client.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """一个简单的请求包装器。"""
-        await self._ensure_config()
-        # _ensure_config already calls _ensure_client
-        assert self.client is not None
-        response = await self.client.request(method, url, **kwargs)
-        if await self._should_log_responses():
-            # 截断HTML以避免日志过长
-            scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
-        return response
+        # 实时从数据库加载并应用Cookie和User-Agent配置。
+        cookie = await self.config_manager.get("gamerCookie", "")
+        user_agent = await self.config_manager.get("gamerUserAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        headers = {"User-Agent": user_agent}
+        if cookie:
+            headers["Cookie"] = cookie
+
+        async with await self._create_client(headers=headers, timeout=20.0, follow_redirects=True) as client:
+            response = await client.request(method, url, **kwargs)
+            if await self._should_log_responses():
+                # 截断HTML以避免日志过长
+                scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
+            return response
 
     async def close(self):
-        if self.client:
-            await self.client.aclose()
-            self.client = None
+        pass
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         Performs a cached search for Gamer content.
         It caches the base results for a title and then filters them based on season.
         """
-        await self._ensure_config()
         
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
