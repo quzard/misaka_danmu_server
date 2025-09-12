@@ -388,7 +388,7 @@ class TencentScraper(BaseScraper):
 
         # Filter movie-like non-formal content (e.g., documentaries, behind-the-scenes)
         if content_type == "电影":
-            non_formal_keywords = ["纪录片", "花絮", "彩蛋", "幕后", "独家", "解说", "特辑", "探班", "拍摄", "制作", "导演", "记录", "回顾", "盘点", "混剪", "解析", "抢先"]
+            non_formal_keywords = [ "花絮", "彩蛋", "幕后", "独家", "解说", "特辑", "探班", "拍摄", "制作", "导演", "记录", "回顾", "盘点", "混剪", "解析", "抢先"]
             if any(kw in title for kw in non_formal_keywords):
                 self.logger.debug(f"检测到非正片电影内容，跳过处理: {title}")
                 return None
