@@ -183,11 +183,17 @@ class ImdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            is_using_proxy = False
+            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
+            proxy_url = await self.config_manager.get("proxy_url", "")
+            proxy_enabled_globally = (await self.config_manager.get("proxy_enabled", "false")).lower() == 'true'
+            async with self._session_factory() as session:
+                metadata_settings = await crud.get_all_metadata_source_settings(session)
+            provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
+            use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
+            is_using_proxy = proxy_enabled_globally and use_proxy_for_this_provider and proxy_url
+            if is_using_proxy:
+                self.logger.debug(f"IMDb: 连接性检查将使用代理: {proxy_url}")
             async with await self._create_client() as client:
-                if client.proxy:
-                    is_using_proxy = True
-                    self.logger.debug(f"IMDb: 连接性检查将使用代理: {client.proxy.url}")
                 response = await client.get("https://www.imdb.com", timeout=10.0)
                 if response.status_code == 200:
                     return "通过代理连接成功" if is_using_proxy else "连接成功"

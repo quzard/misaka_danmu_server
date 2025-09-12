@@ -229,11 +229,12 @@ class TmdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
-            is_using_proxy = False
+            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
+            proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
+            is_using_proxy = bool(proxy_to_use)
+            if is_using_proxy:
+                self.logger.debug(f"TMDB: 连接性检查将使用代理: {proxy_to_use}")
             async with await self._create_client() as client:
-                if client.proxy:
-                    is_using_proxy = True
-                    self.logger.debug(f"TMDB: 连接性检查将使用代理: {client.proxy.url}")
                 response = await client.get("/configuration")
                 if response.status_code == 200:
                     return "通过代理连接成功" if is_using_proxy else "连接成功"

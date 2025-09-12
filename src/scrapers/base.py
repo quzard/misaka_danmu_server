@@ -96,7 +96,6 @@ class BaseScraper(ABC):
         self._session_factory = session_factory
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client: Optional[httpx.AsyncClient] = None
 
     async def _get_proxy_for_provider(self) -> Optional[str]:
         """Helper to get the configured proxy URL for the current provider, if any."""
@@ -264,7 +263,5 @@ class BaseScraper(ABC):
 
     @abstractmethod
     async def close(self):
-        """
-        关闭所有打开的资源，例如HTTP客户端。
-        """
-        raise NotImplementedError
+        """关闭所有打开的资源，例如HTTP客户端。"""
+        pass

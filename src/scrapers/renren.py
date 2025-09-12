@@ -207,38 +207,14 @@ class RenrenScraper(BaseScraper):
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0
         self._min_interval = 0.4
 
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
-        if self.client is None:
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
-            self.client = await self._create_client(timeout=20.0, follow_redirects=True)
-
-    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
-        """
-        获取并编译用于过滤分集的正则表达式。
-        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
-        """
-        # 1. 构造该源特定的配置键，确保与数据库键名一致
-        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
-        
-        # 2. 从数据库动态获取用户自定义规则
-        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
-
-        # 3. 仅当用户配置了非空的规则时才进行过滤
-        if custom_blacklist_str and custom_blacklist_str.strip():
-            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
-            try:
-                return re.compile(custom_blacklist_str, re.IGNORECASE)
-            except re.error as e:
-                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
-        
-        # 4. 如果规则为空或未配置，则不进行过滤
-        return None
+        # This method is now a no-op as clients are created per-request.
+        pass
 
     def _generate_device_id(self) -> str:
         """Generate a fresh device/session id for each request.
@@ -249,20 +225,17 @@ class RenrenScraper(BaseScraper):
         return str(uuid.uuid4()).upper()
 
     async def close(self):
-        if self.client:
-            await self.client.aclose()
-            self.client = None
+        pass
 
     async def _request(self, method: str, url: str, *, params: Optional[Dict[str, Any]] = None) -> httpx.Response:
         # This method is now a simple wrapper, the rate limiting and signing is handled in _perform_network_search
-        await self._ensure_client()
-        assert self.client is not None
         device_id = self._generate_device_id()
         headers = build_signed_headers(method=method, url=url, params=params or {}, device_id=device_id)
-        resp = await self.client.request(method, url, params=params, headers=headers)
-        if await self._should_log_responses():
-            scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
-        return resp
+        async with await self._create_client() as client:
+            resp = await client.request(method, url, params=params, headers=headers)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
+            return resp
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
@@ -496,11 +469,12 @@ class RenrenScraper(BaseScraper):
                 "Origin": prof.origin,
                 "Referer": prof.referer,
             }
-            resp = await self.client.get(url, timeout=20.0, headers=headers)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}") 
-            resp.raise_for_status()
-            data = auto_decode(resp.text)
+            async with await self._create_client() as client:
+                resp = await client.get(url, timeout=20.0, headers=headers)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}") 
+                resp.raise_for_status()
+                data = auto_decode(resp.text)
             if isinstance(data, list):
                 return data
             if isinstance(data, dict) and isinstance(data.get("data"), list):

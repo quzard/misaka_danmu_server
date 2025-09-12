@@ -170,47 +170,17 @@ class BilibiliScraper(BaseScraper):
     ]
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         self._min_interval = 0.5
 
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
-        if self.client is None:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.bilibili.com/",
-            }
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
-            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
-
-    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
-        """
-        获取并编译用于过滤分集的正则表达式。
-        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
-        """
-        # 1. 构造该源特定的配置键
-        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
-        
-        # 2. 从数据库动态获取用户自定义规则
-        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
-
-        # 3. 仅当用户配置了非空的规则时才进行过滤
-        if custom_blacklist_str and custom_blacklist_str.strip():
-            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
-            try:
-                return re.compile(custom_blacklist_str, re.IGNORECASE)
-            except re.error as e:
-                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
-        
-        # 4. 如果规则为空或未配置，则不进行过滤
-        return None
+        # This method is now a no-op as clients are created per-request.
+        pass
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         """封装了速率限制的请求方法。"""
-        await self._ensure_client()
-        assert self.client is not None
         async with self._api_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
@@ -219,14 +189,13 @@ class BilibiliScraper(BaseScraper):
                 self.logger.debug(f"Bilibili: 速率限制，等待 {sleep_duration:.2f} 秒...")
                 await asyncio.sleep(sleep_duration)
 
-            response = await self.client.request(method, url, **kwargs)
-            self._last_request_time = time.time()
-            return response
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.request(method, url, **kwargs)
+                self._last_request_time = time.time()
+                return response
 
     async def close(self):
-        if self.client:
-            await self.client.aclose()
-            self.client = None
+        pass
 
     async def _ensure_config_and_cookie(self):
         """
@@ -236,47 +205,49 @@ class BilibiliScraper(BaseScraper):
         - 在未配置时自动获取临时的buvid3进行公共API请求。
         """
         self.logger.debug("Bilibili: 正在从数据库加载Cookie...")
-        cookie_str = await self.config_manager.get("bilibiliCookie", "")
-        
-        await self._ensure_client()
-        assert self.client is not None
-        self.client.cookies.clear()
+        # This method is now a factory for a configured client.
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.bilibili.com/",
+        }
+        client = await self._create_client(headers=headers)
 
+        cookie_str = await self.config_manager.get("bilibiliCookie", "")
         if cookie_str:
-            # 模式1: 用户已登录。解析并设置从数据库加载的完整Cookie。
             cookie_parts = [c.strip().split('=', 1) for c in cookie_str.split(';')]
             for parts in cookie_parts:
                 if len(parts) == 2:
-                    self.client.cookies.set(parts[0], parts[1], domain=".bilibili.com")
+                    client.cookies.set(parts[0], parts[1], domain=".bilibili.com")
             self.logger.info("Bilibili: 已成功从数据库加载Cookie。")
         else:
             self.logger.info("Bilibili: 数据库中未找到Cookie。")
-       
-        # 如果加载后仍然没有buvid3（例如，数据库为空或cookie不完整），则获取一个临时的
-        if "buvid3" not in self.client.cookies:
-            await self._get_temp_buvid3()
 
-    async def _get_temp_buvid3(self):
+        if "buvid3" not in client.cookies:
+            await self._get_temp_buvid3(client)
+        
+        return client
+
+    async def _get_temp_buvid3(self, client: httpx.AsyncClient):
         """
         为未登录的操作获取一个临时的buvid3。
         这是保留原有非登录模式功能的关键。
         """
-        if "buvid3" in self.client.cookies:
+        if "buvid3" in client.cookies:
             return
         try:
             self.logger.debug("Bilibili: 正在尝试获取一个临时的buvid3...")
-            await self._request_with_rate_limit("GET", "https://www.bilibili.com/")
-            if "buvid3" in self.client.cookies:
+            await client.get("https://www.bilibili.com/")
+            if "buvid3" in client.cookies:
                 self.logger.debug("Bilibili: 已成功获取临时的buvid3。")
         except Exception as e:
             self.logger.warning(f"Bilibili: 获取临时的buvid3失败: {e}")
 
     async def get_login_info(self) -> Dict[str, Any]:
         """获取当前登录状态。"""
-        await self._ensure_config_and_cookie()
-        nav_resp = await self._request_with_rate_limit("GET", "https://api.bilibili.com/x/web-interface/nav")
-        nav_resp.raise_for_status()
-        data = nav_resp.json().get("data", {})
+        async with await self._ensure_config_and_cookie() as client:
+            nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
+            nav_resp.raise_for_status()
+            data = nav_resp.json().get("data", {})
         if data.get("isLogin"):
             vip_info = data.get("vip", {})
             return {
@@ -297,9 +268,9 @@ class BilibiliScraper(BaseScraper):
         mixin_key = await self._get_wbi_mixin_key()
         # The generate endpoint has no parameters, so we sign an empty dict
         signed_params = self._get_wbi_signed_params({}, mixin_key)
-        
-        response = await self._request_with_rate_limit("GET", url, params=signed_params)
-        response.raise_for_status()
+        async with await self._ensure_config_and_cookie() as client:
+            response = await client.get(url, params=signed_params)
+            response.raise_for_status()
         data = response.json().get("data", {})
         if not data.get("qrcode_key") or not data.get("url"):
             raise ValueError("未能从B站API获取有效的二维码信息。")
@@ -312,16 +283,16 @@ class BilibiliScraper(BaseScraper):
         params = {"qrcode_key": qrcodeKey}
         mixin_key = await self._get_wbi_mixin_key()
         signed_params = self._get_wbi_signed_params(params, mixin_key)
-        
-        response = await self._request_with_rate_limit("GET", url, params=signed_params)
-        response.raise_for_status()
-        poll_data = response.json().get("data", {})
+        async with await self._ensure_config_and_cookie() as client:
+            response = await client.get(url, params=signed_params)
+            response.raise_for_status()
+            poll_data = response.json().get("data", {})
 
         if poll_data.get("code") == 0:
             self.logger.info("Bilibili: 扫码登录成功！")
             required_cookies = ["SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid"]
             all_cookies = []
-            for name, value in self.client.cookies.items():
+            for name, value in client.cookies.items():
                 if name in required_cookies or name.startswith("buvid"):
                     all_cookies.append(f"{name}={value}")
             
@@ -359,10 +330,10 @@ class BilibiliScraper(BaseScraper):
         """
         self.logger.info(f"Bilibili: 正在从URL解析ID: {url!r}")
         try:
-            await self._ensure_config_and_cookie()
-            response = await self._request_with_rate_limit("GET", url)
-            response.raise_for_status()
-            html = response.text
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
 
             # 步骤 1: 优先尝试从 __INITIAL_STATE__ JSON块中查找
             match = re.search(r'__INITIAL_STATE__=({.*?});', html)
@@ -429,12 +400,12 @@ class BilibiliScraper(BaseScraper):
         self.logger.info("Bilibili: WBI mixin key expired or not found, fetching new one...")
 
         async def _fetch_key_data():
-            await self._ensure_config_and_cookie()
-            nav_resp = await self._request_with_rate_limit("GET", "https://api.bilibili.com/x/web-interface/nav")
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Bilibili WBI Key Response: {nav_resp.text}")
-            nav_resp.raise_for_status()
-            return nav_resp.json().get("data", {})
+            async with await self._ensure_config_and_cookie() as client:
+                nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Bilibili WBI Key Response: {nav_resp.text}")
+                nav_resp.raise_for_status()
+                return nav_resp.json().get("data", {})
 
         try:
             nav_data = await _fetch_key_data()
@@ -474,8 +445,6 @@ class BilibiliScraper(BaseScraper):
         Performs a cached search for Bilibili content.
         It caches the base results for a title and then filters them based on season.
         """
-        await self._ensure_config_and_cookie()
-        
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
         search_season = parsed['season']
@@ -532,12 +501,12 @@ class BilibiliScraper(BaseScraper):
         
         results = []
         try:
-            response = await self._request_with_rate_limit("GET", url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Bilibili Search Response (type='{search_type}', keyword='{keyword}'): {response.text}")
-            response.raise_for_status()
-            
-            api_result = BiliApiResult.model_validate(response.json())
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.get(url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Bilibili Search Response (type='{search_type}', keyword='{keyword}'): {response.text}")
+                response.raise_for_status()
+                api_result = BiliApiResult.model_validate(response.json())
 
             if api_result.code == 0 and api_result.data and api_result.data.result:
                 self.logger.info(f"Bilibili: API call for type '{search_type}' successful, found {len(api_result.data.result)} items.")
@@ -692,13 +661,12 @@ class BilibiliScraper(BaseScraper):
         # 修正：使用更可靠的 /season 接口，并优先处理 main_section
         url = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
         try:
-            await self._ensure_config_and_cookie()
-            response = await self._request_with_rate_limit("GET", url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Bilibili PGC Episodes Response (media_id={media_id}): {response.text}")
-            response.raise_for_status()
-            
-            data = response.json()
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.get(url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Bilibili PGC Episodes Response (media_id={media_id}): {response.text}")
+                response.raise_for_status()
+                data = response.json()
             if data.get("code") == 0 and (result_data := data.get("result")):
                 # 优先从 'main_section' 获取分集，以过滤掉PV、OP/ED等
                 raw_episodes = result_data.get("main_section", {}).get("episodes", [])
@@ -760,12 +728,12 @@ class BilibiliScraper(BaseScraper):
         bvid = media_id[2:]
         url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
         try:
-            await self._ensure_config_and_cookie()
-            response = await self._request_with_rate_limit("GET", url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Bilibili UGC Episodes Response (media_id={media_id}): {response.text}")
-            response.raise_for_status()
-            data = BiliVideoViewResult.model_validate(response.json())
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.get(url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Bilibili UGC Episodes Response (media_id={media_id}): {response.text}")
+                response.raise_for_status()
+                data = BiliVideoViewResult.model_validate(response.json())
             if data.code == 0 and data.data and data.data.pages:
                 # 对于UGC内容，标题就是 'part' 字段，这里确保它被正确地清理空格。
                 initial_episodes = [
@@ -790,11 +758,12 @@ class BilibiliScraper(BaseScraper):
         all_cids = {cid}
         try:
             url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={cid}"
-            response = await self._request_with_rate_limit("GET", url)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Bilibili Danmaku Pools Response (aid={aid}, cid={cid}): {response.text}")
-            response.raise_for_status()
-            data = response.json()
+            async with await self._ensure_config_and_cookie() as client:
+                response = await client.get(url)
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Bilibili Danmaku Pools Response (aid={aid}, cid={cid}): {response.text}")
+                response.raise_for_status()
+                data = response.json()
             if data.get("code") == 0 and data.get("data"):
                 for sub in data.get("data", {}).get("subtitle", {}).get("list", []):
                     if sub.get("id"): all_cids.add(sub['id'])
@@ -812,9 +781,10 @@ class BilibiliScraper(BaseScraper):
                     await progress_callback(min(95, segment_index * 10), f"获取弹幕池 {cid} 的分段 {segment_index}")
 
                 url = f"https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&pid={aid}&segment_index={segment_index}"
-                response = await self._request_with_rate_limit("GET", url)
-                if response.status_code == 304 or not response.content: break
-                response.raise_for_status()
+                async with await self._ensure_config_and_cookie() as client:
+                    response = await client.get(url)
+                    if response.status_code == 304 or not response.content: break
+                    response.raise_for_status()
 
                 danmu_reply = DmSegMobileReply()
                 await asyncio.to_thread(danmu_reply.ParseFromString, response.content)
@@ -836,8 +806,6 @@ class BilibiliScraper(BaseScraper):
         except (ValueError, IndexError):
             self.logger.error(f"Bilibili: 无效的 episode_id 格式: '{episode_id}'")
             return None
-
-        await self._ensure_config_and_cookie()
 
         if progress_callback: await progress_callback(0, "正在获取弹幕池列表...")
         all_cids = await self._get_danmaku_pools(aid, main_cid)
