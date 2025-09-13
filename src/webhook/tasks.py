@@ -172,7 +172,7 @@ async def webhook_search_and_dispatch_task(
                 "Webhook 任务: 将为 %d 个同分最高的匹配项创建导入任务。", len(unique_top_matches)
             )
 
-        progress_callback(55, f"准备创建 {len(unique_top_matches)} 个导入任务")
+        progress_callback(50, f"准备创建 {len(unique_top_matches)} 个导入任务")
 
         # 批量创建任务
         current_time = get_now().strftime("%H:%M:%S")
