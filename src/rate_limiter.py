@@ -44,7 +44,7 @@ class RateLimiter:
                 config_data = json.loads(json_bytes.decode('utf-8'))
                 
                 self.enabled = config_data.get("enabled", self.enabled)
-                self.global_limit = config_data.get("global_limit", self.global_limit)
+                # self.global_limit = config_data.get("global_limit", self.global_limit)
                 self.global_period = config_data.get("global_period", self.global_period)
                 self.logger.info(f"成功加载速率限制参数。")
             else:
