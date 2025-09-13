@@ -3,6 +3,9 @@ import logging
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+
+from gmssl import sm2, sm3, func
+
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,7 +21,11 @@ class RateLimitExceededError(Exception):
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
 
-XOR_KEY = b'mb2%bFSu$D9x3K9xG%W8N&$h0@&I$y7n#@#y9gU&#PGv891NA!RPs@3tDJ46M03v'
+class ConfigVerificationError(Exception):
+    """当配置文件验证失败时引发。"""
+    pass
+
+XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
 
 class RateLimiter:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], scraper_manager: ScraperManager):
@@ -26,31 +33,67 @@ class RateLimiter:
         self._scraper_manager = scraper_manager
         self._period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
         self.logger = logging.getLogger(self.__class__.__name__)
+        self._verification_failed: bool = False
 
         self.enabled: bool = True
         self.global_limit: int = 50
         self.global_period: str = "hour"
 
         try:
-            config_path = Path(__file__).parent / "rate_limit.bin"
-            if config_path.exists():
-                with open(config_path, 'rb') as f:
-                    obfuscated_bytes = f.read()
+            config_dir = Path(__file__).parent.parent / "config" / "rate_limit"
+            config_path = config_dir / "rate_limit.bin"
+            sig_path = config_dir / "rate_limit.bin.sig"
+            pub_key_path = Path(__file__).parent / "public_key.pem"
 
+            if not all([config_path.exists(), sig_path.exists(), pub_key_path.exists()]):
+                self.logger.critical("!!! 严重安全警告：流控配置文件不完整或缺失。")
+                self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
+                self._verification_failed = True
+                raise FileNotFoundError("缺少流控配置文件")
+
+            obfuscated_bytes = config_path.read_bytes()
+            signature = sig_path.read_text('utf-8').strip()
+            public_key_pem = pub_key_path.read_text('utf-8')
+            try:
+                sm2_crypt = sm2.CryptSM2(public_key=public_key_pem, private_key='')
+                sm3_hash = sm3.sm3_hash(func.bytes_to_list(obfuscated_bytes))
+                
+                if not sm2_crypt.verify(sm3_hash.encode('utf-8'), signature):
+                    self.logger.critical("!!! 严重安全警告：速率限制配置文件 'rate_limit.bin' 签名验证失败！文件可能已被篡改。")
+                    self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
+                    self._verification_failed = True
+                    raise ConfigVerificationError("签名验证失败")
+                
+                self.logger.info("速率限制配置文件签名验证成功。")
+            except (ValueError, TypeError, IndexError) as e:
+                self.logger.critical(f"签名验证失败：无效的密钥或签名格式。错误: {e}", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError("签名验证时发生格式错误")
+            except Exception as e:
+                self.logger.critical(f"签名验证过程中发生未知严重错误: {e}", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError("签名验证时发生未知错误")
+
+            try:
                 json_bytes = bytearray()
                 for i, byte in enumerate(obfuscated_bytes):
                     json_bytes.append(byte ^ XOR_KEY[i % len(XOR_KEY)])
 
                 config_data = json.loads(json_bytes.decode('utf-8'))
-                
-                self.enabled = config_data.get("enabled", self.enabled)
-                self.global_limit = config_data.get("global_limit", self.global_limit)
-                self.global_period = config_data.get("global_period", self.global_period)
-                self.logger.info(f"成功加载速率限制参数。")
-            else:
-                self.logger.warning("未找到配置，将使用默认的速率限制参数。")
+                if config_data:
+                    self.enabled = config_data.get("enabled", self.enabled)
+                    self.global_limit = config_data.get("global_limit", self.global_limit)
+                    self.global_period = config_data.get("global_period", self.global_period)
+                    period_map_cn = {"second": "秒", "minute": "分钟", "hour": "小时", "day": "天"}
+                    period_cn = period_map_cn.get(self.global_period, self.global_period)
+                    self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{period_cn}")
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                self.logger.error(f"解密或解析速率限制配置失败: {e}", exc_info=True)
+                raise
+
         except Exception as e:
-            self.logger.error(f"加载配置失败，将使用默认值。错误: {e}", exc_info=True)
+            if not self._verification_failed:
+                self.logger.warning(f"加载速率限制配置时出错，将使用默认值。错误: {e}")
 
     async def _get_provider_quota(self, provider_name: str) -> Optional[int]:
         try:
@@ -68,6 +111,10 @@ class RateLimiter:
         return self.global_limit, self.global_period
 
     async def check(self, provider_name: str):
+        if self._verification_failed:
+            msg = "配置验证失败，所有请求已被安全阻止。"
+            raise RateLimitExceededError(msg, retry_after_seconds=3600)
+
         global_limit, period_str = self._get_global_limit()
         if global_limit <= 0:
             return
@@ -89,7 +136,7 @@ class RateLimiter:
                 await session.refresh(global_state)
                 await session.refresh(provider_state)
                 
-                time_since_reset = now - global_state.lastResetTime # Re-calculate with the new reset time
+                time_since_reset = now - global_state.lastResetTime 
 
             if global_state.requestCount >= global_limit:
                 retry_after = period_seconds - time_since_reset.total_seconds()
