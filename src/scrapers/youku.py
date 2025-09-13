@@ -48,9 +48,20 @@ class YoukuSearchResult(BaseModel):
 class YoukuEpisodeInfo(BaseModel):
     id: str
     title: str
+    # 新增：添加 displayName 字段以捕获更完整的分集标题，特别是对于综艺节目
+    display_name: Optional[str] = Field(None, alias="displayName")
     duration: str
     category: str
     link: str
+
+    @property
+    def clean_display_name(self) -> Optional[str]:
+        """返回一个移除了日期前缀的 displayName。"""
+        if not self.display_name:
+            return None
+        # 匹配 "YYYY-MM-DD : " 或 "MM-DD : " 格式的前缀并移除
+        return re.sub(r'^\d{2,4}-\d{2}-\d{2}\s*:\s*|^\d{2}-\d{2}\s*:\s*', '', self.display_name).strip()
+
 
     @property
     def total_mat(self) -> int:
@@ -345,7 +356,9 @@ class YoukuScraper(BaseScraper):
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                title=ep.title,
+                # 修正：优先使用清理后的 displayName，因为它通常包含最完整且最简洁的信息（如“第X期”），
+                # 如果 displayName 不存在，则回退到使用原始的 title。
+                title=ep.clean_display_name or ep.title,
                 episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
