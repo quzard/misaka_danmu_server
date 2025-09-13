@@ -40,7 +40,6 @@ class RateLimiter:
         self.global_period: str = "hour"
 
         try:
-            # 修正：根据您的文件放置位置，现在从 src/rate_limit 目录加载所有相关文件。
             config_dir = Path(__file__).parent / "rate_limit"
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
@@ -53,14 +52,12 @@ class RateLimiter:
                 raise FileNotFoundError("缺少流控配置文件")
 
             obfuscated_bytes = config_path.read_bytes()
-            # 修正：使用二进制模式 ('rb') 读取签名，然后解码为字符串，以避免编码问题
             signature = sig_path.read_bytes().decode('utf-8').strip()
             public_key_pem = pub_key_path.read_text('utf-8')
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_pem, private_key='')
                 sm3_hash = sm3.sm3_hash(func.bytes_to_list(obfuscated_bytes))
-                
-                if not sm2_crypt.verify(sm3_hash.encode('utf-8'), signature):
+                if not sm2_crypt.verify(signature, sm3_hash):
                     self.logger.critical("!!! 严重安全警告：速率限制配置文件 'rate_limit.bin' 签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
