@@ -40,10 +40,11 @@ class RateLimiter:
         self.global_period: str = "hour"
 
         try:
-            config_dir = Path(__file__).parent.parent / "config" / "rate_limit"
+            # 修正：根据您的文件放置位置，现在从 src/rate_limit 目录加载所有相关文件。
+            config_dir = Path(__file__).parent / "rate_limit"
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
-            pub_key_path = Path(__file__).parent / "public_key.pem"
+            pub_key_path = config_dir / "public_key.pem"
 
             if not all([config_path.exists(), sig_path.exists(), pub_key_path.exists()]):
                 self.logger.critical("!!! 严重安全警告：流控配置文件不完整或缺失。")

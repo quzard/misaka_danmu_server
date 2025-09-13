@@ -2364,6 +2364,7 @@ class RateLimitProviderStatus(BaseModel):
 
 class RateLimitStatusResponse(BaseModel):
     globalEnabled: bool
+    verificationFailed: bool = Field(False, description="配置文件验证是否失败")
     globalRequestCount: int
     globalLimit: int
     globalPeriod: str
@@ -2426,6 +2427,7 @@ async def get_rate_limit_status(
 
     return RateLimitStatusResponse(
         globalEnabled=global_enabled,
+        verificationFailed=rate_limiter._verification_failed,
         globalRequestCount=global_state.requestCount if global_state else 0,
         globalLimit=global_limit,
         globalPeriod=global_period,
