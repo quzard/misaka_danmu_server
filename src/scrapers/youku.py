@@ -232,6 +232,9 @@ class YoukuScraper(BaseScraper):
                 self.logger.debug(f"Youku: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
 
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
+            self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
         except Exception as e:
             self.logger.error(f"Youku: 网络搜索 '{keyword}' 失败: {e}", exc_info=True)
 
@@ -302,7 +305,7 @@ class YoukuScraper(BaseScraper):
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             page = 1
-            page_size = 20
+            page_size = 100
             
             while True:
                 try:

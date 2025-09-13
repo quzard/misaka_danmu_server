@@ -2,6 +2,7 @@ import re
 from typing import Optional, List, Any, Dict, Callable, Union
 import asyncio
 import secrets
+import hashlib
 import importlib
 import string
 import time
@@ -337,34 +338,18 @@ async def get_episodes_for_search_result(
 
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
+    keyword: Optional[str] = Query(None, description="按标题搜索"),
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(10, ge=1, description="每页数量"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """获取数据库中所有已收录的番剧信息，用于“弹幕情况”展示。"""
-    # 修正：直接在此处执行正确的查询，以确保 episodeCount 和 sourceCount 是实时计算的。
-    stmt = (
-        select(
-            orm_models.Anime.id.label("animeId"),
-            orm_models.Anime.title,
-            orm_models.Anime.type,
-            orm_models.Anime.season,
-            orm_models.Anime.year,
-            orm_models.Anime.imageUrl,
-            orm_models.Anime.localImagePath,
-            orm_models.Anime.createdAt,
-            func.count(func.distinct(orm_models.AnimeSource.id)).label("sourceCount"),
-            func.count(func.distinct(orm_models.Episode.id)).label("episodeCount")
-        )
-        .select_from(orm_models.Anime)
-        .outerjoin(orm_models.Anime.sources)
-        .outerjoin(orm_models.AnimeSource.episodes)
-        .group_by(orm_models.Anime.id)
-        .order_by(orm_models.Anime.createdAt.desc())
+    """获取数据库中所有已收录的番剧信息，支持搜索和分页。"""
+    paginated_result = await crud.get_library_anime(session, keyword=keyword, page=page, page_size=pageSize)
+    return models.LibraryResponse(
+        total=paginated_result["total"],
+        list=[models.LibraryAnimeInfo.model_validate(item) for item in paginated_result["list"]]
     )
-    result = await session.execute(stmt)
-    db_results = result.mappings().all()
-    # Pydantic 会自动处理 datetime 到 ISO 8601 字符串的转换
-    return models.LibraryResponse(animes=[models.LibraryAnimeInfo.model_validate(item) for item in db_results])
 
 @router.get("/library/anime/{animeId}/details", response_model=models.AnimeFullDetails, summary="获取影视完整详情")
 async def get_anime_full_details(
@@ -510,8 +495,9 @@ async def delete_source_from_anime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
+    unique_key = f"delete-source-{sourceId}"
     task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除源 '{source_info['providerName']}' 的任务已提交。", "taskId": task_id}
@@ -533,11 +519,13 @@ async def delete_bulk_episodes(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Episode IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.episodeIds)} 个分集"
+    ids_str = ",".join(sorted([str(eid) for eid in request_data.episodeIds]))
+    unique_key = f"delete-bulk-episodes-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
     
     # 注意：这里我们将整个列表传递给任务
     task_coro = lambda session, callback: tasks.delete_bulk_episodes_task(request_data.episodeIds, session, callback)
     
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episodeIds)} 个分集的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
@@ -575,16 +563,21 @@ async def get_anime_sources_for_anime(
     """获取指定作品关联的所有数据源列表。"""
     return await crud.get_anime_sources(session, animeId)
 
-@router.get("/library/source/{sourceId}/episodes", response_model=List[models.EpisodeDetail], summary="获取数据源的所有分集")
+@router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
 async def get_source_episodes(
     sourceId: int,
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(25, ge=1, description="每页数量"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取指定数据源下的所有已收录分集列表。"""
-    paginated_result = await crud.get_episodes_for_source(session, sourceId)
-    # 修正：从分页结果中提取分集列表，以匹配 response_model
-    return paginated_result.get("episodes", [])
+    paginated_result = await crud.get_episodes_for_source(session, sourceId, page, pageSize)
+    # 修正：返回完整的分页响应对象
+    return models.PaginatedEpisodesResponse(
+        total=paginated_result["total"],
+        list=paginated_result.get("episodes", [])
+    )
 
 @router.put("/library/episode/{episodeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑分集信息")
 async def edit_episode_info(
@@ -714,8 +707,9 @@ async def delete_episode_from_source(
 
     provider_name = episode_info.get('providerName', '未知源')
     task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
+    unique_key = f"delete-episode-{episodeId}"
     task_coro = lambda session, callback: tasks.delete_episode_task(episodeId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "taskId": task_id}
@@ -764,6 +758,7 @@ async def refresh_anime(
     if not source_info or not source_info.get("providerName") or not source_info.get("mediaId"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found or missing source information for refresh.")
     
+    unique_key = ""
     if mode == "incremental":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了增量刷新任务。")
         # 修正：crud.get_episodes_for_source 现在返回一个带分页的字典
@@ -771,6 +766,7 @@ async def refresh_anime(
         latest_episode_index = max((ep['episodeIndex'] for ep in paginated_result.get("episodes", [])), default=0)
         next_episode_index = latest_episode_index + 1
         
+        unique_key = f"import-{source_info['providerName']}-{source_info['mediaId']}-ep{next_episode_index}"
         task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
@@ -780,13 +776,14 @@ async def refresh_anime(
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
+        unique_key = f"full-refresh-{sourceId}"
         task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
         task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb, metadata_manager)
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
 
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
     return {"message": message_to_return, "taskId": task_id}
 
 @router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务", response_model=UITaskResponse)
@@ -802,9 +799,11 @@ async def delete_anime_from_library(
     if not anime_details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
     
+    # 修正：为删除任务添加基于 animeId 的唯一键，以防止因作品重名导致的任务冲突。
     task_title = f"删除作品: {anime_details['title']}"
+    unique_key = f"delete-anime-{animeId}"
     task_coro = lambda session, callback: tasks.delete_anime_task(animeId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
     return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "taskId": task_id}
@@ -826,8 +825,10 @@ async def delete_bulk_sources(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
     task_title = f"批量删除 {len(request_data.sourceIds)} 个数据源"
+    ids_str = ",".join(sorted([str(sid) for sid in request_data.sourceIds]))
+    unique_key = f"delete-bulk-sources-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
     task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
     logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
@@ -1114,29 +1115,35 @@ async def update_scraper_config(
             await crud.update_scraper_proxy(session, providerName, use_proxy_value)
 
         # 2. 构建所有期望处理的配置键 (camelCase)
+        # 修正：使用一个映射来处理前端camelCase键到后端DB键的转换，以兼容混合命名法
         expected_camel_keys = set()
-        # 修正：定义正确的 to_camel 辅助函数
+        camel_to_db_key_map = {}
+
         def to_camel(snake_str):
             components = snake_str.split('_')
             return components[0] + ''.join(x.title() for x in components[1:])
 
         if hasattr(scraper_class, 'configurable_fields'):
-            for snake_key in scraper_class.configurable_fields.keys():
-                expected_camel_keys.add(to_camel(snake_key))
+            for db_key in scraper_class.configurable_fields.keys():
+                camel_key = to_camel(db_key)
+                expected_camel_keys.add(camel_key)
+                camel_to_db_key_map[camel_key] = db_key
         
         if getattr(scraper_class, 'is_loggable', False):
-            expected_camel_keys.add(f"scraper{providerName.capitalize()}LogResponses")
+            camel_key = f"scraper{providerName.capitalize()}LogResponses"
+            db_key = f"scraper_{providerName}_log_responses"
+            expected_camel_keys.add(camel_key)
+            camel_to_db_key_map[camel_key] = db_key
         
-        expected_camel_keys.add(f"{providerName}EpisodeBlacklistRegex")
+        camel_key = f"{providerName}EpisodeBlacklistRegex"
+        db_key = f"{providerName}_episode_blacklist_regex"
+        expected_camel_keys.add(camel_key)
+        camel_to_db_key_map[camel_key] = db_key
 
         # 3. 遍历 payload，只处理期望的键
-        def to_snake(camel_str):
-            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
-            return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-
         for camel_key, value in payload.items():
             if camel_key in expected_camel_keys:
-                db_key = to_snake(camel_key)
+                db_key = camel_to_db_key_map[camel_key]
                 value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
                 await crud.update_config_value(session, db_key, value_to_save)
                 config_manager.invalidate(db_key)
@@ -1247,16 +1254,21 @@ async def clear_all_caches(
     logger.info(f"用户 '{current_user.username}' 清除了所有缓存，共 {deleted_count} 条。")
     return {"message": f"成功清除了 {deleted_count} 条缓存记录。"}
 
-@router.get("/tasks", response_model=List[models.TaskInfo], summary="获取所有后台任务的状态")
+@router.get("/tasks", response_model=models.PaginatedTasksResponse, summary="获取所有后台任务的状态")
 async def get_all_tasks(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     search: Optional[str] = Query(None, description="按标题搜索"),
-    status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed")
+    status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed"),
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(20, ge=1, description="每页数量")
 ):
     """获取后台任务的列表和状态，支持搜索和过滤。"""
-    tasks = await crud.get_tasks_from_history(session, search, status)
-    return [models.TaskInfo.model_validate(t) for t in tasks]
+    paginated_result = await crud.get_tasks_from_history(session, search, status, page, pageSize)
+    return models.PaginatedTasksResponse(
+        total=paginated_result["total"],
+        list=[models.TaskInfo.model_validate(t) for t in paginated_result["list"]]
+    )
 
 
 @router.post("/tasks/{task_id}/pause", status_code=status.HTTP_204_NO_CONTENT, summary="暂停一个正在运行的任务")
@@ -1455,12 +1467,10 @@ async def get_ua_rules(
     rules = await crud.get_ua_rules(session)
     return [models.UaRule.model_validate(r) for r in rules]
 
-class UaRuleCreate(models.BaseModel):
-    uaString: str = Field(..., alias="ua_string")
 
 @router.post("/ua-rules", response_model=models.UaRule, status_code=201, summary="添加UA规则")
 async def add_ua_rule(
-    ruleData: UaRuleCreate,
+    ruleData: models.UaRuleCreate,
     currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
@@ -1535,11 +1545,13 @@ async def get_token_logs(
 
 @router.get(
     "/comment/{episodeId}",
-    response_model=models.CommentResponse,
+    response_model=models.PaginatedCommentResponse,
     summary="获取指定分集的弹幕",
 )
 async def get_comments(
     episodeId: int,
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(100, ge=1, description="每页数量"),
     session: AsyncSession = Depends(get_db_session)
 ):
     # 检查episode是否存在，如果不存在则返回404
@@ -1548,14 +1560,16 @@ async def get_comments(
 
     comments_data = await crud.fetch_comments(session, episodeId)
     
-    # 修正：使用 enumerate 为弹幕生成一个从0开始的自增ID (cid)。
-    # 弹幕文件本身不包含此ID，而API响应需要它，尤其对于前端（例如作为React的key）。
-    # 这也使其行为与 dandan_api 中的弹幕接口保持一致。
+    total = len(comments_data)
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    paginated_data = comments_data[start:end]
+
     comments = [
-        models.Comment(cid=i, p=item.get("p", ""), m=item.get("m", ""))
-        for i, item in enumerate(comments_data)
+        models.Comment(cid=i + start, p=item.get("p", ""), m=item.get("m", ""))
+        for i, item in enumerate(paginated_data)
     ]
-    return models.CommentResponse(count=len(comments), comments=comments)
+    return models.PaginatedCommentResponse(total=total, list=comments)
 
 @router.get("/webhooks/available", response_model=List[str], summary="获取所有可用的Webhook类型")
 async def get_available_webhook_types(
@@ -1916,12 +1930,16 @@ async def manual_import_episode(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
 
     task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
+    
+    # 生成unique_key以防止重复任务
+    unique_key = f"manual-import-{source_id}-{request_data.episodeIndex}-{provider_name}"
+    
     task_coro = lambda session, callback: tasks.manual_import_task(
         sourceId=source_id, animeId=source_info['animeId'], title=request_data.title,
         episodeIndex=request_data.episodeIndex, content=content_to_use, providerName=provider_name,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
     return {"message": f"手动导入任务 '{task_title}' 已提交。", "taskId": task_id}
 
 @router.post("/library/source/{sourceId}/batch-import", status_code=status.HTTP_202_ACCEPTED, summary="批量手动导入分集", response_model=UITaskResponse)
@@ -2061,8 +2079,18 @@ async def import_from_provider(
     if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
         task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
 
+    # 生成unique_key以避免重复任务
+    unique_key_parts = [request_data.provider, request_data.mediaId]
+    if request_data.season is not None:
+        unique_key_parts.append(f"season-{request_data.season}")
+    if request_data.currentEpisodeIndex is not None:
+        unique_key_parts.append(f"episode-{request_data.currentEpisodeIndex}")
+    if request_data.type:
+        unique_key_parts.append(request_data.type)
+    unique_key = f"ui-import-{'-'.join(unique_key_parts)}"
+
     # 提交任务并获取任务ID
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     return {"message": f"'{request_data.animeTitle}' 的导入任务已提交。请在任务管理器中查看进度。", "taskId": task_id}
 
@@ -2085,7 +2113,21 @@ async def import_edited_episodes(
         rate_limiter=rate_limiter,
         metadata_manager=metadata_manager
     )
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    # 修正：为编辑后导入任务添加一个唯一的键，以防止重复提交，同时允许对同一作品的不同分集范围进行排队。
+    # 这个键基于提供商、媒体ID和正在导入的分集索引列表的哈希值。
+    # 这修复了在一次导入完成后，立即为同一作品提交另一次导入时，因任务标题相同而被拒绝的问题。
+    episode_indices_str = ",".join(sorted([str(ep.episodeIndex) for ep in request_data.episodes]))
+    episodes_hash = hashlib.md5(episode_indices_str.encode('utf-8')).hexdigest()[:8]
+    unique_key = f"import-{request_data.provider}-{request_data.mediaId}-{episodes_hash}"
+
+    try:
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+    except HTTPException as e:
+        # 重新抛出由 task_manager 引发的冲突错误
+        raise e
+    except Exception as e:
+        logger.error(f"提交编辑后导入任务时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
 
 @auth_router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
@@ -2233,8 +2275,14 @@ async def import_from_url(
         rate_limiter=rate_limiter
     )
     
+    # 生成unique_key以避免重复任务
+    unique_key_parts = ["url-import", provider, media_id_for_scraper, request_data.media_type]
+    if request_data.season:
+        unique_key_parts.append(f"season-{request_data.season}")
+    unique_key = "-".join(unique_key_parts)
+    
     task_title = f"URL导入: {title} ({provider})"
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
     return {"message": f"'{title}' 的URL导入任务已提交。", "taskId": task_id}
 
@@ -2325,14 +2373,13 @@ class RateLimitStatusResponse(BaseModel):
 @router.get("/rate-limit/status", response_model=RateLimitStatusResponse, summary="获取所有流控规则的状态")
 async def get_rate_limit_status(
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """获取所有流控规则的当前状态，包括全局和各源的配额使用情况。"""
     # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
     try:
-        await rate_limiter.check("__global__")
+        await rate_limiter.check("__ui_status_check__")
     except RateLimitExceededError:
         # 我们只关心检查和重置的副作用，不关心它是否真的超限，所以忽略此错误
         pass
@@ -2340,11 +2387,9 @@ async def get_rate_limit_status(
         # 记录其他潜在错误，但不中断状态获取
         logger.error(f"在获取流控状态时，检查全局流控失败: {e}")
 
-    global_enabled_str = await config_manager.get("globalRateLimitEnabled", "true")
-    global_enabled = global_enabled_str.lower() == 'true'
-    global_limit_str = await config_manager.get("globalRateLimitCount", "50")
-    global_limit = int(global_limit_str) if global_limit_str.isdigit() else 50
-    global_period = await config_manager.get("globalRateLimitPeriod", "hour")
+    global_enabled = rate_limiter.enabled
+    global_limit = rate_limiter.global_limit
+    global_period = rate_limiter.global_period
     period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
 
     all_states = await crud.get_all_rate_limit_states(session)

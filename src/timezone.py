@@ -26,8 +26,11 @@ def get_app_timezone() -> ZoneInfo:
     return _app_timezone
 
 def get_now() -> datetime:
-    """获取附加了应用程序时区的当前时间。"""
-    return datetime.now(get_app_timezone())
+    """
+    获取附加了应用程序时区的当前时间，并返回一个不带时区信息的（naive）datetime对象。
+    例如，如果UTC时间为00:00，而时区设置为Asia/Shanghai，此函数将返回 08:00:00。
+    """
+    return datetime.now(get_app_timezone()).replace(tzinfo=None)
 
 def get_timezone_offset_str() -> str:
     """

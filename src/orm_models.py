@@ -19,6 +19,12 @@ class NaiveDateTime(TypeDecorator):
     impl = TIMESTAMP
     cache_ok = True
 
+    def process_bind_param(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
+        """在写入数据库时，移除时区信息。"""
+        if value is not None and value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+
     def process_result_value(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
         """从数据库读取时，移除时区信息。"""
         if value is not None and value.tzinfo is not None:
@@ -233,6 +239,7 @@ class TaskHistory(Base):
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
     updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", NaiveDateTime)
+    uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 

@@ -53,6 +53,11 @@ export const EpisodeDetail = () => {
   const [episodeList, setEpisodeList] = useState([])
   const [selectedRows, setSelectedRows] = useState([])
   const [sourceInfo, setSourceInfo] = useState({})
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 50,
+    total: 0,
+  })
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -82,13 +87,19 @@ export const EpisodeDetail = () => {
         }),
         getEpisodes({
           sourceId: Number(id),
+          page: pagination.current,
+          pageSize: pagination.pageSize,
         }),
         getAnimeSource({
           animeId: Number(animeId),
         }),
       ])
       setAnimeDetail(detailRes.data)
-      setEpisodeList(episodeRes.data)
+      setEpisodeList(episodeRes.data?.list || [])
+      setPagination(prev => ({
+        ...prev,
+        total: episodeRes.data?.total || 0,
+      }))
       setSourceInfo({
         ...sourceRes?.data?.filter(it => it.sourceId === Number(id))?.[0],
         animeName: detailRes.data?.title,
@@ -101,7 +112,7 @@ export const EpisodeDetail = () => {
 
   useEffect(() => {
     getDetail()
-  }, [])
+  }, [pagination.current, pagination.pageSize])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -646,7 +657,28 @@ export const EpisodeDetail = () => {
         {!!episodeList?.length ? (
           <Table
             rowSelection={{ type: 'checkbox', ...rowSelection }}
-            pagination={false}
+            pagination={{
+              ...pagination,
+              showTotal: total => `共 ${total} 条数据`,
+              onChange: (page, pageSize) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    current: page,
+                    pageSize,
+                  }
+                })
+              },
+              onShowSizeChange: (_, size) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    pageSize: size,
+                  }
+                })
+              },
+              hideOnSinglePage: true,
+            }}
             size="small"
             dataSource={episodeList}
             columns={columns}

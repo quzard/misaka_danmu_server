@@ -60,24 +60,30 @@ async def webhook_search_and_dispatch_task(
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
         progress_callback(5, "正在检查已收藏的源...")
 
-        # 1. 优先查找已收藏的源
-        favorited_source = await crud.find_favorited_source_for_anime(session, animeTitle, season)
-        if favorited_source:
-            logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
-            progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
+        # 1. 优先查找已收藏的源 (Favorited Source)
+        # 步骤 1a: 首先通过标题和季度找到库中的作品
+        existing_anime = await crud.find_anime_by_title_and_season(session, animeTitle, season)
+        if existing_anime:
+            anime_id = existing_anime['id']
+            # 步骤 1b: 然后查找该作品下是否有精确标记的源
+            favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
+            if favorited_source:
+                logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
+                progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
-            # 直接使用这个源的信息创建导入任务
-            task_title = f"Webhook自动导入: {favorited_source['animeTitle']} ({favorited_source['providerName']})"
-            task_coro = lambda session, cb: generic_import_task(
-                provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
-                mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
-                imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, metadata_manager=metadata_manager,
-                bangumiId=bangumiId, rate_limiter=rate_limiter,
-                progress_callback=cb, session=session, manager=manager,
-                task_manager=task_manager
-            )
-            await task_manager.submit_task(task_coro, task_title)
-            raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
+                # 直接使用这个源的信息创建导入任务
+                task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
+                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
+                task_coro = lambda session, cb: generic_import_task(
+                    provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
+                    mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
+                    imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, metadata_manager=metadata_manager,
+                    bangumiId=bangumiId, rate_limiter=rate_limiter,
+                    progress_callback=cb, session=session, manager=manager,
+                    task_manager=task_manager
+                )
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
@@ -170,34 +176,54 @@ async def webhook_search_and_dispatch_task(
 
         # 批量创建任务
         current_time = get_now().strftime("%H:%M:%S")
-        created_titles = []
-        for idx, (match_item, score) in enumerate(unique_top_matches, start=1):
-            if mediaType == "tv_series":
-                task_title = (
-                    f"Webhook（{webhookSource}）自动导入[{idx}/{len(unique_top_matches)}]："
-                    f"{match_item.title} - S{season:02d}E{currentEpisodeIndex:02d} ({match_item.provider}) [{current_time}]"
-                )
-            else:
-                task_title = (
-                    f"Webhook（{webhookSource}）自动导入[{idx}/{len(unique_top_matches)}]："
-                    f"{match_item.title} ({match_item.provider}) [{current_time}]"
-                )
+        if len(unique_top_matches) > 1:
+            created_titles = []
+            total = len(unique_top_matches)
+            for idx, (match_item, score) in enumerate(unique_top_matches, start=1):
+                if mediaType == "tv_series":
+                    task_title = (
+                        f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
+                        f"{match_item.title} - S{season:02d}E{currentEpisodeIndex:02d} ({match_item.provider}) [{current_time}]"
+                    )
+                else:
+                    task_title = (
+                        f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
+                        f"{match_item.title} ({match_item.provider}) [{current_time}]"
+                    )
 
-            task_coro = lambda session, cb, mi=match_item: generic_import_task(
-                provider=mi.provider, mediaId=mi.mediaId, year=year,
-                animeTitle=mi.title, mediaType=mi.type,
-                season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=mi.imageUrl, metadata_manager=metadata_manager,
+                unique_key = f"import-{match_item.provider}-{match_item.mediaId}-ep{currentEpisodeIndex}"
+                task_coro = lambda session, cb, mi=match_item: generic_import_task(
+                    provider=mi.provider, mediaId=mi.mediaId, year=year,
+                    animeTitle=mi.title, mediaType=mi.type,
+                    season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=mi.imageUrl, metadata_manager=metadata_manager,
+                    doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                    progress_callback=cb, session=session, manager=manager,
+                    task_manager=task_manager
+                )
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                created_titles.append(task_title)
+
+            progress_callback(90, f"已创建 {len(created_titles)} 个导入任务")
+            raise TaskSuccess(
+                f"Webhook: 已为 {len(created_titles)} 个最高匹配源创建导入任务。"
+            )
+        else:
+            # 单一最佳匹配项
+            if mediaType == "tv_series":
+                task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+            else:  # movie
+                task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+            task_coro = lambda session, cb: generic_import_task(
+                provider=best_match.provider, mediaId=best_match.mediaId, year=year,
+                animeTitle=best_match.title, mediaType=best_match.type,
+                season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, metadata_manager=metadata_manager,
                 doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-                progress_callback=cb, session=session, manager=manager,
+                progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
                 task_manager=task_manager
             )
-            await task_manager.submit_task(task_coro, task_title)
-            created_titles.append(task_title)
-
-        progress_callback(90, f"已创建 {len(created_titles)} 个导入任务")
-        raise TaskSuccess(
-            f"Webhook: 已为 {len(created_titles)} 个最高匹配源创建导入任务。"
-        )
+            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
     except TaskSuccess:
         raise
     except Exception as e:

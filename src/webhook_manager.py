@@ -17,11 +17,10 @@ from .metadata_manager import MetadataSourceManager
 logger = logging.getLogger(__name__)
 
 class WebhookManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
-        self.config_manager = config_manager
         self.rate_limiter = rate_limiter
         self.metadata_manager = metadata_manager
         self._handlers: Dict[str, Type[BaseWebhook]] = {}

@@ -65,10 +65,13 @@ const ApplyField = ({ name, label, fetchedValue, form }) => {
 export const Library = () => {
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
-  const [renderData, setRenderData] = useState([])
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
-  const [libraryPageSize, setLibraryPageSize] = useState(50)
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 50,
+    total: 0,
+  })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   const [form] = Form.useForm()
@@ -91,12 +94,18 @@ export const Library = () => {
   const getList = async () => {
     try {
       setLoading(true)
-      const res = await getAnimeLibrary()
-      setList(res.data?.animes || [])
-      setRenderData(res.data?.animes || [])
+      const res = await getAnimeLibrary({
+        keyword: keyword,
+        page: pagination.current,
+        pageSize: pagination.pageSize,
+      })
+      setList(res.data?.list || [])
+      setPagination(prev => ({
+        ...prev,
+        total: res.data?.total || 0,
+      }))
     } catch (error) {
       setList([])
-      setRenderData([])
     } finally {
       setLoading(false)
     }
@@ -104,16 +113,17 @@ export const Library = () => {
 
   const handleCreateSuccess = () => {
     setIsCreateModalOpen(false)
-    getList() // 创建成功后刷新列表
+    setPagination(n => {
+      return {
+        ...n,
+        current: 1,
+      }
+    })
   }
 
   useEffect(() => {
     getList()
-  }, [])
-
-  useEffect(() => {
-    setRenderData(list?.filter(it => it.title.includes(keyword)) || [])
-  }, [list, keyword])
+  }, [keyword, pagination.current, pagination.pageSize])
 
   useEffect(() => {
     if (!fetchedMetadata) return
@@ -617,20 +627,32 @@ export const Library = () => {
           </Space>
         }
       >
-        {!!renderData?.length ? (
+        {!!list?.length ? (
           <Table
             pagination={{
-              pageSize: libraryPageSize,
+              ...pagination,
               showTotal: total => `共 ${total} 条数据`,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              hideOnSinglePage: true,
-              onShowSizeChange: (_, size) => {
-                setLibraryPageSize(size)
+              onChange: (page, pageSize) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    current: page,
+                    pageSize,
+                  }
+                })
               },
+              onShowSizeChange: (_, size) => {
+                setPagination(n => {
+                  return {
+                    ...n,
+                    pageSize: size,
+                  }
+                })
+              },
+              hideOnSinglePage: true,
             }}
             size="small"
-            dataSource={renderData}
+            dataSource={list}
             columns={columns}
             rowKey={'animeId'}
             scroll={{ x: '100%' }}
