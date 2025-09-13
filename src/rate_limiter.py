@@ -53,7 +53,8 @@ class RateLimiter:
                 raise FileNotFoundError("缺少流控配置文件")
 
             obfuscated_bytes = config_path.read_bytes()
-            signature = sig_path.read_text('utf-8').strip()
+            # 修正：使用二进制模式 ('rb') 读取签名，然后解码为字符串，以避免编码问题
+            signature = sig_path.read_bytes().decode('utf-8').strip()
             public_key_pem = pub_key_path.read_text('utf-8')
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_pem, private_key='')
