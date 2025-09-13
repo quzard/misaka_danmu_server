@@ -1091,6 +1091,27 @@ class TencentScraper(BaseScraper):
                 self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
             episodes_to_format = temp_episodes
 
+        # 步骤 3.5: 二次过滤
+        # 在初步处理和启发式过滤后，强制应用一次黑名单，以确保如“第x期加更”等内容被彻底移除。
+        if blacklist_pattern:
+            original_count = len(episodes_to_format)
+            
+            final_filtered_episodes = []
+            secondary_filtered_reasons = defaultdict(int)
+            for ep in episodes_to_format:
+                title_to_check = ep.union_title or ep.title or ""
+                match = blacklist_pattern.search(title_to_check)
+                if not match:
+                    final_filtered_episodes.append(ep)
+                else:
+                    secondary_filtered_reasons[match.group(0)] += 1
+            
+            if filtered_count := original_count - len(final_filtered_episodes):
+                reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in secondary_filtered_reasons.items()])
+                self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个分集。")
+            
+            episodes_to_format = final_filtered_episodes
+
         # 步骤 4: 最终格式化 (后编号)
         final_episodes = []
         for i, ep in enumerate(episodes_to_format):
