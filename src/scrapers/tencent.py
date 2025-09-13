@@ -1056,48 +1056,40 @@ class TencentScraper(BaseScraper):
                 
                 episodes_to_format = final_ep_infos
             else:
-                # 普通电视剧/动漫处理
-                def sort_key_regular(ep: TencentEpisode):
-                    title = ep.union_title or ep.title or ""
-                    match = re.search(r'第(\d+)[集话]', title)
-                    if match: return int(match.group(1))
-                    match = re.match(r'(\d+)', title)
-                    if match: return int(match.group(1))
-                    return float('inf') # 没有数字的排在最后
+                # 普通电视剧/动漫处理 (现在只负责排序)
+                episodes_to_format = sorted(pre_filtered, key=lambda ep: self._get_episode_index_from_title(ep.union_title or ep.title or "") or float('inf'))
 
-                episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
-
-        # 步骤 3: 应用自定义黑名单 (对非综艺节目)
-        if not is_variety_show:
-            blacklist_pattern = await self.get_episode_blacklist_pattern() # type: ignore
-            if blacklist_pattern:
-                original_count = len(episodes_to_format)
+        # 步骤 3: 统一应用黑名单过滤 (包含启发式正片保护)
+        # 修正：恢复了启发式规则，以防止黑名单误杀正片。
+        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        if blacklist_pattern:
+            original_count = len(episodes_to_format)
             
-                temp_episodes = []
-                filtered_reasons = defaultdict(int)
-                for ep in episodes_to_format:
-                    title_to_check = ep.union_title or ep.title or ""
-                    
-                    # 启发式规则：如果标题是纯数字或包含“第”字，则认为是正片，不应用黑名单
-                    # 检查 `ep.title` (通常是纯数字) 是否为数字，或检查 `title_to_check` (完整标题) 是否包含 "第" 字。
-                    is_likely_main_episode = bool(re.fullmatch(r'\d+', ep.title.strip())) or '第' in title_to_check
-                    
-                    if is_likely_main_episode:
-                        temp_episodes.append(ep)
-                        continue
+            temp_episodes = []
+            filtered_reasons = defaultdict(int)
 
-                    # 如果不是明显的正片，则检查是否匹配黑名单
-                    match = blacklist_pattern.search(title_to_check)
-                    if not match:
-                        temp_episodes.append(ep)
-                    else:
-                        filtered_reasons[match.group(0)] += 1
+            for ep in episodes_to_format:
+                title_to_check = ep.union_title or ep.title or ""
                 
-                filtered_count = original_count - len(temp_episodes)
-                if filtered_count > 0:
-                    reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in filtered_reasons.items()])
-                    self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
-                episodes_to_format = temp_episodes
+                # 启发式规则：如果标题是纯数字或包含“第”字，则认为是正片，不应用黑名单。
+                # 检查 `ep.title` (通常是纯数字) 是否为数字，或检查 `title_to_check` (完整标题) 是否包含 "第" 字。
+                is_likely_main_episode = bool(re.fullmatch(r'\d+', ep.title.strip())) or '第' in title_to_check
+
+                if is_likely_main_episode:
+                    temp_episodes.append(ep)
+                    continue
+
+                # 如果不是明显的正片，则检查是否匹配黑名单
+                match = blacklist_pattern.search(title_to_check)
+                if not match:
+                    temp_episodes.append(ep)
+                else:
+                    filtered_reasons[match.group(0)] += 1
+            
+            if filtered_count := original_count - len(temp_episodes):
+                reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in filtered_reasons.items()])
+                self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
+            episodes_to_format = temp_episodes
 
         # 步骤 4: 最终格式化 (后编号)
         final_episodes = []
