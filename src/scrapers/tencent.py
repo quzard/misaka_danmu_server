@@ -232,10 +232,9 @@ class TencentScraper(BaseScraper):
         self._last_request_time = 0
         self._min_interval = 0.5 # A reasonable default
 
-        # 新增：用于分集获取的API端点
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
-    def _get_episode_headers(self, cid: str) -> Dict[str, str]:
+    def _get_episode_headers(self, cid: str) -> Dict[str, str]: # type: ignore
         """获取用于分集API请求的移动端头部。"""
         return {
             'Content-Type': 'application/json',
@@ -246,13 +245,20 @@ class TencentScraper(BaseScraper):
             'Accept-Language': 'zh-CN,zh;q=0.9',
         }
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Tencent: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
             self.client = await self._create_client(
                 headers=self.base_headers, cookies=self.cookies, timeout=20.0
             )
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """

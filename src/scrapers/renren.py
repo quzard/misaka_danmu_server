@@ -211,10 +211,19 @@ class RenrenScraper(BaseScraper):
         self._last_request_time = 0.0
         self._min_interval = 0.4
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
-        # This method is now a no-op as clients are created per-request.
-        pass
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Renren: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
+        if self.client is None:
+            self.client = await self._create_client()
+        
+        return self.client
 
     def _generate_device_id(self) -> str:
         """Generate a fresh device/session id for each request.
@@ -225,17 +234,19 @@ class RenrenScraper(BaseScraper):
         return str(uuid.uuid4()).upper()
 
     async def close(self):
-        pass
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def _request(self, method: str, url: str, *, params: Optional[Dict[str, Any]] = None) -> httpx.Response:
         # This method is now a simple wrapper, the rate limiting and signing is handled in _perform_network_search
         device_id = self._generate_device_id()
         headers = build_signed_headers(method=method, url=url, params=params or {}, device_id=device_id)
-        async with await self._create_client() as client:
-            resp = await client.request(method, url, params=params, headers=headers)
-            if await self._should_log_responses():
-                scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
-            return resp
+        client = await self._ensure_client()
+        resp = await client.request(method, url, params=params, headers=headers)
+        if await self._should_log_responses():
+            scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
+        return resp
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

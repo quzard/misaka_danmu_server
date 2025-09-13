@@ -30,11 +30,31 @@ class GamerScraper(BaseScraper):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
+        self.client: Optional[httpx.AsyncClient] = None
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
-        # This method is now a no-op as clients are created per-request.
-        pass
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Gamer: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
+        if self.client is None:
+            headers = {"User-Agent": "Mozilla/5.0"} # 初始默认值
+            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+        
+        # 动态加载并更新最新的 Cookie 和 User-Agent
+        cookie = await self.config_manager.get("gamerCookie", "")
+        user_agent = await self.config_manager.get("gamerUserAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        self.client.headers["User-Agent"] = user_agent
+        self.client.cookies.clear()
+        if cookie:
+            self.client.cookies.update(httpx.Cookies({k.strip(): v.strip() for k, v in (p.split('=', 1) for p in cookie.split(';') if '=' in p)}))
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -60,23 +80,17 @@ class GamerScraper(BaseScraper):
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """一个简单的请求包装器。"""
-        # 实时从数据库加载并应用Cookie和User-Agent配置。
-        cookie = await self.config_manager.get("gamerCookie", "")
-        user_agent = await self.config_manager.get("gamerUserAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
-        headers = {"User-Agent": user_agent}
-        if cookie:
-            headers["Cookie"] = cookie
-
-        async with await self._create_client(headers=headers, timeout=20.0, follow_redirects=True) as client:
-            response = await client.request(method, url, **kwargs)
-            if await self._should_log_responses():
-                # 截断HTML以避免日志过长
-                scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
-            return response
+        client = await self._ensure_client()
+        response = await client.request(method, url, **kwargs)
+        if await self._should_log_responses():
+            # 截断HTML以避免日志过长
+            scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
+        return response
 
     async def close(self):
-        pass
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

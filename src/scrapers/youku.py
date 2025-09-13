@@ -129,12 +129,20 @@ class YoukuScraper(BaseScraper):
         self._cna = ""
         self._token = ""
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Youku: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
             self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -162,6 +170,10 @@ class YoukuScraper(BaseScraper):
         if self.client:
             await self.client.aclose()
             self.client = None
+
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        client = await self._ensure_client()
+        return await client.request(method, url, **kwargs)
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
@@ -194,8 +206,6 @@ class YoukuScraper(BaseScraper):
 
     async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """Performs the actual network search for Youku."""
-        await self._ensure_client()
-        assert self.client is not None
         self.logger.info(f"Youku: 正在为 '{keyword}' 执行网络搜索...")
         ua_encoded = urlencode({"userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         keyword_encoded = urlencode({"keyword": keyword})
@@ -203,7 +213,7 @@ class YoukuScraper(BaseScraper):
         
         results = []
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
@@ -257,12 +267,10 @@ class YoukuScraper(BaseScraper):
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从优酷URL中提取作品信息。"""
-        await self._ensure_client()
-        assert self.client is not None
         self.logger.info(f"Youku: 正在从URL提取信息: {url}")
         
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             response.raise_for_status()
             html_content = response.text
 
@@ -371,25 +379,22 @@ class YoukuScraper(BaseScraper):
         return provider_episodes
 
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
-        await self._ensure_client()
-        assert self.client is not None
+        client = await self._ensure_client()
         url = f"https://openapi.youku.com/v2/shows/videos.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&ext=show&show_id={show_id}&page={page}&count={page_size}"
-        response = await self.client.get(url)
+        response = await client.get(url)
         if await self._should_log_responses():
             scraper_responses_logger.debug(f"Youku Episodes Page Response (show_id={show_id}, page={page}): {response.text}")
         response.raise_for_status()
         return YoukuVideoResult.model_validate(response.json())
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> Optional[List[dict]]:
-        await self._ensure_client()
-        assert self.client is not None
         vid = episode_id.replace("_", "=")
         
         try:
             await self._ensure_token_cookie() # 首次获取令牌
             
             episode_info_url = f"https://openapi.youku.com/v2/videos/show_basic.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&video_id={vid}"
-            episode_info_resp = await self.client.get(episode_info_url)
+            episode_info_resp = await self._request("GET", episode_info_url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Episode Info Response (vid={vid}): {episode_info_resp.text}")
             episode_info_resp.raise_for_status()
@@ -443,12 +448,11 @@ class YoukuScraper(BaseScraper):
         # 我们优先访问主站，因为它更不容易出网络问题。
         cna_val = self.client.cookies.get("cna")
         if not cna_val or force_refresh:
-            await self._ensure_client()
-            assert self.client is not None
+            client = await self._ensure_client()
             try:
                 log_msg = "强制刷新 'cna' cookie..." if force_refresh else "'cna' cookie 未找到, 正在访问 youku.com 以获取..."
                 self.logger.debug(f"Youku: {log_msg}")
-                await self.client.get("https://www.youku.com/")
+                await client.get("https://www.youku.com/")
                 cna_val = self.client.cookies.get("cna")
             except httpx.ConnectError as e:
                 self.logger.warning(f"Youku: 无法连接到 youku.com 获取 'cna' cookie。错误: {e}")
@@ -457,12 +461,11 @@ class YoukuScraper(BaseScraper):
         # 步骤 2: 获取 '_m_h5_tk' 令牌, 此请求可能依赖于 'cna' cookie 的存在。
         token_val = self.client.cookies.get("_m_h5_tk")
         if not token_val or force_refresh:
-            await self._ensure_client()
-            assert self.client is not None
+            client = await self._ensure_client()
             try:
                 log_msg = "强制刷新 '_m_h5_tk' cookie..." if force_refresh else "'_m_h5_tk' cookie 未找到, 正在从 acs.youku.com 请求..."
                 self.logger.debug(f"Youku: {log_msg}")
-                await self.client.get("https://acs.youku.com/h5/mtop.com.youku.aplatform.weakget/1.0/?jsv=2.5.1&appKey=24679788")
+                await client.get("https://acs.youku.com/h5/mtop.com.youku.aplatform.weakget/1.0/?jsv=2.5.1&appKey=24679788")
                 token_val = self.client.cookies.get("_m_h5_tk")
             except httpx.ConnectError as e:
                 self.logger.error(f"Youku: 无法连接到 acs.youku.com 获取令牌 cookie。弹幕获取很可能会失败。错误: {e}")
@@ -483,8 +486,6 @@ class YoukuScraper(BaseScraper):
         return hashlib.md5(s.encode('utf-8')).hexdigest().lower()
 
     async def _get_danmu_content_by_mat(self, vid: str, mat: int) -> Optional[List[YoukuComment]]:
-        await self._ensure_client()
-        assert self.client is not None
         if not self._token:
             self.logger.error("Youku: Cannot get danmaku, _m_h5_tk is missing.")
             return []
@@ -520,7 +521,8 @@ class YoukuScraper(BaseScraper):
         
         url = f"https://acs.youku.com/h5/mopen.youku.danmu.list/1.0/?{urlencode(params)}"
         
-        response = await self.client.post(
+        response = await self._request(
+            "POST",
             url,
             data={"data": data_payload},
             headers={"Referer": "https://v.youku.com"}

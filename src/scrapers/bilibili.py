@@ -244,10 +244,10 @@ class BilibiliScraper(BaseScraper):
 
     async def get_login_info(self) -> Dict[str, Any]:
         """获取当前登录状态。"""
-        async with await self._ensure_config_and_cookie() as client:
-            nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
-            nav_resp.raise_for_status()
-            data = nav_resp.json().get("data", {})
+        client = await self._ensure_client()
+        nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
+        nav_resp.raise_for_status()
+        data = nav_resp.json().get("data", {})
         if data.get("isLogin"):
             vip_info = data.get("vip", {})
             return {
@@ -268,9 +268,9 @@ class BilibiliScraper(BaseScraper):
         mixin_key = await self._get_wbi_mixin_key()
         # The generate endpoint has no parameters, so we sign an empty dict
         signed_params = self._get_wbi_signed_params({}, mixin_key)
-        async with await self._ensure_config_and_cookie() as client:
-            response = await client.get(url, params=signed_params)
-            response.raise_for_status()
+        client = await self._ensure_client()
+        response = await client.get(url, params=signed_params)
+        response.raise_for_status()
         data = response.json().get("data", {})
         if not data.get("qrcode_key") or not data.get("url"):
             raise ValueError("未能从B站API获取有效的二维码信息。")
@@ -283,20 +283,21 @@ class BilibiliScraper(BaseScraper):
         params = {"qrcode_key": qrcodeKey}
         mixin_key = await self._get_wbi_mixin_key()
         signed_params = self._get_wbi_signed_params(params, mixin_key)
-        async with await self._ensure_config_and_cookie() as client:
-            response = await client.get(url, params=signed_params)
-            response.raise_for_status()
-            poll_data = response.json().get("data", {})
+        client = await self._ensure_client()
+        response = await client.get(url, params=signed_params)
+        response.raise_for_status()
+        poll_data = response.json().get("data", {})
 
         if poll_data.get("code") == 0:
             self.logger.info("Bilibili: 扫码登录成功！")
             required_cookies = ["SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid"]
             all_cookies = []
-            for name, value in client.cookies.items():
+            for name, value in client.cookies.items(): # 修正：现在 client 是 self.client，在作用域内
                 if name in required_cookies or name.startswith("buvid"):
                     all_cookies.append(f"{name}={value}")
             
-            if "SESSDATA" in self.client.cookies:
+            # 修正：检查从客户端收集的cookie，而不是 self.client
+            if any("SESSDATA" in c for c in all_cookies):
                 cookie_string = "; ".join(all_cookies)
                 await self.config_manager.setValue("bilibiliCookie", cookie_string)
                 self.logger.info("Bilibili: 新的登录Cookie已保存到数据库。")
@@ -330,10 +331,10 @@ class BilibiliScraper(BaseScraper):
         """
         self.logger.info(f"Bilibili: 正在从URL解析ID: {url!r}")
         try:
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                html = response.text
+            client = await self._ensure_client()
+            response = await client.get(url)
+            response.raise_for_status()
+            html = response.text
 
             # 步骤 1: 优先尝试从 __INITIAL_STATE__ JSON块中查找
             match = re.search(r'__INITIAL_STATE__=({.*?});', html)
@@ -398,14 +399,14 @@ class BilibiliScraper(BaseScraper):
             return self._WBI_MIXIN_KEY_CACHE["key"]
 
         self.logger.info("Bilibili: WBI mixin key expired or not found, fetching new one...")
-
+        
+        client = await self._ensure_client()
         async def _fetch_key_data():
-            async with await self._ensure_config_and_cookie() as client:
-                nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Bilibili WBI Key Response: {nav_resp.text}")
-                nav_resp.raise_for_status()
-                return nav_resp.json().get("data", {})
+            nav_resp = await client.get("https://api.bilibili.com/x/web-interface/nav")
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili WBI Key Response: {nav_resp.text}")
+            nav_resp.raise_for_status()
+            return nav_resp.json().get("data", {})
 
         try:
             nav_data = await _fetch_key_data()
@@ -501,12 +502,12 @@ class BilibiliScraper(BaseScraper):
         
         results = []
         try:
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.get(url)
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Bilibili Search Response (type='{search_type}', keyword='{keyword}'): {response.text}")
-                response.raise_for_status()
-                api_result = BiliApiResult.model_validate(response.json())
+            client = await self._ensure_client()
+            response = await client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili Search Response (type='{search_type}', keyword='{keyword}'): {response.text}")
+            response.raise_for_status()
+            api_result = BiliApiResult.model_validate(response.json())
 
             if api_result.code == 0 and api_result.data and api_result.data.result:
                 self.logger.info(f"Bilibili: API call for type '{search_type}' successful, found {len(api_result.data.result)} items.")
@@ -661,12 +662,12 @@ class BilibiliScraper(BaseScraper):
         # 修正：使用更可靠的 /season 接口，并优先处理 main_section
         url = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
         try:
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.get(url)
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Bilibili PGC Episodes Response (media_id={media_id}): {response.text}")
-                response.raise_for_status()
-                data = response.json()
+            client = await self._ensure_client()
+            response = await client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili PGC Episodes Response (media_id={media_id}): {response.text}")
+            response.raise_for_status()
+            data = response.json()
             if data.get("code") == 0 and (result_data := data.get("result")):
                 # 优先从 'main_section' 获取分集，以过滤掉PV、OP/ED等
                 raw_episodes = result_data.get("main_section", {}).get("episodes", [])
@@ -728,12 +729,12 @@ class BilibiliScraper(BaseScraper):
         bvid = media_id[2:]
         url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
         try:
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.get(url)
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Bilibili UGC Episodes Response (media_id={media_id}): {response.text}")
-                response.raise_for_status()
-                data = BiliVideoViewResult.model_validate(response.json())
+            client = await self._ensure_client()
+            response = await client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili UGC Episodes Response (media_id={media_id}): {response.text}")
+            response.raise_for_status()
+            data = BiliVideoViewResult.model_validate(response.json())
             if data.code == 0 and data.data and data.data.pages:
                 # 对于UGC内容，标题就是 'part' 字段，这里确保它被正确地清理空格。
                 initial_episodes = [
@@ -758,12 +759,12 @@ class BilibiliScraper(BaseScraper):
         all_cids = {cid}
         try:
             url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={cid}"
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.get(url)
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Bilibili Danmaku Pools Response (aid={aid}, cid={cid}): {response.text}")
-                response.raise_for_status()
-                data = response.json()
+            client = await self._ensure_client()
+            response = await client.get(url)
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Bilibili Danmaku Pools Response (aid={aid}, cid={cid}): {response.text}")
+            response.raise_for_status()
+            data = response.json()
             if data.get("code") == 0 and data.get("data"):
                 for sub in data.get("data", {}).get("subtitle", {}).get("list", []):
                     if sub.get("id"): all_cids.add(sub['id'])
@@ -781,11 +782,10 @@ class BilibiliScraper(BaseScraper):
                     await progress_callback(min(95, segment_index * 10), f"获取弹幕池 {cid} 的分段 {segment_index}")
 
                 url = f"https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&pid={aid}&segment_index={segment_index}"
-                async with await self._ensure_config_and_cookie() as client:
-                    response = await client.get(url)
-                    if response.status_code == 304 or not response.content: break
-                    response.raise_for_status()
-
+                client = await self._ensure_client()
+                response = await client.get(url)
+                if response.status_code == 304 or not response.content: break
+                response.raise_for_status()
                 danmu_reply = DmSegMobileReply()
                 await asyncio.to_thread(danmu_reply.ParseFromString, response.content)
                 if not danmu_reply.elems: break

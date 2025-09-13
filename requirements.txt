@@ -30,3 +30,5 @@ chardet
 opencc-python-reimplemented
 # 用于非对称加密签名验证
 cryptography
+# 用于SM2/SM3/SM4国密算法
+gmssl

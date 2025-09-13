@@ -96,6 +96,8 @@ class BaseScraper(ABC):
         self._session_factory = session_factory
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
+        # 新增：用于跟踪当前客户端实例所使用的代理配置
+        self._current_proxy_config: Optional[str] = None
 
     async def _get_proxy_for_provider(self) -> Optional[str]:
         """Helper to get the configured proxy URL for the current provider, if any."""
@@ -116,13 +118,17 @@ class BaseScraper(ABC):
         if proxy_url:
             self.logger.debug(f"通过代理 '{proxy_url}' 发起请求...")
 
-    async def _create_client(self, **kwargs) -> httpx.AsyncClient:
+    async def _create_client(self, **kwargs) -> httpx.AsyncClient: # type: ignore
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
         子类可以传递额外的 httpx.AsyncClient 参数。
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
+        
+        # 关键：在创建客户端后，记录下当前使用的代理配置
+        self._current_proxy_config = proxy_to_use
+        
         client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 

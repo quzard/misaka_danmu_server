@@ -158,11 +158,26 @@ class MgtvScraper(BaseScraper):
         # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，
         # 适当增加延迟以提高稳定性。
         self._min_interval = 1.0
+        self.client: Optional[httpx.AsyncClient] = None
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
-        # This method is now a no-op as clients are created per-request.
-        pass
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("MGTV: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
+        if self.client is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.mgtv.com/",
+                "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
+            }
+            self.client = await self._create_client(headers=headers)
+        
+        return self.client
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         async with self._api_lock:
@@ -170,18 +185,15 @@ class MgtvScraper(BaseScraper):
             time_since_last = now - self._last_request_time
             if time_since_last < self._min_interval:
                 await asyncio.sleep(self._min_interval - time_since_last)
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.mgtv.com/",
-                "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
-            }
-            async with await self._create_client(headers=headers, **kwargs) as client:
-                response = await client.request(method, url, **kwargs)
-                self._last_request_time = time.time()
-                return response
+            client = await self._ensure_client()
+            response = await client.request(method, url, **kwargs)
+            self._last_request_time = time.time()
+            return response
 
     async def close(self):
-        pass
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """

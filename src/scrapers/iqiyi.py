@@ -271,6 +271,14 @@ class IqiyiScraper(BaseScraper):
 
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
+        """确保 httpx 客户端已初始化，并支持代理。"""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("iQiyi: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
             headers = {
                 "User-Agent": self.mobile_user_agent,
@@ -280,6 +288,8 @@ class IqiyiScraper(BaseScraper):
             self.client = await self._create_client(
                 headers=headers, cookies=self.cookies, timeout=30.0, follow_redirects=True
             )
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -328,6 +338,9 @@ class IqiyiScraper(BaseScraper):
                 result_bits.append('0')
         result_binary = ''.join(result_bits[::-1])
         return int(result_binary, 2) if result_binary else 0
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response: # type: ignore
+        client = await self._ensure_client()
+        return await client.request(method, url, **kwargs)
 
     def _video_id_to_entity_id(self, video_id: str) -> Optional[str]:
         """将视频ID (v_...中的部分) 转换为entity_id"""
@@ -360,7 +373,7 @@ class IqiyiScraper(BaseScraper):
         
         return md5_hash
 
-    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response: # type: ignore
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         await self._ensure_client()
         assert self.client is not None
         return await self.client.request(method, url, **kwargs)

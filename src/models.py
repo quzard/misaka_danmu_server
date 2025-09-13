@@ -384,7 +384,7 @@ class ProxySettingsResponse(BaseModel):
     proxyPort: Optional[int] = None
     proxyUsername: Optional[str] = None
     proxyPassword: Optional[str] = None
-    proxyEnabled: bool
+    proxyEnabled: bool = False
 
 class ReassociationRequest(BaseModel):
     targetAnimeId: int
