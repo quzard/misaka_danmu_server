@@ -174,10 +174,13 @@ class BilibiliScraper(BaseScraper):
         self._last_request_time = 0
         self._min_interval = 0.5
 
-    async def _ensure_client(self):
-        """Ensures the httpx client is initialized, with proxy support."""
-        # This method is now a no-op as clients are created per-request.
-        pass
+    async def _ensure_client(self) -> httpx.AsyncClient:
+        """
+        Ensures a configured client is available for short-lived requests like WBI key fetching.
+        This method is primarily for compatibility with functions that expect it.
+        """
+        # 修正：此方法现在正确地调用 _ensure_config_and_cookie 来返回一个可用的客户端实例。
+        return await self._ensure_config_and_cookie()
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         """封装了速率限制的请求方法。"""
