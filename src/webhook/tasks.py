@@ -37,7 +37,7 @@ async def webhook_search_and_dispatch_task(
     animeTitle: str,
     mediaType: str,
     season: int,
-    currentEpisodeIndex: int,
+    currentEpisodeIndex: Optional[int],
     searchKeyword: str,
     doubanId: Optional[str],
     tmdbId: Optional[str],
@@ -57,7 +57,10 @@ async def webhook_search_and_dispatch_task(
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
     """
     try:
-        logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
+        if currentEpisodeIndex is not None:
+            logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
+        else:
+            logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d} 整季) 查找最佳源...")
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
@@ -72,8 +75,13 @@ async def webhook_search_and_dispatch_task(
                 progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
                 # 直接使用这个源的信息创建导入任务
-                task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
-                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
+                if currentEpisodeIndex is not None:
+                    task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
+                else:
+                    task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d} 整季 ({favorited_source['providerName']})"
+                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-s{season}"
+                if currentEpisodeIndex is not None:
+                    unique_key += f"-ep{currentEpisodeIndex}"
                 task_coro = lambda session, cb: generic_import_task(
                     provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
                     mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
@@ -181,17 +189,25 @@ async def webhook_search_and_dispatch_task(
             total = len(unique_top_matches)
             for idx, (match_item, score) in enumerate(unique_top_matches, start=1):
                 if mediaType == "tv_series":
-                    task_title = (
-                        f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
-                        f"{match_item.title} - S{season:02d}E{currentEpisodeIndex:02d} ({match_item.provider}) [{current_time}]"
-                    )
+                    if currentEpisodeIndex is not None:
+                        task_title = (
+                            f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
+                            f"{match_item.title} - S{season:02d}E{currentEpisodeIndex:02d} ({match_item.provider}) [{current_time}]"
+                        )
+                    else:
+                        task_title = (
+                            f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
+                            f"{match_item.title} - S{season:02d} 整季 ({match_item.provider}) [{current_time}]"
+                        )
                 else:
                     task_title = (
                         f"Webhook（{webhookSource}）自动导入[{idx}/{total}]："
                         f"{match_item.title} ({match_item.provider}) [{current_time}]"
                     )
 
-                unique_key = f"import-{match_item.provider}-{match_item.mediaId}-ep{currentEpisodeIndex}"
+                unique_key = f"import-{match_item.provider}-{match_item.mediaId}-s{season}"
+                if currentEpisodeIndex is not None:
+                    unique_key += f"-ep{currentEpisodeIndex}"
                 task_coro = lambda session, cb, mi=match_item: generic_import_task(
                     provider=mi.provider, mediaId=mi.mediaId, year=year,
                     animeTitle=mi.title, mediaType=mi.type,
@@ -210,10 +226,15 @@ async def webhook_search_and_dispatch_task(
         else:
             # 单一最佳匹配项
             if mediaType == "tv_series":
-                task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+                if currentEpisodeIndex is not None:
+                    task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+                else:
+                    task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d} 整季 ({best_match.provider}) [{current_time}]"
             else:  # movie
                 task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
-            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-s{season}"
+            if currentEpisodeIndex is not None:
+                unique_key += f"-ep{currentEpisodeIndex}"
             task_coro = lambda session, cb: generic_import_task(
                 provider=best_match.provider, mediaId=best_match.mediaId, year=year,
                 animeTitle=best_match.title, mediaType=best_match.type,

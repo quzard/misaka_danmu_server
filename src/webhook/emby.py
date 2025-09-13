@@ -32,16 +32,17 @@ class EmbyWebhook(BaseWebhook):
 
         item_type = item.get("Type")
         if item_type not in ["Episode", "Movie", "Series"]:
-            logger.info(f"Webhook: 忽略非 'Episode' 或 'Movie' 的媒体项 (类型: {item_type})")
+            logger.info(f"Webhook: 忽略非 'Episode'、'Movie' 或 'Series' 的媒体项 (类型: {item_type})")
             return
 
         # 提取通用信息
         provider_ids = item.get("ProviderIds", {})
-        tmdb_id = provider_ids.get("Tmdb")
-        imdb_id = provider_ids.get("IMDB") # 修正：Emby 使用大写的 "IMDB"
-        tvdb_id = provider_ids.get("Tvdb")
-        douban_id = provider_ids.get("DoubanID") # Emby 可能使用 DoubanID
-        bangumi_id = provider_ids.get("Bangumi")
+        # 兼容不同大小写/命名
+        tmdb_id = provider_ids.get("Tmdb") or provider_ids.get("TMDB") or provider_ids.get("tmdb")
+        imdb_id = provider_ids.get("Imdb") or provider_ids.get("IMDB") or provider_ids.get("imdb")
+        tvdb_id = provider_ids.get("Tvdb") or provider_ids.get("TVDB") or provider_ids.get("tvdb")
+        douban_id = provider_ids.get("DoubanID") or provider_ids.get("Douban") or provider_ids.get("douban")
+        bangumi_id = provider_ids.get("Bangumi") or provider_ids.get("bangumi")
         year = item.get("ProductionYear")
         
         # 根据媒体类型分别处理
@@ -78,6 +79,67 @@ class EmbyWebhook(BaseWebhook):
             season_number = 1
             episode_number = 1 # 电影按单集处理
             anime_title = movie_title
+        elif item_type == "Series":
+            # 收藏/评分剧集（整部剧），没有具体季/集信息，这里默认 S1E1 作为触发点
+            series_title = item.get("Name") or item.get("OriginalTitle") or item.get("SortName")
+            if not series_title:
+                logger.warning("Webhook: 忽略一个剧集（Series），因为缺少标题信息。")
+                return
+
+            logger.info(f"Emby Webhook: 解析到剧集（整部）- 标题: '{series_title}', 类型: Series")
+            logger.info(f"Webhook: 收到剧集 '{series_title}' 的收藏/评分通知（Series 级别）。")
+
+            # 新增：整剧收藏时，尝试导入“所有季（整季）”。
+            media_type = "tv_series"
+            anime_title = series_title
+
+            # 1) 先通过全网搜索探测可用的季列表
+            try:
+                search_results = await self.scraper_manager.search_all([series_title])
+            except Exception as e:
+                logger.error(f"为整剧 '{series_title}' 探测季信息时搜索失败: {e}", exc_info=True)
+                search_results = []
+
+            seasons_found = sorted({r.season for r in search_results if r.type == 'tv_series' and isinstance(r.season, int) and r.season > 0})
+            if not seasons_found:
+                seasons_found = [1]
+                logger.info(f"未能从搜索结果推断季信息，回退为 S01。")
+            else:
+                logger.info(f"为 '{series_title}' 检测到季列表: {seasons_found}")
+
+            # 2) 为每个季提交一个“整季导入”任务（currentEpisodeIndex=None）
+            for s in seasons_found:
+                task_title = f"Webhook（emby）搜索: {series_title} - S{s:02d} 全季"
+                search_keyword = f"{series_title} S{s:02d}"
+                unique_key = f"webhook-search-{anime_title}-S{s}-FULL"
+
+                logger.info(
+                    f"Webhook: 准备为 '{anime_title}' 的 S{s:02d} 创建整季导入搜索任务，附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。"
+                )
+
+                task_coro = lambda session, callback, season_val=s: webhook_search_and_dispatch_task(
+                    animeTitle=anime_title,
+                    mediaType=media_type,
+                    season=season_val,
+                    currentEpisodeIndex=None,
+                    year=year,
+                    searchKeyword=search_keyword,
+                    doubanId=str(douban_id) if douban_id else None,
+                    tmdbId=str(tmdb_id) if tmdb_id else None,
+                    imdbId=str(imdb_id) if imdb_id else None,
+                    tvdbId=str(tvdb_id) if tvdb_id else None,
+                    bangumiId=str(bangumi_id) if bangumi_id else None,
+                    webhookSource='emby',
+                    progress_callback=callback,
+                    session=session,
+                    metadata_manager=self.metadata_manager,
+                    manager=self.scraper_manager, # type: ignore
+                    task_manager=self.task_manager,
+                    rate_limiter=self.rate_limiter
+                )
+                await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            # 整剧模式下，已按季提交完任务，提前返回
+            return
         
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
         unique_key = f"webhook-search-{anime_title}-S{season_number}-E{episode_number}"
