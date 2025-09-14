@@ -208,7 +208,7 @@ class GamerScraper(BaseScraper):
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从动画疯URL中提取作品信息。"""
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在从URL提取信息: {url}")
 
         sn_match = re.search(r"sn=(\d+)", url)
@@ -284,7 +284,7 @@ class GamerScraper(BaseScraper):
         return str(provider_episode_id)
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 media_id={media_id} 获取分集列表...")
         
         # 修正：直接请求作品集页面(animeRef.php)，而不是依赖于播放页(animeVideo.php)的重定向，这与Lua脚本的逻辑一致，更健壮。
@@ -358,7 +358,7 @@ class GamerScraper(BaseScraper):
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 episode_id={episode_id} 获取弹幕...")
         
         url = "https://ani.gamer.com.tw/ajax/danmuGet.php"
@@ -367,7 +367,6 @@ class GamerScraper(BaseScraper):
         try:
             if progress_callback: await progress_callback(10, "正在请求弹幕数据...")
             
-            await self._ensure_config()
             response = await self._request("POST", url, data=data)
             danmu_data = response.json()
 

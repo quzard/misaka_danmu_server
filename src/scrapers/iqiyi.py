@@ -1141,14 +1141,17 @@ class IqiyiScraper(BaseScraper):
     async def _filter_and_finalize_episodes(self, episodes: List[models.ProviderEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
         """对分集列表应用黑名单过滤并返回最终结果。"""
         # 统一过滤逻辑
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        global_pattern_str = await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT)
+        provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+        blacklist_rules = []
+        if global_pattern_str: blacklist_rules.extend(global_pattern_str.split('|'))
+        if provider_pattern_str: blacklist_rules.extend(provider_pattern_str.split('|'))
         
         filtered_episodes = episodes
-        if blacklist_pattern:
+        if blacklist_rules:
             original_count = len(episodes)
             temp_episodes = []
             filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-            blacklist_rules = blacklist_pattern.pattern.split('|')
             for ep in episodes:
                 title_to_check = ep.title
                 match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)

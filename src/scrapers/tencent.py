@@ -1067,13 +1067,17 @@ class TencentScraper(BaseScraper):
 
         # 步骤 3: 统一应用黑名单过滤 (包含启发式正片保护)
         # 修正：恢复了启发式规则，以防止黑名单误杀正片。
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
-        if blacklist_pattern:
+        global_pattern_str = await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT)
+        provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+        blacklist_rules = []
+        if global_pattern_str: blacklist_rules.extend(global_pattern_str.split('|'))
+        if provider_pattern_str: blacklist_rules.extend(provider_pattern_str.split('|'))
+
+        if blacklist_rules:
             original_count = len(episodes_to_format)
             
             temp_episodes = []
             filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-            blacklist_rules = blacklist_pattern.pattern.split('|')
 
             for ep in episodes_to_format:
                 title_to_check = ep.union_title or ep.title or ""
@@ -1100,12 +1104,11 @@ class TencentScraper(BaseScraper):
 
         # 步骤 3.5: 二次过滤
         # 在初步处理和启发式过滤后，强制应用一次黑名单，以确保如“第x期加更”等内容被彻底移除。
-        if blacklist_pattern:
+        if blacklist_rules:
             original_count = len(episodes_to_format)
             
             final_filtered_episodes = []
             secondary_filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-            blacklist_rules = blacklist_pattern.pattern.split('|')
             for ep in episodes_to_format:
                 title_to_check = ep.union_title or ep.title or ""
                 match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)

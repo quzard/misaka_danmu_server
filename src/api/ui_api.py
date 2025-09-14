@@ -841,7 +841,10 @@ async def get_scraper_settings(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """获取所有可用搜索源的列表及其配置（启用状态、顺序、可配置字段）。"""
-    settings = await crud.get_all_scraper_settings(session)
+    all_settings = await crud.get_all_scraper_settings(session)
+
+    # 修正：不应在UI中显示 'custom' 源，因为它不是一个真正的刮削器
+    settings = [s for s in all_settings if s.get('providerName') != 'custom']
     
     # 获取验证开关的全局状态
     verification_enabled_str = await config_manager.get("scraper_verification_enabled", "false")
