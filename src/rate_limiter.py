@@ -30,7 +30,7 @@ class ConfigVerificationError(Exception):
 XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
 
 def _extract_hex_from_pem(pem_string: str) -> str:
-    
+
     pem_string = re.sub(r'-----(BEGIN|END) PUBLIC KEY-----', '', pem_string)
     pem_string = pem_string.replace('\n', '').replace('\r', '')
 
@@ -69,9 +69,8 @@ class RateLimiter:
             public_key_hex = _extract_hex_from_pem(public_key_pem)
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
-                sm3_hash = sm3.sm3_hash(func.bytes_to_list(obfuscated_bytes)) # type: ignore
-                if not sm2_crypt.verify(signature, sm3_hash.encode('utf-8')):
-                    self.logger.critical("!!! 严重安全警告：速率限制配置文件 'rate_limit.bin' 签名验证失败！文件可能已被篡改。")
+                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes)):
+                    self.logger.critical("!!! 严重安全警告：签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
                     raise ConfigVerificationError("签名验证失败")
