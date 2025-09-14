@@ -1344,8 +1344,7 @@ async def get_rate_limit_status(
 
     global_enabled = rate_limiter.enabled
     global_limit = rate_limiter.global_limit
-    global_period = rate_limiter.global_period
-    period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
+    period_seconds = rate_limiter.global_period_seconds
 
     all_states = await crud.get_all_rate_limit_states(session)
     states_map = {s.providerName: s for s in all_states}
@@ -1371,7 +1370,14 @@ async def get_rate_limit_status(
             pass
         provider_items.append(models.ControlRateLimitProviderStatus(providerName=provider_name, requestCount=provider_state.requestCount if provider_state else 0, quota=quota))
 
-    return models.ControlRateLimitStatusResponse(globalEnabled=global_enabled, globalRequestCount=global_state.requestCount if global_state else 0, globalLimit=global_limit, globalPeriod=global_period, secondsUntilReset=seconds_until_reset, providers=provider_items)
+    # 修正：将秒数转换为可读的字符串以匹配响应模型
+    global_period_str = f"{period_seconds} 秒"
+
+    return models.ControlRateLimitStatusResponse(
+        globalEnabled=global_enabled, 
+        globalRequestCount=global_state.requestCount if global_state else 0, 
+        globalLimit=global_limit, globalPeriod=global_period_str, 
+        secondsUntilReset=seconds_until_reset, providers=provider_items)
 
 
 # --- 定时任务管理 ---

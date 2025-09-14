@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from gmssl import sm2, sm3, func
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,7 +30,7 @@ class ConfigVerificationError(Exception):
 XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
 
 original_sm3_z = sm2.CryptSM2._sm3_z
-def fixed_sm3_z(self, uid='1234567812345678'): 
+def fixed_sm3_z(self, uid: Union[str, bytes]): 
     if isinstance(uid, str):
         uid_bytes = uid.encode('utf-8')
     else:
@@ -87,12 +87,25 @@ class RateLimiter:
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
             pub_key_path = config_dir / "public_key.pem"
+            uid_path = config_dir / "rate_limit.uid"
 
-            if not all([config_path.exists(), sig_path.exists(), pub_key_path.exists()]):
-                self.logger.critical("!!! 严重安全警告：流控配置文件不完整或缺失。")
+            if not all([config_path.exists(), sig_path.exists(), pub_key_path.exists(), uid_path.exists()]):
+                self.logger.critical("!!! 严重安全警告：流控配置文件不完整或缺失 (rate_limit.bin, .sig, public_key.pem, rate_limit.uid)。")
                 self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                 self._verification_failed = True
                 raise FileNotFoundError("缺少流控配置文件")
+
+            # 读取UID文件，现在它是必需的
+            try:
+                uid_from_file = uid_path.read_text('utf-8').strip()
+                if not uid_from_file:
+                    raise ValueError("UID 文件为空或只包含空白字符。")
+                signing_uid = uid_from_file
+                self.logger.info(f"已从 rate_limit.uid 文件加载签名UID。")
+            except Exception as e:
+                self.logger.critical(f"读取 rate_limit.uid 文件失败！此文件对于签名验证至关重要。", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError(f"读取 rate_limit.uid 文件失败") from e
 
             obfuscated_bytes = config_path.read_bytes()
             signature = sig_path.read_bytes().decode('utf-8').strip()
@@ -100,7 +113,8 @@ class RateLimiter:
             public_key_hex = _extract_hex_from_pem(public_key_pem)
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
-                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes)):
+                # 关键：在验证时传入与签名时相同的UID
+                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes), uid=signing_uid):
                     self.logger.critical("!!! 严重安全警告：速率限制配置文件签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
