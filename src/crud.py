@@ -1521,14 +1521,14 @@ async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(ApiToken).order_by(ApiToken.createdAt.desc())
     result = await session.execute(stmt)
     return [
-        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}
+        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt, "dailyCallLimit": t.dailyCallLimit, "dailyCallCount": t.dailyCallCount}
         for t in result.scalars()
     ]
 
 async def get_api_token_by_id(session: AsyncSession, token_id: int) -> Optional[Dict[str, Any]]:
     token = await session.get(ApiToken, token_id)
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt, "dailyCallLimit": token.dailyCallLimit, "dailyCallCount": token.dailyCallCount}
     return None
 
 async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> Optional[Dict[str, Any]]:
@@ -1536,10 +1536,10 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
     result = await session.execute(stmt)
     token = result.scalar_one_or_none()
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt, "dailyCallLimit": token.dailyCallLimit, "dailyCallCount": token.dailyCallCount}
     return None
 
-async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str) -> int:
+async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str, daily_call_limit: int) -> int:
     """创建新的API Token，如果名称已存在则会失败。"""
     # 检查名称是否已存在
     existing_token = await session.execute(select(ApiToken).where(ApiToken.name == name))
@@ -1554,7 +1554,8 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     new_token = ApiToken(
         name=name, token=token, 
         expiresAt=expires_at, 
-        createdAt=get_now()
+        createdAt=get_now(),
+        dailyCallLimit=daily_call_limit
     )
     session.add(new_token)
     await session.commit()
@@ -1583,11 +1584,40 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     if not token_info:
         return None
     # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
-    # 修正：现在所有时间都是naive的，可以直接比较
     if token_info.expiresAt:
         if token_info.expiresAt < get_now(): # Compare naive datetimes
             return None # Token 已过期
-    return {"id": token_info.id, "expiresAt": token_info.expiresAt} # type: ignore
+    
+    # --- 新增：每日调用限制检查 ---
+    now = get_now()
+    current_count = token_info.dailyCallCount
+    
+    # 如果有上次调用记录，且不是今天，则视为计数为0
+    if token_info.lastCallAt and token_info.lastCallAt.date() < now.date():
+        current_count = 0
+        
+    if token_info.dailyCallLimit != -1 and current_count >= token_info.dailyCallLimit:
+        return None # Token 已达到每日调用上限
+
+    return {"id": token_info.id, "expiresAt": token_info.expiresAt, "dailyCallLimit": token_info.dailyCallLimit, "dailyCallCount": token_info.dailyCallCount} # type: ignore
+
+async def increment_token_call_count(session: AsyncSession, token_id: int):
+    """为指定的Token增加调用计数。"""
+    token = await session.get(ApiToken, token_id)
+    if not token:
+        return
+
+    now = get_now()
+    # 如果是新的一天，重置计数器为1
+    if token.lastCallAt is None or token.lastCallAt.date() < now.date():
+        token.dailyCallCount = 1
+    else:
+        # 否则，简单地增加计数
+        token.dailyCallCount += 1
+    
+    # 总是更新最后调用时间
+    token.lastCallAt = now
+    # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
 
 # --- UA Filter and Log Services ---
 

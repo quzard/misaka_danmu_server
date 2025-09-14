@@ -1368,7 +1368,7 @@ async def create_new_api_token(
     alphabet = string.ascii_letters + string.digits
     new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
     try:
-        token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod)
+        token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod, token_data.dailyCallLimit)
         # 重新从数据库获取以包含所有字段
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
@@ -1398,6 +1398,28 @@ async def toggle_api_token_status(
     if not toggled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     return
+
+class ApiTokenUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
+    dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
+
+@router.put("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT, summary="更新API Token信息")
+async def update_api_token(
+    token_id: int,
+    payload: ApiTokenUpdate,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """更新指定API Token的名称和每日调用上限。"""
+    token = await session.get(orm_models.ApiToken, token_id)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    
+    token.name = payload.name
+    token.dailyCallLimit = payload.dailyCallLimit
+    await session.commit()
+    logger.info(f"用户 '{current_user.username}' 更新了 Token (ID: {token_id}) 的信息。")
+
 
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(

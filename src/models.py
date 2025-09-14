@@ -247,10 +247,13 @@ class ApiTokenInfo(BaseModel):
     isEnabled: bool
     expiresAt: Optional[datetime] = None
     createdAt: datetime
+    dailyCallLimit: int
+    dailyCallCount: int
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
     validityPeriod: str = Field("permanent", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
+    dailyCallLimit: int = Field(500, description="每日调用次数限制, -1 表示无限")
 
 # --- UA Filter Models ---
 class UaRule(BaseModel):

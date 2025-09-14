@@ -1180,7 +1180,7 @@ async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = D
     """
     token_str = secrets.token_urlsafe(16)
     try:
-        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validityPeriod)
+        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validityPeriod, payload.dailyCallLimit)
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
     except ValueError as e:
@@ -1207,6 +1207,25 @@ async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
         raise HTTPException(404, "Token未找到")
     message = "Token 已启用。" if new_status else "Token 已禁用。"
     return {"message": message}
+
+class ControlApiTokenUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
+    dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
+
+@router.put("/tokens/{tokenId}", response_model=ControlActionResponse, summary="更新Token信息")
+async def update_token(
+    tokenId: int,
+    payload: ControlApiTokenUpdate,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """更新指定API Token的名称和每日调用上限。"""
+    token = await session.get(orm_models.ApiToken, tokenId)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    token.name = payload.name
+    token.dailyCallLimit = payload.dailyCallLimit
+    await session.commit()
+    return {"message": "Token信息更新成功。"}
 
 @router.delete("/tokens/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
 async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):

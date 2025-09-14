@@ -473,6 +473,10 @@ async def get_token_from_path(
             await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
 
+    # 3. 增加调用计数 (在所有验证通过后)
+    await crud.increment_token_call_count(session, token_info['id'])
+    await session.commit()
+
     # 3. 记录成功访问
     await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='allowed', path=log_path)
 
