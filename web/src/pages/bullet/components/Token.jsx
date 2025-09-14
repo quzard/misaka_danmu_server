@@ -3,10 +3,12 @@ import {
   Card,
   Form,
   Input,
+  InputNumber,
   message,
   Modal,
   Select,
   Space,
+  Progress,
   Table,
   Tag,
   Tooltip,
@@ -146,18 +148,37 @@ export const Token = () => {
     },
     {
       title: '状态',
-      width: 100,
+      width: 150,
       dataIndex: 'isEnabled',
       key: 'isEnabled',
       render: (_, record) => {
+        if (!record.isEnabled) {
+          return <Tag color="red">禁用</Tag>
+        }
+
+        const isInfinite = record.dailyCallLimit === -1
+
+        const percent = isInfinite
+          ? 0
+          : Math.round(
+              (record.dailyCallCount / record.dailyCallLimit) * 100
+            )
+        const limitText = isInfinite ? '∞' : record.dailyCallLimit
+
         return (
-          <div>
-            {record.isEnabled ? (
-              <Tag color="green">启用</Tag>
-            ) : (
-              <Tag color="red">禁用</Tag>
-            )}
-          </div>
+          <Space size="small" align="center">
+            <Progress
+              percent={percent}
+              size="small"
+              showInfo={false}
+              status={isInfinite ? 'normal' : 'normal'}
+              strokeColor={isInfinite ? '#1677ff' : undefined}
+              className="!w-[60px]"
+            />
+            <span style={{ minWidth: '50px', display: 'inline-block' }}>
+              {record.dailyCallCount} / {limitText}
+            </span>
+          </Space>
         )
       },
     },
@@ -319,6 +340,7 @@ export const Token = () => {
           layout="vertical"
           initialValues={{
             validityPeriod: 'permanent',
+            dailyCallLimit: 500,
           }}
         >
           <Form.Item
@@ -347,6 +369,18 @@ export const Token = () => {
                 { value: '180d', label: '6 个月' },
                 { value: '365d', label: '1 年' },
               ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="dailyCallLimit"
+            label="每日调用上限"
+            tooltip="设置此Token每日可调用的总次数。-1 代表无限次。"
+            className="mb-4"
+          >
+            <InputNumber
+              min={-1}
+              style={{ width: '100%' }}
+              placeholder="默认为500, -1为无限"
             />
           </Form.Item>
         </Form>
