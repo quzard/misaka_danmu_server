@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class TvdbMetadataSource(BaseMetadataSource):
     provider_name = "tvdb"
+    test_url = "https://api4.thetvdb.com"
 
     async def _get_tvdb_token(self, client: httpx.AsyncClient) -> str:
         """获取一个有效的TVDB令牌，如果需要则从数据库或API刷新。"""
@@ -159,6 +160,7 @@ class TvdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
+            is_using_proxy = False
             api_key = await self.config_manager.get("tvdbApiKey")
             if not api_key:
                 return "未配置API Key"
@@ -167,17 +169,21 @@ class TvdbMetadataSource(BaseMetadataSource):
             async with self._session_factory() as session:
                 metadata_settings = await crud.get_all_metadata_source_settings(session)
             provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-            use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
+            use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
             proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+            if proxy_to_use:
+                is_using_proxy = True
+                self.logger.debug(f"TVDB: 连接性检查将使用代理: {proxy_to_use}")
+
             async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use) as client:
                 response = await client.post("https://api4.thetvdb.com/v4/login", json={"apikey": api_key})
                 if response.status_code == 200:
-                    return "连接正常"
+                    return "通过代理连接成功" if is_using_proxy else "连接成功"
                 else:
-                    return f"连接失败 (状态码: {response.status_code})"
+                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
         except Exception as e:
             self.logger.error(f"TVDB: 连接性检查失败: {e}", exc_info=True)
-            return "连接失败"
+            return "连接失败" # 代理信息已包含在异常中
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """TVDB source does not support custom actions."""
         raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")

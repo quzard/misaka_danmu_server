@@ -841,7 +841,10 @@ async def get_scraper_settings(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """获取所有可用搜索源的列表及其配置（启用状态、顺序、可配置字段）。"""
-    settings = await crud.get_all_scraper_settings(session)
+    all_settings = await crud.get_all_scraper_settings(session)
+
+    # 修正：不应在UI中显示 'custom' 源，因为它不是一个真正的刮削器
+    settings = [s for s in all_settings if s.get('providerName') != 'custom']
     
     # 获取验证开关的全局状态
     verification_enabled_str = await config_manager.get("scraper_verification_enabled", "false")
@@ -975,6 +978,9 @@ async def update_proxy_settings(
     
     await crud.update_config_value(session, "proxyEnabled", str(payload.proxyEnabled).lower())
     config_manager.invalidate("proxyEnabled")
+
+    await crud.update_config_value(session, "proxySslVerify", str(payload.proxySslVerify).lower())
+    config_manager.invalidate("proxySslVerify")
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
 class ProxyTestRequest(BaseModel):
@@ -987,21 +993,26 @@ class FullProxyTestResponse(BaseModel):
 @router.post("/proxy/test", response_model=FullProxyTestResponse, summary="测试代理连接和延迟")
 async def test_proxy_latency(
     request: ProxyTestRequest,
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
-    """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
+    """
+    测试代理连接和到各源的延迟。
+    - 如果提供了代理URL，则通过代理测试。
+    - 如果未提供代理URL，则直接连接。
+    """
     proxy_url = request.proxy_url
-    # 修正：使用旧的 'proxy' 参数以兼容旧版 httpx
     proxy_to_use = proxy_url if proxy_url else None
 
-    # Test 1: Proxy Connectivity
+    # --- 步骤 1: 测试与代理服务器本身的连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    # 使用一个已知的高可用、轻量级端点进行测试
-    test_url_google = "http://www.google.com/generate_204"
-
     if not proxy_url:
         proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置代理，跳过测试")
     else:
+        # 使用一个已知的高可用、轻量级端点进行测试
+        test_url_google = "http://www.google.com/generate_204"
         try:
             async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
                 start_time = time.time()
@@ -1018,14 +1029,49 @@ async def test_proxy_latency(
         except Exception as e:
             proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
 
-    # Test 2: Target Site Reachability
+    # --- 步骤 2: 动态构建要测试的目标域名列表 ---
     target_sites_results: Dict[str, ProxyTestResult] = {}
-    test_domains = [
-        "https://api.bilibili.com", "https://www.iqiyi.com", "https://v.qq.com",
-        "https://youku.com", "https://www.mgtv.com", "https://ani.gamer.com.tw",
-        "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
-    ]
+    test_domains = set()
     
+    # 统一获取所有源的设置
+    enabled_metadata_settings = await crud.get_all_metadata_source_settings(session)
+    scraper_settings = await crud.get_all_scraper_settings(session)
+
+    # 合并所有源的设置，并添加一个获取实例的函数
+    all_sources_settings = [
+        (s, lambda name=s['providerName']: metadata_manager.get_source(name)) for s in enabled_metadata_settings
+    ] + [
+        (s, lambda name=s['providerName']: scraper_manager.get_scraper(name)) for s in scraper_settings
+    ]
+
+    log_message = "代理未启用，将测试所有已启用的源。" if not proxy_url else "代理已启用，将仅测试已配置代理的源。"
+    logger.info(log_message)
+
+    for setting, get_instance_func in all_sources_settings:
+        # 新增：定义一个始终需要测试的源列表
+        always_test_providers = {'tmdb', 'imdb', 'tvdb', 'douban', '360', 'bangumi'}
+        provider_name = setting.get('providerName')
+
+        # 核心逻辑：
+        # 1. 如果是始终测试的源（无论是否需要代理），只要它启用就测试。
+        # 2. 对于其他源，如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
+        should_test = setting['isEnabled'] and (provider_name in always_test_providers or (not proxy_url or setting['useProxy']))
+
+        if should_test:
+            try:
+                instance = get_instance_func()
+                # 修正：支持异步获取 test_url
+                if hasattr(instance, 'test_url'):
+                    test_url_attr = getattr(instance, 'test_url')
+                    # 检查 test_url 是否是一个异步属性
+                    if asyncio.iscoroutine(test_url_attr):
+                        test_domains.add(await test_url_attr)
+                    else:
+                        test_domains.add(test_url_attr)
+            except ValueError:
+                pass
+
+    # --- 步骤 3: 并发执行所有测试 ---
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
         try:
             start_time = time.time()
@@ -1038,11 +1084,12 @@ async def test_proxy_latency(
             error_str = f"{type(e).__name__}"
             return domain, ProxyTestResult(status="failure", error=error_str)
 
-    async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
-        tasks = [test_domain(domain, client) for domain in test_domains]
-        results = await asyncio.gather(*tasks)
-        for domain, result in results:
-            target_sites_results[domain] = result
+    if test_domains:
+        async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
+            tasks = [test_domain(domain, client) for domain in test_domains]
+            results = await asyncio.gather(*tasks)
+            for domain, result in results:
+                target_sites_results[domain] = result
 
     return FullProxyTestResponse(
         proxy_connectivity=proxy_connectivity_result,
@@ -1365,7 +1412,7 @@ async def create_new_api_token(
     alphabet = string.ascii_letters + string.digits
     new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
     try:
-        token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod)
+        token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod, token_data.dailyCallLimit)
         # 重新从数据库获取以包含所有字段
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
@@ -1395,6 +1442,43 @@ async def toggle_api_token_status(
     if not toggled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     return
+
+class ApiTokenUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
+    dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
+    validityPeriod: str = Field(..., description="新的有效期: 'permanent', 'custom', '30d' 等")
+
+@router.put("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT, summary="更新API Token信息")
+async def update_api_token(
+    token_id: int,
+    payload: ApiTokenUpdate,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """更新指定API Token的名称、每日调用上限和有效期。"""
+    updated = await crud.update_api_token(
+        session,
+        token_id=token_id,
+        name=payload.name,
+        daily_call_limit=payload.dailyCallLimit,
+        validity_period=payload.validityPeriod
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    logger.info(f"用户 '{current_user.username}' 更新了 Token (ID: {token_id}) 的信息。")
+
+
+@router.post("/tokens/{token_id}/reset", status_code=status.HTTP_204_NO_CONTENT, summary="重置API Token的调用次数")
+async def reset_api_token_counter(
+    token_id: int,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """将指定API Token的今日调用次数重置为0。"""
+    reset_ok = await crud.reset_token_counter(session, token_id)
+    if not reset_ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    logger.info(f"用户 '{current_user.username}' 重置了 Token (ID: {token_id}) 的调用次数。")
 
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
@@ -2364,6 +2448,7 @@ class RateLimitProviderStatus(BaseModel):
 
 class RateLimitStatusResponse(BaseModel):
     globalEnabled: bool
+    verificationFailed: bool = Field(False, description="配置文件验证是否失败")
     globalRequestCount: int
     globalLimit: int
     globalPeriod: str
@@ -2389,8 +2474,7 @@ async def get_rate_limit_status(
 
     global_enabled = rate_limiter.enabled
     global_limit = rate_limiter.global_limit
-    global_period = rate_limiter.global_period
-    period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
+    period_seconds = rate_limiter.global_period_seconds
 
     all_states = await crud.get_all_rate_limit_states(session)
     states_map = {s.providerName: s for s in all_states}
@@ -2404,7 +2488,9 @@ async def get_rate_limit_status(
 
     provider_items = []
     # 修正：从数据库获取所有已配置的搜索源，而不是调用一个不存在的方法
-    all_scrapers = await crud.get_all_scraper_settings(session)
+    all_scrapers_raw = await crud.get_all_scraper_settings(session)
+    # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
+    all_scrapers = [s for s in all_scrapers_raw if s['providerName'] != 'custom']
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
@@ -2424,11 +2510,15 @@ async def get_rate_limit_status(
             quota=quota
         ))
 
+    # 修正：将秒数转换为可读的字符串以匹配响应模型
+    global_period_str = f"{period_seconds} 秒"
+
     return RateLimitStatusResponse(
         globalEnabled=global_enabled,
+        verificationFailed=rate_limiter._verification_failed,
         globalRequestCount=global_state.requestCount if global_state else 0,
         globalLimit=global_limit,
-        globalPeriod=global_period,
+        globalPeriod=global_period_str,
         secondsUntilReset=seconds_until_reset,
         providers=provider_items
     )

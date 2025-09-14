@@ -149,6 +149,9 @@ class ApiToken(Base):
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
     expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", NaiveDateTime)
+    dailyCallLimit: Mapped[int] = mapped_column("daily_call_limit", Integer, default=500, server_default="500", nullable=False)
+    dailyCallCount: Mapped[int] = mapped_column("daily_call_count", Integer, default=0, server_default="0", nullable=False)
+    lastCallAt: Mapped[Optional[datetime]] = mapped_column("last_call_at", NaiveDateTime)
 
 class TokenAccessLog(Base):
     __tablename__ = "token_access_logs"

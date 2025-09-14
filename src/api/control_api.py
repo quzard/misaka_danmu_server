@@ -1180,7 +1180,7 @@ async def create_token(payload: models.ApiTokenCreate, session: AsyncSession = D
     """
     token_str = secrets.token_urlsafe(16)
     try:
-        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validityPeriod)
+        token_id = await crud.create_api_token(session, payload.name, token_str, payload.validityPeriod, payload.dailyCallLimit)
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
     except ValueError as e:
@@ -1207,6 +1207,41 @@ async def toggle_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
         raise HTTPException(404, "Token未找到")
     message = "Token 已启用。" if new_status else "Token 已禁用。"
     return {"message": message}
+
+class ControlApiTokenUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
+    dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
+    validityPeriod: str = Field("custom", description="新的有效期: 'permanent', 'custom', '30d' 等。'custom' 表示不改变当前有效期。")
+
+@router.put("/tokens/{tokenId}", response_model=ControlActionResponse, summary="更新Token信息")
+async def update_token(
+    tokenId: int,
+    payload: ControlApiTokenUpdate,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """更新指定API Token的名称、每日调用上限和有效期。"""
+    updated = await crud.update_api_token(
+        session,
+        token_id=tokenId,
+        name=payload.name,
+        daily_call_limit=payload.dailyCallLimit,
+        validity_period=payload.validityPeriod
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    return {"message": "Token信息更新成功。"}
+
+@router.post("/tokens/{tokenId}/reset", response_model=ControlActionResponse, summary="重置Token调用次数")
+async def reset_token_counter(
+    tokenId: int,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """将指定API Token的今日调用次数重置为0。"""
+    reset_ok = await crud.reset_token_counter(session, tokenId)
+    if not reset_ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    return {"message": "Token调用次数已重置为0。"}
+
 
 @router.delete("/tokens/{tokenId}", response_model=ControlActionResponse, summary="删除Token")
 async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_session)):
@@ -1242,8 +1277,9 @@ async def get_tasks(
     session: AsyncSession = Depends(get_db_session),
 ):
     """获取后台任务的列表和状态，支持按标题搜索和按状态过滤。"""
-    tasks_from_db = await crud.get_tasks_from_history(session, search, status)
-    return [models.TaskInfo.model_validate(t) for t in tasks_from_db]
+    # 修正：为 get_tasks_from_history 提供分页参数，以匹配更新后的函数签名。
+    paginated_result = await crud.get_tasks_from_history(session, search, status, page=1, page_size=1000)
+    return [models.TaskInfo.model_validate(t) for t in paginated_result["list"]]
 
 @router.get("/tasks/{taskId}", response_model=models.TaskInfo, summary="获取单个任务状态")
 async def get_task_status(
@@ -1343,8 +1379,7 @@ async def get_rate_limit_status(
 
     global_enabled = rate_limiter.enabled
     global_limit = rate_limiter.global_limit
-    global_period = rate_limiter.global_period
-    period_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(global_period, 3600)
+    period_seconds = rate_limiter.global_period_seconds
 
     all_states = await crud.get_all_rate_limit_states(session)
     states_map = {s.providerName: s for s in all_states}
@@ -1356,7 +1391,9 @@ async def get_rate_limit_status(
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
-    all_scrapers = await crud.get_all_scraper_settings(session)
+    all_scrapers_raw = await crud.get_all_scraper_settings(session)
+    # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
+    all_scrapers = [s for s in all_scrapers_raw if s['providerName'] != 'custom']
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
@@ -1370,7 +1407,14 @@ async def get_rate_limit_status(
             pass
         provider_items.append(models.ControlRateLimitProviderStatus(providerName=provider_name, requestCount=provider_state.requestCount if provider_state else 0, quota=quota))
 
-    return models.ControlRateLimitStatusResponse(globalEnabled=global_enabled, globalRequestCount=global_state.requestCount if global_state else 0, globalLimit=global_limit, globalPeriod=global_period, secondsUntilReset=seconds_until_reset, providers=provider_items)
+    # 修正：将秒数转换为可读的字符串以匹配响应模型
+    global_period_str = f"{period_seconds} 秒"
+
+    return models.ControlRateLimitStatusResponse(
+        globalEnabled=global_enabled, 
+        globalRequestCount=global_state.requestCount if global_state else 0, 
+        globalLimit=global_limit, globalPeriod=global_period_str, 
+        secondsUntilReset=seconds_until_reset, providers=provider_items)
 
 
 # --- 定时任务管理 ---

@@ -1,9 +1,11 @@
 import uvicorn
 import asyncio
 import secrets
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends, status
 import httpx
+from contextlib import asynccontextmanager
+from pathlib import Path
+from fastapi import FastAPI, Request, Depends, status
+from fastapi.openapi.docs import get_swagger_ui_html
 import logging
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
@@ -172,9 +174,22 @@ app = FastAPI(
     description="用于外部自动化和集成的API。所有端点都需要通过 `?api_key=` 进行鉴权。",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/api/control/docs",  # 为外部控制API设置专用的文档路径
+    # 禁用默认的 docs_url，我们将使用自定义的本地化版本
+    docs_url=None,
     redoc_url=None         # 禁用ReDoc
 )
+
+# --- 新增：自定义本地化的 Swagger UI 文档路由 ---
+@app.get("/api/control/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    """提供一个使用本地静态资源的 Swagger UI 页面。"""
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - API Docs",
+        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui/swagger-ui.css",
+        swagger_favicon_url="/static/swagger-ui/favicon-32x32.png"
+    )
 
 # 新增：配置CORS，允许前端开发服务器访问API
 app.add_middleware(
@@ -275,6 +290,11 @@ app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible
 
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
+
+# --- 新增：挂载 Swagger UI 的静态文件目录 ---
+# 修正：使用绝对路径以确保无论从哪里运行都能找到静态文件目录
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "swagger-ui"
+app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger-ui-static")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机

@@ -184,6 +184,7 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
+    test_url = "https://v.qq.com"
     # 基于JS参考实现，提供一个更通用和全面的分集黑名单。
     # 使用 re.escape 来确保特殊字符被正确处理。
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"|".join(re.escape(keyword) for keyword in [
@@ -232,10 +233,9 @@ class TencentScraper(BaseScraper):
         self._last_request_time = 0
         self._min_interval = 0.5 # A reasonable default
 
-        # 新增：用于分集获取的API端点
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
-    def _get_episode_headers(self, cid: str) -> Dict[str, str]:
+    def _get_episode_headers(self, cid: str) -> Dict[str, str]: # type: ignore
         """获取用于分集API请求的移动端头部。"""
         return {
             'Content-Type': 'application/json',
@@ -246,13 +246,20 @@ class TencentScraper(BaseScraper):
             'Accept-Language': 'zh-CN,zh;q=0.9',
         }
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Tencent: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
             self.client = await self._create_client(
                 headers=self.base_headers, cookies=self.cookies, timeout=20.0
             )
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -362,6 +369,7 @@ class TencentScraper(BaseScraper):
         type_mapping = {
             "电视剧": "tv_series", "动漫": "tv_series",
             "电影": "movie",
+            "纪录片": "tv_series",
             "综艺": "tv_series", "综艺节目": "tv_series",
         }
         internal_media_type = type_mapping.get(content_type)
@@ -387,7 +395,7 @@ class TencentScraper(BaseScraper):
 
         # Filter movie-like non-formal content (e.g., documentaries, behind-the-scenes)
         if content_type == "电影":
-            non_formal_keywords = ["纪录片", "花絮", "彩蛋", "幕后", "独家", "解说", "特辑", "探班", "拍摄", "制作", "导演", "记录", "回顾", "盘点", "混剪", "解析", "抢先"]
+            non_formal_keywords = [ "花絮", "彩蛋", "幕后", "独家", "解说", "特辑", "探班", "拍摄", "制作", "导演", "记录", "回顾", "盘点", "混剪", "解析", "抢先"]
             if any(kw in title for kw in non_formal_keywords):
                 self.logger.debug(f"检测到非正片电影内容，跳过处理: {title}")
                 return None
@@ -1017,18 +1025,12 @@ class TencentScraper(BaseScraper):
                 for ep in pre_filtered:
                     title = ep.union_title or ep.title or ""
                     
-                    if has_qi_format:
-                        qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE)
+                    if has_qi_format: # 如果是按“期”的综艺
+                        qi_updown_match = re.search(r'第(\d+)期([上下])', title, re.IGNORECASE) # 匹配“第N期上/下”
                         if qi_updown_match:
-                            qi_num_str, part = qi_updown_match.groups()
-                            qi_text = f"第{qi_num_str}期{part}"
-                            after_text = title[title.find(qi_text) + len(qi_text):]
-                            if not re.match(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_text, re.IGNORECASE):
-                                episode_infos.append({'ep': ep, 'qi_num': int(qi_num_str), 'part': part})
-                        else:
-                            qi_match = re.search(r'第(\d+)期', title)
-                            if qi_match and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', title, re.IGNORECASE):
-                                episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
+                            episode_infos.append({'ep': ep, 'qi_num': int(qi_updown_match.group(1)), 'part': qi_updown_match.group(2)})
+                        elif qi_match := re.search(r'第(\d+)期', title): # 匹配“第N期”
+                            episode_infos.append({'ep': ep, 'qi_num': int(qi_match.group(1)), 'part': ''})
                     else:
                         # 如果没有"第N期"格式，则保留所有非广告内容
                         if "广告" not in title and "推广" not in title:
@@ -1061,48 +1063,65 @@ class TencentScraper(BaseScraper):
                 
                 episodes_to_format = final_ep_infos
             else:
-                # 普通电视剧/动漫处理
-                def sort_key_regular(ep: TencentEpisode):
-                    title = ep.union_title or ep.title or ""
-                    match = re.search(r'第(\d+)[集话]', title)
-                    if match: return int(match.group(1))
-                    match = re.match(r'(\d+)', title)
-                    if match: return int(match.group(1))
-                    return float('inf') # 没有数字的排在最后
+                # 普通电视剧/动漫处理 (现在只负责排序)
+                episodes_to_format = sorted(pre_filtered, key=lambda ep: self._get_episode_index_from_title(ep.union_title or ep.title or "") or float('inf'))
 
-                episodes_to_format = sorted(pre_filtered, key=sort_key_regular)
+        # 步骤 3: 统一应用黑名单过滤 (包含启发式正片保护)
+        # 修正：恢复了启发式规则，以防止黑名单误杀正片。
+        # 修正：安全地获取并组合黑名单规则
+        blacklist_rules = [p for p in [
+            await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
+            await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+        ] if p]
 
-        # 步骤 3: 应用自定义黑名单 (对非综艺节目)
-        if not is_variety_show:
-            blacklist_pattern = await self.get_episode_blacklist_pattern() # type: ignore
-            if blacklist_pattern:
-                original_count = len(episodes_to_format)
+        if blacklist_rules:
+            original_count = len(episodes_to_format)
             
-                temp_episodes = []
-                filtered_reasons = defaultdict(int)
-                for ep in episodes_to_format:
-                    title_to_check = ep.union_title or ep.title or ""
-                    
-                    # 启发式规则：如果标题是纯数字或包含“第”字，则认为是正片，不应用黑名单
-                    # 检查 `ep.title` (通常是纯数字) 是否为数字，或检查 `title_to_check` (完整标题) 是否包含 "第" 字。
-                    is_likely_main_episode = bool(re.fullmatch(r'\d+', ep.title.strip())) or '第' in title_to_check
-                    
-                    if is_likely_main_episode:
-                        temp_episodes.append(ep)
-                        continue
+            temp_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
 
-                    # 如果不是明显的正片，则检查是否匹配黑名单
-                    match = blacklist_pattern.search(title_to_check)
-                    if not match:
-                        temp_episodes.append(ep)
-                    else:
-                        filtered_reasons[match.group(0)] += 1
+            for ep in episodes_to_format:
+                title_to_check = ep.union_title or ep.title or ""
                 
-                filtered_count = original_count - len(temp_episodes)
-                if filtered_count > 0:
-                    reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in filtered_reasons.items()])
-                    self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
-                episodes_to_format = temp_episodes
+                # 启发式规则：如果标题是纯数字或包含“第”字，则认为是正片，不应用黑名单。
+                # 检查 `ep.title` (通常是纯数字) 是否为数字，或检查 `title_to_check` (完整标题) 是否包含 "第" 字。
+                is_likely_main_episode = bool(re.fullmatch(r'\d+', ep.title.strip())) or '第' in title_to_check
+
+                if is_likely_main_episode:
+                    temp_episodes.append(ep)
+                    continue
+
+                # 如果不是明显的正片，则检查是否匹配黑名单
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
+                    temp_episodes.append(ep)
+                else:
+                    filtered_out_log[match_rule].append(title_to_check)
+            
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Tencent: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个非正片分集: {', '.join(titles)}")
+
+            episodes_to_format = temp_episodes
+
+        # 步骤 3.5: 二次过滤
+        # 在初步处理和启发式过滤后，强制应用一次黑名单，以确保如“第x期加更”等内容被彻底移除。
+        if blacklist_rules:
+            original_count = len(episodes_to_format)
+            
+            final_filtered_episodes = []
+            secondary_filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            for ep in episodes_to_format:
+                title_to_check = ep.union_title or ep.title or ""
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
+                    final_filtered_episodes.append(ep)
+                else:
+                    secondary_filtered_out_log[match_rule].append(title_to_check)
+            
+            for rule, titles in secondary_filtered_out_log.items():
+                self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            
+            episodes_to_format = final_filtered_episodes
 
         # 步骤 4: 最终格式化 (后编号)
         final_episodes = []

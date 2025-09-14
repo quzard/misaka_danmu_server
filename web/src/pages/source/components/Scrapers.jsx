@@ -469,7 +469,7 @@ export const Scrapers = () => {
             label="分集标题黑名单 (正则)"
             className="mb-4"
           >
-            <Input />
+            <Input.TextArea rows={6} />
           </Form.Item>
           <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
             <Form.Item

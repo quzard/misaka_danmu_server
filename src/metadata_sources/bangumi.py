@@ -211,6 +211,7 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
 class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
+    test_url = "https://bgm.tv"
     
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
         super().__init__(session_factory, config_manager, scraper_manager)
@@ -393,27 +394,33 @@ class BangumiMetadataSource(BaseMetadataSource):
         # 3. 如果两者都没有，只检查网络连通性
         proxy_to_use = None
         try:
+            is_using_proxy = False
             async with self._session_factory() as session:
                 proxy_url = await crud.get_config_value(session, "proxy_url", "")
                 proxy_enabled_str = await crud.get_config_value(session, "proxy_enabled", "false")
                 ssl_verify_str = await crud.get_config_value(session, "proxySslVerify", "true")
                 ssl_verify = ssl_verify_str.lower() == 'true'
                 proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
-
+    
                 if proxy_enabled_globally and proxy_url:
                     source_setting = await crud.get_metadata_source_setting_by_name(session, self.provider_name)
                     if source_setting and source_setting.get('useProxy', False):
                         proxy_to_use = proxy_url
+                        is_using_proxy = True
                         self.logger.debug(f"Bangumi: 连接性检查将使用代理: {proxy_to_use}")
+            
             async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use, verify=ssl_verify) as client:
                 response = await client.get("https://bgm.tv/")
-                return "连接成功 (未配置认证)" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
+                if response.status_code == 200:
+                    return "通过代理连接成功 (未认证)" if is_using_proxy else "连接成功 (未认证)"
+                else:
+                    return f"通过代理连接失败 (状态码: {response.status_code})" if is_using_proxy else f"连接失败 (状态码: {response.status_code})"
         except httpx.ProxyError as e:
             self.logger.error(f"Bangumi: 连接性检查代理错误: {e}")
             return "连接失败 (代理错误)"
         except Exception as e:
             self.logger.error(f"Bangumi: 连接性检查发生未知错误: {e}", exc_info=True)
-            return "连接失败"
+            return "通过代理连接失败" if is_using_proxy else "连接失败"
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Request) -> Any:
         if action_name == "get_auth_state":

@@ -2,8 +2,14 @@ import asyncio
 import logging
 import json
 from pathlib import Path
+import hashlib
+import base64
+import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+
+from gmssl import sm2, sm3, func
+
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -18,39 +24,155 @@ class RateLimitExceededError(Exception):
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
 
-XOR_KEY = b'mb2%bFSu$D9x3K9xG%W8N&$h0@&I$y7n#@#y9gU&#PGv891NA!RPs@3tDJ46M03v'
+class ConfigVerificationError(Exception):
+    """当配置文件验证失败时引发。"""
+    pass
+
+XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
+
+original_sm3_z = sm2.CryptSM2._sm3_z
+def fixed_sm3_z(self, uid: Union[str, bytes]): 
+    if isinstance(uid, str):
+        uid_bytes = uid.encode('utf-8')
+    else:
+        uid_bytes = uid
+    return original_sm3_z(self, uid_bytes)
+
+sm2.CryptSM2._sm3_z = fixed_sm3_z 
+
+original_verify = sm2.CryptSM2.verify
+def fixed_verify(self, sign: str, data: bytes, uid: Union[str, bytes]) -> bool:
+    """
+    一个包装函数，它在内部计算 Z 值和消息的哈希，然后调用原始的 verify 方法。
+    这使得本地验证逻辑与服务器端完全一致。
+    """
+    z_hex = self._sm3_z(uid=uid)
+    message_bytes = z_hex.encode('utf-8') + data
+    hash_to_verify = sm3.sm3_hash(func.bytes_to_list(message_bytes))
+    return original_verify(self, sign, bytes.fromhex(hash_to_verify))
+
+sm2.CryptSM2.verify = fixed_verify 
+
+def _extract_hex_from_pem(pem_content: str) -> str:
+    """
+    从PEM格式的公钥字符串中稳健地提取十六进制公钥。
+    此函数能够正确解析ASN.1 DER编码结构。
+    """
+    try:
+        pem_lines = pem_content.strip().split('\n')
+        base64_str = "".join(line for line in pem_lines if not line.startswith("-----"))
+
+        der_data = base64.b64decode(base64_str)
+
+        if der_data[0] != 0x30:
+            raise ValueError("PEM内容不是一个有效的DER SEQUENCE。")
+
+        bit_string_tag_index = der_data.find(b'\x03')
+        if bit_string_tag_index == -1:
+            raise ValueError("在DER编码中未找到BIT STRING。")
+        public_key_bytes = der_data[-65:] 
+        return public_key_bytes.hex()
+    except Exception as e:
+        logger.error(f"解析PEM公钥时发生错误: {e}", exc_info=True)
+        raise ValueError("无法解析PEM公钥。") from e
 
 class RateLimiter:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], scraper_manager: ScraperManager):
         self._session_factory = session_factory
         self._scraper_manager = scraper_manager
-        self._period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
         self.logger = logging.getLogger(self.__class__.__name__)
+        self._verification_failed: bool = False
 
         self.enabled: bool = True
         self.global_limit: int = 50
-        self.global_period: str = "hour"
-
+        self.global_period_seconds: int = 3600 
         try:
-            config_path = Path(__file__).parent / "rate_limit.bin"
-            if config_path.exists():
-                with open(config_path, 'rb') as f:
-                    obfuscated_bytes = f.read()
+            config_dir = Path(__file__).parent / "rate_limit"
+            config_path = config_dir / "rate_limit.bin"
+            sig_path = config_dir / "rate_limit.bin.sig"
+            pub_key_path = config_dir / "public_key.pem"
+            uid_path = config_dir / "rate_limit.uid"
 
+            if not all([config_path.exists(), sig_path.exists(), pub_key_path.exists(), uid_path.exists()]):
+                self.logger.critical("!!! 严重安全警告：流控配置文件不完整或缺失 (rate_limit.bin, .sig, public_key.pem, rate_limit.uid)。")
+                self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
+                self._verification_failed = True
+                raise FileNotFoundError("缺少流控配置文件")
+
+            try:
+                uid_from_file = uid_path.read_text('utf-8').strip()
+                if not uid_from_file:
+                    raise ValueError("UID 文件为空或只包含空白字符。")
+                signing_uid = uid_from_file
+                self.logger.info(f"已从 rate_limit.uid 文件加载签名UID。")
+            except Exception as e:
+                self.logger.critical(f"读取 rate_limit.uid 文件失败！此文件对于签名验证至关重要。", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError(f"读取 rate_limit.uid 文件失败") from e
+
+            obfuscated_bytes = config_path.read_bytes()
+            signature = sig_path.read_bytes().decode('utf-8').strip()
+            public_key_pem = pub_key_path.read_text('utf-8')
+            public_key_hex = _extract_hex_from_pem(public_key_pem)
+            try:
+                sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
+                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes), uid=signing_uid):
+                    self.logger.critical("!!! 严重安全警告：速率限制配置文件签名验证失败！文件可能已被篡改。")
+                    self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
+                    self._verification_failed = True
+                    raise ConfigVerificationError("签名验证失败")
+                
+                self.logger.info("速率限制配置文件签名验证成功。")
+            except (ValueError, TypeError, IndexError) as e:
+                self.logger.critical(f"签名验证失败：无效的密钥或签名格式。错误: {e}", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError("签名验证时发生格式错误")
+            except Exception as e:
+                self.logger.critical(f"签名验证过程中发生未知严重错误: {e}", exc_info=True)
+                self._verification_failed = True
+                raise ConfigVerificationError("签名验证时发生未知错误")
+
+            try:
                 json_bytes = bytearray()
                 for i, byte in enumerate(obfuscated_bytes):
                     json_bytes.append(byte ^ XOR_KEY[i % len(XOR_KEY)])
 
                 config_data = json.loads(json_bytes.decode('utf-8'))
+
+                expected_hash = config_data.get("rate_limiter_hash")
+                if not expected_hash:
+                    self.logger.critical("!!! 严重安全警告：配置文件中缺少 'rate_limiter_hash'，无法校验核心文件完整性。")
+                    self._verification_failed = True
+                    raise ConfigVerificationError("配置文件中缺少核心文件哈希")
+
+                rate_limiter_path = Path(__file__) 
+                rate_limiter_content_bytes = rate_limiter_path.read_bytes()
+                actual_hash = hashlib.sha256(rate_limiter_content_bytes.replace(b'\r\n', b'\n')).hexdigest()
+
+                if actual_hash != expected_hash:
+                    self.logger.critical("="*60)
+                    self.logger.critical("！！！严重安全警告：rate_limiter.py 文件完整性校验失败！文件可能已被篡改。！！！")
+                    self.logger.critical("="*60)
+                    self._verification_failed = True
+                    raise ConfigVerificationError("rate_limiter.py 文件完整性校验失败")
                 
-                self.enabled = config_data.get("enabled", self.enabled)
-                self.global_limit = config_data.get("global_limit", self.global_limit)
-                self.global_period = config_data.get("global_period", self.global_period)
-                self.logger.info(f"成功加载速率限制参数。")
-            else:
-                self.logger.warning("未找到配置，将使用默认的速率限制参数。")
+                self.logger.info("rate_limiter.py 文件完整性校验通过。")
+                if config_data:
+                    self.enabled = config_data.get("enabled", self.enabled)
+                    self.global_limit = config_data.get("global_limit", self.global_limit)
+                    if "global_period_seconds" in config_data:
+                        self.global_period_seconds = config_data.get("global_period_seconds", self.global_period_seconds)
+                    elif "global_period" in config_data: 
+                        period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+                        self.global_period_seconds = period_map.get(config_data["global_period"], 3600)
+                    self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{self.global_period_seconds}秒")
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                self.logger.error(f"解密或解析速率限制配置失败: {e}", exc_info=True)
+                raise
+
         except Exception as e:
-            self.logger.error(f"加载配置失败，将使用默认值。错误: {e}", exc_info=True)
+            if not self._verification_failed:
+                self.logger.warning(f"加载速率限制配置时出错，将使用默认值。错误: {e}")
 
     async def _get_provider_quota(self, provider_name: str) -> Optional[int]:
         try:
@@ -62,17 +184,20 @@ class RateLimiter:
             pass
         return None
 
-    def _get_global_limit(self) -> tuple[int, str]:
+    def _get_global_limit(self) -> tuple[int, int]:
         if not self.enabled:
-            return 0, "hour"
-        return self.global_limit, self.global_period
+            return 0, 3600
+        return self.global_limit, self.global_period_seconds
 
     async def check(self, provider_name: str):
+        if self._verification_failed:
+            msg = "配置验证失败，所有请求已被安全阻止。"
+            raise RateLimitExceededError(msg, retry_after_seconds=3600)
+
         global_limit, period_str = self._get_global_limit()
         if global_limit <= 0:
             return
-        
-        period_seconds = self._period_map.get(period_str, 3600)
+        period_seconds = period_str
 
         async with self._session_factory() as session:
             global_state = await crud.get_or_create_rate_limit_state(session, "__global__")
@@ -89,7 +214,7 @@ class RateLimiter:
                 await session.refresh(global_state)
                 await session.refresh(provider_state)
                 
-                time_since_reset = now - global_state.lastResetTime # Re-calculate with the new reset time
+                time_since_reset = now - global_state.lastResetTime 
 
             if global_state.requestCount >= global_limit:
                 retry_after = period_seconds - time_since_reset.total_seconds()

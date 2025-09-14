@@ -5,9 +5,11 @@ from fastapi import FastAPI, Request
 from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError # Import specific SQLAlchemy exceptions
 from .config import settings
 from .orm_models import Base # type: ignore
 from .timezone import get_app_timezone, get_timezone_offset_str, get_now
+from .migrations import run_migrations
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
@@ -37,386 +39,57 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         raise ValueError(f"不支持的数据库类型: '{db_type}'。请使用 'mysql' 或 'postgresql'。")
 
     return URL.create(
-        drivername=drivername,
-        username=settings.database.user,
-        password=settings.database.password,
-        host=settings.database.host,
-        port=settings.database.port,
-        database=database,
-        query=query,
+        drivername=drivername, username=settings.database.user, password=settings.database.password,
+        host=settings.database.host, port=settings.database.port, database=database, query=query,
     )
 
-async def _migrate_utc_to_local_datetime(conn, db_type, db_name):
-    """
-    迁移任务: 将可能被错误存储为UTC时间的datetime字段，转换为服务器的本地时间。
-    这是一个一次性修复任务，用于解决旧版本中可能存在的时区处理不一致问题。
-    它会检查所有相关的时间戳字段，并确保它们都以不带时区的形式存储。
-    """
-    migration_id = "convert_datetime_to_naive_v2"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    # 1. 检查迁移是否已执行过
-    check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
-    flag_exists = (await conn.execute(check_flag_sql, {"key": migration_id})).scalar_one_or_none() is not None
-    if flag_exists:
-        logger.info(f"迁移 '{migration_id}' 已执行过，跳过。")
-        return
-
-    logger.warning(f"将执行一次性数据库时间迁移 '{migration_id}'。")
-    logger.warning("此操作将确保所有时间戳字段都以不带时区的形式存储。")
-    logger.warning("在继续之前，强烈建议您备份数据库。")
-
-    # 2. 定义所有需要迁移的表和列
-    tables_and_columns = {
-        "anime": ["created_at"], "anime_sources": ["created_at"], "episode": ["fetched_at"],
-        "users": ["token_update", "created_at"], "api_tokens": ["created_at", "expires_at"],
-        "token_access_logs": ["access_time"], "ua_rules": ["created_at"],
-        "bangumi_auth": ["expires_at", "authorized_at"], "oauth_states": ["expires_at"],
-        "scheduled_tasks": ["last_run_at", "next_run_at"],
-        "task_history": ["created_at", "updated_at", "finished_at"],
-        "external_api_logs": ["access_time"], "rate_limit_state": ["last_reset_time"],
-        "cache_data": ["expires_at"],
-    }
-
-    # 3. 执行迁移
-    try:
-        for table, columns in tables_and_columns.items():
-            for column in columns:
-                logger.info(f"正在迁移 {table}.{column}...")
-                if db_type == "mysql":
-                    # MySQL 的 CONVERT_TZ 函数可以处理时区转换，但更直接的方式是确保类型正确。
-                    # 这里的 ALTER TABLE 语句是幂等的，它会确保列类型为 DATETIME，从而丢弃任何时区信息。
-                    update_sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` DATETIME;")
-                else: # postgresql
-                    # 对于 PostgreSQL，我们使用 `AT TIME ZONE 'UTC'` 将带时区的时间戳转换为UTC时间，
-                    # 然后再使用 `AT TIME ZONE 'UTC'` 将其转换为不带时区的本地时间。
-                    # 这是一个将 TIMESTAMPTZ 转换为 TIMESTAMP 的标准方法。
-                    update_sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE TIMESTAMP WITHOUT TIME ZONE USING "{column}"::timestamp;')
-                await conn.execute(update_sql)
-        logger.info("所有时间字段迁移完成。")
-        # 4. 插入标志位，防止重复执行
-        await conn.execute(text("INSERT INTO config (config_key, config_value, description) VALUES (:key, :value, :desc)"), {"key": migration_id, "value": "true", "desc": "标志位，表示已将旧的UTC时间戳迁移到本地时间。"})
-        logger.info(f"成功设置迁移标志 '{migration_id}'。")
-    except Exception as e:
-        logger.error(f"执行时间迁移时发生错误: {e}", exc_info=True)
-        logger.error("时间迁移失败，数据库可能处于不一致状态。请从备份中恢复或手动修复。")
-        raise
-    logger.info(f"迁移任务 '{migration_id}' 成功完成。")
-
-async def _migrate_add_source_order(conn, db_type, db_name):
-    """
-    迁移任务: 确保 anime_sources 表有持久化的 source_order 字段。
-    这是一个关键迁移，用于修复因动态计算源顺序而导致的数据覆盖问题。
-    """
-    migration_id = "add_source_order_to_anime_sources"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    # --- 1. 检查并添加 source_order 列 (初始为可空) ---
-    if db_type == "mysql":
-        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'anime_sources' AND column_name = 'source_order'")
-        add_column_sql = text("ALTER TABLE anime_sources ADD COLUMN `source_order` INT NULL")
-    elif db_type == "postgresql":
-        check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'anime_sources' AND column_name = 'source_order'")
-        add_column_sql = text('ALTER TABLE anime_sources ADD COLUMN "source_order" INT NULL')
-    else:
-        return
-
-    column_exists = (await conn.execute(check_column_sql)).scalar_one_or_none() is not None
-    if not column_exists:
-        logger.info("列 'anime_sources.source_order' 不存在。正在添加...")
-        await conn.execute(add_column_sql)
-        logger.info("成功添加列 'anime_sources.source_order'。")
-
-        # --- 2. 为现有数据填充 source_order ---
-        logger.info("正在为现有数据填充 'source_order'...")
-        distinct_anime_ids_res = await conn.execute(text("SELECT DISTINCT anime_id FROM anime_sources"))
-        distinct_anime_ids = distinct_anime_ids_res.scalars().all()
-
-        for anime_id in distinct_anime_ids:
-            select_stmt = text("SELECT id FROM anime_sources WHERE anime_id = :anime_id ORDER BY id")
-            sources_res = await conn.execute(select_stmt, {"anime_id": anime_id})
-            sources_ids = sources_res.scalars().all()
-            for i, source_id in enumerate(sources_ids):
-                order = i + 1
-                update_stmt = text("UPDATE anime_sources SET source_order = :order WHERE id = :source_id")
-                await conn.execute(update_stmt, {"order": order, "source_id": source_id})
-        logger.info("成功填充 'source_order' 数据。")
-
-        # --- 3. 将列修改为 NOT NULL ---
-        logger.info("正在将 'source_order' 列修改为 NOT NULL...")
-        if db_type == "mysql":
-            alter_not_null_sql = text("ALTER TABLE anime_sources MODIFY COLUMN `source_order` INT NOT NULL")
-        else: # postgresql
-            alter_not_null_sql = text('ALTER TABLE anime_sources ALTER COLUMN "source_order" SET NOT NULL')
-        await conn.execute(alter_not_null_sql)
-        logger.info("成功将 'source_order' 列修改为 NOT NULL。")
-
-    # --- 4. 检查并添加唯一约束 ---
-    # 即使列已存在，约束也可能不存在
-    if db_type == "mysql":
-        check_constraint_sql = text(f"SELECT 1 FROM information_schema.table_constraints WHERE table_schema = '{db_name}' AND table_name = 'anime_sources' AND constraint_name = 'idx_anime_source_order_unique'")
-        add_constraint_sql = text("ALTER TABLE anime_sources ADD CONSTRAINT idx_anime_source_order_unique UNIQUE (anime_id, source_order)")
-    else: # postgresql
-        check_constraint_sql = text("SELECT 1 FROM pg_constraint WHERE conname = 'idx_anime_source_order_unique'")
-        add_constraint_sql = text('ALTER TABLE anime_sources ADD CONSTRAINT idx_anime_source_order_unique UNIQUE (anime_id, source_order)')
-
-    constraint_exists = (await conn.execute(check_constraint_sql)).scalar_one_or_none() is not None
-    if not constraint_exists:
-        logger.info("唯一约束 'idx_anime_source_order_unique' 不存在。正在添加...")
-        try:
-            await conn.execute(add_constraint_sql)
-            logger.info("成功添加唯一约束 'idx_anime_source_order_unique'。")
-        except Exception as e:
-            logger.error(f"添加唯一约束失败: {e}。这可能是由于数据中存在重复的 (anime_id, source_order) 对。请手动检查并清理数据。")
-
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-
-async def _migrate_add_danmaku_file_path(conn, db_type, db_name):
-    """
-    迁移任务: 确保 episode 表有 danmaku_file_path 字段。
-    这是为了兼容旧版本数据库，在代码更新后自动添加新列。
-    """
-    migration_id = "add_danmaku_file_path_to_episode"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    # --- 1. 检查并添加 danmaku_file_path 列 ---
-    if db_type == "mysql":
-        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'episode' AND column_name = 'danmaku_file_path'")
-        add_column_sql = text("ALTER TABLE episode ADD COLUMN `danmaku_file_path` VARCHAR(1024) NULL DEFAULT NULL")
-    elif db_type == "postgresql":
-        check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'episode' AND column_name = 'danmaku_file_path'")
-        add_column_sql = text('ALTER TABLE episode ADD COLUMN "danmaku_file_path" VARCHAR(1024) NULL DEFAULT NULL')
-    else:
-        return
-
-    column_exists = (await conn.execute(check_column_sql)).scalar_one_or_none() is not None
-    if not column_exists:
-        logger.info("列 'episode.danmaku_file_path' 不存在。正在添加...")
-        await conn.execute(add_column_sql)
-        logger.info("成功添加列 'episode.danmaku_file_path'。")
-    
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-
-async def _migrate_cache_value_to_mediumtext(conn, db_type, db_name):
-    """
-    迁移任务: 确保 cache_data.cache_value 列有足够大的容量 (MEDIUMTEXT)。
-    """
-    migration_id = "migrate_cache_value_to_mediumtext"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    if db_type == "mysql":
-        # 检查列是否存在且类型不是MEDIUMTEXT
-        check_sql = text(
-            "SELECT DATA_TYPE FROM information_schema.columns "
-            f"WHERE table_schema = '{db_name}' AND table_name = 'cache_data' AND column_name = 'cache_value'"
-        )
-        result = await conn.execute(check_sql)
-        current_type = result.scalar_one_or_none()
-
-        if current_type and current_type.lower() != 'mediumtext':
-            logger.info(f"列 'cache_data.cache_value' 类型为 '{current_type}'，正在修改为 MEDIUMTEXT...")
-            alter_sql = text("ALTER TABLE cache_data MODIFY COLUMN `cache_value` MEDIUMTEXT")
-            await conn.execute(alter_sql)
-            logger.info("成功将 'cache_data.cache_value' 列类型修改为 MEDIUMTEXT。")
-        else:
-            logger.info("列 'cache_data.cache_value' 类型已是 MEDIUMTEXT 或不存在，跳过迁移。")
-    elif db_type == "postgresql":
-        logger.info("PostgreSQL 的 TEXT 类型已支持大容量数据，无需为 cache_value 列执行迁移。")
-    
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-
-async def _migrate_add_source_url_to_episode(conn, db_type, db_name):
-    """
-    迁移任务: 确保 episode 表有 source_url 字段，并处理旧的命名。
-    - 如果存在旧的 'sourceUrl' 列，则将其重命名为 'source_url'。
-    - 如果两者都不存在，则添加新的 'source_url' 列。
-    """
-    migration_id = "add_or_rename_source_url_in_episode"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    old_column_name = "sourceUrl"
-    new_column_name = "source_url"
-    table_name = "episode"
-
-    if db_type == "mysql":
-        check_old_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = '{table_name}' AND column_name = '{old_column_name}'")
-        check_new_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = '{table_name}' AND column_name = '{new_column_name}'")
-        rename_column_sql = text(f"ALTER TABLE `{table_name}` CHANGE COLUMN `{old_column_name}` `{new_column_name}` TEXT NULL")
-        add_column_sql = text(f"ALTER TABLE `{table_name}` ADD COLUMN `{new_column_name}` TEXT NULL")
-    elif db_type == "postgresql":
-        check_old_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_name = '{table_name}' AND column_name = '{old_column_name}'")
-        check_new_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_name = '{table_name}' AND column_name = '{new_column_name}'")
-        rename_column_sql = text(f'ALTER TABLE "{table_name}" RENAME COLUMN "{old_column_name}" TO "{new_column_name}"')
-        add_column_sql = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{new_column_name}" TEXT NULL')
-    else:
-        return
-
-    old_col_exists = (await conn.execute(check_old_column_sql)).scalar_one_or_none() is not None
-    new_col_exists = (await conn.execute(check_new_column_sql)).scalar_one_or_none() is not None
-
-    if old_col_exists and not new_col_exists:
-        logger.info(f"在表 '{table_name}' 中发现旧列 '{old_column_name}'，正在将其重命名为 '{new_column_name}'...")
-        await conn.execute(rename_column_sql)
-        logger.info(f"成功重命名表 '{table_name}' 中的列。")
-    elif not old_col_exists and not new_col_exists:
-        logger.info(f"列 '{table_name}.{new_column_name}' 不存在，正在添加...")
-        await conn.execute(add_column_sql)
-        logger.info(f"成功添加列 '{table_name}.{new_column_name}'。")
-    elif new_col_exists:
-        logger.info(f"列 '{table_name}.{new_column_name}' 已存在，跳过迁移。")
-    
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-
-async def _migrate_text_to_mediumtext(conn, db_type, db_name):
-    """
-    迁移任务: 将多个表中可能存在的 TEXT 字段修改为 MEDIUMTEXT (仅MySQL)。
-    这是为了确保在旧版本上创建的表有足够大的容量。
-    """
-    migration_id = "migrate_text_to_mediumtext"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    if db_type != "mysql":
-        logger.info("非MySQL数据库，跳过 TEXT 到 MEDIUMTEXT 的迁移。")
-        return
-
-    tables_and_columns = {
-        "cache_data": "cache_value",
-        "config": "config_value",
-        "task_history": "description",
-        "external_api_logs": "message"
-    }
-
-    for table, column in tables_and_columns.items():
-        check_sql = text(
-            "SELECT DATA_TYPE FROM information_schema.columns "
-            f"WHERE table_schema = '{db_name}' AND table_name = '{table}' AND column_name = '{column}'"
-        )
-        result = await conn.execute(check_sql)
-        current_type = result.scalar_one_or_none()
-
-        if current_type and current_type.lower() == 'text':
-            logger.info(f"列 '{table}.{column}' 类型为 TEXT，正在修改为 MEDIUMTEXT...")
-            alter_sql = text(f"ALTER TABLE {table} MODIFY COLUMN `{column}` MEDIUMTEXT")
-            await conn.execute(alter_sql)
-            logger.info(f"成功将 '{table}.{column}' 列类型修改为 MEDIUMTEXT。")
-
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-
-async def _migrate_clear_rate_limit_state(conn, db_type, db_name):
-    """
-    迁移任务: 检查是否需要执行一次性的速率限制状态表清理。
-    这用于解决从旧版本升级时可能存在的脏数据问题。
-    """
-    migration_id = "clear_rate_limit_state_on_first_run"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    config_key = "rate_limit_state_cleaned_v1"
-
-    # 检查标志位是否存在
-    check_flag_sql = text("SELECT 1 FROM config WHERE config_key = :key")
-    flag_exists = (await conn.execute(check_flag_sql, {"key": config_key})).scalar_one_or_none() is not None
-
-    if flag_exists:
-        logger.info(f"标志 '{config_key}' 已存在，跳过速率限制状态表的清理。")
-        return
-
-    logger.warning(f"未找到标志 '{config_key}'。将执行一次性的速率限制状态表清理，以确保数据兼容性。")
-    
-    try:
-        # 清空 rate_limit_state 表
-        truncate_sql = text("TRUNCATE TABLE rate_limit_state;")
-        await conn.execute(truncate_sql)
-        logger.info("成功清空 'rate_limit_state' 表。")
-
-        # 同时，从 config 表中移除旧的、现已废弃的速率限制配置键
-        logger.info("正在从 config 表中移除旧的速率限制配置键...")
-        delete_old_keys_sql = text(
-            "DELETE FROM config WHERE config_key IN (:key1, :key2, :key3)"
-        )
-        await conn.execute(
-            delete_old_keys_sql,
-            {"key1": "globalRateLimitEnabled", "key2": "globalRateLimitCount", "key3": "globalRateLimitPeriod"}
-        )
-        logger.info("成功移除旧的速率限制配置键。")
-
-        # 插入标志位
-        insert_flag_sql = text(
-            "INSERT INTO config (config_key, config_value, description) "
-            "VALUES (:key, :value, :desc)"
-        )
-        await conn.execute(
-            insert_flag_sql,
-            {"key": config_key, "value": "true", "desc": "标志位，表示已为兼容性问题执行过一次性的速率限制状态表清理。"}
-        )
-        logger.info(f"一次性清理任务 '{migration_id}' 执行成功。")
-    except Exception as e:
-        logger.error(f"执行一次性清理任务 '{migration_id}' 时发生错误: {e}", exc_info=True)
-
-async def _migrate_add_unique_key_to_task_history(conn, db_type, db_name):
-    """
-    迁移任务: 确保 task_history 表有 unique_key 字段和索引。
-    """
-    migration_id = "add_unique_key_to_task_history"
-    logger.info(f"正在检查是否需要执行迁移: {migration_id}...")
-
-    if db_type == "mysql":
-        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = '{db_name}' AND table_name = 'task_history' AND column_name = 'unique_key'")
-        add_column_sql = text("ALTER TABLE task_history ADD COLUMN `unique_key` VARCHAR(255) NULL, ADD INDEX `idx_unique_key` (`unique_key`)")
-        create_index_sql = None # MySQL 在一条语句中完成
-    elif db_type == "postgresql":
-        check_column_sql = text("SELECT 1 FROM information_schema.columns WHERE table_name = 'task_history' AND column_name = 'unique_key'")
-        add_column_sql = text('ALTER TABLE task_history ADD COLUMN "unique_key" VARCHAR(255) NULL')
-        create_index_sql = text('CREATE INDEX IF NOT EXISTS idx_task_history_unique_key ON task_history (unique_key)')
-    else:
-        return
-
-    column_exists = (await conn.execute(check_column_sql)).scalar_one_or_none() is not None
-    if not column_exists:
-        logger.info("列 'task_history.unique_key' 不存在。正在添加...")
-        await conn.execute(add_column_sql)
-        if create_index_sql is not None:
-            logger.info("正在为 'task_history.unique_key' 创建索引...")
-            await conn.execute(create_index_sql)
-        logger.info("成功添加列 'task_history.unique_key'。")
-    logger.info(f"迁移任务 '{migration_id}' 检查完成。")
-            
-async def _run_migrations(conn):
-    """
-    执行所有一次性的数据库架构迁移。
-    """
-    db_type = settings.database.type.lower()
-    db_name = settings.database.name
-
-    if db_type not in ["mysql", "postgresql"]:
-        logger.warning(f"不支持为数据库类型 '{db_type}' 自动执行迁移。")
-        return
-
-    # 新增：在所有其他迁移之前，首先运行时间校正迁移
-    await _migrate_utc_to_local_datetime(conn, db_type, db_name)
-
-    await _migrate_clear_rate_limit_state(conn, db_type, db_name)
-    await _migrate_add_source_order(conn, db_type, db_name)
-    await _migrate_add_danmaku_file_path(conn, db_type, db_name)
-    await _migrate_cache_value_to_mediumtext(conn, db_type, db_name)
-    await _migrate_text_to_mediumtext(conn, db_type, db_name)
-    await _migrate_add_source_url_to_episode(conn, db_type, db_name)
-    await _migrate_add_unique_key_to_task_history(conn, db_type, db_name)
-
 def _log_db_connection_error(context_message: str, e: Exception):
-    """Logs a standardized, detailed error message for database connection failures."""
+    """
+    Logs a standardized, detailed error message for database connection failures,
+    attempting to diagnose specific issues like connection refused or permission denied.
+    """
     logger.error("="*60)
     logger.error(f"=== {context_message}失败，应用无法启动。 ===")
     logger.error(f"=== 错误类型: {type(e).__name__}")
     logger.error(f"=== 错误详情: {e}")
     logger.error("---")
-    logger.error("--- 可能的原因与排查建议: ---")
-    logger.error("--- 1. 数据库服务未运行: 请确认您的数据库服务正在运行。")
-    logger.error(f"--- 2. 配置错误: 请检查您的配置文件或环境变量中的数据库连接信息是否正确。")
-    logger.error(f"---    - 主机 (Host): {settings.database.host}")
-    logger.error(f"---    - 端口 (Port): {settings.database.port}")
-    logger.error(f"---    - 用户 (User): {settings.database.user}")
-    logger.error("--- 3. 网络问题: 如果应用和数据库在不同的容器或机器上，请检查它们之间的网络连接和防火墙设置。")
-    logger.error("--- 4. 权限问题: 确认提供的用户有权限从应用所在的IP地址连接，并有创建数据库的权限。")
+    logger.error("--- 诊断与排查建议: ---")
+
+    # Attempt to provide more specific diagnostics based on the exception type
+    specific_diagnosis = ""
+    if isinstance(e, OperationalError):
+        # For MySQL (pymysql) errors, e.orig often has an errno
+        if hasattr(e.orig, 'errno'):
+            if e.orig.errno == 2003:
+                specific_diagnosis = "无法连接到数据库服务器。请检查主机和端口配置，以及网络防火墙。"
+            elif e.orig.errno == 1044:
+                specific_diagnosis = f"数据库用户 '{settings.database.user}' 权限不足，无法创建或访问数据库 '{settings.database.name}'。"
+            elif e.orig.errno == 1045:
+                specific_diagnosis = f"数据库用户 '{settings.database.user}' 的密码错误。"
+            else:
+                specific_diagnosis = f"数据库操作错误 (MySQL 错误码: {e.orig.errno})。"
+        # For PostgreSQL (asyncpg) errors, check the original exception type/message
+        elif isinstance(e.orig, Exception):
+            err_str = str(e.orig).lower()
+            if "connection refused" in err_str or "could not connect" in err_str:
+                specific_diagnosis = "无法连接到数据库服务器。请检查主机和端口配置，以及网络防火墙。"
+            elif "permission denied" in err_str or "privilege" in err_str:
+                specific_diagnosis = f"数据库用户 '{settings.database.user}' 权限不足。"
+            elif "password authentication failed" in err_str:
+                specific_diagnosis = f"数据库用户 '{settings.database.user}' 的密码错误。"
+    elif isinstance(e, ProgrammingError):
+        specific_diagnosis = "数据库编程错误，可能是SQL语法或权限问题。"
+
+    if specific_diagnosis:
+        logger.error(f"--- [!] 精确诊断: {specific_diagnosis}")
+        logger.error("---")
+
+    logger.error("--- 通用检查列表: ---")
+    logger.error("--- 1. 数据库服务是否正在运行？")
+    logger.error(f"--- 2. 数据库配置是否正确？ (主机: {settings.database.host}, 端口: {settings.database.port}, 用户: {settings.database.user})")
+    logger.error("--- 3. 数据库密码是否正确？")
+    logger.error("--- 4. 数据库用户是否有足够的权限？")
+    logger.error("--- 5. 应用与数据库之间的网络是否通畅？")
     logger.error("="*60)
 
 async def create_db_engine_and_session(app: FastAPI):
@@ -550,6 +223,6 @@ async def init_db_tables(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         logger.info("数据库模型同步完成。")
 
-        # 2. 然后，在已存在的表结构上运行手动迁移。
-        await _run_migrations(conn)
+        # 2. 然后，在已存在的表结构上运行统一的迁移任务。
+        await run_migrations(conn, settings.database.type.lower(), settings.database.name)
     logger.info("数据库初始化完成。")

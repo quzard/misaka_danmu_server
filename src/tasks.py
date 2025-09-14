@@ -1141,13 +1141,13 @@ async def auto_search_and_import_task(
 
         search_type = payload.searchType
         search_term = payload.searchTerm
+        media_type = payload.mediaType
+        season = payload.season
         
         await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
 
         aliases = {search_term}
         main_title = search_term
-        media_type = payload.mediaType
-        season = payload.season
         image_url = None
         tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
@@ -1155,87 +1155,77 @@ async def auto_search_and_import_task(
         user = models.User(id=1, username="admin")
 
         # 1. 获取元数据和别名
-        if search_type != "keyword":
-            # --- Start of fix for TMDB/TVDB mediaType ---
-            # 如果是TMDB或TVDB搜索，且没有提供mediaType，则根据有无季/集信息进行推断
-            # 同时，将内部使用的 'tv_series'/'movie' 转换为特定提供商需要的格式
-            provider_media_type = media_type
-            if search_type in ["tmdb", "tvdb"]:
-                # TVDB API v4 使用 'series' 和 'movies'
-                provider_specific_tv_type = "tv" if search_type == "tmdb" else "series"
-                provider_specific_movie_type = "movie" if search_type == "tmdb" else "movies"
+        details: Optional[models.MetadataDetailsResponse] = None
+        
+        # 智能检测：如果 searchType 是 keyword 但 searchTerm 是数字，则尝试将其作为 TMDB ID 处理
+        effective_search_type = search_type.value
+        if search_type == "keyword" and search_term.isdigit():
+            logger.info(f"检测到关键词 '{search_term}' 为数字，将尝试作为TMDB ID进行元数据获取...")
+            effective_search_type = "tmdb"
 
-                if not media_type:
-                    # 修正：只要提供了季度信息，就应推断为电视剧
-                    if payload.season is not None:
-                        provider_media_type = provider_specific_tv_type
-                        media_type = "tv_series" # 更新内部使用的类型
-                        logger.info(f"{search_type.upper()} 搜索未提供 mediaType，根据季/集信息推断为 '{provider_specific_tv_type}'。")
-                    else:
-                        provider_media_type = provider_specific_movie_type
-                        media_type = "movie" # 更新内部使用的类型
-                        logger.info(f"{search_type.upper()} 搜索未提供 mediaType 和季/集信息，默认推断为 '{provider_specific_movie_type}'。")
-                elif media_type == "tv_series":
-                    provider_media_type = provider_specific_tv_type
-                elif media_type == "movie":
-                    provider_media_type = provider_specific_movie_type
-            # --- End of fix ---
+        if effective_search_type != "keyword":
+            provider_media_type = None
+            if media_type:
+                if effective_search_type == 'tmdb':
+                    provider_media_type = 'tv' if media_type == 'tv_series' else 'movie'
+                elif effective_search_type == 'tvdb':
+                    provider_media_type = 'series' if media_type == 'tv_series' else 'movies'
+
             try:
-                await progress_callback(10, f"正在从 {search_type.upper()} 获取元数据...")
+                await progress_callback(10, f"正在从 {effective_search_type.upper()} 获取元数据...")
                 details = await metadata_manager.get_details(
-                    provider=search_type, item_id=search_term, user=user, mediaType=provider_media_type
+                    provider=effective_search_type, item_id=search_term, user=user, mediaType=provider_media_type
                 )
-                
-                if details:
-                    main_title = details.title or main_title
-                    image_url = details.imageUrl
-                    aliases.add(main_title)
-                    aliases.update(details.aliasesCn or [])
-                    aliases.add(details.nameEn)
-                    aliases.add(details.nameJp)
-                    tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
-                        details.tmdbId, details.bangumiId, details.doubanId,
-                        details.tvdbId, details.imdbId
-                    )
-                    # 修正：从元数据源获取最准确的媒体类型
-                    if hasattr(details, 'type') and details.type:
-                        media_type = details.type
-                    
-                    # 新增：从其他启用的元数据源获取更多别名，以提高搜索覆盖率
-                    logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
-                    enriched_aliases = await metadata_manager.search_aliases_from_enabled_sources(main_title, user)
-                    if enriched_aliases:
-                        aliases.update(enriched_aliases)
-                        logger.info(f"别名已扩充: {aliases}")
+                if not details and search_type == "keyword":
+                    logger.info(f"作为TMDB ID获取元数据失败，将按原样作为关键词处理。")
             except Exception as e:
-                logger.error(f"从 {search_type.upper()} 获取元数据失败: {e}\n{traceback.format_exc()}")
-                # Don't fail the whole task, just proceed with the original search term
+                logger.error(f"从 {effective_search_type.upper()} 获取元数据失败: {e}\n{traceback.format_exc()}")
+                if search_type == "keyword":
+                    logger.warning(f"尝试将关键词作为TMDB ID处理时出错，将按原样作为关键词处理。")
+
+        if details:
+            main_title = details.title or main_title
+            image_url = details.imageUrl
+            aliases.add(main_title)
+            aliases.update(details.aliasesCn or [])
+            aliases.add(details.nameEn)
+            aliases.add(details.nameJp)
+            tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = (
+                details.tmdbId, details.bangumiId, details.doubanId,
+                details.tvdbId, details.imdbId
+            )
+            if hasattr(details, 'type') and details.type:
+                media_type = details.type
+            
+            logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
+            enriched_aliases = await metadata_manager.search_aliases_from_enabled_sources(main_title, user)
+            if enriched_aliases:
+                aliases.update(enriched_aliases)
+                logger.info(f"别名已扩充: {aliases}")
 
         # 2. 检查媒体库中是否已存在
+        existing_anime: Optional[Dict[str, Any]] = None
         await progress_callback(20, "正在检查媒体库...")
         
-        # 新增：优先通过元数据ID检查作品是否存在，以防止因标题不一致而重复入库
-        existing_anime_id: Optional[int] = None
-        id_check_map = {
-            "tmdb": (tmdb_id, crud.get_anime_id_by_tmdb_id),
-            "tvdb": (tvdb_id, crud.get_anime_id_by_tvdb_id),
-            "imdb": (imdb_id, crud.get_anime_id_by_imdb_id),
-            "douban": (douban_id, crud.get_anime_id_by_douban_id),
-            "bangumi": (bangumi_id, crud.get_anime_id_by_bangumi_id),
-        }
-        
-        # 如果是按ID搜索，则直接使用该ID进行检查
-        if search_type != "keyword":
-            id_to_check, crud_func = id_check_map[search_type]
-            if id_to_check:
-                existing_anime_id = await crud_func(session, id_to_check)
-                if existing_anime_id:
-                    logger.info(f"通过 {search_type.upper()} ID '{id_to_check}' 在库中找到已存在的作品 (Anime ID: {existing_anime_id})。")
+        # 步骤 2a: 优先通过元数据ID和季度号进行精确查找
+        if search_type != "keyword" and season is not None:
+            id_column_map = {
+                "tmdb": "tmdbId", "tvdb": "tvdbId", "imdb": "imdbId",
+                "douban": "doubanId", "bangumi": "bangumiId"
+            }
+            id_type = id_column_map.get(search_type.value)
+            if id_type:
+                logger.info(f"正在通过 {search_type.upper()} ID '{search_term}' 和季度 {season} 精确查找...")
+                existing_anime = await crud.find_anime_by_metadata_id_and_season(
+                    session, id_type, search_term, season
+                )
+                if existing_anime:
+                    logger.info(f"精确查找到已存在的作品: {existing_anime['title']} (ID: {existing_anime['id']})")
 
-        existing_anime = None
-        if existing_anime_id:
-            existing_anime = await crud.get_anime_full_details(session, existing_anime_id)
-        else:
+        # 步骤 2b: 如果精确查找未找到，则回退到按标题和季度查找
+        if not existing_anime:
+            if search_type != "keyword":
+                logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
 

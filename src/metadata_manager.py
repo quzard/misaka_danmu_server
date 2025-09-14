@@ -51,6 +51,16 @@ class MetadataSourceManager:
         self._build_source_routers()
         logger.info("元数据源管理器已初始化。")
 
+    def get_source(self, provider_name: str) -> Any:
+        """
+        根据提供方名称获取元数据源的实例。
+        """
+        source_instance = self.sources.get(provider_name)
+        if not source_instance:
+            # 抛出 ValueError 以匹配 ui_api.py 中已有的异常处理逻辑
+            raise ValueError(f"未找到或未启用名为 '{provider_name}' 的元数据源。")
+        return source_instance
+
     def _build_source_routers(self):
         """
         遍历所有已加载的源，并将其API路由注册到管理器的路由器中。

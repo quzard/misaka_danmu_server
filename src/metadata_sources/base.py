@@ -21,7 +21,6 @@ class BaseMetadataSource(ABC):
         self.config_manager = config_manager
         self.scraper_manager = scraper_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client: Optional[httpx.AsyncClient] = None
 
     @abstractmethod
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
@@ -60,5 +59,4 @@ class BaseMetadataSource(ABC):
 
     async def close(self):
         """关闭所有打开的资源，例如HTTP客户端。"""
-        if self.client:
-            await self.client.aclose()
+        pass

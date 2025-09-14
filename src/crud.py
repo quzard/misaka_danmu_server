@@ -15,7 +15,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.sql.elements import ColumnElement
 
 from . import models
-from .orm_models import (
+from . import orm_models
+from .orm_models import ( # noqa: F401
     Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
 , RateLimitState)
 from .config import settings
@@ -395,6 +396,29 @@ async def find_anime_by_title_and_season(session: AsyncSession, title: str, seas
     row = result.mappings().first()
     return dict(row) if row else None
 
+async def find_anime_by_metadata_id_and_season(
+    session: AsyncSession, 
+    id_type: str,
+    media_id: str, 
+    season: int
+) -> Optional[Dict[str, Any]]:
+    """
+    通过元数据ID和季度号精确查找一个作品。
+    """
+    id_column = getattr(AnimeMetadata, id_type, None)
+    if id_column is None:
+        raise ValueError(f"无效的元数据ID类型: {id_type}")
+
+    stmt = (
+        select(Anime.id, Anime.title, Anime.season)
+        .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId)
+        .where(id_column == media_id, Anime.season == season)
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.mappings().first()
+    return dict(row) if row else None
+
 async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, season: Optional[int] = None) -> List[int]:
     """根据作品标题和可选的季度号获取已存在的所有分集序号列表。"""
     stmt = (
@@ -629,31 +653,31 @@ async def get_anime_id_by_bangumi_id(session: AsyncSession, bangumi_id: str) -> 
     """通过 bangumi_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.bangumiId == bangumi_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_tmdb_id(session: AsyncSession, tmdb_id: str) -> Optional[int]:
     """通过 tmdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tmdbId == tmdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_tvdb_id(session: AsyncSession, tvdb_id: str) -> Optional[int]:
     """通过 tvdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tvdbId == tvdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_imdb_id(session: AsyncSession, imdb_id: str) -> Optional[int]:
     """通过 imdb_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.imdbId == imdb_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def get_anime_id_by_douban_id(session: AsyncSession, douban_id: str) -> Optional[int]:
     """通过 douban_id 查找 anime_id。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.doubanId == douban_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
     """检查具有给定提供商和媒体ID的源是否已存在。"""
@@ -1498,14 +1522,14 @@ async def get_all_api_tokens(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(ApiToken).order_by(ApiToken.createdAt.desc())
     result = await session.execute(stmt)
     return [
-        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt}
+        {"id": t.id, "name": t.name, "token": t.token, "isEnabled": t.isEnabled, "expiresAt": t.expiresAt, "createdAt": t.createdAt, "dailyCallLimit": t.dailyCallLimit, "dailyCallCount": t.dailyCallCount}
         for t in result.scalars()
     ]
 
 async def get_api_token_by_id(session: AsyncSession, token_id: int) -> Optional[Dict[str, Any]]:
     token = await session.get(ApiToken, token_id)
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt, "dailyCallLimit": token.dailyCallLimit, "dailyCallCount": token.dailyCallCount}
     return None
 
 async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> Optional[Dict[str, Any]]:
@@ -1513,10 +1537,10 @@ async def get_api_token_by_token_str(session: AsyncSession, token_str: str) -> O
     result = await session.execute(stmt)
     token = result.scalar_one_or_none()
     if token:
-        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt}
+        return {"id": token.id, "name": token.name, "token": token.token, "isEnabled": token.isEnabled, "expiresAt": token.expiresAt, "createdAt": token.createdAt, "dailyCallLimit": token.dailyCallLimit, "dailyCallCount": token.dailyCallCount}
     return None
 
-async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str) -> int:
+async def create_api_token(session: AsyncSession, name: str, token: str, validityPeriod: str, daily_call_limit: int) -> int:
     """创建新的API Token，如果名称已存在则会失败。"""
     # 检查名称是否已存在
     existing_token = await session.execute(select(ApiToken).where(ApiToken.name == name))
@@ -1531,11 +1555,40 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     new_token = ApiToken(
         name=name, token=token, 
         expiresAt=expires_at, 
-        createdAt=get_now()
+        createdAt=get_now(),
+        dailyCallLimit=daily_call_limit
     )
     session.add(new_token)
     await session.commit()
     return new_token.id
+
+async def update_api_token(
+    session: AsyncSession,
+    token_id: int,
+    name: str,
+    daily_call_limit: int,
+    validity_period: str
+) -> bool:
+    """更新API Token的名称、调用上限和有效期。"""
+    token = await session.get(orm_models.ApiToken, token_id)
+    if not token:
+        return False
+
+    token.name = name
+    token.dailyCallLimit = daily_call_limit
+
+    if validity_period != 'custom':
+        if validity_period == 'permanent':
+            token.expiresAt = None
+        else:
+            try:
+                days = int(validity_period.replace('d', ''))
+                token.expiresAt = get_now() + timedelta(days=days)
+            except (ValueError, TypeError):
+                logger.warning(f"更新Token时收到无效的有效期格式: '{validity_period}'")
+
+    await session.commit()
+    return True
 
 async def delete_api_token(session: AsyncSession, token_id: int) -> bool:
     token = await session.get(ApiToken, token_id)
@@ -1553,6 +1606,16 @@ async def toggle_api_token(session: AsyncSession, token_id: int) -> bool:
         return True
     return False
 
+async def reset_token_counter(session: AsyncSession, token_id: int) -> bool:
+    """将指定Token的每日调用次数重置为0。"""
+    token = await session.get(orm_models.ApiToken, token_id)
+    if not token:
+        return False
+    
+    token.dailyCallCount = 0
+    await session.commit()
+    return True
+
 async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict[str, Any]]:
     stmt = select(ApiToken).where(ApiToken.token == token, ApiToken.isEnabled == True)
     result = await session.execute(stmt)
@@ -1560,11 +1623,40 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     if not token_info:
         return None
     # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
-    # 修正：现在所有时间都是naive的，可以直接比较
     if token_info.expiresAt:
         if token_info.expiresAt < get_now(): # Compare naive datetimes
             return None # Token 已过期
-    return {"id": token_info.id, "expiresAt": token_info.expiresAt} # type: ignore
+    
+    # --- 新增：每日调用限制检查 ---
+    now = get_now()
+    current_count = token_info.dailyCallCount
+    
+    # 如果有上次调用记录，且不是今天，则视为计数为0
+    if token_info.lastCallAt and token_info.lastCallAt.date() < now.date():
+        current_count = 0
+        
+    if token_info.dailyCallLimit != -1 and current_count >= token_info.dailyCallLimit:
+        return None # Token 已达到每日调用上限
+
+    return {"id": token_info.id, "expiresAt": token_info.expiresAt, "dailyCallLimit": token_info.dailyCallLimit, "dailyCallCount": token_info.dailyCallCount} # type: ignore
+
+async def increment_token_call_count(session: AsyncSession, token_id: int):
+    """为指定的Token增加调用计数。"""
+    token = await session.get(ApiToken, token_id)
+    if not token:
+        return
+
+    now = get_now()
+    # 如果是新的一天，重置计数器为1
+    if token.lastCallAt is None or token.lastCallAt.date() < now.date():
+        token.dailyCallCount = 1
+    else:
+        # 否则，简单地增加计数
+        token.dailyCallCount += 1
+    
+    # 总是更新最后调用时间
+    token.lastCallAt = now
+    # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
 
 # --- UA Filter and Log Services ---
 

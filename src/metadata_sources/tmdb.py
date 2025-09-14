@@ -2,11 +2,13 @@ import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set, cast
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import crud, models, utils
+from ..config_manager import ConfigManager
 from .base import BaseMetadataSource
 
 from fastapi import HTTPException, status
@@ -21,8 +23,34 @@ def _clean_movie_title(title: Optional[str]) -> Optional[str]:
     cleaned_title = re.sub(r'\s{2,}', ' ', cleaned_title).strip().strip(':- ')
     return cleaned_title
 
+async def _get_proxy_for_tmdb(config_manager: ConfigManager, session_factory: async_sessionmaker[AsyncSession]) -> Optional[str]:
+    """Helper to determine if a proxy should be used for TMDB."""
+    proxy_url = await config_manager.get("proxy_url", "")
+    proxy_enabled_globally = (await config_manager.get("proxy_enabled", "false")).lower() == 'true'
+    if not proxy_enabled_globally or not proxy_url:
+        return None
+    
+    async with session_factory() as session:
+        metadata_settings = await crud.get_all_metadata_source_settings(session)
+    
+    provider_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
+    use_proxy = provider_setting.get('useProxy', False) if provider_setting else False
+    
+    return proxy_url if use_proxy else None
+
 class TmdbMetadataSource(BaseMetadataSource):
     provider_name = "tmdb"
+
+    @property
+    async def test_url(self) -> str:
+        """
+        动态地从配置中获取测试URL。
+        这确保了代理测试和连接性检查使用的是用户配置的域名。
+        """
+        base_url_from_config = await self.config_manager.get("tmdbApiBaseUrl", "https://api.themoviedb.org/3")
+        # 测试URL应该是基础域名，不应包含 /3 这样的API路径
+        cleaned_domain = base_url_from_config.rstrip('/')
+        return re.sub(r'/3/?$', '', cleaned_domain)
 
     async def _get_robust_image_base_url(self) -> str:
         """
@@ -49,7 +77,10 @@ class TmdbMetadataSource(BaseMetadataSource):
         base_url = cleaned_domain if cleaned_domain.endswith('/3') else f"{cleaned_domain}/3"
         
         params = {"api_key": api_key, "language": "zh-CN"}
-        return httpx.AsyncClient(base_url=base_url, params=params, timeout=20.0, follow_redirects=True)
+        proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
+        if proxy_to_use:
+            self.logger.debug(f"TMDB: 将使用代理: {proxy_to_use}")
+        return httpx.AsyncClient(base_url=base_url, params=params, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         if not mediaType:
@@ -209,13 +240,21 @@ class TmdbMetadataSource(BaseMetadataSource):
 
     async def check_connectivity(self) -> str:
         try:
+            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
+            proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
+            is_using_proxy = bool(proxy_to_use)
+            if is_using_proxy:
+                self.logger.debug(f"TMDB: 连接性检查将使用代理: {proxy_to_use}")
             async with await self._create_client() as client:
                 response = await client.get("/configuration")
-                return "连接成功" if response.status_code == 200 else f"连接失败 (状态码: {response.status_code})"
+                if response.status_code == 200:
+                    return "通过代理连接成功" if is_using_proxy else "连接成功"
+                else:
+                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
         except ValueError as e: # API Key not configured
             return f"未配置: {e}"
         except Exception as e:
-            return f"连接失败: {e}"
+            return f"连接失败: {e}" # 代理信息已包含在异常中
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Any) -> Any:
         try:
