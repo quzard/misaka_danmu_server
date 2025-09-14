@@ -58,14 +58,6 @@ export const Proxy = () => {
           配置一个全局代理，可用于访问受限的网络资源。支持 http, https, socks5
           协议。
         </div>
-        <Form.Item
-          name="proxyEnabled"
-          label="启用代理"
-          className="mb-6"
-          valuePropName="checked"
-        >
-          <Switch onChange={checked => setProxyEnabled(checked)} />
-        </Form.Item>
 
         <Form
           form={form}
@@ -73,6 +65,14 @@ export const Proxy = () => {
           onFinish={handleSave}
           className="px-6 pb-6"
         >
+          <Form.Item
+            name="proxyEnabled"
+            label="启用代理"
+            className="mb-6"
+            valuePropName="checked"
+          >
+            <Switch onChange={checked => setProxyEnabled(checked)} />
+          </Form.Item>
           <Form.Item name="proxyProtocol" label="协议" className="mb-6">
             <Select
               disabled={!proxyEnabled}
