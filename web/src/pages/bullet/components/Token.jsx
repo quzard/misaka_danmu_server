@@ -224,7 +224,7 @@ export const Token = () => {
       title: '创建时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
-      width: 200,
+      width: 180,
       render: (_, record) => {
         return (
           <div>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}</div>
@@ -235,7 +235,7 @@ export const Token = () => {
       title: '有效期',
       dataIndex: 'expiresAt',
       key: 'expiresAt',
-      width: 200,
+      width: 180,
       render: (_, record) => {
         return (
           <div>
@@ -248,7 +248,7 @@ export const Token = () => {
     },
     {
       title: '操作',
-      width: 120,
+      width: 160,
       fixed: 'right',
       render: (_, record) => {
         return (
