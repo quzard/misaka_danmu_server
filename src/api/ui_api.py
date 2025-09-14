@@ -1034,9 +1034,16 @@ async def test_proxy_latency(
     test_domains = set()
 
     # 2a. 添加所有已启用的元数据源
-    enabled_metadata_sources = await metadata_manager.get_enabled_sources()
-    for source in enabled_metadata_sources:
-        if source.test_url: test_domains.add(source.test_url)
+    # 修正：直接从数据库查询已启用的元数据源，因为 MetadataSourceManager 中没有 get_enabled_sources 方法
+    enabled_metadata_settings = await crud.get_all_metadata_source_settings(session)
+    for setting in enabled_metadata_settings:
+        if setting['isEnabled']:
+            try:
+                source_instance = metadata_manager.get_source(setting['providerName'])
+                if source_instance.test_url:
+                    test_domains.add(source_instance.test_url)
+            except ValueError:
+                pass
     
     if not proxy_url:
         # 如果不使用代理，只测试元数据源
