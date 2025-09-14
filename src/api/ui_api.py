@@ -1039,8 +1039,8 @@ async def test_proxy_latency(
     for setting in enabled_metadata_settings:
         if setting['isEnabled']:
             try:
-                # 修正4：直接从 metadata_manager 的内部字典 _sources 获取实例
-                source_instance = metadata_manager._sources.get(setting['providerName'])
+                # 最终修正：调用新增的、可靠的 get_source 公共方法
+                source_instance = metadata_manager.get_source(setting['providerName'])
                 if test_url := getattr(source_instance, 'test_url', None):
                     test_domains.add(test_url)
             except ValueError:
