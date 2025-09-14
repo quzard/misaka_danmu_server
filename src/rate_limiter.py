@@ -40,12 +40,29 @@ def fixed_sm3_z(self, uid='1234567812345678'):
 sm2.CryptSM2._sm3_z = fixed_sm3_z 
 
 
-def _extract_hex_from_pem(pem_string: str) -> str:
-    pem_string = re.sub(r'-----(BEGIN|END) PUBLIC KEY-----', '', pem_string)
-    pem_string = pem_string.replace('\n', '').replace('\r', '')
-    der_data = base64.b64decode(pem_string)
-    public_key_bytes = der_data[-65:]
-    return public_key_bytes.hex()
+def _extract_hex_from_pem(pem_content: str) -> str:
+    """
+    从PEM格式的公钥字符串中稳健地提取十六进制公钥。
+    此函数能够正确解析ASN.1 DER编码结构。
+    """
+    try:
+        pem_lines = pem_content.strip().split('\n')
+        base64_str = "".join(line for line in pem_lines if not line.startswith("-----"))
+
+        der_data = base64.b64decode(base64_str)
+
+        if der_data[0] != 0x30:
+            raise ValueError("PEM内容不是一个有效的DER SEQUENCE。")
+
+        bit_string_tag_index = der_data.find(b'\x03')
+        if bit_string_tag_index == -1:
+            raise ValueError("在DER编码中未找到BIT STRING。")
+
+        public_key_bytes = der_data[bit_string_tag_index + 2 + der_data[bit_string_tag_index + 1] - 65:]
+        return public_key_bytes.hex()
+    except Exception as e:
+        logger.error(f"解析PEM公钥时发生错误: {e}", exc_info=True)
+        raise ValueError("无法解析PEM公钥。") from e
 
 class RateLimiter:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], scraper_manager: ScraperManager):
