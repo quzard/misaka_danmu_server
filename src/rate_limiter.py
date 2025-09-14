@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 from pathlib import Path
+import hashlib
 import base64
 import re
 from datetime import datetime, timezone
@@ -137,6 +138,25 @@ class RateLimiter:
                     json_bytes.append(byte ^ XOR_KEY[i % len(XOR_KEY)])
 
                 config_data = json.loads(json_bytes.decode('utf-8'))
+
+                # --- 新增：校验 rate_limiter.py 文件本身的完整性 ---
+                expected_hash = config_data.get("rate_limiter_hash")
+                if not expected_hash:
+                    self.logger.critical("!!! 严重安全警告：配置文件中缺少 'rate_limiter_hash'，无法校验核心文件完整性。")
+                    self._verification_failed = True
+                    raise ConfigVerificationError("配置文件中缺少核心文件哈希")
+
+                rate_limiter_path = Path(__file__) # This file itself
+                actual_hash = hashlib.sha256(rate_limiter_path.read_bytes()).hexdigest()
+
+                if actual_hash != expected_hash:
+                    self.logger.critical("="*60)
+                    self.logger.critical("！！！严重安全警告：rate_limiter.py 文件完整性校验失败！文件可能已被篡改。！！！")
+                    self.logger.critical("="*60)
+                    self._verification_failed = True
+                    raise ConfigVerificationError("rate_limiter.py 文件完整性校验失败")
+                
+                self.logger.info("rate_limiter.py 文件完整性校验通过。")
                 if config_data:
                     self.enabled = config_data.get("enabled", self.enabled)
                     self.global_limit = config_data.get("global_limit", self.global_limit)
