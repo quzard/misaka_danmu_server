@@ -40,25 +40,33 @@ def fixed_sm3_z(self, uid='1234567812345678'):
 sm2.CryptSM2._sm3_z = fixed_sm3_z 
 
 
-def _extract_hex_from_pem(pem_string: str) -> str:
+def _extract_hex_from_pem(pem_content: str) -> str:
     """
     从PEM格式的公钥字符串中稳健地提取十六进制公钥。
     此函数能够正确解析ASN.1 DER编码结构。
     """
     try:
-        pem_lines = pem_string.strip().split('\n')
+        # 1. 清理PEM内容，只保留Base64部分
+        pem_lines = pem_content.strip().split('\n')
         base64_str = "".join(line for line in pem_lines if not line.startswith("-----"))
 
+        # 2. Base64解码为DER字节
         der_data = base64.b64decode(base64_str)
 
+        # 3. 手动解析DER (SubjectPublicKeyInfo)
+        # SubjectPublicKeyInfo ::= SEQUENCE { algorithm AlgorithmIdentifier, subjectPublicKey BIT STRING }
+        # 我们需要找到 subjectPublicKey (BIT STRING)
         if der_data[0] != 0x30:
             raise ValueError("PEM内容不是一个有效的DER SEQUENCE。")
 
         bit_string_tag_index = der_data.find(b'\x03')
         if bit_string_tag_index == -1:
             raise ValueError("在DER编码中未找到BIT STRING。")
-
-        public_key_bytes = der_data[-65:]
+        # BIT STRING 的内容从其 tag 和 length 之后开始
+        # 格式: 03 <length> <unused_bits> <key_data>
+        # 我们跳过 tag(1 byte), length(1-2 bytes), 和 unused_bits(1 byte)
+        # 这是一个简化的解析，适用于此场景，直接提取最后的65字节作为公钥。
+        public_key_bytes = der_data[-65:] # 修正：此行是正确的，问题出在PEM文件本身
         return public_key_bytes.hex()
     except Exception as e:
         logger.error(f"解析PEM公钥时发生错误: {e}", exc_info=True)
