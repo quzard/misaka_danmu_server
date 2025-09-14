@@ -40,13 +40,13 @@ def fixed_sm3_z(self, uid='1234567812345678'):
 sm2.CryptSM2._sm3_z = fixed_sm3_z 
 
 
-def _extract_hex_from_pem(pem_content: str) -> str:
+def _extract_hex_from_pem(pem_string: str) -> str:
     """
     从PEM格式的公钥字符串中稳健地提取十六进制公钥。
     此函数能够正确解析ASN.1 DER编码结构。
     """
     try:
-        pem_lines = pem_content.strip().split('\n')
+        pem_lines = pem_string.strip().split('\n')
         base64_str = "".join(line for line in pem_lines if not line.startswith("-----"))
 
         der_data = base64.b64decode(base64_str)
@@ -58,7 +58,7 @@ def _extract_hex_from_pem(pem_content: str) -> str:
         if bit_string_tag_index == -1:
             raise ValueError("在DER编码中未找到BIT STRING。")
 
-        public_key_bytes = der_data[bit_string_tag_index + 2 + der_data[bit_string_tag_index + 1] - 65:]
+        public_key_bytes = der_data[-65:]
         return public_key_bytes.hex()
     except Exception as e:
         logger.error(f"解析PEM公钥时发生错误: {e}", exc_info=True)
@@ -73,8 +73,7 @@ class RateLimiter:
 
         self.enabled: bool = True
         self.global_limit: int = 50
-        self.global_period_seconds: int = 3600 # 默认1小时
-
+        self.global_period_seconds: int = 3600 
         try:
             config_dir = Path(__file__).parent / "rate_limit"
             config_path = config_dir / "rate_limit.bin"
