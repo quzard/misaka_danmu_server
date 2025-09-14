@@ -49,7 +49,7 @@ def fixed_verify(self, sign: str, data: bytes, uid: Union[str, bytes]) -> bool:
     z_hex = self._sm3_z(uid=uid)
     message_bytes = z_hex.encode('utf-8') + data
     hash_to_verify = sm3.sm3_hash(func.bytes_to_list(message_bytes))
-    return original_verify(self, sign, bytes.fromhex(hash_to_verify)) # type: ignore
+    return original_verify(self, sign, bytes.fromhex(hash_to_verify))
 
 sm2.CryptSM2.verify = fixed_verify 
 
@@ -139,15 +139,15 @@ class RateLimiter:
 
                 config_data = json.loads(json_bytes.decode('utf-8'))
 
-                # --- 新增：校验 rate_limiter.py 文件本身的完整性 ---
                 expected_hash = config_data.get("rate_limiter_hash")
                 if not expected_hash:
                     self.logger.critical("!!! 严重安全警告：配置文件中缺少 'rate_limiter_hash'，无法校验核心文件完整性。")
                     self._verification_failed = True
                     raise ConfigVerificationError("配置文件中缺少核心文件哈希")
 
-                rate_limiter_path = Path(__file__) # This file itself
-                actual_hash = hashlib.sha256(rate_limiter_path.read_bytes()).hexdigest()
+                rate_limiter_path = Path(__file__) 
+                rate_limiter_content_bytes = rate_limiter_path.read_bytes()
+                actual_hash = hashlib.sha256(rate_limiter_content_bytes.replace(b'\r\n', b'\n')).hexdigest()
 
                 if actual_hash != expected_hash:
                     self.logger.critical("="*60)
