@@ -4,7 +4,6 @@ import {
   Col,
   Form,
   Input,
-  message,
   Row,
   Tooltip,
   Select,
@@ -12,6 +11,7 @@ import {
   Spin,
   Tag,
   Divider,
+  Space,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { getProxyConfig, setProxyConfig, testProxy } from '../../../apis'
