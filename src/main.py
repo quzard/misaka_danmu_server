@@ -1,6 +1,7 @@
 import uvicorn
 import asyncio
 import secrets
+import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, status
 from fastapi.openapi.docs import get_swagger_ui_html
