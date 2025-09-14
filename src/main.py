@@ -3,6 +3,7 @@ import asyncio
 import secrets
 import httpx
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request, Depends, status
 from fastapi.openapi.docs import get_swagger_ui_html
 import logging
@@ -291,7 +292,9 @@ app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible
 app.include_router(api_router, prefix="/api")
 
 # --- 新增：挂载 Swagger UI 的静态文件目录 ---
-app.mount("/static/swagger-ui", StaticFiles(directory="static/swagger-ui"), name="swagger-ui-static")
+# 修正：使用绝对路径以确保无论从哪里运行都能找到静态文件目录
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "swagger-ui"
+app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger-ui-static")
 
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
