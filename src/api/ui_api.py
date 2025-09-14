@@ -1039,10 +1039,8 @@ async def test_proxy_latency(
     for setting in enabled_metadata_settings:
         if setting['isEnabled']:
             try:
-                # 修正：应该使用 scraper_manager 来获取元数据源的实例，
-                # 修正2：应该使用 metadata_manager 来获取元数据源实例
-                source_instance = metadata_manager.get_source(setting['providerName'])
-                # 修正3：安全地访问 test_url 属性
+                # 修正4：直接从 metadata_manager 的内部字典 _sources 获取实例
+                source_instance = metadata_manager._sources.get(setting['providerName'])
                 if test_url := getattr(source_instance, 'test_url', None):
                     test_domains.add(test_url)
             except ValueError:
