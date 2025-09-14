@@ -9,9 +9,12 @@ import {
   Tooltip,
   Select,
   Switch,
+  Spin,
+  Tag,
+  Divider,
 } from 'antd'
 import { useEffect, useState } from 'react'
-import { getProxyConfig, setProxyConfig } from '../../../apis'
+import { getProxyConfig, setProxyConfig, testProxy } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 
 export const Proxy = () => {
@@ -19,6 +22,8 @@ export const Proxy = () => {
   const [loading, setLoading] = useState(true)
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
+  const [isTestLoading, setIsTestLoading] = useState(false)
+  const [testResult, setTestResult] = useState(null)
   const messageApi = useMessage()
 
   useEffect(() => {
@@ -51,6 +56,43 @@ export const Proxy = () => {
     }
   }
 
+  const handleTest = async () => {
+    try {
+      setIsTestLoading(true)
+      setTestResult(null)
+      const values = await form.validateFields()
+      let proxyUrl = ''
+      if (
+        values.proxyEnabled &&
+        values.proxyHost &&
+        values.proxyPort &&
+        values.proxyProtocol
+      ) {
+        let userinfo = ''
+        if (values.proxyUsername) {
+          userinfo = encodeURIComponent(values.proxyUsername)
+          if (values.proxyPassword) {
+            userinfo += ':' + encodeURIComponent(values.proxyPassword)
+          }
+          userinfo += '@'
+        }
+        proxyUrl = `${values.proxyProtocol}://${userinfo}${values.proxyHost}:${values.proxyPort}`
+      }
+      const res = await testProxy({ proxy_url: proxyUrl })
+      setTestResult(res.data)
+    } catch (error) {
+      messageApi.error('测试请求失败')
+    } finally {
+      setIsTestLoading(false)
+    }
+  }
+
+  const ResultTag = ({ result }) => {
+    const isSuccess = result.status === 'success'
+    const color = isSuccess ? 'green' : 'red'
+    const text = isSuccess ? `成功 (${result.latency.toFixed(0)} ms)` : `失败: ${result.error}`
+    return <Tag color={color}>{text}</Tag>
+  }
   return (
     <div className="my-6">
       <Card loading={loading} title="代理配置">
@@ -138,12 +180,49 @@ export const Proxy = () => {
 
           <Form.Item>
             <div className="flex justify-end">
-              <Button type="primary" htmlType="submit" loading={isSaveLoading}>
-                保存修改
-              </Button>
+              <Space>
+                <Button onClick={handleTest} loading={isTestLoading}>
+                  测试连接
+                </Button>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={isSaveLoading}
+                >
+                  保存修改
+                </Button>
+              </Space>
             </div>
           </Form.Item>
         </Form>
+        {isTestLoading && (
+          <div className="text-center">
+            <Spin />
+            <p>正在测试连接，请稍候...</p>
+          </div>
+        )}
+        {testResult && (
+          <div>
+            <Divider>测试结果</Divider>
+            <div className="flex flex-col gap-2">
+              {testResult.proxy_connectivity &&
+                testResult.proxy_connectivity.status !== 'skipped' && (
+                  <div className="flex justify-between">
+                    <span>代理服务器连通性:</span>
+                    <ResultTag result={testResult.proxy_connectivity} />
+                  </div>
+                )}
+              {Object.entries(testResult.target_sites).map(([site, result]) => (
+                <div key={site} className="flex justify-between">
+                  <span>
+                    {site.replace('https://', '').replace('http://', '')}:
+                  </span>
+                  <ResultTag result={result} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   )

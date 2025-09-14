@@ -246,6 +246,9 @@ export const getProxyConfig = () => api.get('/api/ui/config/proxy')
 /** 设置代理配置 */
 export const setProxyConfig = data => api.put('/api/ui/config/proxy', data)
 
+/** 测试代理连接 */
+export const testProxy = data => api.post('/api/ui/proxy/test', data)
+
 /** 获取受信任的反向代理IP */
 export const getTrustedProxiesConfig = () =>
   api.get('/api/ui/config/trustedProxies')

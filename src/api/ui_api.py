@@ -993,21 +993,26 @@ class FullProxyTestResponse(BaseModel):
 @router.post("/proxy/test", response_model=FullProxyTestResponse, summary="测试代理连接和延迟")
 async def test_proxy_latency(
     request: ProxyTestRequest,
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
 ):
-    """测试代理到常用域名的连接延迟。如果未提供代理URL，则测试直接连接。"""
+    """
+    测试代理连接和到各源的延迟。
+    - 如果提供了代理URL，则通过代理测试。
+    - 如果未提供代理URL，则直接连接。
+    """
     proxy_url = request.proxy_url
-    # 修正：使用旧的 'proxy' 参数以兼容旧版 httpx
     proxy_to_use = proxy_url if proxy_url else None
 
-    # Test 1: Proxy Connectivity
+    # --- 步骤 1: 测试与代理服务器本身的连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    # 使用一个已知的高可用、轻量级端点进行测试
-    test_url_google = "http://www.google.com/generate_204"
-
     if not proxy_url:
         proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置代理，跳过测试")
     else:
+        # 使用一个已知的高可用、轻量级端点进行测试
+        test_url_google = "http://www.google.com/generate_204"
         try:
             async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
                 start_time = time.time()
@@ -1024,14 +1029,32 @@ async def test_proxy_latency(
         except Exception as e:
             proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
 
-    # Test 2: Target Site Reachability
+    # --- 步骤 2: 动态构建要测试的目标域名列表 ---
     target_sites_results: Dict[str, ProxyTestResult] = {}
-    test_domains = [
-        "https://api.bilibili.com", "https://www.iqiyi.com", "https://v.qq.com",
-        "https://youku.com", "https://www.mgtv.com", "https://ani.gamer.com.tw",
-        "https://api.themoviedb.org", "https://api.bgm.tv", "https://movie.douban.com"
-    ]
+    test_domains = set()
+
+    # 2a. 添加所有已启用的元数据源
+    enabled_metadata_sources = await metadata_manager.get_enabled_sources()
+    for source in enabled_metadata_sources:
+        if source.test_url: test_domains.add(source.test_url)
     
+    if not proxy_url:
+        # 如果不使用代理，只测试元数据源
+        logger.info("代理未启用，仅测试元数据源的直连速度。")
+    else:
+        # 如果使用代理，则额外添加所有已启用且开启了代理的弹幕源
+        logger.info("代理已启用，将测试元数据源和已配置代理的弹幕源。")
+        scraper_settings = await crud.get_all_scraper_settings(session)
+        for setting in scraper_settings:
+            if setting['isEnabled'] and setting['useProxy']:
+                try:
+                    scraper_instance = scraper_manager.get_scraper(setting['providerName'])
+                    if scraper_instance.test_url:
+                        test_domains.add(scraper_instance.test_url)
+                except ValueError:
+                    pass
+
+    # --- 步骤 3: 并发执行所有测试 ---
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
         try:
             start_time = time.time()
@@ -1044,11 +1067,12 @@ async def test_proxy_latency(
             error_str = f"{type(e).__name__}"
             return domain, ProxyTestResult(status="failure", error=error_str)
 
-    async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
-        tasks = [test_domain(domain, client) for domain in test_domains]
-        results = await asyncio.gather(*tasks)
-        for domain, result in results:
-            target_sites_results[domain] = result
+    if test_domains:
+        async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
+            tasks = [test_domain(domain, client) for domain in test_domains]
+            results = await asyncio.gather(*tasks)
+            for domain, result in results:
+                target_sites_results[domain] = result
 
     return FullProxyTestResponse(
         proxy_connectivity=proxy_connectivity_result,

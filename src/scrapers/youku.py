@@ -307,6 +307,41 @@ class YoukuScraper(BaseScraper):
         # 优酷的逻辑不区分电影和电视剧，都是从一个show_id获取列表，
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
         # 仅当请求完整列表时才使用缓存
+        # --- 新增：优先从搜索结果缓存中提取详细分集信息 ---
+        # 优酷的搜索API有时会直接返回分集列表，其中包含更完整的 displayName
+        search_cache_key = f"search_api_response_youku_{media_id}"
+        cached_search_data = await self._get_from_cache(search_cache_key)
+
+        if cached_search_data:
+            self.logger.info(f"Youku: 命中搜索结果缓存 (media_id={media_id})，尝试直接提取分集。")
+            try:
+                # 模拟搜索结果的嵌套结构来解析
+                page_component_list = cached_search_data.get("pageComponentList", [])
+                for component in page_component_list:
+                    episodes_data = component.get("componentMap", {}).get("1052", {}).get("data", [])
+                    if episodes_data:
+                        self.logger.info(f"Youku: 从缓存中成功提取到 {len(episodes_data)} 个原始分集。")
+                        # 直接使用这些数据，它们包含 displayName
+                        raw_episodes = [
+                            YoukuEpisodeInfo.model_validate(ep) for ep in episodes_data
+                        ]
+                        # 后续逻辑将处理过滤和编号
+                        break
+                else:
+                    raw_episodes = []
+
+                if raw_episodes:
+                    # 使用与下面相同的逻辑处理和返回
+                    final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
+                    if target_episode_index:
+                        return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
+                    return final_episodes
+
+            except Exception as e:
+                self.logger.warning(f"Youku: 从搜索缓存中提取分集失败: {e}，将回退到网络获取。")
+
+        # --- 缓存提取逻辑结束，如果失败则执行原有逻辑 ---
+
         # 修正：缓存键应表示缓存的是原始数据
         cache_key = f"episodes_raw_{media_id}"
         
@@ -349,48 +384,50 @@ class YoukuScraper(BaseScraper):
             if raw_episodes and target_episode_index is None:
                 await self._set_to_cache(cache_key, [e.model_dump() for e in raw_episodes], 'episodes_ttl_seconds', 1800)
 
+        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
+
+        if target_episode_index:
+            return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
+        return final_episodes
+
+    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
+        """
+        一个集中的辅助函数，用于过滤、格式化和编号原始的优酷分集列表。
+        """
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
         blacklist_pattern = await self.get_episode_blacklist_pattern()
+        
+        filtered_episodes = []
         if blacklist_pattern:
-            filtered_episodes = []
             filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-            # 修正：不再拆分已编译的 pattern
-            blacklist_rules = [p for p in [
-                await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
-                await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
-            ] if p]
 
             for ep in raw_episodes:
                 title_to_check = f"{ep.clean_display_name or ep.title}".strip()
-                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
-                if match_rule:
-                    filtered_out_log[match_rule].append(title_to_check)
+                if blacklist_pattern.search(title_to_check):
+                    filtered_out_log[blacklist_pattern.pattern].append(title_to_check)
                 else:
                     filtered_episodes.append(ep)
             
-            for rule, titles in filtered_out_log.items():
-                self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            if filtered_out_log:
+                for rule, titles in filtered_out_log.items():
+                    self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
         else:
             filtered_episodes = raw_episodes
 
         # 在过滤后的列表上重新编号
-        provider_episodes = [
+        final_episodes = [
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
                 # 修正：优先使用清理后的 displayName，因为它通常包含最完整且最简洁的信息（如“第X期”），
                 # 如果 displayName 不存在，则回退到使用原始的 title。
-                title=ep.clean_display_name or ep.title,
+                title=(ep.clean_display_name or ep.title).strip(),
                 episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
         ]
-
-        if target_episode_index:
-            target = next((ep for ep in provider_episodes if ep.episodeIndex == target_episode_index), None)
-            return [target] if target else []
-            
-        return provider_episodes
+        
+        return final_episodes
 
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
         client = await self._ensure_client()
