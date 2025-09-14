@@ -422,10 +422,11 @@ class AvailableJobInfo(BaseModel):
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str
     proxyHost: Optional[str] = None
-    proxyPort: Optional[int] = None
+    proxyPort: Optional[Union[int, str]] = None
     proxyUsername: Optional[str] = None
     proxyPassword: Optional[str] = None
     proxyEnabled: bool
+    proxySslVerify: bool = Field(True, description="是否验证代理服务器的SSL证书")
 
 class UaRuleCreate(BaseModel):
     uaString: str

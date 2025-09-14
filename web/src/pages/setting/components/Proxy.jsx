@@ -25,7 +25,11 @@ export const Proxy = () => {
     getProxyConfig()
       .then(res => {
         setProxyEnabled(res.data?.proxyEnabled ?? false)
-        form.setFieldsValue(res.data ?? {})
+        // 修正：确保 proxySslVerify 字段即使在API未返回时也有一个默认值
+        form.setFieldsValue({
+          ...res.data,
+          proxySslVerify: res.data?.proxySslVerify ?? true,
+        })
       })
       .finally(() => {
         setLoading(false)

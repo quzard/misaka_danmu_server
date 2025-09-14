@@ -975,6 +975,9 @@ async def update_proxy_settings(
     
     await crud.update_config_value(session, "proxyEnabled", str(payload.proxyEnabled).lower())
     config_manager.invalidate("proxyEnabled")
+
+    await crud.update_config_value(session, "proxySslVerify", str(payload.proxySslVerify).lower())
+    config_manager.invalidate("proxySslVerify")
     logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
 
 class ProxyTestRequest(BaseModel):
