@@ -1048,8 +1048,15 @@ async def test_proxy_latency(
     logger.info(log_message)
 
     for setting, get_instance_func in all_sources_settings:
-        # 核心逻辑：如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
-        should_test = setting['isEnabled'] and (not proxy_url or setting['useProxy'])
+        # 新增：定义一个始终需要测试的源列表
+        always_test_providers = {'tmdb', 'imdb', 'tvdb', 'douban', '360', 'bangumi'}
+        provider_name = setting.get('providerName')
+
+        # 核心逻辑：
+        # 1. 如果是始终测试的源（无论是否需要代理），只要它启用就测试。
+        # 2. 对于其他源，如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
+        should_test = setting['isEnabled'] and (provider_name in always_test_providers or (not proxy_url or setting['useProxy']))
+
         if should_test:
             try:
                 instance = get_instance_func()

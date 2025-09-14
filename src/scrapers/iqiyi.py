@@ -244,7 +244,7 @@ class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
     handled_domains = ["www.iqiyi.com"]
     referer = "https://www.iqiyi.com/"
-    test_url = "https://www.iqiyi.com/"
+    test_url = "https://www.iqiyi.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)?|加更(版)?|花絮|预告|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员(专享|加长)?|片花|预告|精华|看点|速看|解读|reaction|影评)(.*?)$"
     
     # --- 新增：用于新API的签名和ID转换 ---
