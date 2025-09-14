@@ -353,9 +353,20 @@ class YoukuScraper(BaseScraper):
         blacklist_pattern = await self.get_episode_blacklist_pattern()
         if blacklist_pattern:
             original_count = len(raw_episodes)
-            filtered_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep.title)]
-            if original_count > len(filtered_episodes):
-                self.logger.info(f"Youku: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个分集。")
+            filtered_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            blacklist_rules = blacklist_pattern.pattern.split('|')
+
+            for ep in raw_episodes:
+                title_to_check = f"{ep.title2} {ep.title}".strip()
+                match = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if match:
+                    filtered_out_log[match].append(title_to_check)
+                else:
+                    filtered_episodes.append(ep)
+            
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
         else:
             filtered_episodes = raw_episodes
 

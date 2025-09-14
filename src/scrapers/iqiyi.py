@@ -1146,9 +1146,19 @@ class IqiyiScraper(BaseScraper):
         filtered_episodes = episodes
         if blacklist_pattern:
             original_count = len(episodes)
-            filtered_episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
-            if original_count > len(filtered_episodes):
-                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个分集。")
+            temp_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            blacklist_rules = blacklist_pattern.pattern.split('|')
+            for ep in episodes:
+                title_to_check = ep.title
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
+                    temp_episodes.append(ep)
+                else:
+                    filtered_out_log[match_rule].append(title_to_check)
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Iqiyi: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            filtered_episodes = temp_episodes
 
         # 新增：在过滤后重新为分集编号，以确保 episodeIndex 是连续的
         for i, ep in enumerate(filtered_episodes):

@@ -17,9 +17,11 @@ import { useEffect, useState } from 'react'
 import {
   addToken,
   deleteToken,
+  editToken,
   getCustomDomain,
   getTokenList,
   getTokenLog,
+  resetTokenCounter,
   toggleTokenStatus,
 } from '../../../apis'
 import dayjs from 'dayjs'
@@ -32,7 +34,9 @@ import { useMessage } from '../../../MessageContext'
 export const Token = () => {
   const [loading, setLoading] = useState(false)
   const [tokenList, setTokenList] = useState([])
-  const [addTokenOpen, setAddTokenOpen] = useState(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingRecord, setEditingRecord] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [form] = Form.useForm()
   const [tokenLogs, setTokenLogs] = useState([])
@@ -43,15 +47,16 @@ export const Token = () => {
 
   const getTokens = async () => {
     try {
+      setLoading(true)
       const [tokenRes, domainRes] = await Promise.all([
         getTokenList(),
         getCustomDomain(),
       ])
       setTokenList(tokenRes.data)
       setDomain(domainRes.data?.value ?? '')
-      setLoading(false)
     } catch (error) {
       console.error(error)
+    } finally {
       setLoading(false)
     }
   }
@@ -73,10 +78,9 @@ export const Token = () => {
       await toggleTokenStatus({
         tokenId: record.id,
       })
+      getTokens()
     } catch (error) {
       messageApi.error('操作失败')
-    } finally {
-      getTokens()
     }
   }
 
@@ -102,19 +106,54 @@ export const Token = () => {
     })
   }
 
-  const handleAddToken = async () => {
-    const values = await form.validateFields()
-    console.log(values, 'values')
+  const handleOpenModal = (editing = false, record = null) => {
+    setIsEditing(editing)
+    setEditingRecord(record)
+    if (editing && record) {
+      form.setFieldsValue({
+        name: record.name,
+        dailyCallLimit: record.dailyCallLimit,
+        validityPeriod: 'custom', // 默认不改变有效期
+      })
+    } else {
+      form.resetFields()
+      form.setFieldsValue({
+        validityPeriod: 'permanent',
+        dailyCallLimit: 500,
+      })
+    }
+    setIsModalOpen(true)
+  }
+
+  const handleSave = async () => {
     try {
+      const values = await form.validateFields()
       setConfirmLoading(true)
-      await addToken(values)
+      if (isEditing && editingRecord) {
+        await editToken({ ...values, id: editingRecord.id })
+        messageApi.success('编辑成功')
+      } else {
+        await addToken(values)
+        messageApi.success('添加成功')
+      }
+      setIsModalOpen(false)
+      getTokens()
     } catch (error) {
-      messageApi.error('添加失败')
+      messageApi.error(error?.detail || '操作失败')
     } finally {
       setConfirmLoading(false)
-      setAddTokenOpen(false)
-      form.resetFields()
+    }
+  }
+
+  const handleResetCounter = async () => {
+    if (!editingRecord) return
+    try {
+      await resetTokenCounter({ id: editingRecord.id })
+      messageApi.success('调用次数已重置为0')
+      setIsModalOpen(false)
       getTokens()
+    } catch (error) {
+      messageApi.error('重置失败')
     }
   }
 
@@ -157,7 +196,6 @@ export const Token = () => {
         }
 
         const isInfinite = record.dailyCallLimit === -1
-
         const percent = isInfinite
           ? 0
           : Math.round(
@@ -215,6 +253,14 @@ export const Token = () => {
       render: (_, record) => {
         return (
           <Space>
+            <Tooltip title="编辑">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => handleOpenModal(true, record)}
+              >
+                <MyIcon icon="edit" size={20}></MyIcon>
+              </span>
+            </Tooltip>
             <Tooltip title="复制">
               <span
                 className="cursor-pointer hover:text-primary"
@@ -311,7 +357,7 @@ export const Token = () => {
         title="弹幕Token管理"
         extra={
           <>
-            <Button type="primary" onClick={() => setAddTokenOpen(true)}>
+            <Button type="primary" onClick={() => handleOpenModal(false)}>
               添加Token
             </Button>
           </>
@@ -327,22 +373,36 @@ export const Token = () => {
         />
       </Card>
       <Modal
-        title="添加新Token"
-        open={addTokenOpen}
-        onOk={handleAddToken}
+        title={isEditing ? '编辑Token' : '添加新Token'}
+        open={isModalOpen}
+        onOk={handleSave}
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
-        onCancel={() => setAddTokenOpen(false)}
+        onCancel={() => setIsModalOpen(false)}
+        footer={
+          <div className="flex justify-between">
+            <div>
+              {isEditing && (
+                <Button danger onClick={handleResetCounter}>
+                  重置调用次数
+                </Button>
+              )}
+            </div>
+            <div>
+              <Button onClick={() => setIsModalOpen(false)}>取消</Button>
+              <Button
+                type="primary"
+                onClick={handleSave}
+                loading={confirmLoading}
+              >
+                确认
+              </Button>
+            </div>
+          </div>
+        }
       >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{
-            validityPeriod: 'permanent',
-            dailyCallLimit: 500,
-          }}
-        >
+        <Form form={form} layout="vertical">
           <Form.Item
             name="name"
             label="名称"
@@ -358,17 +418,15 @@ export const Token = () => {
             className="mb-4"
           >
             <Select
-              onChange={value => {
-                form.setFieldsValue({ validity: value })
-              }}
               options={[
+                isEditing && { value: 'custom', label: '不改变当前有效期' },
                 { value: 'permanent', label: '永久' },
                 { value: '1d', label: '1 天' },
                 { value: '7d', label: '7 天' },
                 { value: '30d', label: '30 天' },
                 { value: '180d', label: '6 个月' },
                 { value: '365d', label: '1 年' },
-              ]}
+              ].filter(Boolean)}
             />
           </Form.Item>
           <Form.Item

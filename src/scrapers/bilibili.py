@@ -649,19 +649,40 @@ class BilibiliScraper(BaseScraper):
         content_type: str  # "PGC" or "UGC"
     ) -> List[models.ProviderEpisodeInfo]:
         """Applies blacklist filtering to a list of episodes and renumbers their indices."""
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        # 修正：获取原始黑名单字符串，而不是编译后的正则表达式
+        blacklist_regex_str = await self.config.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
         
-        filtered_episodes = episodes
-        if blacklist_pattern:
-            original_count = len(episodes)
-            filtered_episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
-            self.logger.info(f"Bilibili: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个{content_type}分集。")
+        if not blacklist_regex_str:
+            # 如果没有黑名单，直接重编号并返回
+            for i, ep in enumerate(episodes):
+                ep.episodeIndex = i + 1
+            return episodes
+
+        # 修正：将黑名单规则按 `|` 分割成列表，以便逐条匹配和记录
+        blacklist_rules = blacklist_regex_str.split('|')
+        episodes_to_keep = []
+        filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+
+        for episode in episodes:
+            is_filtered = False
+            for rule in blacklist_rules:
+                if not rule: continue
+                if re.search(rule, episode.title, re.IGNORECASE):
+                    filtered_out_log[rule].append(episode.title)
+                    is_filtered = True
+                    break  # 匹配到任何一条规则即被过滤，跳出内层循环
+            if not is_filtered:
+                episodes_to_keep.append(episode)
+
+        # 修正：打印详细的过滤日志
+        for rule, titles in filtered_out_log.items():
+            self.logger.info(f"Bilibili: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个{content_type}分集: {', '.join(titles)}")
 
         # Renumber the final list of episodes
-        for i, ep in enumerate(filtered_episodes):
+        for i, ep in enumerate(episodes_to_keep):
             ep.episodeIndex = i + 1
             
-        return filtered_episodes
+        return episodes_to_keep
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         if media_id.startswith("ss"):

@@ -168,6 +168,11 @@ export const toggleTokenStatus = data =>
   api.put(`api/ui/tokens/${data.tokenId}/toggle`)
 /** 删除token */
 export const deleteToken = data => api.delete(`/api/ui/tokens/${data.tokenId}`)
+/** 编辑token */
+export const editToken = data => api.put(`/api/ui/tokens/${data.id}`, data)
+/** 重置token调用次数 */
+export const resetTokenCounter = data =>
+  api.post(`/api/ui/tokens/${data.id}/reset`)
 /** 获取ua规则 */
 export const getUaRules = () => api.get('/api/ui/ua-rules')
 /** 添加ua规则 */

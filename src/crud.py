@@ -1561,6 +1561,34 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     await session.commit()
     return new_token.id
 
+async def update_api_token(
+    session: AsyncSession,
+    token_id: int,
+    name: str,
+    daily_call_limit: int,
+    validity_period: str
+) -> bool:
+    """更新API Token的名称、调用上限和有效期。"""
+    token = await session.get(orm_models.ApiToken, token_id)
+    if not token:
+        return False
+
+    token.name = name
+    token.dailyCallLimit = daily_call_limit
+
+    if validity_period != 'custom':
+        if validity_period == 'permanent':
+            token.expiresAt = None
+        else:
+            try:
+                days = int(validity_period.replace('d', ''))
+                token.expiresAt = get_now() + timedelta(days=days)
+            except (ValueError, TypeError):
+                logger.warning(f"更新Token时收到无效的有效期格式: '{validity_period}'")
+
+    await session.commit()
+    return True
+
 async def delete_api_token(session: AsyncSession, token_id: int) -> bool:
     token = await session.get(ApiToken, token_id)
     if token:
@@ -1576,6 +1604,16 @@ async def toggle_api_token(session: AsyncSession, token_id: int) -> bool:
         await session.commit()
         return True
     return False
+
+async def reset_token_counter(session: AsyncSession, token_id: int) -> bool:
+    """将指定Token的每日调用次数重置为0。"""
+    token = await session.get(orm_models.ApiToken, token_id)
+    if not token:
+        return False
+    
+    token.dailyCallCount = 0
+    await session.commit()
+    return True
 
 async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict[str, Any]]:
     stmt = select(ApiToken).where(ApiToken.token == token, ApiToken.isEnabled == True)

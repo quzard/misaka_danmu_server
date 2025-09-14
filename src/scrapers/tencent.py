@@ -1072,7 +1072,8 @@ class TencentScraper(BaseScraper):
             original_count = len(episodes_to_format)
             
             temp_episodes = []
-            filtered_reasons = defaultdict(int)
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            blacklist_rules = blacklist_pattern.pattern.split('|')
 
             for ep in episodes_to_format:
                 title_to_check = ep.union_title or ep.title or ""
@@ -1086,15 +1087,15 @@ class TencentScraper(BaseScraper):
                     continue
 
                 # 如果不是明显的正片，则检查是否匹配黑名单
-                match = blacklist_pattern.search(title_to_check)
-                if not match:
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
                     temp_episodes.append(ep)
                 else:
-                    filtered_reasons[match.group(0)] += 1
+                    filtered_out_log[match_rule].append(title_to_check)
             
-            if filtered_count := original_count - len(temp_episodes):
-                reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in filtered_reasons.items()])
-                self.logger.info(f"Tencent: 根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个非正片分集。")
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Tencent: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个非正片分集: {', '.join(titles)}")
+
             episodes_to_format = temp_episodes
 
         # 步骤 3.5: 二次过滤
@@ -1103,18 +1104,18 @@ class TencentScraper(BaseScraper):
             original_count = len(episodes_to_format)
             
             final_filtered_episodes = []
-            secondary_filtered_reasons = defaultdict(int)
+            secondary_filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            blacklist_rules = blacklist_pattern.pattern.split('|')
             for ep in episodes_to_format:
                 title_to_check = ep.union_title or ep.title or ""
-                match = blacklist_pattern.search(title_to_check)
-                if not match:
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
                     final_filtered_episodes.append(ep)
                 else:
-                    secondary_filtered_reasons[match.group(0)] += 1
+                    secondary_filtered_out_log[match_rule].append(title_to_check)
             
-            if filtered_count := original_count - len(final_filtered_episodes):
-                reasons_str = ", ".join([f"'{k}'({v}次)" for k, v in secondary_filtered_reasons.items()])
-                self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 ({reasons_str}) 过滤掉了 {filtered_count} 个分集。")
+            for rule, titles in secondary_filtered_out_log.items():
+                self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
             
             episodes_to_format = final_filtered_episodes
 

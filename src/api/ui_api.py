@@ -1402,6 +1402,7 @@ async def toggle_api_token_status(
 class ApiTokenUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
     dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
+    validityPeriod: str = Field(..., description="新的有效期: 'permanent', 'custom', '30d' 等")
 
 @router.put("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT, summary="更新API Token信息")
 async def update_api_token(
@@ -1410,16 +1411,30 @@ async def update_api_token(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """更新指定API Token的名称和每日调用上限。"""
-    token = await session.get(orm_models.ApiToken, token_id)
-    if not token:
+    """更新指定API Token的名称、每日调用上限和有效期。"""
+    updated = await crud.update_api_token(
+        session,
+        token_id=token_id,
+        name=payload.name,
+        daily_call_limit=payload.dailyCallLimit,
+        validity_period=payload.validityPeriod
+    )
+    if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
-    
-    token.name = payload.name
-    token.dailyCallLimit = payload.dailyCallLimit
-    await session.commit()
     logger.info(f"用户 '{current_user.username}' 更新了 Token (ID: {token_id}) 的信息。")
 
+
+@router.post("/tokens/{token_id}/reset", status_code=status.HTTP_204_NO_CONTENT, summary="重置API Token的调用次数")
+async def reset_api_token_counter(
+    token_id: int,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """将指定API Token的今日调用次数重置为0。"""
+    reset_ok = await crud.reset_token_counter(session, token_id)
+    if not reset_ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    logger.info(f"用户 '{current_user.username}' 重置了 Token (ID: {token_id}) 的调用次数。")
 
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(

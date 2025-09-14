@@ -451,8 +451,21 @@ class RenrenScraper(BaseScraper):
         blacklist_pattern = await self.get_episode_blacklist_pattern()
         if blacklist_pattern:
             original_count = len(raw_episodes)
-            raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(str(ep.get("title", "")))]
-            self.logger.info(f"Renren: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
+            filtered_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            blacklist_rules = blacklist_pattern.pattern.split('|')
+
+            for ep in raw_episodes:
+                title_to_check = str(ep.get("title", ""))
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
+                    filtered_episodes.append(ep)
+                else:
+                    filtered_out_log[match_rule].append(title_to_check)
+            
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Renren: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            raw_episodes = filtered_episodes
 
         # 过滤后再编号
         provider_eps = []
