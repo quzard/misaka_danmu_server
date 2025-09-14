@@ -448,16 +448,16 @@ class RenrenScraper(BaseScraper):
                 raw_episodes.append(ep)
 
         # 统一过滤逻辑
-        global_pattern_str = await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT)
-        provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
-        blacklist_rules = []
-        if global_pattern_str: blacklist_rules.extend(global_pattern_str.split('|'))
-        if provider_pattern_str: blacklist_rules.extend(provider_pattern_str.split('|'))
+        # 修正：安全地获取并组合黑名单规则
+        blacklist_rules = [p for p in [
+            await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
+            await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+        ] if p]
 
         if blacklist_rules:
             filtered_episodes = []
             filtered_out_log: Dict[str, List[str]] = defaultdict(list)
- 
+
             for ep in raw_episodes:
                 title_to_check = str(ep.get("title", ""))
                 match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
@@ -465,7 +465,7 @@ class RenrenScraper(BaseScraper):
                     filtered_episodes.append(ep)
                 else:
                     filtered_out_log[match_rule].append(title_to_check)
-
+            
             for rule, titles in filtered_out_log.items():
                 self.logger.info(f"Renren: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
             raw_episodes = filtered_episodes

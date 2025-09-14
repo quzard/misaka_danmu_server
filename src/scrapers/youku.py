@@ -351,25 +351,27 @@ class YoukuScraper(BaseScraper):
 
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
         blacklist_pattern = await self.get_episode_blacklist_pattern()
-        global_pattern_str = await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT)
-        provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
-        blacklist_rules = []
-        if global_pattern_str: blacklist_rules.extend(global_pattern_str.split('|'))
-        if provider_pattern_str: blacklist_rules.extend(provider_pattern_str.split('|'))
+        if blacklist_pattern:
+            filtered_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            # 修正：不再拆分已编译的 pattern
+            blacklist_rules = [p for p in [
+                await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
+                await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+            ] if p]
 
-        filtered_episodes = []
-        filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-
-        for ep in raw_episodes:
-            title_to_check = f"{ep.clean_display_name or ep.title}".strip()
-            match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
-            if match_rule:
-                filtered_out_log[match_rule].append(title_to_check)
-            else:
-                filtered_episodes.append(ep)
-        
-        for rule, titles in filtered_out_log.items():
-            self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            for ep in raw_episodes:
+                title_to_check = f"{ep.clean_display_name or ep.title}".strip()
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if match_rule:
+                    filtered_out_log[match_rule].append(title_to_check)
+                else:
+                    filtered_episodes.append(ep)
+            
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+        else:
+            filtered_episodes = raw_episodes
 
         # 在过滤后的列表上重新编号
         provider_episodes = [

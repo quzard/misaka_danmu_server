@@ -649,12 +649,13 @@ class BilibiliScraper(BaseScraper):
         content_type: str  # "PGC" or "UGC"
     ) -> List[models.ProviderEpisodeInfo]:
         """Applies blacklist filtering to a list of episodes and renumbers their indices."""
+        # 修正：安全地获取并组合黑名单规则，不再错误地拆分正则表达式
         global_pattern_str = await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT)
         provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
 
         blacklist_rules = []
-        if global_pattern_str: blacklist_rules.extend(global_pattern_str.split('|'))
-        if provider_pattern_str: blacklist_rules.extend(provider_pattern_str.split('|'))
+        if global_pattern_str: blacklist_rules.append(global_pattern_str)
+        if provider_pattern_str: blacklist_rules.append(provider_pattern_str)
         
         if not blacklist_rules:
             # 如果没有黑名单，直接重编号并返回

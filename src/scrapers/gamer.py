@@ -310,13 +310,15 @@ class GamerScraper(BaseScraper):
                         raw_episodes.append({'link': None, 'sn': sn_match.group(1), 'title': title_match.group(1)})
 
             # 统一过滤逻辑
-            blacklist_pattern = await self.get_episode_blacklist_pattern()
-            filtered_raw_episodes = raw_episodes
-            if blacklist_pattern:
-                original_count = len(raw_episodes)
+            # 修正：安全地获取并组合黑名单规则
+            blacklist_rules = [p for p in [
+                await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
+                await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+            ] if p]
+
+            if blacklist_rules:
                 temp_episodes = []
                 filtered_out_log: Dict[str, List[str]] = defaultdict(list)
-                blacklist_rules = blacklist_pattern.pattern.split('|')
                 for ep in raw_episodes:
                     title_to_check = ep['title']
                     match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
@@ -326,11 +328,11 @@ class GamerScraper(BaseScraper):
                         filtered_out_log[match_rule].append(title_to_check)
                 for rule, titles in filtered_out_log.items():
                     self.logger.info(f"Gamer: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
-                filtered_raw_episodes = temp_episodes
+                raw_episodes = temp_episodes
 
             # 过滤后再编号
             episodes = []
-            for i, raw_ep in enumerate(filtered_raw_episodes):
+            for i, raw_ep in enumerate(raw_episodes):
                 if raw_ep.get('link'):
                     href = raw_ep['link'].get("href")
                     sn_match = re.search(r"\?sn=(\d+)", href)
