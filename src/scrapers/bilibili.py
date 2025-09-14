@@ -173,6 +173,7 @@ class BilibiliScraper(BaseScraper):
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         self._min_interval = 0.5
+        self.client: Optional[httpx.AsyncClient] = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """
@@ -180,8 +181,16 @@ class BilibiliScraper(BaseScraper):
         This method is primarily for compatibility with functions that expect it.
         """
         # 修正：此方法现在正确地调用 _ensure_config_and_cookie 来返回一个可用的客户端实例。
-        return await self._ensure_config_and_cookie()
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Bilibili: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
 
+        if self.client is None:
+            self.client = await self._create_configured_client()
+        return self.client
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
         """封装了速率限制的请求方法。"""
         async with self._api_lock:
@@ -192,15 +201,17 @@ class BilibiliScraper(BaseScraper):
                 self.logger.debug(f"Bilibili: 速率限制，等待 {sleep_duration:.2f} 秒...")
                 await asyncio.sleep(sleep_duration)
 
-            async with await self._ensure_config_and_cookie() as client:
-                response = await client.request(method, url, **kwargs)
-                self._last_request_time = time.time()
-                return response
+            client = await self._ensure_client()
+            response = await client.request(method, url, **kwargs)
+            self._last_request_time = time.time()
+            return response
 
     async def close(self):
-        pass
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
-    async def _ensure_config_and_cookie(self):
+    async def _create_configured_client(self) -> httpx.AsyncClient:
         """
         实时从数据库加载并应用Cookie，确保配置实时生效。
         此方法在每次请求前调用。它支持两种模式：
@@ -208,7 +219,6 @@ class BilibiliScraper(BaseScraper):
         - 在未配置时自动获取临时的buvid3进行公共API请求。
         """
         self.logger.debug("Bilibili: 正在从数据库加载Cookie...")
-        # This method is now a factory for a configured client.
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.bilibili.com/",
@@ -221,9 +231,9 @@ class BilibiliScraper(BaseScraper):
             for parts in cookie_parts:
                 if len(parts) == 2:
                     client.cookies.set(parts[0], parts[1], domain=".bilibili.com")
-            self.logger.info("Bilibili: 已成功从数据库加载Cookie。")
+            self.logger.debug("Bilibili: 已成功从数据库加载Cookie。")
         else:
-            self.logger.info("Bilibili: 数据库中未找到Cookie。")
+            self.logger.debug("Bilibili: 数据库中未找到Cookie。")
 
         if "buvid3" not in client.cookies:
             await self._get_temp_buvid3(client)
