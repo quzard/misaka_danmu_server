@@ -51,13 +51,12 @@ class RateLimiter:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], scraper_manager: ScraperManager):
         self._session_factory = session_factory
         self._scraper_manager = scraper_manager
-        self._period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
         self.logger = logging.getLogger(self.__class__.__name__)
         self._verification_failed: bool = False
 
         self.enabled: bool = True
         self.global_limit: int = 50
-        self.global_period: str = "hour"
+        self.global_period_seconds: int = 3600 # 默认1小时
 
         try:
             config_dir = Path(__file__).parent / "rate_limit"
@@ -74,13 +73,11 @@ class RateLimiter:
             obfuscated_bytes = config_path.read_bytes()
             signature = sig_path.read_bytes().decode('utf-8').strip()
             public_key_pem = pub_key_path.read_text('utf-8')
-            # 修正：从PEM字符串中提取Hex格式的公钥
             public_key_hex = _extract_hex_from_pem(public_key_pem)
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
-                sm3_hash = sm3.sm3_hash(func.bytes_to_list(obfuscated_bytes)) # type: ignore
-                if not sm2_crypt.verify(signature, sm3_hash.encode('utf-8')):
-                    self.logger.critical("!!! 严重安全警告：速率限制配置文件 'rate_limit.bin' 签名验证失败！文件可能已被篡改。")
+                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes)):
+                    self.logger.critical("!!! 严重安全警告：速率限制配置文件签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
                     raise ConfigVerificationError("签名验证失败")
@@ -104,10 +101,13 @@ class RateLimiter:
                 if config_data:
                     self.enabled = config_data.get("enabled", self.enabled)
                     self.global_limit = config_data.get("global_limit", self.global_limit)
-                    self.global_period = config_data.get("global_period", self.global_period)
-                    period_map_cn = {"second": "秒", "minute": "分钟", "hour": "小时", "day": "天"}
-                    period_cn = period_map_cn.get(self.global_period, self.global_period)
-                    self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{period_cn}")
+                    # 兼容旧的 global_period 和新的 global_period_seconds
+                    if "global_period_seconds" in config_data:
+                        self.global_period_seconds = config_data.get("global_period_seconds", self.global_period_seconds)
+                    elif "global_period" in config_data: # 兼容旧版配置
+                        period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+                        self.global_period_seconds = period_map.get(config_data["global_period"], 3600)
+                    self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{self.global_period_seconds}秒")
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 self.logger.error(f"解密或解析速率限制配置失败: {e}", exc_info=True)
                 raise
@@ -126,10 +126,10 @@ class RateLimiter:
             pass
         return None
 
-    def _get_global_limit(self) -> tuple[int, str]:
+    def _get_global_limit(self) -> tuple[int, int]:
         if not self.enabled:
-            return 0, "hour"
-        return self.global_limit, self.global_period
+            return 0, 3600
+        return self.global_limit, self.global_period_seconds
 
     async def check(self, provider_name: str):
         if self._verification_failed:
@@ -139,8 +139,7 @@ class RateLimiter:
         global_limit, period_str = self._get_global_limit()
         if global_limit <= 0:
             return
-        
-        period_seconds = self._period_map.get(period_str, 3600)
+        period_seconds = period_str
 
         async with self._session_factory() as session:
             global_state = await crud.get_or_create_rate_limit_state(session, "__global__")
