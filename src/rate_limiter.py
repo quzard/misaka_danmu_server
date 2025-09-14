@@ -29,13 +29,21 @@ class ConfigVerificationError(Exception):
 
 XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
 
-def _extract_hex_from_pem(pem_string: str) -> str:
+original_sm3_z = sm2.CryptSM2._sm3_z
+def fixed_sm3_z(self, uid='1234567812345678'): 
+    if isinstance(uid, str):
+        uid_bytes = uid.encode('utf-8')
+    else:
+        uid_bytes = uid
+    return original_sm3_z(self, uid_bytes)
 
+sm2.CryptSM2._sm3_z = fixed_sm3_z 
+
+
+def _extract_hex_from_pem(pem_string: str) -> str:
     pem_string = re.sub(r'-----(BEGIN|END) PUBLIC KEY-----', '', pem_string)
     pem_string = pem_string.replace('\n', '').replace('\r', '')
-
     der_data = base64.b64decode(pem_string)
-
     public_key_bytes = der_data[-65:]
     return public_key_bytes.hex()
 
@@ -66,11 +74,13 @@ class RateLimiter:
             obfuscated_bytes = config_path.read_bytes()
             signature = sig_path.read_bytes().decode('utf-8').strip()
             public_key_pem = pub_key_path.read_text('utf-8')
+            # 修正：从PEM字符串中提取Hex格式的公钥
             public_key_hex = _extract_hex_from_pem(public_key_pem)
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
-                if not sm2_crypt.verify(signature, bytes(obfuscated_bytes)):
-                    self.logger.critical("!!! 严重安全警告：签名验证失败！文件可能已被篡改。")
+                sm3_hash = sm3.sm3_hash(func.bytes_to_list(obfuscated_bytes)) # type: ignore
+                if not sm2_crypt.verify(signature, sm3_hash.encode('utf-8')):
+                    self.logger.critical("!!! 严重安全警告：速率限制配置文件 'rate_limit.bin' 签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
                     raise ConfigVerificationError("签名验证失败")
