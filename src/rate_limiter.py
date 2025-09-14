@@ -48,7 +48,7 @@ def fixed_verify(self, sign: str, data: bytes, uid: Union[str, bytes]) -> bool:
     z_hex = self._sm3_z(uid=uid)
     message_bytes = z_hex.encode('utf-8') + data
     hash_to_verify = sm3.sm3_hash(func.bytes_to_list(message_bytes))
-    return original_verify(self, sign, bytes.fromhex(hash_to_verify))
+    return original_verify(self, sign, bytes.fromhex(hash_to_verify)) # type: ignore
 
 sm2.CryptSM2.verify = fixed_verify 
 
@@ -98,7 +98,6 @@ class RateLimiter:
                 self._verification_failed = True
                 raise FileNotFoundError("缺少流控配置文件")
 
-            # 读取UID文件，现在它是必需的
             try:
                 uid_from_file = uid_path.read_text('utf-8').strip()
                 if not uid_from_file:
@@ -116,7 +115,6 @@ class RateLimiter:
             public_key_hex = _extract_hex_from_pem(public_key_pem)
             try:
                 sm2_crypt = sm2.CryptSM2(public_key=public_key_hex, private_key='')
-                # 关键：在验证时传入与签名时相同的UID
                 if not sm2_crypt.verify(signature, bytes(obfuscated_bytes), uid=signing_uid):
                     self.logger.critical("!!! 严重安全警告：速率限制配置文件签名验证失败！文件可能已被篡改。")
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
@@ -142,10 +140,9 @@ class RateLimiter:
                 if config_data:
                     self.enabled = config_data.get("enabled", self.enabled)
                     self.global_limit = config_data.get("global_limit", self.global_limit)
-                    # 兼容旧的 global_period 和新的 global_period_seconds
                     if "global_period_seconds" in config_data:
                         self.global_period_seconds = config_data.get("global_period_seconds", self.global_period_seconds)
-                    elif "global_period" in config_data: # 兼容旧版配置
+                    elif "global_period" in config_data: 
                         period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
                         self.global_period_seconds = period_map.get(config_data["global_period"], 3600)
                     self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{self.global_period_seconds}秒")

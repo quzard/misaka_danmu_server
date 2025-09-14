@@ -1356,7 +1356,9 @@ async def get_rate_limit_status(
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
-    all_scrapers = await crud.get_all_scraper_settings(session)
+    all_scrapers_raw = await crud.get_all_scraper_settings(session)
+    # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
+    all_scrapers = [s for s in all_scrapers_raw if s['providerName'] != 'custom']
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
