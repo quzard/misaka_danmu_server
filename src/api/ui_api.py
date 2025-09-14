@@ -1032,36 +1032,37 @@ async def test_proxy_latency(
     # --- 步骤 2: 动态构建要测试的目标域名列表 ---
     target_sites_results: Dict[str, ProxyTestResult] = {}
     test_domains = set()
-
-    # 2a. 添加所有已启用的元数据源
-    # 修正：直接从数据库查询已启用的元数据源，因为 MetadataSourceManager 中没有 get_enabled_sources 方法
+    
+    # 统一获取所有源的设置
     enabled_metadata_settings = await crud.get_all_metadata_source_settings(session)
-    for setting in enabled_metadata_settings:
-        if setting['isEnabled']:
+    scraper_settings = await crud.get_all_scraper_settings(session)
+
+    # 合并所有源的设置，并添加一个获取实例的函数
+    all_sources_settings = [
+        (s, lambda name=s['providerName']: metadata_manager.get_source(name)) for s in enabled_metadata_settings
+    ] + [
+        (s, lambda name=s['providerName']: scraper_manager.get_scraper(name)) for s in scraper_settings
+    ]
+
+    log_message = "代理未启用，将测试所有已启用的源。" if not proxy_url else "代理已启用，将仅测试已配置代理的源。"
+    logger.info(log_message)
+
+    for setting, get_instance_func in all_sources_settings:
+        # 核心逻辑：如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
+        should_test = setting['isEnabled'] and (not proxy_url or setting['useProxy'])
+        if should_test:
             try:
-                # 最终修正：调用新增的、可靠的 get_source 公共方法
-                source_instance = metadata_manager.get_source(setting['providerName'])
-                if test_url := getattr(source_instance, 'test_url', None):
-                    test_domains.add(test_url)
+                instance = get_instance_func()
+                # 修正：支持异步获取 test_url
+                if hasattr(instance, 'test_url'):
+                    test_url_attr = getattr(instance, 'test_url')
+                    # 检查 test_url 是否是一个异步属性
+                    if asyncio.iscoroutine(test_url_attr):
+                        test_domains.add(await test_url_attr)
+                    else:
+                        test_domains.add(test_url_attr)
             except ValueError:
                 pass
-    
-    if not proxy_url:
-        # 如果不使用代理，只测试元数据源
-        logger.info("代理未启用，仅测试元数据源的直连速度。")
-    else:
-        # 如果使用代理，则额外添加所有已启用且开启了代理的弹幕源
-        logger.info("代理已启用，将测试元数据源和已配置代理的弹幕源。")
-        scraper_settings = await crud.get_all_scraper_settings(session)
-        for setting in scraper_settings:
-            if setting['isEnabled'] and setting['useProxy']:
-                try:
-                    scraper_instance = scraper_manager.get_scraper(setting['providerName'])
-                    # 修正3：安全地访问 test_url 属性
-                    if test_url := getattr(scraper_instance, 'test_url', None):
-                        test_domains.add(test_url)
-                except ValueError:
-                    pass
 
     # --- 步骤 3: 并发执行所有测试 ---
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:

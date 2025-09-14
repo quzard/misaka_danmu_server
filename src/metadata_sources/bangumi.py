@@ -211,6 +211,7 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
 class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
+    test_url = "https://bgm.tv"
     
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
         super().__init__(session_factory, config_manager, scraper_manager)

@@ -22,6 +22,7 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
+    test_url = "https://ani.gamer.com.tw/"
     configurable_fields = {
         "gamerCookie": "巴哈姆特动画疯 Cookie",
         "gamerUserAgent": "巴哈姆特动画疯 User-Agent",

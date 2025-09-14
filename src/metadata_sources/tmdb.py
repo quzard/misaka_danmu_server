@@ -41,6 +41,17 @@ async def _get_proxy_for_tmdb(config_manager: ConfigManager, session_factory: as
 class TmdbMetadataSource(BaseMetadataSource):
     provider_name = "tmdb"
 
+    @property
+    async def test_url(self) -> str:
+        """
+        动态地从配置中获取测试URL。
+        这确保了代理测试和连接性检查使用的是用户配置的域名。
+        """
+        base_url_from_config = await self.config_manager.get("tmdbApiBaseUrl", "https://api.themoviedb.org/3")
+        # 测试URL应该是基础域名，不应包含 /3 这样的API路径
+        cleaned_domain = base_url_from_config.rstrip('/')
+        return re.sub(r'/3/?$', '', cleaned_domain)
+
     async def _get_robust_image_base_url(self) -> str:
         """
         获取TMDB图片基础URL，并对其进行健壮性处理。

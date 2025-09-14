@@ -184,6 +184,7 @@ class TencentScraper(BaseScraper):
     provider_name = "tencent"
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
+    test_url = "https://v.qq.com"
     # 基于JS参考实现，提供一个更通用和全面的分集黑名单。
     # 使用 re.escape 来确保特殊字符被正确处理。
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"|".join(re.escape(keyword) for keyword in [

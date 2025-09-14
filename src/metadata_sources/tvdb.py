@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class TvdbMetadataSource(BaseMetadataSource):
     provider_name = "tvdb"
+    test_url = "https://api4.thetvdb.com"
 
     async def _get_tvdb_token(self, client: httpx.AsyncClient) -> str:
         """获取一个有效的TVDB令牌，如果需要则从数据库或API刷新。"""

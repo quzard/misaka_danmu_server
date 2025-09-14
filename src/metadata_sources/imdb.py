@@ -34,6 +34,7 @@ class ImdbApiResponse(BaseModel):
 
 class ImdbMetadataSource(BaseMetadataSource):
     provider_name = "imdb"
+    test_url = "https://www.imdb.com"
 
     async def _create_client(self) -> httpx.AsyncClient:
         """Creates an httpx.AsyncClient with IMDb headers and proxy settings."""
