@@ -1,15 +1,36 @@
 # --- Stage 1: Build Frontend ---
 FROM node:20-alpine AS builder
 
+# 接收来自 docker build 命令的密钥参数
+ARG XOR_KEY_SECRET
+ENV XOR_KEY_SECRET=${XOR_KEY_SECRET}
+
+# 安装 Python 和编译依赖
+RUN apk add --no-cache python3 py3-pip build-base
+
 WORKDIR /app/web
 
 # 仅复制 package.json 和 package-lock.json 以利用Docker缓存
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-# 复制前端源代码
+# 复制所有源代码
 COPY web/ ./
+COPY src/ ./src/
+COPY requirements.txt .
 
+# 安装 Python 依赖和 Nuitka
+RUN pip install --no-cache-dir -r requirements.txt nuitka
+
+# 在编译前，将占位符替换为真实的密钥
+RUN if [ -z "$XOR_KEY_SECRET" ]; then echo "错误：必须提供 XOR_KEY_SECRET 构建参数！" && exit 1; fi \
+    && sed -i "s|__XOR_KEY_PLACEHOLDER__|${XOR_KEY_SECRET}|g" src/rate_limiter.py
+
+# 编译 rate_limiter.py
+# --module: 编译为 .so 模块
+# --output-dir: 指定输出目录
+RUN python3 -m nuitka --module src/rate_limiter.py --output-dir=src/
+ 
 # 执行构建
 RUN npm run build
 
@@ -49,6 +70,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY static/ ./static/
 COPY config/ ./config/
+# 移除 rate_limiter.py 源码
+RUN rm src/rate_limiter.py
+# 从 builder 阶段复制编译好的 .so 文件
+COPY --from=builder /app/web/src/*.so ./src/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
