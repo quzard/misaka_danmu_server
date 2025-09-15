@@ -38,7 +38,7 @@ RUN --mount=type=secret,id=XOR_KEY_SECRET \
     sed -i "s|__XOR_KEY_PLACEHOLDER__|$(cat /run/secrets/XOR_KEY_SECRET)|g" src/rate_limiter.py
 
 # 编译 rate_limiter.py
-RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=. --output-filename=rate_limiter.so
+RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=.
 
 # --- Stage 3: Final Application ---
 FROM l429609201/su-exec:su-exec
@@ -46,11 +46,11 @@ FROM l429609201/su-exec:su-exec
 
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV TZ=Asia/Shanghai
-ENV LANG C.UTF-8
-ENV LC_ALL C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ="Asia/Shanghai"
+ENV LANG="C.UTF-8"
+ENV LC_ALL="C.UTF-8"
 
 # 设置工作目录
 WORKDIR /app
@@ -81,7 +81,7 @@ COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
 
 # 从 backend-builder 阶段复制编译好的 .so 文件
-COPY --from=backend-builder /app/rate_limiter.so ./src/
+COPY --from=backend-builder /app/rate_limiter.*.so ./src/rate_limiter.so
 
 # 移除 rate_limiter.py 源码
 RUN rm src/rate_limiter.py
