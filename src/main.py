@@ -292,8 +292,8 @@ app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible
 app.include_router(api_router, prefix="/api")
 
 # --- 新增：挂载 Swagger UI 的静态文件目录 ---
-# 修正：使用绝对路径以确保无论从哪里运行都能找到静态文件目录
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "swagger-ui"
+# 修正：使用相对于工作目录 /app 的绝对路径，使其不再受 __file__ 路径影响
+STATIC_DIR = Path("/app/static/swagger-ui")
 app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger-ui-static")
 
 # 添加一个运行入口，以便直接从配置启动
