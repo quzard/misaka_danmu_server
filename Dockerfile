@@ -78,8 +78,10 @@ COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
 
-# 从 backend-builder 阶段复制编译好的 .so 文件，并移除源码
-COPY --from=backend-builder /app/*.so ./src/
+# 从 backend-builder 阶段复制编译好的 .so 文件
+COPY --from=backend-builder /app/*.so ./src/rate_limiter.so
+
+# 移除 rate_limiter.py 源码
 RUN rm src/rate_limiter.py
 
 # 从 frontend-builder 阶段复制构建好的前端静态文件
