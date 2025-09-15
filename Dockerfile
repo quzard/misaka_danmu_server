@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 WORKDIR /app
 
 # 复制 Python 源代码和依赖文件
-COPY src/ ./src/
+COPY src ./src
 COPY requirements.txt .
 
 # 安装 Python 依赖和 Nuitka
@@ -73,9 +73,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # 复制应用代码
-COPY src/ ./src/
-COPY static/ ./static/
-COPY config/ ./config/
+COPY src ./src
+COPY static ./static
+COPY config ./config
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
