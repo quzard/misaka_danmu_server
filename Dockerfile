@@ -6,7 +6,7 @@ ARG XOR_KEY_SECRET
 ENV XOR_KEY_SECRET=${XOR_KEY_SECRET}
 
 # 安装 Python 和编译依赖
-RUN apk add --no-cache python3 py3-pip build-base
+RUN apk add --no-cache python3 py3-pip build-base python3-dev
 
 WORKDIR /app/web
 
@@ -53,8 +53,9 @@ WORKDIR /app
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        default-libmysqlclient-dev \
+        build-essential \
         libpq-dev \
+        python3-dev \
         tzdata \
         iputils-ping \
     && addgroup --gid 1000 appgroup \
