@@ -75,8 +75,8 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 COPY src/ ./src/
 COPY static/ ./static/
 COPY config/ ./config/
-COPY exec.sh ./
-COPY run.sh ./
+COPY exec.sh /exec.sh
+COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
 
 # 从 backend-builder 阶段复制编译好的 .so 文件
