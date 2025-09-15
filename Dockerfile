@@ -53,8 +53,9 @@ WORKDIR /app
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        default-libmysqlclient-dev \
+        build-essential \
         libpq-dev \
+        python3-dev \
         tzdata \
         iputils-ping \
     && addgroup --gid 1000 appgroup \
@@ -89,4 +90,3 @@ EXPOSE 7768
 
 # 运行应用的默认命令
 CMD ["/exec.sh"]
-
