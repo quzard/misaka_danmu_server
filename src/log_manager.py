@@ -69,7 +69,7 @@ def setup_logging():
     以及一个用于API的内存双端队列。
     此函数应在应用启动时被调用一次。
     """
-    log_dir = Path(__file__).parent.parent / "config" / "logs"
+    log_dir = Path("/app/config/logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"
 

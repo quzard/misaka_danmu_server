@@ -28,7 +28,7 @@ class ConfigVerificationError(Exception):
     """当配置文件验证失败时引发。"""
     pass
 
-XOR_KEY = b"T3Nn@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S@pT^K!v8&s$U@w#Z&e3S"
+XOR_KEY = b"__XOR_KEY_PLACEHOLDER__"
 
 original_sm3_z = sm2.CryptSM2._sm3_z
 def fixed_sm3_z(self, uid: Union[str, bytes]): 
@@ -87,7 +87,7 @@ class RateLimiter:
         self.global_limit: int = 50
         self.global_period_seconds: int = 3600 
         try:
-            config_dir = Path(__file__).parent / "rate_limit"
+            config_dir = Path("/app/src/rate_limit")
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
             pub_key_path = config_dir / "public_key.pem"
@@ -145,7 +145,7 @@ class RateLimiter:
                     self._verification_failed = True
                     raise ConfigVerificationError("配置文件中缺少核心文件哈希")
 
-                rate_limiter_path = Path(__file__) 
+                rate_limiter_path = Path("/app/src/rate_limiter.py")
                 rate_limiter_content_bytes = rate_limiter_path.read_bytes()
                 actual_hash = hashlib.sha256(rate_limiter_content_bytes.replace(b'\r\n', b'\n')).hexdigest()
 

@@ -26,7 +26,7 @@ from .danmaku_parser import parse_dandan_xml_to_comments
 logger = logging.getLogger(__name__)
 
 # --- 新增：文件存储相关常量和辅助函数 ---
-DANMAKU_BASE_DIR = Path(__file__).parent.parent / "config" / "danmaku"
+DANMAKU_BASE_DIR = Path("/app/config/danmaku")
 
 def _generate_xml_from_comments(
     comments: List[Dict[str, Any]], 

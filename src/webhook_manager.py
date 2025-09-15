@@ -28,7 +28,7 @@ class WebhookManager:
 
     def _load_handlers(self):
         """动态发现并加载 'webhook' 目录下的所有处理器，使用文件名作为类型。"""
-        webhook_package_path = [str(Path(__file__).parent / "webhook")]
+        webhook_package_path = [str(Path("/app/src/webhook"))]
         for finder, name, ispkg in pkgutil.iter_modules(webhook_package_path):
             if name.startswith("_") or name == "base":
                 continue

@@ -62,7 +62,7 @@ class SchedulerManager:
         """
         动态发现并加载 'jobs' 目录下的所有任务类。
         """
-        jobs_package_path = [str(Path(__file__).parent / "jobs")]
+        jobs_package_path = [str(Path("/app/src/jobs"))]
         for finder, name, ispkg in pkgutil.iter_modules(jobs_package_path):
             if name.startswith("_") or name == "base":
                 continue
