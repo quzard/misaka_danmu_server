@@ -20,10 +20,10 @@ FROM l429609201/su-exec:su-exec AS backend-builder
 # 安装编译所需的依赖
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /backend-build
 
 # 复制 Python 源代码和依赖文件
-COPY src/ src/
+COPY src/ ./src/
 COPY requirements.txt .
 
 # 安装 Python 依赖和 Nuitka
@@ -69,15 +69,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY src/. ./src/
-COPY static/. ./static/
-COPY config/. ./config/
+COPY src/ ./src/
+COPY static/ ./static/
+COPY config/ ./config/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
 
 # 从 backend-builder 阶段复制编译好的 .so 文件
-COPY --from=backend-builder /app/rate_limiter.*.so ./src/rate_limiter.so
+COPY --from=backend-builder /backend-build/rate_limiter.*.so ./src/rate_limiter.so
 
 # 移除 rate_limiter.py 源码
 RUN rm src/rate_limiter.py

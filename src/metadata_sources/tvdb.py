@@ -55,8 +55,8 @@ class TvdbMetadataSource(BaseMetadataSource):
 
     async def _create_client(self) -> httpx.AsyncClient:
         # 1. 获取代理配置
-        proxy_url = await self.config_manager.get("proxy_url", "")
-        proxy_enabled_globally = (await self.config_manager.get("proxy_enabled", "false")).lower() == 'true'
+        proxy_url = await self.config_manager.get("proxyUrl", "")
+        proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
 
         async with self._session_factory() as session:
             metadata_settings = await crud.get_all_metadata_source_settings(session)
@@ -164,8 +164,8 @@ class TvdbMetadataSource(BaseMetadataSource):
             api_key = await self.config_manager.get("tvdbApiKey")
             if not api_key:
                 return "未配置API Key"
-            proxy_url = await self.config_manager.get("proxy_url", "")
-            proxy_enabled_globally = (await self.config_manager.get("proxy_enabled", "false")).lower() == 'true'
+            proxy_url = await self.config_manager.get("proxyUrl", "")
+            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
             async with self._session_factory() as session:
                 metadata_settings = await crud.get_all_metadata_source_settings(session)
             provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
