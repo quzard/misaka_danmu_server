@@ -1,10 +1,9 @@
 # 启用 BuildKit 新特性，如 secrets
 # syntax=docker/dockerfile:1.4
-# --- Stage 1: Build Frontend ---
-FROM node:20-alpine AS builder
 
-# 安装 Python 和编译依赖
-RUN apk add --no-cache python3 py3-pip build-base python3-dev
+# --- Stage 1: frontend-builder ---
+# 使用 Node.js 镜像专门构建前端
+FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/web
 
@@ -12,30 +11,37 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-# 复制所有源代码
+# 复制前端源代码
 COPY web/ ./
-COPY src/ ./src/
-COPY requirements.txt .
-
-# 安装 Python 依赖和 Nuitka
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt nuitka
-
-# 修正：使用 --mount=type=secret 安全地挂载密钥，并替换占位符
-# 密钥内容将存在于 /run/secrets/XOR_KEY_SECRET 文件中
-RUN --mount=type=secret,id=XOR_KEY_SECRET \
-    sed -i "s|__XOR_KEY_PLACEHOLDER__|$(cat /run/secrets/XOR_KEY_SECRET)|g" src/rate_limiter.py
-
-# 编译 rate_limiter.py
-# --module: 编译为 .so 模块
-# --output-dir: 指定输出目录
-RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=.
  
 # 执行构建
 RUN npm run build
 
-# --- Stage 2: Final Python Application ---
-FROM l429609201/su-exec:su-exec
+# --- Stage 2: backend-builder ---
+# 使用官方 Python 镜像专门编译 Nuitka 模块
+FROM python:3.12-alpine AS backend-builder
 
+# 安装编译所需的依赖
+RUN apk add --no-cache build-base
+
+WORKDIR /app
+
+# 复制 Python 源代码和依赖文件
+COPY src/ ./src/
+COPY requirements.txt .
+
+# 安装 Python 依赖和 Nuitka
+RUN pip install --no-cache-dir -r requirements.txt nuitka
+
+# 使用 --mount=type=secret 安全地挂载密钥，并替换占位符
+RUN --mount=type=secret,id=XOR_KEY_SECRET \
+    sed -i "s|__XOR_KEY_PLACEHOLDER__|$(cat /run/secrets/XOR_KEY_SECRET)|g" src/rate_limiter.py
+
+# 编译 rate_limiter.py
+RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=.
+
+# --- Stage 3: Final Application ---
+FROM l429609201/su-exec:su-exec
 
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
@@ -45,16 +51,15 @@ ENV TZ="Asia/Shanghai"
 ENV LANG="C.UTF-8"
 ENV LC_ALL="C.UTF-8"
 
-# 设置工作目录
 WORKDIR /app
 
 # 安装系统依赖并创建用户
+# 修正：最终镜像不再需要 build-essential 和 python3-dev
+# libpq-dev 仍然需要，因为 psycopg2 可能在运行时需要它
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
         libpq-dev \
-        python3-dev \
         tzdata \
         iputils-ping \
     && addgroup --gid 1000 appgroup \
@@ -62,30 +67,28 @@ RUN set -ex \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件并安装
+# 复制 Python 运行时依赖文件并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-# 复制应用代码
+# 复制应用代码和脚本
 COPY src/ ./src/
 COPY static/ ./static/
 COPY config/ ./config/
-# 移除 rate_limiter.py 源码
-RUN rm src/rate_limiter.py
-# 从 builder 阶段复制编译好的 .so 文件
-COPY --from=builder /app/web/*.so ./src/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
 
-# 从 'builder' 阶段复制构建好的前端静态文件
-COPY --from=builder /app/web/dist ./web/dist/
+# 从 backend-builder 阶段复制编译好的 .so 文件，并移除源码
+COPY --from=backend-builder /app/*.so ./src/
+RUN rm src/rate_limiter.py
+
+# 从 frontend-builder 阶段复制构建好的前端静态文件
+COPY --from=frontend-builder /app/web/dist ./web/dist/
 
 # 更改工作目录所有权为新创建的用户
 RUN chown -R appuser:appgroup /app
 
-# 暴露应用运行的端口
 EXPOSE 7768
 
-# 运行应用的默认命令
 CMD ["/exec.sh"]
