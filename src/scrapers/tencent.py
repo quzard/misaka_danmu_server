@@ -1068,11 +1068,11 @@ class TencentScraper(BaseScraper):
 
         # 步骤 3: 统一应用黑名单过滤 (包含启发式正片保护)
         # 修正：恢复了启发式规则，以防止黑名单误杀正片。
-        # 修正：安全地获取并组合黑名单规则
-        blacklist_rules = [p for p in [
-            await self.config_manager.get("episode_blacklist_regex", self._GLOBAL_EPISODE_BLACKLIST_DEFAULT),
-            await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
-        ] if p]
+        # 修正：腾讯视频源只应使用其专属的黑名单，以避免全局规则（如 "版"）误杀正片。
+        provider_pattern_str = await self.config_manager.get(
+            f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
+        )
+        blacklist_rules = [provider_pattern_str] if provider_pattern_str else []
 
         if blacklist_rules:
             original_count = len(episodes_to_format)
