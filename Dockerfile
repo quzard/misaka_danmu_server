@@ -1,8 +1,7 @@
 # 启用 BuildKit 新特性，如 secrets
 # syntax=docker/dockerfile:1.4
 
-# --- Stage 1: frontend-builder ---
-# 使用 Node.js 镜像专门构建前端
+# --- Stage 1: Build Frontend ---
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/web
@@ -13,7 +12,7 @@ RUN npm ci
 
 # 复制前端源代码
 COPY web/ ./
- 
+
 # 执行构建
 RUN npm run build
 
