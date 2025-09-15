@@ -1,8 +1,5 @@
-# 启用 BuildKit 新特性，如 secrets
-# syntax=docker/dockerfile:1.4
-
 # --- Stage 1: Build Frontend ---
-FROM node:20-alpine AS frontend-builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app/web
 
@@ -16,7 +13,7 @@ COPY web/ ./
 # 执行构建
 RUN npm run build
 
-# --- Stage 2: backend-builder ---
+# --- Stage 2:backend-builder ---
 # 使用官方 Python 镜像专门编译 Nuitka 模块
 FROM l429609201/su-exec:su-exec AS backend-builder
 
@@ -39,27 +36,27 @@ RUN --mount=type=secret,id=XOR_KEY_SECRET \
 # 编译 rate_limiter.py
 RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=.
 
-# --- Stage 3: Final Application ---
+# --- Stage 3: Final Python Application ---
 FROM l429609201/su-exec:su-exec
 
 
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV TZ="Asia/Shanghai"
-ENV LANG="C.UTF-8"
-ENV LC_ALL="C.UTF-8"
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV TZ=Asia/Shanghai
+ENV LANG C.UTF-8
+ENV LC_ALL C.UTF-8
 
 # 设置工作目录
 WORKDIR /app
 
 # 安装系统依赖并创建用户
-# 修正：最终镜像不再需要 build-essential 和 python3-dev
-# libpq-dev 仍然需要，因为 psycopg2 可能在运行时需要它
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+        default-libmysqlclient-dev \
+        libpq-dev \
         tzdata \
         iputils-ping \
     && addgroup --gid 1000 appgroup \
@@ -69,12 +66,12 @@ RUN set -ex \
 
 # 复制依赖文件并安装
 COPY requirements.txt .
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY src/ src/
-COPY static/ static/
-COPY config/ config/
+COPY src/ ./src/
+COPY static/ ./static/
+COPY config/ ./config/
 COPY exec.sh /exec.sh
 COPY run.sh /run.sh
 RUN chmod +x /exec.sh /run.sh
@@ -85,8 +82,8 @@ COPY --from=backend-builder /app/rate_limiter.*.so ./src/rate_limiter.so
 # 移除 rate_limiter.py 源码
 RUN rm src/rate_limiter.py
 
-# 从 frontend-builder 阶段复制构建好的前端静态文件
-COPY --from=frontend-builder /app/web/dist ./web/dist/
+# 从 'builder' 阶段复制构建好的前端静态文件
+COPY --from=builder /app/web/dist ./web/dist/
 
 # 更改工作目录所有权为新创建的用户
 RUN chown -R appuser:appgroup /app
