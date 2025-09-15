@@ -1105,19 +1105,24 @@ class TencentScraper(BaseScraper):
 
         # 步骤 3.5: 二次过滤
         # 在初步处理和启发式过滤后，强制应用一次黑名单，以确保如“第x期加更”等内容被彻底移除。
+        # 修正：确保二次过滤使用与第一次过滤相同的、完整的黑名单规则列表。
         if blacklist_rules:
             original_count = len(episodes_to_format)
-            
-            final_filtered_episodes = []
+
             secondary_filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            
+            # 使用一个 lambda 函数来封装过滤逻辑，以避免代码重复
+            def is_blacklisted(title: str) -> Optional[str]:
+                return next((rule for rule in blacklist_rules if rule and re.search(rule, title, re.IGNORECASE)), None)
+
+            final_filtered_episodes = []
             for ep in episodes_to_format:
                 title_to_check = ep.union_title or ep.title or ""
-                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
-                if not match_rule:
-                    final_filtered_episodes.append(ep)
-                else:
+                if match_rule := is_blacklisted(title_to_check):
                     secondary_filtered_out_log[match_rule].append(title_to_check)
-            
+                else:
+                    final_filtered_episodes.append(ep)
+
             for rule, titles in secondary_filtered_out_log.items():
                 self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
             
