@@ -6,7 +6,7 @@ ARG XOR_KEY_SECRET
 ENV XOR_KEY_SECRET=${XOR_KEY_SECRET}
 
 # 安装 Python 和编译依赖
-RUN apk add --no-cache python3 py3-pip build-base
+RUN apk add --no-cache python3 py3-pip build-base python3-dev
 
 WORKDIR /app/web
 
@@ -89,3 +89,4 @@ EXPOSE 7768
 
 # 运行应用的默认命令
 CMD ["/exec.sh"]
+
