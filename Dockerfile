@@ -19,7 +19,7 @@ RUN npm run build
 
 # --- Stage 2: backend-builder ---
 # 使用官方 Python 镜像专门编译 Nuitka 模块
-FROM python:3.12-slim-bullseye AS backend-builder
+FROM l429609201/su-exec:su-exec AS backend-builder
 
 # 安装编译所需的依赖
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
