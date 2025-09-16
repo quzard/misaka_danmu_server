@@ -38,8 +38,10 @@ class So360SearchRes(BaseModel):
     rows: List[So360SearchResultItem] = Field(default_factory=list)
 
 class So360SearchResult(BaseModel):
-    # 修正：API现在返回一个包含 'list' 键的字典，其值才是 So360SearchRes
-    longData: Optional[Dict[str, So360SearchRes]] = Field(None, alias="longData")
+    # 修正：API 返回的 longData 结构多变，有时是 {"list": {"rows": [...]}}，
+    # 有时是 {"rows": [...]}, 有时直接是 [...]。
+    # 使用 Union 来兼容多种可能性。
+    longData: Optional[Union[Dict[str, So360SearchRes], So360SearchRes, List[So360SearchResultItem]]] = Field(None, alias="longData")
 
 class So360SearchResponse(BaseModel):
     data: Optional[So360SearchResult] = None
@@ -111,16 +113,26 @@ class So360MetadataSource(BaseMetadataSource):
             except ValueError:
                 json_payload = json_text # 如果找不到括号，则假定它不是JSONP
             data = So360SearchResponse.model_validate(json.loads(json_payload))
-            
-            # 修正：根据新的模型结构调整数据提取逻辑
-            long_data_dict = data.data.longData if data.data else None
-            search_res = long_data_dict.get("list") if long_data_dict else None
-            if not search_res or not isinstance(search_res, So360SearchRes):
+
+            # 修正：健壮地从多种可能的 longData 结构中提取 rows
+            rows_to_process: List[So360SearchResultItem] = []
+            if data.data and data.data.longData:
+                if isinstance(data.data.longData, dict) and "list" in data.data.longData:
+                    # Case 1: {"list": {"rows": [...]}}
+                    rows_to_process = data.data.longData["list"].rows
+                elif isinstance(data.data.longData, So360SearchRes):
+                    # Case 2: {"rows": [...]}
+                    rows_to_process = data.data.longData.rows
+                elif isinstance(data.data.longData, list):
+                    # Case 3: [...]
+                    rows_to_process = [So360SearchResultItem.model_validate(item) for item in data.data.longData]
+
+            if not rows_to_process:
                 self.logger.info("360影视搜索未返回有效的 'longData' 对象，搜索结束。")
                 return []
 
             results: List[models.MetadataDetailsResponse] = []
-            for item in search_res.rows:
+            for item in rows_to_process:
                 media_type = "other"
                 if item.cat_name:
                     if "电影" in item.cat_name: media_type = "movie"
