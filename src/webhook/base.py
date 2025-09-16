@@ -51,12 +51,26 @@ class BaseWebhook(ABC):
         async with self._session_factory() as session:
             # 检查全局开关和过滤规则的逻辑已移至 webhook/tasks.py 中，
             # 以确保即使任务被延时，规则也能在执行时被应用。
-            enabled = (await self.config_manager.get("webhookEnabled", "true")).lower() == 'true'
-            if not enabled:
-                self.logger.info("Webhook 功能已禁用，忽略请求。")
+            # 修正：将所有检查逻辑移回到这里，在创建任务前执行
+            if not (await self.config_manager.get("webhookEnabled", "true")).lower() == 'true':
+                self.logger.info("Webhook 功能已全局禁用，忽略请求。")
                 return
 
-            if not await self._should_process(payload.get("animeTitle", "")):
+            # 重新加入过滤逻辑
+            filter_mode = await self.config_manager.get("webhookFilterMode", "blacklist")
+            filter_regex_str = await self.config_manager.get("webhookFilterRegex", "")
+            if filter_regex_str:
+                try:
+                    filter_pattern = re.compile(filter_regex_str, re.IGNORECASE)
+                    anime_title = payload.get("animeTitle", "")
+                    if (filter_mode == 'blacklist' and filter_pattern.search(anime_title)) or \
+                       (filter_mode == 'whitelist' and not filter_pattern.search(anime_title)):
+                        self.logger.info(f"Webhook 请求 '{anime_title}' 因匹配过滤规则而被忽略。")
+                        return
+                except re.error as e:
+                    self.logger.error(f"无效的 Webhook 过滤正则表达式: '{filter_regex_str}'。错误: {e}。将忽略此过滤规则。")
+
+            if not await self._should_process(payload.get("animeTitle", "")): # 这行现在是多余的，但为了兼容性暂时保留
                 return
 
             delayed_enabled = (await self.config_manager.get("webhookDelayedImportEnabled", "false")).lower() == 'true'

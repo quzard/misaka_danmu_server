@@ -56,36 +56,6 @@ async def webhook_search_and_dispatch_task(
     """
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
-        
-        # 新增：在任务开始时检查 Webhook 是否全局启用
-        enabled = (await config_manager.get("webhookEnabled", "true")).lower() == 'true'
-        if not enabled:
-            msg = "已忽略：Webhook 功能已全局禁用。"
-            logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
-            raise TaskSuccess(msg)
-
-        progress_callback(2, "正在检查过滤规则...")
-
-        # 新增：在任务开始时执行过滤逻辑
-        filter_mode = await config_manager.get("webhookFilterMode", "blacklist")
-        filter_regex_str = await config_manager.get("webhookFilterRegex", "")
-
-        if filter_regex_str:
-            try:
-                filter_pattern = re.compile(filter_regex_str, re.IGNORECASE)
-                match = filter_pattern.search(animeTitle)
-
-                if filter_mode == 'blacklist' and match:
-                    msg = f"已忽略：标题匹配黑名单规则 '{filter_regex_str}'"
-                    logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
-                    raise TaskSuccess(msg)
-                elif filter_mode == 'whitelist' and not match:
-                    msg = f"已忽略：标题未匹配白名单规则 '{filter_regex_str}'"
-                    logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
-                    raise TaskSuccess(msg)
-            except re.error as e:
-                logger.error(f"无效的 Webhook 过滤正则表达式: '{filter_regex_str}'。错误: {e}。将忽略此过滤规则。")
-
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
