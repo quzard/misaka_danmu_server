@@ -88,7 +88,6 @@ class RateLimiter:
         self.global_period_seconds: int = 3600 
         try:
             config_dir = Path("/app/src/rate_limit")
-            config_dir = Path("/app/config/rate_limit")
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
             pub_key_path = config_dir / "public_key.pem"
