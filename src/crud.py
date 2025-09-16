@@ -14,6 +14,12 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.sql.elements import ColumnElement
 
+from .task_manager import TaskManager
+from .scraper_manager import ScraperManager
+from .metadata_manager import MetadataSourceManager
+from .config_manager import ConfigManager
+from .rate_limiter import RateLimiter
+
 from . import models
 from . import orm_models
 from .orm_models import ( # noqa: F401
@@ -2090,13 +2096,42 @@ async def get_webhook_tasks(session: AsyncSession, page: int, page_size: int, se
     result = await session.execute(stmt)
     return {"total": total, "list": result.scalars().all()}
 
-async def run_webhook_tasks_now(session: AsyncSession, task_ids: List[int]):
-    """将指定的待处理任务的执行时间更新为当前时间。"""
+async def run_webhook_tasks_directly(
+    session: AsyncSession,
+    task_ids: List[int],
+    task_manager: TaskManager,
+    scraper_manager: ScraperManager,
+    metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
+    rate_limiter: RateLimiter
+) -> int:
+    """直接获取并执行指定的待处理Webhook任务。"""
     if not task_ids:
-        return
-    stmt = update(WebhookTask).where(WebhookTask.id.in_(task_ids), WebhookTask.status == "pending").values(executeTime=get_now())
-    await session.execute(stmt)
-    await session.commit()
+        return 0
+
+    stmt = select(WebhookTask).where(WebhookTask.id.in_(task_ids), WebhookTask.status == "pending")
+    tasks_to_run = (await session.execute(stmt)).scalars().all()
+
+    submitted_count = 0
+    for task in tasks_to_run:
+        try:
+            await update_webhook_task_status(session, task.id, "processing")
+            await session.commit()
+
+            payload = json.loads(task.payload)
+            task_coro = lambda s, cb: webhook_search_and_dispatch_task(
+                webhookSource=task.webhookSource, progress_callback=cb, session=s,
+                manager=scraper_manager, task_manager=task_manager,
+                metadata_manager=metadata_manager, config_manager=config_manager,
+                rate_limiter=rate_limiter, **payload
+            )
+            await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
+            await update_webhook_task_status(session, task.id, "submitted")
+            await session.commit()
+            submitted_count += 1
+        except Exception as e:
+            logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
+    return submitted_count
 
 async def delete_webhook_tasks(session: AsyncSession, task_ids: List[int]) -> int:
     """批量删除指定的 Webhook 任务。"""

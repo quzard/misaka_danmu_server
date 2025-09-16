@@ -2612,10 +2612,28 @@ async def delete_bulk_webhook_tasks(payload: Dict[str, List[int]], session: Asyn
 async def run_webhook_tasks_now(
     payload: Dict[str, List[int]],
     session: AsyncSession = Depends(get_db_session),
-    scheduler: SchedulerManager = Depends(get_scheduler_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """立即执行指定的待处理Webhook任务。"""
-    await crud.run_webhook_tasks_now(session, payload.get("ids", []))
-    # 触发一次 WebhookProcessorJob 以确保任务被立即拾取
-    await scheduler.run_task_now_by_type("webhookProcessor")
-    return {"message": "任务已标记为立即执行。"}
+    task_ids = payload.get("ids", [])
+    if not task_ids:
+        return {"message": "没有选中任何任务。"}
+
+    submitted_count = await crud.run_webhook_tasks_directly(
+        session=session,
+        task_ids=task_ids,
+        task_manager=task_manager,
+        scraper_manager=scraper_manager,
+        metadata_manager=metadata_manager,
+        config_manager=config_manager,
+        rate_limiter=rate_limiter
+    )
+
+    if submitted_count > 0:
+        return {"message": f"已成功提交 {submitted_count} 个任务到执行队列。"}
+    else:
+        return {"message": "没有找到可执行的待处理任务。"}
