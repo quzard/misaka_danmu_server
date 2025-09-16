@@ -304,19 +304,9 @@ app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
 if __name__ == "__main__":
-    host_to_run = settings.server.host
-    port_to_run = settings.server.port
-
-    # 新增：在 Uvicorn 启动前打印更清晰的监听地址信息
-    # Uvicorn 的默认日志可能只显示 IPv4 地址，即使在双栈模式下也是如此。
-    if host_to_run == '::':
-        logger.info(f"服务正在启动，将同时监听所有 IPv4 和 IPv6 地址...")
-        logger.info(f"  - IPv4: http://0.0.0.0:{port_to_run}")
-        logger.info(f"  - IPv6: http://[::]:{port_to_run}")
-
     uvicorn.run(
         "src.main:app",
-        host=host_to_run,
-        port=port_to_run,
+        host=settings.server.host,
+        port=settings.server.port,
         reload=settings.environment == "development"  # 开发环境启用自动重载
     )

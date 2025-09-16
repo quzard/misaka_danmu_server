@@ -19,7 +19,7 @@ services:
       - PGID=1000
       - UMASK=0022 # 设置文件创建掩码，0022 是一个常见的安全默认值
       # 服务配置 (端口在主机网络模式下由应用内部配置决定)
-      - DANMUAPI_SERVER__HOST=::
+      - DANMUAPI_SERVER__HOST=0.0.0.0
       - DANMUAPI_SERVER__PORT=7768
       # 数据库配置 - 连接到宿主机上的数据库
       - DANMUAPI_DATABASE__HOST=127.0.0.1
