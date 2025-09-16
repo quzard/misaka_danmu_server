@@ -16,9 +16,14 @@ export const Task = () => {
       defaultActiveKey={key}
       items={[
         {
-          label: '进行中任务',
+          label: '进行中的任务',
           key: 'task',
           children: <ImportTask />,
+        },
+        {
+          label: 'Webhook 任务',
+          key: 'webhook',
+          children: <WebhookTasks />,
         },
         {
           label: '定时任务',
@@ -29,11 +34,6 @@ export const Task = () => {
           label: '流控面板',
           key: 'ratelimit',
           children: <RateLimitPanel />,
-        },
-        {
-          label: 'Webhook 任务',
-          key: 'webhook',
-          children: <WebhookTasks />,
         },
       ]}
       onChange={key => {

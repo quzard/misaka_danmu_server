@@ -13,6 +13,16 @@ const getStatusTagType = status => {
   return 'default'
 }
 
+const translateStatus = status => {
+  const statusMap = {
+    pending: '待处理',
+    submitted: '已提交',
+    processing: '处理中',
+    failed: '失败',
+  }
+  return statusMap[status] || status
+}
+
 export const WebhookTasks = () => {
   const [loading, setLoading] = useState(true)
   const [taskList, setTaskList] = useState([])
@@ -140,7 +150,7 @@ export const WebhookTasks = () => {
                     className="!cursor-pointer hover:!bg-gray-100"
                     extra={
                       <Tag color={getStatusTagType(item.status)}>
-                        {item.status}
+                        {translateStatus(item.status)}
                       </Tag>
                     }
                   >

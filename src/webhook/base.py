@@ -51,6 +51,14 @@ class BaseWebhook(ABC):
         async with self._session_factory() as session:
             # 检查全局开关和过滤规则的逻辑已移至 webhook/tasks.py 中，
             # 以确保即使任务被延时，规则也能在执行时被应用。
+            enabled = (await self.config_manager.get("webhookEnabled", "true")).lower() == 'true'
+            if not enabled:
+                self.logger.info("Webhook 功能已禁用，忽略请求。")
+                return
+
+            if not await self._should_process(payload.get("animeTitle", "")):
+                return
+
             delayed_enabled = (await self.config_manager.get("webhookDelayedImportEnabled", "false")).lower() == 'true'
             delay_hours_str = await self.config_manager.get("webhookDelayedImportHours", "24")
             delay_hours = int(delay_hours_str) if delay_hours_str.isdigit() else 24
