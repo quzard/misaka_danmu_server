@@ -119,14 +119,6 @@ export const WebhookTasks = () => {
         title="Webhook 任务列表"
         extra={
           <Space>
-            <Input.Search
-              placeholder="搜索任务标题"
-              onSearch={value => {
-                setSearchTerm(value)
-                setPagination(prev => ({ ...prev, current: 1 }))
-              }}
-              style={{ width: 200 }}
-            />
             <Tooltip title="全选/取消全选">
               <Button
                 type="default"
@@ -161,6 +153,14 @@ export const WebhookTasks = () => {
                 onClick={handleBulkDelete}
               />
             </Tooltip>
+            <Input.Search
+              placeholder="搜索任务标题"
+              onSearch={value => {
+                setSearchTerm(value)
+                setPagination(prev => ({ ...prev, current: 1 }))
+              }}
+              style={{ width: 200 }}
+            />
           </Space>
         }
       >

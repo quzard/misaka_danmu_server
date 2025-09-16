@@ -230,3 +230,15 @@ class SchedulerManager:
             job.modify(next_run_time=datetime.now(self.scheduler.timezone))
         else:
             raise ValueError("找不到指定的任务ID")
+
+    async def run_task_now_by_type(self, job_type: str):
+        """
+        根据任务类型查找任务并立即运行它。
+        """
+        async with self._session_factory() as session:
+            task_id = await crud.get_scheduled_task_id_by_type(session, job_type)
+        
+        if not task_id:
+            raise ValueError(f"找不到类型为 '{job_type}' 的定时任务")
+
+        await self.run_task_now(task_id)    

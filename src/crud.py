@@ -1871,6 +1871,12 @@ async def check_scheduled_task_exists_by_type(session: AsyncSession, job_type: s
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
+async def get_scheduled_task_id_by_type(session: AsyncSession, job_type: str) -> Optional[str]:
+    """获取指定类型的定时任务ID。"""
+    stmt = select(ScheduledTask.taskId).where(ScheduledTask.jobType == job_type).limit(1)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
 async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     stmt = select(
         ScheduledTask.taskId.label("taskId"), 
