@@ -2623,7 +2623,7 @@ async def run_webhook_tasks_now(
     if not task_ids:
         return {"message": "没有选中任何任务。"}
 
-    submitted_count = await crud.run_webhook_tasks_directly(
+    submitted_count = await tasks.run_webhook_tasks_directly(
         session=session,
         task_ids=task_ids,
         task_manager=task_manager,

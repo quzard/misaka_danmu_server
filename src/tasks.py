@@ -24,6 +24,7 @@ from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager 
 from .utils import parse_search_keyword, clean_xml_string
+from .webhook.tasks import webhook_search_and_dispatch_task
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
@@ -1030,6 +1031,44 @@ async def manual_import_task(
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
+
+async def run_webhook_tasks_directly(
+    session: AsyncSession,
+    task_ids: List[int],
+    task_manager: "TaskManager",
+    scraper_manager: "ScraperManager",
+    metadata_manager: "MetadataSourceManager",
+    config_manager: "ConfigManager",
+    rate_limiter: "RateLimiter"
+) -> int:
+    """直接获取并执行指定的待处理Webhook任务。"""
+    if not task_ids:
+        return 0
+
+    stmt = select(orm_models.WebhookTask).where(orm_models.WebhookTask.id.in_(task_ids), orm_models.WebhookTask.status == "pending")
+    tasks_to_run = (await session.execute(stmt)).scalars().all()
+
+    submitted_count = 0
+    for task in tasks_to_run:
+        try:
+            await crud.update_webhook_task_status(session, task.id, "processing")
+            await session.commit()
+
+            payload = json.loads(task.payload)
+            task_coro = lambda s, cb: webhook_search_and_dispatch_task(
+                webhookSource=task.webhookSource, progress_callback=cb, session=s,
+                manager=scraper_manager, task_manager=task_manager,
+                metadata_manager=metadata_manager, config_manager=config_manager,
+                rate_limiter=rate_limiter, **payload
+            )
+            await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
+            await crud.update_webhook_task_status(session, task.id, "submitted")
+            await session.commit()
+            submitted_count += 1
+        except Exception as e:
+            logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
+            await session.rollback()
+    return submitted_count
 
 async def batch_manual_import_task(
     sourceId: int, animeId: int, providerName: str, items: List[models.BatchManualImportItem],
