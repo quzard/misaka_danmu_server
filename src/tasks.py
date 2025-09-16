@@ -1173,9 +1173,29 @@ async def auto_search_and_import_task(
 
             try:
                 await progress_callback(10, f"正在从 {effective_search_type.upper()} 获取元数据...")
-                details = await metadata_manager.get_details(
-                    provider=effective_search_type, item_id=search_term, user=user, mediaType=provider_media_type
-                )
+                
+                # --- 修正：当 mediaType 未提供时，智能地尝试两种类型 ---
+                provider_media_type_to_try = None
+                if media_type:
+                    if effective_search_type == 'tmdb':
+                        provider_media_type_to_try = 'tv' if media_type == 'tv_series' else 'movie'
+                    elif effective_search_type == 'tvdb':
+                        provider_media_type_to_try = 'series' if media_type == 'tv_series' else 'movies'
+
+                if provider_media_type_to_try:
+                    details = await metadata_manager.get_details(
+                        provider=effective_search_type, item_id=search_term, user=user, mediaType=provider_media_type_to_try
+                    )
+                else:
+                    # 如果无法推断，则依次尝试 TV 和 Movie
+                    logger.info(f"未提供 mediaType，将依次尝试 TV 和 Movie 类型...")
+                    tv_type = 'tv' if effective_search_type == 'tmdb' else 'series'
+                    details = await metadata_manager.get_details(provider=effective_search_type, item_id=search_term, user=user, mediaType=tv_type)
+                    if not details:
+                        logger.info(f"作为 TV/Series 未找到，正在尝试作为 Movie...")
+                        movie_type = 'movie' if effective_search_type == 'tmdb' else 'movies'
+                        details = await metadata_manager.get_details(provider=effective_search_type, item_id=search_term, user=user, mediaType=movie_type)
+                # --- 修正结束 ---
                 if not details and search_type == "keyword":
                     logger.info(f"作为TMDB ID获取元数据失败，将按原样作为关键词处理。")
             except Exception as e:
