@@ -40,7 +40,7 @@ async def handle_webhook(
     try:
         handler = webhook_manager.get_handler(webhook_type)
         # 将整个请求对象传递给处理器
-        await handler.handle(request)
+        await handler.handle(request, webhook_source=webhook_type)
     except ValueError as e:
         # 捕获在 get_handler 中当 webhook_type 无效时抛出的 ValueError
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
