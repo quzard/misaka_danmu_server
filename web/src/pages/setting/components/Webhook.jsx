@@ -54,7 +54,7 @@ export const Webhook = () => {
         getWebhookSettings(),
       ])
       setApiKey(apiKeyRes)
-      setServices(servicesRes)
+      setServices(servicesRes.data)
       // 使用 setFieldsValue 将从后端获取的设置填充到表单中
       form.setFieldsValue(settingsRes.data)
     } catch (error) {
