@@ -1062,12 +1062,13 @@ async def run_webhook_tasks_directly(
                 rate_limiter=rate_limiter, **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-            await crud.update_webhook_task_status(session, task.id, "submitted")
-            await session.commit()
+            # 修正：任务成功提交后，直接删除该条待办记录
+            await session.delete(task)
             submitted_count += 1
         except Exception as e:
             logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
             await session.rollback()
+    await session.commit() # 在循环结束后统一提交所有更改
     return submitted_count
 
 def _is_movie_by_title(title: str) -> bool:

@@ -54,10 +54,12 @@ class WebhookProcessorJob(BaseJob):
                     **payload
                 )
                 await self.task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-                await crud.update_webhook_task_status(session, task.id, "submitted")
-                await session.commit()
 
             except Exception as e:
                 logger.error(f"处理 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
                 await crud.update_webhook_task_status(session, task.id, "failed")
-                await session.commit()
+            else:
+                # 修正：只有在任务成功提交后才删除记录
+                await session.delete(task)
+            finally:
+                await session.commit() # 确保状态更新或删除被提交

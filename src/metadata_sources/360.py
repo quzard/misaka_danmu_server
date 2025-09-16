@@ -28,7 +28,8 @@ class So360SearchResultItem(BaseModel):
     cat_name: Optional[str] = Field(None, alias="cat_name")
     playlinks: Dict[str, Any] = Field(default_factory=dict)
     playlinks_year: Optional[Dict[str, List[int]]] = Field(None, alias="playlinks_year")
-    seriesPlaylinks: Optional[List[Dict[str, Any]]] = Field(None, alias="seriesPlaylinks")
+    # 修正：seriesPlaylinks 现在可能是一个字符串列表或字典列表
+    seriesPlaylinks: Optional[List[Union[Dict[str, Any], str]]] = Field(None, alias="seriesPlaylinks")
     seriesSite: Optional[str] = Field(None, alias="seriesSite")
     years: Optional[List[int]] = None
     alias: Optional[List[str]] = None
@@ -37,7 +38,8 @@ class So360SearchRes(BaseModel):
     rows: List[So360SearchResultItem] = Field(default_factory=list)
 
 class So360SearchResult(BaseModel):
-    longData: Optional[Union[So360SearchRes, List]] = Field(None, alias="longData")
+    # 修正：API现在返回一个包含 'list' 键的字典，其值才是 So360SearchRes
+    longData: Optional[Dict[str, So360SearchRes]] = Field(None, alias="longData")
 
 class So360SearchResponse(BaseModel):
     data: Optional[So360SearchResult] = None
@@ -110,12 +112,15 @@ class So360MetadataSource(BaseMetadataSource):
                 json_payload = json_text # 如果找不到括号，则假定它不是JSONP
             data = So360SearchResponse.model_validate(json.loads(json_payload))
             
-            if not data.data or not data.data.longData or not isinstance(data.data.longData, So360SearchRes):
+            # 修正：根据新的模型结构调整数据提取逻辑
+            long_data_dict = data.data.longData if data.data else None
+            search_res = long_data_dict.get("list") if long_data_dict else None
+            if not search_res or not isinstance(search_res, So360SearchRes):
                 self.logger.info("360影视搜索未返回有效的 'longData' 对象，搜索结束。")
                 return []
 
             results: List[models.MetadataDetailsResponse] = []
-            for item in data.data.longData.rows:
+            for item in search_res.rows:
                 media_type = "other"
                 if item.cat_name:
                     if "电影" in item.cat_name: media_type = "movie"
