@@ -18,6 +18,7 @@ from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .config_manager import ConfigManager
+from .webhook.tasks import webhook_search_and_dispatch_task
 from .rate_limiter import RateLimiter
 
 from . import models
