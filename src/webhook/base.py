@@ -70,9 +70,6 @@ class BaseWebhook(ABC):
                 except re.error as e:
                     self.logger.error(f"无效的 Webhook 过滤正则表达式: '{filter_regex_str}'。错误: {e}。将忽略此过滤规则。")
 
-            if not await self._should_process(payload.get("animeTitle", "")): # 这行现在是多余的，但为了兼容性暂时保留
-                return
-
             delayed_enabled = (await self.config_manager.get("webhookDelayedImportEnabled", "false")).lower() == 'true'
             delay_hours_str = await self.config_manager.get("webhookDelayedImportHours", "24")
             delay_hours = int(delay_hours_str) if delay_hours_str.isdigit() else 24
