@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Space,
   Spin,
   Switch,
@@ -23,17 +22,22 @@ import { useMessage } from '../../../MessageContext'
 
 export const Webhook = () => {
   const [isLoading, setLoading] = useState(true)
+  const [isSaving, setSaving] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [domain, setDomain] = useState('')
   const [services, setServices] = useState([])
   const messageApi = useMessage()
+  const [form] = Form.useForm()
+
+  // 动态监听表单中的值，以便实时更新UI
+  const webhookEnabled = Form.useWatch('webhookEnabled', form)
+  const isDelayedImportEnabled = Form.useWatch(
+    'webhookDelayedImportEnabled',
+    form
+  )
+  const domain = Form.useWatch('webhookCustomDomain', form)
 
   const getApiKey = async () => {
     const res = await getWebhookApikey()
-    return res.data?.value || ''
-  }
-  const getDomain = async () => {
-    const res = await getWebhookDomain()
     return res.data?.value || ''
   }
   const getServices = async () => {
@@ -42,62 +46,74 @@ export const Webhook = () => {
   }
 
   const getInfo = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const [apiKey, domain, services] = await Promise.all([
+      const [apiKeyRes, servicesRes, settingsRes] = await Promise.all([
         getApiKey(),
-        getDomain(),
-        getServices(),
+        getWebhookServices(),
+        getWebhookSettings(),
       ])
-      setApiKey(apiKey)
-      setDomain(domain)
-      setServices(services)
-      setLoading(false)
+      setApiKey(apiKeyRes)
+      setServices(servicesRes)
+      // 使用 setFieldsValue 将从后端获取的设置填充到表单中
+      form.setFieldsValue(settingsRes.data)
     } catch (error) {
+      messageApi.error('加载Webhook配置失败')
+    } finally {
       setLoading(false)
     }
   }
 
   const onRefresh = async () => {
-    const res = await refreshWebhookApikey()
-    setApiKey(res.data.value)
+    try {
+      const res = await refreshWebhookApikey()
+      setApiKey(res.data.value)
+      messageApi.success('API Key 已刷新')
+    } catch (error) {
+      messageApi.error('刷新API Key失败')
+    }
   }
 
-  const onSaveDoamin = async () => {
+  const onSave = async values => {
     try {
-      await setWebhookDomain({ value: domain })
+      setSaving(true)
+      await setWebhookSettings(values)
       messageApi.success('保存成功')
     } catch (error) {
       messageApi.error('保存失败')
+    } finally {
+      setSaving(false)
     }
   }
 
   useEffect(() => {
     getInfo()
-  }, [])
+  }, []) // eslint-disable-line
 
   return (
     <div className="my-6">
-      <Spin spinning={isLoading}>
-        <div className="mb-3">
-          Webhook
-          用于接收来自外部服务的通知，以实现自动化导入。请将下方对应服务的 URL
-          填入其 Webhook 通知设置中。
-        </div>
-        <div className="mb-4">{`URL 格式为：http(s)://域名(ip):端口(port)/api/webhook/{服务名}?api_key={你的API Key}`}</div>
-        <div className="flex items-center justify-start gap-3 mb-4">
-          <div className="shrink-0 w-auto md:w-[120px]">API Key:</div>
-          <div className="w-full">
-            <Space.Compact style={{ width: '100%' }}>
-              <Input block readOnly value={apiKey} />
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={onRefresh}
-              />
-            </Space.Compact>
+      <Card loading={isLoading} title="Webhook 配置">
+        <Spin spinning={isLoading}>
+          <div className="mb-3">
+            Webhook
+            用于接收来自外部服务的通知，以实现自动化导入。请将下方对应服务的
+            URL 填入其 Webhook 通知设置中。
           </div>
-        </div>
+          <div className="mb-4">{`URL 格式为：http(s)://域名(ip):端口(port)/api/webhook/{服务名}?api_key={你的API Key}`}</div>
+          <div className="flex items-center justify-start gap-3 mb-4">
+            <div className="shrink-0 w-auto md:w-[120px]">API Key:</div>
+            <div className="w-full">
+              <Space.Compact style={{ width: '100%' }}>
+                <Input readOnly value={apiKey} />
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={onRefresh}
+                />
+              </Space.Compact>
+            </div>
+          </div>
+        </Spin>
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item
             name="webhookEnabled"
@@ -129,7 +145,7 @@ export const Webhook = () => {
           </Form.Item>
 
           {webhookEnabled &&
-            services.map(it => (
+            services?.map(it => (
               <Form.Item key={it} label={`${it} Webhook地址`}>
                 <Space.Compact style={{ width: '100%' }}>
                   <Input
@@ -156,7 +172,7 @@ export const Webhook = () => {
             </Button>
           </Form.Item>
         </Form>
-      </Spin>
+      </Card>
     </div>
   )
 }
