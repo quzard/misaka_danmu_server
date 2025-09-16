@@ -2071,14 +2071,26 @@ async def create_webhook_task(
         await session.rollback()
         logger.warning(f"检测到重复的 Webhook 请求 (unique_key: {unique_key})，已忽略。")
 
-async def get_webhook_tasks(session: AsyncSession, page: int, page_size: int) -> Dict[str, Any]:
+async def get_webhook_tasks(session: AsyncSession, page: int, page_size: int, search: Optional[str] = None) -> Dict[str, Any]:
     """获取待处理的 Webhook 任务列表，支持分页。"""
-    count_stmt = select(func.count(WebhookTask.id))
+    base_stmt = select(WebhookTask)
+    if search:
+        base_stmt = base_stmt.where(WebhookTask.taskTitle.like(f"%{search}%"))
+
+    count_stmt = select(func.count()).select_from(base_stmt.alias("count_subquery"))
     total = (await session.execute(count_stmt)).scalar_one()
 
-    stmt = select(WebhookTask).order_by(WebhookTask.receptionTime.asc()).offset((page - 1) * page_size).limit(page_size)
+    stmt = base_stmt.order_by(WebhookTask.receptionTime.desc()).offset((page - 1) * page_size).limit(page_size)
     result = await session.execute(stmt)
     return {"total": total, "list": result.scalars().all()}
+
+async def run_webhook_tasks_now(session: AsyncSession, task_ids: List[int]):
+    """将指定的待处理任务的执行时间更新为当前时间。"""
+    if not task_ids:
+        return
+    stmt = update(WebhookTask).where(WebhookTask.id.in_(task_ids), WebhookTask.status == "pending").values(executeTime=get_now())
+    await session.execute(stmt)
+    await session.commit()
 
 async def delete_webhook_tasks(session: AsyncSession, task_ids: List[int]) -> int:
     """批量删除指定的 Webhook 任务。"""

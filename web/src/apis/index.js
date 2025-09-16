@@ -215,6 +215,8 @@ export const setWebhookSettings = data => api.put('/api/ui/settings/webhook', da
 export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
 /** 批量删除webhook任务 */
 export const deleteWebhookTasks = data => api.post('/api/ui/webhook-tasks/delete-bulk', data)
+/** 立即执行webhook任务 */
+export const runWebhookTasksNow = data => api.post('/api/ui/webhook-tasks/run-now', data)
 
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */

@@ -11,6 +11,7 @@ from .. import crud
 from ..config_manager import ConfigManager
 from ..task_manager import TaskManager
 from ..rate_limiter import RateLimiter
+from ..webhook.tasks import webhook_search_and_dispatch_task
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
 
@@ -73,9 +74,27 @@ class BaseWebhook(ABC):
             delayed_enabled = (await self.config_manager.get("webhookDelayedImportEnabled", "false")).lower() == 'true'
             delay_hours_str = await self.config_manager.get("webhookDelayedImportHours", "24")
             delay_hours = int(delay_hours_str) if delay_hours_str.isdigit() else 24
-
-            await crud.create_webhook_task(
-                session, task_title, unique_key, payload, webhook_source,
-                delayed_enabled, timedelta(hours=delay_hours)
-            )
-            await session.commit()
+            
+            if delayed_enabled:
+                # 延时导入开启：将任务存入数据库
+                await crud.create_webhook_task(
+                    session, task_title, unique_key, payload, webhook_source,
+                    True, timedelta(hours=delay_hours)
+                )
+                await session.commit()
+                self.logger.info(f"Webhook 任务 '{task_title}' 已加入延时队列。")
+            else:
+                # 延时导入关闭：直接提交到 TaskManager
+                self.logger.info(f"Webhook 延时导入已关闭，正在立即执行任务 '{task_title}'...")
+                task_coro = lambda s, cb: webhook_search_and_dispatch_task(
+                    webhookSource=webhook_source,
+                    progress_callback=cb,
+                    session=s,
+                    manager=self.scraper_manager,
+                    task_manager=self.task_manager,
+                    metadata_manager=self.metadata_manager,
+                    config_manager=self.config_manager,
+                    rate_limiter=self.rate_limiter,
+                    **payload
+                )
+                await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

@@ -2597,12 +2597,25 @@ class PaginatedWebhookTasksResponse(BaseModel):
 async def get_webhook_tasks(
     page: int = Query(1, ge=1),
     pageSize: int = Query(100, ge=1),
+    search: Optional[str] = Query(None, description="按任务标题搜索"),
     session: AsyncSession = Depends(get_db_session)
 ):
-    result = await crud.get_webhook_tasks(session, page, pageSize)
+    result = await crud.get_webhook_tasks(session, page, pageSize, search)
     return PaginatedWebhookTasksResponse.model_validate(result)
 
 @router.post("/webhook-tasks/delete-bulk", summary="批量删除Webhook任务")
 async def delete_bulk_webhook_tasks(payload: Dict[str, List[int]], session: AsyncSession = Depends(get_db_session)):
     deleted_count = await crud.delete_webhook_tasks(session, payload.get("ids", []))
     return {"message": f"成功删除 {deleted_count} 个任务。"}
+
+@router.post("/webhook-tasks/run-now", summary="立即执行选中的Webhook任务")
+async def run_webhook_tasks_now(
+    payload: Dict[str, List[int]],
+    session: AsyncSession = Depends(get_db_session),
+    scheduler: SchedulerManager = Depends(get_scheduler_manager)
+):
+    """立即执行指定的待处理Webhook任务。"""
+    await crud.run_webhook_tasks_now(session, payload.get("ids", []))
+    # 触发一次 WebhookProcessorJob 以确保任务被立即拾取
+    await scheduler.run_task_now_by_type("webhookProcessor")
+    return {"message": "任务已标记为立即执行。"}

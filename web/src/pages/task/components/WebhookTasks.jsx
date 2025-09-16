@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { List, Button, Tag, Space, Card, Checkbox, Empty, Tooltip } from 'antd'
-import { DeleteOutlined, CheckOutlined, MinusOutlined } from '@ant-design/icons'
+import { List, Button, Tag, Space, Card, Checkbox, Empty, Tooltip, Input } from 'antd'
+import { DeleteOutlined, CheckOutlined, MinusOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getWebhookTasks, deleteWebhookTasks } from '../../../apis'
+import { getWebhookTasks, deleteWebhookTasks, runWebhookTasksNow } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { useModal } from '../../../ModalContext'
 
@@ -29,9 +29,10 @@ export const WebhookTasks = () => {
   const [selectedTasks, setSelectedTasks] = useState([])
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 100,
+    pageSize: 20,
     total: 0,
   })
+  const [searchTerm, setSearchTerm] = useState('')
   const messageApi = useMessage()
   const modalApi = useModal()
 
@@ -39,6 +40,7 @@ export const WebhookTasks = () => {
     setLoading(true)
     try {
       const { data } = await getWebhookTasks({
+        search: searchTerm,
         page: pagination.current,
         pageSize: pagination.pageSize,
       })
@@ -49,7 +51,7 @@ export const WebhookTasks = () => {
     } finally {
       setLoading(false)
     }
-  }, [messageApi, pagination.current, pagination.pageSize])
+  }, [messageApi, pagination.current, pagination.pageSize, searchTerm])
 
   useEffect(() => {
     fetchTasks()
@@ -87,6 +89,25 @@ export const WebhookTasks = () => {
     })
   }
 
+  const handleRunNow = () => {
+    modalApi.confirm({
+      title: '立即执行任务',
+      content: `确定要立即执行选中的 ${selectedTasks.length} 个待处理任务吗？`,
+      onOk: async () => {
+        try {
+          const ids = selectedTasks.map(task => task.id)
+          await runWebhookTasksNow({ ids })
+          messageApi.success('任务已提交执行')
+          setSelectedTasks([])
+          // 刷新列表以更新状态
+          fetchTasks()
+        } catch (error) {
+          messageApi.error('提交执行失败')
+        }
+      },
+    })
+  }
+
   const selectedTaskIds = useMemo(() => new Set(selectedTasks.map(t => t.id)), [
     selectedTasks,
   ])
@@ -98,6 +119,14 @@ export const WebhookTasks = () => {
         title="Webhook 任务列表"
         extra={
           <Space>
+            <Input.Search
+              placeholder="搜索任务标题"
+              onSearch={value => {
+                setSearchTerm(value)
+                setPagination(prev => ({ ...prev, current: 1 }))
+              }}
+              style={{ width: 200 }}
+            />
             <Tooltip title="全选/取消全选">
               <Button
                 type="default"
@@ -111,6 +140,15 @@ export const WebhookTasks = () => {
                   )
                 }
                 onClick={handleSelectAll}
+              />
+            </Tooltip>
+            <Tooltip title="立即执行选中任务">
+              <Button
+                type="primary"
+                shape="circle"
+                icon={<PlayCircleOutlined />}
+                disabled={selectedTasks.length === 0}
+                onClick={handleRunNow}
               />
             </Tooltip>
             <Tooltip title="批量删除">
