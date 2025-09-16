@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
 from .. import crud
+from ..config_manager import ConfigManager
 from ..rate_limiter import RateLimiter
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
@@ -47,6 +48,7 @@ async def webhook_search_and_dispatch_task(
     manager: ScraperManager,
     task_manager: TaskManager, # type: ignore
     metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
     rate_limiter: RateLimiter
 ):
     """
@@ -54,6 +56,36 @@ async def webhook_search_and_dispatch_task(
     """
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
+        
+        # 新增：在任务开始时检查 Webhook 是否全局启用
+        enabled = (await config_manager.get("webhookEnabled", "true")).lower() == 'true'
+        if not enabled:
+            msg = "已忽略：Webhook 功能已全局禁用。"
+            logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
+            raise TaskSuccess(msg)
+
+        progress_callback(2, "正在检查过滤规则...")
+
+        # 新增：在任务开始时执行过滤逻辑
+        filter_mode = await config_manager.get("webhookFilterMode", "blacklist")
+        filter_regex_str = await config_manager.get("webhookFilterRegex", "")
+
+        if filter_regex_str:
+            try:
+                filter_pattern = re.compile(filter_regex_str, re.IGNORECASE)
+                match = filter_pattern.search(animeTitle)
+
+                if filter_mode == 'blacklist' and match:
+                    msg = f"已忽略：标题匹配黑名单规则 '{filter_regex_str}'"
+                    logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
+                    raise TaskSuccess(msg)
+                elif filter_mode == 'whitelist' and not match:
+                    msg = f"已忽略：标题未匹配白名单规则 '{filter_regex_str}'"
+                    logger.info(f"Webhook 任务 '{animeTitle}': {msg}")
+                    raise TaskSuccess(msg)
+            except re.error as e:
+                logger.error(f"无效的 Webhook 过滤正则表达式: '{filter_regex_str}'。错误: {e}。将忽略此过滤规则。")
+
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
@@ -73,7 +105,7 @@ async def webhook_search_and_dispatch_task(
                 task_coro = lambda session, cb: generic_import_task(
                     provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
                     mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
-                    imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, metadata_manager=metadata_manager,
+                    imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, config_manager=config_manager, metadata_manager=metadata_manager,
                     bangumiId=bangumiId, rate_limiter=rate_limiter,
                     progress_callback=cb, session=session, manager=manager,
                     task_manager=task_manager
@@ -135,7 +167,7 @@ async def webhook_search_and_dispatch_task(
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, metadata_manager=metadata_manager,
+            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,  # 修正：使用由TaskManager提供的session和cb
             task_manager=task_manager

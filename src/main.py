@@ -66,6 +66,8 @@ async def lifespan(app: FastAPI):
         'webhookEnabled': ('true', '是否全局启用 Webhook 功能。'),
         'webhookDelayedImportEnabled': ('false', '是否为 Webhook 触发的导入启用延时。'),
         'webhookDelayedImportHours': ('24', 'Webhook 延时导入的小时数。'),
+        'webhookFilterMode': ('blacklist', 'Webhook 标题过滤模式 (blacklist/whitelist)。'),
+        'webhookFilterRegex': ('', '用于过滤 Webhook 标题的正则表达式。'),
         'externalApiKey': ('', '用于外部API调用的安全密钥。'),
         'externalApiDuplicateTaskThresholdHours': (3, '（外部API）重复任务提交阈值（小时）。在此时长内，不允许为同一媒体提交重复的自动导入任务。0为禁用。'),
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),

@@ -2528,24 +2528,33 @@ class WebhookSettings(BaseModel):
     webhookDelayedImportEnabled: bool
     webhookDelayedImportHours: int
     webhookCustomDomain: str
+    webhookFilterMode: str
+    webhookFilterRegex: str
 
 @router.get("/settings/webhook", response_model=WebhookSettings, summary="获取Webhook设置")
 async def get_webhook_settings(
     config: ConfigManager = Depends(get_config_manager),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    # 使用 asyncio.gather 并发获取所有配置项，提高效率
-    enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str = await asyncio.gather(
+    # 使用 asyncio.gather 并发获取所有配置项
+    (
+        enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
+        filter_mode, filter_regex
+    ) = await asyncio.gather(
         config.get("webhookEnabled", "true"),
         config.get("webhookDelayedImportEnabled", "false"),
         config.get("webhookDelayedImportHours", "24"),
-        config.get("webhookCustomDomain", "")
+        config.get("webhookCustomDomain", ""),
+        config.get("webhookFilterMode", "blacklist"),
+        config.get("webhookFilterRegex", "")
     )
     return WebhookSettings(
         webhookEnabled=enabled_str.lower() == 'true',
         webhookDelayedImportEnabled=delayed_enabled_str.lower() == 'true',
         webhookDelayedImportHours=int(delay_hours_str) if delay_hours_str.isdigit() else 24,
-        webhookCustomDomain=custom_domain_str
+        webhookCustomDomain=custom_domain_str,
+        webhookFilterMode=filter_mode,
+        webhookFilterRegex=filter_regex
     )
 
 @router.put("/settings/webhook", status_code=status.HTTP_204_NO_CONTENT, summary="更新Webhook设置")
@@ -2554,12 +2563,14 @@ async def update_webhook_settings(
     config: ConfigManager = Depends(get_config_manager),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    # 使用 asyncio.gather 并发保存所有配置项，提高效率
+    # 使用 asyncio.gather 并发保存所有配置项
     await asyncio.gather(
         config.setValue("webhookEnabled", str(payload.webhookEnabled).lower()),
         config.setValue("webhookDelayedImportEnabled", str(payload.webhookDelayedImportEnabled).lower()),
         config.setValue("webhookDelayedImportHours", str(payload.webhookDelayedImportHours)),
-        config.setValue("webhookCustomDomain", payload.webhookCustomDomain)
+        config.setValue("webhookCustomDomain", payload.webhookCustomDomain),
+        config.setValue("webhookFilterMode", payload.webhookFilterMode),
+        config.setValue("webhookFilterRegex", payload.webhookFilterRegex)
     )
     return
 

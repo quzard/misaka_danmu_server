@@ -1124,7 +1124,10 @@ class TencentScraper(BaseScraper):
                     final_filtered_episodes.append(ep)
 
             for rule, titles in secondary_filtered_out_log.items():
-                self.logger.info(f"Tencent: 二次过滤，根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+                if titles:
+                    log_message = f"Tencent: 二次过滤，根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集:\n"
+                    log_message += "\n".join([f"  - {title}" for title in titles])
+                    self.logger.info(log_message)
             
             episodes_to_format = final_filtered_episodes
 

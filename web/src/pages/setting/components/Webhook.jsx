@@ -4,6 +4,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Select,
   Space,
   Spin,
   Switch,
@@ -81,9 +82,12 @@ export const Webhook = () => {
       // 为这些字段提供合理的默认值，以确保发送到后端的对象结构始终完整且有效。
       const payload = {
         webhookEnabled: values.webhookEnabled ?? false,
-        webhookDelayedImportEnabled: values.webhookDelayedImportEnabled ?? false,
+        webhookDelayedImportEnabled:
+          values.webhookDelayedImportEnabled ?? false,
         webhookDelayedImportHours: values.webhookDelayedImportHours ?? 24,
         webhookCustomDomain: values.webhookCustomDomain ?? '',
+        webhookFilterMode: values.webhookFilterMode ?? 'blacklist',
+        webhookFilterRegex: values.webhookFilterRegex ?? '',
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')
@@ -123,31 +127,61 @@ export const Webhook = () => {
           </div>
         </Spin>
         <Form form={form} layout="vertical" onFinish={onSave}>
-          <Form.Item
-            name="webhookEnabled"
-            label="启用 Webhook"
-            valuePropName="checked"
-          >
-            <Switch />
+          <Form.Item>
+            <Space align="end" wrap>
+              <Form.Item
+                name="webhookEnabled"
+                label="启用 Webhook"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                name="webhookDelayedImportEnabled"
+                label="启用延时导入"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch disabled={!webhookEnabled} />
+              </Form.Item>
+              <Form.Item label="延时时间 (小时)" noStyle>
+                <Form.Item name="webhookDelayedImportHours" noStyle>
+                  <InputNumber
+                    min={1}
+                    disabled={!webhookEnabled || !isDelayedImportEnabled}
+                  />
+                </Form.Item>
+              </Form.Item>
+            </Space>
+            <div className="text-gray-400 text-xs mt-1">
+              全局启用或禁用Webhook，并可选择延时导入以等待媒体文件被完整扫描。
+            </div>
           </Form.Item>
-          <Form.Item
-            name="webhookDelayedImportEnabled"
-            label="启用延时导入"
-            valuePropName="checked"
-          >
-            <Switch disabled={!webhookEnabled} />
-          </Form.Item>
-          <Form.Item label="延时时间 (小时)">
-            <Form.Item name="webhookDelayedImportHours" noStyle>
-              <InputNumber
-                min={1}
-                disabled={!webhookEnabled || !isDelayedImportEnabled}
+
+          <Form.Item label="过滤规则 (正则表达式)">
+            <Form.Item name="webhookFilterRegex" noStyle>
+              <Input
+                addonBefore={
+                  <Form.Item name="webhookFilterMode" noStyle>
+                    <Select
+                      defaultValue="blacklist"
+                      style={{ width: 100 }}
+                      options={[
+                        { value: 'blacklist', label: '黑名单' },
+                        { value: 'whitelist', label: '白名单' },
+                      ]}
+                    />
+                  </Form.Item>
+                }
+                placeholder="留空则不过滤"
               />
             </Form.Item>
             <div className="text-gray-400 text-xs mt-1">
-              Webhook 触发后，等待指定的小时数再执行导入任务。
+              黑名单：匹配规则的标题将被忽略。白名单：只有匹配规则的标题才会被处理。
             </div>
           </Form.Item>
+
           <Form.Item name="webhookCustomDomain" label="自定义域名 (可选)">
             <Input placeholder="例如：https://your.domain.com" />
           </Form.Item>

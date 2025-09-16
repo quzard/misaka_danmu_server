@@ -49,6 +49,7 @@ class WebhookProcessorJob(BaseJob):
                     manager=self.scraper_manager,
                     task_manager=self.task_manager,
                     metadata_manager=self.metadata_manager,
+                    config_manager=self.config_manager,
                     rate_limiter=self.rate_limiter,
                     **payload
                 )
