@@ -127,31 +127,26 @@ export const Webhook = () => {
           </div>
         </Spin>
         <Form form={form} layout="vertical" onFinish={onSave}>
-          <Form.Item>
-            <Space align="end" wrap>
-              <Form.Item
-                name="webhookEnabled"
-                label="启用 Webhook"
-                valuePropName="checked"
-                noStyle
-              >
+          <Form.Item label="Webhook 控制">
+            <Space align="center" wrap>
+              <span>启用 Webhook</span>
+              <Form.Item name="webhookEnabled" valuePropName="checked" noStyle>
                 <Switch />
               </Form.Item>
+              <span style={{ marginLeft: '16px' }}>启用延时导入</span>
               <Form.Item
                 name="webhookDelayedImportEnabled"
-                label="启用延时导入"
                 valuePropName="checked"
                 noStyle
               >
                 <Switch disabled={!webhookEnabled} />
               </Form.Item>
-              <Form.Item label="延时时间 (小时)" noStyle>
-                <Form.Item name="webhookDelayedImportHours" noStyle>
-                  <InputNumber
-                    min={1}
-                    disabled={!webhookEnabled || !isDelayedImportEnabled}
-                  />
-                </Form.Item>
+              <span style={{ marginLeft: '16px' }}>自定义延时时间 (小时)</span>
+              <Form.Item name="webhookDelayedImportHours" noStyle>
+                <InputNumber
+                  min={1}
+                  disabled={!webhookEnabled || !isDelayedImportEnabled}
+                />
               </Form.Item>
             </Space>
             <div className="text-gray-400 text-xs mt-1">
