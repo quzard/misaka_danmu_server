@@ -129,4 +129,3 @@ class JellyfinWebhook(BaseWebhook):
             task_title=task_title, unique_key=unique_key,
             payload=task_payload, webhook_source=webhook_source
         )
-        await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
