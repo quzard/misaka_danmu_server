@@ -2522,3 +2522,118 @@ async def get_rate_limit_status(
         secondsUntilReset=seconds_until_reset,
         providers=provider_items
     )
+
+class WebhookSettings(BaseModel):
+    webhookEnabled: bool
+    webhookDelayedImportEnabled: bool
+    webhookDelayedImportHours: int
+    webhookCustomDomain: str
+    webhookFilterMode: str
+    webhookFilterRegex: str
+    webhookLogRawRequest: bool
+
+@router.get("/settings/webhook", response_model=WebhookSettings, summary="获取Webhook设置")
+async def get_webhook_settings(
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    # 使用 asyncio.gather 并发获取所有配置项
+    (
+        enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
+        filter_mode, filter_regex, log_raw_request_str
+    ) = await asyncio.gather(
+        config.get("webhookEnabled", "true"),
+        config.get("webhookDelayedImportEnabled", "false"),
+        config.get("webhookDelayedImportHours", "24"),
+        config.get("webhookCustomDomain", ""),
+        config.get("webhookFilterMode", "blacklist"),
+        config.get("webhookFilterRegex", ""),
+        config.get("webhookLogRawRequest", "false")
+    )
+    return WebhookSettings(
+        webhookEnabled=enabled_str.lower() == 'true',
+        webhookDelayedImportEnabled=delayed_enabled_str.lower() == 'true',
+        webhookDelayedImportHours=int(delay_hours_str) if delay_hours_str.isdigit() else 24,
+        webhookCustomDomain=custom_domain_str,
+        webhookFilterMode=filter_mode,
+        webhookFilterRegex=filter_regex,
+        webhookLogRawRequest=log_raw_request_str.lower() == 'true'
+    )
+
+@router.put("/settings/webhook", status_code=status.HTTP_204_NO_CONTENT, summary="更新Webhook设置")
+async def update_webhook_settings(
+    payload: WebhookSettings,
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    # 使用 asyncio.gather 并发保存所有配置项
+    await asyncio.gather(
+        config.setValue("webhookEnabled", str(payload.webhookEnabled).lower()),
+        config.setValue("webhookDelayedImportEnabled", str(payload.webhookDelayedImportEnabled).lower()),
+        config.setValue("webhookDelayedImportHours", str(payload.webhookDelayedImportHours)),
+        config.setValue("webhookCustomDomain", payload.webhookCustomDomain),
+        config.setValue("webhookFilterMode", payload.webhookFilterMode),
+        config.setValue("webhookFilterRegex", payload.webhookFilterRegex),
+        config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower())
+    )
+    return
+
+class WebhookTaskItem(BaseModel):
+    id: int
+    receptionTime: datetime
+    executeTime: datetime
+    webhookSource: str
+    status: str
+    taskTitle: str
+
+    class Config:
+        from_attributes = True
+
+class PaginatedWebhookTasksResponse(BaseModel):
+    total: int
+    list: List[WebhookTaskItem]
+
+@router.get("/webhook-tasks", response_model=PaginatedWebhookTasksResponse, summary="获取待处理的Webhook任务列表")
+async def get_webhook_tasks(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(100, ge=1),
+    search: Optional[str] = Query(None, description="按任务标题搜索"),
+    session: AsyncSession = Depends(get_db_session)
+):
+    result = await crud.get_webhook_tasks(session, page, pageSize, search)
+    return PaginatedWebhookTasksResponse.model_validate(result)
+
+@router.post("/webhook-tasks/delete-bulk", summary="批量删除Webhook任务")
+async def delete_bulk_webhook_tasks(payload: Dict[str, List[int]], session: AsyncSession = Depends(get_db_session)):
+    deleted_count = await crud.delete_webhook_tasks(session, payload.get("ids", []))
+    return {"message": f"成功删除 {deleted_count} 个任务。"}
+
+@router.post("/webhook-tasks/run-now", summary="立即执行选中的Webhook任务")
+async def run_webhook_tasks_now(
+    payload: Dict[str, List[int]],
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """立即执行指定的待处理Webhook任务。"""
+    task_ids = payload.get("ids", [])
+    if not task_ids:
+        return {"message": "没有选中任何任务。"}
+
+    submitted_count = await tasks.run_webhook_tasks_directly(
+        session=session,
+        task_ids=task_ids,
+        task_manager=task_manager,
+        scraper_manager=scraper_manager,
+        metadata_manager=metadata_manager,
+        config_manager=config_manager,
+        rate_limiter=rate_limiter
+    )
+
+    if submitted_count > 0:
+        return {"message": f"已成功提交 {submitted_count} 个任务到执行队列。"}
+    else:
+        return {"message": "没有找到可执行的待处理任务。"}

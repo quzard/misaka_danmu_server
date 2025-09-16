@@ -16,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 from . import crud
 from .rate_limiter import RateLimiter
 from .jobs.base import BaseJob
+from .jobs.webhook_processor import WebhookProcessorJob
 from .timezone import get_app_timezone
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
@@ -62,7 +63,7 @@ class SchedulerManager:
         """
         动态发现并加载 'jobs' 目录下的所有任务类。
         """
-        jobs_package_path = [str(Path(__file__).parent / "jobs")]
+        jobs_package_path = [str(Path("/app/src/jobs"))]
         for finder, name, ispkg in pkgutil.iter_modules(jobs_package_path):
             if name.startswith("_") or name == "base":
                 continue
@@ -183,6 +184,12 @@ class SchedulerManager:
                 if exists:
                     raise ValueError("“TMDB自动映射与更新”任务已存在，无法重复创建。")
 
+            # 新增：确保 Webhook 处理器任务只能创建一个
+            if job_type == "webhookProcessor":
+                exists = await crud.check_scheduled_task_exists_by_type(session, "webhookProcessor")
+                if exists:
+                    raise ValueError("“Webhook 延时任务处理器”已存在，无法重复创建。")
+
             task_id = str(uuid4())
             await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled)
             runner = self._create_job_runner(job_type, task_id)
@@ -223,3 +230,15 @@ class SchedulerManager:
             job.modify(next_run_time=datetime.now(self.scheduler.timezone))
         else:
             raise ValueError("找不到指定的任务ID")
+
+    async def run_task_now_by_type(self, job_type: str):
+        """
+        根据任务类型查找任务并立即运行它。
+        """
+        async with self._session_factory() as session:
+            task_id = await crud.get_scheduled_task_id_by_type(session, job_type)
+        
+        if not task_id:
+            raise ValueError(f"找不到类型为 '{job_type}' 的定时任务")
+
+        await self.run_task_now(task_id)    
