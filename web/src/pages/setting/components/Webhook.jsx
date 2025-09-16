@@ -77,12 +77,13 @@ export const Webhook = () => {
   const onSave = async values => {
     try {
       setSaving(true)
-      // 修正：确保所有字段都存在，即使它们的值是 undefined。
-      // 为 undefined 的字段提供默认值，以确保发送到后端的对象结构完整。
+      // 修正：确保所有字段都存在，即使它们的值是 undefined 或 null。
+      // 为这些字段提供合理的默认值，以确保发送到后端的对象结构始终完整且有效。
       const payload = {
         webhookEnabled: values.webhookEnabled ?? false,
         webhookDelayedImportEnabled: values.webhookDelayedImportEnabled ?? false,
         webhookDelayedImportHours: values.webhookDelayedImportHours ?? 24,
+        webhookCustomDomain: values.webhookCustomDomain ?? '',
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')

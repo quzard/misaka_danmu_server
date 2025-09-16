@@ -2522,3 +2522,69 @@ async def get_rate_limit_status(
         secondsUntilReset=seconds_until_reset,
         providers=provider_items
     )
+
+class WebhookSettings(BaseModel):
+    webhookEnabled: bool
+    webhookDelayedImportEnabled: bool
+    webhookDelayedImportHours: int
+    webhookCustomDomain: str
+
+@router.get("/settings/webhook", response_model=WebhookSettings, summary="获取Webhook设置")
+async def get_webhook_settings(
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    # 使用 asyncio.gather 并发获取所有配置项，提高效率
+    enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str = await asyncio.gather(
+        config.get("webhookEnabled", "true"),
+        config.get("webhookDelayedImportEnabled", "false"),
+        config.get("webhookDelayedImportHours", "24"),
+        config.get("webhookCustomDomain", "")
+    )
+    return WebhookSettings(
+        webhookEnabled=enabled_str.lower() == 'true',
+        webhookDelayedImportEnabled=delayed_enabled_str.lower() == 'true',
+        webhookDelayedImportHours=int(delay_hours_str) if delay_hours_str.isdigit() else 24,
+        webhookCustomDomain=custom_domain_str
+    )
+
+@router.put("/settings/webhook", status_code=status.HTTP_204_NO_CONTENT, summary="更新Webhook设置")
+async def update_webhook_settings(
+    payload: WebhookSettings,
+    config: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    # 使用 asyncio.gather 并发保存所有配置项，提高效率
+    await asyncio.gather(
+        config.setValue("webhookEnabled", str(payload.webhookEnabled).lower()),
+        config.setValue("webhookDelayedImportEnabled", str(payload.webhookDelayedImportEnabled).lower()),
+        config.setValue("webhookDelayedImportHours", str(payload.webhookDelayedImportHours)),
+        config.setValue("webhookCustomDomain", payload.webhookCustomDomain)
+    )
+    return
+
+class WebhookTaskItem(BaseModel):
+    id: int
+    receptionTime: datetime
+    executeTime: datetime
+    webhookSource: str
+    status: str
+    taskTitle: str
+
+class PaginatedWebhookTasksResponse(BaseModel):
+    total: int
+    list: List[WebhookTaskItem]
+
+@router.get("/webhook-tasks", response_model=PaginatedWebhookTasksResponse, summary="获取待处理的Webhook任务列表")
+async def get_webhook_tasks(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(100, ge=1),
+    session: AsyncSession = Depends(get_db_session)
+):
+    result = await crud.get_webhook_tasks(session, page, pageSize)
+    return PaginatedWebhookTasksResponse.model_validate(result)
+
+@router.post("/webhook-tasks/delete-bulk", summary="批量删除Webhook任务")
+async def delete_bulk_webhook_tasks(payload: Dict[str, List[int]], session: AsyncSession = Depends(get_db_session)):
+    deleted_count = await crud.delete_webhook_tasks(session, payload.get("ids", []))
+    return {"message": f"成功删除 {deleted_count} 个任务。"}
