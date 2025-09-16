@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -17,7 +17,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from . import models
 from . import orm_models
 from .orm_models import ( # noqa: F401
-    Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog
+    Anime, AnimeSource, Episode, User, Scraper, AnimeMetadata, Config, CacheData, ApiToken, TokenAccessLog, UaRule, BangumiAuth, OauthState, AnimeAlias, TmdbEpisodeMapping, ScheduledTask, TaskHistory, MetadataSource, ExternalApiLog, WebhookTask
 , RateLimitState)
 from .config import settings
 from .timezone import get_now
@@ -2038,6 +2038,67 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount
+
+# --- Webhook Tasks ---
+
+async def create_webhook_task(
+    session: AsyncSession,
+    task_title: str,
+    unique_key: str,
+    payload: Dict[str, Any],
+    webhook_source: str,
+    is_delayed: bool,
+    delay: timedelta
+):
+    """创建一个新的待处理 Webhook 任务。"""
+    now = get_now()
+    execute_time = now + delay if is_delayed else now
+
+    try:
+        new_task = WebhookTask(
+            receptionTime=now,
+            executeTime=execute_time,
+            webhookSource=webhook_source,
+            status="pending",
+            payload=json.dumps(payload, ensure_ascii=False),
+            uniqueKey=unique_key,
+            taskTitle=task_title
+        )
+        session.add(new_task)
+        await session.flush() # Flush to check for unique constraint violation
+    except exc.IntegrityError:
+        # 如果 uniqueKey 已存在，则忽略此重复请求
+        await session.rollback()
+        logger.warning(f"检测到重复的 Webhook 请求 (unique_key: {unique_key})，已忽略。")
+
+async def get_webhook_tasks(session: AsyncSession, page: int, page_size: int) -> Dict[str, Any]:
+    """获取待处理的 Webhook 任务列表，支持分页。"""
+    count_stmt = select(func.count(WebhookTask.id))
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = select(WebhookTask).order_by(WebhookTask.receptionTime.asc()).offset((page - 1) * page_size).limit(page_size)
+    result = await session.execute(stmt)
+    return {"total": total, "list": result.scalars().all()}
+
+async def delete_webhook_tasks(session: AsyncSession, task_ids: List[int]) -> int:
+    """批量删除指定的 Webhook 任务。"""
+    if not task_ids:
+        return 0
+    stmt = delete(WebhookTask).where(WebhookTask.id.in_(task_ids))
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
+async def get_due_webhook_tasks(session: AsyncSession) -> List[WebhookTask]:
+    """获取所有已到执行时间的待处理任务。"""
+    now = get_now()
+    stmt = select(WebhookTask).where(WebhookTask.status == "pending", WebhookTask.executeTime <= now)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+async def update_webhook_task_status(session: AsyncSession, task_id: int, status: str):
+    """更新 Webhook 任务的状态。"""
+    await session.execute(update(WebhookTask).where(WebhookTask.id == task_id).values(status=status))
 
 async def get_last_run_result_for_scheduled_task(session: AsyncSession, scheduled_task_id: str) -> Optional[Dict[str, Any]]:
     """获取指定定时任务的最近一次运行结果。"""

@@ -16,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 from . import crud
 from .rate_limiter import RateLimiter
 from .jobs.base import BaseJob
+from .jobs.webhook_processor import WebhookProcessorJob
 from .timezone import get_app_timezone
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
@@ -182,6 +183,12 @@ class SchedulerManager:
                 exists = await crud.check_scheduled_task_exists_by_type(session, "tmdbAutoMap")
                 if exists:
                     raise ValueError("“TMDB自动映射与更新”任务已存在，无法重复创建。")
+
+            # 新增：确保 Webhook 处理器任务只能创建一个
+            if job_type == "webhookProcessor":
+                exists = await crud.check_scheduled_task_exists_by_type(session, "webhookProcessor")
+                if exists:
+                    raise ValueError("“Webhook 延时任务处理器”已存在，无法重复创建。")
 
             task_id = str(uuid4())
             await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled)

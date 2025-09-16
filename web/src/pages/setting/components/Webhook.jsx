@@ -1,11 +1,21 @@
-import { Button, Card, Input, message, Space } from 'antd'
+import {
+  Button,
+  Card,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Space,
+  Spin,
+  Switch,
+} from 'antd'
 import { useEffect, useState } from 'react'
 import {
   getWebhookApikey,
-  getWebhookDomain,
   getWebhookServices,
   refreshWebhookApikey,
-  setWebhookDomain,
+  getWebhookSettings,
+  setWebhookSettings,
 } from '../../../apis'
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import copy from 'copy-to-clipboard'
@@ -68,7 +78,7 @@ export const Webhook = () => {
 
   return (
     <div className="my-6">
-      <Card loading={isLoading} title="Webhook 配置">
+      <Spin spinning={isLoading}>
         <div className="mb-3">
           Webhook
           用于接收来自外部服务的通知，以实现自动化导入。请将下方对应服务的 URL
@@ -88,52 +98,65 @@ export const Webhook = () => {
             </Space.Compact>
           </div>
         </div>
-        <div className="flex items-center justify-start gap-3 mb-4 flex-wrap md:flex-nowrap">
-          <div className="shrink-0 w-[120px]">自定义域名(可选):</div>
-          <div className="w-full">
-            <Input
-              block
-              value={domain}
-              onChange={e => setDomain(e.target.value)}
-            />
-          </div>
-          <Button
-            type="primary"
-            className="w-full md:w-[120px]"
-            onClick={onSaveDoamin}
+        <Form form={form} layout="vertical" onFinish={onSave}>
+          <Form.Item
+            name="webhookEnabled"
+            label="启用 Webhook"
+            valuePropName="checked"
           >
-            保存域名
-          </Button>
-        </div>
-        {services.map(it => (
-          <div
-            key={it}
-            className="flex items-center justify-start gap-3 mb-4 flex-wrap md:flex-nowrap"
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="webhookDelayedImportEnabled"
+            label="启用延时导入"
+            valuePropName="checked"
           >
-            <div className="shrink-0 w-auto md:w-[120px]">
-              {it} Webhook地址:
+            <Switch disabled={!webhookEnabled} />
+          </Form.Item>
+          <Form.Item label="延时时间 (小时)">
+            <Form.Item name="webhookDelayedImportHours" noStyle>
+              <InputNumber
+                min={1}
+                disabled={!webhookEnabled || !isDelayedImportEnabled}
+              />
+            </Form.Item>
+            <div className="text-gray-400 text-xs mt-1">
+              Webhook 触发后，等待指定的小时数再执行导入任务。
             </div>
-            <div className="w-full">
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  block
-                  readOnly
-                  value={`${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`}
-                />
-                <Button
-                  type="primary"
-                  icon={<CopyOutlined />}
-                  onClick={() => {
-                    copy(
-                      `${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`
-                    )
-                  }}
-                />
-              </Space.Compact>
-            </div>
-          </div>
-        ))}
-      </Card>
+          </Form.Item>
+          <Form.Item name="webhookCustomDomain" label="自定义域名 (可选)">
+            <Input placeholder="例如：https://your.domain.com" />
+          </Form.Item>
+
+          {webhookEnabled &&
+            services.map(it => (
+              <Form.Item key={it} label={`${it} Webhook地址`}>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input
+                    readOnly
+                    value={`${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`}
+                  />
+                  <Button
+                    type="primary"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      copy(
+                        `${domain || window.location.origin}/api/webhook/${it}?api_key=${apiKey}`
+                      )
+                      messageApi.success('复制成功')
+                    }}
+                  />
+                </Space.Compact>
+              </Form.Item>
+            ))}
+
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={isSaving}>
+              保存设置
+            </Button>
+          </Form.Item>
+        </Form>
+      </Spin>
     </div>
   )
 }
