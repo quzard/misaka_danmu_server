@@ -2586,6 +2586,9 @@ class WebhookTaskItem(BaseModel):
     status: str
     taskTitle: str
 
+    class Config:
+        from_attributes = True
+
 class PaginatedWebhookTasksResponse(BaseModel):
     total: int
     list: List[WebhookTaskItem]
