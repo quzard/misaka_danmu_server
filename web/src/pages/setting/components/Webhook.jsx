@@ -88,6 +88,7 @@ export const Webhook = () => {
         webhookCustomDomain: values.webhookCustomDomain ?? '',
         webhookFilterMode: values.webhookFilterMode ?? 'blacklist',
         webhookFilterRegex: values.webhookFilterRegex ?? '',
+        webhookLogRawRequest: values.webhookLogRawRequest ?? false,
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')
@@ -147,6 +148,14 @@ export const Webhook = () => {
                   min={1}
                   disabled={!webhookEnabled || !isDelayedImportEnabled}
                 />
+              </Form.Item>
+              <span style={{ marginLeft: '16px' }}>记录原始请求</span>
+              <Form.Item
+                name="webhookLogRawRequest"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch disabled={!webhookEnabled} />
               </Form.Item>
             </Space>
             <div className="text-gray-400 text-xs mt-1">
