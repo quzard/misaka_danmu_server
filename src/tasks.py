@@ -24,7 +24,6 @@ from .config import settings
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager 
 from .utils import parse_search_keyword, clean_xml_string
-from .webhook.tasks import webhook_search_and_dispatch_task
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
@@ -1030,6 +1029,155 @@ async def manual_import_task(
         raise
     except Exception as e:
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
+        raise
+
+async def run_webhook_tasks_directly(
+    session: AsyncSession,
+    task_ids: List[int],
+    task_manager: "TaskManager",
+    scraper_manager: "ScraperManager",
+    metadata_manager: "MetadataSourceManager",
+    config_manager: "ConfigManager",
+    rate_limiter: "RateLimiter"
+) -> int:
+    """直接获取并执行指定的待处理Webhook任务。"""
+    if not task_ids:
+        return 0
+
+    stmt = select(orm_models.WebhookTask).where(orm_models.WebhookTask.id.in_(task_ids), orm_models.WebhookTask.status == "pending")
+    tasks_to_run = (await session.execute(stmt)).scalars().all()
+
+    submitted_count = 0
+    for task in tasks_to_run:
+        try:
+            await crud.update_webhook_task_status(session, task.id, "processing")
+            await session.commit()
+
+            payload = json.loads(task.payload)
+            task_coro = lambda s, cb: webhook_search_and_dispatch_task(
+                webhookSource=task.webhookSource, progress_callback=cb, session=s,
+                manager=scraper_manager, task_manager=task_manager,
+                metadata_manager=metadata_manager, config_manager=config_manager,
+                rate_limiter=rate_limiter, **payload
+            )
+            await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
+            await crud.update_webhook_task_status(session, task.id, "submitted")
+            await session.commit()
+            submitted_count += 1
+        except Exception as e:
+            logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
+            await session.rollback()
+    return submitted_count
+
+def _is_movie_by_title(title: str) -> bool:
+    """
+    通过标题中的关键词（如“剧场版”）判断是否为电影。
+    """
+    if not title:
+        return False
+    # 关键词列表，不区分大小写
+    movie_keywords = ["剧场版", "劇場版", "movie", "映画"]
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in movie_keywords)
+
+
+async def webhook_search_and_dispatch_task(
+    animeTitle: str,
+    mediaType: str,
+    season: int,
+    currentEpisodeIndex: int,
+    searchKeyword: str,
+    doubanId: Optional[str],
+    tmdbId: Optional[str],
+    imdbId: Optional[str],
+    tvdbId: Optional[str],
+    bangumiId: Optional[str],
+    webhookSource: str,
+    year: Optional[int],
+    progress_callback: Callable,
+    session: AsyncSession,
+    manager: ScraperManager,
+    task_manager: TaskManager, # type: ignore
+    metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
+    rate_limiter: RateLimiter
+):
+    """
+    Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
+    """
+    try:
+        logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
+        progress_callback(5, "正在检查已收藏的源...")
+
+        # 1. 优先查找已收藏的源 (Favorited Source)
+        existing_anime = await crud.find_anime_by_title_and_season(session, animeTitle, season)
+        if existing_anime:
+            anime_id = existing_anime['id']
+            favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
+            if favorited_source:
+                logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
+                progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
+
+                task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
+                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
+                task_coro = lambda session, cb: generic_import_task(
+                    provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
+                    mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
+                    imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, config_manager=config_manager, metadata_manager=metadata_manager,
+                    bangumiId=bangumiId, rate_limiter=rate_limiter,
+                    progress_callback=cb, session=session, manager=manager,
+                    task_manager=task_manager
+                )
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
+
+        # 2. 如果没有收藏源，则并发搜索所有启用的源
+        logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
+        progress_callback(20, "并发搜索所有源...")
+
+        parsed_keyword = parse_search_keyword(searchKeyword)
+        search_title_only = parsed_keyword["title"]
+        logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title_only}' 进行搜索。")
+
+        all_search_results = await manager.search_all(
+            [search_title_only], episode_info={"season": season, "episode": currentEpisodeIndex}
+        )
+
+        if not all_search_results:
+            raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
+
+        # 3. 从所有源的返回结果中，根据类型、季度和标题相似度选择最佳匹配项
+        ordered_settings = await crud.get_all_scraper_settings(session)
+        provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
+
+        valid_candidates = [item for item in all_search_results if (item.type == mediaType) and ((item.season == season) if mediaType == 'tv_series' else True)]
+
+        if not valid_candidates:
+            raise ValueError(f"未找到 '{animeTitle}' 的精确匹配项。")
+
+        valid_candidates.sort(key=lambda item: (fuzz.token_set_ratio(animeTitle, item.title), -provider_order.get(item.provider, 999)), reverse=True)
+        best_match = valid_candidates[0]
+
+        logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
+        progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+
+        current_time = get_now().strftime("%H:%M:%S")
+        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+        task_coro = lambda session, cb: generic_import_task(
+            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
+            animeTitle=best_match.title, mediaType=best_match.type,
+            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+            progress_callback=cb, session=session, manager=manager,
+            task_manager=task_manager
+        )
+        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise
 
 async def run_webhook_tasks_directly(

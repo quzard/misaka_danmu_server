@@ -11,7 +11,7 @@ from .. import crud
 from ..config_manager import ConfigManager
 from ..task_manager import TaskManager
 from ..rate_limiter import RateLimiter
-from ..webhook.tasks import webhook_search_and_dispatch_task
+from ..tasks import webhook_search_and_dispatch_task
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
 

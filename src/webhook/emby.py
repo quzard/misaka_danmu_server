@@ -4,7 +4,6 @@ from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
 from ..scraper_manager import ScraperManager
-from .tasks import webhook_search_and_dispatch_task
 
 logger = logging.getLogger(__name__)
 

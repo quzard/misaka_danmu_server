@@ -4,7 +4,7 @@ from typing import Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud
-from ..webhook.tasks import webhook_search_and_dispatch_task
+from ..tasks import webhook_search_and_dispatch_task
 from .base import BaseJob
 
 logger = logging.getLogger(__name__)
