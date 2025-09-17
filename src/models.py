@@ -377,9 +377,8 @@ class MetadataSourceStatusResponse(BaseModel):
     isFailoverEnabled: bool
 
 class ScraperSettingWithConfig(ScraperSetting):
-    configurableFields: Optional[Dict[str, str]] = None
+    configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str]]]] = None
     isLoggable: bool
-    isVerified: bool
 
 class ProxySettingsResponse(BaseModel):
     proxyProtocol: str

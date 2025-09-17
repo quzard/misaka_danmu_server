@@ -22,10 +22,10 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
-    test_url = "https://ani.gamer.com.tw"
-    configurable_fields = {
-        "gamerCookie": "巴哈姆特动画疯 Cookie",
-        "gamerUserAgent": "巴哈姆特动画疯 User-Agent",
+    test_url = "https://ani.gamer.com.tw"    
+    configurable_fields: Dict[str, Tuple[str, str, str]] = {
+        "gamerCookie": ("巴哈姆特动画疯 Cookie", "string", "用于访问动画疯的Cookie。"),
+        "gamerUserAgent": ("巴哈姆特动画疯 User-Agent", "string", "用于访问动画疯的User-Agent。")
     }
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)

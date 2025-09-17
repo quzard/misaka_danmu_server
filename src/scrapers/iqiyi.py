@@ -24,6 +24,12 @@ from .. import models
 from ..utils import parse_search_keyword
 from .base import BaseScraper, get_season_from_title
 
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import descriptor_pool as _descriptor_pool
+from google.protobuf import symbol_database as _symbol_database
+from google.protobuf.internal import builder as _builder
+import brotli
+
 scraper_responses_logger = logging.getLogger("scraper_responses")
 
 # --- Pydantic Models for iQiyi Mobile Search API ---
@@ -31,6 +37,27 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 class IqiyiVideoLibMeta(BaseModel):
     douban_id: Optional[int] = Field(None, alias="douban_id")
     filmtv_update_strategy: Optional[str] = Field(None, alias="filmtv_update_strategy")
+
+# --- Protobuf dynamic definition ---
+_sym_db = _symbol_database.Default()
+
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x64\x61nmu.proto\x12\x05\x64\x61nmu\"\x83\x01\n\nBulletInfo\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\n\n\x02\x61\x33\x18\x03 \x01(\t\x12\n\n\x02\x61\x34\x18\x04 \x01(\t\x12\n\n\x02\x61\x35\x18\x05 \x01(\t\x12\x10\n\x08showTime\x18\x06 \x01(\t\x12\n\n\x02\x61\x37\x18\x07 \x01(\t\x12\n\n\x02\x61\x38\x18\x08 \x01(\t\x12\n\n\x02\x61\x39\x18\t \x01(\t\".\n\x05\x45ntry\x12%\n\nbulletInfo\x18\x02 \x03(\x0b\x32\x11.danmu.BulletInfo\"$\n\x05\x44\x61nmu\x12\x1b\n\x05\x65ntry\x18\x06 \x03(\x0b\x32\x0c.danmu.Entry')
+
+_globals = globals()
+_builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'danmu_pb2', _globals)
+if not _descriptor._USE_C_DESCRIPTORS:
+    DESCRIPTOR._loaded_options = None
+    _globals['_BULLETINFO']._serialized_start=23
+    _globals['_BULLETINFO']._serialized_end=154
+    _globals['_ENTRY']._serialized_start=156
+    _globals['_ENTRY']._serialized_end=202
+    _globals['_DANMU']._serialized_start=204
+    _globals['_DANMU']._serialized_end=240
+
+Danmu = _globals['Danmu']
+BulletInfo = _globals['BulletInfo']
+Entry = _globals['Entry']
 
 class IqiyiSearchVideoInfo(BaseModel):
     item_link: str = Field(alias="itemLink")
@@ -246,6 +273,9 @@ class IqiyiScraper(BaseScraper):
     referer = "https://www.iqiyi.com/"
     test_url = "https://www.iqiyi.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)?|加更(版)?|花絮|预告|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员(专享|加长)?|片花|预告|精华|看点|速看|解读|reaction|影评)(.*?)$"
+    configurable_fields: ClassVar[Dict[str, Tuple[str, str, str]]] = {
+        "iqiyiUseProtobuf": ("使用Protobuf弹幕接口", "boolean", "实验性功能，使用新的接口获取弹幕，可能更稳定但覆盖面未知。")
+    }
     
     # --- 新增：用于新API的签名和ID转换 ---
     _xor_key: ClassVar[int] = 0x75706971676c
@@ -259,6 +289,9 @@ class IqiyiScraper(BaseScraper):
         # 实体引用匹配正则
         self.client: Optional[httpx.AsyncClient] = None
         self.entity_pattern = re.compile(r'&#[xX]?[0-9a-fA-F]+;')
+        # For protobuf danmaku
+        self.salt = "cbzuw1259a"
+        self.interval = 60
 
         # XML 1.0规范允许的字符编码范围
         self.valid_codes = set(
@@ -939,6 +972,78 @@ class IqiyiScraper(BaseScraper):
             self.logger.error(f"爱奇艺: 备用方案 (解析HTML) 也失败了: {fallback_e}", exc_info=True)
             return None
 
+    async def _get_comments_protobuf(self, tv_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
+        """使用新的 Protobuf 方法获取弹幕。"""
+        duration = await self._get_duration_for_tvid(tv_id)
+        if not duration or duration <= 0:
+            self.logger.warning(f"爱奇艺 (Protobuf): 未能获取视频时长或时长为0 (tvid={tv_id})，无法获取弹幕。")
+            return []
+
+        total_segments = (duration + self.interval - 1) // self.interval # type: ignore
+        self.logger.info(f"爱奇艺 (Protobuf): 视频时长 {duration}s, 预计弹幕分段数: {total_segments}")
+
+        danmu_urls = []
+        for segment in range(1, total_segments + 1):
+            hash_value = self._generate_hash_protobuf(tv_id, segment)
+            path1 = tv_id[-4:-2] if len(tv_id) >= 4 else "00"
+            path2 = tv_id[-2:] if len(tv_id) >= 2 else "00"
+            url = f"https://cmts.iqiyi.com/bullet/{path1}/{path2}/{tv_id}_{self.interval}_{segment}_{hash_value}.br"
+            start_time = (segment - 1) * self.interval
+            danmu_urls.append({'segment': segment, 'url': url, 'start_time': start_time})
+
+        all_danmu = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_segment = {
+                executor.submit(self._download_and_parse_segment_protobuf, seg): seg
+                for seg in danmu_urls
+            }
+            for i, future in enumerate(as_completed(future_to_segment)):
+                result = future.result()
+                if progress_callback:
+                    progress = int(((i + 1) / total_segments) * 100) if total_segments > 0 else 100
+                    await progress_callback(progress, f"正在下载分段 {i + 1}/{total_segments}")
+                if result['success']:
+                    all_danmu.extend(result['danmu_list'])
+        
+        all_danmu.sort(key=lambda x: x['time'])
+        return self._format_comments_protobuf(all_danmu)
+
+    def _generate_hash_protobuf(self, tvid: str, segment: int) -> str:
+        """为Protobuf弹幕URL生成hash值。"""
+        input_string = f"{tvid}_{self.interval}_{segment}{self.salt}"
+        return hashlib.md5(input_string.encode('utf-8')).hexdigest()[-8:]
+
+    def _download_and_parse_segment_protobuf(self, segment_info: Dict[str, Any]) -> Dict[str, Any]:
+        """下载并解析单个Protobuf弹幕分段。这是一个同步函数，将在线程池中运行。"""
+        try:
+            # 使用同步的 requests
+            response = requests.get(segment_info['url'], headers=self.base_headers, timeout=30)
+            response.raise_for_status()
+            decompressed_data = brotli.decompress(response.content)
+            danmu_proto = Danmu()
+            danmu_proto.ParseFromString(decompressed_data)
+            danmu_list = []
+            for entry in danmu_proto.entry:
+                for item in entry.bulletInfo:
+                    text = item.content.strip()
+                    if text:
+                        show_time = float(item.showTime) if item.showTime.replace('.', '', 1).isdigit() else 0.0
+                        # 修正：将分段内的相对时间与分段的开始时间相加，得到绝对时间
+                        absolute_time = show_time + segment_info.get('start_time', 0)
+                        color_hex = item.a8 if item.a8 else "ffffff"
+                        danmu_list.append({'text': text, 'time': absolute_time, 'color': color_hex})
+            return {'segment': segment_info['segment'], 'danmu_list': danmu_list, 'success': True}
+        except Exception as e:
+            return {'segment': segment_info['segment'], 'error': str(e), 'success': False}
+
+    def _format_comments_protobuf(self, danmu_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """格式化从Protobuf解析的弹幕。"""
+        formatted = []
+        for i, danmu in enumerate(danmu_list):
+            p_string = f"{danmu['time']:.2f},1,25,{int(danmu['color'], 16)},[{self.provider_name}]"
+            formatted.append({"cid": str(i), "p": p_string, "m": danmu['text'], "t": danmu['time']})
+        return formatted
+
     async def _get_tv_episodes(self, album_id: int, page_size: int = 200) -> List[IqiyiEpisodeInfo]:
         """
         获取剧集列表，实现主/备API端点回退和分页机制。
@@ -1262,6 +1367,13 @@ class IqiyiScraper(BaseScraper):
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
         tv_id = episode_id # For iqiyi, episodeId is tvId
+
+        # 新增：根据配置选择弹幕获取方式
+        use_protobuf_str = await self.config_manager.get("iqiyiUseProtobuf", "false")
+        if use_protobuf_str.lower() == 'true':
+            self.logger.info(f"爱奇艺: 使用 Protobuf 弹幕接口获取弹幕 (tvid={tv_id})")
+            return await self._get_comments_protobuf(tv_id, progress_callback)
+
         all_comments = []
         
         # 优化：先获取视频总时长，以确定需要请求多少个分段

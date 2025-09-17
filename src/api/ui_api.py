@@ -869,8 +869,9 @@ async def get_scraper_settings(
             configurable_fields = base_fields.copy() if base_fields is not None else {}
 
             # 为当前源动态添加其专属的黑名单配置字段
+            # 修正：使用新的元组格式
             blacklist_key = f"{provider_name}_episode_blacklist_regex"
-            configurable_fields[blacklist_key] = "分集标题黑名单 (正则)"
+            configurable_fields[blacklist_key] = ("分集标题黑名单 (正则)", "string", "使用正则表达式过滤不想要的分集标题。")
             full_setting_data['configurableFields'] = configurable_fields
         else:
             # Provide defaults if scraper_class is not found to prevent validation errors
@@ -1115,16 +1116,24 @@ async def get_scraper_config(
     response_data = {}
 
     # 1. 从 scrapers 表获取 useProxy 设置
-    scraper_settings = await crud.get_scraper_setting_by_name(session, providerName)
-    response_data['useProxy'] = scraper_settings.get('useProxy', False) if scraper_settings else False
+    scraper_setting = await crud.get_scraper_setting_by_name(session, providerName)
+    response_data['useProxy'] = scraper_setting.get('useProxy', False) if scraper_setting else False
 
     # 2. 从 config 表获取其他可配置字段
     config_keys_snake = []
+    field_types: Dict[str, str] = {} # 新增：用于存储字段类型
     if hasattr(scraper_class, 'configurable_fields'):
-        config_keys_snake.extend(scraper_class.configurable_fields.keys())
+        for key, (desc, field_type, tooltip) in scraper_class.configurable_fields.items():
+            config_keys_snake.append(key)
+            field_types[key] = field_type
+
     if getattr(scraper_class, 'is_loggable', False):
-        config_keys_snake.append(f"scraper_{providerName}_log_responses")
+        log_key = f"scraper_{providerName}_log_responses"
+        config_keys_snake.append(log_key)
+        field_types[log_key] = "boolean" # 日志开关也是布尔类型
+
     config_keys_snake.append(f"{providerName}_episode_blacklist_regex")
+    field_types[f"{providerName}_episode_blacklist_regex"] = "string"
 
     # 辅助函数，用于将 snake_case 转换为 camelCase
     def to_camel(snake_str):
@@ -1134,8 +1143,8 @@ async def get_scraper_config(
     for db_key in config_keys_snake:
         value = await crud.get_config_value(session, db_key, "")
         camel_key = to_camel(db_key)
-        # 对布尔值进行特殊处理，以匹配前端Switch组件的期望
-        if "log_responses" in db_key:
+        # 新增：根据字段类型动态处理值
+        if field_types.get(db_key) == "boolean":
             response_data[camel_key] = value.lower() == 'true'
         else:
             response_data[camel_key] = value
@@ -1165,14 +1174,15 @@ async def update_scraper_config(
         # 2. 构建所有期望处理的配置键 (camelCase)
         # 修正：使用一个映射来处理前端camelCase键到后端DB键的转换，以兼容混合命名法
         expected_camel_keys = set()
-        camel_to_db_key_map = {}
+        camel_to_db_key_map: Dict[str, str] = {}
 
         def to_camel(snake_str):
             components = snake_str.split('_')
             return components[0] + ''.join(x.title() for x in components[1:])
 
         if hasattr(scraper_class, 'configurable_fields'):
-            for db_key in scraper_class.configurable_fields.keys():
+            # 修正：从元组中解构，以适应新的 configurable_fields 格式
+            for db_key, (desc, field_type, tooltip) in scraper_class.configurable_fields.items():
                 camel_key = to_camel(db_key)
                 expected_camel_keys.add(camel_key)
                 camel_to_db_key_map[camel_key] = db_key
@@ -1192,7 +1202,11 @@ async def update_scraper_config(
         for camel_key, value in payload.items():
             if camel_key in expected_camel_keys:
                 db_key = camel_to_db_key_map[camel_key]
-                value_to_save = str(value) if not isinstance(value, bool) else str(value).lower()
+                # 确保布尔值被正确地保存为 'true' 或 'false' 字符串
+                if isinstance(value, bool):
+                    value_to_save = str(value).lower()
+                else:
+                    value_to_save = str(value)
                 await crud.update_config_value(session, db_key, value_to_save)
                 config_manager.invalidate(db_key)
         
