@@ -36,7 +36,7 @@ class WebhookProcessorJob(BaseJob):
                 # 解析 payload 并提交到 TaskManager
                 payload = task.payload
                 if isinstance(payload, str):
-                    payload = eval(payload)
+                    payload = json.loads(payload)
                 
                 # 使用 webhook_search_and_dispatch_task 的逻辑
                 task_coro = lambda s, cb: webhook_search_and_dispatch_task(
