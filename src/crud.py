@@ -1646,16 +1646,11 @@ async def increment_token_call_count(session: AsyncSession, token_id: int):
     if not token:
         return
 
-    now = get_now()
-    # 如果是新的一天，重置计数器为1
-    if token.lastCallAt is None or token.lastCallAt.date() < now.date():
-        token.dailyCallCount = 1
-    else:
-        # 否则，简单地增加计数
-        token.dailyCallCount += 1
-    
+    # 修正：简化函数职责，现在只负责增加计数。
+    # 重置逻辑已移至 validate_api_token 中，以避免竞争条件。
+    token.dailyCallCount += 1
     # 总是更新最后调用时间
-    token.lastCallAt = now
+    token.lastCallAt = get_now()
     # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
 
 # --- UA Filter and Log Services ---

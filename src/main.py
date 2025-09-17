@@ -121,14 +121,14 @@ async def lifespan(app: FastAPI):
 
 
 
-    app.state.task_manager = TaskManager(session_factory)
+    app.state.task_manager = TaskManager(session_factory, app.state.config_manager)
     app.state.webhook_manager = WebhookManager(
         session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager)
+    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager)
     await app.state.scheduler_manager.start()
     
     # --- 前端服务 (生产环境) ---

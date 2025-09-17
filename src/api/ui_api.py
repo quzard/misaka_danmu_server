@@ -747,7 +747,8 @@ async def refresh_anime(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     为指定的数据源启动一个刷新任务。
@@ -2116,7 +2117,8 @@ async def import_from_provider(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     try:
         # 在启动任务前检查provider是否存在
@@ -2145,6 +2147,7 @@ async def import_from_provider(
         currentEpisodeIndex=request_data.currentEpisodeIndex,
         imageUrl=request_data.imageUrl,
         doubanId=request_data.doubanId,
+        config_manager=config_manager,
         tmdbId=request_data.tmdbId,
         imdbId=None, 
         tvdbId=None, # 手动导入时这些ID为空,
@@ -2185,7 +2188,8 @@ async def import_edited_episodes(
     task_manager: TaskManager = Depends(get_task_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
@@ -2194,6 +2198,7 @@ async def import_edited_episodes(
         progress_callback=callback,
         session=session,
         manager=scraper_manager,
+        config_manager=config_manager,
         rate_limiter=rate_limiter,
         metadata_manager=metadata_manager
     )
@@ -2293,7 +2298,8 @@ async def import_from_url(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     provider = request_data.provider
     url = request_data.url
@@ -2356,6 +2362,7 @@ async def import_from_url(
         current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None, bangumi_id=None,
         metadata_manager=metadata_manager,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
+        config_manager=config_manager,
         rate_limiter=rate_limiter
     )
     
@@ -2623,7 +2630,7 @@ async def run_webhook_tasks_now(
     if not task_ids:
         return {"message": "没有选中任何任务。"}
 
-    submitted_count = await tasks.run_webhook_tasks_directly(
+    submitted_count = await tasks.run_webhook_tasks_directly_manual(
         session=session,
         task_ids=task_ids,
         task_manager=task_manager,

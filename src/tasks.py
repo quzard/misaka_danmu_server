@@ -509,6 +509,7 @@ async def edited_import_task(
     request_data: "models.EditedImportRequest",
     progress_callback: Callable,
     session: AsyncSession,
+    config_manager: ConfigManager,
     manager: ScraperManager,
     rate_limiter: RateLimiter,
     metadata_manager: MetadataSourceManager
@@ -946,8 +947,8 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             provider=source_info["providerName"], mediaId=source_info["mediaId"],
             animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1), year=source_info.get("year"),
-            currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
-            doubanId=None, tmdbId=source_info.get("tmdbId"), metadata_manager=metadata_manager,
+            currentEpisodeIndex=nextEpisodeIndex, imageUrl=source_info.get("imageUrl"),
+            doubanId=None, tmdbId=source_info.get("tmdbId"), config_manager=config_manager, metadata_manager=metadata_manager,
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
             session=session,
@@ -1032,7 +1033,7 @@ async def manual_import_task(
         logger.error(f"手动导入任务失败: {e}", exc_info=True)
         raise
 
-async def run_webhook_tasks_directly(
+async def run_webhook_tasks_directly_manual(
     session: AsyncSession,
     task_ids: List[int],
     task_manager: "TaskManager",
@@ -1051,9 +1052,6 @@ async def run_webhook_tasks_directly(
     submitted_count = 0
     for task in tasks_to_run:
         try:
-            await crud.update_webhook_task_status(session, task.id, "processing")
-            await session.commit()
-
             payload = json.loads(task.payload)
             task_coro = lambda s, cb: webhook_search_and_dispatch_task(
                 webhookSource=task.webhookSource, progress_callback=cb, session=s,
@@ -1062,13 +1060,12 @@ async def run_webhook_tasks_directly(
                 rate_limiter=rate_limiter, **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-            # 修正：任务成功提交后，直接删除该条待办记录
             await session.delete(task)
+            await session.commit()  # 为每个成功提交的任务单独提交删除操作
             submitted_count += 1
         except Exception as e:
             logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
             await session.rollback()
-    await session.commit() # 在循环结束后统一提交所有更改
     return submitted_count
 
 def _is_movie_by_title(title: str) -> bool:
@@ -1169,7 +1166,7 @@ async def webhook_search_and_dispatch_task(
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,
             task_manager=task_manager
@@ -1181,44 +1178,6 @@ async def webhook_search_and_dispatch_task(
     except Exception as e:
         logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise
-
-async def run_webhook_tasks_directly(
-    session: AsyncSession,
-    task_ids: List[int],
-    task_manager: "TaskManager",
-    scraper_manager: "ScraperManager",
-    metadata_manager: "MetadataSourceManager",
-    config_manager: "ConfigManager",
-    rate_limiter: "RateLimiter"
-) -> int:
-    """直接获取并执行指定的待处理Webhook任务。"""
-    if not task_ids:
-        return 0
-
-    stmt = select(orm_models.WebhookTask).where(orm_models.WebhookTask.id.in_(task_ids), orm_models.WebhookTask.status == "pending")
-    tasks_to_run = (await session.execute(stmt)).scalars().all()
-
-    submitted_count = 0
-    for task in tasks_to_run:
-        try:
-            await crud.update_webhook_task_status(session, task.id, "processing")
-            await session.commit()
-
-            payload = json.loads(task.payload)
-            task_coro = lambda s, cb: webhook_search_and_dispatch_task(
-                webhookSource=task.webhookSource, progress_callback=cb, session=s,
-                manager=scraper_manager, task_manager=task_manager,
-                metadata_manager=metadata_manager, config_manager=config_manager,
-                rate_limiter=rate_limiter, **payload
-            )
-            await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-            await crud.update_webhook_task_status(session, task.id, "submitted")
-            await session.commit()
-            submitted_count += 1
-        except Exception as e:
-            logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
-            await session.rollback()
-    return submitted_count
 
 async def batch_manual_import_task(
     sourceId: int, animeId: int, providerName: str, items: List[models.BatchManualImportItem],
@@ -1314,6 +1273,7 @@ async def auto_search_and_import_task(
     payload: "models.ControlAutoImportRequest",
     progress_callback: Callable,
     session: AsyncSession,
+    config_manager: ConfigManager,
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
@@ -1472,7 +1432,7 @@ async def auto_search_and_import_task(
                     unique_key_parts.append(f"e{payload.episode}")
                 unique_key = "-".join(unique_key_parts)
                 task_coro = lambda s, cb: generic_import_task(
-                    provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
+                provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'], config_manager=config_manager,
                     animeTitle=main_title, mediaType=media_type, season=season,
                     year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
                     metadata_manager=metadata_manager,
@@ -1569,7 +1529,7 @@ async def auto_search_and_import_task(
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=best_match.title, mediaType=best_match.type, season=best_match.season, year=best_match.year,
-            metadata_manager=metadata_manager,
+            config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
