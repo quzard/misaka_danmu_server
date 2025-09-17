@@ -1004,18 +1004,21 @@ class IqiyiScraper(BaseScraper):
             danmu_urls.append({'segment': segment, 'url': url, 'start_time': start_time})
 
         all_danmu = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_segment = {
-                executor.submit(self._download_and_parse_segment_protobuf, seg): seg
-                for seg in danmu_urls
-            }
-            for i, future in enumerate(as_completed(future_to_segment)):
-                result = future.result()
+        # 修正：移除多线程，改为单线程异步顺序下载
+        for i, seg_info in enumerate(danmu_urls):
+            try:
                 if progress_callback:
                     progress = int(((i + 1) / total_segments) * 100) if total_segments > 0 else 100
                     await progress_callback(progress, f"正在下载分段 {i + 1}/{total_segments}")
-                if result['success']:
+                
+                result = await self._download_and_parse_segment_protobuf(seg_info)
+                if result and result['success']:
                     all_danmu.extend(result['danmu_list'])
+                
+                # 增加短暂延时，避免请求过于频繁
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                self.logger.error(f"爱奇艺 (Protobuf): 处理分段 {i+1} 时发生错误: {e}", exc_info=True)
         
         all_danmu.sort(key=lambda x: x['time'])
         return self._format_comments_protobuf(all_danmu)
@@ -1048,17 +1051,17 @@ class IqiyiScraper(BaseScraper):
         if any(re.match(pattern, text) for pattern in invalid_patterns):
             return False
 
-        # 保留包含有意义内容的弹幕
+        # 修正：保留包含有意义内容的弹幕
         if re.search(r'[\u4e00-\u9fff]', text): return True  # 包含中文
         if re.search(r'[a-zA-Z]', text) and len(text) <= 100: return True  # 包含字母且不太长
         if re.search(r'[!?.,;:"\'()\[\]<>【】《》〈〉！？。，、；：“”‘’]', text): return True # 包含标点
         return False
 
-    def _download_and_parse_segment_protobuf(self, segment_info: Dict[str, Any]) -> Dict[str, Any]:
-        """下载并解析单个Protobuf弹幕分段。这是一个同步函数，将在线程池中运行。"""
+    async def _download_and_parse_segment_protobuf(self, segment_info: Dict[str, Any]) -> Dict[str, Any]:
+        """下载并解析单个Protobuf弹幕分段。这是一个异步函数。"""
         try:
-            # 使用同步的 requests
-            response = requests.get(segment_info['url'], headers=self.protobuf_headers, timeout=30)
+            # 修正：使用异步的 httpx 客户端
+            response = await self._request('GET', segment_info['url'], headers=self.protobuf_headers, timeout=30)
             response.raise_for_status()
             decompressed_data = brotli.decompress(response.content)
             danmu_proto = Danmu()
@@ -1070,8 +1073,9 @@ class IqiyiScraper(BaseScraper):
                     # 新增：使用更严格的弹幕内容验证
                     if self._is_valid_danmu_text(text):
                         show_time = float(item.showTime) if item.showTime.replace('.', '', 1).isdigit() else 0.0
-                        # 修正：将分段内的相对时间与分段的开始时间相加，得到绝对时间
-                        absolute_time = show_time + segment_info.get('start_time', 0)
+                        # 关键修正：API返回的 showTime 是毫秒，需要转换为秒，然后再与分段的开始时间相加
+                        relative_time_sec = show_time / 1000.0
+                        absolute_time = relative_time_sec + segment_info.get('start_time', 0)
                         # 新增：更健壮的颜色处理
                         color_hex = "ffffff"
                         if item.a8:
