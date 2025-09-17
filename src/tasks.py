@@ -509,6 +509,7 @@ async def edited_import_task(
     request_data: "models.EditedImportRequest",
     progress_callback: Callable,
     session: AsyncSession,
+    config_manager: ConfigManager,
     manager: ScraperManager,
     rate_limiter: RateLimiter,
     metadata_manager: MetadataSourceManager
@@ -947,7 +948,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1), year=source_info.get("year"),
             currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
-            doubanId=None, tmdbId=source_info.get("tmdbId"), metadata_manager=metadata_manager,
+            doubanId=None, tmdbId=source_info.get("tmdbId"), config_manager=config_manager, metadata_manager=metadata_manager,
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
             session=session,
@@ -1169,7 +1170,7 @@ async def webhook_search_and_dispatch_task(
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=image_url, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,
             task_manager=task_manager
@@ -1314,6 +1315,7 @@ async def auto_search_and_import_task(
     payload: "models.ControlAutoImportRequest",
     progress_callback: Callable,
     session: AsyncSession,
+    config_manager: ConfigManager,
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
@@ -1472,7 +1474,7 @@ async def auto_search_and_import_task(
                     unique_key_parts.append(f"e{payload.episode}")
                 unique_key = "-".join(unique_key_parts)
                 task_coro = lambda s, cb: generic_import_task(
-                    provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
+                provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'], config_manager=config_manager,
                     animeTitle=main_title, mediaType=media_type, season=season,
                     year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
                     metadata_manager=metadata_manager,
@@ -1569,7 +1571,7 @@ async def auto_search_and_import_task(
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=best_match.title, mediaType=best_match.type, season=best_match.season, year=best_match.year,
-            metadata_manager=metadata_manager,
+            config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,

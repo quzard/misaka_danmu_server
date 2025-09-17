@@ -13,13 +13,13 @@ COPY web/ ./
 # 执行构建
 RUN npm run build
 
+
 # --- Stage 2:backend-builder ---
 # 使用官方 Python 镜像专门编译 Nuitka 模块
 FROM l429609201/su-exec:su-exec AS backend-builder
 
 # 安装编译所需的依赖
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /backend-build
 
 # --- 精确复制编译所需的文件 ---
@@ -44,6 +44,7 @@ RUN --mount=type=secret,id=XOR_KEY_SECRET \
 # 编译 rate_limiter.py。移除 --include-package=src 以避免将整个应用打包进去。
 RUN python3 -m nuitka --module src/rate_limiter.py --output-dir=.
 
+
 # --- Stage 3: Python Dependency Builder ---
 FROM l429609201/su-exec:su-exec AS python-builder
 
@@ -55,18 +56,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 创建一个虚拟环境来安装包，方便后续复制
-ENV VIRTUAL_ENV=/opt/venv
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-
-# 复制并安装Python依赖
-WORKDIR /app
+# 创建一个目录用于存放安装的包
+WORKDIR /install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 将所有包安装到当前目录 (/install)
+RUN pip install --no-cache-dir -r requirements.txt --target .
 
 
-# --- Stage 4: Final Application Image ---
+# --- Stage 3: Final Python Application ---
 FROM l429609201/su-exec:su-exec
 
 
@@ -94,9 +91,9 @@ RUN set -ex \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 从 python-builder 阶段复制已安装的Python包
-COPY --from=python-builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# 从 python-builder 阶段将安装好的包复制到系统 site-packages 目录
+# 注意：路径中的 python3.11 需要与基础镜像的Python版本匹配
+COPY --from=python-builder /install /usr/local/lib/python3.11/site-packages
 
 # 复制应用代码
 COPY src/ ./src/
