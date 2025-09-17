@@ -5,7 +5,7 @@ import json
 import hashlib
 import time
 from datetime import datetime, timezone
-from typing import ClassVar
+from typing import ClassVar, Tuple
 import zlib
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
