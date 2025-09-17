@@ -1062,6 +1062,10 @@ class IqiyiScraper(BaseScraper):
         try:
             # 修正：使用异步的 httpx 客户端
             response = await self._request('GET', segment_info['url'], headers=self.protobuf_headers, timeout=30)
+            # 新增：根据您的要求，记录原始响应以供分析
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"iQiyi Protobuf Segment Response (segment={segment_info['segment']}): status={response.status_code}, content_length={len(response.content)}")
+
             response.raise_for_status()
             decompressed_data = brotli.decompress(response.content)
             danmu_proto = Danmu()
@@ -1073,9 +1077,8 @@ class IqiyiScraper(BaseScraper):
                     # 新增：使用更严格的弹幕内容验证
                     if self._is_valid_danmu_text(text):
                         show_time = float(item.showTime) if item.showTime.replace('.', '', 1).isdigit() else 0.0
-                        # 关键修正：API返回的 showTime 是毫秒，需要转换为秒，然后再与分段的开始时间相加
-                        relative_time_sec = show_time / 1000.0
-                        absolute_time = relative_time_sec + segment_info.get('start_time', 0)
+                        # 关键修正：showTime 已经是秒，直接与分段的开始时间相加
+                        absolute_time = show_time + segment_info.get('start_time', 0)
                         # 新增：更健壮的颜色处理
                         color_hex = "ffffff"
                         if item.a8:
