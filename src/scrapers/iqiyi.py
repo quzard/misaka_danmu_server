@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Callable
 from collections import defaultdict
 import httpx
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict, field_validator
