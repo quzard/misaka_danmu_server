@@ -771,7 +771,7 @@ async def refresh_anime(
         task_title = f"增量刷新: {source_info['title']} ({source_info['providerName']}) - 尝试第{next_episode_index}集"
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
-            task_manager=task_manager, progress_callback=cb, animeTitle=source_info["title"],
+            task_manager=task_manager, config_manager=config_manager, progress_callback=cb, animeTitle=source_info["title"],
             rate_limiter=rate_limiter, metadata_manager=metadata_manager
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
