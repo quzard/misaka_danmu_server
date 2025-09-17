@@ -295,6 +295,16 @@ class IqiyiScraper(BaseScraper):
         self.salt = "cbzuw1259a"
         self.interval = 60
 
+        # 新增：为 Protobuf 弹幕下载定义专用的请求头，参考了您的示例
+        self.protobuf_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://www.iqiyi.com/',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+        }
+
         # XML 1.0规范允许的字符编码范围
         self.valid_codes = set(
             [0x09, 0x0A, 0x0D] +  # 制表符、换行、回车
@@ -1014,12 +1024,41 @@ class IqiyiScraper(BaseScraper):
         """为Protobuf弹幕URL生成hash值。"""
         input_string = f"{tvid}_{self.interval}_{segment}{self.salt}"
         return hashlib.md5(input_string.encode('utf-8')).hexdigest()[-8:]
+    
+    def _is_valid_danmu_text(self, text: Optional[str]) -> bool:
+        """
+        新增：判断是否为有效的弹幕文本，移植自您的参考脚本。
+        """
+        if not text or not text.strip():
+            return False
+
+        text = text.strip()
+        # 过滤掉常见的无效模式
+        invalid_patterns = [
+            r'^\d+$',  # 纯数字
+            r'^[a-f0-9]{8,}$',  # 长十六进制字符串
+            r'^[\x00-\x1f]+$',  # 控制字符
+            r'^\{.*\}$',  # JSON对象
+            r'^\[.*\]$',  # JSON数组
+            r'^https?://',  # URL
+            r'^[A-Z0-9]{20,}$',  # 过长的ID
+            r'^\d{10,}$',  # 过长的数字ID
+            r'^[a-zA-Z0-9_-]{20,}$',  # 过长的字母数字ID
+        ]
+        if any(re.match(pattern, text) for pattern in invalid_patterns):
+            return False
+
+        # 保留包含有意义内容的弹幕
+        if re.search(r'[\u4e00-\u9fff]', text): return True  # 包含中文
+        if re.search(r'[a-zA-Z]', text) and len(text) <= 100: return True  # 包含字母且不太长
+        if re.search(r'[!?.,;:"\'()\[\]<>【】《》〈〉！？。，、；：“”‘’]', text): return True # 包含标点
+        return False
 
     def _download_and_parse_segment_protobuf(self, segment_info: Dict[str, Any]) -> Dict[str, Any]:
         """下载并解析单个Protobuf弹幕分段。这是一个同步函数，将在线程池中运行。"""
         try:
             # 使用同步的 requests
-            response = requests.get(segment_info['url'], headers=self.base_headers, timeout=30)
+            response = requests.get(segment_info['url'], headers=self.protobuf_headers, timeout=30)
             response.raise_for_status()
             decompressed_data = brotli.decompress(response.content)
             danmu_proto = Danmu()
@@ -1027,13 +1066,20 @@ class IqiyiScraper(BaseScraper):
             danmu_list = []
             for entry in danmu_proto.entry:
                 for item in entry.bulletInfo:
-                    text = item.content.strip()
-                    if text:
+                    text = item.content
+                    # 新增：使用更严格的弹幕内容验证
+                    if self._is_valid_danmu_text(text):
                         show_time = float(item.showTime) if item.showTime.replace('.', '', 1).isdigit() else 0.0
                         # 修正：将分段内的相对时间与分段的开始时间相加，得到绝对时间
                         absolute_time = show_time + segment_info.get('start_time', 0)
-                        color_hex = item.a8 if item.a8 else "ffffff"
-                        danmu_list.append({'text': text, 'time': absolute_time, 'color': color_hex})
+                        # 新增：更健壮的颜色处理
+                        color_hex = "ffffff"
+                        if item.a8:
+                            try:
+                                int(item.a8, 16)
+                                color_hex = item.a8
+                            except (ValueError, TypeError): pass
+                        danmu_list.append({'text': text.strip(), 'time': absolute_time, 'color': color_hex})
             return {'segment': segment_info['segment'], 'danmu_list': danmu_list, 'success': True}
         except Exception as e:
             return {'segment': segment_info['segment'], 'error': str(e), 'success': False}
