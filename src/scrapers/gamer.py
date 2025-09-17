@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
