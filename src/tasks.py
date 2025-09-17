@@ -947,7 +947,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             provider=source_info["providerName"], mediaId=source_info["mediaId"],
             animeTitle=animeTitle, mediaType=source_info["type"],
             season=source_info.get("season", 1), year=source_info.get("year"),
-            currentEpisodeIndex=nextEpisodeIndex, imageUrl=None,
+            currentEpisodeIndex=nextEpisodeIndex, imageUrl=source_info.get("imageUrl"),
             doubanId=None, tmdbId=source_info.get("tmdbId"), config_manager=config_manager, metadata_manager=metadata_manager,
             imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
             progress_callback=progress_callback,
@@ -1063,8 +1063,8 @@ async def run_webhook_tasks_directly(
                 rate_limiter=rate_limiter, **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-            # 修正：任务成功提交后，直接删除该条待办记录
-            await session.delete(task)
+            # 修正：任务成功提交后，直接删除该条待办记录，而不是更新状态
+            await session.delete(task) # type: ignore
             submitted_count += 1
         except Exception as e:
             logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
@@ -1170,7 +1170,7 @@ async def webhook_search_and_dispatch_task(
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=year,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=image_url, config_manager=config_manager, metadata_manager=metadata_manager,
+            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,
             task_manager=task_manager
@@ -1213,8 +1213,8 @@ async def run_webhook_tasks_directly(
                 rate_limiter=rate_limiter, **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-            await crud.update_webhook_task_status(session, task.id, "submitted")
-            await session.commit()
+            # 修正：任务成功提交后，直接删除该条待办记录，而不是更新状态
+            await session.delete(task)
             submitted_count += 1
         except Exception as e:
             logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
