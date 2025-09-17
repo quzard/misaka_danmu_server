@@ -44,7 +44,6 @@ RUN --mount=type=secret,id=XOR_KEY_SECRET \
 # 编译 rate_limiter.py。移除 --include-package=src 以避免将整个应用打包进去。
 RUN python3 -m nuitka --module src/rate_limiter.py --output-dir=.
 
-
 # --- Stage 3: Python Dependency Builder ---
 FROM l429609201/su-exec:su-exec AS python-builder
 
@@ -119,4 +118,5 @@ RUN chown -R appuser:appgroup /app
 EXPOSE 7768
 
 # 运行应用的默认命令
+
 CMD ["/exec.sh"]
