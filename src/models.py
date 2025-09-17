@@ -375,6 +375,7 @@ class MetadataSourceStatusResponse(BaseModel):
     status: str
     useProxy: bool
     isFailoverEnabled: bool
+    logRawResponses: bool = Field(False, alias="log_raw_responses")
 
 class ScraperSettingWithConfig(ScraperSetting):
     configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str]]]] = None

@@ -53,10 +53,10 @@ class IncrementalRefreshJob(BaseJob):
                 def create_task_coro_factory(info, next_ep):
                     return lambda s, cb: generic_import_task(
                         provider=info["providerName"], mediaId=info["mediaId"], animeTitle=info["title"],
-                        mediaType=info["type"], season=info.get("season", 1), year=info.get("year"), config_manager=self.config_manager,
+                        mediaType=info["type"], season=info.get("season", 1), year=info.get("year"),
                         currentEpisodeIndex=next_ep, imageUrl=None,
                         doubanId=None, tmdbId=info.get("tmdbId"), imdbId=None, tvdbId=None,
-                        bangumiId=info.get("bangumiId"), config_manager=self.config_manager, metadata_manager=self.metadata_manager,
+                        bangumiId=info.get("bangumiId"), metadata_manager=self.metadata_manager,
                         progress_callback=cb, session=s, manager=self.scraper_manager,
                         task_manager=self.task_manager, rate_limiter=self.rate_limiter
                     )

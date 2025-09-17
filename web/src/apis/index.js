@@ -282,6 +282,13 @@ export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */
 export const setMetaData = data => api.put('/api/ui/metadata-sources', data)
 
+/** 获取单个元数据源的配置 (新) */
+export const getProviderConfig = data =>
+  api.get(`/api/ui/metadata-sources/${data.providerName}/config`)
+
+/** 设置单个元数据源的配置 (新) */
+export const setProviderConfig = (providerName, data) =>
+  api.put(`/api/ui/metadata-sources/${providerName}/config`, data)
 /** ---------------------------------------------- 全局过滤设置 ----------------------------------------------  */
 /** 获取全局过滤规则 */
 export const getGlobalFilter = () =>

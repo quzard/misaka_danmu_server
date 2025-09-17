@@ -1379,10 +1379,12 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
 async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(MetadataSource).order_by(MetadataSource.displayOrder)
     result = await session.execute(stmt)
-    return [
-        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
-        for s in result.scalars()
-    ]
+    return [{
+        "providerName": s.providerName, "isEnabled": s.isEnabled,
+        "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder,
+        "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled,
+        "logRawResponses": s.logRawResponses
+    } for s in result.scalars()]
 
 async def update_metadata_sources_settings(session: AsyncSession, settings: List['models.MetadataSourceSettingUpdate']):
     for s in settings:
@@ -1392,9 +1394,20 @@ async def update_metadata_sources_settings(session: AsyncSession, settings: List
         await session.execute(
             update(MetadataSource)
             .where(MetadataSource.providerName == s.providerName)
-            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy, isFailoverEnabled=is_failover_enabled)
+            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy, isFailoverEnabled=is_failover_enabled, logRawResponses=s.logRawResponses)
         )
     await session.commit()
+
+async def get_metadata_source_setting_by_name(session: AsyncSession, provider_name: str) -> Optional[Dict[str, Any]]:
+    """获取单个元数据源的设置。"""
+    source = await session.get(MetadataSource, provider_name)
+    if source:
+        return {"useProxy": source.useProxy, "logRawResponses": source.logRawResponses}
+    return None
+
+async def update_metadata_source_specific_settings(session: AsyncSession, provider_name: str, settings: Dict[str, Any]):
+    """更新单个元数据源的特定设置（如 logRawResponses）。"""
+    await session.execute(update(MetadataSource).where(MetadataSource.providerName == provider_name).values(**settings))
 
 async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有已启用辅助搜索的元数据源。"""

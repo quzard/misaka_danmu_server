@@ -185,6 +185,7 @@ class MetadataSourceManager:
                 "displayOrder": setting.get('displayOrder', 99),
                 "status": status_text,
                 "useProxy": setting.get('useProxy', False),
+                "logRawResponses": setting.get('log_raw_responses', False),
             })
         
         return sorted(full_status_list, key=lambda x: x['displayOrder'])
@@ -330,6 +331,12 @@ class MetadataSourceManager:
         if providerName in ["douban", "tvdb"]:
             return {"value": next(iter(config_values.values()), "")}
         
+        # 新增：从数据库获取 useProxy 和 logRawResponses 并添加到配置中
+        async with self._session_factory() as session:
+            provider_settings = await crud.get_metadata_source_setting_by_name(session, providerName)
+            if provider_settings:
+                config_values.update(provider_settings)
+
         # 新增：为Gamer也返回单值value，以简化前端处理
         if providerName == "gamer":
             # 修正：此前的实现有误，只返回了Cookie。现在返回所有为Gamer获取的配置。
@@ -364,6 +371,14 @@ class MetadataSourceManager:
             raise HTTPException(status_code=404, detail=f"提供商 '{providerName}' 不存在或不支持自定义配置。")
 
         async with self._session_factory() as session:
+            # 新增：单独处理属于 metadata_sources 表的字段
+            db_fields = {}
+            if 'logRawResponses' in payload:
+                db_fields['logRawResponses'] = bool(payload.pop('logRawResponses'))
+            
+            if db_fields:
+                await crud.update_metadata_source_specific_settings(session, providerName, db_fields)
+
             for key, value in payload.items():
                 if key in allowed_keys:
                     await crud.update_config_value(session, key, str(value if value is not None else ""))

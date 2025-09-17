@@ -2658,3 +2658,31 @@ async def run_webhook_tasks_now(
         return {"message": f"已成功提交 {submitted_count} 个任务到执行队列。"}
     else:
         return {"message": "没有找到可执行的待处理任务。"}
+
+@router.get("/metadata-sources/{providerName}/config", response_model=Dict[str, Any], summary="获取指定元数据源的配置")
+async def get_metadata_source_config(
+    providerName: str,
+    current_user: models.User = Depends(security.get_current_user),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """获取单个元数据源的详细配置。"""
+    try:
+        return await metadata_manager.getProviderConfig(providerName)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+@router.put("/metadata-sources/{providerName}/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定元数据源的配置")
+async def update_metadata_source_config(
+    providerName: str,
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(security.get_current_user),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+):
+    """更新指定元数据源的配置。"""
+    try:
+        await metadata_manager.updateProviderConfig(providerName, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"更新元数据源 '{providerName}' 配置时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
