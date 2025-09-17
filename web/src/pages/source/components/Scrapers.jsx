@@ -260,6 +260,8 @@ export const Scrapers = () => {
     form.setFieldsValue({
       [`scraper${setNameCapitalize}LogResponses`]:
         res.data?.[`scraper${setNameCapitalize}LogResponses`] ?? false,
+      [`${item.providerName}EpisodeBlacklistRegex`]:
+        res.data?.[`${item.providerName}EpisodeBlacklistRegex`] || '',
       useProxy: res.data?.useProxy ?? false,
       ...dynamicInitialValues,
     })
@@ -396,11 +398,17 @@ export const Scrapers = () => {
 
     return Object.entries(currentScraper.configurableFields).map(
       ([key, fieldInfo]) => {
+        // 兼容旧的字符串格式和新的元组格式
         const [label, type, tooltip] =
           typeof fieldInfo === 'string'
             ? [fieldInfo, 'string', '']
             : fieldInfo
         const camelKey = key.replace(/_([a-z])/g, g => g[1].toUpperCase())
+
+        // 跳过通用黑名单字段，因为它在下面有专门的渲染逻辑
+        if (key.endsWith('_episode_blacklist_regex')) {
+          return null
+        }
 
         switch (type) {
           case 'boolean':
@@ -520,6 +528,28 @@ export const Scrapers = () => {
           {/* 动态渲染表单项 */}
           {renderDynamicFormItems()}
 
+          {/* 通用部分 分集标题黑名单 记录原始响应 */}
+          <Form.Item
+            name={`${setname}EpisodeBlacklistRegex`}
+            label="分集标题黑名单 (正则)"
+            className="mb-4"
+          >
+            <Input.TextArea rows={6} />
+          </Form.Item>
+          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+            <Form.Item
+              name={`scraper${setname.charAt(0).toUpperCase()}${setname.slice(1)}LogResponses`}
+              label="记录原始响应"
+              valuePropName="checked"
+              className="min-w-[100px] shrink-0 !mb-0"
+            >
+              <Switch />
+            </Form.Item>
+            <div className="w-full">
+              启用后，此源的所有API请求的原始响应将被记录到
+              config/logs/scraper_responses.log 文件中，用于调试。
+            </div>
+          </div>
           {/* bilibili登录信息 */}
           {setname === 'bilibili' && (
             <div>
