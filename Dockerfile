@@ -44,7 +44,29 @@ RUN --mount=type=secret,id=XOR_KEY_SECRET \
 # 编译 rate_limiter.py。移除 --include-package=src 以避免将整个应用打包进去。
 RUN python3 -m nuitka --module src/rate_limiter.py --output-dir=.
 
-# --- Stage 3: Final Python Application ---
+# --- Stage 3: Python Dependency Builder ---
+FROM l429609201/su-exec:su-exec AS python-builder
+
+# 安装编译Python包所需的构建时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    libpq-dev \
+    default-libmysqlclient-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建一个虚拟环境来安装包，方便后续复制
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# 复制并安装Python依赖
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# --- Stage 4: Final Application Image ---
 FROM l429609201/su-exec:su-exec
 
 
@@ -59,23 +81,22 @@ ENV LC_ALL C.UTF-8
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖并创建用户
+# 仅安装运行时的系统依赖，不再需要 build-essential, python3-dev 等
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
-        libpq-dev \
-        python3-dev \
         tzdata \
         iputils-ping \
+        libmariadb3 \
+        libpq5 \
     && addgroup --gid 1000 appgroup \
     && adduser --shell /bin/sh --disabled-password --uid 1000 --gid 1000 appuser \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件并安装
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 从 python-builder 阶段复制已安装的Python包
+COPY --from=python-builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # 复制应用代码
 COPY src/ ./src/
@@ -89,7 +110,7 @@ RUN chmod +x /exec.sh /run.sh
 COPY --from=backend-builder /backend-build/rate_limiter.*.so ./src/rate_limiter.so
 
 # 移除 rate_limiter.py 源码
-RUN rm src/rate_limiter.py
+RUN rm -f src/rate_limiter.py
 
 # 从 'builder' 阶段复制构建好的前端静态文件
 COPY --from=builder /app/web/dist ./web/dist/
