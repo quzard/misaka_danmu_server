@@ -22,12 +22,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 WORKDIR /backend-build
 
-# 复制 Python 源代码和依赖文件
-COPY src/ ./src/
-COPY requirements.txt .
+# --- 精确复制编译所需的文件 ---
+# 创建 src 目录结构
+RUN mkdir -p src
+# 只复制 rate_limiter.py 及其直接和间接依赖的本地模块
+COPY src/rate_limiter.py ./src/
+COPY src/crud.py ./src/
+COPY src/scraper_manager.py ./src/
+COPY src/timezone.py ./src/
+COPY src/orm_models.py ./src/
+COPY src/models.py ./src/
+COPY src/config.py ./src/
 
-# 安装 Python 依赖和 Nuitka
-RUN pip install --no-cache-dir -r requirements.txt nuitka
+# --- 最小化安装编译所需的 Python 包 ---
+RUN pip install --no-cache-dir nuitka sqlalchemy gmssl
 
 # 使用 --mount=type=secret 安全地挂载密钥，并替换占位符
 RUN --mount=type=secret,id=XOR_KEY_SECRET \
