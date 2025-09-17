@@ -33,8 +33,8 @@ RUN pip install --no-cache-dir -r requirements.txt nuitka
 RUN --mount=type=secret,id=XOR_KEY_SECRET \
     sh -c 'XOR_KEY_VALUE=$(cat /run/secrets/XOR_KEY_SECRET) && sed -i "s|__XOR_KEY_PLACEHOLDER__|${XOR_KEY_VALUE}|g" src/rate_limiter.py'
 
-# 编译 rate_limiter.py
-RUN python3 -m nuitka --module --include-package=src src/rate_limiter.py --output-dir=.
+# 编译 rate_limiter.py。移除 --include-package=src 以避免将整个应用打包进去。
+RUN python3 -m nuitka --module src/rate_limiter.py --output-dir=.
 
 # --- Stage 3: Final Python Application ---
 FROM l429609201/su-exec:su-exec
