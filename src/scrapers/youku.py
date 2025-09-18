@@ -40,6 +40,7 @@ class YoukuSearchCommonData(BaseModel):
 
 class YoukuSearchComponent(BaseModel):
     common_data: Optional[YoukuSearchCommonData] = Field(None, alias="commonData")
+    component_map: Optional[Dict[str, Any]] = Field(None, alias="componentMap")
 
 class YoukuSearchResult(BaseModel):
     page_component_list: Optional[List[YoukuSearchComponent]] = Field(None, alias="pageComponentList")
@@ -50,9 +51,9 @@ class YoukuEpisodeInfo(BaseModel):
     title: str
     # 新增：添加 displayName 字段以捕获更完整的分集标题，特别是对于综艺节目
     display_name: Optional[str] = Field(None, alias="displayName")
-    duration: str
-    category: str
-    link: str
+    duration: Optional[str] = None
+    category: Optional[str] = None
+    link: Optional[str] = None
 
     @property
     def clean_display_name(self) -> Optional[str]:
@@ -66,7 +67,7 @@ class YoukuEpisodeInfo(BaseModel):
     @property
     def total_mat(self) -> int:
         try:
-            duration_float = float(self.duration)
+            duration_float = float(self.duration) if self.duration else 0.0
             return int(duration_float // 60) + 1
         except (ValueError, TypeError):
             return 0
@@ -252,6 +253,19 @@ class YoukuScraper(BaseScraper):
                     currentEpisodeIndex=current_episode
                 )
                 self.logger.debug(f"Youku: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
+
+                # 新增：缓存从搜索结果中获取的详细分集列表
+                if component.component_map and "1052" in component.component_map:
+                    episodes_component = component.component_map["1052"]
+                    if episodes_component and "data" in episodes_component:
+                        raw_episode_list = episodes_component["data"]
+                        show_id = common_data.show_id
+                        # 缓存键应与 get_episodes 中的逻辑匹配
+                        ep_cache_key = f"episodes_from_search_{show_id}"
+                        # 直接缓存原始的字典列表，在 get_episodes 中进行解析
+                        await self._set_to_cache(ep_cache_key, raw_episode_list, 'episodes_ttl_seconds', 3600)
+                        self.logger.info(f"Youku: 缓存了来自搜索的 {len(raw_episode_list)} 个详细分集 (show_id={show_id})")
+
                 results.append(provider_search_info)
 
         except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -309,9 +323,25 @@ class YoukuScraper(BaseScraper):
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
 
         raw_episodes: List[YoukuEpisodeInfo] = []
-        # 修正：缓存键应表示缓存的是原始数据，并将其定义移到使用前
-        cache_key = f"episodes_raw_{media_id}"
 
+        # 方案一：优先从搜索结果中缓存的分集列表获取，因为这里有 displayName
+        episodes_from_search_cache_key = f"episodes_from_search_{media_id}"
+        cached_episodes_from_search = await self._get_from_cache(episodes_from_search_cache_key)
+        if cached_episodes_from_search:
+            self.logger.info(f"Youku: 命中来自搜索的详细分集缓存 (media_id={media_id})")
+            try:
+                # The cached data is a list of dicts with 'videoId', 'title', 'displayName'
+                temp_raw_episodes = []
+                for ep_data in cached_episodes_from_search:
+                    ep_data['id'] = ep_data.pop('videoId', None)
+                    if 'link' not in ep_data and ep_data.get('id'):
+                        ep_data['link'] = f"https://v.youku.com/v_show/id_{ep_data['id']}.html"
+                    temp_raw_episodes.append(YoukuEpisodeInfo.model_validate(ep_data))
+                raw_episodes = temp_raw_episodes
+            except Exception as e:
+                self.logger.warning(f"Youku: 解析来自搜索的分集缓存失败: {e}，将回退到 OpenAPI。")
+                raw_episodes = [] # 清空以触发回退
+        
         # 仅当请求完整列表时才尝试从缓存获取
         if target_episode_index is None:
             cached_episodes = await self._get_from_cache(cache_key)
@@ -321,6 +351,8 @@ class YoukuScraper(BaseScraper):
         
         # 如果缓存未命中或不需要缓存，则从网络获取
         if not raw_episodes:
+            # 方案二：如果方案一失败，则回退到 OpenAPI
+            cache_key = f"episodes_raw_{media_id}"
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             page = 1
