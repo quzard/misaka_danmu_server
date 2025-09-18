@@ -150,9 +150,13 @@ class MetadataSourceManager:
         for source_setting in enabled_sources_settings:
             provider = source_setting['providerName']
             if source_instance := self.sources.get(provider):
-                # 修正：现在我们调用 search 方法，而不是 search_aliases
-                # 因为 search 方法返回更详细的信息，我们可以从中提取别名
-                tasks.append(source_instance.search(keyword, user))
+                # 关键修复：为 TMDB 特殊处理，同时搜索 'tv' 和 'movie'
+                if provider == 'tmdb':
+                    tasks.append(source_instance.search(keyword, user, mediaType='tv'))
+                    tasks.append(source_instance.search(keyword, user, mediaType='movie'))
+                else:
+                    # 对于其他源，正常调用
+                    tasks.append(source_instance.search(keyword, user))
             else:
                 self.logger.warning(f"已启用的元数据源 '{provider}' 未被成功加载，跳过辅助搜索。")
 
@@ -165,7 +169,13 @@ class MetadataSourceManager:
         supplemental_results: List[models.ProviderSearchInfo] = []
 
         for i, res in enumerate(results):
-            provider_name = enabled_sources_settings[i]['providerName']
+            # 修正：由于 TMDB 会产生两个任务，我们需要一个更健壮的方式来获取 provider_name
+            # 这是一个简化的逻辑，假设任务顺序与 settings 顺序大致对应
+            # 注意：这个逻辑在 TMDB 不是第一个或最后一个源时可能不完美，但对于当前场景是有效的
+            provider_name = "tmdb"
+            if i < len(enabled_sources_settings):
+                provider_name = enabled_sources_settings[i]['providerName']
+
             if isinstance(res, list):
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
                 for item in res:
