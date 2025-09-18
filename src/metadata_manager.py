@@ -320,22 +320,26 @@ class MetadataSourceManager:
         # 如果提供商没有特定的配置键，检查它是否是一个已知的提供商
         if keys_to_fetch is None:
             is_known_metadata_source = providerName in self.sources
-            is_known_scraper = providerName in self.scraper_manager.scrapers
-            if not is_known_metadata_source and not is_known_scraper:
-                raise HTTPException(status_code=404, detail=f"未找到提供商: {providerName}")
-            return {}
+            # 修正：即使没有特定配置键，只要是已知的元数据源，就继续执行
+            if is_known_metadata_source:
+                config_values = {}
+            else:
+                raise ValueError(f"未找到提供商: {providerName}")
+        else:
+            config_values = {key: await self._config_manager.get(key, "") for key in keys_to_fetch}
 
-        config_values = {key: await self._config_manager.get(key, "") for key in keys_to_fetch}
-
-        # 为单值配置提供特殊处理，以匹配前端期望的格式
-        if providerName in ["douban", "tvdb"]:
-            return {"value": next(iter(config_values.values()), "")}
-        
         # 新增：从数据库获取 useProxy 和 logRawResponses 并添加到配置中
+        # 修正：将此逻辑移到更前面，确保所有源都能执行
         async with self._session_factory() as session:
             provider_settings = await crud.get_metadata_source_setting_by_name(session, providerName)
             if provider_settings:
                 config_values.update(provider_settings)
+
+        # 为单值配置提供特殊处理，以匹配前端期望的格式
+        # 修正：在所有配置都获取完毕后，再进行此项特殊处理
+        if providerName in ["douban", "tvdb"]:
+            # 确保即使只有表内设置，也能正确返回
+            return config_values
 
         # 新增：为Gamer也返回单值value，以简化前端处理
         if providerName == "gamer":

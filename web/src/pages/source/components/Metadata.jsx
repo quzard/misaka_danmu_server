@@ -200,7 +200,7 @@ export const Metadata = () => {
         displayOrder: item.displayOrder,
         useProxy: item.useProxy,
         isFailoverEnabled: item.isFailoverEnabled,
-        logRawResponses: item.logRawResponses,
+        logRawResponses: item.log_raw_responses,
       }))
       setMetaData(payload)
       messageApi.success(
@@ -237,7 +237,7 @@ export const Metadata = () => {
       displayOrder: item.displayOrder,
       useProxy: item.useProxy,
       isFailoverEnabled: item.isFailoverEnabled,
-      logRawResponses: item.logRawResponses,
+      logRawResponses: item.log_raw_responses,
     }))
     setMetaData(payload)
   }
