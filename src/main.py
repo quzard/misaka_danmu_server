@@ -29,6 +29,9 @@ print(f"当前环境: {settings.environment}")
 
 logger = logging.getLogger(__name__)
 
+# 新增：定义应用版本号
+APP_VERSION = "2.0.11"
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -38,6 +41,9 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup Logic ---
     setup_logging()
+
+    # 新增：在日志系统初始化后立即打印版本号
+    logger.info(f"Misaka Danmaku API 版本 {APP_VERSION} 正在启动...")
 
     # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
     await init_db_tables(app)

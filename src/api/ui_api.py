@@ -31,6 +31,7 @@ from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
+from ..main import APP_VERSION
 from thefuzz import fuzz
 from ..config import settings
 from ..timezone import get_now
@@ -71,6 +72,11 @@ async def get_config_manager(request: Request) -> ConfigManager:
 async def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
+
+@router.get("/version", response_model=Dict[str, str], summary="获取应用版本号")
+async def get_app_version():
+    """获取当前后端应用的版本号。"""
+    return {"version": APP_VERSION}
 
 @router.get(
     "/search/anime",

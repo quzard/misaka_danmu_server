@@ -3,7 +3,7 @@ import { RoutePaths } from './RoutePaths.jsx'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAtom, useAtomValue } from 'jotai'
 import { isMobileAtom, userinfoAtom } from '../../store/index.js'
-import DarkModeToggle from '@/components/DarkModeToggle.jsx'
+import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { Dropdown, Tag } from 'antd'
@@ -19,11 +19,11 @@ const navItems = [
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
-const version = 'v2.0.10'
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
   const location = useLocation()
+  const [version, setVersion] = useState('N/A');
   console.log(location)
 
   const activeKey = useMemo(() => {
@@ -35,6 +35,13 @@ export const Header = () => {
     )
   }, [location, navItems])
 
+  useEffect(() => {
+    const fetchVersion = async () => {
+      const res = await getVersion();
+      setVersion(`v${res.data.version}`);
+    };
+    fetchVersion();
+  }, []);
   useEffect(() => {
     const checkScreenSize = () => {
       setIsMobile(window.innerWidth <= 768)

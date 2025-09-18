@@ -1,5 +1,8 @@
 import api from './fetch'
 
+/** 获取应用版本号 */
+export const getVersion = () => api.get('/api/ui/version')
+
 /** -------------------------------------------------用户相关开始------------------------------------------------- */
 /** 登录 */
 export const login = data =>
