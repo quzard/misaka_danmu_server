@@ -1081,6 +1081,7 @@ def _is_movie_by_title(title: str) -> bool:
 
 
 FUZZY_TIE_SCORE_DELTA = 10
+FUZZY_MIN_SCORE = 70  # 过滤掉低质量的模糊匹配
 
 
 async def webhook_search_and_dispatch_task(
@@ -1170,6 +1171,16 @@ async def webhook_search_and_dispatch_task(
             season_match = (item.season == season) if mediaType == 'tv_series' else True
 
             if type_match and season_match:
+                similarity_score = fuzz.token_set_ratio(animeTitle, item.title)
+                if similarity_score < FUZZY_MIN_SCORE:
+                    logger.info(
+                        "Webhook 任务: 跳过候选源 %s - %s，模糊匹配分数 %s 低于阈值 %s。",
+                        item.provider,
+                        item.title,
+                        similarity_score,
+                        FUZZY_MIN_SCORE
+                    )
+                    continue
                 valid_candidates.append(item)
 
         if not valid_candidates:
