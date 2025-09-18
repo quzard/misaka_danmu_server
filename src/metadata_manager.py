@@ -77,6 +77,26 @@ class MetadataSourceManager:
                 )
                 self.logger.info(f"已为源 '{provider_name}' 添加API路由，子前缀: /{provider_name}")
 
+    async def has_any_enabled_aux_source(self) -> bool:
+        """
+        Checks if there are any metadata sources enabled for auxiliary search,
+        including those that are force-enabled.
+        """
+        for provider, settings in self.source_settings.items():
+            if not settings.get('isEnabled'):
+                continue
+            
+            # Check if it's enabled for aux search in its settings
+            if settings.get('isAuxSearchEnabled'):
+                return True
+            
+            # Check if it's force-enabled via global config
+            force_enabled_str = await self._config_manager.get(f"{provider}_force_aux_search", "false")
+            if force_enabled_str.lower() == 'true':
+                return True
+        
+        return False
+
     async def load_and_sync_sources(self):
         """动态发现、同步到数据库并加载元数据源插件。"""
         await self.close_all()  # 在重新加载前确保旧连接已关闭
@@ -388,17 +408,6 @@ class MetadataSourceManager:
         if source_class and getattr(source_class, 'has_force_aux_search_toggle', False):
             force_enabled_str = await self._config_manager.get(f"{providerName}_force_aux_search", "false")
             config_values['forceAuxSearchEnabled'] = force_enabled_str.lower() == 'true'
-
-        # 为单值配置提供特殊处理，以匹配前端期望的格式
-        # 修正：在所有配置都获取完毕后，再进行此项特殊处理
-        if providerName in ["douban", "tvdb"]:
-            # 确保即使只有表内设置，也能正确返回
-            return config_values
-
-        # 新增：为Gamer也返回单值value，以简化前端处理
-        if providerName == "gamer":
-            # 修正：此前的实现有误，只返回了Cookie。现在返回所有为Gamer获取的配置。
-            return config_values
 
         # 新增：为Bangumi添加 authMode 字段，以明确告知前端当前应显示哪种模式
         if providerName == "bangumi":
