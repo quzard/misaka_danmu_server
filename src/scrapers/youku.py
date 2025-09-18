@@ -389,6 +389,9 @@ class YoukuScraper(BaseScraper):
         media_type_cache_key = f"media_type_{media_id}"
         media_type = await self._get_from_cache(media_type_cache_key) or 'variety'
         
+        # 计算真实期数映射
+        stage_to_episode = self._calculate_episode_number_from_stage(raw_episodes)
+        
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
         provider_pattern_str = await self.config_manager.get(
             f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
@@ -417,13 +420,23 @@ class YoukuScraper(BaseScraper):
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                title=self._format_episode_title(ep, i + 1, media_type),
+                title=self._format_episode_title(ep, i + 1, media_type, stage_to_episode),
                 episodeIndex=i + 1,
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
         ]
         
         return final_episodes
+
+    def _calculate_episode_number_from_stage(self, episodes: List[YoukuEpisodeInfo]) -> Dict[str, int]:
+        """根据stage字段计算真实的期数"""
+        stage_to_episode = {}
+        unique_stages = sorted(set(ep.stage for ep in episodes if ep.stage))
+        
+        for i, stage in enumerate(unique_stages, 1):
+            stage_to_episode[stage] = i
+        
+        return stage_to_episode
 
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
         client = await self._ensure_client()
@@ -691,29 +704,25 @@ class YoukuScraper(BaseScraper):
         # 默认返回综艺
         return 'variety'
 
-    def _format_episode_title(self, ep: YoukuEpisodeInfo, episode_index: int, media_type: str) -> str:
+    def _format_episode_title(self, ep: YoukuEpisodeInfo, episode_index: int, media_type: str, stage_to_episode: Dict[str, int]) -> str:
         """根据节目类型格式化分集标题"""
-        # 优先使用 clean_display_name，如果没有则使用 title
         base_title = (ep.clean_display_name or ep.title).strip()
         
         if media_type == "movie":
-            # 电影：使用原标题
             return base_title
         elif media_type == "variety":
-            # 综艺：处理期数，特别是"上/下"情况
-            if ep.seq and ep.seq.isdigit():
-                return f"第{ep.seq}期: {base_title}"
-            # 如果没有期数但标题中包含"第X期"，保持原样
-            elif "第" in base_title and "期" in base_title:
-                return base_title
+            # 综艺：使用stage计算真实期数
+            if ep.stage and ep.stage in stage_to_episode:
+                real_episode_num = stage_to_episode[ep.stage]
+                return f"第{real_episode_num}期{base_title}"
             else:
                 return f"第{episode_index}期: {base_title}"
         elif media_type == "anime":
-            # 动漫：拼接集数
             return f"第{episode_index}集: {base_title}"
         else:
-            # 默认处理（电视剧等）
             return f"第{episode_index}集: {base_title}"
+
+
 
 
 
