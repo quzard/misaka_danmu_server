@@ -24,13 +24,11 @@ from .config import settings
 from . import crud, security
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
+from ._version import APP_VERSION
 
 print(f"当前环境: {settings.environment}") 
 
 logger = logging.getLogger(__name__)
-
-# 新增：定义应用版本号
-APP_VERSION = "2.0.11"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

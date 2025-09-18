@@ -31,7 +31,7 @@ from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
-from ..main import APP_VERSION
+from .._version import APP_VERSION
 from thefuzz import fuzz
 from ..config import settings
 from ..timezone import get_now
