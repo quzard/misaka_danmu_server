@@ -5,7 +5,7 @@ import inspect
 import logging
 import pkgutil
 from pathlib import Path
-from typing import Any, Dict, List, Set, Optional, Type
+from typing import Any, Dict, List, Set, Optional, Type, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status, Request, APIRouter
