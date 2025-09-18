@@ -1,6 +1,15 @@
 import { useEffect, useState, useRef } from 'react'
 import { getRateLimitStatus } from '../../../apis/index.js'
-import { Card, Table, Typography, Progress, Row, Col, Statistic } from 'antd'
+import {
+  Card,
+  Table,
+  Typography,
+  Progress,
+  Row,
+  Col,
+  Statistic,
+  Alert,
+} from 'antd'
 
 const { Title, Paragraph } = Typography
 
@@ -46,12 +55,32 @@ export const RateLimitPanel = () => {
         </Typography>
         {status && (
           <>
+            {status.verificationFailed && (
+              <Alert
+                message="严重安全警告"
+                description="流控配置文件验证失败或缺失。为保证安全，所有弹幕下载请求已被自动阻止。"
+                type="error"
+                showIcon
+                className="!mb-4"
+              />
+            )}
             <Card type="inner" title="全局限制" className="!mb-6">
               <Row gutter={[16, 16]} align="middle">
                 <Col xs={24} sm={12} md={8}>
                   <Statistic
                     title="全局状态"
-                    value={status.globalEnabled ? '已启用' : '已禁用'}
+                    value={
+                      status.verificationFailed
+                        ? '验证失败 (已锁定)'
+                        : status.globalEnabled
+                          ? '已启用'
+                          : '已禁用'
+                    }
+                    valueStyle={{
+                      color: status.verificationFailed
+                        ? 'var(--color-red-600)'
+                        : undefined,
+                    }}
                   />
                 </Col>
                 <Col xs={24} sm={12} md={8}>
@@ -59,6 +88,7 @@ export const RateLimitPanel = () => {
                     title={`全局使用量 (每${periodLabelMap[status.globalPeriod] || status.globalPeriod})`}
                     value={status.globalRequestCount}
                     suffix={`/ ${status.globalLimit}`}
+                    className={status.verificationFailed ? 'opacity-50' : ''}
                   />
                 </Col>
                 <Col xs={24} sm={24} md={8}>
@@ -67,21 +97,23 @@ export const RateLimitPanel = () => {
                     value={Date.now() + status.secondsUntilReset * 1000}
                     format="HH:mm:ss"
                     type="countdown"
+                    className={status.verificationFailed ? 'opacity-50' : ''}
                   />
                 </Col>
                 <Col span={24}>
                   <Progress
-                    percent={
-                      status.globalLimit > 0
-                        ? (status.globalRequestCount / status.globalLimit) * 100
-                        : 0
-                    }
+                    percent={status.globalLimit > 0 ? (status.globalRequestCount / status.globalLimit) * 100 : 0}
                     showInfo={false}
+                    className={status.verificationFailed ? 'opacity-50' : ''}
                   />
                 </Col>
               </Row>
             </Card>
-            <Card type="inner" title="各源配额使用情况">
+            <Card
+              type="inner"
+              title="各源配额使用情况"
+              className={status.verificationFailed ? 'opacity-50' : ''}
+            >
               <Table
                 columns={[
                   {

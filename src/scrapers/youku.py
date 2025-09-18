@@ -48,9 +48,20 @@ class YoukuSearchResult(BaseModel):
 class YoukuEpisodeInfo(BaseModel):
     id: str
     title: str
+    # 新增：添加 displayName 字段以捕获更完整的分集标题，特别是对于综艺节目
+    display_name: Optional[str] = Field(None, alias="displayName")
     duration: str
     category: str
     link: str
+
+    @property
+    def clean_display_name(self) -> Optional[str]:
+        """返回一个移除了日期前缀的 displayName。"""
+        if not self.display_name:
+            return None
+        # 匹配 "YYYY-MM-DD : " 或 "MM-DD : " 格式的前缀并移除
+        return re.sub(r'^\d{2,4}-\d{2}-\d{2}\s*:\s*|^\d{2}-\d{2}\s*:\s*', '', self.display_name).strip()
+
 
     @property
     def total_mat(self) -> int:
@@ -100,6 +111,7 @@ class YoukuScraper(BaseScraper):
     provider_name = "youku"
     handled_domains = ["v.youku.com"]
     referer = "https://v.youku.com"
+    test_url = "https://v.youku.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(版|篇)?|加更(版|篇)?|花絮|预告|特辑|彩蛋|专访|幕后(故事|花絮)?|直播|纯享|未播|衍生|番外|会员(专属|加长)?|片花|精华|看点|速览|解读|reaction|影评)(.*?)$"
 
     # 新增：为令牌过期定义一个自定义异常
@@ -118,12 +130,20 @@ class YoukuScraper(BaseScraper):
         self._cna = ""
         self._token = ""
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Youku: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
             self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -151,6 +171,10 @@ class YoukuScraper(BaseScraper):
         if self.client:
             await self.client.aclose()
             self.client = None
+
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        client = await self._ensure_client()
+        return await client.request(method, url, **kwargs)
 
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
@@ -183,8 +207,6 @@ class YoukuScraper(BaseScraper):
 
     async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """Performs the actual network search for Youku."""
-        await self._ensure_client()
-        assert self.client is not None
         self.logger.info(f"Youku: 正在为 '{keyword}' 执行网络搜索...")
         ua_encoded = urlencode({"userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         keyword_encoded = urlencode({"keyword": keyword})
@@ -192,7 +214,7 @@ class YoukuScraper(BaseScraper):
         
         results = []
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Search Response (keyword='{keyword}'): {response.text}")
             response.raise_for_status()
@@ -246,12 +268,10 @@ class YoukuScraper(BaseScraper):
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从优酷URL中提取作品信息。"""
-        await self._ensure_client()
-        assert self.client is not None
         self.logger.info(f"Youku: 正在从URL提取信息: {url}")
         
         try:
-            response = await self.client.get(url)
+            response = await self._request("GET", url)
             response.raise_for_status()
             html_content = response.text
 
@@ -288,6 +308,41 @@ class YoukuScraper(BaseScraper):
         # 优酷的逻辑不区分电影和电视剧，都是从一个show_id获取列表，
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
         # 仅当请求完整列表时才使用缓存
+        # --- 新增：优先从搜索结果缓存中提取详细分集信息 ---
+        # 优酷的搜索API有时会直接返回分集列表，其中包含更完整的 displayName
+        search_cache_key = f"search_api_response_youku_{media_id}"
+        cached_search_data = await self._get_from_cache(search_cache_key)
+
+        if cached_search_data:
+            self.logger.info(f"Youku: 命中搜索结果缓存 (media_id={media_id})，尝试直接提取分集。")
+            try:
+                # 模拟搜索结果的嵌套结构来解析
+                page_component_list = cached_search_data.get("pageComponentList", [])
+                for component in page_component_list:
+                    episodes_data = component.get("componentMap", {}).get("1052", {}).get("data", [])
+                    if episodes_data:
+                        self.logger.info(f"Youku: 从缓存中成功提取到 {len(episodes_data)} 个原始分集。")
+                        # 直接使用这些数据，它们包含 displayName
+                        raw_episodes = [
+                            YoukuEpisodeInfo.model_validate(ep) for ep in episodes_data
+                        ]
+                        # 后续逻辑将处理过滤和编号
+                        break
+                else:
+                    raw_episodes = []
+
+                if raw_episodes:
+                    # 使用与下面相同的逻辑处理和返回
+                    final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
+                    if target_episode_index:
+                        return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
+                    return final_episodes
+
+            except Exception as e:
+                self.logger.warning(f"Youku: 从搜索缓存中提取分集失败: {e}，将回退到网络获取。")
+
+        # --- 缓存提取逻辑结束，如果失败则执行原有逻辑 ---
+
         # 修正：缓存键应表示缓存的是原始数据
         cache_key = f"episodes_raw_{media_id}"
         
@@ -330,53 +385,72 @@ class YoukuScraper(BaseScraper):
             if raw_episodes and target_episode_index is None:
                 await self._set_to_cache(cache_key, [e.model_dump() for e in raw_episodes], 'episodes_ttl_seconds', 1800)
 
+        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
+
+        if target_episode_index:
+            return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
+        return final_episodes
+
+    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
+        """
+        一个集中的辅助函数，用于过滤、格式化和编号原始的优酷分集列表。
+        """
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        # 修正：Youku源只应使用其专属的黑名单，以避免全局规则误杀。
+        provider_pattern_str = await self.config_manager.get(
+            f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
+        )
+        blacklist_pattern = re.compile(provider_pattern_str, re.IGNORECASE) if provider_pattern_str else None
+        
+        filtered_episodes = []
         if blacklist_pattern:
-            original_count = len(raw_episodes)
-            filtered_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep.title)]
-            if original_count > len(filtered_episodes):
-                self.logger.info(f"Youku: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个分集。")
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+
+            for ep in raw_episodes:
+                title_to_check = f"{ep.clean_display_name or ep.title}".strip()
+                if blacklist_pattern.search(title_to_check):
+                    filtered_out_log[blacklist_pattern.pattern].append(title_to_check)
+                else:
+                    filtered_episodes.append(ep)
+            
+            if filtered_out_log:
+                for rule, titles in filtered_out_log.items():
+                    self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
         else:
             filtered_episodes = raw_episodes
 
         # 在过滤后的列表上重新编号
-        provider_episodes = [
+        final_episodes = [
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                title=ep.title,
+                # 修正：优先使用清理后的 displayName，因为它通常包含最完整且最简洁的信息（如“第X期”），
+                # 如果 displayName 不存在，则回退到使用原始的 title。
+                title=(ep.clean_display_name or ep.title).strip(),
                 episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
         ]
-
-        if target_episode_index:
-            target = next((ep for ep in provider_episodes if ep.episodeIndex == target_episode_index), None)
-            return [target] if target else []
-            
-        return provider_episodes
+        
+        return final_episodes
 
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
-        await self._ensure_client()
-        assert self.client is not None
+        client = await self._ensure_client()
         url = f"https://openapi.youku.com/v2/shows/videos.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&ext=show&show_id={show_id}&page={page}&count={page_size}"
-        response = await self.client.get(url)
+        response = await client.get(url)
         if await self._should_log_responses():
             scraper_responses_logger.debug(f"Youku Episodes Page Response (show_id={show_id}, page={page}): {response.text}")
         response.raise_for_status()
         return YoukuVideoResult.model_validate(response.json())
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> Optional[List[dict]]:
-        await self._ensure_client()
-        assert self.client is not None
         vid = episode_id.replace("_", "=")
         
         try:
             await self._ensure_token_cookie() # 首次获取令牌
             
             episode_info_url = f"https://openapi.youku.com/v2/videos/show_basic.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&video_id={vid}"
-            episode_info_resp = await self.client.get(episode_info_url)
+            episode_info_resp = await self._request("GET", episode_info_url)
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Episode Info Response (vid={vid}): {episode_info_resp.text}")
             episode_info_resp.raise_for_status()
@@ -426,31 +500,30 @@ class YoukuScraper(BaseScraper):
         确保获取弹幕签名所需的 cna 和 _m_h5_tk cookie。
         此逻辑严格参考了 C# 代码，并针对网络环境进行了优化。
         """
+        # 修正：在函数开头就确保客户端已初始化，以防止在后续代码中对 NoneType 对象进行操作。
+        client = await self._ensure_client()
+
         # 步骤 1: 获取 'cna' cookie。它通常由优酷主站或其统计服务设置。
         # 我们优先访问主站，因为它更不容易出网络问题。
-        cna_val = self.client.cookies.get("cna")
+        cna_val = client.cookies.get("cna")
         if not cna_val or force_refresh:
-            await self._ensure_client()
-            assert self.client is not None
             try:
                 log_msg = "强制刷新 'cna' cookie..." if force_refresh else "'cna' cookie 未找到, 正在访问 youku.com 以获取..."
                 self.logger.debug(f"Youku: {log_msg}")
-                await self.client.get("https://www.youku.com/")
+                await client.get("https://www.youku.com/")
                 cna_val = self.client.cookies.get("cna")
             except httpx.ConnectError as e:
                 self.logger.warning(f"Youku: 无法连接到 youku.com 获取 'cna' cookie。错误: {e}")
         self._cna = cna_val or ""
 
         # 步骤 2: 获取 '_m_h5_tk' 令牌, 此请求可能依赖于 'cna' cookie 的存在。
-        token_val = self.client.cookies.get("_m_h5_tk")
+        token_val = client.cookies.get("_m_h5_tk")
         if not token_val or force_refresh:
-            await self._ensure_client()
-            assert self.client is not None
             try:
                 log_msg = "强制刷新 '_m_h5_tk' cookie..." if force_refresh else "'_m_h5_tk' cookie 未找到, 正在从 acs.youku.com 请求..."
                 self.logger.debug(f"Youku: {log_msg}")
-                await self.client.get("https://acs.youku.com/h5/mtop.com.youku.aplatform.weakget/1.0/?jsv=2.5.1&appKey=24679788")
-                token_val = self.client.cookies.get("_m_h5_tk")
+                await client.get("https://acs.youku.com/h5/mtop.com.youku.aplatform.weakget/1.0/?jsv=2.5.1&appKey=24679788")
+                token_val = client.cookies.get("_m_h5_tk")
             except httpx.ConnectError as e:
                 self.logger.error(f"Youku: 无法连接到 acs.youku.com 获取令牌 cookie。弹幕获取很可能会失败。错误: {e}")
         
@@ -470,8 +543,6 @@ class YoukuScraper(BaseScraper):
         return hashlib.md5(s.encode('utf-8')).hexdigest().lower()
 
     async def _get_danmu_content_by_mat(self, vid: str, mat: int) -> Optional[List[YoukuComment]]:
-        await self._ensure_client()
-        assert self.client is not None
         if not self._token:
             self.logger.error("Youku: Cannot get danmaku, _m_h5_tk is missing.")
             return []
@@ -507,7 +578,8 @@ class YoukuScraper(BaseScraper):
         
         url = f"https://acs.youku.com/h5/mopen.youku.danmu.list/1.0/?{urlencode(params)}"
         
-        response = await self.client.post(
+        response = await self._request(
+            "POST",
             url,
             data={"data": data_payload},
             headers={"Referer": "https://v.youku.com"}

@@ -21,8 +21,8 @@ export const useDebounce = (
   fn,
   wait = 1000,
   options = {
-    leading: true,
-    trailing: false,
+    leading: false,
+    trailing: true,
   }
 ) => {
   const fnRef = useRef(fn)

@@ -3,15 +3,16 @@ import time
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
 from typing import Union
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .. import crud
 from .. import models
-from ..config_manager import ConfigManager
 
+if TYPE_CHECKING:
+    from ..config_manager import ConfigManager
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
@@ -92,11 +93,12 @@ class BaseScraper(ABC):
     _GLOBAL_EPISODE_BLACKLIST_DEFAULT = r"^(.*?)((.+?版)|(特(别|典))|((导|演)员|嘉宾|角色)访谈|福利|彩蛋|花絮|预告|特辑|专访|访谈|幕后|周边|资讯|看点|速看|回顾|盘点|合集|PV|MV|CM|OST|ED|OP|BD|特典|SP|NCOP|NCED|MENU|Web-DL|rip|x264|x265|aac|flac)(.*?)$"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT: str = ""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: "ConfigManager"):
         self._session_factory = session_factory
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client: Optional[httpx.AsyncClient] = None
+        # 新增：用于跟踪当前客户端实例所使用的代理配置
+        self._current_proxy_config: Optional[str] = None
 
     async def _get_proxy_for_provider(self) -> Optional[str]:
         """Helper to get the configured proxy URL for the current provider, if any."""
@@ -113,13 +115,21 @@ class BaseScraper(ABC):
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
+    async def _log_proxy_usage(self, proxy_url: Optional[str]):
+        if proxy_url:
+            self.logger.debug(f"通过代理 '{proxy_url}' 发起请求...")
 
-    async def _create_client(self, **kwargs) -> httpx.AsyncClient:
+    async def _create_client(self, **kwargs) -> httpx.AsyncClient: # type: ignore
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
         子类可以传递额外的 httpx.AsyncClient 参数。
         """
         proxy_to_use = await self._get_proxy_for_provider()
+        await self._log_proxy_usage(proxy_to_use)
+        
+        # 关键：在创建客户端后，记录下当前使用的代理配置
+        self._current_proxy_config = proxy_to_use
+        
         client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 
@@ -260,7 +270,5 @@ class BaseScraper(ABC):
 
     @abstractmethod
     async def close(self):
-        """
-        关闭所有打开的资源，例如HTTP客户端。
-        """
-        raise NotImplementedError
+        """关闭所有打开的资源，例如HTTP客户端。"""
+        pass

@@ -19,7 +19,7 @@ const navItems = [
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
-const version = 'v2.0.6'
+const version = 'v2.0.10'
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
@@ -53,7 +53,7 @@ export const Header = () => {
           <div className="fixed top-0 left-0 w-full z-50 py-2 bg-base-bg">
             <div className="flex justify-start items-center px-4 md:px-8">
               <div onClick={() => navigate(RoutePaths.HOME)}>
-                <img src="/images/logo.png" className="h-8 cursor-pointer" />
+                <img src="/images/logo.png" className="h-12 cursor-pointer" />
               </div>
               <div className="flex items-center justify-center gap-2 ml-auto">
                 <Tag>{version}</Tag>

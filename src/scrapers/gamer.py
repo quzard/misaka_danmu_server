@@ -22,6 +22,7 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
+    test_url = "https://ani.gamer.com.tw"
     configurable_fields = {
         "gamerCookie": "巴哈姆特动画疯 Cookie",
         "gamerUserAgent": "巴哈姆特动画疯 User-Agent",
@@ -32,12 +33,29 @@ class GamerScraper(BaseScraper):
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
         self.client: Optional[httpx.AsyncClient] = None
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("Gamer: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            headers = {"User-Agent": "Mozilla/5.0"} # 初始默认值
             self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
+        
+        # 动态加载并更新最新的 Cookie 和 User-Agent
+        cookie = await self.config_manager.get("gamerCookie", "")
+        user_agent = await self.config_manager.get("gamerUserAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        self.client.headers["User-Agent"] = user_agent
+        self.client.cookies.clear()
+        if cookie:
+            self.client.cookies.update(httpx.Cookies({k.strip(): v.strip() for k, v in (p.split('=', 1) for p in cookie.split(';') if '=' in p)}))
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -61,33 +79,10 @@ class GamerScraper(BaseScraper):
         # 4. 如果规则为空或未配置，则不进行过滤
         return None
 
-    async def _ensure_config(self):
-        """
-        实时从数据库加载并应用Cookie和User-Agent配置。
-        此方法在每次请求前调用，以确保配置实时生效。
-        """
-        await self._ensure_client()
-        assert self.client is not None
-        cookie = await self.config_manager.get("gamerCookie", "")
-        user_agent = await self.config_manager.get("gamerUserAgent", "")
-
-        if cookie:
-            self.client.headers["Cookie"] = cookie
-        elif "Cookie" in self.client.headers:
-            del self.client.headers["Cookie"]
-
-        if user_agent:
-            self.client.headers["User-Agent"] = user_agent
-        else:
-            # 如果数据库中没有，则恢复为默认值
-            self.client.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """一个简单的请求包装器。"""
-        await self._ensure_config()
-        # _ensure_config already calls _ensure_client
-        assert self.client is not None
-        response = await self.client.request(method, url, **kwargs)
+        client = await self._ensure_client()
+        response = await client.request(method, url, **kwargs)
         if await self._should_log_responses():
             # 截断HTML以避免日志过长
             scraper_responses_logger.debug(f"Gamer Response ({method} {url}): status={response.status_code}, text={response.text[:500]}")
@@ -103,7 +98,6 @@ class GamerScraper(BaseScraper):
         Performs a cached search for Gamer content.
         It caches the base results for a title and then filters them based on season.
         """
-        await self._ensure_config()
         
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
@@ -215,7 +209,7 @@ class GamerScraper(BaseScraper):
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """从动画疯URL中提取作品信息。"""
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在从URL提取信息: {url}")
 
         sn_match = re.search(r"sn=(\d+)", url)
@@ -291,7 +285,7 @@ class GamerScraper(BaseScraper):
         return str(provider_episode_id)
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 media_id={media_id} 获取分集列表...")
         
         # 修正：直接请求作品集页面(animeRef.php)，而不是依赖于播放页(animeVideo.php)的重定向，这与Lua脚本的逻辑一致，更健壮。
@@ -317,16 +311,28 @@ class GamerScraper(BaseScraper):
                         raw_episodes.append({'link': None, 'sn': sn_match.group(1), 'title': title_match.group(1)})
 
             # 统一过滤逻辑
-            blacklist_pattern = await self.get_episode_blacklist_pattern()
-            filtered_raw_episodes = raw_episodes
-            if blacklist_pattern:
-                original_count = len(raw_episodes)
-                filtered_raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(ep['title'])]
-                self.logger.info(f"Gamer: 根据黑名单规则过滤掉了 {original_count - len(filtered_raw_episodes)} 个分集。")
+            # 修正：安全地获取并组合黑名单规则
+            # 修正：Gamer源只应使用其专属的黑名单，以避免全局规则误杀。
+            provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+            blacklist_rules = [provider_pattern_str] if provider_pattern_str else []
+
+            if blacklist_rules:
+                temp_episodes = []
+                filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+                for ep in raw_episodes:
+                    title_to_check = ep['title']
+                    match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                    if not match_rule:
+                        temp_episodes.append(ep)
+                    else:
+                        filtered_out_log[match_rule].append(title_to_check)
+                for rule, titles in filtered_out_log.items():
+                    self.logger.info(f"Gamer: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+                raw_episodes = temp_episodes
 
             # 过滤后再编号
             episodes = []
-            for i, raw_ep in enumerate(filtered_raw_episodes):
+            for i, raw_ep in enumerate(raw_episodes):
                 if raw_ep.get('link'):
                     href = raw_ep['link'].get("href")
                     sn_match = re.search(r"\?sn=(\d+)", href)
@@ -354,7 +360,7 @@ class GamerScraper(BaseScraper):
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
-        await self._ensure_config()
+        await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 episode_id={episode_id} 获取弹幕...")
         
         url = "https://ani.gamer.com.tw/ajax/danmuGet.php"
@@ -363,7 +369,6 @@ class GamerScraper(BaseScraper):
         try:
             if progress_callback: await progress_callback(10, "正在请求弹幕数据...")
             
-            await self._ensure_config()
             response = await self._request("POST", url, data=data)
             danmu_data = response.json()
 

@@ -149,61 +149,45 @@ class MgtvScraper(BaseScraper):
     provider_name = "mgtv"
     handled_domains = ["www.mgtv.com"]
     referer = "https://www.mgtv.com/"
+    test_url = "https://www.mgtv.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)|加更(版)?|花絮|预告|特辑|(特别|惊喜|纳凉)?企划|彩蛋|专访|幕后(花絮)?|直播|纯享|未播|衍生|番外|合伙人手记|会员(专享|加长)|片花|精华|看点|速看|解读|reaction|超前营业|超前(vlog)?|陪看(记)?|.{3,}篇|影评)(.*?)$"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
-        self.client: Optional[httpx.AsyncClient] = None
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，
         # 适当增加延迟以提高稳定性。
         self._min_interval = 1.0
+        self.client: Optional[httpx.AsyncClient] = None
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> httpx.AsyncClient:
         """Ensures the httpx client is initialized, with proxy support."""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("MGTV: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Referer": "https://www.mgtv.com/",
-                "Sec-Fetch-Site": "same-site",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
             }
-            # 修正：使用基类中的 _create_client 方法来创建客户端，以支持代理
-            self.client = await self._create_client(headers=headers, timeout=20.0, follow_redirects=True)
-
-    async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
-        """
-        获取并编译用于过滤分集的正则表达式。
-        此方法现在只使用数据库中配置的规则，如果规则为空，则不进行过滤。
-        """
-        # 1. 构造该源特定的配置键，确保与数据库键名一致
-        provider_blacklist_key = f"{self.provider_name}_episode_blacklist_regex"
+            self.client = await self._create_client(headers=headers)
         
-        # 2. 从数据库动态获取用户自定义规则
-        custom_blacklist_str = await self.config_manager.get(provider_blacklist_key)
-
-        # 3. 仅当用户配置了非空的规则时才进行过滤
-        if custom_blacklist_str and custom_blacklist_str.strip():
-            self.logger.info(f"正在为 '{self.provider_name}' 使用数据库中的自定义分集黑名单。")
-            try:
-                return re.compile(custom_blacklist_str, re.IGNORECASE)
-            except re.error as e:
-                self.logger.error(f"编译 '{self.provider_name}' 的分集黑名单时出错: {e}。规则: '{custom_blacklist_str}'")
-        
-        # 4. 如果规则为空或未配置，则不进行过滤
-        return None
+        return self.client
 
     async def _request_with_rate_limit(self, method: str, url: str, **kwargs) -> httpx.Response:
-        await self._ensure_client()
-        assert self.client is not None
         async with self._api_lock:
             now = time.time()
             time_since_last = now - self._last_request_time
             if time_since_last < self._min_interval:
                 await asyncio.sleep(self._min_interval - time_since_last)
-            response = await self.client.request(method, url, **kwargs)
+            client = await self._ensure_client()
+            response = await client.request(method, url, **kwargs)
             self._last_request_time = time.time()
             return response
 
@@ -448,11 +432,11 @@ class MgtvScraper(BaseScraper):
             raw_episodes = all_episodes
 
             # 统一过滤逻辑
-            blacklist_pattern = await self.get_episode_blacklist_pattern()
+            # 修正：Mgtv源只应使用其专属的黑名单，以避免全局规则误杀。
+            provider_pattern_str = await self.config_manager.get(f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT)
+            blacklist_pattern = re.compile(provider_pattern_str, re.IGNORECASE) if provider_pattern_str else None
             if blacklist_pattern:
-                original_count = len(raw_episodes)
                 raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
-                self.logger.info(f"MGTV: 根据黑名单规则过滤掉了 {original_count - len(raw_episodes)} 个分集。")
 
             # Apply custom blacklist from config
             blacklist_pattern = await self.get_episode_blacklist_pattern()

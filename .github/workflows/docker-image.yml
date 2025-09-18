@@ -4,20 +4,47 @@ name: Publish to Docker Hub
 # 触发条件：
 # 1. 当推送到 'test' 分支时
 # 2. 当推送到 'beta' 分支时
-# 3. 当创建 'v*.*.*' 格式的标签时
+# 3. 当推送到 'main' 分支时
+# 4. 当创建 'v*.*.*' 格式的标签时
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - test
+      - beta
+    tags:
+      - 'v*.*.*'
 
 jobs:
   build-and-push:
-    # 在最新的 Ubuntu 虚拟机上运行
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出代码，以便 workflow 可以访问它
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Prepare Docker tags and platforms
+        id: prep
+        run: |
+          DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
+          GHCR_IMAGE=ghcr.io/${{ github.repository }}
+          PLATFORMS="linux/amd64,linux/arm64"
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+            TAGS="${DOCKER_IMAGE}:${TAG},${DOCKER_IMAGE}:latest,${GHCR_IMAGE}:${TAG},${GHCR_IMAGE}:latest"
+          elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            TAGS="${DOCKER_IMAGE}:latest,${DOCKER_IMAGE}:main,${GHCR_IMAGE}:latest,${GHCR_IMAGE}:main"
+          elif [[ $GITHUB_REF == refs/heads/test ]]; then
+            TAGS="${DOCKER_IMAGE}:test,${GHCR_IMAGE}:test"
+            PLATFORMS="linux/amd64"
+          elif [[ $GITHUB_REF == refs/heads/beta ]]; then
+            TAGS="${DOCKER_IMAGE}:beta,${GHCR_IMAGE}:beta"
+          else
+            REF=${GITHUB_REF##*/}
+            TAGS="${DOCKER_IMAGE}:${REF},${GHCR_IMAGE}:${REF}"
+          fi
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -29,26 +56,20 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
-            ghcr.io/${{ github.repository }}
-
       - name: Build and push Docker image
+        if: steps.prep.outputs.tags
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
+          platforms: ${{ steps.prep.outputs.platforms }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.prep.outputs.tags }}
+          secrets: |
+            XOR_KEY_SECRET=${{ secrets.XOR_KEY_SECRET }}

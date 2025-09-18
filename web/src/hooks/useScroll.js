@@ -79,7 +79,6 @@ export const useScroll = ({ canLoadMore, onLoadMore, setRoot }) => {
       }
     )
 
-    console.log('开始观察目标元素')
     observer.observe(target)
     unobserveRef.current = () => observer.unobserve(target)
 

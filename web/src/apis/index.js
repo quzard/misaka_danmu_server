@@ -168,6 +168,11 @@ export const toggleTokenStatus = data =>
   api.put(`api/ui/tokens/${data.tokenId}/toggle`)
 /** 删除token */
 export const deleteToken = data => api.delete(`/api/ui/tokens/${data.tokenId}`)
+/** 编辑token */
+export const editToken = data => api.put(`/api/ui/tokens/${data.id}`, data)
+/** 重置token调用次数 */
+export const resetTokenCounter = data =>
+  api.post(`/api/ui/tokens/${data.id}/reset`)
 /** 获取ua规则 */
 export const getUaRules = () => api.get('/api/ui/ua-rules')
 /** 添加ua规则 */
@@ -202,6 +207,16 @@ export const setWebhookDomain = data =>
   api.put('/api/ui/config/webhook_custom_domain', data)
 /** webhook可用服务 */
 export const getWebhookServices = () => api.get('/api/ui/webhooks/available')
+/** 获取webhook设置 */
+export const getWebhookSettings = () => api.get('/api/ui/settings/webhook')
+/** 设置webhook设置 */
+export const setWebhookSettings = data => api.put('/api/ui/settings/webhook', data)
+/** 获取webhook任务列表 */
+export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
+/** 批量删除webhook任务 */
+export const deleteWebhookTasks = data => api.post('/api/ui/webhook-tasks/delete-bulk', data)
+/** 立即执行webhook任务 */
+export const runWebhookTasksNow = data => api.post('/api/ui/webhook-tasks/run-now', data)
 
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */
@@ -240,6 +255,9 @@ export const setTvdbConfig = data =>
 export const getProxyConfig = () => api.get('/api/ui/config/proxy')
 /** 设置代理配置 */
 export const setProxyConfig = data => api.put('/api/ui/config/proxy', data)
+
+/** 测试代理连接 */
+export const testProxy = data => api.post('/api/ui/proxy/test', data)
 
 /** 获取受信任的反向代理IP */
 export const getTrustedProxiesConfig = () =>

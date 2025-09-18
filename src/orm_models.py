@@ -149,6 +149,9 @@ class ApiToken(Base):
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
     expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", NaiveDateTime)
+    dailyCallLimit: Mapped[int] = mapped_column("daily_call_limit", Integer, default=500, server_default="500", nullable=False)
+    dailyCallCount: Mapped[int] = mapped_column("daily_call_count", Integer, default=0, server_default="0", nullable=False)
+    lastCallAt: Mapped[Optional[datetime]] = mapped_column("last_call_at", NaiveDateTime)
 
 class TokenAccessLog(Base):
     __tablename__ = "token_access_logs"
@@ -226,6 +229,19 @@ class ScheduledTask(Base):
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
     lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", NaiveDateTime)
     nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", NaiveDateTime)
+
+class WebhookTask(Base):
+    __tablename__ = "webhook_tasks"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    receptionTime: Mapped[datetime] = mapped_column("reception_time", NaiveDateTime, index=True)
+    executeTime: Mapped[datetime] = mapped_column("execute_time", NaiveDateTime, index=True)
+    webhookSource: Mapped[str] = mapped_column("webhook_source", String(50))
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True) # pending, processing, failed, submitted
+    payload: Mapped[str] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
+    uniqueKey: Mapped[str] = mapped_column("unique_key", String(255), unique=True)
+    taskTitle: Mapped[str] = mapped_column("task_title", String(255))
+
+    __table_args__ = (Index('idx_status_execute_time', 'status', 'execute_time'),)
 
 class TaskHistory(Base):
     __tablename__ = "task_history"

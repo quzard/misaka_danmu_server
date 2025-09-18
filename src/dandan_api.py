@@ -440,7 +440,7 @@ async def get_token_from_path(
     request_path = request.url.path
     log_path = re.sub(r'^/api/v1/[^/]+', '', request_path) # 从路径中移除 /api/v1/{token} 部分
 
-    token_info = await crud.validate_api_token(session, token)
+    token_info = await crud.validate_api_token(session, token=token)
     if not token_info: 
         # 尝试记录失败的访问
         token_record = await crud.get_api_token_by_token_str(session, token)
@@ -472,6 +472,10 @@ async def get_token_from_path(
         if ua_filter_mode == 'whitelist' and not is_matched:
             await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='denied_ua_whitelist', path=log_path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User-Agent not in whitelist")
+
+    # 3. 增加调用计数 (在所有验证通过后)
+    await crud.increment_token_call_count(session, token_info['id'])
+    await session.commit()
 
     # 3. 记录成功访问
     await crud.create_token_access_log(session, token_info['id'], client_ip_str, user_agent, log_status='allowed', path=log_path)

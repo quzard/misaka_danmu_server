@@ -244,6 +244,7 @@ class IqiyiScraper(BaseScraper):
     provider_name = "iqiyi"
     handled_domains = ["www.iqiyi.com"]
     referer = "https://www.iqiyi.com/"
+    test_url = "https://www.iqiyi.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)?|加更(版)?|花絮|预告|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员(专享|加长)?|片花|预告|精华|看点|速看|解读|reaction|影评)(.*?)$"
     
     # --- 新增：用于新API的签名和ID转换 ---
@@ -271,6 +272,14 @@ class IqiyiScraper(BaseScraper):
 
     async def _ensure_client(self):
         """Ensures the httpx client is initialized, with proxy support."""
+        """确保 httpx 客户端已初始化，并支持代理。"""
+        # 检查代理配置是否发生变化
+        new_proxy_config = await self._get_proxy_for_provider()
+        if self.client and new_proxy_config != self._current_proxy_config:
+            self.logger.info("iQiyi: 代理配置已更改，正在重建HTTP客户端...")
+            await self.client.aclose()
+            self.client = None
+
         if self.client is None:
             headers = {
                 "User-Agent": self.mobile_user_agent,
@@ -280,6 +289,8 @@ class IqiyiScraper(BaseScraper):
             self.client = await self._create_client(
                 headers=headers, cookies=self.cookies, timeout=30.0, follow_redirects=True
             )
+        
+        return self.client
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
@@ -328,6 +339,9 @@ class IqiyiScraper(BaseScraper):
                 result_bits.append('0')
         result_binary = ''.join(result_bits[::-1])
         return int(result_binary, 2) if result_binary else 0
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response: # type: ignore
+        client = await self._ensure_client()
+        return await client.request(method, url, **kwargs)
 
     def _video_id_to_entity_id(self, video_id: str) -> Optional[str]:
         """将视频ID (v_...中的部分) 转换为entity_id"""
@@ -360,7 +374,7 @@ class IqiyiScraper(BaseScraper):
         
         return md5_hash
 
-    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response: # type: ignore
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         await self._ensure_client()
         assert self.client is not None
         return await self.client.request(method, url, **kwargs)
@@ -1128,14 +1142,27 @@ class IqiyiScraper(BaseScraper):
     async def _filter_and_finalize_episodes(self, episodes: List[models.ProviderEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
         """对分集列表应用黑名单过滤并返回最终结果。"""
         # 统一过滤逻辑
-        blacklist_pattern = await self.get_episode_blacklist_pattern()
+        # 修正：iQiyi源只应使用其专属的黑名单，以避免全局规则误杀。
+        provider_pattern_str = await self.config_manager.get(
+            f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
+        )
+        blacklist_rules = [provider_pattern_str] if provider_pattern_str else []
         
         filtered_episodes = episodes
-        if blacklist_pattern:
+        if blacklist_rules:
             original_count = len(episodes)
-            filtered_episodes = [ep for ep in episodes if not blacklist_pattern.search(ep.title)]
-            if original_count > len(filtered_episodes):
-                self.logger.info(f"Iqiyi: 根据黑名单规则过滤掉了 {original_count - len(filtered_episodes)} 个分集。")
+            temp_episodes = []
+            filtered_out_log: Dict[str, List[str]] = defaultdict(list)
+            for ep in episodes:
+                title_to_check = ep.title
+                match_rule = next((rule for rule in blacklist_rules if rule and re.search(rule, title_to_check, re.IGNORECASE)), None)
+                if not match_rule:
+                    temp_episodes.append(ep)
+                else:
+                    filtered_out_log[match_rule].append(title_to_check)
+            for rule, titles in filtered_out_log.items():
+                self.logger.info(f"Iqiyi: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
+            filtered_episodes = temp_episodes
 
         # 新增：在过滤后重新为分集编号，以确保 episodeIndex 是连续的
         for i, ep in enumerate(filtered_episodes):
