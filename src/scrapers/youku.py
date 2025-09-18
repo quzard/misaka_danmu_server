@@ -60,8 +60,12 @@ class YoukuEpisodeInfo(BaseModel):
         """返回一个移除了日期前缀的 displayName。"""
         if not self.display_name:
             return None
-        # 匹配 "YYYY-MM-DD : " 或 "MM-DD : " 格式的前缀并移除
-        return re.sub(r'^\d{2,4}-\d{2}-\d{2}\s*:\s*|^\d{2}-\d{2}\s*:\s*', '', self.display_name).strip()
+        # 修正：更新正则表达式以保留“第X期”部分。
+        # 新的模式会智能地区分两种情况：
+        # 1. 如果日期后跟着“第X期”，则只移除日期。
+        # 2. 如果日期后跟着冒号，则将日期和冒号一并移除。
+        pattern = r'^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*(?=(?:第\d+期))|^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*:\s*'
+        return re.sub(pattern, '', self.display_name).strip()
 
 
     @property
