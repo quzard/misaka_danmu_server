@@ -460,11 +460,15 @@ async def generic_import_task(
             msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
             logger.error(f"任务失败: {msg} (provider='{provider}', media_id='{mediaId}')")
             raise ValueError(msg)
-
+        
+    # 修正：如果媒体类型是电影，则强制只处理第一个分集，并将其集数设为1。
+    # 这确保了无论刮削器返回什么，电影在数据库中始终被记录为S01E01。
     if mediaType == "movie" and episodes:
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
         episodes = episodes[:1]
-
+        if episodes:
+            episodes[0].episodeIndex = 1
+            
     # --- 数据库写入阶段 (pre-loop) ---
     await progress_callback(15, "正在准备数据库...")
     local_image_path = await download_image(imageUrl, session, manager, provider)
@@ -1401,9 +1405,17 @@ async def auto_search_and_import_task(
         if not existing_anime:
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
+            
+            # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+            # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+            season_for_check = season
+            if media_type == 'movie' and season_for_check is None:
+                season_for_check = 1
+                logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, main_title, season, year
+                session, main_title, season_for_check, year
             )
         if existing_anime:
             # 修正：从 existing_anime 字典中安全地获取ID。

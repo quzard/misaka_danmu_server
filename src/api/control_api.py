@@ -587,14 +587,23 @@ async def direct_import(
     if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_to_import = cached_results[payload.resultIndex]
+    item_to_import = cached_results[payload.resultIndex] # type: ignore
 
     # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
-    existing_anime = await crud.find_anime_by_title_and_season(session, item_to_import.title, item_to_import.season)
+    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+    # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+    season_for_check = item_to_import.season
+    if item_to_import.type == 'movie':
+        season_for_check = 1
+        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
+    existing_anime = await crud.find_anime_by_title_season_year(
+        session, item_to_import.title, season_for_check, item_to_import.year
+    )
     if existing_anime:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"作品 '{item_to_import.title}' (第 {item_to_import.season} 季) 已存在于媒体库中，无需重复导入。"
+            detail=f"作品 '{item_to_import.title}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
         )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -700,7 +709,22 @@ async def edited_import(
     if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_info = cached_results[payload.resultIndex]
+    item_info = cached_results[payload.resultIndex] # type: ignore
+
+    # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
+    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找。
+    title_for_check = payload.title or item_info.title
+    season_for_check = item_info.season
+    if item_info.type == 'movie':
+        season_for_check = 1
+        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
+    existing_anime = await crud.find_anime_by_title_season_year(session, title_for_check, season_for_check, item_info.year)
+    if existing_anime:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"作品 '{title_for_check}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
+        )
 
     # Construct the full EditedImportRequest for the task
     task_payload = models.EditedImportRequest(

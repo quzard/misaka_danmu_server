@@ -405,8 +405,8 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     if title:
         return {
             "title": title,
-            "season": 1, # 对电影，默认匹配第1季
-            "episode": 1, # 和第1集
+            "season": 1,  # 对电影，默认匹配第1季
+            "episode": 1, # 修正：对电影，默认匹配第1集
         }
 
     return None
