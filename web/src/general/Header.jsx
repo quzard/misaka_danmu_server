@@ -24,6 +24,7 @@ import { getVersion } from '../apis/index.js';
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
   const location = useLocation()
+  const navigate = useNavigate()
   const [version, setVersion] = useState('N/A');
   console.log(location)
 
@@ -72,7 +73,7 @@ export const Header = () => {
           <MobileHeader activeKey={activeKey} />
         </>
       ) : (
-        <DesktopHeader activeKey={activeKey} />
+        <DesktopHeader activeKey={activeKey} version={version} />
       )}
     </>
   )
@@ -171,7 +172,7 @@ const MobileHeader = ({ activeKey }) => {
   )
 }
 
-const DesktopHeader = ({ activeKey }) => {
+const DesktopHeader = ({ activeKey, version }) => {
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
 
