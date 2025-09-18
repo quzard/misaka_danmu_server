@@ -198,6 +198,21 @@ async def _migrate_api_token_to_daily_limit_task(conn: AsyncConnection, db_type:
             await conn.execute(text('ALTER TABLE api_tokens ADD COLUMN "last_call_at" TIMESTAMP NULL DEFAULT NULL;'))
         logger.info("成功为 api_tokens 表添加每日限制相关列。")
 
+async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 确保 metadata_sources 表有 log_raw_responses 字段。"""
+    table_name = 'metadata_sources'
+    column_name = 'log_raw_responses'
+    
+    if db_type == "mysql":
+        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '{table_name}' AND column_name = '{column_name}'")
+        add_column_sql = text(f"ALTER TABLE {table_name} ADD COLUMN `{column_name}` BOOLEAN NOT NULL DEFAULT FALSE")
+    else: # postgresql
+        check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_name = '{table_name}' AND column_name = '{column_name}'")
+        add_column_sql = text(f'ALTER TABLE {table_name} ADD COLUMN "{column_name}" BOOLEAN NOT NULL DEFAULT FALSE')
+
+    if not (await conn.execute(check_column_sql)).scalar_one_or_none():
+        await conn.execute(add_column_sql)
+
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
@@ -215,6 +230,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_source_url_to_episode_v1", _migrate_add_source_url_to_episode_task, (db_type,)),
         ("migrate_add_unique_key_to_task_history_v1", _migrate_add_unique_key_to_task_history_task, (db_type,)),
         ("migrate_api_token_to_daily_limit_v1", _migrate_api_token_to_daily_limit_task, (db_type,)),
+        ("migrate_add_log_raw_responses_to_metadata_sources_v1", _migrate_add_log_raw_responses_to_metadata_sources_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:
