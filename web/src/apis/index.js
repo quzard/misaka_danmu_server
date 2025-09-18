@@ -196,6 +196,13 @@ export const getDanmuOutputAggregation = () =>
 export const setDanmuOutputAggregation = data =>
   api.put('/api/ui/config/danmaku_aggregation_enabled', data)
 
+/** 获取匹配后备机制状态 */
+export const getMatchFallback = () =>
+  api.get('/api/ui/config/matchFallbackEnabled')
+/** 设置匹配后备机制状态 */
+export const setMatchFallback = data =>
+  api.put('/api/ui/config/matchFallbackEnabled', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')

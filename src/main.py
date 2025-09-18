@@ -96,6 +96,7 @@ async def lifespan(app: FastAPI):
         'scraperVerificationEnabled': ('false', '是否启用搜索源签名验证。'),
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
+        'matchFallbackEnabled': ('false', '是否为匹配接口启用后备机制（自动搜索导入）。'),
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
         # 全局过滤

@@ -21,6 +21,9 @@ from .config_manager import ConfigManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session
 from .utils import parse_search_keyword
+from .rate_limiter import RateLimiter
+from .task_manager import TaskManager
+from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 
 logger = logging.getLogger(__name__)
@@ -114,6 +117,18 @@ class DandanApiRoute(APIRoute):
 async def get_config_manager(request: Request) -> ConfigManager:
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
+
+async def get_task_manager(request: Request) -> TaskManager:
+    """依赖项：从应用状态获取任务管理器"""
+    return request.app.state.task_manager
+
+async def get_metadata_manager(request: Request) -> MetadataSourceManager:
+    """依赖项：从应用状态获取元数据源管理器"""
+    return request.app.state.metadata_manager
+
+async def get_rate_limiter(request: Request) -> RateLimiter:
+    """依赖项：从应用状态获取速率限制器"""
+    return request.app.state.rate_limiter
 
 # 这是将包含在 main.py 中的主路由。
 # 使用自定义的 Route 类来应用特殊的异常处理。
@@ -737,6 +752,52 @@ async def _get_match_for_item(item: DandanBatchMatchRequestItem, session: AsyncS
                 return response
 
     # --- 步骤 3: 如果所有方法都失败 ---
+    # 新增：后备机制 (Fallback Mechanism)
+    fallback_enabled_str = await config_manager.get("matchFallbackEnabled", "false")
+    if fallback_enabled_str.lower() == 'true':
+        logger.info(f"匹配失败，已启用后备机制，正在为 '{item.fileName}' 创建自动搜索任务。")
+        try:
+            # 构造 auto_search_and_import_task 需要的 payload
+            # 如果文件名能解析出季度/集数，则认为是电视剧，否则认为是电影
+            media_type_for_fallback = "tv_series" if parsed_info.get("season") is not None or parsed_info.get("episode") is not None else "movie"
+            
+            auto_import_payload = models.ControlAutoImportRequest(
+                searchType="keyword",
+                searchTerm=parsed_info["title"],
+                season=parsed_info.get("season"),
+                episode=parsed_info.get("episode"),
+                mediaType=media_type_for_fallback
+            )
+
+            # 为后备任务创建一个唯一的键，以防止在短时间内重复提交
+            unique_key_parts = ["match-fallback", auto_import_payload.searchTerm]
+            if auto_import_payload.season is not None:
+                unique_key_parts.append(f"s{auto_import_payload.season}")
+            if auto_import_payload.episode is not None:
+                unique_key_parts.append(f"e{auto_import_payload.episode}")
+            unique_key = "-".join(unique_key_parts)
+
+            task_title = f"匹配后备: {item.fileName}"
+
+            # 创建任务协程
+            task_coro = lambda session, cb: tasks.auto_search_and_import_task(
+                auto_import_payload, cb, session, config_manager, scraper_manager, metadata_manager, task_manager,
+                rate_limiter=rate_limiter,
+                api_key=None # 这是一个内部任务，没有API Key
+            )
+            
+            # 提交任务，并捕获可能的冲突异常
+            try:
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                logger.info(f"已为 '{item.fileName}' 成功提交匹配后备任务。")
+            except HTTPException as e:
+                if e.status_code == 409: # Conflict
+                    logger.info(f"匹配后备任务已存在，跳过提交: {e.detail}")
+                else:
+                    raise # 重新抛出其他HTTP异常
+        except Exception as e:
+            logger.error(f"提交匹配后备任务时发生错误: {e}", exc_info=True)
+
     response = DandanMatchResponse(isMatched=False, matches=[])
     logger.info(f"发送匹配响应 (所有方法均未匹配): {response.model_dump_json(indent=2)}")
     return response
@@ -749,13 +810,21 @@ async def _get_match_for_item(item: DandanBatchMatchRequestItem, session: AsyncS
 async def match_single_file(
     request: DandanBatchMatchRequestItem,
     token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     通过文件名匹配弹幕库。此接口不使用文件Hash。
     优先进行库内直接匹配，失败后回退到TMDB剧集组映射。
     """
-    return await _get_match_for_item(request, session)
+    return await _get_match_for_item(
+        request, session, task_manager, scraper_manager, 
+        metadata_manager, config_manager, rate_limiter
+    )
 
 
 @implementation_router.post(
@@ -766,7 +835,12 @@ async def match_single_file(
 async def match_batch_files(
     request: DandanBatchMatchRequest,
     token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     批量匹配文件。
@@ -774,7 +848,11 @@ async def match_batch_files(
     if len(request.requests) > 32:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="批量匹配请求不能超过32个文件。")
 
-    tasks = [_get_match_for_item(item, session) for item in request.requests]
+    tasks = [
+        _get_match_for_item(
+            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter
+        ) for item in request.requests
+    ]
     results = await asyncio.gather(*tasks)
     return results
 
