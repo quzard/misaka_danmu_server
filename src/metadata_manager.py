@@ -355,36 +355,48 @@ class MetadataSourceManager:
         """
         更新特定提供商（元数据源或搜索源）的配置。
         """
-        # 定义每个提供商允许更新的配置键，以防止任意写入
+        # 1. 验证提供商是否存在
+        if providerName not in self.sources:
+            raise HTTPException(status_code=404, detail=f"提供商 '{providerName}' 不存在或未加载。")
+
+        # 2. 准备要更新的字段
+        db_fields_to_update = {}
+        config_fields_to_update: Dict[str, str] = {}
+
+        # 2a. 识别属于 metadata_sources 表的字段
+        if 'logRawResponses' in payload:
+            db_fields_to_update['logRawResponses'] = bool(payload.pop('logRawResponses', False))
+        if 'useProxy' in payload:
+            db_fields_to_update['useProxy'] = bool(payload.pop('useProxy', False))
+
+        # 2b. 识别属于 config 表的字段
         allowed_keys_map = {
-            # Metadata Sources
             "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
             "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
-            # Scrapers
-            "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
         }
-
         allowed_keys = allowed_keys_map.get(providerName)
-        if allowed_keys is None:
-            raise HTTPException(status_code=404, detail=f"提供商 '{providerName}' 不存在或不支持自定义配置。")
-
-        async with self._session_factory() as session:
-            # 新增：单独处理属于 metadata_sources 表的字段
-            db_fields = {}
-            if 'logRawResponses' in payload:
-                db_fields['logRawResponses'] = bool(payload.pop('logRawResponses'))
-            
-            if db_fields:
-                await crud.update_metadata_source_specific_settings(session, providerName, db_fields)
-
+        if allowed_keys:
             for key, value in payload.items():
                 if key in allowed_keys:
-                    await crud.update_config_value(session, key, str(value if value is not None else ""))
-                else:
-                    self.logger.warning(f"尝试为提供商 '{providerName}' 更新一个不允许的配置项 '{key}'，已忽略。")
-            # 修正：添加 commit() 以确保更改被保存到数据库。
+                    config_fields_to_update[key] = str(value if value is not None else "")
+
+        # 3. 检查是否有任何需要更新的内容
+        if not db_fields_to_update and not config_fields_to_update:
+            self.logger.info(f"为提供商 '{providerName}' 收到配置更新请求，但没有可识别的字段需要更新。")
+            return {"message": "没有可更新的配置项。"}
+
+        # 4. 执行数据库操作
+        async with self._session_factory() as session:
+            if db_fields_to_update:
+                await crud.update_metadata_source_specific_settings(session, providerName, db_fields_to_update)
+            
+            if config_fields_to_update:
+                for key, value in config_fields_to_update.items():
+                    await crud.update_config_value(session, key, value)
+                    self._config_manager.invalidate(key)
+            
             await session.commit()
         
         # 如果是元数据源的配置更新，重新加载它们以使更改生效
