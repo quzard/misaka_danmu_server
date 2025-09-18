@@ -198,8 +198,6 @@ export const Metadata = () => {
         providerName: item.providerName,
         isAuxSearchEnabled: item.isAuxSearchEnabled,
         displayOrder: item.displayOrder,
-        useProxy: item.useProxy,
-        isFailoverEnabled: item.isFailoverEnabled,
       }))
       setMetaData(payload)
       messageApi.success(
@@ -234,8 +232,6 @@ export const Metadata = () => {
       providerName: item.providerName,
       isAuxSearchEnabled: item.isAuxSearchEnabled,
       displayOrder: item.displayOrder,
-      useProxy: item.useProxy,
-      isFailoverEnabled: item.isFailoverEnabled,
     }))
     setMetaData(payload)
   }
@@ -371,12 +367,13 @@ export const Metadata = () => {
               启用后，此源的所有API请求的原始响应将被记录到{' '}
               <code>config/logs/metadata_responses.log</code> 文件中，用于调试。
             </div>
-          </div>
-          {['douban', '360'].includes(selectedSource?.providerName) && (
+        </div>
+          {/* 修正：根据后端返回的 isFailoverSource 标志来决定是否显示此开关 */}
+          {form.getFieldValue('isFailoverSource') && (
             <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
               <Form.Item
                 name="forceAuxSearchEnabled"
-                label="强制辅助"
+                label="强制辅助搜索"
                 valuePropName="checked"
                 className="min-w-[100px] shrink-0 !mb-0"
               >

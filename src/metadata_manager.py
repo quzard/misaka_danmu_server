@@ -408,8 +408,13 @@ class MetadataSourceManager:
         if source_class and getattr(source_class, 'has_force_aux_search_toggle', False):
             force_enabled_str = await self._config_manager.get(f"{providerName}_force_aux_search", "false")
             config_values['forceAuxSearchEnabled'] = force_enabled_str.lower() == 'true'
+        
+        # 新增：告知前端此源是否为故障转移源，以决定是否显示“强制辅助”开关
+        if source_class:
+            config_values['isFailoverSource'] = getattr(source_class, 'is_failover_source', False)
 
-        # 新增：为Bangumi添加 authMode 字段，以明确告知前端当前应显示哪种模式
+
+        # 添加特殊逻辑
         if providerName == "bangumi":
             if config_values.get("bangumiToken"):
                 config_values["authMode"] = "token"
@@ -435,6 +440,9 @@ class MetadataSourceManager:
             db_fields_to_update['logRawResponses'] = bool(payload.pop('logRawResponses', False))
         if 'useProxy' in payload:
             db_fields_to_update['useProxy'] = bool(payload.pop('useProxy', False))
+        # 新增：将 isFailoverEnabled 的更新也移到此接口
+        if 'isFailoverEnabled' in payload:
+            db_fields_to_update['isFailoverEnabled'] = bool(payload.pop('isFailoverEnabled', False))
         
         # 新增：处理 forceAuxSearchEnabled，它现在存储在 config 表中
         if 'forceAuxSearchEnabled' in payload:
