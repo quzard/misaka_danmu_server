@@ -705,22 +705,9 @@ class YoukuScraper(BaseScraper):
         return 'variety'
 
     def _format_episode_title(self, ep: YoukuEpisodeInfo, episode_index: int, media_type: str, stage_to_episode: Dict[str, int]) -> str:
-        """根据节目类型格式化分集标题"""
-        base_title = (ep.clean_display_name or ep.title).strip()
-        
-        if media_type == "movie":
-            return base_title
-        elif media_type == "variety":
-            # 综艺：使用stage计算真实期数
-            if ep.stage and ep.stage in stage_to_episode:
-                real_episode_num = stage_to_episode[ep.stage]
-                return f"第{real_episode_num}期{base_title}"
-            else:
-                return f"第{episode_index}期: {base_title}"
-        elif media_type == "anime":
-            return f"第{episode_index}集: {base_title}"
-        else:
-            return f"第{episode_index}集: {base_title}"
+        """直接使用API返回的原始标题"""
+        return (ep.clean_display_name or ep.title).strip()
+
 
 
 
