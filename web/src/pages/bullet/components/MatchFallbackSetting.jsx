@@ -38,7 +38,7 @@ export const MatchFallbackSetting = () => {
   }
 
   return (
-    <Card title="匹配后备机制" loading={loading}>
+    <Card title="配置" loading={loading}>
       <Form form={form} onValuesChange={handleValueChange}>
         <Form.Item
           name="matchFallbackEnabled"

@@ -642,10 +642,19 @@ async def get_bangumi_details(
 
     return BangumiDetailsResponse(bangumi=bangumi_details)
 
-async def _get_match_for_item(item: DandanBatchMatchRequestItem, session: AsyncSession) -> DandanMatchResponse:
+async def _get_match_for_item(
+    item: DandanBatchMatchRequestItem,
+    session: AsyncSession,
+    task_manager: TaskManager,
+    scraper_manager: ScraperManager,
+    metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
+    rate_limiter: RateLimiter
+) -> DandanMatchResponse:
     """
     通过文件名匹配弹幕库的核心逻辑。此接口不使用文件Hash。
     优先进行库内直接匹配，失败后回退到TMDB剧集组映射。
+    新增：如果所有匹配都失败，且启用了后备机制，则触发自动搜索导入任务。
     """
     logger.info(f"执行匹配逻辑, 文件名: '{item.fileName}'")
     parsed_info = _parse_filename_for_match(item.fileName)
