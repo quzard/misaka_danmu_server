@@ -52,6 +52,8 @@ class YoukuEpisodeInfo(BaseModel):
     # 新增：添加 displayName 字段以捕获更完整的分集标题，特别是对于综艺节目
     display_name: Optional[str] = Field(None, alias="displayName")
     show_video_stage: Optional[str] = Field(None, alias="showVideoStage")
+    stage: Optional[str] = None
+    seq: Optional[str] = None
     duration: Optional[str] = None
     category: Optional[str] = None
     link: Optional[str] = None
@@ -407,9 +409,22 @@ class YoukuScraper(BaseScraper):
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                # 修正：智能拼接标题。如果 showVideoStage 存在，则将其与 title 拼接。
-                # 否则，直接使用 title。这确保了综艺节目的日期和期数信息被包含。
-                title=(f"{ep.show_video_stage} {ep.title}" if ep.show_video_stage and ep.show_video_stage not in ep.title else ep.title).strip(),
+                # 修正：更智能地拼接标题，使用 openapi 中的 stage 和 seq 字段。
+                title=(
+                    lambda ep: (
+                        f"{ep.stage[:4]}-{ep.stage[4:6]}-{ep.stage[6:]} 第{ep.seq}期: {ep.title}"
+                        if ep.stage and len(ep.stage) == 8 and ep.seq and ep.seq.isdigit()
+                        else (
+                            f"{ep.stage[:4]}-{ep.stage[4:6]}-{ep.stage[6:]}: {ep.title}"
+                            if ep.stage and len(ep.stage) == 8
+                            else (
+                                f"第{ep.seq}期: {ep.title}"
+                                if ep.seq and ep.seq.isdigit()
+                                else ep.title
+                            )
+                        )
+                    )
+                )(ep).strip(),
                 episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
