@@ -13,6 +13,7 @@ from fastapi import HTTPException, status, Request, APIRouter
 from . import crud, models, orm_models
 from .config_manager import ConfigManager
 from .scraper_manager import ScraperManager
+from .metadata_sources.base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
 import httpx
@@ -115,11 +116,9 @@ class MetadataSourceManager:
                 module_name = f"src.metadata_sources.{name}"
                 module = importlib.import_module(module_name)
                 for class_name, obj in inspect.getmembers(module, inspect.isclass):
-                    # 使用鸭子类型（duck typing）来识别插件，而不是依赖于一个共享的基类。
-                    # 如果一个类有 'provider_name' 属性和 'search_aliases' 方法，我们就认为它是一个元数据源插件。
-                    if (hasattr(obj, 'provider_name') and
-                        hasattr(obj, 'search_aliases') and
-                        hasattr(obj, 'get_details') and
+                    # 修正：直接检查是否为 BaseMetadataSource 的子类，这比鸭子类型更可靠
+                    if (issubclass(obj, BaseMetadataSource) and
+                        obj is not BaseMetadataSource and
                         obj.__module__ == module_name):
                         provider_name = obj.provider_name
                         if provider_name in self._source_classes:
