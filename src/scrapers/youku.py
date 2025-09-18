@@ -254,14 +254,6 @@ class YoukuScraper(BaseScraper):
                 self.logger.debug(f"Youku: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
 
-                # 新增：如果搜索结果包含分集列表，则缓存它以供 get_episodes 使用
-                episodes_data = component.componentMap.get("1052", {}).get("data") if component.componentMap else None
-                if episodes_data:
-                    episodes_cache_key = f"episodes_from_search_{common_data.show_id}"
-                    # 使用与分集列表相同的TTL
-                    await self._set_to_cache(episodes_cache_key, episodes_data, 'episodes_ttl_seconds', 1800)
-                    self.logger.info(f"Youku: 已为 show_id={common_data.show_id} 缓存了 {len(episodes_data)} 个来自搜索结果的分集。")
-
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
             self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
