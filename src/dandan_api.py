@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from . import crud, models, orm_models
+from . import crud, models, orm_models, tasks
 from .config_manager import ConfigManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session
