@@ -1397,12 +1397,10 @@ async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[s
 async def update_metadata_sources_settings(session: AsyncSession, settings: List['models.MetadataSourceSettingUpdate']):
     for s in settings:
         is_aux_enabled = True if s.providerName == 'tmdb' else s.isAuxSearchEnabled
-        # 新增：确保 isFailoverEnabled 字段被正确处理
-        is_failover_enabled = s.isFailoverEnabled if hasattr(s, 'isFailoverEnabled') else False
         await session.execute(
             update(MetadataSource)
             .where(MetadataSource.providerName == s.providerName)
-            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy, isFailoverEnabled=is_failover_enabled, logRawResponses=s.logRawResponses)
+            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder)
         )
     await session.commit()
 

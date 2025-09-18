@@ -188,9 +188,6 @@ class ScraperSetting(BaseModel):
 class MetadataSourceSettingUpdate(BaseModel):
     providerName: str
     isAuxSearchEnabled: bool
-    useProxy: bool
-    isFailoverEnabled: bool
-    logRawResponses: bool = False
     displayOrder: int
 
 
