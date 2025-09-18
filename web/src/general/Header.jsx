@@ -6,7 +6,7 @@ import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
-import { Dropdown, Tag } from 'antd'
+import { Dropdown, Tag } from 'antd';
 import { logout } from '../apis/index.js'
 import Cookies from 'js-cookie'
 
@@ -19,6 +19,7 @@ const navItems = [
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
+import { getVersion } from '../apis/index.js';
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
