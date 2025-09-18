@@ -347,6 +347,8 @@ class YoukuScraper(BaseScraper):
                 raw_episodes = [] # 清空以触发回退
         
         # 仅当请求完整列表时才尝试从缓存获取
+        # 修正：将 cache_key 的定义移到此处，确保它在使用前被定义
+        cache_key = f"episodes_raw_{media_id}"
         if target_episode_index is None:
             cached_episodes = await self._get_from_cache(cache_key)
             if cached_episodes is not None:
