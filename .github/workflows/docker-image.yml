@@ -18,11 +18,15 @@ on:
 
 jobs:
   build-and-push:
+    # 在最新的 Ubuntu 虚拟机上运行
     runs-on: ubuntu-latest
     steps:
+      # 步骤1: 检出代码，以便 workflow 可以访问它
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 步骤2: 准备 Docker 镜像标签
+      # 根据触发事件（分支或标签）动态生成镜像标签和平台
       - name: Prepare Docker tags and platforms
         id: prep
         run: |
@@ -33,6 +37,7 @@ jobs:
             TAG=${GITHUB_REF#refs/tags/}
             TAGS="${DOCKER_IMAGE}:${TAG},${DOCKER_IMAGE}:latest,${GHCR_IMAGE}:${TAG},${GHCR_IMAGE}:latest"
           elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            PLATFORMS="linux/amd64"
             TAGS="${DOCKER_IMAGE}:latest,${DOCKER_IMAGE}:main,${GHCR_IMAGE}:latest,${GHCR_IMAGE}:main"
           elif [[ $GITHUB_REF == refs/heads/test ]]; then
             TAGS="${DOCKER_IMAGE}:test,${GHCR_IMAGE}:test"
