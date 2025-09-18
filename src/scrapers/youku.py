@@ -51,6 +51,7 @@ class YoukuEpisodeInfo(BaseModel):
     title: str
     # 新增：添加 displayName 字段以捕获更完整的分集标题，特别是对于综艺节目
     display_name: Optional[str] = Field(None, alias="displayName")
+    show_video_stage: Optional[str] = Field(None, alias="showVideoStage")
     duration: Optional[str] = None
     category: Optional[str] = None
     link: Optional[str] = None
@@ -60,12 +61,14 @@ class YoukuEpisodeInfo(BaseModel):
         """返回一个移除了日期前缀的 displayName。"""
         if not self.display_name:
             return None
-        # 修正：更新正则表达式以保留“第X期”部分。
+        # 修正：更新正则表达式以保留“第X期”部分，并进一步移除“上/中/下”部分。
         # 新的模式会智能地区分两种情况：
         # 1. 如果日期后跟着“第X期”，则只移除日期。
         # 2. 如果日期后跟着冒号，则将日期和冒号一并移除。
-        pattern = r'^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*(?=(?:第\d+期))|^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*:\s*'
-        return re.sub(pattern, '', self.display_name).strip()
+        date_pattern = r'^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*(?=(?:第\d+期))|^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*:\s*'
+        cleaned_date = re.sub(date_pattern, '', self.display_name).strip()
+        part_pattern = r'^第\d+期\s*[：:]\s*[上中下]\s*[：:]\s*'
+        return re.sub(part_pattern, '', cleaned_date).strip()
 
 
     @property
@@ -327,27 +330,7 @@ class YoukuScraper(BaseScraper):
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
 
         raw_episodes: List[YoukuEpisodeInfo] = []
-
-        # 方案一：优先从搜索结果中缓存的分集列表获取，因为这里有 displayName
-        episodes_from_search_cache_key = f"episodes_from_search_{media_id}"
-        cached_episodes_from_search = await self._get_from_cache(episodes_from_search_cache_key)
-        if cached_episodes_from_search:
-            self.logger.info(f"Youku: 命中来自搜索的详细分集缓存 (media_id={media_id})")
-            try:
-                # The cached data is a list of dicts with 'videoId', 'title', 'displayName'
-                temp_raw_episodes = []
-                for ep_data in cached_episodes_from_search:
-                    ep_data['id'] = ep_data.pop('videoId', None)
-                    if 'link' not in ep_data and ep_data.get('id'):
-                        ep_data['link'] = f"https://v.youku.com/v_show/id_{ep_data['id']}.html"
-                    temp_raw_episodes.append(YoukuEpisodeInfo.model_validate(ep_data))
-                raw_episodes = temp_raw_episodes
-            except Exception as e:
-                self.logger.warning(f"Youku: 解析来自搜索的分集缓存失败: {e}，将回退到 OpenAPI。")
-                raw_episodes = [] # 清空以触发回退
-        
         # 仅当请求完整列表时才尝试从缓存获取
-        # 修正：将 cache_key 的定义移到此处，确保它在使用前被定义
         cache_key = f"episodes_raw_{media_id}"
         if target_episode_index is None:
             cached_episodes = await self._get_from_cache(cache_key)
@@ -357,8 +340,6 @@ class YoukuScraper(BaseScraper):
         
         # 如果缓存未命中或不需要缓存，则从网络获取
         if not raw_episodes:
-            # 方案二：如果方案一失败，则回退到 OpenAPI
-            cache_key = f"episodes_raw_{media_id}"
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             page = 1
@@ -426,9 +407,9 @@ class YoukuScraper(BaseScraper):
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                # 修正：优先使用清理后的 displayName，因为它通常包含最完整且最简洁的信息（如“第X期”），
-                # 如果 displayName 不存在，则回退到使用原始的 title。
-                title=(ep.clean_display_name or ep.title).strip(),
+                # 修正：智能拼接标题。如果 showVideoStage 存在，则将其与 title 拼接。
+                # 否则，直接使用 title。这确保了综艺节目的日期和期数信息被包含。
+                title=(f"{ep.show_video_stage} {ep.title}" if ep.show_video_stage and ep.show_video_stage not in ep.title else ep.title).strip(),
                 episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
