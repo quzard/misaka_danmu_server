@@ -82,9 +82,10 @@ class RateLimiter:
         self._scraper_manager = scraper_manager
         self.logger = logging.getLogger(self.__class__.__name__)
         self._verification_failed: bool = False
+
         self.enabled: bool = True
         self.global_limit: int = 1000
-        self.global_period_seconds: int = 3600
+        self.global_period_seconds: int = 3600 
         try:
             config_dir = Path("/app/src/rate_limit")
             config_path = config_dir / "rate_limit.bin"
@@ -107,7 +108,7 @@ class RateLimiter:
             except Exception as e:
                 self.logger.critical(f"读取 rate_limit.uid 文件失败！此文件对于签名验证至关重要。", exc_info=True)
                 self._verification_failed = True
-                raise ConfigVerificationError("读取 rate_limit.uid 文件失败") from e
+                raise ConfigVerificationError(f"读取 rate_limit.uid 文件失败") from e
 
             obfuscated_bytes = config_path.read_bytes()
             signature = sig_path.read_bytes().decode('utf-8').strip()
@@ -120,7 +121,7 @@ class RateLimiter:
                     self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                     self._verification_failed = True
                     raise ConfigVerificationError("签名验证失败")
-
+                
                 self.logger.info("速率限制配置文件签名验证成功。")
             except (ValueError, TypeError, IndexError) as e:
                 self.logger.critical(f"签名验证失败：无效的密钥或签名格式。错误: {e}", exc_info=True)
@@ -151,19 +152,18 @@ class RateLimiter:
                 self.logger.info("XOR密钥验证通过，配置文件来源可信。")
                 if config_data:
                     self.enabled = config_data.get("enabled", self.enabled)
-                    self.global_limit = config_data.get("global_limit", self.global_limit)
+                    # self.global_limit = config_data.get("global_limit", self.global_limit)
                     if "global_period_seconds" in config_data:
                         self.global_period_seconds = config_data.get("global_period_seconds", self.global_period_seconds)
-                    elif "global_period" in config_data:
+                    elif "global_period" in config_data: 
                         period_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
-                        self.global_period_seconds = period_map.get(config_data["global_period"], self.global_period_seconds)
-                    self.logger.info(
-                        f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{self.global_period_seconds}秒"
-                    )
+                        self.global_period_seconds = period_map.get(config_data["global_period"], 3600)
+                    self.logger.info(f"成功加载并验证了速率限制配置文件。参数: 启用={self.enabled}, 限制={self.global_limit}次/{self.global_period_seconds}秒")
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 self.logger.critical("!!! 严重安全警告：解密或解析速率限制配置失败！这很可能是由于XOR密钥不正确导致的。")
                 self.logger.critical("!!! 为保证安全，所有弹幕下载请求将被阻止，直到问题解决。")
                 self._verification_failed = True
+                # 抛出一个更清晰的异常，以便外部捕获块可以显示一个简洁的警告
                 raise ConfigVerificationError("解密配置失败，可能是XOR密钥错误") from e
 
         except Exception as e:
