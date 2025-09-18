@@ -33,6 +33,7 @@ class YoukuSearchCommonData(BaseModel):
     show_id: str = Field(alias="showId")
     episode_total: int = Field(alias="episodeTotal")
     feature: str
+    cats: Optional[str] = None  # 新增：节目分类字段
     is_youku: int = Field(alias="isYouku")
     has_youku: int = Field(alias="hasYouku")
     poster_dto: Optional[YoukuPosterDTO] = Field(None, alias="posterDTO")
@@ -67,10 +68,8 @@ class YoukuEpisodeInfo(BaseModel):
         # 新的模式会智能地区分两种情况：
         # 1. 如果日期后跟着“第X期”，则只移除日期。
         # 2. 如果日期后跟着冒号，则将日期和冒号一并移除。
-        date_pattern = r'^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*(?=(?:第\d+期))|^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*:\s*'
-        cleaned_date = re.sub(date_pattern, '', self.display_name).strip()
-        part_pattern = r'^第\d+期\s*[：:]\s*[上中下]\s*[：:]\s*'
-        return re.sub(part_pattern, '', cleaned_date).strip()
+        pattern = r'^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*(?=(?:第\d+期))|^(?:\d{2,4}-\d{2}-\d{2}|\d{2}-\d{2})\s*:\s*'
+        return re.sub(pattern, '', self.display_name).strip()
 
 
     @property
@@ -246,6 +245,12 @@ class YoukuScraper(BaseScraper):
                 year = int(year_match.group(0)) if year_match else None
                 
                 cleaned_title = self.unused_words_reg.sub("", title).strip().replace(":", "：")
+                
+                # 新增：提取媒体类型并缓存
+                media_type_detected = self._extract_media_type_from_response(common_data)
+                media_type_cache_key = f"media_type_{common_data.show_id}"
+                await self._set_to_cache(media_type_cache_key, media_type_detected, 'episodes_ttl_seconds', 3600)
+                
                 media_type = "movie" if "电影" in common_data.feature else "tv_series"
                 
                 current_episode = episode_info.get("episode") if episode_info else None
@@ -370,18 +375,21 @@ class YoukuScraper(BaseScraper):
             if raw_episodes and target_episode_index is None:
                 await self._set_to_cache(cache_key, [e.model_dump() for e in raw_episodes], 'episodes_ttl_seconds', 1800)
 
-        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
+        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index, media_id)
 
         if target_episode_index:
             return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
         return final_episodes
 
-    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int]) -> List[models.ProviderEpisodeInfo]:
+    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int], media_id: str) -> List[models.ProviderEpisodeInfo]:
         """
         一个集中的辅助函数，用于过滤、格式化和编号原始的优酷分集列表。
         """
+        # 获取媒体类型
+        media_type_cache_key = f"media_type_{media_id}"
+        media_type = await self._get_from_cache(media_type_cache_key) or 'variety'
+        
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
-        # 修正：Youku源只应使用其专属的黑名单，以避免全局规则误杀。
         provider_pattern_str = await self.config_manager.get(
             f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
         )
@@ -404,28 +412,13 @@ class YoukuScraper(BaseScraper):
         else:
             filtered_episodes = raw_episodes
 
-        # 在过滤后的列表上重新编号
+        # 在过滤后的列表上重新编号，使用媒体类型格式化标题
         final_episodes = [
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=ep.id.replace("=", "_"),
-                # 修正：更智能地拼接标题，使用 openapi 中的 stage 和 seq 字段。
-                title=(
-                    lambda ep: (
-                        f"{ep.stage[:4]}-{ep.stage[4:6]}-{ep.stage[6:]} 第{ep.seq}期: {ep.title}"
-                        if ep.stage and len(ep.stage) == 8 and ep.seq and ep.seq.isdigit()
-                        else (
-                            f"{ep.stage[:4]}-{ep.stage[4:6]}-{ep.stage[6:]}: {ep.title}"
-                            if ep.stage and len(ep.stage) == 8
-                            else (
-                                f"第{ep.seq}期: {ep.title}"
-                                if ep.seq and ep.seq.isdigit()
-                                else ep.title
-                            )
-                        )
-                    )
-                )(ep).strip(),
-                episodeIndex=i + 1, # 关键：使用过滤后列表的连续索引
+                title=self._format_episode_title(ep, i + 1, media_type),
+                episodeIndex=i + 1,
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
         ]
@@ -669,3 +662,60 @@ class YoukuScraper(BaseScraper):
     def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
         """For Youku, the episode ID is a simple string, so no formatting is needed."""
         return str(provider_episode_id)
+
+    def _extract_media_type_from_response(self, common_data: YoukuSearchCommonData) -> str:
+        """从API响应中提取节目类型"""
+        # 优先使用 cats 字段
+        if common_data.cats:
+            cats = common_data.cats.lower()
+            if '综艺' in cats or 'variety' in cats:
+                return 'variety'
+            elif '电影' in cats or 'movie' in cats:
+                return 'movie'
+            elif '动漫' in cats or 'anime' in cats:
+                return 'anime'
+            elif '电视剧' in cats or 'drama' in cats:
+                return 'drama'
+        
+        # 备用：从 feature 字段提取
+        feature = common_data.feature.lower()
+        if '综艺' in feature:
+            return 'variety'
+        elif '电影' in feature:
+            return 'movie'
+        elif '动漫' in feature:
+            return 'anime'
+        elif '电视剧' in feature:
+            return 'drama'
+        
+        # 默认返回综艺
+        return 'variety'
+
+    def _format_episode_title(self, ep: YoukuEpisodeInfo, episode_index: int, media_type: str) -> str:
+        """根据节目类型格式化分集标题"""
+        # 优先使用 clean_display_name，如果没有则使用 title
+        base_title = (ep.clean_display_name or ep.title).strip()
+        
+        if media_type == "movie":
+            # 电影：使用原标题
+            return base_title
+        elif media_type == "variety":
+            # 综艺：处理期数，特别是"上/下"情况
+            if ep.seq and ep.seq.isdigit():
+                return f"第{ep.seq}期: {base_title}"
+            # 如果没有期数但标题中包含"第X期"，保持原样
+            elif "第" in base_title and "期" in base_title:
+                return base_title
+            else:
+                return f"第{episode_index}期: {base_title}"
+        elif media_type == "anime":
+            # 动漫：拼接集数
+            return f"第{episode_index}集: {base_title}"
+        else:
+            # 默认处理（电视剧等）
+            return f"第{episode_index}集: {base_title}"
+
+
+
+
+
