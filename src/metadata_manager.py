@@ -123,8 +123,86 @@ class MetadataSourceManager:
 
     async def search_aliases_from_enabled_sources(self, keyword: str, user: models.User) -> Set[str]:
         """从所有已启用的辅助元数据源并发获取别名。"""
-        async with self._session_factory() as session:
-            enabled_sources_settings = await crud.get_enabled_aux_metadata_sources(session)
+        # 修正：调用新的、更通用的方法，并只返回别名部分
+        aliases, _ = await self.search_supplemental_sources(keyword, user)
+        return aliases
+
+    async def search_supplemental_sources(self, keyword: str, user: models.User) -> Tuple[Set[str], List[models.ProviderSearchInfo]]:
+        """
+        从所有启用的辅助源（包括强制启用的）进行搜索。
+        返回一个元组：(别名集合, 补充搜索结果列表)
+        """
+        enabled_sources_settings = []
+        for provider, settings in self.source_settings.items():
+            if not settings.get('isEnabled'):
+                continue
+            
+            force_enabled_str = await self._config_manager.get(f"{provider}_force_aux_search", "false")
+            force_enabled = force_enabled_str.lower() == 'true'
+
+            if settings.get('isAuxSearchEnabled') or force_enabled:
+                enabled_sources_settings.append(settings)
+        
+        if not enabled_sources_settings:
+            return set(), []
+
+        tasks = []
+        for source_setting in enabled_sources_settings:
+            provider = source_setting['providerName']
+            if source_instance := self.sources.get(provider):
+                # 修正：现在我们调用 search 方法，而不是 search_aliases
+                # 因为 search 方法返回更详细的信息，我们可以从中提取别名
+                tasks.append(source_instance.search(keyword, user))
+            else:
+                self.logger.warning(f"已启用的元数据源 '{provider}' 未被成功加载，跳过辅助搜索。")
+
+        if not tasks:
+            return set(), []
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        all_aliases: Set[str] = set()
+        supplemental_results: List[models.ProviderSearchInfo] = []
+
+        for i, res in enumerate(results):
+            provider_name = enabled_sources_settings[i]['providerName']
+            if isinstance(res, list):
+                self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
+                for item in res:
+                    all_aliases.add(item.title)
+                    if item.aliasesCn:
+                        all_aliases.update(item.aliasesCn)
+                    
+                    # 如果是 'douban' 或 '360'，则将其结果添加到补充列表中
+                    if provider_name in ['douban', '360']:
+                        supplemental_results.append(models.ProviderSearchInfo(
+                            provider=provider_name, mediaId=item.id, title=item.title,
+                            type='unknown', season=1, year=None, imageUrl=item.imageUrl
+                        ))
+            elif isinstance(res, Exception):
+                if isinstance(res, httpx.ConnectError):
+                    self.logger.warning(f"无法连接到元数据源 '{provider_name}'。请检查网络连接或代理设置。")
+                elif isinstance(res, (httpx.TimeoutException, httpx.ReadTimeout)):
+                    self.logger.warning(f"连接元数据源 '{provider_name}' 超时。")
+                else:
+                    self.logger.error(f"元数据源 '{provider_name}' 的辅助搜索子任务失败: {res}", exc_info=False)
+        
+        return {alias for alias in all_aliases if alias}, supplemental_results
+
+    async def get_sources_with_status(self) -> List[Dict[str, Any]]:
+        """从所有已启用的辅助元数据源并发获取别名。"""
+        # 修正：现在从内存中的设置获取，并考虑强制辅助搜索
+        enabled_sources_settings = []
+        for provider, settings in self.source_settings.items():
+            if not settings.get('isEnabled'):
+                continue
+            
+            # 检查是否开启了强制辅助
+            force_enabled_str = await self._config_manager.get(f"{provider}_force_aux_search", "false")
+            force_enabled = force_enabled_str.lower() == 'true'
+
+            if settings.get('isAuxSearchEnabled') or force_enabled:
+                enabled_sources_settings.append(settings)
         
         tasks = []
         for source_setting in enabled_sources_settings:
@@ -342,6 +420,12 @@ class MetadataSourceManager:
             if provider_settings:
                 config_values.update(provider_settings)
 
+        # 新增：如果源支持强制辅助搜索，则从config表获取其状态
+        source_class = self._source_classes.get(providerName)
+        if source_class and getattr(source_class, 'has_force_aux_search_toggle', False):
+            force_enabled_str = await self._config_manager.get(f"{providerName}_force_aux_search", "false")
+            config_values['forceAuxSearchEnabled'] = force_enabled_str.lower() == 'true'
+
         # 为单值配置提供特殊处理，以匹配前端期望的格式
         # 修正：在所有配置都获取完毕后，再进行此项特殊处理
         if providerName in ["douban", "tvdb"]:
@@ -379,6 +463,12 @@ class MetadataSourceManager:
             db_fields_to_update['logRawResponses'] = bool(payload.pop('logRawResponses', False))
         if 'useProxy' in payload:
             db_fields_to_update['useProxy'] = bool(payload.pop('useProxy', False))
+        
+        # 新增：处理 forceAuxSearchEnabled，它现在存储在 config 表中
+        if 'forceAuxSearchEnabled' in payload:
+            force_enabled_value = str(payload.pop('forceAuxSearchEnabled', False)).lower()
+            config_key = f"{providerName}_force_aux_search"
+            config_fields_to_update[config_key] = force_enabled_value
 
         # 2b. 识别属于 config 表的字段
         allowed_keys_map = {

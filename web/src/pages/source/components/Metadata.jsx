@@ -200,7 +200,6 @@ export const Metadata = () => {
         displayOrder: item.displayOrder,
         useProxy: item.useProxy,
         isFailoverEnabled: item.isFailoverEnabled,
-        logRawResponses: item.log_raw_responses,
       }))
       setMetaData(payload)
       messageApi.success(
@@ -237,7 +236,6 @@ export const Metadata = () => {
       displayOrder: item.displayOrder,
       useProxy: item.useProxy,
       isFailoverEnabled: item.isFailoverEnabled,
-      logRawResponses: item.log_raw_responses,
     }))
     setMetaData(payload)
   }
@@ -374,6 +372,21 @@ export const Metadata = () => {
               <code>config/logs/metadata_responses.log</code> 文件中，用于调试。
             </div>
           </div>
+          {['douban', '360'].includes(selectedSource?.providerName) && (
+            <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+              <Form.Item
+                name="forceAuxSearchEnabled"
+                label="强制辅助"
+                valuePropName="checked"
+                className="min-w-[100px] shrink-0 !mb-0"
+              >
+                <Switch />
+              </Form.Item>
+              <div className="w-full text-gray-500">
+                启用后，即使全局辅助搜索关闭，此源也会参与别名搜索。
+              </div>
+            </div>
+          )}
         </Form>
       </Modal>
     </div>

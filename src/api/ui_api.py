@@ -98,6 +98,7 @@ class UIProviderSearchResponse(models.ProviderSearchResponse):
     """扩展了 ProviderSearchResponse 以包含原始搜索的上下文。"""
     search_season: Optional[int] = None
     search_episode: Optional[int] = None
+    supplemental_results: List[models.ProviderSearchInfo] = Field([], description="来自补充源（如360, Douban）的搜索结果")
 @router.get("/search/provider", response_model=UIProviderSearchResponse, summary="从外部数据源搜索节目")
 async def search_anime_provider(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
@@ -119,9 +120,11 @@ async def search_anime_provider(
         # --- 新增：按季缓存逻辑 ---
         # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
         cache_key = f"provider_search_{search_title}_{season_to_filter or 'all'}"
+        supplemental_cache_key = f"supplemental_search_{search_title}"
         cached_results_data = await crud.get_cache(session, cache_key)
+        cached_supplemental_results = await crud.get_cache(session, supplemental_cache_key)
 
-        if cached_results_data is not None:
+        if cached_results_data is not None and cached_supplemental_results is not None:
             logger.info(f"搜索缓存命中: '{cache_key}'")
             # 缓存数据已排序和过滤，只需更新当前请求的集数信息
             results = [models.ProviderSearchInfo.model_validate(item) for item in cached_results_data]
@@ -130,6 +133,7 @@ async def search_anime_provider(
             
             return UIProviderSearchResponse(
                 results=results,
+                supplemental_results=[models.ProviderSearchInfo.model_validate(item) for item in cached_supplemental_results],
                 search_season=season_to_filter,
                 search_episode=episode_to_filter
             )
@@ -150,18 +154,20 @@ async def search_anime_provider(
             )
 
         # --- 原有的复杂搜索流程开始 ---
+        # 1. 获取别名和补充结果
         enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
 
         if not enabled_aux_sources:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
-            results = await manager.search_all([search_title], episode_info=episode_info)
+            supplemental_results = []
+            main_search_results = await manager.search_all([search_title], episode_info=episode_info)
             logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
         else:
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
             # 1. 获取所有可能的别名
             all_possible_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
-            
+            all_possible_aliases, supplemental_results = await metadata_manager.search_supplemental_sources(search_title, current_user)
             # 2. 验证每个别名与原始搜索词的相似度
             validated_aliases = set()
             for alias in all_possible_aliases:
@@ -180,6 +186,7 @@ async def search_anime_provider(
             logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
 
             logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+            # 2. 并行执行主搜索和补充搜索
             all_results = await manager.search_all([search_title], episode_info=episode_info)
 
             def normalize_for_filtering(title: str) -> str:
@@ -205,6 +212,7 @@ async def search_anime_provider(
 
             logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
             results = filtered_results
+
     except httpx.RequestError as e:
         error_message = f"搜索 '{keyword}' 时发生网络错误: {e}"
         logger.error(error_message, exc_info=True)
@@ -269,11 +277,15 @@ async def search_anime_provider(
         results_to_cache.append(item_copy.model_dump())
 
     if sorted_results:
-        await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800) # 缓存3小时
+        await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800)
+    # 缓存补充结果
+    if supplemental_results:
+        await crud.set_cache(session, supplemental_cache_key, [item.model_dump() for item in supplemental_results], ttl_seconds=10800)
     # --- 缓存逻辑结束 ---
 
     return UIProviderSearchResponse(
         results=sorted_results,
+        supplemental_results=supplemental_results,
         search_season=season_to_filter,
         search_episode=episode_to_filter
     )
