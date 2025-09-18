@@ -1494,12 +1494,17 @@ async def auto_search_and_import_task(
         # 1. 媒体类型是否匹配 (最优先)
         # 2. 如果请求指定了季度，季度是否匹配 (次优先)
         # 3. 标题相似度
-        # 4. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
-        # 5. 用户设置的源优先级 (最后)
+        # 4. 新增：对完全匹配或非常接近的标题给予巨大奖励
+        # 5. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
+        # 6. 用户设置的源优先级 (最后)
         all_results.sort(
             key=lambda item: (
                 1 if item.type == media_type else 0,
                 1 if season is not None and item.season == season else 0,
+                # 关键修复：为精确匹配的标题提供一个巨大的分数奖励，
+                # 这将确保 '游戏人生 零' 总是排在 '游戏人生' 前面。
+                # 使用 token_sort_ratio 是因为它对词序不敏感。
+                100 if fuzz.token_sort_ratio(main_title, item.title) > 95 else 0,
                 fuzz.token_set_ratio(main_title, item.title),
                 -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
                 -provider_order.get(item.provider, 999)
