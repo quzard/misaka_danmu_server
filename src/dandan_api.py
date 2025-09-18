@@ -25,6 +25,7 @@ from .rate_limiter import RateLimiter
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
+from .api.control_api import ControlAutoImportRequest
 
 logger = logging.getLogger(__name__)
 
@@ -770,7 +771,7 @@ async def _get_match_for_item(
             # 如果文件名能解析出季度/集数，则认为是电视剧，否则认为是电影
             media_type_for_fallback = "tv_series" if parsed_info.get("season") is not None or parsed_info.get("episode") is not None else "movie"
             
-            auto_import_payload = models.ControlAutoImportRequest(
+            auto_import_payload = ControlAutoImportRequest(
                 searchType="keyword",
                 searchTerm=parsed_info["title"],
                 season=parsed_info.get("season"),
