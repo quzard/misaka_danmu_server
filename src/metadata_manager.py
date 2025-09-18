@@ -213,24 +213,26 @@ class MetadataSourceManager:
         
         for source_setting in enabled_sources_settings:
             provider = source_setting['providerName']
-            if source_instance := self.sources.get(provider):
-                self.logger.info(f"Failover: Trying source '{provider}' for '{title}' S{season}E{episode_index}")
-                try:
-                    comments = await source_instance.get_comments_by_failover(title, season, episode_index, user)
-                    if comments:
-                        self.logger.info(f"Failover: Source '{provider}' successfully found {len(comments)} comments.")
-                        return comments
-                except Exception as e:
-                    self.logger.error(f"Failover source '{provider}' failed: {e}", exc_info=True)
-            else:
+            source_instance = self.sources.get(provider)
+            if not source_instance:
                 self.logger.warning(f"Enabled failover source '{provider}' was not loaded, skipping.")
+                continue
+            
+            self.logger.info(f"Failover: Trying source '{provider}' for '{title}' S{season}E{episode_index}")
+            try:
+                comments = await source_instance.get_comments_by_failover(title, season, episode_index, user)
+                if comments:
+                    self.logger.info(f"Failover: Source '{provider}' successfully found {len(comments)} comments.")
+                    return comments
+            except Exception as e:
+                self.logger.error(f"Failover source '{provider}' failed: {e}", exc_info=True)
         
         self.logger.info(f"Failover: No source could find comments for '{title}' S{season}E{episode_index}")
         return None
 
     async def supplement_search_result(self, target_provider: str, keyword: str, episode_info: Optional[Dict[str, Any]]) -> List[models.ProviderSearchInfo]:
         """
-        当主搜索源未找到结果时，尝试通过故障转移源（如360）查找对应平台的链接，并返回结果。
+        当主搜索源未找到结果时，主动通过故障转移源（如360）查找对应平台的链接，并返回结果。
         """
         self.logger.info(f"主搜索源 '{target_provider}' 未找到结果，正在尝试故障转移...")
         
@@ -241,20 +243,25 @@ class MetadataSourceManager:
         
         for source_setting in failover_sources_settings:
             provider_name = source_setting['providerName']
-            if source_instance := self.sources.get(provider_name):
-                if hasattr(source_instance, "find_url_for_provider"):
-                    self.logger.info(f"故障转移: 正在使用 '{provider_name}' 查找 '{keyword}' 的 '{target_provider}' 链接...")
-                    target_url = await source_instance.find_url_for_provider(keyword, target_provider, user)
-                    if target_url:
-                        self.logger.info(f"故障转移成功: 从 '{provider_name}' 找到URL: {target_url}")
-                        try:
-                            target_scraper = self.scraper_manager.get_scraper(target_provider)
-                            info = await target_scraper.get_info_from_url(target_url)
-                            if info:
-                                return [info]
-                        except Exception as e:
-                            self.logger.error(f"通过故障转移URL '{target_url}' 获取信息失败: {e}")
-                            continue
+            source_instance = self.sources.get(provider_name)
+            if not source_instance or not hasattr(source_instance, "find_url_for_provider"):
+                continue
+
+            self.logger.info(f"故障转移: 正在使用 '{provider_name}' 查找 '{keyword}' 的 '{target_provider}' 链接...")
+            target_url = await source_instance.find_url_for_provider(keyword, target_provider, user)
+            if not target_url:
+                continue
+
+            self.logger.info(f"故障转移成功: 从 '{provider_name}' 找到URL: {target_url}")
+            try:
+                target_scraper = self.scraper_manager.get_scraper(target_provider)
+                info = await target_scraper.get_info_from_url(target_url)
+                if info:
+                    return [info]
+            except Exception as e:
+                self.logger.error(f"通过故障转移URL '{target_url}' 获取信息失败: {e}")
+                continue
+
         return []
 
     async def find_new_media_id(self, source_info: Dict[str, Any]) -> Optional[str]:

@@ -150,10 +150,9 @@ async def search_anime_provider(
             )
 
         # --- 原有的复杂搜索流程开始 ---
-        tmdb_api_key = await crud.get_config_value(session, "tmdb_api_key", "")
         enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
 
-        if not enabled_aux_sources or (len(enabled_aux_sources) == 1 and enabled_aux_sources[0]['providerName'] == 'tmdb' and not tmdb_api_key):
+        if not enabled_aux_sources:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             results = await manager.search_all([search_title], episode_info=episode_info)
             logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
