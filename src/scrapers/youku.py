@@ -309,22 +309,6 @@ class YoukuScraper(BaseScraper):
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
 
         raw_episodes: List[YoukuEpisodeInfo] = []
-
-        # 方案一：优先从搜索结果中缓存的分集列表获取，因为这里有 displayName
-        episodes_from_search_cache_key = f"episodes_from_search_{media_id}"
-        cached_episodes_from_search = await self._get_from_cache(episodes_from_search_cache_key)
-        if cached_episodes_from_search:
-            self.logger.info(f"Youku: 命中来自搜索的详细分集缓存 (media_id={media_id})")
-            try:
-                raw_episodes = [YoukuEpisodeInfo.model_validate(e) for e in cached_episodes_from_search]
-            except Exception as e:
-                self.logger.warning(f"Youku: 解析来自搜索的分集缓存失败: {e}，将回退到 OpenAPI。")
-                raw_episodes = [] # 清空以触发回退
-
-        # 方案二：如果方案一失败，则回退到 OpenAPI
-
-        # 修正：缓存键应表示缓存的是原始数据
-        cache_key = f"episodes_raw_{media_id}"
         
         raw_episodes: List[YoukuEpisodeInfo] = []
 
