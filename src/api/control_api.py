@@ -374,6 +374,17 @@ async def auto_import(
     if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
         raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
 
+    # 新增：如果不是关键词搜索，则检查所选的元数据源是否已启用
+    if payload.searchType != AutoImportSearchType.KEYWORD:
+        provider_name = payload.searchType.value
+        provider_setting = metadata_manager.source_settings.get(provider_name)
+        
+        if not provider_setting or not provider_setting.get('isEnabled'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"元信息搜索源 '{provider_name}' 未启用。请在“设置-元信息搜索源”页面中启用它。"
+            )
+
     if not await manager.acquire_search_lock(api_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
