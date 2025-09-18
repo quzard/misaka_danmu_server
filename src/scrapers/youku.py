@@ -309,8 +309,8 @@ class YoukuScraper(BaseScraper):
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
 
         raw_episodes: List[YoukuEpisodeInfo] = []
-        
-        raw_episodes: List[YoukuEpisodeInfo] = []
+        # 修正：缓存键应表示缓存的是原始数据，并将其定义移到使用前
+        cache_key = f"episodes_raw_{media_id}"
 
         # 仅当请求完整列表时才尝试从缓存获取
         if target_episode_index is None:
@@ -318,7 +318,7 @@ class YoukuScraper(BaseScraper):
             if cached_episodes is not None:
                 self.logger.info(f"Youku: 从缓存中命中原始分集列表 (media_id={media_id})")
                 raw_episodes = [YoukuEpisodeInfo.model_validate(e) for e in cached_episodes]
-
+        
         # 如果缓存未命中或不需要缓存，则从网络获取
         if not raw_episodes:
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
