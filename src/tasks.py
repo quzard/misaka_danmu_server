@@ -1303,6 +1303,7 @@ async def auto_search_and_import_task(
         aliases = {search_term}
         main_title = search_term
         image_url = None
+        year = None # 修正：在使用前初始化 year 变量
         tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
         # 为后台任务创建一个虚拟用户对象
