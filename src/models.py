@@ -190,6 +190,7 @@ class MetadataSourceSettingUpdate(BaseModel):
     isAuxSearchEnabled: bool
     useProxy: bool
     isFailoverEnabled: bool
+    logRawResponses: bool = False
     displayOrder: int
 
 
