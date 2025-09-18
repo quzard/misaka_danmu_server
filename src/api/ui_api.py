@@ -155,13 +155,16 @@ async def search_anime_provider(
 
         # --- 原有的复杂搜索流程开始 ---
         # 1. 获取别名和补充结果
-        enabled_aux_sources = await crud.get_enabled_aux_metadata_sources(session)
+        # 修正：检查是否有任何启用的辅助源或强制辅助源
+        has_any_aux_source = await metadata_manager.has_any_enabled_aux_source()
 
-        if not enabled_aux_sources:
+        if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
-            main_search_results = await manager.search_all([search_title], episode_info=episode_info)
-            logger.info(f"直接搜索完成，找到 {len(results)} 个原始结果。")
+            # 修正：变量名统一
+            all_results = await manager.search_all([search_title], episode_info=episode_info)
+            logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
+            filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
         else:
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。

@@ -955,6 +955,9 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             manager=manager, # type: ignore
             task_manager=task_manager,
             rate_limiter=rate_limiter)
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
     except Exception as e:
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
@@ -1398,8 +1401,9 @@ async def auto_search_and_import_task(
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
-            existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
-
+            existing_anime = await crud.find_anime_by_title_season_year(
+                session, main_title, season, year
+            )
         if existing_anime:
             # 修正：从 existing_anime 字典中安全地获取ID。
             # 不同的查询路径可能返回 'id' 或 'animeId' 作为键。

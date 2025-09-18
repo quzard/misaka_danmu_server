@@ -254,6 +254,14 @@ class YoukuScraper(BaseScraper):
                 self.logger.debug(f"Youku: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
 
+                # 新增：如果搜索结果包含分集列表，则缓存它以供 get_episodes 使用
+                episodes_data = component.componentMap.get("1052", {}).get("data") if component.componentMap else None
+                if episodes_data:
+                    episodes_cache_key = f"episodes_from_search_{common_data.show_id}"
+                    # 使用与分集列表相同的TTL
+                    await self._set_to_cache(episodes_cache_key, episodes_data, 'episodes_ttl_seconds', 1800)
+                    self.logger.info(f"Youku: 已为 show_id={common_data.show_id} 缓存了 {len(episodes_data)} 个来自搜索结果的分集。")
+
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
             self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
@@ -307,41 +315,21 @@ class YoukuScraper(BaseScraper):
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         # 优酷的逻辑不区分电影和电视剧，都是从一个show_id获取列表，
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
-        # 仅当请求完整列表时才使用缓存
-        # --- 新增：优先从搜索结果缓存中提取详细分集信息 ---
-        # 优酷的搜索API有时会直接返回分集列表，其中包含更完整的 displayName
-        search_cache_key = f"search_api_response_youku_{media_id}"
-        cached_search_data = await self._get_from_cache(search_cache_key)
 
-        if cached_search_data:
-            self.logger.info(f"Youku: 命中搜索结果缓存 (media_id={media_id})，尝试直接提取分集。")
+        raw_episodes: List[YoukuEpisodeInfo] = []
+
+        # 方案一：优先从搜索结果中缓存的分集列表获取，因为这里有 displayName
+        episodes_from_search_cache_key = f"episodes_from_search_{media_id}"
+        cached_episodes_from_search = await self._get_from_cache(episodes_from_search_cache_key)
+        if cached_episodes_from_search:
+            self.logger.info(f"Youku: 命中来自搜索的详细分集缓存 (media_id={media_id})")
             try:
-                # 模拟搜索结果的嵌套结构来解析
-                page_component_list = cached_search_data.get("pageComponentList", [])
-                for component in page_component_list:
-                    episodes_data = component.get("componentMap", {}).get("1052", {}).get("data", [])
-                    if episodes_data:
-                        self.logger.info(f"Youku: 从缓存中成功提取到 {len(episodes_data)} 个原始分集。")
-                        # 直接使用这些数据，它们包含 displayName
-                        raw_episodes = [
-                            YoukuEpisodeInfo.model_validate(ep) for ep in episodes_data
-                        ]
-                        # 后续逻辑将处理过滤和编号
-                        break
-                else:
-                    raw_episodes = []
-
-                if raw_episodes:
-                    # 使用与下面相同的逻辑处理和返回
-                    final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index)
-                    if target_episode_index:
-                        return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
-                    return final_episodes
-
+                raw_episodes = [YoukuEpisodeInfo.model_validate(e) for e in cached_episodes_from_search]
             except Exception as e:
-                self.logger.warning(f"Youku: 从搜索缓存中提取分集失败: {e}，将回退到网络获取。")
+                self.logger.warning(f"Youku: 解析来自搜索的分集缓存失败: {e}，将回退到 OpenAPI。")
+                raw_episodes = [] # 清空以触发回退
 
-        # --- 缓存提取逻辑结束，如果失败则执行原有逻辑 ---
+        # 方案二：如果方案一失败，则回退到 OpenAPI
 
         # 修正：缓存键应表示缓存的是原始数据
         cache_key = f"episodes_raw_{media_id}"

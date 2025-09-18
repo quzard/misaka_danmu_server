@@ -784,7 +784,11 @@ async def _get_match_for_item(
             if auto_import_payload.season is not None:
                 unique_key_parts.append(f"s{auto_import_payload.season}")
             if auto_import_payload.episode is not None:
+                # 关键修复：对于单集匹配，将集数也加入唯一键
                 unique_key_parts.append(f"e{auto_import_payload.episode}")
+            # 关键修复：将媒体类型也加入唯一键，以区分同名的电影和电视剧
+            if auto_import_payload.mediaType:
+                unique_key_parts.append(auto_import_payload.mediaType)
             unique_key = "-".join(unique_key_parts)
 
             task_title = f"匹配后备: {item.fileName}"

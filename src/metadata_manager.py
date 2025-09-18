@@ -200,53 +200,6 @@ class MetadataSourceManager:
         return {alias for alias in all_aliases if alias}, supplemental_results
 
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
-        """从所有已启用的辅助元数据源并发获取别名。"""
-        # 修正：现在从内存中的设置获取，并考虑强制辅助搜索
-        enabled_sources_settings = []
-        for provider, settings in self.source_settings.items():
-            if not settings.get('isEnabled'):
-                continue
-            
-            # 检查是否开启了强制辅助
-            force_enabled_str = await self._config_manager.get(f"{provider}_force_aux_search", "false")
-            force_enabled = force_enabled_str.lower() == 'true'
-
-            if settings.get('isAuxSearchEnabled') or force_enabled:
-                enabled_sources_settings.append(settings)
-        
-        tasks = []
-        for source_setting in enabled_sources_settings:
-            provider = source_setting['providerName']
-            if source_instance := self.sources.get(provider):
-                tasks.append(source_instance.search_aliases(keyword, user))
-            else:
-                self.logger.warning(f"已启用的元数据源 '{provider}' 未被成功加载，跳过别名搜索。")
-
-        if not tasks:
-            return set()
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_aliases: Set[str] = set()
-        
-        # 修正：改进错误日志记录
-        for i, res in enumerate(results):
-            if isinstance(res, set):
-                all_aliases.update(res)
-            elif isinstance(res, Exception):
-                provider_name = enabled_sources_settings[i]['providerName']
-                # 针对常见的网络错误提供更友好的提示
-                if isinstance(res, httpx.ConnectError):
-                    self.logger.warning(f"无法连接到元数据源 '{provider_name}'。请检查网络连接或代理设置。")
-                elif isinstance(res, (httpx.TimeoutException, httpx.ReadTimeout)):
-                    self.logger.warning(f"连接元数据源 '{provider_name}' 超时。")
-                else:
-                    # 对于其他异常，记录更详细的信息，但避免完整的堆栈跟踪，除非在调试模式下
-                    self.logger.error(f"元数据源 '{provider_name}' 的辅助搜索子任务失败: {res}", exc_info=False)
-        
-        # 过滤掉潜在的 None 或空字符串
-        return {alias for alias in all_aliases if alias}
-
-    async def get_sources_with_status(self) -> List[Dict[str, Any]]:
         """获取所有元数据源及其持久化和临时状态。"""
         tasks = []
         # 确保我们只检查已加载的源

@@ -937,6 +937,8 @@ class IqiyiScraper(BaseScraper):
                 self.logger.error(f"爱奇艺: 缓存的基础信息 (link_id={link_id}) 验证失败。这可能是一个陈旧或损坏的缓存。")
                 self.logger.error(f"导致验证失败的数据: {cached_info}")
                 self.logger.error(f"Pydantic 验证错误: {e}")
+                # 新增：删除损坏的缓存，以便下次请求可以重新获取
+                await self._delete_from_cache(cache_key)
                 return None
 
         # 主方案：使用API获取信息

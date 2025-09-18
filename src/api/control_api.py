@@ -953,7 +953,9 @@ async def create_anime_entry(
     # Check for duplicates first
     # 修正：为非电视剧类型使用默认季度1进行重复检查
     season_for_check = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
-    existing_anime = await crud.find_anime_by_title_and_season(session, payload.title, season_for_check)
+    existing_anime = await crud.find_anime_by_title_season_year(
+        session, payload.title, season_for_check, payload.year
+    )
     if existing_anime:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

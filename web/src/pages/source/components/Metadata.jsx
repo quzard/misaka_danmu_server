@@ -382,8 +382,11 @@ export const Metadata = () => {
               >
                 <Switch />
               </Form.Item>
-              <div className="w-full text-gray-500">
-                启用后，即使全局辅助搜索关闭，此源也会参与别名搜索。
+              <div
+                className="w-full text-gray-500"
+                title="启用后，在搜索时，此源将作为一个补充搜索源。如果其他弹幕源没有找到结果，或结果不佳，此源的结果将作为备选项显示在搜索结果中。"
+              >
+                启用后，此源将作为补充搜索源。当其他弹幕源结果不佳时，其结果将作为备选项显示。
               </div>
             </div>
           )}

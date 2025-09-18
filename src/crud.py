@@ -167,8 +167,11 @@ async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Opti
     return dict(row) if row else None
 
 async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None) -> int:
-    """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
+    """通过标题、季度和年份查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
+    # 修正：将年份也作为唯一性检查的一部分
     stmt = select(Anime).where(Anime.title == title, Anime.season == season)
+    if year:
+        stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     anime = result.scalar_one_or_none()
 
@@ -209,8 +212,10 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     Manually creates a new anime entry in the database, and automatically
     creates and links a default 'custom' source for it.
     """
-    # Check if an anime with the same title and season already exists
-    existing_anime = await find_anime_by_title_and_season(session, anime_data.title, anime_data.season)
+    # 修正：在重复检查时也包含年份
+    existing_anime = await find_anime_by_title_season_year(
+        session, anime_data.title, anime_data.season, anime_data.year
+    )
     if existing_anime:
         raise ValueError(f"作品 '{anime_data.title}' (第 {anime_data.season} 季) 已存在。")
 
@@ -379,19 +384,22 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_anime_by_title_and_season(session: AsyncSession, title: str, season: int) -> Optional[Dict[str, Any]]:
+async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
-    通过标题和季度查找番剧，返回一个简化的字典或None。
+    通过标题、季度和可选的年份查找番剧，返回一个简化的字典或None。
     """
     stmt = (
         select(
             Anime.id,
             Anime.title,
-            Anime.season
+            Anime.season,
+            Anime.year
         )
         .where(Anime.title == title, Anime.season == season)
         .limit(1)
     )
+    if year:
+        stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
