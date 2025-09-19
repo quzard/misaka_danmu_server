@@ -1778,6 +1778,11 @@ async def auto_search_and_import_task(
         # 4. 新增：对完全匹配或非常接近的标题给予巨大奖励
         # 5. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
         # 6. 用户设置的源优先级 (最后)
+        # 添加调试日志
+        logger.info(f"排序前的媒体类型: media_type='{media_type}', 前5个结果:")
+        for i, item in enumerate(all_results[:5]):
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
+
         all_results.sort(
             key=lambda item: (
                 1 if item.type == media_type else 0,
@@ -1799,6 +1804,13 @@ async def auto_search_and_import_task(
             ),
             reverse=True # 按得分从高到低排序
         )
+
+        # 添加排序后的调试日志
+        logger.info(f"排序后的前5个结果:")
+        for i, item in enumerate(all_results[:5]):
+            type_match = "✓" if item.type == media_type else "✗"
+            title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 类型匹配: {type_match}, 标题匹配: {title_match})")
         # 并行评估前3个最佳匹配项
         max_candidates = min(3, len(all_results))  # 最多评估3个候选项
         min_similarity_threshold = 75  # 最低相似度阈值
