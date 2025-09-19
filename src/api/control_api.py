@@ -646,7 +646,7 @@ async def direct_import(
         task_coro = lambda session, cb: tasks.generic_import_task(
             provider=item_to_import.provider,
             mediaId=item_to_import.mediaId,
-            animeTitle=item_to_import.title, 
+            animeTitle=item_to_import.title,
             # 修正：传递从搜索结果中获取的年份和海报URL
             mediaType=item_to_import.type,
             season=item_to_import.season,
@@ -654,6 +654,7 @@ async def direct_import(
             currentEpisodeIndex=item_to_import.currentEpisodeIndex,
             imageUrl=item_to_import.imageUrl,
             doubanId=payload.doubanId,
+            config_manager=config_manager,
             metadata_manager=metadata_manager, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
