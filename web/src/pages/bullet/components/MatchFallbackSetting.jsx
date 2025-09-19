@@ -8,6 +8,7 @@ export const MatchFallbackSetting = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(true)
   const [pathSaving, setPathSaving] = useState(false)
+  const [customPathEnabled, setCustomPathEnabled] = useState(false)
   const messageApi = useMessage()
 
   const fetchSettings = async () => {
@@ -17,10 +18,12 @@ export const MatchFallbackSetting = () => {
         getMatchFallback(),
         getCustomDanmakuPath()
       ])
+      const pathEnabled = pathRes.data.enabled === 'true'
+      setCustomPathEnabled(pathEnabled)
       form.setFieldsValue({
         matchFallbackEnabled: fallbackRes.data.value === 'true',
-        customDanmakuPathEnabled: pathRes.data.enabled === 'true',
-        customDanmakuPathTemplate: pathRes.data.template || '/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}'
+        customDanmakuPathEnabled: pathEnabled,
+        customDanmakuPathTemplate: pathRes.data.template || '/app/config/danmaku/${animeId}/${episodeId}'
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -39,6 +42,7 @@ export const MatchFallbackSetting = () => {
         await setMatchFallback({ value: String(changedValues.matchFallbackEnabled) })
       }
       if ('customDanmakuPathEnabled' in changedValues) {
+        setCustomPathEnabled(changedValues.customDanmakuPathEnabled)
         const currentValues = form.getFieldsValue()
         await setCustomDanmakuPath({
           enabled: String(changedValues.customDanmakuPathEnabled),
@@ -69,10 +73,10 @@ export const MatchFallbackSetting = () => {
   }
 
   const templateOptions = [
-    { label: '默认模板', value: '/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}' },
-    { label: '简单模板', value: '/downloads/${title}/${title} - ${episode}' },
-    { label: '按年份分类', value: '/downloads/${year}/${title}/Season ${season}/${episode}' },
-    { label: '按提供商分类', value: '/downloads/${provider}/${title}/Season ${season}/${episode}' }
+    { label: '默认模板', value: '/app/config/danmaku/${animeId}/${episodeId}' },
+    { label: '按标题分类', value: '/downloads/弹幕/${title}/${title} - S${season:02d}E${episode:02d}' },
+    { label: 'QB下载风格', value: '/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}' },
+    { label: 'Plex风格', value: '/media/动漫/${title} (${year})/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}' }
   ]
 
   return (
@@ -100,8 +104,8 @@ export const MatchFallbackSetting = () => {
           name="customDanmakuPathTemplate"
           label={
             <Space>
-              自定义路径模板
-              <Tooltip title="支持变量：${title}(标题), ${season}(季度), ${episode}(集数), ${year}(年份), ${provider}(提供商), ${animeId}(动画ID), ${episodeId}(分集ID)。格式化：${season:02d}表示两位数字补零。">
+              弹幕文件路径模板
+              <Tooltip title="支持变量：${title}(标题), ${season}(季度), ${episode}(集数), ${year}(年份), ${provider}(提供商), ${animeId}(动画ID), ${episodeId}(分集ID)。格式化：${season:02d}表示两位数字补零。.xml后缀会自动添加。">
                 <QuestionCircleOutlined />
               </Tooltip>
             </Space>
@@ -113,10 +117,12 @@ export const MatchFallbackSetting = () => {
               placeholder="选择预设模板"
               options={templateOptions}
               onChange={(value) => form.setFieldValue('customDanmakuPathTemplate', value)}
+              disabled={!customPathEnabled}
             />
             <Input
-              placeholder="输入自定义路径模板"
+              placeholder="路径模板"
               style={{ flex: 1 }}
+              disabled={!customPathEnabled}
             />
             <Button type="primary" loading={pathSaving} onClick={handlePathSave}>
               保存
@@ -125,8 +131,9 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
-          <div>示例路径：/downloads/QB下载/动漫/天才基本法/Season 01/天才基本法 - S01E05.xml（.xml后缀自动添加）</div>
+          <div>示例路径：/app/config/danmaku/26/25000026010012.xml（.xml后缀自动添加）</div>
           <div>支持的变量：title, season, episode, year, provider, animeId, episodeId</div>
+          <div>格式化选项：${`{season:02d}`} 表示季度号补零到2位，${`{episode:03d}`} 表示集数补零到3位</div>
         </div>
       </Form>
     </Card>

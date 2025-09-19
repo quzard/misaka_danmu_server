@@ -2766,7 +2766,7 @@ async def get_custom_danmaku_path(
 ):
     """获取自定义弹幕路径配置"""
     enabled = await crud.get_config_value(session, "customDanmakuPathEnabled", "false")
-    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}")
+    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/app/config/danmaku/${animeId}/${episodeId}")
     return CustomDanmakuPathResponse(enabled=enabled, template=template)
 
 @router.put("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="设置自定义弹幕路径配置")

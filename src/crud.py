@@ -92,9 +92,10 @@ async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=
 
     if config_manager:
         try:
-            custom_path_enabled = await config_manager.get_bool('customDanmakuPathEnabled', False)
+            custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
+            custom_path_enabled = custom_path_enabled_str.lower() == 'true'
             if custom_path_enabled:
-                custom_template = await config_manager.get_str('customDanmakuPathTemplate', '')
+                custom_template = await config_manager.get('customDanmakuPathTemplate', '')
         except Exception as e:
             logger.warning(f"获取自定义路径配置失败: {e}")
 
