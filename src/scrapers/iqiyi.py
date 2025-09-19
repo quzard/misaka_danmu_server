@@ -1006,21 +1006,33 @@ class IqiyiScraper(BaseScraper):
             danmu_urls.append({'segment': segment, 'url': url, 'start_time': start_time})
 
         all_danmu = []
+        successful_segments = 0
+        failed_segments = 0
         # 修正：移除多线程，改为单线程异步顺序下载
         for i, seg_info in enumerate(danmu_urls):
             try:
                 if progress_callback:
                     progress = int(((i + 1) / total_segments) * 100) if total_segments > 0 else 100
                     await progress_callback(progress, f"正在下载分段 {i + 1}/{total_segments}")
-                
+
                 result = await self._download_and_parse_segment_protobuf(seg_info)
                 if result and result['success']:
+                    segment_danmu_count = len(result['danmu_list'])
                     all_danmu.extend(result['danmu_list'])
-                
+                    successful_segments += 1
+                    self.logger.debug(f"爱奇艺 (Protobuf): 分段 {i+1} 成功获取 {segment_danmu_count} 条弹幕")
+                else:
+                    failed_segments += 1
+                    error_msg = result.get('error', '未知错误') if result else '返回结果为空'
+                    self.logger.warning(f"爱奇艺 (Protobuf): 分段 {i+1} 获取失败: {error_msg}")
+
                 # 增加短暂延时，避免请求过于频繁
                 await asyncio.sleep(0.1)
             except Exception as e:
+                failed_segments += 1
                 self.logger.error(f"爱奇艺 (Protobuf): 处理分段 {i+1} 时发生错误: {e}", exc_info=True)
+
+        self.logger.info(f"爱奇艺 (Protobuf): 弹幕获取完成，成功分段: {successful_segments}/{total_segments}，失败分段: {failed_segments}，总弹幕数: {len(all_danmu)}")
         
         all_danmu.sort(key=lambda x: x['time'])
         return self._format_comments_protobuf(all_danmu)
@@ -1065,6 +1077,10 @@ class IqiyiScraper(BaseScraper):
             # 修正：使用异步的 httpx 客户端
             response = await self._request('GET', segment_info['url'], headers=self.protobuf_headers, timeout=30)
 
+            # 特殊处理404错误，这通常表示该分段没有弹幕数据
+            if response.status_code == 404:
+                return {'segment': segment_info['segment'], 'danmu_list': [], 'success': True, 'note': '分段无弹幕数据(404)'}
+
             response.raise_for_status()
             decompressed_data = brotli.decompress(response.content)
             danmu_proto = Danmu()
@@ -1075,11 +1091,15 @@ class IqiyiScraper(BaseScraper):
                 scraper_responses_logger.debug(f"iQiyi Protobuf Segment Response (segment={segment_info['segment']}):\n{danmu_proto}")
 
             danmu_list = []
+            valid_danmu_count = 0
+            total_danmu_count = 0
             for entry in danmu_proto.entry:
                 for item in entry.bulletInfo:
+                    total_danmu_count += 1
                     text = item.content
                     # 新增：使用更严格的弹幕内容验证
                     if self._is_valid_danmu_text(text):
+                        valid_danmu_count += 1
                         show_time = float(item.showTime) if item.showTime.replace('.', '', 1).isdigit() else 0.0
                         # absolute_time = show_time + segment_info.get('start_time', 0)
                         # 关键修正：showTime 已经是绝对时间（秒），直接使用即可。
@@ -1092,6 +1112,13 @@ class IqiyiScraper(BaseScraper):
                                 color_hex = item.a8
                             except (ValueError, TypeError): pass
                         danmu_list.append({'text': text.strip(), 'time': absolute_time, 'color': color_hex})
+
+            # 记录过滤统计信息
+            if total_danmu_count > 0:
+                filter_rate = (valid_danmu_count / total_danmu_count) * 100
+                if filter_rate < 50:  # 如果过滤率过高，记录警告
+                    self.logger.warning(f"爱奇艺 (Protobuf): 分段 {segment_info['segment']} 弹幕过滤率较高: {valid_danmu_count}/{total_danmu_count} ({filter_rate:.1f}%)")
+
             return {'segment': segment_info['segment'], 'danmu_list': danmu_list, 'success': True}
         except Exception as e:
             return {'segment': segment_info['segment'], 'error': str(e), 'success': False}
