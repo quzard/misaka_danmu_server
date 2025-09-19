@@ -426,6 +426,24 @@ async def auto_import(
         title_parts.append(f"E{payload.episode:02d}")
     task_title = " ".join(title_parts)
 
+    # 在任务提交前添加重复检查
+    duplicate_reason = await crud.check_duplicate_import(
+        session=session,
+        provider="auto",
+        media_id=f"auto-{searchTerm}",
+        anime_title=searchTerm,
+        media_type=mediaType.value if mediaType else "tv_series",
+        season=season,
+        year=None,
+        is_single_episode=episode is not None
+    )
+    # 对于自动导入，只在数据源重复时阻止
+    if duplicate_reason and "数据源已存在" in duplicate_reason:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_reason
+        )
+
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
             payload, cb, session, config_manager, manager, metadata_manager, task_manager,
@@ -589,21 +607,21 @@ async def direct_import(
         
     item_to_import = cached_results[payload.resultIndex] # type: ignore
 
-    # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
-    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
-    # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
-    season_for_check = item_to_import.season
-    if item_to_import.type == 'movie':
-        season_for_check = 1
-        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
-
-    existing_anime = await crud.find_anime_by_title_season_year(
-        session, item_to_import.title, season_for_check, item_to_import.year
+    # 在现有的任务提交逻辑前添加
+    duplicate_reason = await crud.check_duplicate_import(
+        session=session,
+        provider=item_to_import.provider,
+        media_id=item_to_import.mediaId,
+        anime_title=item_to_import.title,
+        media_type=item_to_import.type,
+        season=item_to_import.season,
+        year=item_to_import.year,
+        is_single_episode=item_to_import.currentEpisodeIndex is not None
     )
-    if existing_anime:
+    if duplicate_reason:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"作品 '{item_to_import.title}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
+            detail=duplicate_reason
         )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -709,45 +727,66 @@ async def edited_import(
     if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_info = cached_results[payload.resultIndex] # type: ignore
+    item_to_import = cached_results[payload.resultIndex]
 
-    # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
-    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找。
-    title_for_check = payload.title or item_info.title
-    season_for_check = item_info.season
-    if item_info.type == 'movie':
-        season_for_check = 1
-        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
-
-    existing_anime = await crud.find_anime_by_title_season_year(session, title_for_check, season_for_check, item_info.year)
-    if existing_anime:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"作品 '{title_for_check}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
+    # 新增：检查数据源是否已存在
+    source_exists = await crud.check_source_exists_by_media_id(session, item_to_import.provider, item_to_import.mediaId)
+    if source_exists:
+        # 如果数据源已存在，需要检查哪些集已存在
+        existing_episodes = await crud.get_existing_episodes_for_source(session, item_to_import.provider, item_to_import.mediaId)
+        existing_episode_indices = {ep.episodeIndex for ep in existing_episodes}
+        
+        # 过滤掉已存在的集
+        filtered_episodes = [ep for ep in payload.episodes if ep.episodeIndex not in existing_episode_indices]
+        
+        if not filtered_episodes:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="所有指定的分集都已存在，无需重复导入。"
+            )
+        
+        # 更新payload中的episodes列表
+        payload.episodes = filtered_episodes
+        logger.info(f"编辑导入：过滤掉 {len(payload.episodes) - len(filtered_episodes)} 个已存在的分集，剩余 {len(filtered_episodes)} 个分集待导入。")
+    else:
+        # 数据源不存在，检查是否有同名同季度同年份的作品
+        duplicate_reason = await crud.check_duplicate_import(
+            session=session,
+            provider=item_to_import.provider,
+            media_id=item_to_import.mediaId,
+            anime_title=payload.animeTitle or item_to_import.title,
+            media_type=item_to_import.type,
+            season=item_to_import.season,
+            year=item_to_import.year,
+            is_single_episode=False
         )
+        if duplicate_reason and "作品" in duplicate_reason:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=duplicate_reason
+            )
 
-    # Construct the full EditedImportRequest for the task
-    task_payload = models.EditedImportRequest(
-        provider=item_info.provider,
-        mediaId=item_info.mediaId,
-        animeTitle=payload.title or item_info.title, # type: ignore
-        year=item_info.year,
-        mediaType=item_info.type,
-        season=item_info.season,
-        imageUrl=item_info.imageUrl,
-        doubanId=payload.doubanId,
+    # 构建编辑导入请求
+    edited_request = models.EditedImportRequest(
+        provider=item_to_import.provider,
+        mediaId=item_to_import.mediaId,
+        animeTitle=payload.animeTitle or item_to_import.title,
+        type=item_to_import.type,
+        season=item_to_import.season,
+        year=item_to_import.year,
+        episodes=payload.episodes,
         tmdbId=payload.tmdbId,
         imdbId=payload.imdbId,
         tvdbId=payload.tvdbId,
+        doubanId=payload.doubanId,
         bangumiId=payload.bangumiId,
-        tmdbEpisodeGroupId=payload.tmdbEpisodeGroupId,
-        episodes=payload.episodes
+        tmdbEpisodeGroupId=payload.tmdbEpisodeGroupId
     )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
-    title_parts = [f"外部API编辑后导入: {task_payload.animeTitle} ({task_payload.provider})"]
-    if task_payload.season is not None:
-        title_parts.append(f"S{task_payload.season:02d}")
+    title_parts = [f"外部API编辑后导入: {edited_request.animeTitle} ({edited_request.provider})"]
+    if edited_request.season is not None:
+        title_parts.append(f"S{edited_request.season:02d}")
     if payload.episodes:
         episode_indices = sorted([ep.episodeIndex for ep in payload.episodes])
         if len(episode_indices) == 1:
@@ -760,11 +799,11 @@ async def edited_import(
     # 这解决了在一次导入完成后，无法立即为同一媒体提交另一次导入的问题。
     episode_indices_str = ",".join(sorted([str(ep.episodeIndex) for ep in payload.episodes]))
     episodes_hash = hashlib.md5(episode_indices_str.encode('utf-8')).hexdigest()[:8]
-    unique_key = f"import-{task_payload.provider}-{task_payload.mediaId}-{episodes_hash}"
+    unique_key = f"import-{edited_request.provider}-{edited_request.mediaId}-{episodes_hash}"
 
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
-            request_data=task_payload, progress_callback=cb, session=session,
+            request_data=edited_request, progress_callback=cb, session=session,
             config_manager=config_manager, manager=manager, rate_limiter=rate_limiter,
             metadata_manager=metadata_manager
         )

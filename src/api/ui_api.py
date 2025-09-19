@@ -2161,14 +2161,22 @@ async def import_from_provider(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    # 只有在全量导入（非单集导入）时才执行此检查
-    if request_data.currentEpisodeIndex is None:
-        source_exists = await crud.check_source_exists_by_media_id(session, request_data.provider, request_data.mediaId)
-        if source_exists:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="该数据源已存在于弹幕库中，无需重复导入。"
-            )
+    # 替换原有的重复检查逻辑
+    duplicate_reason = await crud.check_duplicate_import(
+        session=session,
+        provider=request_data.provider,
+        media_id=request_data.mediaId,
+        anime_title=request_data.animeTitle,
+        media_type=request_data.type,
+        season=request_data.season,
+        year=request_data.year,
+        is_single_episode=request_data.currentEpisodeIndex is not None
+    )
+    if duplicate_reason:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_reason
+        )
 
     # 创建一个将传递给任务管理器的协程工厂 (lambda)
     task_coro = lambda session, callback: tasks.generic_import_task(
