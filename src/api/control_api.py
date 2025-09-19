@@ -418,6 +418,28 @@ async def auto_import(
                 time_since_creation = get_now() - recent_task.createdAt
                 hours_ago = time_since_creation.total_seconds() / 3600
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
+
+            # 关键修复：恢复并完善在任务提交前的重复检查。
+            # 对于自动导入，我们只关心数据源是否重复，因为作品重复的逻辑在任务内部处理。
+            # 这里的 media_id 是一个为自动任务构造的唯一标识。
+            duplicate_reason = await crud.check_duplicate_import(
+                session=session,
+                provider="auto",
+                media_id=f"auto-{searchTerm}",
+                anime_title=searchTerm,
+                media_type=mediaType.value if mediaType else "tv_series",
+                season=season,
+                year=None, # 自动导入时年份未知，在任务内部获取
+                is_single_episode=episode is not None,
+                episode_index=episode
+            )
+            # 仅当数据源已存在时才阻止创建任务。
+            if duplicate_reason and "数据源已存在" in duplicate_reason:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=duplicate_reason
+                )
+
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
     title_parts = [f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"]
     if payload.season is not None:
@@ -425,27 +447,6 @@ async def auto_import(
     if payload.episode is not None:
         title_parts.append(f"E{payload.episode:02d}")
     task_title = " ".join(title_parts)
-
-    # 关键修复：恢复并完善在任务提交前的重复检查。
-    # 对于自动导入，我们只关心数据源是否重复，因为作品重复的逻辑在任务内部处理。
-    # 这里的 media_id 是一个为自动任务构造的唯一标识。
-    duplicate_reason = await crud.check_duplicate_import(
-        session=session,
-        provider="auto",
-        media_id=f"auto-{searchTerm}",
-        anime_title=searchTerm,
-        media_type=mediaType.value if mediaType else "tv_series",
-        season=season,
-        year=None, # 自动导入时年份未知，在任务内部获取
-        is_single_episode=episode is not None,
-        episode_index=episode
-    )
-    # 仅当数据源已存在时才阻止创建任务。
-    if duplicate_reason and "数据源已存在" in duplicate_reason:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=duplicate_reason
-        )
 
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
