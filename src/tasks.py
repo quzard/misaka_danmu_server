@@ -182,7 +182,9 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
             await progress_callback(0, f"开始删除 (尝试 {attempt + 1}/{max_retries})...")
             
             # 检查作品是否存在
-            anime_exists = await session.get(orm_models.Anime, animeId)
+            anime_stmt = select(orm_models.Anime).where(orm_models.Anime.id == animeId)
+            anime_result = await session.execute(anime_stmt)
+            anime_exists = anime_result.scalar_one_or_none()
             if not anime_exists:
                 raise TaskSuccess("作品未找到，无需删除。")
 
@@ -222,7 +224,9 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
     await progress_callback(0, "开始删除...")
     try:
         # 检查源是否存在
-        source_exists = await session.get(orm_models.AnimeSource, sourceId)
+        source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == sourceId)
+        source_result = await session.execute(source_stmt)
+        source_exists = source_result.scalar_one_or_none()
         if not source_exists:
             raise TaskSuccess("数据源未找到，无需删除。")
         
@@ -251,7 +255,9 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
     await progress_callback(0, "开始删除...")
     try:
         # 检查分集是否存在
-        episode_exists = await session.get(orm_models.Episode, episodeId)
+        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episodeId)
+        episode_result = await session.execute(episode_stmt)
+        episode_exists = episode_result.scalar_one_or_none()
         if not episode_exists:
             raise TaskSuccess("分集未找到，无需删除。")
 
@@ -319,7 +325,9 @@ async def _import_episodes_iteratively(
                 )
 
                 # 检查分集是否已有弹幕，如果有则跳过
-                existing_episode = await session.get(orm_models.Episode, episode_db_id)
+                episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                episode_result = await session.execute(episode_stmt)
+                existing_episode = episode_result.scalar_one_or_none()
                 if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
                     logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
                     successful_episodes_indices.append(episode.episodeIndex)
@@ -356,7 +364,9 @@ async def _import_episodes_iteratively(
                     )
 
                     # 检查分集是否已有弹幕，如果有则跳过
-                    existing_episode = await session.get(orm_models.Episode, episode_db_id)
+                    episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                    episode_result = await session.execute(episode_stmt)
+                    existing_episode = episode_result.scalar_one_or_none()
                     if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
                         logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
                         successful_episodes_indices.append(episode.episodeIndex)
@@ -390,7 +400,9 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
             progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
             await progress_callback(progress, f"正在删除分集 {i+1}/{total} (ID: {episode_id}) 的数据...")
 
-            episode = await session.get(orm_models.Episode, episode_id)
+            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_id)
+            episode_result = await session.execute(episode_stmt)
+            episode = episode_result.scalar_one_or_none()
             if episode:
                 _delete_danmaku_file(episode.danmakuFilePath)
                 await session.delete(episode)
@@ -858,7 +870,9 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {sourceId})...")
         try:
-            source = await session.get(orm_models.AnimeSource, sourceId)
+            source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == sourceId)
+            source_result = await session.execute(source_stmt)
+            source = source_result.scalar_one_or_none()
             if source:
                 await session.delete(source)
                 await session.commit()
