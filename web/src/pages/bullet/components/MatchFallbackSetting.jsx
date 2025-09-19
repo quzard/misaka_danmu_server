@@ -1,4 +1,4 @@
-import { Card, Form, Switch, Input, Button, Space, Select, Tooltip } from 'antd'
+import { Card, Form, Switch, Input, Button, Space, Tooltip } from 'antd'
 import { useEffect, useState } from 'react'
 import { getMatchFallback, setMatchFallback, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
@@ -72,16 +72,20 @@ export const MatchFallbackSetting = () => {
     }
   }
 
-  const templateOptions = [
-    { label: '默认模板', value: '/app/config/danmaku/${animeId}/${episodeId}' },
-    { label: '按标题分类', value: '/downloads/弹幕/${title}/${title} - S${season:02d}E${episode:02d}' },
-    { label: 'QB下载风格', value: '/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}' },
-    { label: 'Plex风格', value: '/media/动漫/${title} (${year})/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}' }
-  ]
+
 
   return (
     <Card title="配置" loading={loading}>
-      <Form form={form} onValuesChange={handleValueChange} layout="vertical">
+      <Form
+        form={form}
+        onValuesChange={handleValueChange}
+        layout="vertical"
+        initialValues={{
+          matchFallbackEnabled: false,
+          customDanmakuPathEnabled: false,
+          customDanmakuPathTemplate: '/app/config/danmaku/${animeId}/${episodeId}'
+        }}
+      >
         <Form.Item
           name="matchFallbackEnabled"
           label="启用匹配后备"
@@ -104,7 +108,7 @@ export const MatchFallbackSetting = () => {
           name="customDanmakuPathTemplate"
           label={
             <Space>
-              弹幕文件路径模板
+              弹幕文件保存路径
               <Tooltip title="支持变量：${title}(标题), ${season}(季度), ${episode}(集数), ${year}(年份), ${provider}(提供商), ${animeId}(动画ID), ${episodeId}(分集ID)。格式化：${season:02d}表示两位数字补零。.xml后缀会自动添加。">
                 <QuestionCircleOutlined />
               </Tooltip>
@@ -112,15 +116,8 @@ export const MatchFallbackSetting = () => {
           }
         >
           <Space.Compact style={{ width: '100%' }}>
-            <Select
-              style={{ width: '200px' }}
-              placeholder="选择预设模板"
-              options={templateOptions}
-              onChange={(value) => form.setFieldValue('customDanmakuPathTemplate', value)}
-              disabled={!customPathEnabled}
-            />
             <Input
-              placeholder="路径模板"
+              placeholder="自定义保存路径"
               style={{ flex: 1 }}
               disabled={!customPathEnabled}
             />
@@ -131,8 +128,8 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
-          <div>示例路径：/app/config/danmaku/26/25000026010012.xml（.xml后缀自动添加）</div>
-          <div>支持的变量：title, season, episode, year, provider, animeId, episodeId</div>
+          <div>示例路径：/app/config/danmaku/${animeId}/${episodeId}  </div>
+          <div>支持的变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}</div>
           <div>格式化选项：${`{season:02d}`} 表示季度号补零到2位，${`{episode:03d}`} 表示集数补零到3位</div>
         </div>
       </Form>
