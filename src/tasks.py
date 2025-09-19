@@ -314,15 +314,22 @@ async def _import_episodes_iteratively(
 
             if comments is not None:
                 episode_db_id = await crud.create_episode_if_not_exists(
-                    session, anime_id, source_id, episode.episodeIndex, 
+                    session, anime_id, source_id, episode.episodeIndex,
                     episode.title, episode.url, episode.episodeId
                 )
-                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-                await session.commit()
-                
-                total_comments_added += added_count
-                successful_episodes_indices.append(episode.episodeIndex)
-                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+
+                # 检查分集是否已有弹幕，如果有则跳过
+                existing_episode = await session.get(orm_models.Episode, episode_db_id)
+                if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                    successful_episodes_indices.append(episode.episodeIndex)
+                else:
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    await session.commit()
+
+                    total_comments_added += added_count
+                    successful_episodes_indices.append(episode.episodeIndex)
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
             else:
                 failed_episodes_count += 1
                 logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
