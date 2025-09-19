@@ -1672,6 +1672,14 @@ async def increment_token_call_count(session: AsyncSession, token_id: int):
     token.lastCallAt = get_now()
     # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
 
+async def reset_all_token_daily_counts(session: AsyncSession) -> int:
+    """重置所有API Token的每日调用次数为0。"""
+    from sqlalchemy import update
+    stmt = update(ApiToken).values(dailyCallCount=0)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
 # --- UA Filter and Log Services ---
 
 async def get_ua_rules(session: AsyncSession) -> List[Dict[str, Any]]:

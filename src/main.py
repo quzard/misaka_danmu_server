@@ -133,6 +133,21 @@ async def lifespan(app: FastAPI):
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
+    
+    # 新增：创建系统内置定时任务
+    async with session_factory() as session:
+        existing_task = await session.get(orm_models.ScheduledTask, "system_token_reset")
+        if not existing_task:
+            await crud.create_scheduled_task(
+                session, 
+                task_id="system_token_reset",
+                name="重置API Token每日调用次数",
+                job_type="tokenReset", 
+                cron="0 0 * * *",
+                is_enabled=True
+            )
+            logger.info("已创建系统内置定时任务：重置API Token每日调用次数")
+    
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
     app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager)
     await app.state.scheduler_manager.start()

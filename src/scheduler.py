@@ -164,10 +164,20 @@ class SchedulerManager:
                     except Exception as e:
                         logger.error(f"加载定时任务 '{task['name']}' (ID: {task['taskId']}) 失败: {e}")
 
+    def _is_system_task(self, job_type: str) -> bool:
+        """通过Job类判断是否为系统任务"""
+        if job_type in self._job_classes:
+            return getattr(self._job_classes[job_type], 'is_system_task', False)
+        return False
+
     async def get_all_tasks(self) -> List[Dict[str, Any]]:
-        """从数据库获取所有定时任务的列表。"""
+        """从数据库获取所有定时任务的列表，并标记系统任务。"""
         async with self._session_factory() as session:
-            return await crud.get_scheduled_tasks(session)
+            tasks = await crud.get_scheduled_tasks(session)
+            # 为每个任务添加系统任务标识
+            for task in tasks:
+                task['isSystemTask'] = self._is_system_task(task['jobType'])
+            return tasks
 
     async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool) -> Dict[str, Any]:
         if job_type not in self._job_classes:
@@ -204,15 +214,15 @@ class SchedulerManager:
 
     async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool) -> Optional[Dict[str, Any]]:
         async with self._session_factory() as session:
-            job = self.scheduler.get_job(task_id)
-            if not job: return None
-
             task_info = await crud.get_scheduled_task(session, task_id)
             if not task_info: return None
-            job_type = task_info['jobType']
-
+            
+            # 新增：防止修改系统任务
+            if self._is_system_task(task_info['jobType']):
+                raise ValueError("系统内置任务不允许修改")
+            
             # 确保增量更新任务的轮询间隔不低于3小时
-            if job_type == "incrementalRefresh" and not cron_is_valid(cron, 3):
+            if task_info['jobType'] == "incrementalRefresh" and not cron_is_valid(cron, 3):
                 raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
             await crud.update_scheduled_task(session, task_id, name, cron, is_enabled)
             job.modify(name=name)
@@ -223,10 +233,18 @@ class SchedulerManager:
             await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
-    async def delete_task(self, task_id: str):
-        if self.scheduler.get_job(task_id): self.scheduler.remove_job(task_id)
+    async def delete_task(self, task_id: str) -> bool:
         async with self._session_factory() as session:
+            task_info = await crud.get_scheduled_task(session, task_id)
+            if not task_info: return False
+            
+            # 新增：防止删除系统任务
+            if self._is_system_task(task_info['jobType']):
+                raise ValueError("系统内置任务不允许删除")
+            
+            if self.scheduler.get_job(task_id): self.scheduler.remove_job(task_id)
             await crud.delete_scheduled_task(session, task_id)
+            return True
 
     async def run_task_now(self, task_id: str):
         if job := self.scheduler.get_job(task_id):
