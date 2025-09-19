@@ -215,15 +215,32 @@ async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncCon
 
 async def _migrate_danmaku_paths_to_absolute_task(conn: AsyncConnection):
     """迁移任务: 将现有的相对路径转换为绝对路径。"""
-    # 查询所有有弹幕文件路径且为相对路径的分集
-    select_sql = text("SELECT id, danmaku_file_path FROM episode WHERE danmaku_file_path IS NOT NULL AND danmaku_file_path NOT LIKE '/%'")
+    # 查询所有需要迁移的弹幕文件路径：
+    # 1. 以 /danmaku/ 开头的路径（旧格式）
+    # 2. 不以 /app/config/ 开头的路径（相对路径）
+    select_sql = text("""
+        SELECT id, danmaku_file_path
+        FROM episode
+        WHERE danmaku_file_path IS NOT NULL
+        AND (danmaku_file_path LIKE '/danmaku/%' OR danmaku_file_path NOT LIKE '/app/config/%')
+        AND danmaku_file_path NOT LIKE '/app/config/danmaku/%'
+    """)
     episodes = await conn.execute(select_sql)
 
     migrated_count = 0
     for episode in episodes:
         episode_id, old_path = episode
-        # 将相对路径转换为绝对路径
-        new_path = f"/app/config/{old_path}"
+
+        # 处理不同格式的路径
+        if old_path.startswith('/danmaku/'):
+            # 旧格式：/danmaku/1/25000001010001.xml -> /app/config/danmaku/1/25000001010001.xml
+            new_path = old_path.replace('/danmaku/', '/app/config/danmaku/', 1)
+        elif not old_path.startswith('/'):
+            # 相对路径：danmaku/1/25000001010001.xml -> /app/config/danmaku/1/25000001010001.xml
+            new_path = f"/app/config/{old_path}"
+        else:
+            # 其他格式，跳过
+            continue
 
         # 更新数据库
         update_sql = text("UPDATE episode SET danmaku_file_path = :new_path WHERE id = :episode_id")
@@ -252,7 +269,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_unique_key_to_task_history_v1", _migrate_add_unique_key_to_task_history_task, (db_type,)),
         ("migrate_api_token_to_daily_limit_v1", _migrate_api_token_to_daily_limit_task, (db_type,)),
         ("migrate_add_log_raw_responses_to_metadata_sources_v1", _migrate_add_log_raw_responses_to_metadata_sources_task, (db_type,)),
-        ("migrate_danmaku_paths_to_absolute_v1", _migrate_danmaku_paths_to_absolute_task, ()),
+        ("migrate_danmaku_paths_to_absolute_v2", _migrate_danmaku_paths_to_absolute_task, ()),
     ]
 
     for migration_id, migration_func, args in migrations:
