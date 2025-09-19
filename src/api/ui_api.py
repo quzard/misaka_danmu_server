@@ -2161,6 +2161,11 @@ async def import_from_provider(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+    # 添加调试日志
+    logger.info(f"UI导入请求参数: provider={request_data.provider}, mediaId={request_data.mediaId}, "
+                f"animeTitle={request_data.animeTitle}, type={request_data.type}, season={request_data.season}, "
+                f"currentEpisodeIndex={request_data.currentEpisodeIndex}, is_single_episode={request_data.currentEpisodeIndex is not None}")
+
     # 替换原有的重复检查逻辑
     duplicate_reason = await crud.check_duplicate_import(
         session=session,

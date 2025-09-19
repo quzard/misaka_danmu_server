@@ -1569,20 +1569,30 @@ async def check_duplicate_import(
     统一的重复导入检查函数
     返回None表示可以导入，返回字符串表示重复原因
     """
+    # 添加调试日志
+    logger.info(f"重复检查参数: provider={provider}, media_id={media_id}, anime_title={anime_title}, "
+                f"is_single_episode={is_single_episode}, episode_index={episode_index}")
+
     # 1. 检查数据源是否已存在
     source_exists = await check_source_exists_by_media_id(session, provider, media_id)
     if source_exists:
+        logger.info(f"数据源已存在: provider={provider}, media_id={media_id}")
         # 对于单集导入，即使数据源存在，也要检查具体集数是否存在
         if is_single_episode and episode_index is not None:
+            logger.info(f"单集导入检查: episode_index={episode_index}")
             anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
+            logger.info(f"获取到anime_id: {anime_id}")
             if anime_id:
                 episode_exists = await find_episode_by_index(session, anime_id, episode_index)
+                logger.info(f"集数是否存在: episode_index={episode_index}, exists={episode_exists is not None}")
                 if episode_exists:
                     return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中，无需重复导入"
                 else:
                     # 数据源存在但集数不存在，允许导入
+                    logger.info(f"数据源存在但第{episode_index}集不存在，允许导入")
                     return None
         # 对于全量导入或无法确定集数的情况，仍然阻止重复导入
+        logger.info("全量导入或无法确定集数，阻止重复导入")
         return f"该数据源已存在于弹幕库中"
 
     if not is_single_episode:  # 只在全量导入时检查作品重复
