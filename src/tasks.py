@@ -391,6 +391,22 @@ async def generic_import_task(
     后台任务：执行从指定数据源导入弹幕的完整流程。
     修改流程：先获取弹幕，成功后再创建数据库条目。
     """
+    # 添加重复检查
+    await progress_callback(5, "检查重复导入...")
+    duplicate_reason = await crud.check_duplicate_import(
+        session=session,
+        provider=provider,
+        media_id=mediaId,
+        anime_title=animeTitle,
+        media_type=mediaType,
+        season=season,
+        year=year,
+        is_single_episode=currentEpisodeIndex is not None,
+        episode_index=currentEpisodeIndex
+    )
+    if duplicate_reason:
+        raise ValueError(duplicate_reason)
+
     scraper = manager.get_scraper(provider)
     title_to_use = animeTitle.strip()
     season_to_use = season
