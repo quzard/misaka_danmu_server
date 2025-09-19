@@ -1786,7 +1786,7 @@ async def generic_import_task(
             if not comments:
                 logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 未找到弹幕，但已创建分集记录。")
                 continue
-            added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
             total_comments_added += added_count
             logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
         else:
@@ -1829,7 +1829,14 @@ async def edited_import_task(
         if anime_id and source_id:
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
             if comments:
-                total_comments_added += await crud.bulk_insert_comments(session, episode_db_id, comments)
+                # 检查分集是否已有弹幕，如果有则跳过
+                existing_episode = await session.get(orm_models.Episode, episode_db_id)
+                if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                else:
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    total_comments_added += added_count
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
 
     if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
     else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
@@ -1883,7 +1890,7 @@ async def full_refresh_task(source_id: int, session: AsyncSession, manager: Scra
                 episode_info.url, episode_info.episodeId
             )
             if comments:
-                await crud.bulk_insert_comments(session, episode_db_id, comments)
+                await crud.save_danmaku_for_episode(session, episode_db_id, comments)
         
         await session.commit()
         raise TaskSuccess(f"全量刷新完成，共导入 {len(new_episodes)} 个分集，{total_comments_fetched} 条弹幕。")
@@ -1950,7 +1957,7 @@ async def refresh_episode_task(episode_id: int, session: AsyncSession, manager: 
             raise TaskSuccess("刷新完成，没有新增弹幕。")
 
         await progress_callback(96, f"正在写入 {len(new_comments)} 条新弹幕...")
-        added_count = await crud.bulk_insert_comments(session, episode_id, new_comments)
+        added_count = await crud.save_danmaku_for_episode(session, episode_id, new_comments)
         await crud.update_episode_fetch_time(session, episode_id)
         logger.info(f"分集 ID: {episode_id} 刷新完成，新增 {added_count} 条弹幕。")
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
@@ -2135,7 +2142,7 @@ async def manual_import_task(
 
         await progress_callback(90, "正在写入数据库...")
         episode_db_id = await crud.get_or_create_episode(session, source_id, episode_index, title, url, episode_id_for_comments)
-        added_count = await crud.bulk_insert_comments(session, episode_db_id, comments)
+        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
         raise

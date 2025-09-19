@@ -1222,7 +1222,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
                 comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
             comments_to_insert.append(comment_dict)
 
-        added = await crud.bulk_insert_comments(session, episodeId, comments_to_insert)
+        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
