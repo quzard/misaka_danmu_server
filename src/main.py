@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI):
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'matchFallbackEnabled': ('false', '是否为匹配接口启用后备机制（自动搜索导入）。'),
+        # 弹幕文件路径配置
+        'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
+        'customDanmakuPathTemplate': ('/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}', '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
         # 全局过滤

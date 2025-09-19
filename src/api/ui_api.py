@@ -2749,3 +2749,36 @@ async def update_metadata_source_config(
     except Exception as e:
         logger.error(f"更新元数据源 '{providerName}' 配置时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
+
+# --- 自定义弹幕路径配置 ---
+
+class CustomDanmakuPathRequest(BaseModel):
+    enabled: str
+    template: str
+
+class CustomDanmakuPathResponse(BaseModel):
+    enabled: str
+    template: str
+
+@router.get("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="获取自定义弹幕路径配置")
+async def get_custom_danmaku_path(
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取自定义弹幕路径配置"""
+    enabled = await crud.get_config_value(session, "customDanmakuPathEnabled", "false")
+    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}")
+    return CustomDanmakuPathResponse(enabled=enabled, template=template)
+
+@router.put("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="设置自定义弹幕路径配置")
+async def set_custom_danmaku_path(
+    request: CustomDanmakuPathRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置自定义弹幕路径配置"""
+    await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
+    await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
+    config_manager.invalidate("customDanmakuPathEnabled")
+    config_manager.invalidate("customDanmakuPathTemplate")
+    return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)

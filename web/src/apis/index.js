@@ -203,6 +203,13 @@ export const getMatchFallback = () =>
 export const setMatchFallback = data =>
   api.put('/api/ui/config/matchFallbackEnabled', data)
 
+/** 获取自定义弹幕路径配置 */
+export const getCustomDanmakuPath = () =>
+  api.get('/api/ui/config/customDanmakuPath')
+/** 设置自定义弹幕路径配置 */
+export const setCustomDanmakuPath = data =>
+  api.put('/api/ui/config/customDanmakuPath', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')

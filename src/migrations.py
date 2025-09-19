@@ -202,7 +202,7 @@ async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncCon
     """迁移任务: 确保 metadata_sources 表有 log_raw_responses 字段。"""
     table_name = 'metadata_sources'
     column_name = 'log_raw_responses'
-    
+
     if db_type == "mysql":
         check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '{table_name}' AND column_name = '{column_name}'")
         add_column_sql = text(f"ALTER TABLE {table_name} ADD COLUMN `{column_name}` BOOLEAN NOT NULL DEFAULT FALSE")
@@ -212,6 +212,27 @@ async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncCon
 
     if not (await conn.execute(check_column_sql)).scalar_one_or_none():
         await conn.execute(add_column_sql)
+
+async def _migrate_danmaku_paths_to_absolute_task(conn: AsyncConnection):
+    """迁移任务: 将现有的相对路径转换为绝对路径。"""
+    # 查询所有有弹幕文件路径且为相对路径的分集
+    select_sql = text("SELECT id, danmaku_file_path FROM episode WHERE danmaku_file_path IS NOT NULL AND danmaku_file_path NOT LIKE '/%'")
+    episodes = await conn.execute(select_sql)
+
+    migrated_count = 0
+    for episode in episodes:
+        episode_id, old_path = episode
+        # 将相对路径转换为绝对路径
+        new_path = f"/app/config/{old_path}"
+
+        # 更新数据库
+        update_sql = text("UPDATE episode SET danmaku_file_path = :new_path WHERE id = :episode_id")
+        await conn.execute(update_sql, {"new_path": new_path, "episode_id": episode_id})
+        migrated_count += 1
+
+        logger.debug(f"迁移路径: {old_path} -> {new_path}")
+
+    logger.info(f"弹幕路径迁移完成，共迁移 {migrated_count} 个分集的路径")
 
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
@@ -231,6 +252,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_unique_key_to_task_history_v1", _migrate_add_unique_key_to_task_history_task, (db_type,)),
         ("migrate_api_token_to_daily_limit_v1", _migrate_api_token_to_daily_limit_task, (db_type,)),
         ("migrate_add_log_raw_responses_to_metadata_sources_v1", _migrate_add_log_raw_responses_to_metadata_sources_task, (db_type,)),
+        ("migrate_danmaku_paths_to_absolute_v1", _migrate_danmaku_paths_to_absolute_task, ()),
     ]
 
     for migration_id, migration_func, args in migrations:

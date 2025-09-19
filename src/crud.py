@@ -22,6 +22,7 @@ from .orm_models import ( # noqa: F401
 from .config import settings
 from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
+from .path_template import DanmakuPathTemplate, create_danmaku_context
 
 logger = logging.getLogger(__name__)
 
@@ -53,18 +54,83 @@ def _generate_xml_from_comments(
 
 def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     """
-    将Web路径（例如 /data/danmaku/1/2.xml 或 /danmaku/1/2.xml）转换为文件系统路径。
-    这个辅助函数通过查找 '/danmaku/' 标记来健壮地处理新旧两种路径格式。
+    将Web路径转换为文件系统路径。
+    现在支持绝对路径格式（如 /app/config/danmaku/1/2.xml）和自定义路径。
     """
     if not web_path:
         return None
-    
+
+    # 如果是绝对路径，直接返回Path对象
+    if web_path.startswith('/'):
+        return Path(web_path)
+
+    # 兼容旧的相对路径格式
     if '/danmaku/' in web_path:
         relative_part = web_path.split('/danmaku/', 1)[1]
         return DANMAKU_BASE_DIR / relative_part
-    
-    logger.warning(f"无法从Web路径 '{web_path}' 解析文件系统路径，因为它不包含 '/danmaku/'。")
+    elif '/custom_danmaku/' in web_path:
+        # 处理自定义路径
+        relative_part = web_path.split('/custom_danmaku/', 1)[1]
+        return Path(relative_part)
+
+    logger.warning(f"无法从Web路径 '{web_path}' 解析文件系统路径: {web_path}")
     return None
+
+async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=None) -> tuple[str, Path]:
+    """
+    生成弹幕文件的Web路径和文件系统路径
+
+    Returns:
+        tuple: (web_path, absolute_path)
+    """
+    anime_id = episode.source.anime.id
+    episode_id = episode.id
+
+    # 检查是否启用自定义路径
+    custom_path_enabled = False
+    custom_template = None
+
+    if config_manager:
+        try:
+            custom_path_enabled = await config_manager.get_bool('customDanmakuPathEnabled', False)
+            if custom_path_enabled:
+                custom_template = await config_manager.get_str('customDanmakuPathTemplate', '')
+        except Exception as e:
+            logger.warning(f"获取自定义路径配置失败: {e}")
+
+    if custom_path_enabled and custom_template:
+        try:
+            # 创建路径模板上下文
+            context = create_danmaku_context(
+                anime_title=episode.source.anime.title,
+                season=episode.source.anime.season or 1,
+                episode_index=episode.episodeIndex,
+                year=episode.source.anime.year,
+                provider=episode.source.providerName,
+                anime_id=anime_id,
+                episode_id=episode_id,
+                source_id=episode.source.id
+            )
+
+            # 生成自定义路径
+            path_template = DanmakuPathTemplate(custom_template)
+            custom_path = path_template.generate_path(context)
+
+            # 自定义路径使用绝对路径存储
+            web_path = str(custom_path)  # 绝对路径用于数据库存储
+            absolute_path = Path(custom_path)  # 直接使用生成的路径
+
+            logger.info(f"使用自定义路径模板生成弹幕路径: {absolute_path}")
+            return web_path, absolute_path
+
+        except Exception as e:
+            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
+
+    # 默认路径逻辑 - 转换为绝对路径
+    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"  # 绝对路径用于数据库存储
+    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
+
+    return web_path, absolute_path
 # --- Anime & Library ---
 
 async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
@@ -929,7 +995,8 @@ async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, 
 async def save_danmaku_for_episode(
     session: AsyncSession,
     episode_id: int,
-    comments: List[Dict[str, Any]]
+    comments: List[Dict[str, Any]],
+    config_manager = None
 ) -> int:
     """将弹幕写入XML文件，并更新数据库记录，返回新增数量。"""
     if not comments:
@@ -953,11 +1020,12 @@ async def save_danmaku_for_episode(
         "bilibili": "comment.bilibili.com"
     }
     xml_content = _generate_xml_from_comments(comments, episode_id, provider_name, chat_server_map.get(provider_name, "danmaku.misaka.org"))
-    
-    # 修正：统一文件路径结构，与 tasks.py 保持一致（不包含 source_id）
-    web_path = f"/danmaku/{anime_id}/{episode_id}.xml"
-    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
-    
+
+    # 新增：支持自定义路径模板
+    web_path, absolute_path = await _generate_danmaku_path(
+        session, episode, config_manager
+    )
+
     try:
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         absolute_path.write_text(xml_content, encoding='utf-8')
@@ -965,7 +1033,7 @@ async def save_danmaku_for_episode(
     except OSError as e:
         logger.error(f"写入弹幕文件失败: {absolute_path}。错误: {e}")
         raise
-    
+
     await update_episode_danmaku_info(session, episode_id, web_path, len(comments))
     return len(comments)
 
@@ -1212,7 +1280,7 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
                     # 移动弹幕文件
                     if episode_to_move.danmakuFilePath:
                         old_path = _get_fs_path_from_web_path(episode_to_move.danmakuFilePath)
-                        new_web_path = f"/danmaku/{target_anime_id}/{episode_to_move.id}.xml"
+                        new_web_path = f"/app/config/danmaku/{target_anime_id}/{episode_to_move.id}.xml"
                         new_fs_path = _get_fs_path_from_web_path(new_web_path)
                         if old_path and old_path.exists() and new_fs_path:
                             new_fs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1238,7 +1306,7 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
             for ep in source_to_process.episodes:
                 if ep.danmakuFilePath:
                     old_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
-                    new_web_path = f"/danmaku/{target_anime_id}/{ep.id}.xml"
+                    new_web_path = f"/app/config/danmaku/{target_anime_id}/{ep.id}.xml"
                     new_fs_path = _get_fs_path_from_web_path(new_web_path)
                     if old_path and old_path.exists() and new_fs_path:
                         new_fs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1304,7 +1372,7 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
         old_absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
         
         # 修正：新的Web路径和文件系统路径应与 tasks.py 保持一致（不包含 source_id）
-        new_web_path = f"/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
+        new_web_path = f"/app/config/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
         new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / f"{new_episode_id}.xml"
         
         if old_absolute_path and old_absolute_path.exists():

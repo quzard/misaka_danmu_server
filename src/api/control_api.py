@@ -1222,7 +1222,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
                 comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
             comments_to_insert.append(comment_dict)
 
-        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert)
+        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, None)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
@@ -1338,6 +1338,8 @@ async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session
     config_manager.invalidate('danmaku_output_limit_per_source')
     config_manager.invalidate('danmaku_aggregation_enabled')
     return {"message": "弹幕输出设置已更新。"}
+
+
 
 # --- 任务管理 ---
 
