@@ -180,28 +180,31 @@ class SchedulerManager:
             return tasks
 
     async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool) -> Dict[str, Any]:
+        # 新增：禁止前端创建系统内置任务
+        if job_type == "tokenReset":
+            raise ValueError("系统内置任务 'tokenReset' 不允许手动创建。")
+        
         if job_type not in self._job_classes:
             raise ValueError(f"未知的任务类型: {job_type}")
+        
         # 确保增量更新任务的轮询间隔不低于3小时
         if job_type == "incrementalRefresh" and not cron_is_valid(cron, 3):
             raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
         
-        # 新增：确保“定时追更”任务只能创建一个
+        # 确保某些任务类型只能创建一个
         async with self._session_factory() as session:
             if job_type == "incrementalRefresh":
                 exists = await crud.check_scheduled_task_exists_by_type(session, "incrementalRefresh")
                 if exists:
-                    raise ValueError("“定时追更”任务已存在，无法重复创建。")
+                    raise ValueError("定时追更任务已存在，无法重复创建。")
             elif job_type == "tmdbAutoMap":
                 exists = await crud.check_scheduled_task_exists_by_type(session, "tmdbAutoMap")
                 if exists:
-                    raise ValueError("“TMDB自动映射与更新”任务已存在，无法重复创建。")
-
-            # 新增：确保 Webhook 处理器任务只能创建一个
-            if job_type == "webhookProcessor":
+                    raise ValueError("TMDB自动映射与更新任务已存在，无法重复创建。")
+            elif job_type == "webhookProcessor":
                 exists = await crud.check_scheduled_task_exists_by_type(session, "webhookProcessor")
                 if exists:
-                    raise ValueError("“Webhook 延时任务处理器”已存在，无法重复创建。")
+                    raise ValueError("Webhook 延时任务处理器已存在，无法重复创建。")
 
             task_id = str(uuid4())
             await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled)
@@ -278,5 +281,6 @@ class SchedulerManager:
             raise ValueError(f"找不到类型为 '{job_type}' 的定时任务")
 
         await self.run_task_now(task_id)    
+
 
 

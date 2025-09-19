@@ -136,7 +136,10 @@ class BaseScraper(ABC):
     async def _get_from_cache(self, key: str) -> Optional[Any]:
         """从数据库缓存中获取数据。"""
         async with self._session_factory() as session:
-            return await crud.get_cache(session, key)
+            try:
+                return await crud.get_cache(session, key)
+            finally:
+                await session.close()
 
     async def _set_to_cache(self, key: str, value: Any, config_key: str, default_ttl: int):
         """将数据存入数据库缓存，TTL从配置中读取。"""
@@ -144,7 +147,11 @@ class BaseScraper(ABC):
         ttl = int(ttl_str)
         if ttl > 0:
             async with self._session_factory() as session:
-                await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
+                try:
+                    await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
+                    await session.commit()
+                finally:
+                    await session.close()
 
     # 每个子类都必须覆盖这个类属性
     provider_name: str
@@ -269,6 +276,48 @@ class BaseScraper(ABC):
         大多数源直接返回字符串，但Bilibili和MGTV需要特殊处理。
         """
         return str(provider_episode_id)
+
+    def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
+        """
+        过滤掉垃圾分集（预告、花絮等）
+        """
+        if not episodes:
+            return episodes
+        
+        filtered_episodes = []
+        filtered_out_episodes = []
+        
+        for episode in episodes:
+            # 检查是否匹配垃圾内容模式
+            match = self._GLOBAL_SEARCH_JUNK_TITLE_PATTERN.search(episode.title)
+            if match:
+                junk_type = match.group(0)
+                filtered_out_episodes.append((episode, junk_type))
+            else:
+                filtered_episodes.append(episode)
+        
+        # 打印分集过滤结果
+        self.logger.info(f"{self.provider_name}: 分集过滤结果:")
+        
+        # 打印过滤掉的分集
+        if filtered_out_episodes:
+            for episode, junk_type in filtered_out_episodes:
+                self.logger.info(f"  - 已过滤: {episode.title} (类型: {junk_type})")
+        
+        # 打印保留的分集
+        if filtered_episodes:
+            for episode in filtered_episodes:
+                # 检查是否包含预告关键词但未被过滤
+                title_lower = episode.title.lower()
+                if any(keyword in title_lower for keyword in ['预告', 'preview', 'trailer', 'teaser']):
+                    self.logger.info(f"  - {episode.title} (注意: 标题包含预告关键词但未被过滤)")
+                else:
+                    self.logger.info(f"  - {episode.title}")
+        
+        if not filtered_episodes and not filtered_out_episodes:
+            self.logger.info(f"  - 无分集数据")
+        
+        return filtered_episodes
 
     @abstractmethod
     async def close(self):

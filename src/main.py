@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI):
             await crud.create_scheduled_task(
                 session, 
                 task_id="system_token_reset",
-                name="token每日重置",
+                name="系统内置：Token每日重置",
                 job_type="tokenReset", 
                 cron="0 0 * * *",
                 is_enabled=True

@@ -103,6 +103,7 @@ class MetadataDetailsResponse(BaseModel):
     aliasesCn: List[str] = []
     imageUrl: Optional[str] = None
     details: Optional[str] = None
+    year: Optional[int] = None
 
 class AnimeCreate(BaseModel):
     """Model for creating a new anime entry manually."""
