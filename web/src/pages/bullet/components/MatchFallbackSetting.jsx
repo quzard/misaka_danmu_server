@@ -18,14 +18,15 @@ export const MatchFallbackSetting = () => {
         getMatchFallback(),
         getCustomDanmakuPath()
       ])
-      const pathEnabled = pathRes.data.enabled === 'true'
+      const pathEnabled = pathRes?.data?.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
       form.setFieldsValue({
-        matchFallbackEnabled: fallbackRes.data.value === 'true',
+        matchFallbackEnabled: fallbackRes?.data?.value === 'true',
         customDanmakuPathEnabled: pathEnabled,
-        customDanmakuPathTemplate: pathRes.data.template || '/app/config/danmaku/${animeId}/${episodeId}'
+        customDanmakuPathTemplate: pathRes?.data?.template || '/app/config/danmaku/${animeId}/${episodeId}'
       })
     } catch (error) {
+      console.error('获取设置失败:', error)
       messageApi.error('获取设置失败')
     } finally {
       setLoading(false)
@@ -34,7 +35,7 @@ export const MatchFallbackSetting = () => {
 
   useEffect(() => {
     fetchSettings()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleValueChange = async changedValues => {
     try {
@@ -46,11 +47,12 @@ export const MatchFallbackSetting = () => {
         const currentValues = form.getFieldsValue()
         await setCustomDanmakuPath({
           enabled: String(changedValues.customDanmakuPathEnabled),
-          template: currentValues.customDanmakuPathTemplate
+          template: currentValues.customDanmakuPathTemplate || '/app/config/danmaku/${animeId}/${episodeId}'
         })
       }
       messageApi.success('设置已保存')
     } catch (error) {
+      console.error('保存设置失败:', error)
       messageApi.error('保存设置失败')
       fetchSettings()
     }
@@ -61,11 +63,12 @@ export const MatchFallbackSetting = () => {
       setPathSaving(true)
       const values = form.getFieldsValue()
       await setCustomDanmakuPath({
-        enabled: String(values.customDanmakuPathEnabled),
-        template: values.customDanmakuPathTemplate
+        enabled: String(values.customDanmakuPathEnabled || false),
+        template: values.customDanmakuPathTemplate || '/app/config/danmaku/${animeId}/${episodeId}'
       })
       messageApi.success('路径模板已保存')
     } catch (error) {
+      console.error('保存路径模板失败:', error)
       messageApi.error('保存路径模板失败')
     } finally {
       setPathSaving(false)
@@ -130,7 +133,7 @@ export const MatchFallbackSetting = () => {
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
           <div>示例路径：/app/config/danmaku/${animeId}/${episodeId}  </div>
           <div>支持的变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}</div>
-          <div>格式化选项：${`{season:02d}`} 表示季度号补零到2位，${`{episode:03d}`} 表示集数补零到3位</div>
+          <div>格式化选项：$&#123;season:02d&#125; 表示季度号补零到2位，$&#123;episode:03d&#125; 表示集数补零到3位</div>
         </div>
       </Form>
     </Card>
