@@ -270,6 +270,48 @@ class BaseScraper(ABC):
         """
         return str(provider_episode_id)
 
+    def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
+        """
+        过滤掉垃圾分集（预告、花絮等）
+        """
+        if not episodes:
+            return episodes
+        
+        filtered_episodes = []
+        filtered_out_episodes = []
+        
+        for episode in episodes:
+            # 检查是否匹配垃圾内容模式
+            match = self._GLOBAL_SEARCH_JUNK_TITLE_PATTERN.search(episode.title)
+            if match:
+                junk_type = match.group(0)
+                filtered_out_episodes.append((episode, junk_type))
+            else:
+                filtered_episodes.append(episode)
+        
+        # 打印分集过滤结果
+        self.logger.info(f"{self.provider_name}: 分集过滤结果:")
+        
+        # 打印过滤掉的分集
+        if filtered_out_episodes:
+            for episode, junk_type in filtered_out_episodes:
+                self.logger.info(f"  - 已过滤: {episode.title} (类型: {junk_type})")
+        
+        # 打印保留的分集
+        if filtered_episodes:
+            for episode in filtered_episodes:
+                # 检查是否包含预告关键词但未被过滤
+                title_lower = episode.title.lower()
+                if any(keyword in title_lower for keyword in ['预告', 'preview', 'trailer', 'teaser']):
+                    self.logger.info(f"  - {episode.title} (注意: 标题包含预告关键词但未被过滤)")
+                else:
+                    self.logger.info(f"  - {episode.title}")
+        
+        if not filtered_episodes and not filtered_out_episodes:
+            self.logger.info(f"  - 无分集数据")
+        
+        return filtered_episodes
+
     @abstractmethod
     async def close(self):
         """关闭所有打开的资源，例如HTTP客户端。"""
