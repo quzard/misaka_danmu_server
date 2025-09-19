@@ -1,5 +1,5 @@
 import { Card, Form, Switch, Input, Button, Space, Tooltip } from 'antd'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { getMatchFallback, setMatchFallback, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
@@ -11,31 +11,30 @@ export const MatchFallbackSetting = () => {
   const [customPathEnabled, setCustomPathEnabled] = useState(false)
   const messageApi = useMessage()
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = async () => {
     try {
       setLoading(true)
       const [fallbackRes, pathRes] = await Promise.all([
         getMatchFallback(),
         getCustomDanmakuPath()
       ])
-      const pathEnabled = pathRes?.data?.enabled === 'true'
+      const pathEnabled = pathRes.data.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
       form.setFieldsValue({
-        matchFallbackEnabled: fallbackRes?.data?.value === 'true',
+        matchFallbackEnabled: fallbackRes.data.value === 'true',
         customDanmakuPathEnabled: pathEnabled,
-        customDanmakuPathTemplate: pathRes?.data?.template || '/app/config/danmaku/${animeId}/${episodeId}'
+        customDanmakuPathTemplate: pathRes.data.template || '/app/config/danmaku/${animeId}/${episodeId}'
       })
     } catch (error) {
-      console.error('获取设置失败:', error)
       messageApi.error('获取设置失败')
     } finally {
       setLoading(false)
     }
-  }, [form, messageApi])
+  }
 
   useEffect(() => {
     fetchSettings()
-  }, [fetchSettings]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleValueChange = async changedValues => {
     try {
@@ -47,7 +46,7 @@ export const MatchFallbackSetting = () => {
         const currentValues = form.getFieldsValue()
         await setCustomDanmakuPath({
           enabled: String(changedValues.customDanmakuPathEnabled),
-          template: currentValues.customDanmakuPathTemplate || '/app/config/danmaku/${animeId}/${episodeId}'
+          template: currentValues.customDanmakuPathTemplate
         })
       }
       messageApi.success('设置已保存')
@@ -63,8 +62,8 @@ export const MatchFallbackSetting = () => {
       setPathSaving(true)
       const values = form.getFieldsValue()
       await setCustomDanmakuPath({
-        enabled: String(values.customDanmakuPathEnabled || false),
-        template: values.customDanmakuPathTemplate || '/app/config/danmaku/${animeId}/${episodeId}'
+        enabled: String(values.customDanmakuPathEnabled),
+        template: values.customDanmakuPathTemplate
       })
       messageApi.success('路径模板已保存')
     } catch (error) {
