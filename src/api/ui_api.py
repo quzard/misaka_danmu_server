@@ -1811,8 +1811,37 @@ async def edited_import_task(
     if not episodes:
         raise TaskSuccess("没有提供任何分集，任务结束。")
 
-    anime_id: Optional[int] = None
-    source_id: Optional[int] = None
+    # 首先检查是否已存在数据源
+    anime_id = await crud.get_anime_id_by_source_media_id(session, request_data.provider, request_data.media_id)
+    source_id = None
+
+    if anime_id:
+        # 如果数据源已存在，检查哪些分集已经有弹幕
+        # 通过anime_id和provider信息获取source_id
+        sources = await crud.get_anime_sources(session, anime_id)
+        source_id = None
+        for source in sources:
+            if source['providerName'] == request_data.provider and source.get('mediaId') == request_data.media_id:
+                source_id = source['sourceId']
+                break
+        if source_id:
+            existing_episodes = []
+            for episode in episodes:
+                episode_exists = await crud.find_episode_by_index(session, anime_id, episode.episodeIndex)
+                if episode_exists and episode_exists.danmakuFilePath and episode_exists.commentCount > 0:
+                    existing_episodes.append(episode.episodeIndex)
+
+            if existing_episodes:
+                episode_list = ", ".join(map(str, existing_episodes))
+                logger.info(f"检测到已存在弹幕的分集: {episode_list}")
+                # 过滤掉已存在的分集
+                episodes = [ep for ep in episodes if ep.episodeIndex not in existing_episodes]
+                if not episodes:
+                    raise TaskSuccess(f"所有要导入的分集 ({episode_list}) 都已存在弹幕，无需重复导入。")
+                else:
+                    remaining_list = ", ".join(map(str, [ep.episodeIndex for ep in episodes]))
+                    logger.info(f"将跳过已存在的分集 ({episode_list})，继续导入分集: {remaining_list}")
+
     total_comments_added = 0
     total_episodes = len(episodes)
 
@@ -1829,14 +1858,10 @@ async def edited_import_task(
         if anime_id and source_id:
             episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, episode.episodeIndex, episode.title, episode.url, episode.episodeId)
             if comments:
-                # 检查分集是否已有弹幕，如果有则跳过
-                existing_episode = await session.get(orm_models.Episode, episode_db_id)
-                if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                else:
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
-                    total_comments_added += added_count
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
+                # 由于前面已经过滤了已存在的分集，这里直接导入
+                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                total_comments_added += added_count
+                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕。")
 
     if total_comments_added == 0: raise TaskSuccess("导入完成，但未找到任何新弹幕。")
     else: raise TaskSuccess(f"导入完成，共新增 {total_comments_added} 条弹幕。")
