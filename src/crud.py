@@ -427,6 +427,23 @@ async def find_anime_by_metadata_id_and_season(
     row = result.mappings().first()
     return dict(row) if row else None
 
+async def find_episode_by_index(session: AsyncSession, anime_id: int, episode_index: int) -> bool:
+    """
+    检查指定作品的所有数据源中，是否存在特定集数的分集。
+    返回 True 如果存在，否则返回 False。
+    """
+    stmt = (
+        select(Episode.id)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .where(
+            AnimeSource.animeId == anime_id,
+            Episode.episodeIndex == episode_index
+        )
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
 async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, season: Optional[int] = None) -> List[int]:
     """根据作品标题和可选的季度号获取已存在的所有分集序号列表。"""
     stmt = (

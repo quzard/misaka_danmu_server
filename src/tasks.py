@@ -1452,6 +1452,20 @@ async def auto_search_and_import_task(
             # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
             # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
             season_for_check = season
+            # 关键修复：如果这是一个单集导入请求，我们现在需要检查该分集是否已存在。
+            if payload.episode is not None:
+                if existing_anime:
+                    anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
+                    if anime_id_to_use:
+                        episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, payload.episode)
+                        if episode_exists:
+                            final_message = f"作品 '{main_title}' 的第 {payload.episode} 集已在媒体库中，无需重复导入。"
+                            logger.info(f"自动导入任务检测到分集已存在，任务成功结束: {final_message}")
+                            raise TaskSuccess(final_message)
+                # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
+                # 因此，这里我们不再提前返回，而是让代码继续往下走。
+
+
             if media_type == 'movie' and season_for_check is None:
                 season_for_check = 1
                 logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
@@ -1460,6 +1474,14 @@ async def auto_search_and_import_task(
             existing_anime = await crud.find_anime_by_title_season_year(
                 session, main_title, season_for_check, year
             )
+        # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
+        # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。
+        if payload.episode is None and existing_anime:
+            final_message = f"作品 '{main_title}' 已在媒体库中，无需重复导入整季。"
+            logger.info(f"自动导入任务检测到作品已存在（整季导入），任务成功结束: {final_message}")
+            raise TaskSuccess(final_message)
+
+
         if existing_anime:
             # 修正：从 existing_anime 字典中安全地获取ID。
             # 不同的查询路径可能返回 'id' 或 'animeId' 作为键。
@@ -1483,11 +1505,15 @@ async def auto_search_and_import_task(
                 else: source_to_use = None
             
             if source_to_use:
-                # 关键修复：如果作品已在库中，直接报告成功，而不是尝试再次导入。
-                # 这与UI导入的行为保持一致，并从根本上解决了重复导入冲突的问题。
-                final_message = f"作品 '{main_title}' 已在媒体库中，无需重复导入。"
-                logger.info(f"自动导入任务检测到作品已存在，任务成功结束: {final_message}")
-                raise TaskSuccess(final_message)
+                # 关键修复：如果这是一个单集导入，并且我们已经确认了该分集不存在，
+                # 那么我们应该继续执行导入，而不是在这里停止。
+                # 只有在整季导入时，我们才在这里停止。
+                if payload.episode is None:
+                    final_message = f"作品 '{main_title}' 已在媒体库中，无需重复导入。"
+                    logger.info(f"自动导入任务检测到作品已存在（整季导入），任务成功结束: {final_message}")
+                    raise TaskSuccess(final_message)
+                else:
+                    logger.info(f"作品 '{main_title}' 已存在，但请求的分集不存在。将继续执行导入流程。")
 
         # 3. 如果库中不存在，则进行全网搜索
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
