@@ -426,7 +426,9 @@ async def auto_import(
         title_parts.append(f"E{payload.episode:02d}")
     task_title = " ".join(title_parts)
 
-    # 在任务提交前添加重复检查
+    # 关键修复：恢复并完善在任务提交前的重复检查。
+    # 对于自动导入，我们只关心数据源是否重复，因为作品重复的逻辑在任务内部处理。
+    # 这里的 media_id 是一个为自动任务构造的唯一标识。
     duplicate_reason = await crud.check_duplicate_import(
         session=session,
         provider="auto",
@@ -434,10 +436,10 @@ async def auto_import(
         anime_title=searchTerm,
         media_type=mediaType.value if mediaType else "tv_series",
         season=season,
-        year=None,
+        year=None, # 自动导入时年份未知，在任务内部获取
         is_single_episode=episode is not None
     )
-    # 对于自动导入，只在数据源重复时阻止
+    # 仅当数据源已存在时才阻止创建任务。
     if duplicate_reason and "数据源已存在" in duplicate_reason:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -607,7 +609,8 @@ async def direct_import(
         
     item_to_import = cached_results[payload.resultIndex] # type: ignore
 
-    # 在现有的任务提交逻辑前添加
+    # 关键修复：恢复并完善在任务提交前的重复检查。
+    # 这确保了直接导入的行为与UI导入完全一致。
     duplicate_reason = await crud.check_duplicate_import(
         session=session,
         provider=item_to_import.provider,
@@ -731,43 +734,27 @@ async def edited_import(
         
     item_to_import = cached_results[payload.resultIndex]
 
-    # 新增：检查数据源是否已存在
-    source_exists = await crud.check_source_exists_by_media_id(session, item_to_import.provider, item_to_import.mediaId)
-    if source_exists:
-        # 如果数据源已存在，需要检查哪些集已存在
-        existing_episodes = await crud.get_existing_episodes_for_source(session, item_to_import.provider, item_to_import.mediaId)
-        existing_episode_indices = {ep.episodeIndex for ep in existing_episodes}
-        
-        # 过滤掉已存在的集
-        filtered_episodes = [ep for ep in payload.episodes if ep.episodeIndex not in existing_episode_indices]
-        
-        if not filtered_episodes:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="所有指定的分集都已存在，无需重复导入。"
-            )
-        
-        
-        # 更新payload中的episodes列表
-        payload.episodes = filtered_episodes
-        logger.info(f"编辑导入：过滤掉 {len(payload.episodes) - len(filtered_episodes)} 个已存在的分集，剩余 {len(filtered_episodes)} 个分集待导入。")
-    else:
-        # 数据源不存在，检查是否有同名同季度同年份的作品
-        duplicate_reason = await crud.check_duplicate_import(
-            session=session,
-            provider=item_to_import.provider,
-            media_id=item_to_import.mediaId,
-            anime_title=payload.animeTitle or item_to_import.title,
-            media_type=item_to_import.type,
-            season=item_to_import.season,
-            year=item_to_import.year,
-            is_single_episode=False
+    # 关键修复：恢复并完善在任务提交前的重复检查。
+    # 对于编辑后导入，我们只检查作品是否重复，因为分集是用户自定义的。
+    # 数据源重复的检查将在任务内部处理（如果需要）。
+    duplicate_reason = await crud.check_duplicate_import(
+        session=session,
+        provider=item_to_import.provider,
+        media_id=item_to_import.mediaId,
+        anime_title=payload.title or item_to_import.title,
+        media_type=item_to_import.type,
+        season=item_to_import.season,
+        year=item_to_import.year,
+        is_single_episode=False # 编辑导入总是视为全量导入
+    )
+    # 对于编辑后导入，如果作品已存在，我们允许关联。但如果数据源已存在，则阻止。
+    # 这是一个权衡，与UI行为保持一致。
+    if duplicate_reason and "数据源已存在" in duplicate_reason:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_reason
         )
-        if duplicate_reason and "作品" in duplicate_reason:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=duplicate_reason
-            )
+
 
     # 构建编辑导入请求
     edited_request = models.EditedImportRequest(

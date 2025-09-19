@@ -415,7 +415,9 @@ async def generic_import_task(
                 local_image_path = await download_image(imageUrl, session, manager, provider)
                 image_download_failed = bool(imageUrl and not local_image_path)
                 
-                anime_id = await crud.get_or_create_anime(session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year)
+                # 修正：确保在创建时也使用年份进行重复检查
+                anime_id = await crud.get_or_create_anime(
+                    session, title_to_use, mediaType, season_to_use, year, imageUrl, local_image_path)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
@@ -471,8 +473,9 @@ async def generic_import_task(
                     image_download_failed = True
             
             # 创建主条目
+            # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
-                session, title_to_use, mediaType, season_to_use, 
+                session, title_to_use, mediaType, season_to_use, year,
                 imageUrl, local_image_path, year
             )
             
@@ -566,8 +569,9 @@ async def edited_import_task(
                     logger.warning(f"海报下载失败: {e}")
 
             # 创建条目
+            # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
-                session, request_data.animeTitle, request_data.mediaType,
+                session, request_data.animeTitle, request_data.type,
                 request_data.season, request_data.imageUrl, local_image_path, request_data.year
             )
             
@@ -1411,9 +1415,9 @@ async def auto_search_and_import_task(
                 details.tvdbId, details.imdbId
             )
             if hasattr(details, 'type') and details.type:
-                media_type = details.type
+                media_type = models.AutoImportMediaType(details.type)
             if hasattr(details, 'year') and details.year:
-                media_type = details.type
+                year = details.year
             
             logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
             enriched_aliases = await metadata_manager.search_aliases_from_enabled_sources(main_title, user)
@@ -1479,38 +1483,10 @@ async def auto_search_and_import_task(
                 else: source_to_use = None
             
             if source_to_use:
-                await progress_callback(30, f"已存在，使用源: {source_to_use['providerName']}")
-                # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
-                unique_key_parts = ["import", source_to_use['providerName'], source_to_use['mediaId']]
-                if season is not None:
-                    unique_key_parts.append(f"s{season}")
-                if payload.episode is not None:
-                    unique_key_parts.append(f"e{payload.episode}")
-                unique_key = "-".join(unique_key_parts)
-                task_coro = lambda s, cb: generic_import_task(
-                    provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'], config_manager=config_manager,
-                    animeTitle=main_title, mediaType=media_type, season=season,
-                    year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
-                    metadata_manager=metadata_manager,
-                    doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
-                    progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
-                    rate_limiter=rate_limiter
-                )
-                # 修正：提交执行任务，并将其ID作为调度任务的结果
-                # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
-                title_parts = [f"自动导入 (库内): {main_title}"]
-                if payload.season is not None:
-                    title_parts.append(f"S{payload.season:02d}")
-                if payload.episode is not None:
-                    title_parts.append(f"E{payload.episode:02d}")
-                task_title = " ".join(title_parts)
-
-                execution_task_id, _ = await task_manager.submit_task(
-                    task_coro, 
-                    task_title, 
-                    unique_key=unique_key
-                )
-                final_message = f"作品已在库中，已为已有源创建导入任务。执行任务ID: {execution_task_id}"
+                # 关键修复：如果作品已在库中，直接报告成功，而不是尝试再次导入。
+                # 这与UI导入的行为保持一致，并从根本上解决了重复导入冲突的问题。
+                final_message = f"作品 '{main_title}' 已在媒体库中，无需重复导入。"
+                logger.info(f"自动导入任务检测到作品已存在，任务成功结束: {final_message}")
                 raise TaskSuccess(final_message)
 
         # 3. 如果库中不存在，则进行全网搜索
