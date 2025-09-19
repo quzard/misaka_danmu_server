@@ -1785,7 +1785,8 @@ async def auto_search_and_import_task(
 
         all_results.sort(
             key=lambda item: (
-                1 if item.type == media_type else 0,
+                # 移除媒体类型匹配，因为match接口会将电影识别为TV剧
+                # 1 if item.type == media_type else 0,
                 1 if season is not None and item.season == season else 0,
                 # 最高优先级：完全匹配的标题
                 1000 if item.title.strip() == main_title.strip() else 0,
@@ -1808,9 +1809,9 @@ async def auto_search_and_import_task(
         # 添加排序后的调试日志
         logger.info(f"排序后的前5个结果:")
         for i, item in enumerate(all_results[:5]):
-            type_match = "✓" if item.type == media_type else "✗"
             title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 类型匹配: {type_match}, 标题匹配: {title_match})")
+            similarity = fuzz.token_set_ratio(main_title, item.title)
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
         # 并行评估前3个最佳匹配项
         max_candidates = min(3, len(all_results))  # 最多评估3个候选项
         min_similarity_threshold = 75  # 最低相似度阈值
