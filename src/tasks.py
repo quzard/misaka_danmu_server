@@ -460,11 +460,15 @@ async def generic_import_task(
             msg = f"未能找到第 {currentEpisodeIndex} 集。" if currentEpisodeIndex else "未能获取到任何分集。"
             logger.error(f"任务失败: {msg} (provider='{provider}', media_id='{mediaId}')")
             raise ValueError(msg)
-
+        
+    # 修正：如果媒体类型是电影，则强制只处理第一个分集，并将其集数设为1。
+    # 这确保了无论刮削器返回什么，电影在数据库中始终被记录为S01E01。
     if mediaType == "movie" and episodes:
         logger.info(f"检测到媒体类型为电影，将只处理第一个分集 '{episodes[0].title}'。")
         episodes = episodes[:1]
-
+        if episodes:
+            episodes[0].episodeIndex = 1
+            
     # --- 数据库写入阶段 (pre-loop) ---
     await progress_callback(15, "正在准备数据库...")
     local_image_path = await download_image(imageUrl, session, manager, provider)
@@ -933,7 +937,7 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         logger.error(f"集数偏移任务失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
@@ -955,6 +959,9 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             manager=manager, # type: ignore
             task_manager=task_manager,
             rate_limiter=rate_limiter)
+    except TaskSuccess:
+        # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
+        raise
     except Exception as e:
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
@@ -1300,6 +1307,7 @@ async def auto_search_and_import_task(
         aliases = {search_term}
         main_title = search_term
         image_url = None
+        year = None # 修正：在使用前初始化 year 变量
         tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
         # 为后台任务创建一个虚拟用户对象
@@ -1397,9 +1405,18 @@ async def auto_search_and_import_task(
         if not existing_anime:
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
-            # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
-            existing_anime = await crud.find_anime_by_title_and_season(session, main_title, season)
+            
+            # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+            # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+            season_for_check = season
+            if media_type == 'movie' and season_for_check is None:
+                season_for_check = 1
+                logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
 
+            # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
+            existing_anime = await crud.find_anime_by_title_season_year(
+                session, main_title, season_for_check, year
+            )
         if existing_anime:
             # 修正：从 existing_anime 字典中安全地获取ID。
             # 不同的查询路径可能返回 'id' 或 'animeId' 作为键。
@@ -1494,12 +1511,17 @@ async def auto_search_and_import_task(
         # 1. 媒体类型是否匹配 (最优先)
         # 2. 如果请求指定了季度，季度是否匹配 (次优先)
         # 3. 标题相似度
-        # 4. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
-        # 5. 用户设置的源优先级 (最后)
+        # 4. 新增：对完全匹配或非常接近的标题给予巨大奖励
+        # 5. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
+        # 6. 用户设置的源优先级 (最后)
         all_results.sort(
             key=lambda item: (
                 1 if item.type == media_type else 0,
                 1 if season is not None and item.season == season else 0,
+                # 关键修复：为精确匹配的标题提供一个巨大的分数奖励，
+                # 这将确保 '游戏人生 零' 总是排在 '游戏人生' 前面。
+                # 使用 token_sort_ratio 是因为它对词序不敏感。
+                100 if fuzz.token_sort_ratio(main_title, item.title) > 95 else 0,
                 fuzz.token_set_ratio(main_title, item.title),
                 -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
                 -provider_order.get(item.provider, 999)

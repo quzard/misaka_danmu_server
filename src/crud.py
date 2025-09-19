@@ -167,8 +167,11 @@ async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Opti
     return dict(row) if row else None
 
 async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None) -> int:
-    """通过标题查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
+    """通过标题、季度和年份查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
+    # 修正：将年份也作为唯一性检查的一部分
     stmt = select(Anime).where(Anime.title == title, Anime.season == season)
+    if year:
+        stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     anime = result.scalar_one_or_none()
 
@@ -209,8 +212,10 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     Manually creates a new anime entry in the database, and automatically
     creates and links a default 'custom' source for it.
     """
-    # Check if an anime with the same title and season already exists
-    existing_anime = await find_anime_by_title_and_season(session, anime_data.title, anime_data.season)
+    # 修正：在重复检查时也包含年份
+    existing_anime = await find_anime_by_title_season_year(
+        session, anime_data.title, anime_data.season, anime_data.year
+    )
     if existing_anime:
         raise ValueError(f"作品 '{anime_data.title}' (第 {anime_data.season} 季) 已存在。")
 
@@ -379,19 +384,22 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_anime_by_title_and_season(session: AsyncSession, title: str, season: int) -> Optional[Dict[str, Any]]:
+async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
-    通过标题和季度查找番剧，返回一个简化的字典或None。
+    通过标题、季度和可选的年份查找番剧，返回一个简化的字典或None。
     """
     stmt = (
         select(
             Anime.id,
             Anime.title,
-            Anime.season
+            Anime.season,
+            Anime.year
         )
         .where(Anime.title == title, Anime.season == season)
         .limit(1)
     )
+    if year:
+        stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     row = result.mappings().first()
     return dict(row) if row else None
@@ -1379,22 +1387,33 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
 async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(MetadataSource).order_by(MetadataSource.displayOrder)
     result = await session.execute(stmt)
-    return [
-        {"providerName": s.providerName, "isEnabled": s.isEnabled, "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder, "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled}
-        for s in result.scalars()
-    ]
+    return [{
+        "providerName": s.providerName, "isEnabled": s.isEnabled,
+        "isAuxSearchEnabled": s.isAuxSearchEnabled, "displayOrder": s.displayOrder,
+        "useProxy": s.useProxy, "isFailoverEnabled": s.isFailoverEnabled,
+        "logRawResponses": s.logRawResponses
+    } for s in result.scalars()]
 
 async def update_metadata_sources_settings(session: AsyncSession, settings: List['models.MetadataSourceSettingUpdate']):
     for s in settings:
         is_aux_enabled = True if s.providerName == 'tmdb' else s.isAuxSearchEnabled
-        # 新增：确保 isFailoverEnabled 字段被正确处理
-        is_failover_enabled = s.isFailoverEnabled if hasattr(s, 'isFailoverEnabled') else False
         await session.execute(
             update(MetadataSource)
             .where(MetadataSource.providerName == s.providerName)
-            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder, useProxy=s.useProxy, isFailoverEnabled=is_failover_enabled)
+            .values(isAuxSearchEnabled=is_aux_enabled, displayOrder=s.displayOrder)
         )
     await session.commit()
+
+async def get_metadata_source_setting_by_name(session: AsyncSession, provider_name: str) -> Optional[Dict[str, Any]]:
+    """获取单个元数据源的设置。"""
+    source = await session.get(MetadataSource, provider_name)
+    if source:
+        return {"useProxy": source.useProxy, "logRawResponses": source.logRawResponses}
+    return None
+
+async def update_metadata_source_specific_settings(session: AsyncSession, provider_name: str, settings: Dict[str, Any]):
+    """更新单个元数据源的特定设置（如 logRawResponses）。"""
+    await session.execute(update(MetadataSource).where(MetadataSource.providerName == provider_name).values(**settings))
 
 async def get_enabled_aux_metadata_sources(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有已启用辅助搜索的元数据源。"""
@@ -1652,6 +1671,14 @@ async def increment_token_call_count(session: AsyncSession, token_id: int):
     # 总是更新最后调用时间
     token.lastCallAt = get_now()
     # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
+
+async def reset_all_token_daily_counts(session: AsyncSession) -> int:
+    """重置所有API Token的每日调用次数为0。"""
+    from sqlalchemy import update
+    stmt = update(ApiToken).values(dailyCallCount=0)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
 
 # --- UA Filter and Log Services ---
 
