@@ -1733,8 +1733,25 @@ async def auto_search_and_import_task(
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
-            # 修正：使用更智能的模糊匹配来提高准确率，与UI搜索逻辑保持一致
-            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+
+            # 更严格的匹配逻辑：
+            # 1. 完全匹配或高相似度匹配
+            # 2. 标题长度差异不能太大（避免"复仇者"匹配"复仇者联盟2：奥创纪元"）
+            is_relevant = False
+            for alias in normalized_filter_aliases:
+                similarity = fuzz.partial_ratio(normalized_item_title, alias)
+                length_diff = abs(len(normalized_item_title) - len(alias))
+
+                # 完全匹配或非常高的相似度
+                if similarity >= 95:
+                    is_relevant = True
+                    break
+                # 高相似度但标题长度差异不大
+                elif similarity >= 85 and length_diff <= max(len(alias) * 0.3, 10):
+                    is_relevant = True
+                    break
+
+            if is_relevant:
                 filtered_results.append(item)
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         all_results = filtered_results
@@ -1761,10 +1778,12 @@ async def auto_search_and_import_task(
                 1000 if item.title.strip() == main_title.strip() else 0,
                 # 次高优先级：去除标点符号后的完全匹配
                 500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
-                # 第三优先级：高相似度匹配（95%以上）
-                100 if fuzz.token_sort_ratio(main_title, item.title) > 95 else 0,
-                # 第四优先级：一般相似度
-                fuzz.token_set_ratio(main_title, item.title),
+                # 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                200 if (fuzz.token_sort_ratio(main_title, item.title) > 98 and abs(len(item.title) - len(main_title)) <= 10) else 0,
+                # 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                100 if (fuzz.token_sort_ratio(main_title, item.title) > 95 and abs(len(item.title) - len(main_title)) <= 20) else 0,
+                # 第五优先级：一般相似度，但必须达到85%以上才考虑
+                fuzz.token_set_ratio(main_title, item.title) if fuzz.token_set_ratio(main_title, item.title) >= 85 else 0,
                 # 惩罚标题长度差异大的结果
                 -abs(len(item.title) - len(main_title)),
                 # 最后考虑源优先级
@@ -1774,8 +1793,15 @@ async def auto_search_and_import_task(
         )
         best_match = all_results[0]
 
+        # 安全检查：如果最佳匹配的相似度太低，拒绝自动导入
+        best_similarity = fuzz.token_set_ratio(main_title, best_match.title)
+        min_similarity_threshold = 80  # 最低相似度阈值
+
+        if best_similarity < min_similarity_threshold:
+            raise ValueError(f"最佳匹配项 '{best_match.title}' 与搜索标题 '{main_title}' 的相似度过低 ({best_similarity}%)，拒绝自动导入。")
+
         # 记录选择的最佳匹配项，以便调试
-        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season})")
+        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {best_similarity}%)")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
