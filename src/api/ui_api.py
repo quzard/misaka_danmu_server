@@ -1932,7 +1932,9 @@ async def delete_bulk_sources_task(source_ids: List[int], session: AsyncSession,
         progress = int((i / total) * 100)
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {source_id})...")
         try:
-            source = await session.get(orm_models.AnimeSource, source_id)
+            source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == source_id)
+            source_result = await session.execute(source_stmt)
+            source = source_result.scalar_one_or_none()
             if source:
                 await session.delete(source)
                 await session.commit()
