@@ -1486,6 +1486,48 @@ async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: in
     await session.execute(stmt)
     await session.commit()
 
+async def is_system_task(session: AsyncSession, task_id: str) -> bool:
+    """检查是否为系统内置任务"""
+    system_task_ids = ["system_token_reset"]
+    return task_id in system_task_ids
+
+async def delete_scheduled_task(session: AsyncSession, task_id: str) -> bool:
+    """删除定时任务，但不允许删除系统内置任务"""
+    # 检查是否为系统任务
+    if await is_system_task(session, task_id):
+        raise ValueError("不允许删除系统内置任务。")
+    
+    task = await session.get(orm_models.ScheduledTask, task_id)
+    if not task:
+        return False
+    
+    await session.delete(task)
+    await session.commit()
+    return True
+
+async def update_scheduled_task(
+    session: AsyncSession, 
+    task_id: str, 
+    name: str, 
+    cron: str, 
+    is_enabled: bool
+) -> bool:
+    """更新定时任务，但不允许修改系统内置任务的关键属性"""
+    task = await session.get(orm_models.ScheduledTask, task_id)
+    if not task:
+        return False
+    
+    # 系统任务只允许修改启用状态
+    if await is_system_task(session, task_id):
+        task.isEnabled = is_enabled
+    else:
+        task.name = name
+        task.cronExpression = cron
+        task.isEnabled = is_enabled
+    
+    await session.commit()
+    return True
+
 async def check_duplicate_import(
     session: AsyncSession,
     provider: str,
