@@ -1757,12 +1757,17 @@ async def auto_search_and_import_task(
             key=lambda item: (
                 1 if item.type == media_type else 0,
                 1 if season is not None and item.season == season else 0,
-                # 关键修复：为精确匹配的标题提供一个巨大的分数奖励，
-                # 这将确保 '游戏人生 零' 总是排在 '游戏人生' 前面。
-                # 使用 token_sort_ratio 是因为它对词序不敏感。
+                # 最高优先级：完全匹配的标题
+                1000 if item.title.strip() == main_title.strip() else 0,
+                # 次高优先级：去除标点符号后的完全匹配
+                500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
+                # 第三优先级：高相似度匹配（95%以上）
                 100 if fuzz.token_sort_ratio(main_title, item.title) > 95 else 0,
+                # 第四优先级：一般相似度
                 fuzz.token_set_ratio(main_title, item.title),
-                -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
+                # 惩罚标题长度差异大的结果
+                -abs(len(item.title) - len(main_title)),
+                # 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
