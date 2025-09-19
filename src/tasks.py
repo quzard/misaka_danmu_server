@@ -678,9 +678,15 @@ async def edited_import_task(
         if source_id:
             existing_episodes = []
             for episode in episodes:
-                episode_exists = await crud.find_episode_by_index(session, anime_id, episode.episodeIndex)
-                if episode_exists and episode_exists.danmakuFilePath and episode_exists.commentCount > 0:
-                    existing_episodes.append(episode.episodeIndex)
+                # 获取所有相关的episode IDs
+                episode_ids = await crud.get_related_episode_ids(session, anime_id, episode.episodeIndex)
+                if episode_ids:
+                    # 检查是否有任何一个episode已经有弹幕
+                    for episode_id in episode_ids:
+                        existing_episode = await session.get(orm_models.Episode, episode_id)
+                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                            existing_episodes.append(episode.episodeIndex)
+                            break  # 找到一个有弹幕的就够了
 
             if existing_episodes:
                 episode_list = ", ".join(map(str, existing_episodes))
