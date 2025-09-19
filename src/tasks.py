@@ -1753,7 +1753,15 @@ async def auto_search_and_import_task(
 
             if is_relevant:
                 filtered_results.append(item)
+
+        # 详细记录保留的结果
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        if filtered_results:
+            logger.info("保留的结果列表:")
+            for i, item in enumerate(filtered_results[:20], 1):  # 最多显示前20个
+                logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type})")
+            if len(filtered_results) > 20:
+                logger.info(f"  ... 还有 {len(filtered_results) - 20} 个结果未显示")
         all_results = filtered_results
 
         if not all_results:
@@ -1791,17 +1799,36 @@ async def auto_search_and_import_task(
             ),
             reverse=True # 按得分从高到低排序
         )
-        best_match = all_results[0]
+        # 并行评估前3个最佳匹配项
+        max_candidates = min(3, len(all_results))  # 最多评估3个候选项
+        min_similarity_threshold = 75  # 最低相似度阈值
 
-        # 安全检查：如果最佳匹配的相似度太低，拒绝自动导入
-        best_similarity = fuzz.token_set_ratio(main_title, best_match.title)
-        min_similarity_threshold = 80  # 最低相似度阈值
+        # 同时计算前3个候选项的相似度
+        candidates_with_similarity = []
+        for i in range(max_candidates):
+            candidate = all_results[i]
+            similarity = fuzz.token_set_ratio(main_title, candidate.title)
+            candidates_with_similarity.append({
+                'candidate': candidate,
+                'similarity': similarity,
+                'rank': i + 1
+            })
+            logger.info(f"候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
 
-        if best_similarity < min_similarity_threshold:
-            raise ValueError(f"最佳匹配项 '{best_match.title}' 与搜索标题 '{main_title}' 的相似度过低 ({best_similarity}%)，拒绝自动导入。")
+        # 按优先级选择：优先选择排名最高且符合阈值的候选项
+        best_match = None
+        for item in candidates_with_similarity:  # 已经按排名顺序
+            if item['similarity'] >= min_similarity_threshold:
+                best_match = item['candidate']
+                logger.info(f"自动导入：选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {item['similarity']}%)")
+                break
+            else:
+                logger.debug(f"候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
 
-        # 记录选择的最佳匹配项，以便调试
-        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {best_similarity}%)")
+        if best_match is None:
+            logger.warning(f"经过并行评估 {max_candidates} 个候选项，未找到相似度达到 {min_similarity_threshold}% 的匹配项，跳过自动导入。")
+            logger.info("匹配后备任务完成，但未找到足够相似的匹配项进行自动导入。")
+            return  # 直接返回，不抛出异常
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
