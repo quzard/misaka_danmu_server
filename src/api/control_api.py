@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import exc
 
 from .. import crud, models, tasks, utils
-from ..rate_limiter import RateLimiter
+from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
