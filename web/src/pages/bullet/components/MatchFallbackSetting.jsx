@@ -1,5 +1,5 @@
 import { Card, Form, Switch, Input, Button, Space, Tooltip } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { getMatchFallback, setMatchFallback, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
@@ -11,7 +11,7 @@ export const MatchFallbackSetting = () => {
   const [customPathEnabled, setCustomPathEnabled] = useState(false)
   const messageApi = useMessage()
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       setLoading(true)
       const [fallbackRes, pathRes] = await Promise.all([
@@ -31,11 +31,11 @@ export const MatchFallbackSetting = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [form, messageApi])
 
   useEffect(() => {
     fetchSettings()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchSettings]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleValueChange = async changedValues => {
     try {
