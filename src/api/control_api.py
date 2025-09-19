@@ -177,23 +177,14 @@ class ControlDirectImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
     resultIndex: int = Field(..., alias="result_index", ge=0, description="要导入的结果的索引 (从0开始)")
     # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
-    tmdbId: Optional[str] = ""
-    tvdbId: Optional[str] = ""
-    bangumiId: Optional[str] = ""
-    imdbId: Optional[str] = ""
-    doubanId: Optional[str] = ""
+    tmdbId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    imdbId: Optional[str] = None
+    doubanId: Optional[str] = None
 
     class Config:
         populate_by_name = True
-
-    @model_validator(mode='before')
-    @classmethod
-    def empty_str_for_none(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if key in cls.model_fields and value is None:
-                    data[key] = ""
-        return data
 
 class ControlAnimeCreateRequest(BaseModel):
     """用于外部API自定义创建影视条目的请求模型"""
@@ -208,26 +199,17 @@ class ControlAnimeCreateRequest(BaseModel):
     aliasCn2: Optional[str] = Field(None, description="中文别名2")
     aliasCn3: Optional[str] = Field(None, description="中文别名3")
     # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
-    tmdbId: Optional[str] = ""
-    tvdbId: Optional[str] = ""
-    bangumiId: Optional[str] = ""
-    imdbId: Optional[str] = ""
-    doubanId: Optional[str] = ""
+    tmdbId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    imdbId: Optional[str] = None
+    doubanId: Optional[str] = None
 
     @model_validator(mode='after')
     def check_season_for_tv_series(self):
         if self.type == 'tv_series' and self.season is None:
             raise ValueError('对于电视节目 (tv_series)，季度 (season) 是必需的。')
         return self
-    
-    @model_validator(mode='before')
-    @classmethod
-    def empty_str_for_none(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if key in cls.model_fields and value is None:
-                    data[key] = ""
-        return data
 
 class ControlEditedImportRequest(BaseModel):
     searchId: str = Field(..., description="来自搜索响应的searchId")
@@ -235,24 +217,15 @@ class ControlEditedImportRequest(BaseModel):
     title: Optional[str] = Field(None, description="覆盖原始标题")
     episodes: List[models.ProviderEpisodeInfo] = Field(..., description="编辑后的分集列表")
     # 修正：将可选的元数据ID移到模型末尾，以改善文档显示顺序
-    tmdbId: Optional[str] = ""
-    tvdbId: Optional[str] = ""
-    bangumiId: Optional[str] = ""
-    imdbId: Optional[str] = ""
-    doubanId: Optional[str] = ""
-    tmdbEpisodeGroupId: Optional[str] = Field("", description="强制指定TMDB剧集组ID")
+    tmdbId: Optional[str] = None
+    tvdbId: Optional[str] = None
+    bangumiId: Optional[str] = None
+    imdbId: Optional[str] = None
+    doubanId: Optional[str] = None
+    tmdbEpisodeGroupId: Optional[str] = Field(None, description="强制指定TMDB剧集组ID")
 
     class Config:
         populate_by_name = True
-
-    @model_validator(mode='before')
-    @classmethod
-    def empty_str_for_none(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if key in cls.model_fields and value is None:
-                    data[key] = ""
-        return data
 
 class ControlUrlImportRequest(BaseModel):
     """用于外部API通过URL导入到指定源的请求模型"""
