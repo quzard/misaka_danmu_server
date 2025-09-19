@@ -1178,7 +1178,7 @@ async def webhook_search_and_dispatch_task(
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        existing_anime = await crud.find_anime_by_title_and_season(session, animeTitle, season)
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season)
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
