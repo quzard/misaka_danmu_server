@@ -300,17 +300,19 @@ async def _import_episodes_iteratively(
                 logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
             else:
                 # 其他分集正常获取
-                await rate_limiter.acquire()
+                await rate_limiter.check(scraper.provider_name)
                 
                 sub_progress_callback = lambda p, msg: progress_callback(
                     base_progress + int(p * 0.6 / len(episodes)), msg
                 )
                 
                 comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+                
+                # 只有在实际进行了网络请求时才增加计数
+                if comments is not None:
+                    await rate_limiter.increment(scraper.provider_name)
 
             if comments is not None:
-                await rate_limiter.increment(scraper.provider_name)
-                
                 episode_db_id = await crud.create_episode_if_not_exists(
                     session, anime_id, source_id, episode.episodeIndex, 
                     episode.title, episode.url, episode.episodeId
@@ -451,8 +453,9 @@ async def generic_import_task(
     await progress_callback(20, f"正在验证数据源有效性: {first_episode.title}")
     
     try:
-        await rate_limiter.acquire()
+        await rate_limiter.check(scraper.provider_name)
         first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
+        await rate_limiter.increment(scraper.provider_name)
         
         if first_comments:
             first_episode_success = True
@@ -545,8 +548,9 @@ async def edited_import_task(
     first_episode_comments = None
     
     try:
-        await rate_limiter.acquire()
-        first_episode_comments = await scraper.get_comments(first_episode.episodeId)
+        await rate_limiter.check(scraper.provider_name)
+        first_episode_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(10 + p * 0.1, msg))
+        await rate_limiter.increment(scraper.provider_name)
         
         if first_episode_comments:
             await progress_callback(20, "数据源验证成功，正在创建数据库条目...")
@@ -1482,7 +1486,7 @@ async def auto_search_and_import_task(
                     unique_key_parts.append(f"e{payload.episode}")
                 unique_key = "-".join(unique_key_parts)
                 task_coro = lambda s, cb: generic_import_task(
-                provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'], config_manager=config_manager,
+                    provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'], config_manager=config_manager,
                     animeTitle=main_title, mediaType=media_type, season=season,
                     year=source_to_use.get('year'), currentEpisodeIndex=payload.episode, imageUrl=image_url,
                     metadata_manager=metadata_manager,
