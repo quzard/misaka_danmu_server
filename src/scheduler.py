@@ -261,8 +261,8 @@ class SchedulerManager:
         if not job:
             raise ValueError(f"调度器中找不到ID为 '{task_id}' 的任务")
 
-        # 立即运行任务
-        runner = self._create_job_runner(job.func.keywords['job_type'], task_id)
+        # 修正：直接使用数据库中的 jobType，而不是从 job.func.keywords 获取
+        runner = self._create_job_runner(task_info['jobType'], task_id)
         await runner()
 
     async def run_task_now_by_type(self, job_type: str):
@@ -278,4 +278,5 @@ class SchedulerManager:
             raise ValueError(f"找不到类型为 '{job_type}' 的定时任务")
 
         await self.run_task_now(task_id)    
+
 
