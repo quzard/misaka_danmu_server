@@ -586,6 +586,7 @@ async def direct_import(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
