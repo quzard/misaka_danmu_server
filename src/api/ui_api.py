@@ -2170,7 +2170,8 @@ async def import_from_provider(
         media_type=request_data.type,
         season=request_data.season,
         year=request_data.year,
-        is_single_episode=request_data.currentEpisodeIndex is not None
+        is_single_episode=request_data.currentEpisodeIndex is not None,
+        episode_index=request_data.currentEpisodeIndex
     )
     if duplicate_reason:
         raise HTTPException(

@@ -437,7 +437,8 @@ async def auto_import(
         media_type=mediaType.value if mediaType else "tv_series",
         season=season,
         year=None, # 自动导入时年份未知，在任务内部获取
-        is_single_episode=episode is not None
+        is_single_episode=episode is not None,
+        episode_index=episode
     )
     # 仅当数据源已存在时才阻止创建任务。
     if duplicate_reason and "数据源已存在" in duplicate_reason:
@@ -619,7 +620,8 @@ async def direct_import(
         media_type=item_to_import.type,
         season=item_to_import.season,
         year=item_to_import.year,
-        is_single_episode=item_to_import.currentEpisodeIndex is not None
+        is_single_episode=item_to_import.currentEpisodeIndex is not None,
+        episode_index=item_to_import.currentEpisodeIndex
     )
     if duplicate_reason:
         raise HTTPException(
@@ -745,7 +747,8 @@ async def edited_import(
         media_type=item_to_import.type,
         season=item_to_import.season,
         year=item_to_import.year,
-        is_single_episode=False # 编辑导入总是视为全量导入
+        is_single_episode=False, # 编辑导入总是视为全量导入
+        episode_index=None
     )
     # 对于编辑后导入，如果作品已存在，我们允许关联。但如果数据源已存在，则阻止。
     # 这是一个权衡，与UI行为保持一致。

@@ -475,8 +475,13 @@ async def generic_import_task(
             # 创建主条目
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
-                session, title_to_use, mediaType, season_to_use, year,
-                imageUrl, local_image_path, year
+                session, 
+                title_to_use, 
+                mediaType, 
+                season_to_use,
+                imageUrl, 
+                local_image_path, 
+                year
             )
             
             # 更新元数据

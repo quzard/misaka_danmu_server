@@ -713,6 +713,15 @@ async def check_source_exists_by_media_id(session: AsyncSession, provider_name: 
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
+async def get_anime_id_by_source_media_id(session: AsyncSession, provider_name: str, media_id: str) -> Optional[int]:
+    """通过数据源的provider和media_id获取对应的anime_id。"""
+    stmt = select(AnimeSource.animeId).where(
+        AnimeSource.providerName == provider_name,
+        AnimeSource.mediaId == media_id
+    ).limit(1)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
 async def link_source_to_anime(session: AsyncSession, anime_id: int, provider_name: str, media_id: str) -> int:
     """将一个外部数据源关联到一个番剧条目，如果关联已存在则直接返回其ID。"""
     # 修正：在链接源之前，确保该提供商在 scrapers 表中存在。
@@ -1553,7 +1562,8 @@ async def check_duplicate_import(
     media_type: str,
     season: Optional[int] = None,
     year: Optional[int] = None,
-    is_single_episode: bool = False
+    is_single_episode: bool = False,
+    episode_index: Optional[int] = None
 ) -> Optional[str]:
     """
     统一的重复导入检查函数
@@ -1562,21 +1572,32 @@ async def check_duplicate_import(
     # 1. 检查数据源是否已存在
     source_exists = await check_source_exists_by_media_id(session, provider, media_id)
     if source_exists:
+        # 对于单集导入，即使数据源存在，也要检查具体集数是否存在
+        if is_single_episode and episode_index is not None:
+            anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
+            if anime_id:
+                episode_exists = await find_episode_by_index(session, anime_id, episode_index)
+                if episode_exists:
+                    return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中，无需重复导入"
+                else:
+                    # 数据源存在但集数不存在，允许导入
+                    return None
+        # 对于全量导入或无法确定集数的情况，仍然阻止重复导入
         return f"该数据源已存在于弹幕库中"
-    
+
     if not is_single_episode:  # 只在全量导入时检查作品重复
         # 2. 检查作品是否已存在（标题+季度+年份都相同才算重复）
         season_for_check = season if season is not None else 1
         if media_type == 'movie':
             season_for_check = 1
-            
+
         existing_anime = await find_anime_by_title_season_year(
             session, anime_title, season_for_check, year
         )
         if existing_anime:
             year_info = f" ({year}年)" if year else ""
             return f"作品 '{anime_title}'{year_info} (第 {season_for_check} 季) 已存在于媒体库中"
-    
+
     return None
 
 async def update_config_value(session: AsyncSession, key: str, value: str):
