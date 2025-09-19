@@ -571,7 +571,7 @@ async def edited_import_task(
             # 创建条目
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
-                session, request_data.animeTitle, request_data.type,
+                session, request_data.animeTitle, request_data.mediaType,
                 request_data.season, request_data.imageUrl, local_image_path, request_data.year
             )
             

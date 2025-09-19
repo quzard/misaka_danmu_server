@@ -762,7 +762,7 @@ async def edited_import(
         mediaId=item_to_import.mediaId,
         # 修正：传递从搜索结果中获取的年份和海报URL
         animeTitle=payload.title or item_to_import.title,
-        type=item_to_import.type,
+        mediaType=item_to_import.type,
         season=item_to_import.season,
         year=item_to_import.year,
         episodes=payload.episodes,
