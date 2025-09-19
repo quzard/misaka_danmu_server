@@ -374,6 +374,17 @@ async def auto_import(
     if payload.searchType == AutoImportSearchType.KEYWORD and not payload.mediaType:
         raise HTTPException(status_code=400, detail="使用 keyword 搜索时，mediaType 字段是必需的。")
 
+    # 新增：如果不是关键词搜索，则检查所选的元数据源是否已启用
+    if payload.searchType != AutoImportSearchType.KEYWORD:
+        provider_name = payload.searchType.value
+        provider_setting = metadata_manager.source_settings.get(provider_name)
+        
+        if not provider_setting or not provider_setting.get('isEnabled'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"元信息搜索源 '{provider_name}' 未启用。请在“设置-元信息搜索源”页面中启用它。"
+            )
+
     if not await manager.acquire_search_lock(api_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -576,14 +587,23 @@ async def direct_import(
     if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_to_import = cached_results[payload.resultIndex]
+    item_to_import = cached_results[payload.resultIndex] # type: ignore
 
     # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
-    existing_anime = await crud.find_anime_by_title_and_season(session, item_to_import.title, item_to_import.season)
+    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+    # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+    season_for_check = item_to_import.season
+    if item_to_import.type == 'movie':
+        season_for_check = 1
+        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
+    existing_anime = await crud.find_anime_by_title_season_year(
+        session, item_to_import.title, season_for_check, item_to_import.year
+    )
     if existing_anime:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"作品 '{item_to_import.title}' (第 {item_to_import.season} 季) 已存在于媒体库中，无需重复导入。"
+            detail=f"作品 '{item_to_import.title}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
         )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -689,7 +709,22 @@ async def edited_import(
     if not (0 <= payload.resultIndex < len(cached_results)):
         raise HTTPException(status_code=400, detail="提供的 result_index 无效。")
         
-    item_info = cached_results[payload.resultIndex]
+    item_info = cached_results[payload.resultIndex] # type: ignore
+
+    # 新增：在提交任务前，检查媒体库中是否已存在同名同季度的作品
+    # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找。
+    title_for_check = payload.title or item_info.title
+    season_for_check = item_info.season
+    if item_info.type == 'movie':
+        season_for_check = 1
+        logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
+    existing_anime = await crud.find_anime_by_title_season_year(session, title_for_check, season_for_check, item_info.year)
+    if existing_anime:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"作品 '{title_for_check}' (第 {season_for_check} 季) 已存在于媒体库中，无需重复导入。"
+        )
 
     # Construct the full EditedImportRequest for the task
     task_payload = models.EditedImportRequest(
@@ -942,7 +977,9 @@ async def create_anime_entry(
     # Check for duplicates first
     # 修正：为非电视剧类型使用默认季度1进行重复检查
     season_for_check = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
-    existing_anime = await crud.find_anime_by_title_and_season(session, payload.title, season_for_check)
+    existing_anime = await crud.find_anime_by_title_season_year(
+        session, payload.title, season_for_check, payload.year
+    )
     if existing_anime:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

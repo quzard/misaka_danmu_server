@@ -3,7 +3,7 @@ import time
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Type, Tuple, TYPE_CHECKING
 from typing import Union
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -149,8 +149,10 @@ class BaseScraper(ABC):
     # 每个子类都必须覆盖这个类属性
     provider_name: str
 
-    # (可选) 子类可以覆盖此字典来声明其可配置的字段
-    configurable_fields: Dict[str, str] = {}
+    # (可选) 子类可以覆盖此字典来声明其可配置的字段。
+    # 格式: { "config_key": ("UI显示的标签", "字段类型", "UI上的提示信息") }
+    # 支持的字段类型: "string", "boolean", "password"
+    configurable_fields: Dict[str, Tuple[str, str, str]] = {}
 
     # (新增) 子类应覆盖此列表，声明它们可以处理的域名
     handled_domains: List[str] = []
