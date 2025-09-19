@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSON
 from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
 import json
 from .config_manager import ConfigManager
-from .database import init_db_tables, close_db_engine, create_initial_admin_user # type: ignore
+from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api import api_router, control_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
@@ -21,7 +21,7 @@ from .scraper_manager import ScraperManager
 from .webhook_manager import WebhookManager
 from .scheduler import SchedulerManager
 from .config import settings
-from . import crud, security
+from . import crud, security, orm_models  # 添加 orm_models 导入
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
