@@ -22,4 +22,4 @@ database:
 jwt:
   secret_key: "your_super_secret_key_for_jwt_please_change_it" # 请务必修改为一个复杂且唯一的密钥, 建议通过环境变量覆盖
   algorithm: "HS256"
-  access_token_expire_minutes: 1440 # 令牌有效期（分钟），例如 1天
+  access_token_expire_minutes: 4320 # 令牌有效期（分钟），例如 3天

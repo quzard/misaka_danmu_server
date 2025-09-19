@@ -26,7 +26,7 @@ class DatabaseConfig(BaseModel):
 class JWTConfig(BaseModel):
     secret_key: str = "a_very_secret_key_that_should_be_changed"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440 # 1 day
+    access_token_expire_minutes: int = 4320 # 3 days
 
 # 4. (新增) 初始管理员配置
 class AdminConfig(BaseModel):
