@@ -641,11 +641,13 @@ async def direct_import(
             provider=item_to_import.provider,
             mediaId=item_to_import.mediaId,
             animeTitle=item_to_import.title, 
+            # 修正：传递从搜索结果中获取的年份和海报URL
             mediaType=item_to_import.type,
-            season=item_to_import.season, 
+            season=item_to_import.season,
+            year=item_to_import.year,
             currentEpisodeIndex=item_to_import.currentEpisodeIndex,
-            imageUrl=item_to_import.imageUrl, 
-            year=item_to_import.year, doubanId=payload.doubanId,
+            imageUrl=item_to_import.imageUrl,
+            doubanId=payload.doubanId,
             metadata_manager=metadata_manager, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
@@ -771,7 +773,8 @@ async def edited_import(
     edited_request = models.EditedImportRequest(
         provider=item_to_import.provider,
         mediaId=item_to_import.mediaId,
-        animeTitle=payload.animeTitle or item_to_import.title,
+        # 修正：传递从搜索结果中获取的年份和海报URL
+        animeTitle=payload.title or item_to_import.title,
         type=item_to_import.type,
         season=item_to_import.season,
         year=item_to_import.year,
@@ -781,7 +784,8 @@ async def edited_import(
         tvdbId=payload.tvdbId,
         doubanId=payload.doubanId,
         bangumiId=payload.bangumiId,
-        tmdbEpisodeGroupId=payload.tmdbEpisodeGroupId
+        tmdbEpisodeGroupId=payload.tmdbEpisodeGroupId,
+        imageUrl=item_to_import.imageUrl
     )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。

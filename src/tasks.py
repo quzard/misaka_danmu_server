@@ -1344,7 +1344,7 @@ async def auto_search_and_import_task(
         aliases = {search_term}
         main_title = search_term
         image_url = None
-        year = None # 修正：在使用前初始化 year 变量
+        year: Optional[int] = None
         tmdb_id, bangumi_id, douban_id, tvdb_id, imdb_id = None, None, None, None, None
 
         # 为后台任务创建一个虚拟用户对象
@@ -1411,6 +1411,8 @@ async def auto_search_and_import_task(
                 details.tvdbId, details.imdbId
             )
             if hasattr(details, 'type') and details.type:
+                media_type = details.type
+            if hasattr(details, 'year') and details.year:
                 media_type = details.type
             
             logger.info(f"正在为 '{main_title}' 从其他源获取更多别名...")
