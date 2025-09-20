@@ -65,7 +65,24 @@ class SchedulerManager:
         """
         动态发现并加载 'jobs' 目录下的所有任务类。
         """
-        jobs_package_path = [str(Path("/app/src/jobs"))]
+        def _is_docker_environment():
+            """检测是否在Docker容器中运行"""
+            import os
+            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+            if Path("/.dockerenv").exists():
+                return True
+            # 方法2: 检查环境变量
+            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                return True
+            # 方法3: 检查当前工作目录是否为 /app
+            if Path.cwd() == Path("/app"):
+                return True
+            return False
+
+        if _is_docker_environment():
+            jobs_package_path = [str(Path("/app/src/jobs"))]
+        else:
+            jobs_package_path = [str(Path("src/jobs"))]
         for finder, name, ispkg in pkgutil.iter_modules(jobs_package_path):
             if name.startswith("_") or name == "base":
                 continue

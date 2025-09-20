@@ -35,7 +35,15 @@ def _get_image_dir():
         return Path("config/image")
 
 IMAGE_DIR = _get_image_dir()
-IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+def _ensure_image_dir():
+    """确保图片目录存在"""
+    try:
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        logger.warning(f"无法创建图片目录 {IMAGE_DIR}: {e}")
+
+# 延迟创建目录，避免在模块加载时就尝试创建
 
 async def download_image(image_url: Optional[str], session: AsyncSession, scraper_manager: ScraperManager, provider_name: Optional[str] = None) -> Optional[str]:
     """
@@ -50,6 +58,9 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
     """
     if not image_url:
         return None
+
+    # 确保图片目录存在
+    _ensure_image_dir()
 
     # --- Start of new proxy logic ---
     proxy_url = await crud.get_config_value(session, "proxyUrl", "")
