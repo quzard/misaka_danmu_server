@@ -2777,8 +2777,22 @@ async def set_custom_danmaku_path(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """设置自定义弹幕路径配置"""
+    logger.info(f"收到自定义弹幕路径配置请求: enabled={request.enabled}, template={request.template}")
+
+    # 验证模板格式
+    if request.enabled.lower() == 'true' and request.template:
+        try:
+            from src.path_template import DanmakuPathTemplate
+            # 尝试创建模板对象来验证格式
+            DanmakuPathTemplate(request.template)
+            logger.info(f"模板验证成功: {request.template}")
+        except Exception as e:
+            logger.error(f"模板验证失败: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径模板格式错误: {str(e)}")
+
     await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
     await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
     config_manager.invalidate("customDanmakuPathEnabled")
     config_manager.invalidate("customDanmakuPathTemplate")
+    logger.info(f"自定义弹幕路径配置已保存")
     return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
