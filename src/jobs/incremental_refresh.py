@@ -58,7 +58,8 @@ class IncrementalRefreshJob(BaseJob):
                         doubanId=None, tmdbId=info.get("tmdbId"), imdbId=None, tvdbId=None,
                         bangumiId=info.get("bangumiId"), metadata_manager=self.metadata_manager,
                         progress_callback=cb, session=s, manager=self.scraper_manager,
-                        task_manager=self.task_manager, rate_limiter=self.rate_limiter
+                        task_manager=self.task_manager, rate_limiter=self.rate_limiter,
+                        config_manager=self.config_manager
                     )
                 
                 try:
