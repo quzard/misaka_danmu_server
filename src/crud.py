@@ -27,10 +27,23 @@ from .path_template import DanmakuPathTemplate, create_danmaku_context
 logger = logging.getLogger(__name__)
 
 # --- 新增：文件存储相关常量和辅助函数 ---
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
 def _get_base_dir():
     """获取基础目录，根据运行环境自动调整"""
-    # 检查是否在容器环境中运行
-    if Path("/app").exists() and Path("/app/config").exists():
+    if _is_docker_environment():
         return Path("/app")
     else:
         # 源码运行环境，使用当前工作目录

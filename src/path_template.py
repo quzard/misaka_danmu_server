@@ -81,9 +81,23 @@ class DanmakuPathTemplate:
         except Exception as e:
             logger.error(f"生成弹幕路径失败: {e}, 模板: {self.template}, 上下文: {context}")
             # 回退到默认路径
+            def _is_docker_environment():
+                """检测是否在Docker容器中运行"""
+                import os
+                # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+                if Path("/.dockerenv").exists():
+                    return True
+                # 方法2: 检查环境变量
+                if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                    return True
+                # 方法3: 检查当前工作目录是否为 /app
+                if Path.cwd() == Path("/app"):
+                    return True
+                return False
+
             def _get_default_path():
                 """根据运行环境获取默认路径"""
-                if Path("/app").exists() and Path("/app/config").exists():
+                if _is_docker_environment():
                     # 容器环境
                     return f"/app/config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
                 else:
