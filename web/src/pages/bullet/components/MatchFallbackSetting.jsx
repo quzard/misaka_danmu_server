@@ -109,7 +109,6 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <Form.Item
-          name="customDanmakuPathTemplate"
           label={
             <Space>
               弹幕文件保存路径
@@ -120,11 +119,15 @@ export const MatchFallbackSetting = () => {
           }
         >
           <Space.Compact style={{ width: '100%' }}>
-            <Input
-              placeholder="自定义保存路径"
-              style={{ flex: 1 }}
-              disabled={!customPathEnabled}
-            />
+            <Form.Item
+              name="customDanmakuPathTemplate"
+              style={{ flex: 1, marginBottom: 0 }}
+            >
+              <Input
+                placeholder="自定义保存路径"
+                disabled={!customPathEnabled}
+              />
+            </Form.Item>
             <Button onClick={handlePathReset} disabled={!customPathEnabled}>
               重置
             </Button>

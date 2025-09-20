@@ -81,7 +81,16 @@ class DanmakuPathTemplate:
         except Exception as e:
             logger.error(f"生成弹幕路径失败: {e}, 模板: {self.template}, 上下文: {context}")
             # 回退到默认路径
-            return Path(f"/app/config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml")
+            def _get_default_path():
+                """根据运行环境获取默认路径"""
+                if Path("/app").exists() and Path("/app/config").exists():
+                    # 容器环境
+                    return f"/app/config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
+                else:
+                    # 源码运行环境
+                    return f"config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
+
+            return Path(_get_default_path())
     
     def _prepare_context(self, context: Dict[str, Any]) -> Dict[str, str]:
         """准备和清理上下文变量"""

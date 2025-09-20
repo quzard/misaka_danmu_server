@@ -12,7 +12,16 @@ from .scraper_manager import ScraperManager
 logger = logging.getLogger(__name__)
 
 # 图片存储在 config/image/ 目录下
-IMAGE_DIR = Path("/app/config/image")
+def _get_image_dir():
+    """获取图片目录，根据运行环境自动调整"""
+    # 检查是否在容器环境中运行
+    if Path("/app").exists() and Path("/app/config").exists():
+        return Path("/app/config/image")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path("config/image")
+
+IMAGE_DIR = _get_image_dir()
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 async def download_image(image_url: Optional[str], session: AsyncSession, scraper_manager: ScraperManager, provider_name: Optional[str] = None) -> Optional[str]:

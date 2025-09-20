@@ -27,7 +27,17 @@ from .path_template import DanmakuPathTemplate, create_danmaku_context
 logger = logging.getLogger(__name__)
 
 # --- 新增：文件存储相关常量和辅助函数 ---
-DANMAKU_BASE_DIR = Path("/app/config/danmaku")
+def _get_base_dir():
+    """获取基础目录，根据运行环境自动调整"""
+    # 检查是否在容器环境中运行
+    if Path("/app").exists() and Path("/app/config").exists():
+        return Path("/app")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path(".")
+
+BASE_DIR = _get_base_dir()
+DANMAKU_BASE_DIR = BASE_DIR / "config/danmaku"
 
 def _generate_xml_from_comments(
     comments: List[Dict[str, Any]], 
@@ -60,8 +70,12 @@ def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     if not web_path:
         return None
 
-    # 如果是绝对路径，直接返回Path对象
-    if web_path.startswith('/'):
+    # 如果是绝对路径，需要转换为相对路径
+    if web_path.startswith('/app/'):
+        # 移除 /app/ 前缀，转换为相对路径
+        return Path(web_path[5:])  # 移除 "/app/" 前缀
+    elif web_path.startswith('/'):
+        # 其他绝对路径保持不变（用户自定义的绝对路径）
         return Path(web_path)
 
     # 兼容旧的相对路径格式
@@ -127,8 +141,8 @@ async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=
         except Exception as e:
             logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
 
-    # 默认路径逻辑 - 转换为绝对路径
-    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"  # 绝对路径用于数据库存储
+    # 默认路径逻辑 - 使用相对路径
+    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"  # 保持数据库中的格式一致性
     absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
 
     return web_path, absolute_path
