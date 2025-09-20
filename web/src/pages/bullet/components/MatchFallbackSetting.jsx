@@ -23,7 +23,7 @@ export const MatchFallbackSetting = () => {
       form.setFieldsValue({
         matchFallbackEnabled: fallbackRes.data.value === 'true',
         customDanmakuPathEnabled: pathEnabled,
-        customDanmakuPathTemplate: pathRes.data.template || '/app/config/danmaku/${animeId}/${episodeId}'
+        customDanmakuPathTemplate: pathRes.data.template
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -70,6 +70,12 @@ export const MatchFallbackSetting = () => {
     } finally {
       setPathSaving(false)
     }
+  }
+
+  const handlePathReset = () => {
+    const defaultTemplate = '/app/config/danmaku/${animeId}/${episodeId}'
+    form.setFieldValue('customDanmakuPathTemplate', defaultTemplate)
+    messageApi.success('已重置为默认路径模板')
   }
 
   return (
@@ -119,6 +125,9 @@ export const MatchFallbackSetting = () => {
               style={{ flex: 1 }}
               disabled={!customPathEnabled}
             />
+            <Button onClick={handlePathReset} disabled={!customPathEnabled}>
+              重置
+            </Button>
             <Button type="primary" loading={pathSaving} onClick={handlePathSave}>
               保存
             </Button>
@@ -126,7 +135,7 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
-          <div>示例路径：/app/config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
+          <div>默认路径：/app/config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
           <div>支持的变量：$&#123;title&#125;, $&#123;season&#125;, $&#123;episode&#125;, $&#123;year&#125;, $&#123;provider&#125;, $&#123;animeId&#125;, $&#123;episodeId&#125;</div>
           <div>格式化选项：$&#123;season:02d&#125; 表示季度号补零到2位，$&#123;episode:03d&#125; 表示集数补零到3位</div>
         </div>
