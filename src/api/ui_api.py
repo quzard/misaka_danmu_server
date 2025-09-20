@@ -1515,6 +1515,53 @@ async def reset_api_token_counter(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     logger.info(f"用户 '{current_user.username}' 重置了 Token (ID: {token_id}) 的调用次数。")
 
+# --- 自定义弹幕路径配置 ---
+
+class CustomDanmakuPathRequest(BaseModel):
+    enabled: str
+    template: str
+
+class CustomDanmakuPathResponse(BaseModel):
+    enabled: str
+    template: str
+
+@router.get("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="获取自定义弹幕路径配置")
+async def get_custom_danmaku_path(
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取自定义弹幕路径配置"""
+    enabled = await crud.get_config_value(session, "customDanmakuPathEnabled", "false")
+    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/app/config/danmaku/${animeId}/${episodeId}")
+    return CustomDanmakuPathResponse(enabled=enabled, template=template)
+
+@router.put("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="设置自定义弹幕路径配置")
+async def set_custom_danmaku_path(
+    request: CustomDanmakuPathRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置自定义弹幕路径配置"""
+    logger.info(f"收到自定义弹幕路径配置请求: enabled={request.enabled}, template={request.template}")
+
+    # 验证模板格式
+    if request.enabled.lower() == 'true' and request.template:
+        try:
+            from src.path_template import DanmakuPathTemplate
+            # 尝试创建模板对象来验证格式
+            DanmakuPathTemplate(request.template)
+            logger.info(f"模板验证成功: {request.template}")
+        except Exception as e:
+            logger.error(f"模板验证失败: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径模板格式错误: {str(e)}")
+
+    await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
+    await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
+    config_manager.invalidate("customDanmakuPathEnabled")
+    config_manager.invalidate("customDanmakuPathTemplate")
+    logger.info(f"自定义弹幕路径配置已保存")
+    return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,
@@ -2750,49 +2797,4 @@ async def update_metadata_source_config(
         logger.error(f"更新元数据源 '{providerName}' 配置时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
 
-# --- 自定义弹幕路径配置 ---
 
-class CustomDanmakuPathRequest(BaseModel):
-    enabled: str
-    template: str
-
-class CustomDanmakuPathResponse(BaseModel):
-    enabled: str
-    template: str
-
-@router.get("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="获取自定义弹幕路径配置")
-async def get_custom_danmaku_path(
-    session: AsyncSession = Depends(get_db_session)
-):
-    """获取自定义弹幕路径配置"""
-    enabled = await crud.get_config_value(session, "customDanmakuPathEnabled", "false")
-    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/app/config/danmaku/${animeId}/${episodeId}")
-    return CustomDanmakuPathResponse(enabled=enabled, template=template)
-
-@router.put("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="设置自定义弹幕路径配置")
-async def set_custom_danmaku_path(
-    request: CustomDanmakuPathRequest,
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
-    """设置自定义弹幕路径配置"""
-    logger.info(f"收到自定义弹幕路径配置请求: enabled={request.enabled}, template={request.template}")
-
-    # 验证模板格式
-    if request.enabled.lower() == 'true' and request.template:
-        try:
-            from src.path_template import DanmakuPathTemplate
-            # 尝试创建模板对象来验证格式
-            DanmakuPathTemplate(request.template)
-            logger.info(f"模板验证成功: {request.template}")
-        except Exception as e:
-            logger.error(f"模板验证失败: {e}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径模板格式错误: {str(e)}")
-
-    await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
-    await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
-    config_manager.invalidate("customDanmakuPathEnabled")
-    config_manager.invalidate("customDanmakuPathTemplate")
-    logger.info(f"自定义弹幕路径配置已保存")
-    return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
