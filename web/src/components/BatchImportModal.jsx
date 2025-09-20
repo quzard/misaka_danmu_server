@@ -435,22 +435,20 @@ const SortableItem = ({
     }
   }, [isNumberFocused, item.episodeIndex])
 
-  // 拖拽样式
+  // 只保留必要的样式，移除会阻止滚动的touchAction
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    cursor: 'grab',
-    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
-    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 
   return (
-    <List.Item ref={setNodeRef} style={style} {...attributes}>
+    <List.Item ref={setNodeRef} style={style}>
       {/* 保留你原有的列表项渲染逻辑 */}
       <div className="w-full flex items-center justify-between">
-        <div {...listeners} style={{ cursor: 'grab' }}>
+        {/* 将attributes移到拖拽图标容器上，确保只有拖拽图标可触发拖拽 */}
+        <div {...attributes} {...listeners} style={{ cursor: 'grab' }}>
           <MyIcon icon="drag" size={24} />
         </div>
         <div className="w-full flex items-center justify-start gap-3">
