@@ -1,11 +1,12 @@
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from typing import Optional
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
-_app_timezone: ZoneInfo | None = None
+_app_timezone: Optional[ZoneInfo] = None
 
 def get_app_timezone() -> ZoneInfo:
     """
