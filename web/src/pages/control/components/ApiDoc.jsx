@@ -20,7 +20,7 @@ export const ApiDoc = () => {
             className="w-full"
             style={{
               height: `calc(100vh - 300px)`,
-              backgroundColor: 'white',
+              backgroundColor: '#fff9fb',
             }}
             src="/api/control/docs"
           ></iframe>
