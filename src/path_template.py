@@ -18,6 +18,7 @@
 """
 
 import re
+import os
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -75,6 +76,12 @@ class DanmakuPathTemplate:
             # 自动添加.xml后缀（如果没有的话）
             if not resolved_path.endswith('.xml'):
                 resolved_path += '.xml'
+
+            # 处理路径分隔符，确保跨平台兼容性
+            # 将Unix风格的路径分隔符转换为当前系统的分隔符
+            if '/' in resolved_path and not resolved_path.startswith('/'):
+                # 相对路径，转换分隔符
+                resolved_path = resolved_path.replace('/', os.sep)
 
             return Path(resolved_path)
             
@@ -204,9 +211,12 @@ def create_danmaku_context(anime_title: str, season: int, episode_index: int,
 # 预定义的路径模板示例（.xml后缀会自动添加）
 TEMPLATE_EXAMPLES = {
     'default': '/app/config/danmaku/${animeId}/${episodeId}',
-    'organized_by_title': '/downloads/弹幕/${title}/${title} - S${season:02d}E${episode:02d}',
-    'qbittorrent_style': '/downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}',
-    'plex_style': '/media/动漫/${title} (${year})/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}',
-    'emby_style': '/media/动漫/${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}',
-    'simple': '/弹幕/${title}/${episode:03d}'
+    'organized_by_title': 'downloads/弹幕/${title}/${title} - S${season:02d}E${episode:02d}',
+    'qbittorrent_style': 'downloads/QB下载/动漫/${title}/Season ${season}/${title} - S${season:02d}E${episode:02d}',
+    'plex_style': 'media/动漫/${title} (${year})/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}',
+    'emby_style': 'media/动漫/${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}',
+    'simple': '弹幕/${title}/${episode:03d}',
+    # Windows绝对路径示例
+    'windows_absolute': 'D:/弹幕/${title}/${title} - S${season:02d}E${episode:02d}',
+    'windows_downloads': 'C:/Users/${username}/Downloads/弹幕/${title}/${episode:03d}'
 }

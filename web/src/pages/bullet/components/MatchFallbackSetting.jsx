@@ -112,7 +112,7 @@ export const MatchFallbackSetting = () => {
           label={
             <Space>
               弹幕文件保存路径
-              <Tooltip title="支持变量：${title}(标题), ${season}(季度), ${episode}(集数), ${year}(年份), ${provider}(提供商), ${animeId}(动画ID), ${episodeId}(分集ID)。格式化：${season:02d}表示两位数字补零。.xml后缀会自动添加。">
+              <Tooltip title="支持变量：${title}(标题), ${season}(季度), ${episode}(集数), ${year}(年份), ${provider}(提供商), ${animeId}(动画ID), ${episodeId}(分集ID)。格式化：${season:02d}表示两位数字补零。.xml后缀会自动添加。Windows系统可使用绝对路径如：D:/弹幕/${title}/${episode:03d}">
                 <QuestionCircleOutlined />
               </Tooltip>
             </Space>
@@ -138,7 +138,8 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
-          <div>默认路径：/app/config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
+          <div>默认路径：config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
+          <div>Windows绝对路径示例：D:/弹幕/$&#123;title&#125;/$&#123;episode:03d&#125;</div>
           <div>支持的变量：$&#123;title&#125;, $&#123;season&#125;, $&#123;episode&#125;, $&#123;year&#125;, $&#123;provider&#125;, $&#123;animeId&#125;, $&#123;episodeId&#125;</div>
           <div>格式化选项：$&#123;season:02d&#125; 表示季度号补零到2位，$&#123;episode:03d&#125; 表示集数补零到3位</div>
         </div>
