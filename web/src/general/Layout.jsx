@@ -27,7 +27,7 @@ export const Layout = () => {
           }
         })
         .catch(err => {
-          Cookies.remove('token')
+          // Cookies.remove('token')
           window.location.href = '/login'
         })
     }
