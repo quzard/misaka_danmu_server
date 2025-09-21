@@ -234,6 +234,15 @@ async def _migrate_danmaku_paths_to_absolute_task(conn: AsyncConnection):
 
     logger.info(f"弹幕路径迁移完成，共迁移 {migrated_count} 个分集的路径")
 
+async def _enable_metadata_source_proxy_by_default_task(conn: AsyncConnection):
+    """迁移任务: 将元信息搜索源的代理开关默认设置为开启。"""
+    # 更新所有现有的元信息搜索源，将 use_proxy 设置为 true
+    update_sql = text("UPDATE metadata_sources SET use_proxy = true WHERE use_proxy = false")
+    result = await conn.execute(update_sql)
+
+    updated_count = result.rowcount
+    logger.info(f"元信息搜索源代理设置迁移完成，共更新了 {updated_count} 个源。")
+    return f"成功为 {updated_count} 个元信息搜索源启用了代理功能。"
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
@@ -253,6 +262,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_api_token_to_daily_limit_v1", _migrate_api_token_to_daily_limit_task, (db_type,)),
         ("migrate_add_log_raw_responses_to_metadata_sources_v1", _migrate_add_log_raw_responses_to_metadata_sources_task, (db_type,)),
         ("migrate_danmaku_paths_to_absolute_v2", _migrate_danmaku_paths_to_absolute_task, ()),
+        ("migrate_enable_metadata_source_proxy_by_default_v1", _enable_metadata_source_proxy_by_default_task, ()),
     ]
 
     for migration_id, migration_func, args in migrations:

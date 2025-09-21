@@ -112,7 +112,7 @@ class MetadataSource(Base):
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
     isAuxSearchEnabled: Mapped[bool] = mapped_column("is_aux_search_enabled", Boolean, default=True)
     displayOrder: Mapped[int] = mapped_column("display_order", Integer, default=0)
-    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=False)
+    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=True)
     isFailoverEnabled: Mapped[bool] = mapped_column("is_failover_enabled", Boolean, default=False)
     logRawResponses: Mapped[bool] = mapped_column("log_raw_responses", Boolean, default=False, nullable=False)
 
