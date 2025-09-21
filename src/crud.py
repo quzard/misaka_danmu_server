@@ -474,7 +474,8 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     stmt = stmt.where(or_(*like_conditions))
 
     # Order and execute
-    stmt = stmt.order_by(func.length(Anime.title), Scraper.displayOrder)
+    # 修正：按集数排序，确保episodes按正确顺序返回
+    stmt = stmt.order_by(func.length(Anime.title), Scraper.displayOrder, Episode.episodeIndex)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
