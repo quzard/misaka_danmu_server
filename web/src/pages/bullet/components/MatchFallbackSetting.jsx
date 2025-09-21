@@ -8,6 +8,7 @@ export const MatchFallbackSetting = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(true)
   const [pathSaving, setPathSaving] = useState(false)
+  const [blacklistSaving, setBlacklistSaving] = useState(false)
   const [customPathEnabled, setCustomPathEnabled] = useState(false)
   const messageApi = useMessage()
 
@@ -42,9 +43,7 @@ export const MatchFallbackSetting = () => {
     try {
       if ('matchFallbackEnabled' in changedValues) {
         await setMatchFallback({ value: String(changedValues.matchFallbackEnabled) })
-      }
-      if ('matchFallbackBlacklist' in changedValues) {
-        await setMatchFallbackBlacklist({ value: changedValues.matchFallbackBlacklist || '' })
+        messageApi.success('匹配后备开关已保存')
       }
       if ('customDanmakuPathEnabled' in changedValues) {
         setCustomPathEnabled(changedValues.customDanmakuPathEnabled)
@@ -53,8 +52,9 @@ export const MatchFallbackSetting = () => {
           enabled: String(changedValues.customDanmakuPathEnabled),
           template: currentValues.customDanmakuPathTemplate
         })
+        messageApi.success('自定义路径开关已保存')
       }
-      messageApi.success('设置已保存')
+      // 黑名单不自动保存，需要点击保存按钮
     } catch (error) {
       messageApi.error('保存设置失败')
       fetchSettings()
@@ -74,6 +74,19 @@ export const MatchFallbackSetting = () => {
       messageApi.error('保存路径模板失败')
     } finally {
       setPathSaving(false)
+    }
+  }
+
+  const handleBlacklistSave = async () => {
+    try {
+      setBlacklistSaving(true)
+      const values = form.getFieldsValue()
+      await setMatchFallbackBlacklist({ value: values.matchFallbackBlacklist || '' })
+      messageApi.success('黑名单已保存')
+    } catch (error) {
+      messageApi.error('保存黑名单失败')
+    } finally {
+      setBlacklistSaving(false)
     }
   }
 
@@ -107,7 +120,6 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <Form.Item
-          name="matchFallbackBlacklist"
           label={
             <Space>
               匹配后备黑名单
@@ -117,12 +129,22 @@ export const MatchFallbackSetting = () => {
             </Space>
           }
         >
-          <Input.TextArea
-            placeholder="输入正则表达式，例如：预告|广告|花絮"
-            rows={2}
-            showCount
-            maxLength={500}
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item
+              name="matchFallbackBlacklist"
+              style={{ flex: 1, marginBottom: 0 }}
+            >
+              <Input.TextArea
+                placeholder="输入正则表达式，例如：预告|广告|花絮"
+                rows={2}
+                showCount
+                maxLength={500}
+              />
+            </Form.Item>
+            <Button type="primary" loading={blacklistSaving} onClick={handleBlacklistSave}>
+              保存
+            </Button>
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item
