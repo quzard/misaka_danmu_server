@@ -106,8 +106,27 @@ class MetadataSourceManager:
         self.source_settings.clear()
 
         discovered_providers = []
-        
-        sources_package_path = [str(Path("/app/src/metadata_sources"))]
+
+        # 检测环境并使用正确的路径
+        def _is_docker_environment():
+            """检测是否在Docker容器中运行"""
+            import os
+            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+            if Path("/.dockerenv").exists():
+                return True
+            # 方法2: 检查环境变量
+            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                return True
+            # 方法3: 检查当前工作目录是否为 /app
+            if Path.cwd() == Path("/app"):
+                return True
+            return False
+
+        if _is_docker_environment():
+            sources_package_path = [str(Path("/app/src/metadata_sources"))]
+        else:
+            # 源码运行环境，使用相对路径
+            sources_package_path = [str(Path(__file__).parent / "metadata_sources")]
         for finder, name, ispkg in pkgutil.iter_modules(sources_package_path):
             if name.startswith("_") or name == "base":
                 continue

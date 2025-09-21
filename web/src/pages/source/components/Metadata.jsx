@@ -152,6 +152,7 @@ export const Metadata = () => {
         .then(res => {
           form.setFieldsValue({
             ...res.data,
+            useProxy: res.data.useProxy ?? true,
             logRawResponses: res.data.logRawResponses ?? false,
           })
         })
@@ -348,10 +349,23 @@ export const Metadata = () => {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ logRawResponses: false }}
+          initialValues={{ useProxy: true, logRawResponses: false }}
         >
           <div className="my-4">
             请为 {selectedSource?.providerName} 源填写以下配置信息。
+          </div>
+          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+            <Form.Item
+              name="useProxy"
+              label="启用代理"
+              valuePropName="checked"
+              className="min-w-[100px] shrink-0 !mb-0"
+            >
+              <Switch />
+            </Form.Item>
+            <div className="w-full text-gray-500">
+              启用后，此源的所有API请求将通过全局代理服务器进行。需要先在设置中配置全局代理。
+            </div>
           </div>
           <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
             <Form.Item
