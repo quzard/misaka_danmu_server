@@ -240,25 +240,38 @@ class MetadataSourceManager:
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
         """获取所有元数据源及其持久化和临时状态。"""
         tasks = []
-        # 确保我们只检查已加载的源
+        # 确保我们只检查已加载且已启用的源
         loaded_providers = list(self.sources.keys())
+        enabled_providers = []
         for provider_name in loaded_providers:
-            tasks.append(self.sources[provider_name].check_connectivity())
-        
+            # 检查源是否启用
+            setting = self.source_settings.get(provider_name, {})
+            if setting.get('isEnabled', True):  # 默认启用
+                tasks.append(self.sources[provider_name].check_connectivity())
+                enabled_providers.append(provider_name)
+
         connectivity_statuses = await asyncio.gather(*tasks, return_exceptions=True)
-        status_map = dict(zip(loaded_providers, connectivity_statuses))
+        status_map = dict(zip(enabled_providers, connectivity_statuses))
 
         full_status_list = []
         for provider_name, setting in self.source_settings.items():
-            status_text = "检查失败"
-            status_result = status_map.get(provider_name)
-            if isinstance(status_result, str):
-                status_text = status_result
-            elif isinstance(status_result, Exception):
-                self.logger.error(f"检查 '{provider_name}' 连接状态时出错: {status_result}")
+            # 检查源是否启用
+            is_enabled = setting.get('isEnabled', True)
+
+            if is_enabled:
+                status_text = "检查失败"
+                status_result = status_map.get(provider_name)
+                if isinstance(status_result, str):
+                    status_text = status_result
+                elif isinstance(status_result, Exception):
+                    self.logger.error(f"检查 '{provider_name}' 连接状态时出错: {status_result}")
+            else:
+                # 禁用的源显示为"已禁用"状态
+                status_text = "已禁用"
 
             full_status_list.append({
                 "providerName": provider_name,
+                "isEnabled": is_enabled,
                 "isAuxSearchEnabled": setting.get('isAuxSearchEnabled', False),
                 "isFailoverEnabled": setting.get('isFailoverEnabled', False),
                 "displayOrder": setting.get('displayOrder', 99),

@@ -87,7 +87,26 @@ class RateLimiter:
         self.global_limit: int = 50
         self.global_period_seconds: int = 3600 
         try:
-            config_dir = Path("/app/src/rate_limit")
+            # 检测环境并使用正确的路径
+            def _is_docker_environment():
+                """检测是否在Docker容器中运行"""
+                import os
+                # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+                if Path("/.dockerenv").exists():
+                    return True
+                # 方法2: 检查环境变量
+                if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                    return True
+                # 方法3: 检查当前工作目录是否为 /app
+                if Path.cwd() == Path("/app"):
+                    return True
+                return False
+
+            if _is_docker_environment():
+                config_dir = Path("/app/src/rate_limit")
+            else:
+                # 源码运行环境，使用相对路径
+                config_dir = Path(__file__).parent / "rate_limit"
             config_path = config_dir / "rate_limit.bin"
             sig_path = config_dir / "rate_limit.bin.sig"
             pub_key_path = config_dir / "public_key.pem"
