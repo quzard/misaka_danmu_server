@@ -78,6 +78,7 @@ export const MatchFallbackSetting = () => {
   }
 
   const handlePathReset = () => {
+    // Docker环境下使用绝对路径，源码环境使用相对路径
     const defaultTemplate = '/app/config/danmaku/${animeId}/${episodeId}'
     form.setFieldValue('customDanmakuPathTemplate', defaultTemplate)
     messageApi.success('已重置为默认路径模板')
@@ -163,8 +164,7 @@ export const MatchFallbackSetting = () => {
         </Form.Item>
 
         <div style={{ fontSize: '12px', color: '#666', marginTop: '-16px' }}>
-          <div>默认路径：config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
-          <div>Windows绝对路径示例：D:/弹幕/$&#123;title&#125;/$&#123;episode:03d&#125;</div>
+          <div>默认路径：/app/config/danmaku/$&#123;animeId&#125;/$&#123;episodeId&#125;</div>
           <div>支持的变量：$&#123;title&#125;, $&#123;season&#125;, $&#123;episode&#125;, $&#123;year&#125;, $&#123;provider&#125;, $&#123;animeId&#125;, $&#123;episodeId&#125;</div>
           <div>格式化选项：$&#123;season:02d&#125; 表示季度号补零到2位，$&#123;episode:03d&#125; 表示集数补零到3位</div>
         </div>
