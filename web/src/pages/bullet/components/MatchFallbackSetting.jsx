@@ -1,6 +1,6 @@
 import { Card, Form, Switch, Input, Button, Space, Tooltip } from 'antd'
 import { useEffect, useState } from 'react'
-import { getMatchFallback, setMatchFallback, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
+import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 
@@ -14,14 +14,16 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, pathRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, pathRes] = await Promise.all([
         getMatchFallback(),
+        getMatchFallbackBlacklist(),
         getCustomDanmakuPath()
       ])
       const pathEnabled = pathRes.data.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
       form.setFieldsValue({
         matchFallbackEnabled: fallbackRes.data.value === 'true',
+        matchFallbackBlacklist: blacklistRes.data.value || '',
         customDanmakuPathEnabled: pathEnabled,
         customDanmakuPathTemplate: pathRes.data.template
       })
@@ -40,6 +42,9 @@ export const MatchFallbackSetting = () => {
     try {
       if ('matchFallbackEnabled' in changedValues) {
         await setMatchFallback({ value: String(changedValues.matchFallbackEnabled) })
+      }
+      if ('matchFallbackBlacklist' in changedValues) {
+        await setMatchFallbackBlacklist({ value: changedValues.matchFallbackBlacklist || '' })
       }
       if ('customDanmakuPathEnabled' in changedValues) {
         setCustomPathEnabled(changedValues.customDanmakuPathEnabled)
@@ -86,6 +91,7 @@ export const MatchFallbackSetting = () => {
         layout="vertical"
         initialValues={{
           matchFallbackEnabled: false,
+          matchFallbackBlacklist: '',
           customDanmakuPathEnabled: false,
           customDanmakuPathTemplate: '/app/config/danmaku/${animeId}/${episodeId}'
         }}
@@ -97,6 +103,25 @@ export const MatchFallbackSetting = () => {
           tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
         >
           <Switch />
+        </Form.Item>
+
+        <Form.Item
+          name="matchFallbackBlacklist"
+          label={
+            <Space>
+              匹配后备黑名单
+              <Tooltip title="使用正则表达式过滤文件名，匹配的文件不会触发后备机制。例如：预告|广告|花絮 可以过滤包含这些关键词的文件。留空表示不过滤。">
+                <QuestionCircleOutlined />
+              </Tooltip>
+            </Space>
+          }
+        >
+          <Input.TextArea
+            placeholder="输入正则表达式，例如：预告|广告|花絮"
+            rows={2}
+            showCount
+            maxLength={500}
+          />
         </Form.Item>
 
         <Form.Item
