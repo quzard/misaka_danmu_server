@@ -2538,7 +2538,7 @@ async def save_task_state_cache(session: AsyncSession, task_id: str, task_type: 
     now = get_now()
 
     # 使用 merge 来处理插入或更新
-    task_state = models.TaskStateCache(
+    task_state = orm_models.TaskStateCache(
         taskId=task_id,
         taskType=task_type,
         taskParameters=task_parameters,
@@ -2552,7 +2552,7 @@ async def save_task_state_cache(session: AsyncSession, task_id: str, task_type: 
 async def get_task_state_cache(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
     """获取任务状态缓存"""
     result = await session.execute(
-        select(models.TaskStateCache).where(models.TaskStateCache.taskId == task_id)
+        select(orm_models.TaskStateCache).where(orm_models.TaskStateCache.taskId == task_id)
     )
     task_state = result.scalar_one_or_none()
 
@@ -2569,7 +2569,7 @@ async def get_task_state_cache(session: AsyncSession, task_id: str) -> Optional[
 async def clear_task_state_cache(session: AsyncSession, task_id: str):
     """清理任务状态缓存"""
     await session.execute(
-        delete(models.TaskStateCache).where(models.TaskStateCache.taskId == task_id)
+        delete(orm_models.TaskStateCache).where(orm_models.TaskStateCache.taskId == task_id)
     )
     await session.commit()
 
@@ -2577,9 +2577,9 @@ async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, A
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
     # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
     result = await session.execute(
-        select(models.TaskStateCache, models.TaskHistory)
-        .join(models.TaskHistory, models.TaskStateCache.taskId == models.TaskHistory.taskId)
-        .where(models.TaskHistory.status == "运行中")
+        select(orm_models.TaskStateCache, orm_models.TaskHistory)
+        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .where(orm_models.TaskHistory.status == "运行中")
     )
 
     task_states = []
@@ -2597,14 +2597,14 @@ async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, A
 
     return task_states
 
-async def mark_interrupted_tasks_as_failed(session: AsyncSession):
+async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     """将所有运行中的任务标记为失败（用于服务重启时）"""
     now = get_now()
 
     # 更新所有运行中的任务为失败状态
-    await session.execute(
-        update(models.TaskHistory)
-        .where(models.TaskHistory.status == "运行中")
+    result = await session.execute(
+        update(orm_models.TaskHistory)
+        .where(orm_models.TaskHistory.status == "运行中")
         .values(
             status="失败",
             description="服务异常中断，任务被标记为失败",
@@ -2613,7 +2613,10 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession):
         )
     )
 
+    interrupted_count = result.rowcount
+
     # 清理所有任务状态缓存
-    await session.execute(delete(models.TaskStateCache))
+    await session.execute(delete(orm_models.TaskStateCache))
 
     await session.commit()
+    return interrupted_count
