@@ -1882,10 +1882,29 @@ async def auto_search_and_import_task(
                 title_parts.append(f"E{payload.episode:02d}")
         task_title = " ".join(title_parts)
 
+        # 准备任务参数用于恢复
+        task_parameters = {
+            "provider": best_match.provider,
+            "mediaId": best_match.mediaId,
+            "animeTitle": best_match.title,
+            "mediaType": best_match.type,
+            "season": best_match.season,
+            "year": best_match.year,
+            "currentEpisodeIndex": payload.episode,
+            "imageUrl": image_url,
+            "doubanId": douban_id,
+            "tmdbId": tmdb_id,
+            "imdbId": imdb_id,
+            "tvdbId": tvdb_id,
+            "bangumiId": bangumi_id
+        }
+
         execution_task_id, _ = await task_manager.submit_task(
-            task_coro, 
-                    task_title, 
-            unique_key=unique_key
+            task_coro,
+            task_title,
+            unique_key=unique_key,
+            task_type="generic_import",
+            task_parameters=task_parameters
         )
         final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
         raise TaskSuccess(final_message)

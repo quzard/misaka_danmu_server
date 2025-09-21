@@ -800,9 +800,25 @@ async def _get_match_for_item(
                 api_key=None # 这是一个内部任务，没有API Key
             )
             
+            # 准备任务参数用于恢复
+            task_parameters = {
+                "searchType": auto_import_payload.searchType,
+                "searchTerm": auto_import_payload.searchTerm,
+                "season": auto_import_payload.season,
+                "episode": auto_import_payload.episode,
+                "mediaType": auto_import_payload.mediaType,
+                "fileName": item.fileName
+            }
+
             # 提交任务，并捕获可能的冲突异常
             try:
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                await task_manager.submit_task(
+                    task_coro,
+                    task_title,
+                    unique_key=unique_key,
+                    task_type="match_fallback",
+                    task_parameters=task_parameters
+                )
                 logger.info(f"已为 '{item.fileName}' 成功提交匹配后备任务。")
             except HTTPException as e:
                 if e.status_code == 409: # Conflict
