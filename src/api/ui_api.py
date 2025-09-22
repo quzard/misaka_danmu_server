@@ -1652,7 +1652,12 @@ async def delete_ua_rule(
     currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    deleted = await crud.delete_ua_rule(session, ruleId)
+    try:
+        rule_id_int = int(ruleId)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="规则ID必须是有效的整数。")
+
+    deleted = await crud.delete_ua_rule(session, rule_id_int)
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到指定的规则ID。")
 
