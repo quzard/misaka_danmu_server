@@ -155,11 +155,12 @@ export const WebhookTasks = () => {
             </Tooltip>
             <Input.Search
               placeholder="搜索任务标题"
+              allowClear
+              enterButton
               onSearch={value => {
                 setSearchTerm(value)
                 setPagination(prev => ({ ...prev, current: 1 }))
               }}
-              style={{ width: 200 }}
             />
           </Space>
         }

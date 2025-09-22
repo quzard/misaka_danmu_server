@@ -203,6 +203,20 @@ export const getMatchFallback = () =>
 export const setMatchFallback = data =>
   api.put('/api/ui/config/matchFallbackEnabled', data)
 
+/** 获取匹配后备黑名单 */
+export const getMatchFallbackBlacklist = () =>
+  api.get('/api/ui/config/matchFallbackBlacklist')
+/** 设置匹配后备黑名单 */
+export const setMatchFallbackBlacklist = data =>
+  api.put('/api/ui/config/matchFallbackBlacklist', data)
+
+/** 获取自定义弹幕路径配置 */
+export const getCustomDanmakuPath = () =>
+  api.get('/api/ui/config/customDanmakuPath')
+/** 设置自定义弹幕路径配置 */
+export const setCustomDanmakuPath = data =>
+  api.put('/api/ui/config/customDanmakuPath', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')

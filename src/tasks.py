@@ -283,7 +283,8 @@ async def _import_episodes_iteratively(
     episodes: List,
     anime_id: int,
     source_id: int,
-    first_episode_comments: Optional[List] = None
+    first_episode_comments: Optional[List] = None,
+    config_manager = None
 ) -> Tuple[int, List[int], int]:
     """
     迭代地导入分集弹幕。
@@ -332,7 +333,7 @@ async def _import_episodes_iteratively(
                     logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
                     successful_episodes_indices.append(episode.episodeIndex)
                 else:
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                     await session.commit()
 
                     total_comments_added += added_count
@@ -371,7 +372,7 @@ async def _import_episodes_iteratively(
                         logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
                         successful_episodes_indices.append(episode.episodeIndex)
                     else:
-                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                         await session.commit()
 
                         total_comments_added += added_count
@@ -505,7 +506,7 @@ async def generic_import_task(
                 episode_title = f"第 {currentEpisodeIndex} 集"
                 episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, currentEpisodeIndex, episode_title, None, "failover")
                 
-                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                 await session.commit()
                 
                 final_message = f"通过故障转移导入完成，共新增 {added_count} 条弹幕。" + (" (警告：海报图片下载失败)" if image_download_failed else "")
@@ -645,7 +646,8 @@ async def generic_import_task(
         episodes=episodes,
         anime_id=anime_id,
         source_id=source_id,
-        first_episode_comments=first_comments  # 传递第一集已获取的弹幕
+        first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
+        config_manager=config_manager
     )
 
     if not successful_episodes_indices and failed_episodes_count > 0:
@@ -775,7 +777,8 @@ async def edited_import_task(
         episodes=episodes,
         anime_id=anime_id,
         source_id=source_id,
-        first_episode_comments=first_episode_comments
+        first_episode_comments=first_episode_comments,
+        config_manager=config_manager
     )
 
     if total_comments_added == 0:
@@ -787,7 +790,7 @@ async def edited_import_task(
             final_message += f" {failed_count} 个分集因网络或解析错误获取失败。"
         raise TaskSuccess(final_message)
 
-async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable, metadata_manager: MetadataSourceManager):
+async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manager: ScraperManager, task_manager: TaskManager, rate_limiter: RateLimiter, progress_callback: Callable, metadata_manager: MetadataSourceManager, config_manager = None):
     """    
     后台任务：全量刷新一个已存在的番剧，采用先获取后删除的安全策略。
     """
@@ -827,7 +830,8 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
             progress_callback=progress_callback,
             episodes=new_episodes_meta,
             anime_id=source_info["animeId"],
-            source_id=sourceId
+            source_id=sourceId,
+            config_manager=config_manager
         )
 
         # 步骤 3: 在所有导入/更新操作完成后，清理过时的分集
@@ -930,7 +934,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         
         # 获取 animeId 用于文件路径
         anime_id = info["animeId"]
-        added_count = await crud.save_danmaku_for_episode(session, episodeId, all_comments_from_source)
+        added_count = await crud.save_danmaku_for_episode(session, episodeId, all_comments_from_source, None)
         
         await session.commit()
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
@@ -996,7 +1000,7 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
                     continue
 
                 # 修正：使用正确的Web路径格式，并使用辅助函数进行文件路径转换
-                new_danmaku_web_path = f"/danmaku/{anime_id}/{new_id}.xml" if old_ep.danmakuFilePath else None
+                new_danmaku_web_path = f"/app/config/danmaku/{anime_id}/{new_id}.xml" if old_ep.danmakuFilePath else None
                 if old_ep.danmakuFilePath:
                     old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
                     new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
@@ -1111,7 +1115,7 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
                 
                 new_danmaku_web_path = None
                 if old_ep.danmakuFilePath:
-                    new_danmaku_web_path = f"/danmaku/{anime_id}/{new_id}.xml"
+                    new_danmaku_web_path = f"/app/config/danmaku/{anime_id}/{new_id}.xml"
                     old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
                     new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
                     if old_full_path and old_full_path.is_file() and old_full_path != new_full_path:
@@ -1190,9 +1194,12 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
+
+
 async def manual_import_task(
     sourceId: int, animeId: int, title: Optional[str], episodeIndex: int, content: str, providerName: str,
-    progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter
+    progress_callback: Callable, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter,
+    config_manager = None
 ):
     """后台任务：从URL手动导入弹幕。"""
     logger.info(f"开始手动导入任务: sourceId={sourceId}, title='{title or '未提供'}' ({providerName})")
@@ -1215,7 +1222,7 @@ async def manual_import_task(
             await progress_callback(80, "正在写入数据库...")
             final_title = title if title else f"第 {episodeIndex} 集"
             episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, "from_xml", "custom_xml")
-            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
             await session.commit()
             raise TaskSuccess(f"手动导入完成，从XML新增 {added_count} 条弹幕。")
 
@@ -1263,7 +1270,7 @@ async def manual_import_task(
 
         await progress_callback(90, "正在写入数据库...")
         episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, episodeIndex, final_title, content, episode_id_for_comments)
-        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
         await session.commit()
         raise TaskSuccess(f"手动导入完成，新增 {added_count} 条弹幕。")
     except TaskSuccess:
@@ -1467,7 +1474,7 @@ async def batch_manual_import_task(
                     final_title = getattr(item, 'title', None) or f"第 {item.episodeIndex} 集"
                     episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, "from_xml_batch", "custom_xml")
 
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, None)
                     total_added_comments += added_count
                 else:
                     logger.warning(f"批量导入条目 '{item_desc}' 解析失败或不含弹幕，已跳过。")
@@ -1485,7 +1492,7 @@ async def batch_manual_import_task(
                 if comments:
                     await rate_limiter.increment(providerName)
                     episode_db_id = await crud.create_episode_if_not_exists(session, animeId, sourceId, item.episodeIndex, final_title, item.content, episode_id_for_comments)
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments)
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, None)
                     total_added_comments += added_count
             
             await session.commit()
@@ -1726,10 +1733,35 @@ async def auto_search_and_import_task(
         for item in all_results:
             normalized_item_title = normalize_for_filtering(item.title)
             if not normalized_item_title: continue
-            # 修正：使用更智能的模糊匹配来提高准确率，与UI搜索逻辑保持一致
-            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+
+            # 更严格的匹配逻辑：
+            # 1. 完全匹配或高相似度匹配
+            # 2. 标题长度差异不能太大（避免"复仇者"匹配"复仇者联盟2：奥创纪元"）
+            is_relevant = False
+            for alias in normalized_filter_aliases:
+                similarity = fuzz.partial_ratio(normalized_item_title, alias)
+                length_diff = abs(len(normalized_item_title) - len(alias))
+
+                # 完全匹配或非常高的相似度
+                if similarity >= 95:
+                    is_relevant = True
+                    break
+                # 高相似度但标题长度差异不大
+                elif similarity >= 85 and length_diff <= max(len(alias) * 0.3, 10):
+                    is_relevant = True
+                    break
+
+            if is_relevant:
                 filtered_results.append(item)
+
+        # 详细记录保留的结果
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        if filtered_results:
+            logger.info("保留的结果列表:")
+            for i, item in enumerate(filtered_results[:20], 1):  # 最多显示前20个
+                logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type})")
+            if len(filtered_results) > 20:
+                logger.info(f"  ... 还有 {len(filtered_results) - 20} 个结果未显示")
         all_results = filtered_results
 
         if not all_results:
@@ -1746,24 +1778,70 @@ async def auto_search_and_import_task(
         # 4. 新增：对完全匹配或非常接近的标题给予巨大奖励
         # 5. 标题长度惩罚 (标题越长，越可能是特别篇，得分越低)
         # 6. 用户设置的源优先级 (最后)
+        # 添加调试日志
+        logger.info(f"排序前的媒体类型: media_type='{media_type}', 前5个结果:")
+        for i, item in enumerate(all_results[:5]):
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
+
         all_results.sort(
             key=lambda item: (
-                1 if item.type == media_type else 0,
+                # 移除媒体类型匹配，因为match接口会将电影识别为TV剧
+                # 1 if item.type == media_type else 0,
                 1 if season is not None and item.season == season else 0,
-                # 关键修复：为精确匹配的标题提供一个巨大的分数奖励，
-                # 这将确保 '游戏人生 零' 总是排在 '游戏人生' 前面。
-                # 使用 token_sort_ratio 是因为它对词序不敏感。
-                100 if fuzz.token_sort_ratio(main_title, item.title) > 95 else 0,
-                fuzz.token_set_ratio(main_title, item.title),
-                -abs(len(item.title) - len(main_title)), # 惩罚标题长度差异大的结果
+                # 最高优先级：完全匹配的标题
+                1000 if item.title.strip() == main_title.strip() else 0,
+                # 次高优先级：去除标点符号后的完全匹配
+                500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
+                # 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                200 if (fuzz.token_sort_ratio(main_title, item.title) > 98 and abs(len(item.title) - len(main_title)) <= 10) else 0,
+                # 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                100 if (fuzz.token_sort_ratio(main_title, item.title) > 95 and abs(len(item.title) - len(main_title)) <= 20) else 0,
+                # 第五优先级：一般相似度，但必须达到85%以上才考虑
+                fuzz.token_set_ratio(main_title, item.title) if fuzz.token_set_ratio(main_title, item.title) >= 85 else 0,
+                # 惩罚标题长度差异大的结果
+                -abs(len(item.title) - len(main_title)),
+                # 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
         )
-        best_match = all_results[0]
 
-        # 记录选择的最佳匹配项，以便调试
-        logger.info(f"自动导入：经过排序后，选择的最佳匹配项为: '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season})")
+        # 添加排序后的调试日志
+        logger.info(f"排序后的前5个结果:")
+        for i, item in enumerate(all_results[:5]):
+            title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
+            similarity = fuzz.token_set_ratio(main_title, item.title)
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+        # 并行评估前3个最佳匹配项
+        max_candidates = min(3, len(all_results))  # 最多评估3个候选项
+        min_similarity_threshold = 75  # 最低相似度阈值
+
+        # 同时计算前3个候选项的相似度
+        candidates_with_similarity = []
+        for i in range(max_candidates):
+            candidate = all_results[i]
+            similarity = fuzz.token_set_ratio(main_title, candidate.title)
+            candidates_with_similarity.append({
+                'candidate': candidate,
+                'similarity': similarity,
+                'rank': i + 1
+            })
+            logger.info(f"候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+
+        # 按优先级选择：优先选择排名最高且符合阈值的候选项
+        best_match = None
+        for item in candidates_with_similarity:  # 已经按排名顺序
+            if item['similarity'] >= min_similarity_threshold:
+                best_match = item['candidate']
+                logger.info(f"自动导入：选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {item['similarity']}%)")
+                break
+            else:
+                logger.debug(f"候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
+
+        if best_match is None:
+            logger.warning(f"经过并行评估 {max_candidates} 个候选项，未找到相似度达到 {min_similarity_threshold}% 的匹配项，跳过自动导入。")
+            logger.info("匹配后备任务完成，但未找到足够相似的匹配项进行自动导入。")
+            return  # 直接返回，不抛出异常
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
@@ -1804,10 +1882,29 @@ async def auto_search_and_import_task(
                 title_parts.append(f"E{payload.episode:02d}")
         task_title = " ".join(title_parts)
 
+        # 准备任务参数用于恢复
+        task_parameters = {
+            "provider": best_match.provider,
+            "mediaId": best_match.mediaId,
+            "animeTitle": best_match.title,
+            "mediaType": best_match.type,
+            "season": best_match.season,
+            "year": best_match.year,
+            "currentEpisodeIndex": payload.episode,
+            "imageUrl": image_url,
+            "doubanId": douban_id,
+            "tmdbId": tmdb_id,
+            "imdbId": imdb_id,
+            "tvdbId": tvdb_id,
+            "bangumiId": bangumi_id
+        }
+
         execution_task_id, _ = await task_manager.submit_task(
-            task_coro, 
-                    task_title, 
-            unique_key=unique_key
+            task_coro,
+            task_title,
+            unique_key=unique_key,
+            task_type="generic_import",
+            task_parameters=task_parameters
         )
         final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
         raise TaskSuccess(final_message)

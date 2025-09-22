@@ -12,8 +12,38 @@ from .scraper_manager import ScraperManager
 logger = logging.getLogger(__name__)
 
 # 图片存储在 config/image/ 目录下
-IMAGE_DIR = Path("/app/config/image")
-IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+def _get_image_dir():
+    """获取图片目录，根据运行环境自动调整"""
+    if _is_docker_environment():
+        return Path("/app/config/image")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path("config/image")
+
+IMAGE_DIR = _get_image_dir()
+
+def _ensure_image_dir():
+    """确保图片目录存在"""
+    try:
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        logger.warning(f"无法创建图片目录 {IMAGE_DIR}: {e}")
+
+# 延迟创建目录，避免在模块加载时就尝试创建
 
 async def download_image(image_url: Optional[str], session: AsyncSession, scraper_manager: ScraperManager, provider_name: Optional[str] = None) -> Optional[str]:
     """
@@ -28,6 +58,9 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
     """
     if not image_url:
         return None
+
+    # 确保图片目录存在
+    _ensure_image_dir()
 
     # --- Start of new proxy logic ---
     proxy_url = await crud.get_config_value(session, "proxyUrl", "")

@@ -765,6 +765,19 @@ async def _get_match_for_item(
     # 新增：后备机制 (Fallback Mechanism)
     fallback_enabled_str = await config_manager.get("matchFallbackEnabled", "false")
     if fallback_enabled_str.lower() == 'true':
+        # 检查黑名单
+        blacklist_pattern = await config_manager.get("matchFallbackBlacklist", "")
+        if blacklist_pattern.strip():
+            try:
+                import re
+                if re.search(blacklist_pattern, item.fileName, re.IGNORECASE):
+                    logger.info(f"文件 '{item.fileName}' 匹配黑名单规则 '{blacklist_pattern}'，跳过后备机制。")
+                    response = DandanMatchResponse(isMatched=False, matches=[])
+                    logger.info(f"发送匹配响应 (黑名单过滤): {response.model_dump_json(indent=2)}")
+                    return response
+            except re.error as e:
+                logger.warning(f"黑名单正则表达式 '{blacklist_pattern}' 格式错误: {e}，忽略黑名单检查")
+
         logger.info(f"匹配失败，已启用后备机制，正在为 '{item.fileName}' 创建自动搜索任务。")
         try:
             # 构造 auto_search_and_import_task 需要的 payload
@@ -800,9 +813,25 @@ async def _get_match_for_item(
                 api_key=None # 这是一个内部任务，没有API Key
             )
             
+            # 准备任务参数用于恢复
+            task_parameters = {
+                "searchType": auto_import_payload.searchType,
+                "searchTerm": auto_import_payload.searchTerm,
+                "season": auto_import_payload.season,
+                "episode": auto_import_payload.episode,
+                "mediaType": auto_import_payload.mediaType,
+                "fileName": item.fileName
+            }
+
             # 提交任务，并捕获可能的冲突异常
             try:
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                await task_manager.submit_task(
+                    task_coro,
+                    task_title,
+                    unique_key=unique_key,
+                    task_type="match_fallback",
+                    task_parameters=task_parameters
+                )
                 logger.info(f"已为 '{item.fileName}' 成功提交匹配后备任务。")
             except HTTPException as e:
                 if e.status_code == 409: # Conflict

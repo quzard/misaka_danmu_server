@@ -26,9 +26,30 @@ from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
 
-print(f"当前环境: {settings.environment}") 
+print(f"当前环境: {settings.environment}")
 
 logger = logging.getLogger(__name__)
+
+def _get_default_danmaku_path_template():
+    """根据运行环境获取默认弹幕路径模板"""
+    def _is_docker_environment():
+        """检测是否在Docker容器中运行"""
+        import os
+        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+        if Path("/.dockerenv").exists():
+            return True
+        # 方法2: 检查环境变量
+        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+            return True
+        # 方法3: 检查当前工作目录是否为 /app
+        if Path.cwd() == Path("/app"):
+            return True
+        return False
+
+    if _is_docker_environment():
+        return '/app/config/danmaku/${animeId}/${episodeId}'
+    else:
+        return 'config/danmaku/${animeId}/${episodeId}'
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -97,6 +118,10 @@ async def lifespan(app: FastAPI):
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'matchFallbackEnabled': ('false', '是否为匹配接口启用后备机制（自动搜索导入）。'),
+        'matchFallbackBlacklist': ('', '匹配后备黑名单，使用正则表达式过滤文件名，匹配的文件不会触发后备机制。'),
+        # 弹幕文件路径配置
+        'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
+        'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
         # 全局过滤
@@ -319,8 +344,30 @@ app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible
 app.include_router(api_router, prefix="/api")
 
 # --- 新增：挂载 Swagger UI 的静态文件目录 ---
-# 修正：使用相对于工作目录 /app 的绝对路径，使其不再受 __file__ 路径影响
-STATIC_DIR = Path("/app/static/swagger-ui")
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+def _get_static_dir():
+    """获取静态文件目录，根据运行环境自动调整"""
+    if _is_docker_environment():
+        # 容器环境
+        return Path("/app/static/swagger-ui")
+    else:
+        # 源码运行环境
+        return Path("static/swagger-ui")
+
+STATIC_DIR = _get_static_dir()
 app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger-ui-static")
 
 # 添加一个运行入口，以便直接从配置启动

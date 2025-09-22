@@ -1070,14 +1070,11 @@ async def test_proxy_latency(
     logger.info(log_message)
 
     for setting, get_instance_func in all_sources_settings:
-        # 新增：定义一个始终需要测试的源列表
-        always_test_providers = {'tmdb', 'imdb', 'tvdb', 'douban', '360', 'bangumi'}
         provider_name = setting.get('providerName')
 
-        # 核心逻辑：
-        # 1. 如果是始终测试的源（无论是否需要代理），只要它启用就测试。
-        # 2. 对于其他源，如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
-        should_test = setting['isEnabled'] and (provider_name in always_test_providers or (not proxy_url or setting['useProxy']))
+        # 优化：只测试已启用的源
+        # 如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
+        should_test = setting['isEnabled'] and (not proxy_url or setting.get('useProxy', False))
 
         if should_test:
             try:
@@ -1514,6 +1511,53 @@ async def reset_api_token_counter(
     if not reset_ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     logger.info(f"用户 '{current_user.username}' 重置了 Token (ID: {token_id}) 的调用次数。")
+
+# --- 自定义弹幕路径配置 ---
+
+class CustomDanmakuPathRequest(BaseModel):
+    enabled: str
+    template: str
+
+class CustomDanmakuPathResponse(BaseModel):
+    enabled: str
+    template: str
+
+@router.get("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="获取自定义弹幕路径配置")
+async def get_custom_danmaku_path(
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取自定义弹幕路径配置"""
+    enabled = await crud.get_config_value(session, "customDanmakuPathEnabled", "false")
+    template = await crud.get_config_value(session, "customDanmakuPathTemplate", "/app/config/danmaku/${animeId}/${episodeId}")
+    return CustomDanmakuPathResponse(enabled=enabled, template=template)
+
+@router.put("/config/customDanmakuPath", response_model=CustomDanmakuPathResponse, summary="设置自定义弹幕路径配置")
+async def set_custom_danmaku_path(
+    request: CustomDanmakuPathRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置自定义弹幕路径配置"""
+    logger.info(f"收到自定义弹幕路径配置请求: enabled={request.enabled}, template={request.template}")
+
+    # 验证模板格式
+    if request.enabled.lower() == 'true' and request.template:
+        try:
+            from src.path_template import DanmakuPathTemplate
+            # 尝试创建模板对象来验证格式
+            DanmakuPathTemplate(request.template)
+            logger.info(f"模板验证成功: {request.template}")
+        except Exception as e:
+            logger.error(f"模板验证失败: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径模板格式错误: {str(e)}")
+
+    await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
+    await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
+    config_manager.invalidate("customDanmakuPathEnabled")
+    config_manager.invalidate("customDanmakuPathTemplate")
+    logger.info(f"自定义弹幕路径配置已保存")
+    return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
 
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
@@ -2749,3 +2793,5 @@ async def update_metadata_source_config(
     except Exception as e:
         logger.error(f"更新元数据源 '{providerName}' 配置时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
+
+

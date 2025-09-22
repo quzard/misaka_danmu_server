@@ -26,7 +26,7 @@ class DatabaseConfig(BaseModel):
 class JWTConfig(BaseModel):
     secret_key: str = "a_very_secret_key_that_should_be_changed"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440 # 1 day
+    access_token_expire_minutes: int = 4320 # 3 days
 
 # 4. (新增) 初始管理员配置
 class AdminConfig(BaseModel):
@@ -46,7 +46,27 @@ class YamlConfigSettingsSource(PydanticBaseSettingsSource):
     def __init__(self, settings_cls: type[BaseSettings]):
         super().__init__(settings_cls)
         # 在项目根目录的 config/ 文件夹下查找 config.yml
-        self.yaml_file = Path("/app/config/config.yml")
+        # 修正：根据运行环境自动调整路径
+        def _is_docker_environment():
+            """检测是否在Docker容器中运行"""
+            import os
+            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+            if Path("/.dockerenv").exists():
+                return True
+            # 方法2: 检查环境变量
+            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                return True
+            # 方法3: 检查当前工作目录是否为 /app
+            if Path.cwd() == Path("/app"):
+                return True
+            return False
+
+        if _is_docker_environment():
+            # 容器环境
+            self.yaml_file = Path("/app/config/config.yml")
+        else:
+            # 源码运行环境
+            self.yaml_file = Path("config/config.yml")
 
     def get_field_value(self, field, field_name):
         return None, None, False

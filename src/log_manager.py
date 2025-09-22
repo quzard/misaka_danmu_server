@@ -69,8 +69,34 @@ def setup_logging():
     以及一个用于API的内存双端队列。
     此函数应在应用启动时被调用一次。
     """
-    log_dir = Path("/app/config/logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
+    def _is_docker_environment():
+        """检测是否在Docker容器中运行"""
+        import os
+        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+        if Path("/.dockerenv").exists():
+            return True
+        # 方法2: 检查环境变量
+        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+            return True
+        # 方法3: 检查当前工作目录是否为 /app
+        if Path.cwd() == Path("/app"):
+            return True
+        return False
+
+    if _is_docker_environment():
+        log_dir = Path("/app/config/logs")
+    else:
+        log_dir = Path("config/logs")
+
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        # 如果无法创建日志目录，使用当前目录
+        print(f"警告: 无法创建日志目录 {log_dir}: {e}，将使用当前目录")
+        log_dir = Path(".")
+        log_file = log_dir / "app.log"
+    else:
+        log_file = log_dir / "app.log"
     log_file = log_dir / "app.log"
 
     # 为控制台和文件日志定义详细的格式
