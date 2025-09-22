@@ -22,11 +22,35 @@ from .orm_models import ( # noqa: F401
 from .config import settings
 from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
+from .path_template import DanmakuPathTemplate, create_danmaku_context
 
 logger = logging.getLogger(__name__)
 
 # --- 新增：文件存储相关常量和辅助函数 ---
-DANMAKU_BASE_DIR = Path("/app/config/danmaku")
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+def _get_base_dir():
+    """获取基础目录，根据运行环境自动调整"""
+    if _is_docker_environment():
+        return Path("/app")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path(".")
+
+BASE_DIR = _get_base_dir()
+DANMAKU_BASE_DIR = BASE_DIR / "config/danmaku"
 
 def _generate_xml_from_comments(
     comments: List[Dict[str, Any]], 
@@ -53,18 +77,88 @@ def _generate_xml_from_comments(
 
 def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     """
-    将Web路径（例如 /data/danmaku/1/2.xml 或 /danmaku/1/2.xml）转换为文件系统路径。
-    这个辅助函数通过查找 '/danmaku/' 标记来健壮地处理新旧两种路径格式。
+    将Web路径转换为文件系统路径。
+    现在支持绝对路径格式（如 /app/config/danmaku/1/2.xml）和自定义路径。
     """
     if not web_path:
         return None
-    
+
+    # 如果是绝对路径，需要转换为相对路径
+    if web_path.startswith('/app/'):
+        # 移除 /app/ 前缀，转换为相对路径
+        return Path(web_path[5:])  # 移除 "/app/" 前缀
+    elif web_path.startswith('/'):
+        # 其他绝对路径保持不变（用户自定义的绝对路径）
+        return Path(web_path)
+
+    # 兼容旧的相对路径格式
     if '/danmaku/' in web_path:
         relative_part = web_path.split('/danmaku/', 1)[1]
         return DANMAKU_BASE_DIR / relative_part
-    
-    logger.warning(f"无法从Web路径 '{web_path}' 解析文件系统路径，因为它不包含 '/danmaku/'。")
+    elif '/custom_danmaku/' in web_path:
+        # 处理自定义路径
+        relative_part = web_path.split('/custom_danmaku/', 1)[1]
+        return Path(relative_part)
+
+    logger.warning(f"无法从Web路径 '{web_path}' 解析文件系统路径: {web_path}")
     return None
+
+async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=None) -> tuple[str, Path]:
+    """
+    生成弹幕文件的Web路径和文件系统路径
+
+    Returns:
+        tuple: (web_path, absolute_path)
+    """
+    anime_id = episode.source.anime.id
+    episode_id = episode.id
+
+    # 检查是否启用自定义路径
+    custom_path_enabled = False
+    custom_template = None
+
+    if config_manager:
+        try:
+            custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
+            custom_path_enabled = custom_path_enabled_str.lower() == 'true'
+            if custom_path_enabled:
+                custom_template = await config_manager.get('customDanmakuPathTemplate', '')
+        except Exception as e:
+            logger.warning(f"获取自定义路径配置失败: {e}")
+
+    if custom_path_enabled and custom_template:
+        try:
+            # 创建路径模板上下文
+            context = create_danmaku_context(
+                anime_title=episode.source.anime.title,
+                season=episode.source.anime.season or 1,
+                episode_index=episode.episodeIndex,
+                year=episode.source.anime.year,
+                provider=episode.source.providerName,
+                anime_id=anime_id,
+                episode_id=episode_id,
+                source_id=episode.source.id
+            )
+
+            # 生成自定义路径
+            path_template = DanmakuPathTemplate(custom_template)
+            custom_path = path_template.generate_path(context)
+
+            # 自定义路径使用绝对路径存储
+            web_path = str(custom_path)  # 绝对路径用于数据库存储
+            absolute_path = Path(custom_path)  # 直接使用生成的路径
+
+            logger.info(f"使用自定义路径模板生成弹幕路径: {absolute_path}")
+            return web_path, absolute_path
+
+        except Exception as e:
+            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
+
+    # 默认路径逻辑 - 使用相对路径
+    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"  # 保持数据库中的格式一致性
+    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
+
+    return web_path, absolute_path
 # --- Anime & Library ---
 
 async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
@@ -380,7 +474,8 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     stmt = stmt.where(or_(*like_conditions))
 
     # Order and execute
-    stmt = stmt.order_by(func.length(Anime.title), Scraper.displayOrder)
+    # 修正：按集数排序，确保episodes按正确顺序返回
+    stmt = stmt.order_by(func.length(Anime.title), Scraper.displayOrder, Episode.episodeIndex)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
@@ -929,7 +1024,8 @@ async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, 
 async def save_danmaku_for_episode(
     session: AsyncSession,
     episode_id: int,
-    comments: List[Dict[str, Any]]
+    comments: List[Dict[str, Any]],
+    config_manager = None
 ) -> int:
     """将弹幕写入XML文件，并更新数据库记录，返回新增数量。"""
     if not comments:
@@ -953,11 +1049,12 @@ async def save_danmaku_for_episode(
         "bilibili": "comment.bilibili.com"
     }
     xml_content = _generate_xml_from_comments(comments, episode_id, provider_name, chat_server_map.get(provider_name, "danmaku.misaka.org"))
-    
-    # 修正：统一文件路径结构，与 tasks.py 保持一致（不包含 source_id）
-    web_path = f"/danmaku/{anime_id}/{episode_id}.xml"
-    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
-    
+
+    # 新增：支持自定义路径模板
+    web_path, absolute_path = await _generate_danmaku_path(
+        session, episode, config_manager
+    )
+
     try:
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         absolute_path.write_text(xml_content, encoding='utf-8')
@@ -965,7 +1062,7 @@ async def save_danmaku_for_episode(
     except OSError as e:
         logger.error(f"写入弹幕文件失败: {absolute_path}。错误: {e}")
         raise
-    
+
     await update_episode_danmaku_info(session, episode_id, web_path, len(comments))
     return len(comments)
 
@@ -1212,7 +1309,7 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
                     # 移动弹幕文件
                     if episode_to_move.danmakuFilePath:
                         old_path = _get_fs_path_from_web_path(episode_to_move.danmakuFilePath)
-                        new_web_path = f"/danmaku/{target_anime_id}/{episode_to_move.id}.xml"
+                        new_web_path = f"/app/config/danmaku/{target_anime_id}/{episode_to_move.id}.xml"
                         new_fs_path = _get_fs_path_from_web_path(new_web_path)
                         if old_path and old_path.exists() and new_fs_path:
                             new_fs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1238,7 +1335,7 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
             for ep in source_to_process.episodes:
                 if ep.danmakuFilePath:
                     old_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
-                    new_web_path = f"/danmaku/{target_anime_id}/{ep.id}.xml"
+                    new_web_path = f"/app/config/danmaku/{target_anime_id}/{ep.id}.xml"
                     new_fs_path = _get_fs_path_from_web_path(new_web_path)
                     if old_path and old_path.exists() and new_fs_path:
                         new_fs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1304,7 +1401,7 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
         old_absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
         
         # 修正：新的Web路径和文件系统路径应与 tasks.py 保持一致（不包含 source_id）
-        new_web_path = f"/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
+        new_web_path = f"/app/config/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
         new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / f"{new_episode_id}.xml"
         
         if old_absolute_path and old_absolute_path.exists():
@@ -2096,6 +2193,9 @@ async def finalize_task_in_history(session: AsyncSession, task_id: str, status: 
     )
     await session.commit()
 
+    # 任务完成后，清理任务状态缓存
+    await clear_task_state_cache(session, task_id)
+
 async def update_task_status(session: AsyncSession, task_id: str, status: str):
     await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, updatedAt=get_now().replace(tzinfo=None)))
     await session.commit()
@@ -2430,3 +2530,93 @@ async def get_existing_episodes_for_source(
     )
     episodes_result = await session.execute(episodes_stmt)
     return episodes_result.scalars().all()
+
+# ==================== 任务状态缓存相关函数 ====================
+
+async def save_task_state_cache(session: AsyncSession, task_id: str, task_type: str, task_parameters: str):
+    """保存任务状态到缓存表"""
+    now = get_now()
+
+    # 使用 merge 来处理插入或更新
+    task_state = orm_models.TaskStateCache(
+        taskId=task_id,
+        taskType=task_type,
+        taskParameters=task_parameters,
+        createdAt=now,
+        updatedAt=now
+    )
+
+    await session.merge(task_state)
+    await session.commit()
+
+async def get_task_state_cache(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
+    """获取任务状态缓存"""
+    result = await session.execute(
+        select(orm_models.TaskStateCache).where(orm_models.TaskStateCache.taskId == task_id)
+    )
+    task_state = result.scalar_one_or_none()
+
+    if task_state:
+        return {
+            "taskId": task_state.taskId,
+            "taskType": task_state.taskType,
+            "taskParameters": task_state.taskParameters,
+            "createdAt": task_state.createdAt,
+            "updatedAt": task_state.updatedAt
+        }
+    return None
+
+async def clear_task_state_cache(session: AsyncSession, task_id: str):
+    """清理任务状态缓存"""
+    await session.execute(
+        delete(orm_models.TaskStateCache).where(orm_models.TaskStateCache.taskId == task_id)
+    )
+    await session.commit()
+
+async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
+    """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
+    # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
+    result = await session.execute(
+        select(orm_models.TaskStateCache, orm_models.TaskHistory)
+        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .where(orm_models.TaskHistory.status == "运行中")
+    )
+
+    task_states = []
+    for task_state, task_history in result.all():
+        task_states.append({
+            "taskId": task_state.taskId,
+            "taskType": task_state.taskType,
+            "taskParameters": task_state.taskParameters,
+            "createdAt": task_state.createdAt,
+            "updatedAt": task_state.updatedAt,
+            "taskTitle": task_history.title,
+            "taskProgress": task_history.progress,
+            "taskDescription": task_history.description
+        })
+
+    return task_states
+
+async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
+    """将所有运行中的任务标记为失败（用于服务重启时）"""
+    now = get_now()
+
+    # 更新所有运行中的任务为失败状态
+    result = await session.execute(
+        update(orm_models.TaskHistory)
+        .where(orm_models.TaskHistory.status == "运行中")
+        .values(
+            status="失败",
+            description="服务异常中断，任务被标记为失败",
+            finishedAt=now,
+            updatedAt=now
+        )
+    )
+
+    interrupted_count = result.rowcount
+
+    # 清理所有任务状态缓存
+    await session.execute(delete(orm_models.TaskStateCache))
+
+    await session.commit()
+    return interrupted_count

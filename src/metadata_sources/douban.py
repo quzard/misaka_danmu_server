@@ -51,7 +51,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
             metadata_settings = await crud.get_all_metadata_source_settings(session)
 
         provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-        use_proxy_for_this_provider = provider_setting.get('use_proxy', False) if provider_setting else False
+        use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
 

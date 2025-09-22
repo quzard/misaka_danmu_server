@@ -2,7 +2,6 @@ import { ErrorBoundary } from 'react-error-boundary'
 import { ErrorFallback } from '../components/ErrorFallback.jsx'
 import { Outlet } from 'react-router-dom'
 import { useEffect } from 'react'
-import { getStorage } from '../utils/localstroage.js'
 import { Header } from './Header.jsx'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { isMobileAtom, userinfoAtom } from '../../store/index.js'
@@ -28,7 +27,7 @@ export const Layout = () => {
           }
         })
         .catch(err => {
-          Cookies.remove('token')
+          // Cookies.remove('token')
           window.location.href = '/login'
         })
     }

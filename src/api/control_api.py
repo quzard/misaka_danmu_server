@@ -1222,7 +1222,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
                 comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
             comments_to_insert.append(comment_dict)
 
-        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert)
+        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, None)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")
@@ -1338,6 +1338,8 @@ async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session
     config_manager.invalidate('danmaku_output_limit_per_source')
     config_manager.invalidate('danmaku_aggregation_enabled')
     return {"message": "弹幕输出设置已更新。"}
+
+
 
 # --- 任务管理 ---
 
@@ -1512,3 +1514,114 @@ async def get_scheduled_task_last_result(
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该定时任务的运行记录。")
     return models.TaskInfo.model_validate(result)
+
+# --- 通用配置管理接口 ---
+
+# 定义可通过外部API管理的配置项白名单
+ALLOWED_CONFIG_KEYS = {
+    # Webhook相关配置
+    "webhookEnabled": {"type": "boolean", "description": "是否全局启用 Webhook 功能"},
+    "webhookDelayedImportEnabled": {"type": "boolean", "description": "是否为 Webhook 触发的导入启用延时"},
+    "webhookDelayedImportHours": {"type": "integer", "description": "Webhook 延时导入的小时数"},
+    "webhookFilterMode": {"type": "string", "description": "Webhook 标题过滤模式 (blacklist/whitelist)"},
+    "webhookFilterRegex": {"type": "string", "description": "用于过滤 Webhook 标题的正则表达式"},
+}
+
+class ConfigItem(BaseModel):
+    key: str
+    value: str
+    type: str
+    description: str
+
+class ConfigUpdateRequest(BaseModel):
+    key: str
+    value: str
+
+class ConfigResponse(BaseModel):
+    configs: List[ConfigItem]
+
+class HelpResponse(BaseModel):
+    available_keys: List[str]
+    description: str
+
+@router.get("/config", response_model=Union[ConfigResponse, HelpResponse], summary="获取可配置的参数列表或帮助信息")
+async def get_allowed_configs(
+    type: Optional[str] = Query(None, description="请求类型，使用 'help' 获取可用配置项列表"),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    获取所有可通过外部API管理的配置项及其当前值。
+
+    参数:
+    - type: 可选参数
+      - 不提供或为空: 返回所有配置项及其当前值
+      - "help": 返回所有可用的配置项键名列表
+    """
+    # 如果请求类型是 help，返回帮助信息
+    if type == "help":
+        return HelpResponse(
+            available_keys=list(ALLOWED_CONFIG_KEYS.keys()),
+            description="可通过外部API管理的配置项列表。使用不带 type 参数的请求获取详细配置信息。"
+        )
+
+    # 默认行为：返回所有配置项及其当前值
+    configs = []
+
+    for key, meta in ALLOWED_CONFIG_KEYS.items():
+        # 根据类型设置默认值
+        if meta["type"] == "boolean":
+            default_value = "false"
+        elif meta["type"] == "integer":
+            default_value = "0"
+        else:  # string
+            default_value = ""
+
+        current_value = await config_manager.get(key, default_value)
+
+        configs.append(ConfigItem(
+            key=key,
+            value=str(current_value),
+            type=meta["type"],
+            description=meta["description"]
+        ))
+
+    return ConfigResponse(configs=configs)
+
+@router.put("/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定配置项")
+async def update_config(
+    request: ConfigUpdateRequest,
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    更新指定的配置项。
+    只允许更新白名单中定义的配置项。
+    """
+    if request.key not in ALLOWED_CONFIG_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"配置项 '{request.key}' 不在允许的配置列表中。允许的配置项: {list(ALLOWED_CONFIG_KEYS.keys())}"
+        )
+
+    config_meta = ALLOWED_CONFIG_KEYS[request.key]
+
+    # 根据类型验证值
+    if config_meta["type"] == "boolean":
+        if request.value.lower() not in ["true", "false"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"配置项 '{request.key}' 的值必须是 'true' 或 'false'"
+            )
+    elif config_meta["type"] == "integer":
+        try:
+            int(request.value)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"配置项 '{request.key}' 的值必须是整数"
+            )
+
+    # 更新配置
+    await config_manager.setValue(request.key, request.value)
+    logger.info(f"外部API更新了配置项 '{request.key}' 为 '{request.value}'")
+
+    return

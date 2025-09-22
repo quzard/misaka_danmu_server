@@ -112,7 +112,7 @@ class MetadataSource(Base):
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
     isAuxSearchEnabled: Mapped[bool] = mapped_column("is_aux_search_enabled", Boolean, default=True)
     displayOrder: Mapped[int] = mapped_column("display_order", Integer, default=0)
-    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=False)
+    useProxy: Mapped[bool] = mapped_column("use_proxy", Boolean, default=True)
     isFailoverEnabled: Mapped[bool] = mapped_column("is_failover_enabled", Boolean, default=False)
     logRawResponses: Mapped[bool] = mapped_column("log_raw_responses", Boolean, default=False, nullable=False)
 
@@ -259,6 +259,17 @@ class TaskHistory(Base):
     uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
+
+class TaskStateCache(Base):
+    """任务状态缓存表，用于存储正在执行任务的参数，支持服务重启后的任务恢复"""
+    __tablename__ = "task_state_cache"
+    taskId: Mapped[str] = mapped_column("task_id", String(100), primary_key=True)
+    taskType: Mapped[str] = mapped_column("task_type", String(100))  # 任务类型，如 'generic_import', 'match_fallback'
+    taskParameters: Mapped[str] = mapped_column("task_parameters", TEXT().with_variant(MEDIUMTEXT, "mysql"))  # JSON格式的任务参数
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime)
+
+    __table_args__ = (Index('idx_task_type', 'task_type'),)
 
 class ExternalApiLog(Base):
     __tablename__ = "external_api_logs"

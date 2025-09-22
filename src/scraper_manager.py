@@ -85,7 +85,24 @@ class ScraperManager:
 
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
-        scrapers_dir = Path("/app/src/scrapers")
+        def _is_docker_environment():
+            """检测是否在Docker容器中运行"""
+            import os
+            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+            if Path("/.dockerenv").exists():
+                return True
+            # 方法2: 检查环境变量
+            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+                return True
+            # 方法3: 检查当前工作目录是否为 /app
+            if Path.cwd() == Path("/app"):
+                return True
+            return False
+
+        if _is_docker_environment():
+            scrapers_dir = Path("/app/src/scrapers")
+        else:
+            scrapers_dir = Path("src/scrapers")
         for file_path in scrapers_dir.iterdir():
             # 我们只关心 .py 文件或已知的二进制扩展名
             if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):

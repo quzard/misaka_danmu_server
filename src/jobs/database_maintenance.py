@@ -1,10 +1,11 @@
 import logging
-from typing import Callable
+from typing import Callable, Optional
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import text
+from sqlalchemy import text, select
 
 from .. import crud, orm_models
 from ..config import settings
@@ -14,6 +15,46 @@ from ..task_manager import TaskSuccess
 from ..database import _get_db_url
 
 logger = logging.getLogger(__name__)
+
+# 图片存储目录
+IMAGE_DIR = Path("/app/config/image")
+
+async def _clean_orphaned_images(session: AsyncSession) -> str:
+    """清理数据库中不存在的图片文件"""
+    if not IMAGE_DIR.exists():
+        return "图片目录不存在，跳过清理。"
+
+    # 获取数据库中所有的图片路径
+    stmt = select(orm_models.Anime.localImagePath).where(orm_models.Anime.localImagePath.isnot(None))
+    result = await session.execute(stmt)
+    db_image_paths = set()
+
+    for row in result.scalars().all():
+        if row and row.startswith('/data/images/'):
+            # 提取文件名
+            filename = row.split('/')[-1]
+            db_image_paths.add(filename)
+
+    # 获取文件系统中的所有图片文件
+    fs_image_files = set()
+    for file_path in IMAGE_DIR.iterdir():
+        if file_path.is_file() and file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']:
+            fs_image_files.add(file_path.name)
+
+    # 找出孤立的图片文件（文件系统中存在但数据库中不存在）
+    orphaned_files = fs_image_files - db_image_paths
+
+    deleted_count = 0
+    for filename in orphaned_files:
+        try:
+            file_path = IMAGE_DIR / filename
+            file_path.unlink()
+            deleted_count += 1
+            logger.debug(f"删除孤立图片文件: {file_path}")
+        except Exception as e:
+            logger.error(f"删除图片文件失败 {filename}: {e}")
+
+    return f"图片缓存清理完成，删除了 {deleted_count} 个孤立文件。"
 
 async def _optimize_database(session: AsyncSession, db_type: str) -> str:
     """根据数据库类型执行表优化。"""
@@ -59,14 +100,14 @@ async def _purge_binary_logs(session: AsyncSession, days: int) -> str:
 
 class DatabaseMaintenanceJob(BaseJob):
     """
-    一个用于执行数据库维护的定时任务，包括清理旧日志和优化表。
+    缓存日志清理任务，包括清理旧日志、优化表和清理无效图片缓存。
     """
     job_type = "databaseMaintenance"
-    job_name = "数据库维护"
+    job_name = "缓存日志清理任务"
 
     async def run(self, session: AsyncSession, progress_callback: Callable):
         """
-        执行数据库维护的核心任务：清理旧日志和优化表。
+        执行缓存日志清理任务：清理旧日志、优化表和清理无效图片缓存。
         """
         self.logger.info(f"开始执行 [{self.job_name}] 定时任务...")
         
@@ -153,7 +194,20 @@ class DatabaseMaintenanceJob(BaseJob):
             self.logger.error(optimization_message, exc_info=True)
             # 即使优化失败，也不应导致整个任务失败，仅记录错误
 
-        await progress_callback(90, optimization_message)
+        await progress_callback(80, optimization_message)
 
-        final_message = f"数据库维护完成。{optimization_message}"
+        # --- 4. 图片缓存清理 ---
+        await progress_callback(85, "正在清理无效图片缓存...")
+
+        try:
+            image_cleanup_message = await _clean_orphaned_images(session)
+            self.logger.info(f"图片缓存清理结果: {image_cleanup_message}")
+        except Exception as e:
+            image_cleanup_message = f"图片缓存清理失败: {e}"
+            self.logger.error(image_cleanup_message, exc_info=True)
+            # 即使清理失败，也不应导致整个任务失败，仅记录错误
+
+        await progress_callback(100, "缓存日志清理任务完成")
+
+        final_message = f"缓存日志清理任务完成。{optimization_message} {image_cleanup_message}"
         raise TaskSuccess(final_message)

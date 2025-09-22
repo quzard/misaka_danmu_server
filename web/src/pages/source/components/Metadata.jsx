@@ -49,23 +49,22 @@ const SortableItem = ({ item, index, handleChangeStatus, onConfig }) => {
   })
 
   // 拖拽样式
+  // 只保留必要的样式，移除会阻止滚动的touchAction
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    cursor: 'grab',
-    touchAction: 'none', // 关键：阻止浏览器默认触摸行为
-    userSelect: 'none', // 防止拖拽时选中文本
     ...(isDragging && { cursor: 'grabbing' }),
   }
 
   return (
-    <List.Item ref={setNodeRef} style={style} {...attributes}>
+    <List.Item ref={setNodeRef} style={style}>
       {/* 保留你原有的列表项渲染逻辑 */}
       <div className="w-full flex items-center justify-between">
         {/* 左侧添加拖拽手柄 */}
         <div className="flex items-center gap-2">
-          <div {...listeners} style={{ cursor: 'grab' }}>
+          {/* 将attributes移到拖拽图标容器上，确保只有拖拽图标可触发拖拽 */}
+          <div {...attributes} {...listeners} style={{ cursor: 'grab' }}>
             <MyIcon icon="drag" size={24} />
           </div>
           <div>{item.providerName}</div>
@@ -153,6 +152,7 @@ export const Metadata = () => {
         .then(res => {
           form.setFieldsValue({
             ...res.data,
+            useProxy: res.data.useProxy ?? true,
             logRawResponses: res.data.logRawResponses ?? false,
           })
         })
@@ -349,10 +349,23 @@ export const Metadata = () => {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ logRawResponses: false }}
+          initialValues={{ useProxy: true, logRawResponses: false }}
         >
           <div className="my-4">
             请为 {selectedSource?.providerName} 源填写以下配置信息。
+          </div>
+          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+            <Form.Item
+              name="useProxy"
+              label="启用代理"
+              valuePropName="checked"
+              className="min-w-[100px] shrink-0 !mb-0"
+            >
+              <Switch />
+            </Form.Item>
+            <div className="w-full text-gray-500">
+              启用后，此源的所有API请求将通过全局代理服务器进行。需要先在设置中配置全局代理。
+            </div>
           </div>
           <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
             <Form.Item

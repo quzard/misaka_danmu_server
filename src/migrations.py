@@ -202,7 +202,7 @@ async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncCon
     """迁移任务: 确保 metadata_sources 表有 log_raw_responses 字段。"""
     table_name = 'metadata_sources'
     column_name = 'log_raw_responses'
-    
+
     if db_type == "mysql":
         check_column_sql = text(f"SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '{table_name}' AND column_name = '{column_name}'")
         add_column_sql = text(f"ALTER TABLE {table_name} ADD COLUMN `{column_name}` BOOLEAN NOT NULL DEFAULT FALSE")
@@ -213,6 +213,75 @@ async def _migrate_add_log_raw_responses_to_metadata_sources_task(conn: AsyncCon
     if not (await conn.execute(check_column_sql)).scalar_one_or_none():
         await conn.execute(add_column_sql)
 
+async def _migrate_danmaku_paths_to_absolute_task(conn: AsyncConnection):
+    """迁移任务: 将现有的相对路径转换为绝对路径。"""
+    # 查询所有以 /danmaku/ 开头但不以 /app/config/danmaku/ 开头的路径（防止重复拼接）
+    select_sql = text("SELECT id, danmaku_file_path FROM episode WHERE danmaku_file_path LIKE '/danmaku/%' AND danmaku_file_path NOT LIKE '/app/config/danmaku/%'")
+    episodes = await conn.execute(select_sql)
+
+    migrated_count = 0
+    for episode in episodes:
+        episode_id, old_path = episode
+        # 直接在前面拼接 /app/config
+        new_path = f"/app/config{old_path}"
+
+        # 更新数据库
+        update_sql = text("UPDATE episode SET danmaku_file_path = :new_path WHERE id = :episode_id")
+        await conn.execute(update_sql, {"new_path": new_path, "episode_id": episode_id})
+        migrated_count += 1
+
+        logger.debug(f"迁移路径: {old_path} -> {new_path}")
+
+    logger.info(f"弹幕路径迁移完成，共迁移 {migrated_count} 个分集的路径")
+
+async def _enable_metadata_source_proxy_by_default_task(conn: AsyncConnection):
+    """迁移任务: 将元信息搜索源的代理开关默认设置为开启。"""
+    # 更新所有现有的元信息搜索源，将 use_proxy 设置为 true
+    update_sql = text("UPDATE metadata_sources SET use_proxy = true WHERE use_proxy = false")
+    result = await conn.execute(update_sql)
+
+    updated_count = result.rowcount
+    logger.info(f"元信息搜索源代理设置迁移完成，共更新了 {updated_count} 个源。")
+    return f"成功为 {updated_count} 个元信息搜索源启用了代理功能。"
+
+async def _create_task_state_cache_table_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 创建任务状态缓存表，用于支持服务重启后的任务恢复。"""
+    table_name = 'task_state_cache'
+
+    # 检查表是否已存在
+    if db_type == "mysql":
+        check_table_sql = text(f"SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '{table_name}'")
+        create_table_sql = text(f"""
+            CREATE TABLE {table_name} (
+                task_id VARCHAR(100) PRIMARY KEY,
+                task_type VARCHAR(100) NOT NULL,
+                task_parameters MEDIUMTEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                INDEX idx_task_type (task_type)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+    else: # postgresql
+        check_table_sql = text(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{table_name}'")
+        create_table_sql = text(f"""
+            CREATE TABLE {table_name} (
+                task_id VARCHAR(100) PRIMARY KEY,
+                task_type VARCHAR(100) NOT NULL,
+                task_parameters TEXT NOT NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+            )
+        """)
+        create_index_sql = text(f"CREATE INDEX IF NOT EXISTS idx_task_state_cache_task_type ON {table_name} (task_type)")
+
+    if not (await conn.execute(check_table_sql)).scalar_one_or_none():
+        await conn.execute(create_table_sql)
+        # 仅当数据库是 PostgreSQL 时，才单独执行创建索引的语句
+        if db_type == "postgresql":
+            await conn.execute(create_index_sql)
+        logger.info(f"成功创建任务状态缓存表 '{table_name}'")
+    else:
+        logger.info(f"任务状态缓存表 '{table_name}' 已存在，跳过创建")
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
@@ -231,6 +300,9 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_unique_key_to_task_history_v1", _migrate_add_unique_key_to_task_history_task, (db_type,)),
         ("migrate_api_token_to_daily_limit_v1", _migrate_api_token_to_daily_limit_task, (db_type,)),
         ("migrate_add_log_raw_responses_to_metadata_sources_v1", _migrate_add_log_raw_responses_to_metadata_sources_task, (db_type,)),
+        ("migrate_danmaku_paths_to_absolute_v2", _migrate_danmaku_paths_to_absolute_task, ()),
+        ("migrate_enable_metadata_source_proxy_by_default_v1", _enable_metadata_source_proxy_by_default_task, ()),
+        ("migrate_create_task_state_cache_table_v1", _create_task_state_cache_table_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

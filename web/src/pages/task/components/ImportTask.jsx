@@ -21,6 +21,8 @@ import {
   Tag,
   Tooltip,
   Dropdown,
+  Row,
+  Col,
 } from 'antd'
 import {
   CheckOutlined,
@@ -34,6 +36,8 @@ import {
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+import { useAtom } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 // 移除useScroll导入，改用分页模式
 
 export const ImportTask = () => {
@@ -41,6 +45,8 @@ export const ImportTask = () => {
   const [taskList, setTaskList] = useState([])
   const [selectList, setSelectList] = useState([])
   const timer = useRef()
+
+  const [isMobile] = useAtom(isMobileAtom)
 
   const [pagination, setPagination] = useState({
     current: 1,
@@ -294,65 +300,72 @@ export const ImportTask = () => {
         loading={loading}
         title="任务管理器"
         extra={
-          <Space>
-            <Dropdown menu={statusMenu}>
-              <Button icon={<FilterOutlined />}>
-                {getStatusLabel(status)}
-              </Button>
-            </Dropdown>
-            <Tooltip title="全选/取消全选">
-              <Button
-                type="default"
-                shape="circle"
-                icon={
-                  selectList.length === taskList.length &&
-                  !!selectList.length ? (
-                    <CheckOutlined />
-                  ) : (
-                    <MinusOutlined />
-                  )
-                }
-                onClick={() => {
-                  if (
-                    selectList.length === taskList.length &&
-                    !!selectList.length
-                  ) {
-                    setSelectList([])
-                  } else {
-                    setSelectList(taskList)
-                  }
-                }}
-              />
-            </Tooltip>
-            <Tooltip title="启用/暂停任务">
-              <Button
-                disabled={!canPause}
-                type="default"
-                shape="circle"
-                icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
-                onClick={handlePause}
-              />
-            </Tooltip>
-            <Tooltip title="删除任务">
-              <Button
-                disabled={!canDelete}
-                type="default"
-                shape="circle"
-                icon={<DeleteOutlined />}
-                onClick={handleDelete}
-              />
-            </Tooltip>
-            <Tooltip title="中止任务">
-              <Button
-                disabled={!canPause}
-                type="default"
-                shape="circle"
-                icon={<StopOutlined />}
-                onClick={handleStop}
-              />
-            </Tooltip>
+         <Row gutter={[4, 12]} style={{
+            padding: isMobile ? '16px 0' : '0',
+          }}>
+            <Col md={13} xs={24}>
+              <div className='flex items-center justify-center gap-2'>
+                <Dropdown menu={statusMenu}>
+                  <Button icon={<FilterOutlined />}>
+                    {getStatusLabel(status)}
+                  </Button>
+                </Dropdown>
+                <Tooltip title="全选/取消全选">
+                  <Button
+                    type="default"
+                    shape="circle"
+                    icon={
+                      selectList.length === taskList.length &&
+                      !!selectList.length ? (
+                        <CheckOutlined />
+                      ) : (
+                        <MinusOutlined />
+                      )
+                    }
+                    onClick={() => {
+                      if (
+                        selectList.length === taskList.length &&
+                        !!selectList.length
+                      ) {
+                        setSelectList([])
+                      } else {
+                        setSelectList(taskList)
+                      }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="启用/暂停任务">
+                  <Button
+                    disabled={!canPause}
+                    type="default"
+                    shape="circle"
+                    icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
+                    onClick={handlePause}
+                  />
+                </Tooltip>
+                <Tooltip title="删除任务">
+                  <Button
+                    disabled={!canDelete}
+                    type="default"
+                    shape="circle"
+                    icon={<DeleteOutlined />}
+                    onClick={handleDelete}
+                  />
+                </Tooltip>
+                <Tooltip title="中止任务">
+                  <Button
+                    disabled={!canPause}
+                    type="default"
+                    shape="circle"
+                    icon={<StopOutlined />}
+                    onClick={handleStop}
+                  />
+                </Tooltip>
 
-            <Input.Search
+                
+              </div>
+            </Col>
+            <Col md={11} xs={24}><Input.Search
               placeholder="按任务标题搜索"
               allowClear
               enterButton
@@ -361,8 +374,8 @@ export const ImportTask = () => {
                   replace: true,
                 })
               }}
-            />
-          </Space>
+            /></Col>
+          </Row>
         }
       >
         <div>

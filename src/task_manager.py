@@ -3,6 +3,7 @@ import logging
 import traceback
 from enum import Enum
 import time
+import json
 from typing import Any, Callable, Coroutine, Dict, List, Tuple, Optional # Add HTTPException, status
 from uuid import uuid4, UUID
 
@@ -26,7 +27,7 @@ class TaskSuccess(Exception):
     pass
 
 class Task:
-    def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None):
+    def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None):
         self.task_id = task_id
         self.title = title
         self.coro_factory: Callable[[AsyncSession, Callable], Coroutine] = coro_factory
@@ -37,6 +38,8 @@ class Task:
         self.last_update_time: float = 0.0
         self.update_lock = asyncio.Lock()
         self.unique_key = unique_key
+        self.task_type = task_type  # 任务类型，用于恢复
+        self.task_parameters = task_parameters or {}  # 任务参数，用于恢复
         self.pause_event.set() # 默认为运行状态 (事件被设置)
 
 class TaskManager:
@@ -55,6 +58,8 @@ class TaskManager:
         """启动后台工作协程来处理任务队列。"""
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._worker())
+            # 启动时处理中断的任务
+            asyncio.create_task(self._handle_interrupted_tasks())
             self.logger.info("任务管理器已启动。")
 
     async def _run_task_wrapper(self, task: Task):
@@ -73,6 +78,13 @@ class TaskManager:
                 await crud.update_task_progress_in_history(
                     session, task.task_id, TaskStatus.RUNNING, 0, "正在初始化..."
                 )
+
+                # 保存任务状态到缓存表（如果有任务类型和参数）
+                if task.task_type and task.task_parameters:
+                    await crud.save_task_state_cache(
+                        session, task.task_id, task.task_type, json.dumps(task.task_parameters)
+                    )
+
                 progress_callback = self._get_progress_callback(task)
                 actual_coroutine = task.coro_factory(session, progress_callback)
 
@@ -141,7 +153,9 @@ class TaskManager:
         title: str,
         scheduled_task_id: Optional[str] = None,
         unique_key: Optional[str] = None,
-        run_immediately: bool = False
+        run_immediately: bool = False,
+        task_type: Optional[str] = None,
+        task_parameters: Optional[Dict] = None
     ) -> Tuple[str, asyncio.Event]:
         """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。"""
         async with self._lock:
@@ -168,7 +182,7 @@ class TaskManager:
             self._pending_titles.add(title)
 
         task_id = str(uuid4())
-        task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key)
+        task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters)
         
         async with self._session_factory() as session:
             await crud.create_task_in_history(
@@ -281,3 +295,72 @@ class TaskManager:
                 return True
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
         return False
+
+    async def _handle_interrupted_tasks(self):
+        """处理服务重启时中断的任务"""
+        try:
+            async with self._session_factory() as session:
+                # 获取所有运行中的任务状态
+                running_tasks = await crud.get_all_running_task_states(session)
+
+                if running_tasks:
+                    self.logger.info(f"发现 {len(running_tasks)} 个中断的任务，正在处理...")
+
+                    # 尝试恢复任务或标记为失败
+                    for task_info in running_tasks:
+                        await self._try_recover_task(task_info)
+
+                    # 清理所有中断的任务状态
+                    await crud.mark_interrupted_tasks_as_failed(session)
+                    self.logger.info("已处理所有中断的任务")
+                else:
+                    self.logger.info("没有发现中断的任务")
+
+        except Exception as e:
+            self.logger.error(f"处理中断任务时发生错误: {e}", exc_info=True)
+
+    async def _try_recover_task(self, task_info: Dict):
+        """尝试恢复单个任务，如果无法恢复则记录日志"""
+        task_id = task_info["taskId"]
+        task_type = task_info["taskType"]
+        task_title = task_info["taskTitle"]
+
+        try:
+            # 解析任务参数
+            task_parameters = json.loads(task_info["taskParameters"])
+
+            # 根据任务类型尝试恢复
+            if task_type == "generic_import":
+                await self._recover_generic_import_task(task_id, task_title, task_parameters)
+            elif task_type == "match_fallback":
+                await self._recover_match_fallback_task(task_id, task_title, task_parameters)
+            else:
+                self.logger.warning(f"未知的任务类型 '{task_type}'，无法恢复任务 '{task_title}' (ID: {task_id})")
+
+        except Exception as e:
+            self.logger.error(f"尝试恢复任务 '{task_title}' (ID: {task_id}) 时发生错误: {e}", exc_info=True)
+
+    async def _recover_generic_import_task(self, task_id: str, task_title: str, task_parameters: Dict):
+        """恢复通用导入任务"""
+        try:
+            # 这里可以根据需要重新创建任务
+            # 由于任务可能已经部分完成，我们选择不自动重启，而是记录日志
+            self.logger.info(f"通用导入任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，参数: {task_parameters}")
+
+            # 可以在这里添加逻辑来检查任务是否已经部分完成
+            # 并决定是否需要重新启动任务
+
+        except Exception as e:
+            self.logger.error(f"恢复通用导入任务时发生错误: {e}", exc_info=True)
+
+    async def _recover_match_fallback_task(self, task_id: str, task_title: str, task_parameters: Dict):
+        """恢复匹配后备任务"""
+        try:
+            # 匹配后备任务通常可以安全地重新启动
+            self.logger.info(f"匹配后备任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，参数: {task_parameters}")
+
+            # 可以在这里添加逻辑来重新启动匹配后备任务
+            # 由于这类任务通常是幂等的，可以安全重启
+
+        except Exception as e:
+            self.logger.error(f"恢复匹配后备任务时发生错误: {e}", exc_info=True)
