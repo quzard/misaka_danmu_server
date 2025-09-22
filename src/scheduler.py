@@ -244,12 +244,21 @@ class SchedulerManager:
             # 确保增量更新任务的轮询间隔不低于3小时
             if task_info['jobType'] == "incrementalRefresh" and not cron_is_valid(cron, 3):
                 raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
+
+            # 获取APScheduler中的job对象
+            job = self._scheduler.get_job(task_id)
+            if job:
+                job.modify(name=name)
+                job.reschedule(trigger=CronTrigger.from_crontab(cron))
+                if is_enabled:
+                    job.resume()
+                else:
+                    job.pause()
+                next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+            else:
+                next_run_time = None
+
             await crud.update_scheduled_task(session, task_id, name, cron, is_enabled)
-            job.modify(name=name)
-            job.reschedule(trigger=CronTrigger.from_crontab(cron))
-            if is_enabled: job.resume()
-            else: job.pause()
-            next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
             await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
