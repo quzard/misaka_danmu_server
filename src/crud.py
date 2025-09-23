@@ -1683,8 +1683,26 @@ async def check_duplicate_import(
                 else:
                     # 数据源存在但集数不存在，允许导入
                     return None
-        # 对于全量导入或无法确定集数的情况，仍然阻止重复导入
-        return f"该数据源已存在于弹幕库中"
+        # 修复：对于全量导入，检查该数据源是否已有弹幕，而不是简单阻止
+        # 这样允许同一作品的不同来源（如bilibili和youku）都能导入
+        anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
+        if anime_id:
+            # 检查该数据源下是否已有分集和弹幕
+            stmt = select(func.count(Episode.id)).join(
+                AnimeSource, Episode.sourceId == AnimeSource.id
+            ).where(
+                AnimeSource.providerName == provider,
+                AnimeSource.mediaId == media_id,
+                Episode.danmakuFilePath.isnot(None),
+                Episode.commentCount > 0
+            )
+            result = await session.execute(stmt)
+            episode_count = result.scalar_one()
+            if episode_count > 0:
+                return f"该数据源 ({provider}) 已存在于弹幕库中，且已有 {episode_count} 集弹幕"
+            else:
+                # 数据源存在但没有弹幕，允许导入
+                return None
 
     if not is_single_episode:  # 只在全量导入时检查作品重复
         # 2. 检查作品是否已存在（标题+季度+年份都相同才算重复）
@@ -2576,10 +2594,13 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
     # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
+    # 修复MySQL排序规则冲突：使用COLLATE显式指定排序规则
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
-        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
-        .where(orm_models.TaskHistory.status == "运行中")
+        .join(orm_models.TaskHistory,
+              text("task_state_cache.task_id COLLATE utf8mb4_general_ci = task_history.id COLLATE utf8mb4_general_ci"))
+        .where(text("task_history.status COLLATE utf8mb4_general_ci = :status"))
+        .params(status="运行中")
     )
 
     task_states = []

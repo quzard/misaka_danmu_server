@@ -3,6 +3,8 @@ venv/*
 
 src/**/__pycache__/
 src/**/.DS_Store
+src/scrapers/dandanplay.py
 config/danmaku
 config/image
 
+.augment/rules/rules.md

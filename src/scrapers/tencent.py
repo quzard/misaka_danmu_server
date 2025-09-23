@@ -185,6 +185,8 @@ class TencentScraper(BaseScraper):
     handled_domains = ["v.qq.com"]
     referer = "https://v.qq.com/"
     test_url = "https://v.qq.com"
+
+    rate_limit_quota = -1
     # 基于JS参考实现，提供一个更通用和全面的分集黑名单。
     # 修正：使用一个更简洁且高效的正则表达式，而不是对每个关键词进行 re.escape。
     # 这提高了可读性，并允许使用正则表达式的特性（如 `|`）。

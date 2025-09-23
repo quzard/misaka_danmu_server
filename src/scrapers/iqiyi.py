@@ -278,6 +278,8 @@ class IqiyiScraper(BaseScraper):
     configurable_fields: ClassVar[Dict[str, Tuple[str, str, str]]] = {
         "iqiyiUseProtobuf": ("使用Protobuf弹幕接口", "boolean", "实验性功能，使用新的接口获取弹幕，可能更稳定但覆盖面未知。")
     }
+
+    rate_limit_quota = -1
     
     # --- 新增：用于新API的签名和ID转换 ---
     _xor_key: ClassVar[int] = 0x75706971676c
