@@ -280,10 +280,11 @@ export const Scrapers = () => {
 
     // Dandanplay specific logic
     if (item.providerName === 'dandanplay') {
-      if (res.data?.dandanplayProxyConfig) {
-        setDandanAuthMode('proxy')
-      } else {
+      // 如果配置了 App ID，则为本地模式，否则默认为代理模式
+      if (res.data?.dandanplayAppId) {
         setDandanAuthMode('local')
+      } else {
+        setDandanAuthMode('proxy')
       }
     }
   }
@@ -439,6 +440,11 @@ export const Scrapers = () => {
             ? [fieldInfo, 'string', '']
             : fieldInfo
         const camelKey = key.replace(/_([a-z])/g, g => g[1].toUpperCase())
+
+        // 如果是 dandanplay，则跳过所有已在定制UI中处理的字段
+        if (setname === 'dandanplay') {
+          return null
+        }
 
         // 跳过通用黑名单字段，因为它在下面有专门的渲染逻辑
         if (key.endsWith('_episode_blacklist_regex')) {
