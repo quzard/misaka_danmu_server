@@ -248,7 +248,7 @@ class SchedulerManager:
                 raise ValueError("定时增量更新任务的轮询间隔不得低于3小时。请使用如 '0 */3 * * *' (每3小时) 或更长的间隔。")
 
             # 获取APScheduler中的job对象
-            job = self._scheduler.get_job(task_id)
+            job = self.scheduler.get_job(task_id)
             if job:
                 job.modify(name=name)
                 job.reschedule(trigger=CronTrigger.from_crontab(cron))

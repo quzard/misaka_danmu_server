@@ -37,7 +37,7 @@ class WebhookProcessorJob(BaseJob):
                 payload = task.payload
                 if isinstance(payload, str):
                     payload = json.loads(payload)
-                
+
                 # 使用 webhook_search_and_dispatch_task 的逻辑
                 task_coro = lambda s, cb: webhook_search_and_dispatch_task(
                     webhookSource=task.webhookSource,
@@ -51,9 +51,16 @@ class WebhookProcessorJob(BaseJob):
                     title_recognition_manager=self.title_recognition_manager,
                     **payload
                 )
-                await self.task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
-                # 修正：只有在任务成功提交后才删除记录
+                # 修正：使用 run_immediately=True 来串行执行任务，避免并发冲突
+                # 这样每个任务都会立即执行并完成，而不是加入队列等待
+                task_id, done_event = await self.task_manager.submit_task(
+                    task_coro, task.taskTitle, unique_key=task.uniqueKey, run_immediately=True
+                )
+                # 等待任务完成
+                await done_event.wait()
+                # 修正：只有在任务成功提交并完成后才删除记录
                 await session.delete(task)
+
             except Exception as e:
                 logger.error(f"处理 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
                 # 如果提交失败，则将任务标记为失败，以便用户可以手动重试
