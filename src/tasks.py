@@ -1292,7 +1292,8 @@ async def run_webhook_tasks_directly_manual(
     scraper_manager: "ScraperManager",
     metadata_manager: "MetadataSourceManager",
     config_manager: "ConfigManager",
-    rate_limiter: "RateLimiter"
+    rate_limiter: "RateLimiter",
+    title_recognition_manager: "TitleRecognitionManager"
 ) -> int:
     """直接获取并执行指定的待处理Webhook任务。"""
     if not task_ids:
@@ -1309,7 +1310,8 @@ async def run_webhook_tasks_directly_manual(
                 webhookSource=task.webhookSource, progress_callback=cb, session=s,
                 manager=scraper_manager, task_manager=task_manager,
                 metadata_manager=metadata_manager, config_manager=config_manager,
-                rate_limiter=rate_limiter, **payload
+                rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager,
+                **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
             await session.delete(task)

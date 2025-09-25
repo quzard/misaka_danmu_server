@@ -31,6 +31,7 @@ from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
+from ..title_recognition import TitleRecognitionManager
 from .._version import APP_VERSION
 from thefuzz import fuzz
 from ..config import settings
@@ -2849,7 +2850,8 @@ async def run_webhook_tasks_now(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
 ):
     """立即执行指定的待处理Webhook任务。"""
     task_ids = payload.get("ids", [])
@@ -2863,7 +2865,8 @@ async def run_webhook_tasks_now(
         scraper_manager=scraper_manager,
         metadata_manager=metadata_manager,
         config_manager=config_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
 
     if submitted_count > 0:
