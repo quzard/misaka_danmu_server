@@ -28,6 +28,7 @@ from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
+from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
@@ -444,7 +445,8 @@ async def generic_import_task(
     session: AsyncSession,
     manager: ScraperManager, 
     task_manager: TaskManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -492,7 +494,7 @@ async def generic_import_task(
                 
                 # 修正：确保在创建时也使用年份进行重复检查
                 anime_id = await crud.get_or_create_anime(
-                    session, title_to_use, mediaType, season_to_use, year, imageUrl, local_image_path)
+                    session, title_to_use, mediaType, season_to_use, year, imageUrl, local_image_path, title_recognition_manager)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
@@ -556,7 +558,8 @@ async def generic_import_task(
                 season_to_use,
                 imageUrl,
                 local_image_path,
-                year
+                year,
+                title_recognition_manager
             )
 
             # 更新元数据
@@ -610,7 +613,8 @@ async def generic_import_task(
                 season_to_use,
                 imageUrl,
                 local_image_path,
-                year
+                year,
+                title_recognition_manager
             )
 
             # 更新元数据
@@ -668,7 +672,8 @@ async def edited_import_task(
     config_manager: ConfigManager,
     manager: ScraperManager,
     rate_limiter: RateLimiter,
-    metadata_manager: MetadataSourceManager
+    metadata_manager: MetadataSourceManager,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """后台任务：处理编辑后的导入请求。修改流程：先获取弹幕再创建条目。"""
     scraper = manager.get_scraper(request_data.provider)
@@ -747,7 +752,7 @@ async def edited_import_task(
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
                 session, request_data.animeTitle, request_data.mediaType,
-                request_data.season, request_data.imageUrl, local_image_path, request_data.year
+                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager
             )
             
             # 更新元数据
@@ -1165,7 +1170,7 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         logger.error(f"集数偏移任务失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str, title_recognition_manager: TitleRecognitionManager):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
@@ -1186,7 +1191,8 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             session=session,
             manager=manager, # type: ignore
             task_manager=task_manager,
-            rate_limiter=rate_limiter)
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager)
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
         raise
@@ -1345,7 +1351,8 @@ async def webhook_search_and_dispatch_task(
     task_manager: TaskManager, # type: ignore
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
@@ -1355,7 +1362,7 @@ async def webhook_search_and_dispatch_task(
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season)
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager)
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
@@ -1371,7 +1378,8 @@ async def webhook_search_and_dispatch_task(
                     imageUrl=favorited_source['imageUrl'], doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, config_manager=config_manager, metadata_manager=metadata_manager,
                     bangumiId=bangumiId, rate_limiter=rate_limiter,
                     progress_callback=cb, session=session, manager=manager,
-                    task_manager=task_manager
+                    task_manager=task_manager,
+                    title_recognition_manager=title_recognition_manager
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
                 raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
@@ -1415,7 +1423,8 @@ async def webhook_search_and_dispatch_task(
             season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,
-            task_manager=task_manager
+            task_manager=task_manager,
+            title_recognition_manager=title_recognition_manager
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
@@ -1525,6 +1534,7 @@ async def auto_search_and_import_task(
     task_manager: TaskManager,
     rate_limiter: Optional[RateLimiter] = None,
     api_key: Optional[str] = None,
+    title_recognition_manager: Optional[TitleRecognitionManager] = None,
 ):
     """
     全自动搜索并导入的核心任务逻辑。
@@ -1670,7 +1680,7 @@ async def auto_search_and_import_task(
 
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, main_title, season_for_check, year
+                session, main_title, season_for_check, year, title_recognition_manager
             )
         # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
         # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。
@@ -1865,7 +1875,8 @@ async def auto_search_and_import_task(
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
-            rate_limiter=rate_limiter
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。

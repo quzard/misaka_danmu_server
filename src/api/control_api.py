@@ -70,6 +70,10 @@ def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
 
+def get_title_recognition_manager(request: Request):
+    """依赖项：从应用状态获取标题识别管理器"""
+    return request.app.state.title_recognition_manager
+
 # 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
 api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
 
@@ -302,6 +306,7 @@ async def auto_import(
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -425,6 +430,7 @@ async def auto_import(
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
             payload, cb, session, config_manager, manager, metadata_manager, task_manager,
             rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager,
             api_key=api_key
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -560,7 +566,8 @@ async def direct_import(
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     ### 功能
@@ -632,7 +639,7 @@ async def direct_import(
             metadata_manager=metadata_manager, tmdbId=payload.tmdbId, imdbId=payload.imdbId,
             tvdbId=payload.tvdbId, bangumiId=payload.bangumiId,
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
-            rate_limiter=rate_limiter
+            rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "导入任务已提交", "taskId": task_id}
@@ -687,7 +694,8 @@ async def edited_import(
     manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     config_manager: ConfigManager = Depends(get_config_manager),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     ### 功能
@@ -798,7 +806,7 @@ async def edited_import(
         task_coro = lambda session, cb: tasks.edited_import_task(
             request_data=edited_request, progress_callback=cb, session=session,
             config_manager=config_manager, manager=manager, rate_limiter=rate_limiter,
-            metadata_manager=metadata_manager
+            metadata_manager=metadata_manager, title_recognition_manager=title_recognition_manager
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
@@ -995,7 +1003,8 @@ async def search_library(
 @router.post("/library/anime", response_model=ControlAnimeDetailsResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
 async def create_anime_entry(
     payload: ControlAnimeCreateRequest,
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     ### 功能
@@ -1010,7 +1019,7 @@ async def create_anime_entry(
     # 修正：为非电视剧类型使用默认季度1进行重复检查
     season_for_check = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
     existing_anime = await crud.find_anime_by_title_season_year(
-        session, payload.title, season_for_check, payload.year
+        session, payload.title, season_for_check, payload.year, title_recognition_manager
     )
     if existing_anime:
         raise HTTPException(
@@ -1027,7 +1036,8 @@ async def create_anime_entry(
         season=season_for_create,
         year=payload.year,
         image_url=None, # No image URL when creating manually
-        local_image_path=None
+        local_image_path=None,
+        title_recognition_manager=title_recognition_manager
     )
 
     await crud.update_metadata_if_empty(

@@ -59,7 +59,7 @@ class IncrementalRefreshJob(BaseJob):
                         bangumiId=info.get("bangumiId"), metadata_manager=self.metadata_manager,
                         progress_callback=cb, session=s, manager=self.scraper_manager,
                         task_manager=self.task_manager, rate_limiter=self.rate_limiter,
-                        config_manager=self.config_manager
+                        config_manager=self.config_manager, title_recognition_manager=self.title_recognition_manager
                     )
                 
                 try:

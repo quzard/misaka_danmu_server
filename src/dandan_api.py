@@ -25,7 +25,7 @@ from .rate_limiter import RateLimiter
 from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
-from .api.control_api import ControlAutoImportRequest
+from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
 
 logger = logging.getLogger(__name__)
 
@@ -650,7 +650,8 @@ async def _get_match_for_item(
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager
 ) -> DandanMatchResponse:
     """
     通过文件名匹配弹幕库的核心逻辑。此接口不使用文件Hash。
@@ -810,6 +811,7 @@ async def _get_match_for_item(
             task_coro = lambda session, cb: tasks.auto_search_and_import_task(
                 auto_import_payload, cb, session, config_manager, scraper_manager, metadata_manager, task_manager,
                 rate_limiter=rate_limiter,
+                title_recognition_manager=title_recognition_manager,
                 api_key=None # 这是一个内部任务，没有API Key
             )
             
@@ -858,7 +860,8 @@ async def match_single_file(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     通过文件名匹配弹幕库。此接口不使用文件Hash。
@@ -866,7 +869,7 @@ async def match_single_file(
     """
     return await _get_match_for_item(
         request, session, task_manager, scraper_manager, 
-        metadata_manager, config_manager, rate_limiter
+        metadata_manager, config_manager, rate_limiter, title_recognition_manager
     )
 
 
@@ -883,7 +886,8 @@ async def match_batch_files(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     批量匹配文件。
@@ -893,7 +897,7 @@ async def match_batch_files(
 
     tasks = [
         _get_match_for_item(
-            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter
+            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager
         ) for item in request.requests
     ]
     results = await asyncio.gather(*tasks)

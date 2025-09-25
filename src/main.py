@@ -153,6 +153,11 @@ async def lifespan(app: FastAPI):
 
 
     app.state.task_manager = TaskManager(session_factory, app.state.config_manager)
+    
+    # 初始化识别词管理器
+    from .title_recognition import TitleRecognitionManager
+    app.state.title_recognition_manager = TitleRecognitionManager(session_factory)
+    
     app.state.webhook_manager = WebhookManager(
         session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager
     )
