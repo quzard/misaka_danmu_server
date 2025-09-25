@@ -283,6 +283,40 @@ async def _create_task_state_cache_table_task(conn: AsyncConnection, db_type: st
     else:
         logger.info(f"任务状态缓存表 '{table_name}' 已存在，跳过创建")
 
+async def _create_title_recognition_table_task(conn: AsyncConnection, db_type: str):
+    """创建识别词配置表"""
+    table_name = "title_recognition"
+
+    # 检查表是否已存在
+    if db_type == "mysql":
+        check_sql = text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :table_name")
+    else:  # postgresql
+        check_sql = text("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table_name")
+
+    result = await conn.execute(check_sql, {"table_name": table_name})
+    table_exists = result.scalar() > 0
+
+    if not table_exists:
+        if db_type == "mysql":
+            create_table_sql = text(f"""
+                CREATE TABLE {table_name} (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    content MEDIUMTEXT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+        else:  # postgresql
+            create_table_sql = text(f"""
+                CREATE TABLE {table_name} (
+                    id SERIAL PRIMARY KEY,
+                    content TEXT NOT NULL
+                )
+            """)
+
+        await conn.execute(create_table_sql)
+        logger.info(f"成功创建识别词配置表 '{table_name}'")
+    else:
+        logger.info(f"识别词配置表 '{table_name}' 已存在，跳过创建")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -303,6 +337,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_danmaku_paths_to_absolute_v2", _migrate_danmaku_paths_to_absolute_task, ()),
         ("migrate_enable_metadata_source_proxy_by_default_v1", _enable_metadata_source_proxy_by_default_task, ()),
         ("migrate_create_task_state_cache_table_v1", _create_task_state_cache_table_task, (db_type,)),
+        ("migrate_create_title_recognition_table_v1", _create_title_recognition_table_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:
