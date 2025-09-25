@@ -315,8 +315,13 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     # Create new anime - 使用转换后的标题和季数
     logger.info(f"创建新番剧: 标题='{converted_title}', 季数={converted_season}, 类型={media_type}")
     
-    # 电影类型不需要季度信息
-    title = f"{converted_title} 第{converted_season}季" if media_type != 'movie' else converted_title
+    # 电影类型不需要季度信息，非电影类型只有季数大于1时才添加季度信息
+    if media_type == 'movie':
+        title = converted_title
+    elif converted_season > 1:
+        title = f"{converted_title} 第{converted_season}季"
+    else:
+        title = converted_title
     
     new_anime = Anime(
         title=title, type=media_type, season=converted_season, 
