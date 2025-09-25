@@ -38,11 +38,37 @@ export const Recognition = () => {
 
   return (
     <div className="my-6">
-      <Card loading={loading} title="识别词配置">
+      <Card loading={loading} title="自定义识别词配置">
+        <div className="mb-4">
+          <div className="text-sm text-gray-600 mb-2">
+            <p><strong>支持的格式（参考MoviePilot）：</strong></p>
+            <ul className="list-disc list-inside space-y-1">
+              <li><strong>屏蔽词：</strong> <code>屏蔽词</code></li>
+              <li><strong>简单替换：</strong> <code>被替换词 =&gt; 替换词</code></li>
+              <li><strong>集数偏移：</strong> <code>前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code></li>
+              <li><strong>复合格式：</strong> <code>被替换词 =&gt; 替换词 &amp;&amp; 前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code></li>
+              <li><strong>元数据替换：</strong> <code>错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;</code></li>
+            </ul>
+            <p className="mt-2"><strong>集数偏移支持运算：</strong> EP+1, 2*EP, 2*EP-1 等</p>
+          </div>
+        </div>
         <Input.TextArea
-          rows={8}
+          rows={12}
           value={text}
           onChange={value => setText(value.target.value)}
+          placeholder="# 示例配置：
+# 屏蔽词
+预告
+花絮
+
+# 简单替换
+奔跑吧 => 奔跑吧兄弟
+
+# 集数偏移
+第 <> 话 >> EP-1
+
+# 复合格式
+某动画 => 某动画正确名称 && 第 <> 话 >> EP-1"
         />
         <div className="flex justify-end mt-4">
           <Button type="primary" onClick={handleSave} loading={isSaveLoading}>

@@ -494,7 +494,7 @@ async def generic_import_task(
                 
                 # 修正：确保在创建时也使用年份进行重复检查
                 anime_id = await crud.get_or_create_anime(
-                    session, title_to_use, mediaType, season_to_use, year, imageUrl, local_image_path, title_recognition_manager)
+                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
