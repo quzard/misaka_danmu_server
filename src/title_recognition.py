@@ -34,36 +34,31 @@ class TitleRecognitionManager:
         """
         self.session_factory = session_factory
         self.recognition_rules: List[TitleRecognitionRule] = []
-        self._load_recognition_rules()
+        self._rules_loaded = False
 
-    def _load_recognition_rules(self):
+    async def _ensure_rules_loaded(self):
         """
-        从数据库加载识别词规则
+        确保识别词规则已加载
         """
+        if self._rules_loaded:
+            return
+
         try:
-            # 创建同步会话来加载规则
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            async with self.session_factory() as session:
+                # 获取最新的识别词配置（只有一条记录）
+                result = await session.execute(
+                     select(TitleRecognition).limit(1)
+                 )
+                title_recognition = result.scalar_one_or_none()
 
-            async def load_rules():
-                async with self.session_factory() as session:
-                    # 获取最新的识别词配置（只有一条记录）
-                    result = await session.execute(
-                         select(TitleRecognition).limit(1)
-                     )
-                    title_recognition = result.scalar_one_or_none()
+                if title_recognition is None:
+                    logger.info("数据库中未找到识别词配置，使用空规则集")
+                    self.recognition_rules = []
+                else:
+                    self.recognition_rules = self._parse_recognition_content(title_recognition.content)
+                    logger.info(f"从数据库加载了 {len(self.recognition_rules)} 条识别词规则")
 
-                    if title_recognition is None:
-                        logger.info("数据库中未找到识别词配置，使用空规则集")
-                        return []
-
-                    return self._parse_recognition_content(title_recognition.content)
-
-            self.recognition_rules = loop.run_until_complete(load_rules())
-            loop.close()
-
-            logger.info(f"从数据库加载了 {len(self.recognition_rules)} 条识别词规则")
+                self._rules_loaded = True
 
         except Exception as e:
             logger.error(f"从数据库加载识别词规则失败: {e}")
@@ -293,7 +288,7 @@ class TitleRecognitionManager:
             logger.error(f"更新识别词规则失败: {e}")
             raise
     
-    def apply_title_recognition(self, text: str, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
+    async def apply_title_recognition(self, text: str, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
         """
         应用标题识别词转换 - 参考MoviePilot格式
 
@@ -304,6 +299,9 @@ class TitleRecognitionManager:
         Returns:
             Tuple[转换后的文本, 转换后的集数, 是否发生了转换, 元数据信息]
         """
+        # 确保规则已加载
+        await self._ensure_rules_loaded()
+
         if not text:
             return text, episode, False, None
 

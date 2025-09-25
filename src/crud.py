@@ -271,7 +271,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     logger.debug(f"调用识别词转换前: title='{original_title}', season={original_season}")
     
     if title_recognition_manager:
-        converted_title, converted_season, was_converted, metadata_info = title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
     else:
         converted_title, converted_season, was_converted, metadata_info = title, season, False, None
 
@@ -521,7 +521,7 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     original_season = season
     
     if title_recognition_manager:
-        converted_title, converted_season, _, metadata_info = title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
     else:
         converted_title, converted_season, metadata_info = title, season, None
     
