@@ -25,13 +25,14 @@ class WebhookPayload(BaseModel):
 class BaseWebhook(ABC):
     """所有 Webhook 处理器的抽象基类。"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
         self.rate_limiter = rate_limiter
         self.metadata_manager = metadata_manager
         self.config_manager = config_manager
+        self.title_recognition_manager = title_recognition_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
@@ -95,6 +96,7 @@ class BaseWebhook(ABC):
                     metadata_manager=self.metadata_manager,
                     config_manager=self.config_manager,
                     rate_limiter=self.rate_limiter,
+                    title_recognition_manager=self.title_recognition_manager,
                     **payload
                 )
                 await self.task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

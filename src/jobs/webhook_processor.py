@@ -48,6 +48,7 @@ class WebhookProcessorJob(BaseJob):
                     metadata_manager=self.metadata_manager,
                     config_manager=self.config_manager,
                     rate_limiter=self.rate_limiter,
+                    title_recognition_manager=self.title_recognition_manager,
                     **payload
                 )
                 await self.task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)

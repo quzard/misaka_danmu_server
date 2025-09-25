@@ -73,6 +73,10 @@ async def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
 
+async def get_title_recognition_manager(request: Request):
+    """依赖项：从应用状态获取标题识别管理器"""
+    return request.app.state.title_recognition_manager
+
 @router.get("/version", response_model=Dict[str, str], summary="获取应用版本号")
 async def get_app_version():
     """获取当前后端应用的版本号。"""
@@ -768,7 +772,8 @@ async def refresh_anime(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     为指定的数据源启动一个刷新任务。
@@ -792,7 +797,8 @@ async def refresh_anime(
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
             task_manager=task_manager, config_manager=config_manager, progress_callback=cb, animeTitle=source_info["title"],
-            rate_limiter=rate_limiter, metadata_manager=metadata_manager
+            rate_limiter=rate_limiter, metadata_manager=metadata_manager,
+            title_recognition_manager=title_recognition_manager
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
@@ -1234,6 +1240,78 @@ async def update_scraper_config(
         await session.rollback()
         logger.error(f"更新搜索源 '{providerName}' 配置时出错: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
+
+
+class TitleRecognitionContent(BaseModel):
+    """识别词内容模型"""
+    content: str = Field(..., description="识别词配置内容")
+
+
+@router.get("/settings/title-recognition", response_model=TitleRecognitionContent, summary="获取识别词配置内容")
+async def get_title_recognition_content(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取识别词配置内容
+    
+    Returns:
+        TitleRecognitionContent: 包含识别词配置内容的响应
+    """
+    try:
+        # 查询识别词配置（只有一条记录）
+        result = await session.execute(
+            select(orm_models.TitleRecognition).limit(1)
+        )
+        title_recognition = result.scalar_one_or_none()
+        
+        if title_recognition is None:
+            # 如果没有配置记录，返回默认内容
+            default_content = """# 识别词配置
+# 注意事项：
+# - 每行一个映射规则
+# - 使用 " => " 分隔符
+# - 以 # 开头的行为注释
+# - 空行会被忽略
+
+# 示例规则：
+# 奔跑吧 S09 => 奔跑吧兄弟 S13
+# 奔跑吧 S08 => 奔跑吧兄弟 S12
+"""
+            return TitleRecognitionContent(content=default_content)
+        
+        return TitleRecognitionContent(content=title_recognition.content)
+        
+    except Exception as e:
+        logger.error(f"获取识别词配置时发生错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取识别词配置时发生内部错误。")
+
+
+@router.put("/settings/title-recognition", status_code=status.HTTP_204_NO_CONTENT, summary="更新识别词配置内容")
+async def update_title_recognition_content(
+    payload: TitleRecognitionContent,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    title_recognition_manager = Depends(get_title_recognition_manager)
+):
+    """
+    更新识别词配置内容，使用全量替换模式
+    
+    Args:
+        payload: 包含新识别词配置内容的请求体
+    """
+    try:
+        if title_recognition_manager is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
+        
+        # 使用全量替换模式更新识别词规则
+        await title_recognition_manager.update_recognition_rules(payload.content)
+        
+        logger.info("识别词配置更新成功")
+        
+    except Exception as e:
+        logger.error(f"更新识别词配置时发生错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新识别词配置时发生内部错误: {str(e)}")
 
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")
 async def get_server_logs(current_user: models.User = Depends(security.get_current_user)):
@@ -2235,7 +2313,8 @@ async def import_from_provider(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     try:
         # 在启动任务前检查provider是否存在
@@ -2283,7 +2362,8 @@ async def import_from_provider(
         progress_callback=callback,
         session=session,
         manager=scraper_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
     
     # 构造任务标题
@@ -2315,7 +2395,8 @@ async def import_edited_episodes(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
@@ -2326,7 +2407,8 @@ async def import_edited_episodes(
         manager=scraper_manager,
         config_manager=config_manager,
         rate_limiter=rate_limiter,
-        metadata_manager=metadata_manager
+        metadata_manager=metadata_manager,
+        title_recognition_manager=title_recognition_manager
     )
     # 修正：为编辑后导入任务添加一个唯一的键，以防止重复提交，同时允许对同一作品的不同分集范围进行排队。
     # 这个键基于提供商、媒体ID和正在导入的分集索引列表的哈希值。
@@ -2425,7 +2507,8 @@ async def import_from_url(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     provider = request_data.provider
     url = request_data.url
@@ -2489,7 +2572,8 @@ async def import_from_url(
         metadata_manager=metadata_manager,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
         config_manager=config_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
     
     # 生成unique_key以避免重复任务

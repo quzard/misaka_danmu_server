@@ -23,6 +23,7 @@ from .config import settings
 from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
 from .path_template import DanmakuPathTemplate, create_danmaku_context
+from fastapi import Request
 
 logger = logging.getLogger(__name__)
 
@@ -260,32 +261,59 @@ async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Opti
     row = result.mappings().first()
     return dict(row) if row else None
 
-async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None) -> int:
+async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None, title_recognition_manager=None) -> int:
     """通过标题、季度和年份查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
-    # 修正：将年份也作为唯一性检查的一部分
-    stmt = select(Anime).where(Anime.title == title, Anime.season == season)
+    logger.info(f"开始处理番剧: 原始标题='{title}', 季数={season}, 年份={year}")
+    
+    # 应用识别词转换
+    original_title = title
+    original_season = season
+    logger.debug(f"调用识别词转换前: title='{original_title}', season={original_season}")
+    
+    if title_recognition_manager:
+        converted_title, converted_season, was_converted = title_recognition_manager.apply_title_recognition(title, season)
+    else:
+        converted_title, converted_season, was_converted = title, season, False
+    
+    logger.info(f"识别词转换结果: 原始='{original_title}' S{original_season:02d} -> 转换后='{converted_title}' S{converted_season:02d}, 是否转换={was_converted}")
+    
+    # 如果发生了转换，记录详细日志
+    if was_converted:
+        logger.info(f"✓ 标题识别转换生效: '{original_title}' S{original_season:02d} -> '{converted_title}' S{converted_season:02d}")
+    else:
+        logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
+    
+    # 使用转换后的标题和季数进行查找
+    logger.debug(f"使用转换后的标题进行数据库查找: title='{converted_title}', season={converted_season}")
+    stmt = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
     if year:
         stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     anime = result.scalar_one_or_none()
 
     if anime:
+        logger.info(f"找到已存在的番剧: ID={anime.id}, 标题='{anime.title}', 季数={anime.season}")
         update_values = {}
         if not anime.imageUrl and image_url:
             update_values["imageUrl"] = image_url
+            logger.debug(f"更新海报URL: {image_url}")
         if not anime.localImagePath and local_image_path:
             update_values["localImagePath"] = local_image_path
+            logger.debug(f"更新本地海报路径: {local_image_path}")
         # 新增：如果已有条目没有年份，则更新
         if not anime.year and year:
             update_values["year"] = year
+            logger.debug(f"更新年份: {year}")
         if update_values:
             await session.execute(update(Anime).where(Anime.id == anime.id).values(**update_values))
             await session.flush() # 使用 flush 代替 commit，以在事务中保持对象状态
+            logger.info(f"更新番剧信息完成: ID={anime.id}")
         return anime.id
 
-    # Create new anime
+    # Create new anime - 使用转换后的标题和季数
+    logger.info(f"创建新番剧: 标题='{converted_title}', 季数={converted_season}, 类型={media_type}")
     new_anime = Anime(
-        title=title, type=media_type, season=season, 
+        title=converted_title, type=media_type, season=converted_season, 
         imageUrl=image_url, localImagePath=local_image_path, 
         year=year, 
         createdAt=get_now()
@@ -293,12 +321,15 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     session.add(new_anime)
     await session.flush()  # Flush to get the new anime's ID
     
+    logger.info(f"新番剧创建成功: ID={new_anime.id}, 标题='{new_anime.title}', 季数={new_anime.season}")
+    
     # Create associated metadata and alias records
     new_metadata = AnimeMetadata(animeId=new_anime.id)
     new_alias = AnimeAlias(animeId=new_anime.id)
     session.add_all([new_metadata, new_alias])
     
     await session.flush() # 使用 flush 获取新ID，但不提交事务
+    logger.debug(f"关联的元数据和别名记录创建完成: animeId={new_anime.id}")
     return new_anime.id
 
 async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) -> Anime:
@@ -479,10 +510,24 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
+async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None, title_recognition_manager=None) -> Optional[Dict[str, Any]]:
     """
     通过标题、季度和可选的年份查找番剧，返回一个简化的字典或None。
     """
+    # 应用识别词转换
+    original_title = title
+    original_season = season
+    
+    if title_recognition_manager:
+        converted_title, converted_season, _ = title_recognition_manager.apply_title_recognition(title, season)
+    else:
+        converted_title, converted_season = title, season
+    
+    # 如果发生了转换，记录日志
+    if converted_title != original_title or converted_season != original_season:
+        logger.info(f"标题识别转换: '{original_title}' S{original_season:02d} -> '{converted_title}' S{converted_season:02d}")
+    
+    # 使用转换后的标题和季数进行查找
     stmt = (
         select(
             Anime.id,
@@ -490,7 +535,7 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
             Anime.season,
             Anime.year
         )
-        .where(Anime.title == title, Anime.season == season)
+        .where(Anime.title == converted_title, Anime.season == converted_season)
         .limit(1)
     )
     if year:
