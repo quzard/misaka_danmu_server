@@ -40,7 +40,7 @@ export const Recognition = () => {
     <div className="my-6">
       <Card loading={loading} title="自定义识别词配置">
         <div className="mb-4">
-          <div className="text-sm text-gray-600 mb-2">
+          <div className="text-sm mb-2">
             <p><strong>支持的格式（参考MoviePilot）：</strong></p>
             <ul className="list-disc list-inside space-y-1">
               <li><strong>屏蔽词：</strong> <code>屏蔽词</code></li>
