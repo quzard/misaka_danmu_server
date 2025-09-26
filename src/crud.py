@@ -318,7 +318,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     # 电影类型不需要季度信息，非电影类型只有季数大于1时才添加季度信息
     if media_type == 'movie':
         title = converted_title
-    elif converted_season > 1:
+    # 仅转换的需要增加季度信息，其他converted_title已经包含季度信息
+    elif converted_season > 1 and was_converted:
         title = f"{converted_title} 第{converted_season}季"
     else:
         title = converted_title
