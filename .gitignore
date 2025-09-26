@@ -8,3 +8,8 @@ config/danmaku
 config/image
 
 .augment/rules/rules.md
+.cunzhi-memory/metadata.json
+.cunzhi-memory/patterns.md
+.cunzhi-memory/preferences.md
+.cunzhi-memory/context.md
+.cunzhi-memory/rules.md
