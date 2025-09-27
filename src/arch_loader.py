@@ -183,22 +183,33 @@ def smart_import_with_extraction(module_name, fallback_classes=None, search_path
     if search_paths is None:
         search_paths = ['src', '.']
     
+    print(f"[DEBUG] 开始智能导入模块: {module_name}")
+    print(f"[DEBUG] 搜索路径: {search_paths}")
+    
     # 首先尝试本地加载
     module = load_architecture_specific_module(module_name, search_paths)
     
     if module is not None:
+        print(f"[DEBUG] 成功从本地加载模块: {module_name}")
         return module
     
     # 如果本地加载失败，尝试解压zip包
+    print(f"[DEBUG] 本地未找到 {module_name}，尝试从zip包解压...")
     logger.info(f"本地未找到 {module_name}，尝试从zip包解压...")
+    
     if auto_extract_so_modules():
+        print(f"[DEBUG] zip解压成功，重新尝试加载模块: {module_name}")
         # 解压成功后重新尝试加载
         module = load_architecture_specific_module(module_name, search_paths)
         if module is not None:
+            print(f"[DEBUG] 解压后成功加载模块: {module_name}")
             return module
+        else:
+            print(f"[DEBUG] 解压后仍无法加载模块: {module_name}")
     
     # 如果仍然失败，使用回退版本
     if fallback_classes:
+        print(f"[DEBUG] 使用回退版本: {module_name}")
         return create_fallback_module(module_name, fallback_classes)
     
     raise ImportError(f"无法加载模块 {module_name}，且未提供回退版本")
@@ -244,12 +255,23 @@ def extract_architecture_specific_modules(zip_path, extract_to=None, modules=Non
     current_arch = get_system_architecture()
     extracted_files = {}
     
+    print(f"[DEBUG] 开始解压zip包: {zip_path}")
+    print(f"[DEBUG] 解压目标目录: {extract_to}")
+    print(f"[DEBUG] 要查找的模块: {modules}")
+    print(f"[DEBUG] 当前架构: {current_arch}")
+    
     try:
         with zipfile.ZipFile(zip_path, 'r') as zip_file:
             file_list = zip_file.namelist()
+            print(f"[DEBUG] zip文件包含的所有文件:")
+            for f in file_list:
+                print(f"[DEBUG]   - {f}")
+            
             logger.debug(f"zip文件包含: {file_list}")
             
             for module_name in modules:
+                print(f"[DEBUG] 正在查找模块: {module_name}")
+                
                 # 查找当前架构的文件 - 支持多种命名格式
                 possible_names = [
                     f"{module_name}.{current_arch}.so",
@@ -257,11 +279,16 @@ def extract_architecture_specific_modules(zip_path, extract_to=None, modules=Non
                     f"{module_name}-{current_arch}.so"
                 ]
                 
+                print(f"[DEBUG] 可能的文件名:")
+                for name in possible_names:
+                    print(f"[DEBUG]   - {name}")
+                
                 found_file = None
                 for filename in file_list:
                     for possible_name in possible_names:
                         if filename.endswith(possible_name) or filename == possible_name:
                             found_file = filename
+                            print(f"[DEBUG] 找到匹配文件: {filename}")
                             break
                     if found_file:
                         break
@@ -270,6 +297,8 @@ def extract_architecture_specific_modules(zip_path, extract_to=None, modules=Non
                     # 解压并重命名为标准格式: module_name_arch.so
                     standard_name = f"{module_name}_{current_arch}.so"
                     target_path = extract_to / standard_name
+                    
+                    print(f"[DEBUG] 解压文件: {found_file} -> {target_path}")
                     
                     # 确保目标目录存在
                     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,11 +314,14 @@ def extract_architecture_specific_modules(zip_path, extract_to=None, modules=Non
                     
                     extracted_files[module_name] = str(target_path)
                     logger.info(f"成功解压并重命名: {found_file} -> {standard_name}")
+                    print(f"[DEBUG] 成功解压: {found_file} -> {standard_name}")
                 else:
                     logger.warning(f"未在zip中找到模块 {module_name} 的 {current_arch} 架构版本")
+                    print(f"[DEBUG] 未找到模块 {module_name} 的 {current_arch} 架构版本")
     
     except Exception as e:
         logger.error(f"解压zip文件时出错: {e}")
+        print(f"[DEBUG] 解压zip文件时出错: {e}")
         return {}
     
     return extracted_files
@@ -304,13 +336,21 @@ def auto_extract_so_modules():
     """
     zip_path = Path("src/so/so_modules.zip")
     
+    print(f"[DEBUG] 正在查找zip包: {zip_path}")
+    print(f"[DEBUG] zip包绝对路径: {zip_path.absolute()}")
+    print(f"[DEBUG] zip包是否存在: {zip_path.exists()}")
+    
     if not zip_path.exists():
+        print(f"[DEBUG] 未找到.so模块包: {zip_path}")
         logger.debug(f"未找到.so模块包: {zip_path}")
         return False
     
     logger.info(f"发现.so模块包: {zip_path}")
     current_arch = get_system_architecture()
     logger.info(f"当前系统架构: {current_arch}")
+    
+    print(f"[DEBUG] 发现.so模块包: {zip_path}")
+    print(f"[DEBUG] 当前系统架构: {current_arch}")
     
     # 解压到src目录
     extracted = extract_architecture_specific_modules(
@@ -325,6 +365,7 @@ def auto_extract_so_modules():
         return True
     else:
         logger.warning(f"未找到适合 {current_arch} 架构的.so文件")
+        print(f"[DEBUG] 未找到适合 {current_arch} 架构的.so文件")
     
     return False
 
