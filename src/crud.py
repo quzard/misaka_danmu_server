@@ -271,9 +271,9 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     logger.debug(f"调用识别词转换前: title='{original_title}', season={original_season}")
     
     if title_recognition_manager:
-        converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
     else:
-        converted_title, converted_season, was_converted, metadata_info = title, season, False, None
+        converted_title, converted_episode, converted_season, was_converted, metadata_info = title, None, season, False, None
 
     logger.info(f"识别词转换结果: 原始='{original_title}' S{original_season:02d} -> 转换后='{converted_title}' S{converted_season:02d}, 是否转换={was_converted}")
     if metadata_info:
@@ -531,9 +531,9 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     original_season = season
     
     if title_recognition_manager:
-        converted_title, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_episode, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
     else:
-        converted_title, converted_season, metadata_info = title, season, None
+        converted_title, converted_episode, converted_season, metadata_info = title, None, season, None
     
     # 如果发生了转换，记录日志
     if converted_title != original_title or converted_season != original_season:

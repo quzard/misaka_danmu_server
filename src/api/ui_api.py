@@ -1290,10 +1290,22 @@ async def get_title_recognition_content(
 # 5. 元数据替换：直接指定TMDB/豆瓣ID
 # 错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}
 
+# 6. 季度偏移：针对特定源的季度偏移
+# TX源某动画第9季 => {[source=tencent;season_offset=9>13]}
+# 某动画第5季 => {[source=bilibili;season_offset=5+3]}
+# 错误标题 => {[source=iqiyi;title=正确标题;season_offset=*+1]}
+
 # 集偏移支持运算：
 # EP+1：集数加1
 # 2*EP：集数翻倍
 # 2*EP-1：集数翻倍减1
+
+# 季度偏移支持格式：
+# 9>13：第9季改为第13季
+# 9+4：第9季加4变成第13季
+# 9-1：第9季减1变成第8季
+# *+4：所有季度都加4
+# *>1：所有季度都改为第1季
 """
             return TitleRecognitionContent(content=default_content)
         
