@@ -65,7 +65,7 @@ RUN set -ex \
 COPY --from=python-builder /install /usr/local/lib/python3.11/site-packages
 
 # 从 so-extractor 阶段复制.so文件到对应的src目录结构
-COPY --from=so-extractor /workspace/src/ ./src/
+COPY --from=so-extractor /src/ ./src/
 
 # 复制应用代码
 COPY src/ ./src/
