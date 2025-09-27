@@ -64,8 +64,8 @@ RUN set -ex \
 # 注意：路径中的 python3.11 需要与基础镜像的Python版本匹配
 COPY --from=python-builder /install /usr/local/lib/python3.11/site-packages
 
-# 从 so-extractor 阶段复制.so文件到src目录
-COPY --from=so-extractor /src/ ./src/so/
+# 从 so-extractor 阶段复制.so文件到对应的src目录结构
+COPY --from=so-extractor /workspace/src/ ./src/
 
 # 复制应用代码
 COPY src/ ./src/
