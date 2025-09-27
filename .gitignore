@@ -13,3 +13,5 @@ config/image
 .cunzhi-memory/preferences.md
 .cunzhi-memory/context.md
 .cunzhi-memory/rules.md
+generate_rate_limit_config.py
+generate_rate_limit_config.py
