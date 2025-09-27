@@ -1247,6 +1247,11 @@ class TitleRecognitionContent(BaseModel):
     """识别词内容模型"""
     content: str = Field(..., description="识别词配置内容")
 
+class TitleRecognitionUpdateResponse(BaseModel):
+    """识别词更新响应模型"""
+    success: bool = Field(..., description="是否更新成功")
+    warnings: List[str] = Field(default_factory=list, description="解析过程中的警告信息")
+
 
 @router.get("/settings/title-recognition", response_model=TitleRecognitionContent, summary="获取识别词配置内容")
 async def get_title_recognition_content(
@@ -1316,7 +1321,7 @@ async def get_title_recognition_content(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取识别词配置时发生内部错误。")
 
 
-@router.put("/settings/title-recognition", status_code=status.HTTP_204_NO_CONTENT, summary="更新识别词配置内容")
+@router.put("/settings/title-recognition", response_model=TitleRecognitionUpdateResponse, summary="更新识别词配置内容")
 async def update_title_recognition_content(
     payload: TitleRecognitionContent,
     current_user: models.User = Depends(security.get_current_user),
@@ -1325,19 +1330,24 @@ async def update_title_recognition_content(
 ):
     """
     更新识别词配置内容，使用全量替换模式
-    
+
     Args:
         payload: 包含新识别词配置内容的请求体
+
+    Returns:
+        TitleRecognitionUpdateResponse: 包含更新结果和警告信息
     """
     try:
         if title_recognition_manager is None:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
-        
-        # 使用全量替换模式更新识别词规则
-        await title_recognition_manager.update_recognition_rules(payload.content)
-        
+
+        # 使用全量替换模式更新识别词规则，获取警告信息
+        warnings = await title_recognition_manager.update_recognition_rules(payload.content)
+
         logger.info("识别词配置更新成功")
-        
+
+        return TitleRecognitionUpdateResponse(success=True, warnings=warnings)
+
     except Exception as e:
         logger.error(f"更新识别词配置时发生错误: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新识别词配置时发生内部错误: {str(e)}")

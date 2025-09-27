@@ -55,8 +55,12 @@ class TitleRecognitionManager:
                     logger.info("数据库中未找到识别词配置，使用空规则集")
                     self.recognition_rules = []
                 else:
-                    self.recognition_rules = self._parse_recognition_content(title_recognition.content)
+                    self.recognition_rules, warnings = self._parse_recognition_content(title_recognition.content)
                     logger.info(f"从数据库加载了 {len(self.recognition_rules)} 条识别词规则")
+                    if warnings:
+                        logger.warning(f"加载识别词规则时发现 {len(warnings)} 个警告")
+                        for warning in warnings:
+                            logger.warning(f"识别词规则警告: {warning}")
 
                 self._rules_loaded = True
 
@@ -64,7 +68,7 @@ class TitleRecognitionManager:
             logger.error(f"从数据库加载识别词规则失败: {e}")
             self.recognition_rules = []
     
-    def _parse_recognition_content(self, content: str) -> List[TitleRecognitionRule]:
+    def _parse_recognition_content(self, content: str) -> Tuple[List[TitleRecognitionRule], List[str]]:
         """
         解析识别词配置内容 - 参考MoviePilot格式
 
@@ -79,12 +83,13 @@ class TitleRecognitionManager:
             content: 识别词配置文本内容
 
         Returns:
-            List[TitleRecognitionRule]: 解析后的识别词规则列表
+            Tuple[List[TitleRecognitionRule], List[str]]: 解析后的识别词规则列表和警告信息列表
         """
         rules = []
+        warnings = []
 
         if not content:
-            return rules
+            return rules, warnings
 
         lines = content.split('\n')
 
@@ -98,10 +103,12 @@ class TitleRecognitionManager:
                 if rule:
                     rules.append(rule)
             except Exception as e:
-                logger.warning(f"识别词配置第{line_num}行解析失败，跳过: {line}, 错误: {e}")
+                warning_msg = f"第{line_num}行解析失败: {line} (错误: {e})"
+                warnings.append(warning_msg)
+                logger.warning(f"识别词配置{warning_msg}")
                 continue
 
-        return rules
+        return rules, warnings
 
     def _parse_single_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """
@@ -166,10 +173,16 @@ class TitleRecognitionManager:
                 # 检查是否包含季度偏移信息
                 if 'season_offset' in metadata_info:
                     logger.debug(f"解析季度偏移规则: {source} => {target}")
-                    return TitleRecognitionRule('season_offset', source=source, **metadata_info)
+                    # 避免重复的source参数
+                    metadata_copy = metadata_info.copy()
+                    metadata_copy['source'] = source
+                    return TitleRecognitionRule('season_offset', **metadata_copy)
                 else:
                     logger.debug(f"解析元数据替换规则: {source} => {target}")
-                    return TitleRecognitionRule('metadata_replace', source=source, **metadata_info)
+                    # 避免重复的source参数
+                    metadata_copy = metadata_info.copy()
+                    metadata_copy['source'] = source
+                    return TitleRecognitionRule('metadata_replace', **metadata_copy)
 
         logger.debug(f"解析简单替换规则: {source} => {target}")
         return TitleRecognitionRule('replace', source=source, target=target)
@@ -267,14 +280,20 @@ class TitleRecognitionManager:
 
         return metadata if metadata else None
 
-    async def update_recognition_rules(self, content: str):
+    async def update_recognition_rules(self, content: str) -> List[str]:
         """
         更新识别词规则，使用全量替换模式
 
         Args:
             content: 新的识别词配置内容
+
+        Returns:
+            List[str]: 解析过程中的警告信息列表
         """
         try:
+            # 先解析内容，获取警告信息
+            new_rules, warnings = self._parse_recognition_content(content)
+
             async with self.session_factory() as session:
                 # 删除所有现有记录
                 await session.execute(delete(TitleRecognition))
@@ -286,9 +305,15 @@ class TitleRecognitionManager:
                 await session.commit()
 
                 # 重新加载规则到内存
-                self.recognition_rules = self._parse_recognition_content(content)
+                self.recognition_rules = new_rules
 
                 logger.info(f"成功更新识别词规则，共 {len(self.recognition_rules)} 条规则")
+                if warnings:
+                    logger.warning(f"更新过程中发现 {len(warnings)} 个警告")
+                    for warning in warnings:
+                        logger.warning(f"识别词规则警告: {warning}")
+
+                return warnings
 
         except Exception as e:
             logger.error(f"更新识别词规则失败: {e}")

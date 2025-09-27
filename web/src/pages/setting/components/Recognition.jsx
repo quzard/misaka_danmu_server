@@ -24,11 +24,18 @@ export const Recognition = () => {
   const handleSave = async () => {
     try {
       setIsSaveLoading(true)
-      await setRecognition({
+      const response = await setRecognition({
         content: text,
       })
       setIsSaveLoading(false)
-      messageApi.success('保存成功')
+
+      // 检查是否有警告信息
+      if (response.data?.warnings && response.data.warnings.length > 0) {
+        const warningMessages = response.data.warnings.join('\n')
+        messageApi.warning(`保存成功，但发现以下问题：\n${warningMessages}`, 8) // 显示8秒
+      } else {
+        messageApi.success('保存成功')
+      }
     } catch (error) {
       messageApi.error('保存失败')
     } finally {
