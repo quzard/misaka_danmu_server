@@ -1,4 +1,7 @@
-# --- Stage 1: Build Frontend ---
+# --- Stage 1: Extract SO files ---
+FROM l429609201/so:latest AS so-extractor
+
+# --- Stage 2: Build Frontend ---
 FROM node:20-alpine AS builder
 
 WORKDIR /app/web
@@ -13,8 +16,7 @@ COPY web/ ./
 # 执行构建
 RUN npm run build
 
-
-# --- Stage 2: Python Dependency Builder ---
+# --- Stage 3: Python Dependency Builder ---
 FROM l429609201/su-exec:su-exec AS python-builder
 
 # 安装编译Python包所需的构建时依赖
@@ -31,10 +33,8 @@ COPY requirements.txt .
 # 将所有包安装到当前目录 (/install)
 RUN pip install --no-cache-dir -r requirements.txt --target .
 
-
-# --- Stage 3: Final Python Application ---
+# --- Stage 4: Final Python Application ---
 FROM l429609201/su-exec:su-exec
-
 
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
@@ -64,6 +64,9 @@ RUN set -ex \
 # 注意：路径中的 python3.11 需要与基础镜像的Python版本匹配
 COPY --from=python-builder /install /usr/local/lib/python3.11/site-packages
 
+# 从 so-extractor 阶段复制.so文件到src目录
+COPY --from=so-extractor /src/ ./src/so/
+
 # 复制应用代码
 COPY src/ ./src/
 COPY static/ ./static/
@@ -82,5 +85,4 @@ RUN chown -R appuser:appgroup /app
 EXPOSE 7768
 
 # 运行应用的默认命令
-
 CMD ["/exec.sh"]
