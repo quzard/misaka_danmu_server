@@ -976,6 +976,9 @@ async def get_bangumi_details(
                                     # 获取真实的animeId用于生成episodeId
                                     real_anime_id = await _get_next_real_anime_id(session)
 
+                                    # 存储真实animeId到虚拟animeId的映射关系
+                                    mapping_info["real_anime_id"] = real_anime_id
+
                                     for i, episode_data in enumerate(actual_episodes):
                                         # 使用真实animeId生成episodeId
                                         episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
@@ -1463,8 +1466,8 @@ async def get_comments_for_dandan(
             for search_key, search_info in fallback_search_cache.items():
                 if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                     for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                        # 检查animeId是否匹配
-                        if mapping_info.get("anime_id") == (9000000 + anime_id_part):
+                        # 检查真实animeId是否匹配
+                        if mapping_info.get("real_anime_id") == anime_id_part:
                             episode_url = mapping_info["media_id"]
                             provider = mapping_info["provider"]
                             break
