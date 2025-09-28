@@ -1430,58 +1430,57 @@ async def get_comments_for_dandan(
                                 # 4. 异步存储到弹幕库（不阻塞响应）
                                 async def store_comments_task(task_session, progress_callback):
                                     try:
-                                        # 创建虚拟的分集记录用于存储弹幕
                                         from . import models as orm_models
 
-                                        # 检查是否已存在该分集
-                                        existing_episode = await crud.get_episode_by_id(task_session, episodeId)
-                                        if not existing_episode:
-                                            # 解析episodeId获取animeId和集编号
-                                            episode_id_str = str(episodeId)
-                                            anime_id_part = int(episode_id_str[2:8])
-                                            episode_number = int(episode_id_str[10:14])
-                                            actual_anime_id = 9000000 + anime_id_part
+                                        # 获取下一个可用的标准animeId（与WebUI导入逻辑一致）
+                                        next_anime_id = await crud.get_next_anime_id(task_session)
 
-                                            # 检查并创建虚拟anime记录
-                                            existing_anime = await crud.get_anime_by_id(task_session, actual_anime_id)
-                                            if not existing_anime:
-                                                # 从映射信息中获取原始标题
-                                                original_title = "后备搜索结果"
-                                                for search_key, search_info in fallback_search_cache.items():
-                                                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                                                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                                                            if mapping_info.get("anime_id") == actual_anime_id:
-                                                                original_title = mapping_info.get("original_title", "后备搜索结果")
-                                                                break
+                                        # 从映射信息中获取原始标题
+                                        original_title = "后备搜索结果"
+                                        for search_key, search_info in fallback_search_cache.items():
+                                            if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                                for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                                                    if mapping_info.get("provider") == provider and mapping_info.get("media_id") == episode_url:
+                                                        original_title = mapping_info.get("original_title", "后备搜索结果")
+                                                        break
 
-                                                virtual_anime = orm_models.Anime(
-                                                    id=actual_anime_id,
-                                                    title=f"{original_title} (来源：{provider})",
-                                                    year=2025,
-                                                    type="other",
-                                                    summary=f"通过后备搜索获取的内容，来源：{provider}",
-                                                    imageUrl="/static/logo.png",
-                                                    isCompleted=False
-                                                )
-                                                task_session.add(virtual_anime)
+                                        # 创建标准的anime记录
+                                        standard_anime = orm_models.Anime(
+                                            id=next_anime_id,
+                                            title=f"{original_title}",  # 使用原始标题，不添加来源后缀
+                                            year=2025,
+                                            type="other",
+                                            summary=f"通过后备搜索获取的内容，来源：{provider}",
+                                            imageUrl="/static/logo.png",
+                                            isCompleted=False
+                                        )
+                                        task_session.add(standard_anime)
+                                        await task_session.flush()  # 确保anime记录被创建
 
-                                            # 创建虚拟分集记录
-                                            virtual_episode = orm_models.Episode(
-                                                id=episodeId,
-                                                animeId=actual_anime_id,  # 使用解析出的animeId
-                                                episodeNumber=episode_number,
-                                                title=f"第{episode_number}集 (来源：{provider})",
-                                                airDate=None,
-                                                isDownloaded=True,
-                                                filePath=episode_url,  # 存储原始URL
-                                                fileSize=0
-                                            )
-                                            task_session.add(virtual_episode)
-                                            await task_session.commit()
+                                        # 解析原始episodeId获取集编号
+                                        episode_id_str = str(episodeId)
+                                        episode_number = int(episode_id_str[10:14])
 
-                                        # 存储弹幕
-                                        await crud.store_comments(task_session, episodeId, raw_comments_data)
-                                        logger.info(f"已异步存储 episodeId={episodeId} 的弹幕到数据库")
+                                        # 生成标准的episodeId（使用标准格式：25+animeId(6位)+源顺序(01)+集编号(4位)）
+                                        standard_episode_id = _generate_episode_id(next_anime_id, 1, episode_number)
+
+                                        # 创建标准的分集记录
+                                        standard_episode = orm_models.Episode(
+                                            id=standard_episode_id,
+                                            animeId=next_anime_id,  # 使用标准animeId
+                                            episodeNumber=episode_number,
+                                            title=f"第{episode_number}集",  # 使用标准标题格式
+                                            airDate=None,
+                                            isDownloaded=True,
+                                            filePath=episode_url,  # 存储原始URL
+                                            fileSize=0
+                                        )
+                                        task_session.add(standard_episode)
+                                        await task_session.commit()
+
+                                        # 存储弹幕到标准episodeId
+                                        await crud.store_comments(task_session, standard_episode_id, raw_comments_data)
+                                        logger.info(f"已异步存储弹幕到标准库: animeId={next_anime_id}, episodeId={standard_episode_id}")
 
                                     except Exception as e:
                                         logger.error(f"异步存储弹幕失败: {e}", exc_info=True)
