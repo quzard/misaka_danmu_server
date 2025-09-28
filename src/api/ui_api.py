@@ -1681,6 +1681,12 @@ async def set_custom_danmaku_path(
 class MatchFallbackTokensResponse(BaseModel):
     value: str
 
+class ConfigValueResponse(BaseModel):
+    value: str
+
+class ConfigValueRequest(BaseModel):
+    value: str
+
 @router.get("/config/matchFallbackTokens", response_model=MatchFallbackTokensResponse, summary="获取匹配后备允许的Token列表")
 async def get_match_fallback_tokens(
     current_user: models.User = Depends(security.get_current_user),
