@@ -1401,17 +1401,73 @@ async def webhook_search_and_dispatch_task(
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 3. 从所有源的返回结果中，根据类型、季度和标题相似度选择最佳匹配项
+        # 3. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
 
-        valid_candidates = [item for item in all_search_results if (item.type == mediaType) and ((item.season == season) if mediaType == 'tv_series' else True)]
+        # 添加调试日志
+        logger.info(f"Webhook 任务: 排序前的媒体类型: media_type='{mediaType}', 共 {len(all_search_results)} 个结果")
+        for i, item in enumerate(all_search_results[:5]):
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
-        if not valid_candidates:
-            raise ValueError(f"未找到 '{animeTitle}' 的精确匹配项。")
+        # 使用与WebUI相同的智能排序逻辑
+        all_search_results.sort(
+            key=lambda item: (
+                # 1. 季度匹配（仅对电视剧）
+                1 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
+                # 2. 最高优先级：完全匹配的标题
+                1000 if item.title.strip() == animeTitle.strip() else 0,
+                # 3. 次高优先级：去除标点符号后的完全匹配
+                500 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
+                # 4. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                200 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
+                # 5. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                100 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
+                # 6. 第五优先级：一般相似度，但必须达到85%以上才考虑
+                fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
+                # 7. 惩罚标题长度差异大的结果
+                -abs(len(item.title) - len(animeTitle)),
+                # 8. 最后考虑源优先级
+                -provider_order.get(item.provider, 999)
+            ),
+            reverse=True # 按得分从高到低排序
+        )
 
-        valid_candidates.sort(key=lambda item: (fuzz.token_set_ratio(animeTitle, item.title), -provider_order.get(item.provider, 999)), reverse=True)
-        best_match = valid_candidates[0]
+        # 添加排序后的调试日志
+        logger.info(f"Webhook 任务: 排序后的前5个结果:")
+        for i, item in enumerate(all_search_results[:5]):
+            title_match = "✓" if item.title.strip() == animeTitle.strip() else "✗"
+            similarity = fuzz.token_set_ratio(animeTitle, item.title)
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+
+        # 评估前3个最佳匹配项，设置最低相似度阈值
+        max_candidates = min(3, len(all_search_results))
+        min_similarity_threshold = 75  # 最低相似度阈值
+
+        # 计算前3个候选项的相似度
+        candidates_with_similarity = []
+        for i in range(max_candidates):
+            candidate = all_search_results[i]
+            similarity = fuzz.token_set_ratio(animeTitle, candidate.title)
+            candidates_with_similarity.append({
+                'candidate': candidate,
+                'similarity': similarity,
+                'rank': i + 1
+            })
+            logger.info(f"Webhook 任务: 候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+
+        # 按优先级选择：优先选择排名最高且符合阈值的候选项
+        best_match = None
+        for item in candidates_with_similarity:
+            if item['similarity'] >= min_similarity_threshold:
+                best_match = item['candidate']
+                logger.info(f"Webhook 任务: 选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, 相似度: {item['similarity']}%)")
+                break
+            else:
+                logger.debug(f"Webhook 任务: 候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
+
+        if best_match is None:
+            raise ValueError(f"未找到 '{animeTitle}' 的足够相似的匹配项（最低阈值: {min_similarity_threshold}%）。")
 
         logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
         progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
