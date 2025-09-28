@@ -399,7 +399,7 @@ async def auto_import(
 
             # 关键修复：外部API也应该检查库内是否已存在相同作品
             # 使用与WebUI相同的检查逻辑，通过标题+季度+集数进行检查
-            title_recognition_manager = get_title_recognition_manager()
+            title_recognition_manager = get_title_recognition_manager(request)
 
             # 检查作品是否已存在于库内
             existing_anime = await crud.find_anime_by_title_season_year(
