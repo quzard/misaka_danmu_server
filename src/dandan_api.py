@@ -388,21 +388,22 @@ async def _execute_fallback_search_task(
     """
     try:
         # 更新进度
-        progress_callback(10, "开始搜索...")
+        await progress_callback(10, "开始搜索...")
 
         # 使用与WebUI相同的搜索逻辑
         search_results = []
 
         # 获取启用的搜索源
         from . import crud
-        enabled_scrapers = await crud.get_enabled_scrapers(session)
-        progress_callback(20, "获取搜索源...")
+        all_scrapers = await crud.get_all_scraper_settings(session)
+        enabled_scrapers = [s for s in all_scrapers if s.get('isEnabled', False) and s.get('providerName') != 'custom']
+        await progress_callback(20, "获取搜索源...")
 
         # 对每个启用的搜索源进行搜索
         for i, scraper_setting in enumerate(enabled_scrapers):
             try:
                 provider = scraper_setting['providerName']
-                progress_callback(20 + (i * 60 // len(enabled_scrapers)), f"搜索 {provider}...")
+                await progress_callback(20 + (i * 60 // len(enabled_scrapers)), f"搜索 {provider}...")
 
                 # 执行搜索
                 results = await scraper_manager.search(provider, search_term)
@@ -430,14 +431,14 @@ async def _execute_fallback_search_task(
                 logger.warning(f"搜索源 {provider} 搜索失败: {e}")
                 continue
 
-        progress_callback(90, "整理搜索结果...")
+        await progress_callback(90, "整理搜索结果...")
 
         # 更新缓存状态为完成
         if search_key in fallback_search_cache:
             fallback_search_cache[search_key]["status"] = "completed"
             fallback_search_cache[search_key]["results"] = search_results
 
-        progress_callback(100, "搜索完成")
+        await progress_callback(100, "搜索完成")
 
     except Exception as e:
         logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
