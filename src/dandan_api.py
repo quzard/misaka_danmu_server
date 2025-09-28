@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from opencc import OpenCC
 from thefuzz import fuzz
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
@@ -41,6 +41,34 @@ DANDAN_TYPE_DESC_MAPPING = {
 # 后备搜索状态管理
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
+
+async def _get_next_fallback_anime_id(session: AsyncSession) -> int:
+    """
+    获取下一个可用的后备搜索animeId，从250000开始。
+    检查数据库中已存在的animeId，返回下一个可用的。
+    """
+    # 查询250000-299999范围内已使用的最大animeId
+    result = await session.execute(
+        text("SELECT MAX(id) FROM anime WHERE id >= 250000 AND id < 300000")
+    )
+    max_id = result.scalar()
+
+    if max_id is None:
+        return 250000  # 如果没有找到，从250000开始
+    else:
+        return max_id + 1
+
+def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) -> int:
+    """
+    生成episode ID，格式：25 + animeid（6位）+ 源顺序（2位）+ 集编号（4位）
+    例如：250000010100001
+    """
+    # 确保anime_id是6位数字（去掉前缀25）
+    anime_id_part = anime_id % 1000000  # 取后6位
+
+    # 格式化为：25 + 6位animeId + 2位源顺序 + 4位集编号
+    episode_id = int(f"25{anime_id_part:06d}{source_order:02d}{episode_number:04d}")
+    return episode_id
 
 # 后备搜索函数将在模型定义后添加
 # 新增：用于清理文件名中常见元数据关键词的正则表达式
@@ -404,59 +432,109 @@ async def _execute_fallback_search_task(
         # 更新进度
         await progress_callback(10, "开始搜索...")
 
-        # 使用与WebUI相同的搜索逻辑
+        # 1. 使用与WebUI相同的搜索逻辑
+        from . import crud
+        import re
+
+        # 获取用户对象（系统用户）
+        from . import models
+        user = models.User(id=0, username="system")
+
+        # 2. 获取别名和补充搜索结果（与WebUI相同）
+        await progress_callback(20, "获取别名...")
+        try:
+            all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(search_term, user)
+        except Exception as e:
+            logger.warning(f"获取别名失败: {e}")
+            all_possible_aliases = set()
+
+        # 3. 验证别名相似度（与WebUI相同的逻辑）
+        validated_aliases = set()
+        for alias in all_possible_aliases:
+            similarity = fuzz.token_set_ratio(search_term, alias)
+            if similarity >= 75:  # 与WebUI相同的阈值
+                validated_aliases.add(alias)
+
+        filter_aliases = validated_aliases
+        filter_aliases.add(search_term)  # 确保原始搜索词总是在列表中
+        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
+
+        # 4. 执行全网搜索（与WebUI相同）
+        await progress_callback(40, "执行全网搜索...")
+        all_results = await scraper_manager.search_all([search_term])
+        logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
+
+        # 5. 使用与WebUI相同的过滤逻辑
+        def normalize_for_filtering(title: str) -> str:
+            if not title: return ""
+            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
+            return title.lower().replace(" ", "").replace("：", ":").strip()
+
+        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
+        filtered_results = []
+        for item in all_results:
+            normalized_item_title = normalize_for_filtering(item.title)
+            if not normalized_item_title: continue
+
+            # 使用与WebUI相同的过滤条件
+            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+                filtered_results.append(item)
+
+        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+
+        # 6. 使用与WebUI相同的排序逻辑
+        await progress_callback(70, "排序搜索结果...")
+        source_settings = await crud.get_all_scraper_settings(session)
+        source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
+
+        def sort_key(item):
+            provider_order = source_order_map.get(item.provider, 999)
+            similarity_score = fuzz.token_set_ratio(search_term, item.title)
+            return (provider_order, -similarity_score)
+
+        sorted_results = sorted(filtered_results, key=sort_key)
+
+        # 7. 转换为DandanSearchAnimeItem格式
+        await progress_callback(80, "转换搜索结果...")
         search_results = []
 
-        # 获取启用的搜索源
-        from . import crud
-        all_scrapers = await crud.get_all_scraper_settings(session)
-        enabled_scrapers = [s for s in all_scrapers if s.get('isEnabled', False) and s.get('providerName') != 'custom']
-        await progress_callback(20, "获取搜索源...")
+        # 获取下一个可用的animeId（从250000开始）
+        next_anime_id = await _get_next_fallback_anime_id(session)
 
-        # 对每个启用的搜索源进行搜索
-        for i, scraper_setting in enumerate(enabled_scrapers):
-            try:
-                provider = scraper_setting['providerName']
-                await progress_callback(20 + (i * 60 // len(enabled_scrapers)), f"搜索 {provider}...")
+        for i, result in enumerate(sorted_results):
+            # 为每个搜索结果分配一个animeId
+            current_anime_id = next_anime_id + i
 
-                # 执行搜索
-                results = await scraper_manager.search(provider, search_term)
+            # 生成简洁的bangumiId格式：SS + 6位数字
+            unique_bangumi_id = f"SS{(i + 1):06d}"
 
-                # 转换搜索结果为DandanSearchAnimeItem格式
-                for j, result in enumerate(results):
-                    # 生成简洁的bangumiId格式：SS + 6位数字
-                    unique_bangumi_id = f"SS{(i * 1000 + j + 1):06d}"
+            # 在标题后面添加来源信息
+            title_with_source = f"{result.title} （来源：{result.provider}）"
 
-                    # 在标题后面添加来源信息
-                    title_with_source = f"{result.title} （来源：{provider}）"
+            # 存储SS ID到原始信息的映射
+            if search_key in fallback_search_cache:
+                if "ss_mapping" not in fallback_search_cache[search_key]:
+                    fallback_search_cache[search_key]["ss_mapping"] = {}
+                fallback_search_cache[search_key]["ss_mapping"][unique_bangumi_id] = {
+                    "provider": result.provider,
+                    "media_id": result.mediaId,
+                    "original_title": result.title,
+                    "anime_id": current_anime_id  # 存储分配的animeId
+                }
 
-                    # 存储SS ID到原始信息的映射
-                    if search_key in fallback_search_cache:
-                        if "ss_mapping" not in fallback_search_cache[search_key]:
-                            fallback_search_cache[search_key]["ss_mapping"] = {}
-                        fallback_search_cache[search_key]["ss_mapping"][unique_bangumi_id] = {
-                            "provider": provider,
-                            "media_id": result.mediaId,
-                            "original_title": result.title
-                        }
-
-                    search_results.append(DandanSearchAnimeItem(
-                        animeId=999999998,  # 搜索结果使用特定的不会冲突的数字
-                        bangumiId=unique_bangumi_id,
-                        animeTitle=title_with_source,
-                        type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
-                        typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
-                        imageUrl=result.imageUrl,
-                        startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
-                        year=result.year,
-                        episodeCount=result.episodeCount or 0,
-                        rating=0.0,
-                        isFavorited=False
-                    ))
-
-            except Exception as e:
-                logger.warning(f"搜索源 {provider} 搜索失败: {e}")
-                continue
+            search_results.append(DandanSearchAnimeItem(
+                animeId=current_anime_id,  # 使用分配的animeId
+                bangumiId=unique_bangumi_id,
+                animeTitle=title_with_source,
+                type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
+                typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
+                imageUrl=result.imageUrl,
+                startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
+                year=result.year,
+                episodeCount=result.episodeCount or 0,
+                rating=0.0,
+                isFavorited=False
+            ))
 
         await progress_callback(90, "整理搜索结果...")
 
@@ -846,11 +924,14 @@ async def get_bangumi_details(
 
                                 # 处理获取到的分集，在标题后面拼接"（点击下载）"
                                 max_episodes = min(len(mock_episodes), result.episodeCount, 12)
+                                anime_id = mapping_info.get("anime_id", 250000)  # 获取分配的animeId
                                 for i in range(max_episodes):
                                     episode_data = mock_episodes[i]
                                     title_with_download = f"{episode_data['title']}（点击下载）"
+                                    # 使用新的ID生成规则：25 + animeId(6位) + 源顺序(01) + 集编号(4位)
+                                    episode_id = _generate_episode_id(anime_id, 1, i + 1)
                                     episodes.append(BangumiEpisode(
-                                        episodeId=ss_number * 1000 + i + 1,
+                                        episodeId=episode_id,
                                         episodeTitle=title_with_download,
                                         episodeNumber=str(episode_data['episode_number'])
                                     ))
@@ -1304,13 +1385,139 @@ async def get_comments_for_dandan(
     withRelated: bool = Query(True, description="是否包含关联弹幕"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager)
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
+    优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
-    # 弹幕聚合功能已移除，直接从文件获取弹幕
+    # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
+
+    if not comments_data:
+        logger.info(f"弹幕库中未找到 episodeId={episodeId} 的弹幕，尝试直接从源站获取")
+
+        # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
+        if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
+            # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
+            episode_id_str = str(episodeId)
+            anime_id_part = int(episode_id_str[2:8])  # 提取animeId部分
+            source_order = int(episode_id_str[8:10])  # 提取源顺序
+            episode_number = int(episode_id_str[10:14])  # 提取集编号
+
+            # 查找对应的搜索缓存和映射信息
+            episode_url = None
+            provider = None
+
+            for search_key, search_info in fallback_search_cache.items():
+                if search_info.get("status") == "completed" and "ss_mapping" in search_info:
+                    for bangumi_id, mapping_info in search_info["ss_mapping"].items():
+                        # 检查animeId是否匹配
+                        if mapping_info.get("anime_id") == (250000 + anime_id_part):
+                            episode_url = mapping_info["media_id"]
+                            provider = mapping_info["provider"]
+                            break
+                    if episode_url:
+                        break
+
+            if episode_url and provider:
+                logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")
+
+                # 3. 直接从源站获取弹幕
+                try:
+                    scraper = scraper_manager.get_scraper(provider)
+                    if scraper:
+                        # 获取弹幕ID
+                        provider_episode_id = await scraper.get_id_from_url(episode_url)
+                        if provider_episode_id:
+                            episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+
+                            # 直接获取弹幕数据
+                            raw_comments_data = await scraper.get_comments(episode_id_for_comments)
+
+                            if raw_comments_data:
+                                logger.info(f"成功从 {provider} 获取 {len(raw_comments_data)} 条弹幕")
+                                comments_data = raw_comments_data
+
+                                # 4. 异步存储到弹幕库（不阻塞响应）
+                                async def store_comments_task(task_session, progress_callback):
+                                    try:
+                                        # 创建虚拟的分集记录用于存储弹幕
+                                        from . import models as orm_models
+
+                                        # 检查是否已存在该分集
+                                        existing_episode = await crud.get_episode_by_id(task_session, episodeId)
+                                        if not existing_episode:
+                                            # 解析episodeId获取animeId和集编号
+                                            episode_id_str = str(episodeId)
+                                            anime_id_part = int(episode_id_str[2:8])
+                                            episode_number = int(episode_id_str[10:14])
+                                            actual_anime_id = 250000 + anime_id_part
+
+                                            # 检查并创建虚拟anime记录
+                                            existing_anime = await crud.get_anime_by_id(task_session, actual_anime_id)
+                                            if not existing_anime:
+                                                # 从映射信息中获取原始标题
+                                                original_title = "后备搜索结果"
+                                                for search_key, search_info in fallback_search_cache.items():
+                                                    if search_info.get("status") == "completed" and "ss_mapping" in search_info:
+                                                        for bangumi_id, mapping_info in search_info["ss_mapping"].items():
+                                                            if mapping_info.get("anime_id") == actual_anime_id:
+                                                                original_title = mapping_info.get("original_title", "后备搜索结果")
+                                                                break
+
+                                                virtual_anime = orm_models.Anime(
+                                                    id=actual_anime_id,
+                                                    title=f"{original_title} (来源：{provider})",
+                                                    year=2025,
+                                                    type="other",
+                                                    summary=f"通过后备搜索获取的内容，来源：{provider}",
+                                                    imageUrl="/static/logo.png",
+                                                    isCompleted=False
+                                                )
+                                                task_session.add(virtual_anime)
+
+                                            # 创建虚拟分集记录
+                                            virtual_episode = orm_models.Episode(
+                                                id=episodeId,
+                                                animeId=actual_anime_id,  # 使用解析出的animeId
+                                                episodeNumber=episode_number,
+                                                title=f"第{episode_number}集 (来源：{provider})",
+                                                airDate=None,
+                                                isDownloaded=True,
+                                                filePath=episode_url,  # 存储原始URL
+                                                fileSize=0
+                                            )
+                                            task_session.add(virtual_episode)
+                                            await task_session.commit()
+
+                                        # 存储弹幕
+                                        await crud.store_comments(task_session, episodeId, raw_comments_data)
+                                        logger.info(f"已异步存储 episodeId={episodeId} 的弹幕到数据库")
+
+                                    except Exception as e:
+                                        logger.error(f"异步存储弹幕失败: {e}", exc_info=True)
+
+                                # 提交异步存储任务
+                                try:
+                                    await task_manager.submit_task(
+                                        store_comments_task,
+                                        f"存储后备搜索弹幕: episodeId={episodeId}",
+                                        unique_key=f"store_fallback_comments_{episodeId}",
+                                        task_type="store_comments"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"提交异步存储任务失败: {e}")
+
+                except Exception as e:
+                    logger.error(f"从源站获取弹幕失败: {e}", exc_info=True)
+
+        # 如果仍然没有弹幕数据，返回空结果
+        if not comments_data:
+            logger.warning(f"无法获取 episodeId={episodeId} 的弹幕数据")
+            return models.CommentResponse(count=0, comments=[])
 
     # 应用输出数量限制
     limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
@@ -1321,13 +1528,13 @@ async def get_comments_for_dandan(
 
     if limit > 0 and len(comments_data) > limit:
         logger.info(f"弹幕数量 ({len(comments_data)}) 超出限制 ({limit})，将进行均匀采样。")
-        
+
         def get_timestamp(comment):
             try: return float(comment['p'].split(',')[0])
             except (ValueError, IndexError): return float('inf')
 
         comments_data.sort(key=get_timestamp)
-        
+
         step = len(comments_data) / limit
         sampled_comments = []
         for i in range(limit):
@@ -1335,6 +1542,19 @@ async def get_comments_for_dandan(
             if index < len(comments_data): sampled_comments.append(comments_data[index])
         comments_data = sampled_comments
         logger.info(f"采样后弹幕数量: {len(comments_data)}")
+
+    # 过滤时间范围
+    if fromTime > 0:
+        filtered_comments = []
+        for comment in comments_data:
+            try:
+                p_parts = comment.get('p', '').split(',')
+                if p_parts and float(p_parts[0]) >= fromTime:
+                    filtered_comments.append(comment)
+            except (ValueError, IndexError):
+                # 如果解析失败，保留该弹幕
+                filtered_comments.append(comment)
+        comments_data = filtered_comments
 
     # 如果客户端请求了繁简转换，则在此处处理
     if chConvert in [1, 2]:
