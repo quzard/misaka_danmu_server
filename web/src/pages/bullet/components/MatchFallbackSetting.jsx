@@ -1,4 +1,4 @@
-import { Card, Form, Switch, Input, Button, Space, Tooltip, Select } from 'antd'
+import { Card, Form, Switch, Input, Button, Space, Tooltip, Checkbox } from 'antd'
 import { useEffect, useState } from 'react'
 import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
@@ -159,29 +159,52 @@ export const MatchFallbackSetting = () => {
             </Space>
           }
         >
-          <Space.Compact style={{ width: '100%' }}>
-            <Form.Item
-              name="matchFallbackTokens"
-              style={{ flex: 1, marginBottom: 0 }}
-            >
-              <Select
-                mode="multiple"
-                placeholder={tokenList.length === 0 ? "暂无可用Token" : "选择允许使用匹配后备的Token（留空表示允许所有Token）"}
-                disabled={tokenList.length === 0}
-                options={tokenList.map(token => ({
-                  value: token.id,
-                  label: `${token.name} (${token.isEnabled ? '启用' : '禁用'})`
-                }))}
-                showSearch
-                filterOption={(input, option) =>
-                  option.label.toLowerCase().includes(input.toLowerCase())
-                }
-              />
-            </Form.Item>
-            <Button type="primary" loading={tokensSaving} onClick={handleTokensSave}>
-              保存
-            </Button>
-          </Space.Compact>
+          <div style={{ border: '1px solid #d9d9d9', borderRadius: '6px', padding: '12px', minHeight: '120px', backgroundColor: '#fafafa' }}>
+            {tokenList.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                暂无可用Token
+              </div>
+            ) : (
+              <Form.Item
+                name="matchFallbackTokens"
+                style={{ marginBottom: 0 }}
+              >
+                <Checkbox.Group style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {tokenList.map(token => (
+                      <Checkbox
+                        key={token.id}
+                        value={token.id}
+                        style={{
+                          padding: '4px 8px',
+                          border: '1px solid #e8e8e8',
+                          borderRadius: '4px',
+                          backgroundColor: '#fff',
+                          margin: 0
+                        }}
+                      >
+                        <span style={{ fontWeight: 'normal' }}>
+                          {token.name}
+                          <span style={{
+                            marginLeft: '8px',
+                            fontSize: '12px',
+                            color: token.isEnabled ? '#52c41a' : '#ff4d4f'
+                          }}>
+                            ({token.isEnabled ? '启用' : '禁用'})
+                          </span>
+                        </span>
+                      </Checkbox>
+                    ))}
+                  </div>
+                </Checkbox.Group>
+              </Form.Item>
+            )}
+            <div style={{ marginTop: '12px', textAlign: 'right' }}>
+              <Button type="primary" loading={tokensSaving} onClick={handleTokensSave}>
+                保存
+              </Button>
+            </div>
+          </div>
         </Form.Item>
 
         <Form.Item
