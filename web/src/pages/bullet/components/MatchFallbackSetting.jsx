@@ -54,6 +54,18 @@ export const MatchFallbackSetting = () => {
     fetchSettings()
   }, [])
 
+  // 监听页面焦点，当页面重新获得焦点时刷新数据
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchSettings()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+
   const handleValueChange = async changedValues => {
     try {
       if ('matchFallbackEnabled' in changedValues) {
@@ -170,17 +182,23 @@ export const MatchFallbackSetting = () => {
                 style={{ marginBottom: 0 }}
               >
                 <Checkbox.Group style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
                     {tokenList.map(token => (
                       <Checkbox
                         key={token.id}
                         value={token.id}
                         style={{
-                          padding: '4px 8px',
+                          padding: '6px 12px',
                           border: '1px solid #e8e8e8',
                           borderRadius: '4px',
                           backgroundColor: '#fff',
-                          margin: 0
+                          margin: 0,
+                          whiteSpace: 'nowrap'
                         }}
                       >
                         <span style={{ fontWeight: 'normal' }}>
