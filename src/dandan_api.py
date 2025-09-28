@@ -913,15 +913,15 @@ async def get_bangumi_details(
                             scraper = scraper_manager.get_scraper(provider)
                             if scraper:
                                 # 从media_id获取分集列表
-                                actual_episodes = await scraper.get_episodes_from_media_id(media_id)
+                                actual_episodes = await scraper.get_episodes(media_id)
 
                                 if actual_episodes:
                                     for i, episode_data in enumerate(actual_episodes):
                                         episode_id = _generate_episode_id(anime_id, 1, i + 1)
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
-                                            episodeTitle=episode_data['title'],
-                                            episodeNumber=str(episode_data.get('episode_number', i + 1))
+                                            episodeTitle=episode_data.title,  # 使用ProviderEpisodeInfo的title属性
+                                            episodeNumber=str(episode_data.episodeNumber if episode_data.episodeNumber else i + 1)
                                         ))
                                 else:
                                     logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
