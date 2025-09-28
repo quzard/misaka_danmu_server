@@ -1481,15 +1481,28 @@ async def get_comments_for_dandan(
                 try:
                     scraper = scraper_manager.get_scraper(provider)
                     if scraper:
-                        # 获取弹幕ID
-                        provider_episode_id = await scraper.get_id_from_url(episode_url)
-                        if provider_episode_id:
-                            episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+                        # 首先获取分集列表
+                        media_type = mapping_info.get("type", "movie")
+                        episodes_list = await scraper.get_episodes(episode_url, db_media_type=media_type)
 
-                            # 直接获取弹幕数据
-                            raw_comments_data = await scraper.get_comments(episode_id_for_comments)
+                        if episodes_list and len(episodes_list) >= episode_number:
+                            # 获取对应集数的分集信息（episode_number是从1开始的）
+                            target_episode = episodes_list[episode_number - 1]
+                            provider_episode_id = target_episode.episodeId
 
-                            if raw_comments_data:
+                            if provider_episode_id:
+                                episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+
+                                # 直接获取弹幕数据
+                                raw_comments_data = await scraper.get_comments(episode_id_for_comments)
+                            else:
+                                logger.warning(f"无法获取 {provider} 的分集ID: episode_number={episode_number}")
+                                raw_comments_data = None
+                        else:
+                            logger.warning(f"从 {provider} 获取分集列表失败或集数不足: media_id={episode_url}, episode_number={episode_number}")
+                            raw_comments_data = None
+
+                        if raw_comments_data:
                                 logger.info(f"成功从 {provider} 获取 {len(raw_comments_data)} 条弹幕")
                                 comments_data = raw_comments_data
 
