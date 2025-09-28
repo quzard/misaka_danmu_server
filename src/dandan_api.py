@@ -42,32 +42,43 @@ DANDAN_TYPE_DESC_MAPPING = {
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
-async def _get_next_fallback_anime_id(session: AsyncSession) -> int:
+async def _get_next_virtual_anime_id() -> int:
     """
-    获取下一个可用的后备搜索animeId，从9000000开始。
-    检查数据库中已存在的animeId，返回下一个可用的。
+    获取下一个虚拟animeId（6位数字，从900000开始）
+    用于后备搜索结果显示
     """
-    # 查询9000000-9999999范围内已使用的最大animeId
-    result = await session.execute(
-        text("SELECT MAX(id) FROM anime WHERE id >= 9000000 AND id < 10000000")
-    )
-    max_id = result.scalar()
+    # 查找当前最大的虚拟animeId
+    max_id = None
+    for search_key, search_info in fallback_search_cache.items():
+        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                anime_id = mapping_info.get("anime_id")
+                if anime_id and 900000 <= anime_id <= 999999:
+                    if max_id is None or anime_id > max_id:
+                        max_id = anime_id
 
     if max_id is None:
-        return 9000000  # 如果没有找到，从9000000开始
+        return 900000  # 如果没有找到，从900000开始
     else:
         return max_id + 1
+
+async def _get_next_real_anime_id(session: AsyncSession) -> int:
+    """
+    获取下一个真实的animeId（当前最大animeId + 1）
+    用于实际的episodeId生成
+    """
+    from . import crud
+    return await crud.get_next_anime_id(session)
 
 def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) -> int:
     """
     生成episode ID，格式：25 + animeid（6位）+ 源顺序（2位）+ 集编号（4位）
-    例如：250000010100001
+    按照弹幕库标准，animeId补0到6位
+    例如：animeId=136 → episodeId=25000136010001
     """
-    # 确保anime_id是6位数字（去掉前缀25）
-    anime_id_part = anime_id % 1000000  # 取后6位
-
+    # 按照弹幕库标准：animeId补0到6位
     # 格式化为：25 + 6位animeId + 2位源顺序 + 4位集编号
-    episode_id = int(f"25{anime_id_part:06d}{source_order:02d}{episode_number:04d}")
+    episode_id = int(f"25{anime_id:06d}{source_order:02d}{episode_number:04d}")
     return episode_id
 
 # 后备搜索函数将在模型定义后添加
@@ -498,15 +509,15 @@ async def _execute_fallback_search_task(
         await progress_callback(80, "转换搜索结果...")
         search_results = []
 
-        # 获取下一个可用的animeId（从250000开始）
-        next_anime_id = await _get_next_fallback_anime_id(session)
+        # 获取下一个虚拟animeId（6位数字，用于显示）
+        next_virtual_anime_id = await _get_next_virtual_anime_id()
 
         for i, result in enumerate(sorted_results):
-            # 为每个搜索结果分配一个animeId
-            current_anime_id = next_anime_id + i
+            # 为每个搜索结果分配一个虚拟animeId
+            current_virtual_anime_id = next_virtual_anime_id + i
 
-            # 使用弹幕库现有的格式：A + animeId
-            unique_bangumi_id = f"A{current_anime_id}"
+            # 使用弹幕库现有的格式：A + 虚拟animeId
+            unique_bangumi_id = f"A{current_virtual_anime_id}"
 
             # 在标题后面添加来源信息
             title_with_source = f"{result.title} （来源：{result.provider}）"
@@ -519,11 +530,12 @@ async def _execute_fallback_search_task(
                     "provider": result.provider,
                     "media_id": result.mediaId,
                     "original_title": result.title,
-                    "anime_id": current_anime_id  # 存储分配的animeId
+                    "type": result.type,
+                    "anime_id": current_virtual_anime_id  # 存储虚拟animeId
                 }
 
             search_results.append(DandanSearchAnimeItem(
-                animeId=current_anime_id,  # 使用分配的animeId
+                animeId=current_virtual_anime_id,  # 使用虚拟animeId
                 bangumiId=unique_bangumi_id,
                 animeTitle=title_with_source,
                 type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
@@ -927,8 +939,12 @@ async def get_bangumi_details(
                                 actual_episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
 
                                 if actual_episodes:
+                                    # 获取真实的animeId用于生成episodeId
+                                    real_anime_id = await _get_next_real_anime_id(session)
+
                                     for i, episode_data in enumerate(actual_episodes):
-                                        episode_id = _generate_episode_id(anime_id, 1, i + 1)
+                                        # 使用真实animeId生成episodeId
+                                        episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
                                         # 在分集标题后面添加"（点击下载）"提示
                                         episode_title = f"{episode_data.title}（点击下载）"
                                         episodes.append(BangumiEpisode(
@@ -1441,59 +1457,17 @@ async def get_comments_for_dandan(
                                 comments_data = raw_comments_data
 
                                 # 4. 异步存储到弹幕库（不阻塞响应）
+                                # 现在我们已经使用真实的animeId，所以直接使用现有的episodeId进行存储
                                 async def store_comments_task(task_session, progress_callback):
                                     try:
-                                        from . import models as orm_models
+                                        # 直接使用现有的episodeId存储弹幕，因为它已经是基于真实animeId生成的
+                                        # episodeId格式：25 + animeId(6位) + 源顺序(01) + 集编号(4位)
+                                        # 例如：25000136010001 表示 animeId=136, 源顺序=01, 集编号=0001
 
-                                        # 获取下一个可用的标准animeId（与WebUI导入逻辑一致）
-                                        next_anime_id = await crud.get_next_anime_id(task_session)
-
-                                        # 从映射信息中获取原始标题
-                                        original_title = "后备搜索结果"
-                                        for search_key, search_info in fallback_search_cache.items():
-                                            if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                                                for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                                                    if mapping_info.get("provider") == provider and mapping_info.get("media_id") == episode_url:
-                                                        original_title = mapping_info.get("original_title", "后备搜索结果")
-                                                        break
-
-                                        # 创建标准的anime记录
-                                        standard_anime = orm_models.Anime(
-                                            id=next_anime_id,
-                                            title=f"{original_title}",  # 使用原始标题，不添加来源后缀
-                                            year=2025,
-                                            type="other",
-                                            summary=f"通过后备搜索获取的内容，来源：{provider}",
-                                            imageUrl="/static/logo.png",
-                                            isCompleted=False
-                                        )
-                                        task_session.add(standard_anime)
-                                        await task_session.flush()  # 确保anime记录被创建
-
-                                        # 解析原始episodeId获取集编号
-                                        episode_id_str = str(episodeId)
-                                        episode_number = int(episode_id_str[10:14])
-
-                                        # 生成标准的episodeId（使用标准格式：25+animeId(6位)+源顺序(01)+集编号(4位)）
-                                        standard_episode_id = _generate_episode_id(next_anime_id, 1, episode_number)
-
-                                        # 创建标准的分集记录
-                                        standard_episode = orm_models.Episode(
-                                            id=standard_episode_id,
-                                            animeId=next_anime_id,  # 使用标准animeId
-                                            episodeNumber=episode_number,
-                                            title=f"第{episode_number}集",  # 使用标准标题格式
-                                            airDate=None,
-                                            isDownloaded=True,
-                                            filePath=episode_url,  # 存储原始URL
-                                            fileSize=0
-                                        )
-                                        task_session.add(standard_episode)
-                                        await task_session.commit()
-
-                                        # 存储弹幕到标准episodeId
-                                        await crud.store_comments(task_session, standard_episode_id, raw_comments_data)
-                                        logger.info(f"已异步存储弹幕到标准库: animeId={next_anime_id}, episodeId={standard_episode_id}")
+                                        # 直接存储弹幕到现有的episodeId
+                                        # 因为episodeId已经是基于真实animeId生成的，可以直接使用
+                                        await crud.store_comments(task_session, episodeId, raw_comments_data)
+                                        logger.info(f"已异步存储弹幕: episodeId={episodeId}")
 
                                     except Exception as e:
                                         logger.error(f"异步存储弹幕失败: {e}", exc_info=True)
