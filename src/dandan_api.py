@@ -43,6 +43,51 @@ DANDAN_TYPE_DESC_MAPPING = {
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
+async def _check_related_match_fallback_task(session: AsyncSession, search_term: str) -> Optional[Dict[str, Any]]:
+    """
+    检查是否有相关的后备匹配任务正在进行
+    返回任务信息（包含进度）或None
+    """
+    from . import crud
+    from .task_manager import TaskStatus
+
+    # 查找正在进行的匹配后备任务
+    # 匹配后备任务通常包含搜索的关键词信息
+    # 我们需要检查任务参数中的搜索词是否与当前搜索词匹配
+
+    # 查询最近的匹配后备任务
+    stmt = select(orm_models.TaskHistory).where(
+        orm_models.TaskHistory.taskType == "match_fallback",
+        orm_models.TaskHistory.status.in_(['排队中', '运行中'])
+    ).order_by(orm_models.TaskHistory.createdAt.desc()).limit(10)  # 获取最近10个任务
+
+    result = await session.execute(stmt)
+    tasks = result.scalars().all()
+
+    # 检查任务参数中是否包含相关的搜索词
+    for task in tasks:
+        # 简单的标题匹配 - 检查任务标题是否包含搜索词
+        if search_term.lower() in task.title.lower():
+            return {
+                "task_id": task.taskId,
+                "title": task.title,
+                "progress": task.progress or 0,
+                "status": task.status,
+                "description": task.description or "匹配后备正在进行"
+            }
+
+        # 也可以检查任务描述
+        if task.description and search_term.lower() in task.description.lower():
+            return {
+                "task_id": task.taskId,
+                "title": task.title,
+                "progress": task.progress or 0,
+                "status": task.status,
+                "description": task.description
+            }
+
+    return None
+
 async def _get_next_virtual_anime_id() -> int:
     """
     获取下一个虚拟animeId（6位数字，从900000开始）
@@ -358,6 +403,27 @@ async def _handle_fallback_search(
     # 生成搜索任务的唯一标识
     search_key = f"search_{hash(search_term + token)}"
 
+    # 首先检查是否有相关的后备匹配任务正在进行
+    match_fallback_task = await _check_related_match_fallback_task(session, search_term)
+    if match_fallback_task:
+        # 返回后备匹配的进度信息，格式类似后备搜索
+        progress = match_fallback_task['progress']
+        return DandanSearchAnimeResponse(animes=[
+            DandanSearchAnimeItem(
+                animeId=999999999,
+                bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                animeTitle=f"{search_term} 匹配后备正在运行",
+                type="tvseries",
+                typeDescription=f"{progress}%",
+                imageUrl="/static/logo.png",
+                startDate="2025-01-01T00:00:00+08:00",
+                year=2025,
+                episodeCount=1,
+                rating=0.0,
+                isFavorited=False
+            )
+        ])
+
     # 检查是否已有正在进行的搜索
     if search_key in fallback_search_cache:
         search_info = fallback_search_cache[search_key]
@@ -382,6 +448,23 @@ async def _handle_fallback_search(
                         animeTitle=f"{search_term} 搜索正在运行",
                         type="tvseries",
                         typeDescription=f"{progress}%",
+                        imageUrl="/static/logo.png",
+                        startDate="2025-01-01T00:00:00+08:00",
+                        year=2025,
+                        episodeCount=1,
+                        rating=0.0,
+                        isFavorited=False
+                    )
+                ])
+            else:
+                # 5秒内返回搜索启动状态
+                return DandanSearchAnimeResponse(animes=[
+                    DandanSearchAnimeItem(
+                        animeId=999999999,
+                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                        animeTitle=f"{search_term} 搜索正在启动",
+                        type="tvseries",
+                        typeDescription="搜索正在启动",
                         imageUrl="/static/logo.png",
                         startDate="2025-01-01T00:00:00+08:00",
                         year=2025,
@@ -1516,22 +1599,33 @@ async def get_comments_for_dandan(
 
                                         # 直接存储弹幕到现有的episodeId
                                         # 因为episodeId已经是基于真实animeId生成的，可以直接使用
-                                        await crud.store_comments(task_session, episodeId, raw_comments_data)
+                                        await crud.save_danmaku_for_episode(task_session, episodeId, raw_comments_data)
                                         logger.info(f"已异步存储弹幕: episodeId={episodeId}")
 
                                     except Exception as e:
                                         logger.error(f"异步存储弹幕失败: {e}", exc_info=True)
 
-                                # 提交异步存储任务
-                                try:
-                                    await task_manager.submit_task(
-                                        store_comments_task,
-                                        f"存储后备搜索弹幕: episodeId={episodeId}",
-                                        unique_key=f"store_fallback_comments_{episodeId}",
-                                        task_type="store_comments"
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"提交异步存储任务失败: {e}")
+                                # 检查是否已有相同的存储任务正在进行
+                                unique_key = f"store_fallback_comments_{episodeId}"
+                                existing_task = await crud.find_recent_task_by_unique_key(session, unique_key, within_hours=1)
+
+                                if existing_task:
+                                    if existing_task.status in ['排队中', '运行中']:
+                                        logger.info(f"弹幕存储任务已在进行中: episodeId={episodeId}, taskId={existing_task.taskId}")
+                                        # 可以返回任务进度信息
+                                    else:
+                                        logger.info(f"弹幕存储任务最近已完成: episodeId={episodeId}")
+                                else:
+                                    # 提交异步存储任务
+                                    try:
+                                        await task_manager.submit_task(
+                                            store_comments_task,
+                                            f"存储后备搜索弹幕: episodeId={episodeId}",
+                                            unique_key=unique_key,
+                                            task_type="store_comments"
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f"提交异步存储任务失败: {e}")
 
                 except Exception as e:
                     logger.error(f"从源站获取弹幕失败: {e}", exc_info=True)

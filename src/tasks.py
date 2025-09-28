@@ -289,7 +289,7 @@ async def _download_episode_comments_concurrent(
     Returns:
         List[Tuple[episode_index, comments]]: 分集索引和对应的弹幕列表
     """
-    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（二线程模式）")
+    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）")
 
     async def download_single_episode(episode_info):
         episode_index, episode = episode_info
@@ -324,8 +324,8 @@ async def _download_episode_comments_concurrent(
             logger.error(f"[并发下载] 分集 '{episode.title}' 下载失败: {e}")
             return (episode.episodeIndex, None)
 
-    # 使用 asyncio.Semaphore 限制并发数为2
-    semaphore = asyncio.Semaphore(2)
+    # 使用 asyncio.Semaphore 限制并发数为3
+    semaphore = asyncio.Semaphore(3)
 
     async def download_with_semaphore(episode_info):
         async with semaphore:
