@@ -369,8 +369,22 @@ async def _handle_fallback_search(
         search_info["status"] = "failed"
         return DandanSearchAnimeResponse(animes=[])
 
-    # 立即返回空结果，客户端需要等待5秒后再次请求
-    return DandanSearchAnimeResponse(animes=[])
+    # 立即返回"搜索中"状态，让用户知道搜索正在进行
+    return DandanSearchAnimeResponse(animes=[
+        DandanSearchAnimeItem(
+            animeId=None,
+            bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+            animeTitle=f"{search_term} 搜索正在启动",
+            type="tvseries",
+            typeDescription="0%",
+            imageUrl="https://i0.hdslb.com/bfs/bangumi/image/7c8a0359274f62476c9dac77651dfdc09c64f69e.png",
+            startDate="2025-01-01T00:00:00+08:00",
+            year=2025,
+            episodeCount=1,
+            rating=0.0,
+            isFavorited=False
+        )
+    ])
 
 async def _execute_fallback_search_task(
     search_term: str,
@@ -409,14 +423,27 @@ async def _execute_fallback_search_task(
                 results = await scraper_manager.search(provider, search_term)
 
                 # 转换搜索结果为DandanSearchAnimeItem格式
-                for result in results:
-                    # 生成唯一的bangumiId
-                    unique_bangumi_id = f"search_{search_key}_{provider}_{result.mediaId}"
+                for j, result in enumerate(results):
+                    # 生成简洁的bangumiId格式：SS + 6位数字
+                    unique_bangumi_id = f"SS{(i * 1000 + j + 1):06d}"
+
+                    # 在标题后面添加来源信息
+                    title_with_source = f"{result.title} （来源：{provider}）"
+
+                    # 存储SS ID到原始信息的映射
+                    if search_key in fallback_search_cache:
+                        if "ss_mapping" not in fallback_search_cache[search_key]:
+                            fallback_search_cache[search_key]["ss_mapping"] = {}
+                        fallback_search_cache[search_key]["ss_mapping"][unique_bangumi_id] = {
+                            "provider": provider,
+                            "media_id": result.mediaId,
+                            "original_title": result.title
+                        }
 
                     search_results.append(DandanSearchAnimeItem(
                         animeId=None,  # 搜索结果没有本地animeId
                         bangumiId=unique_bangumi_id,
-                        animeTitle=result.title,
+                        animeTitle=title_with_source,
                         type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
                         typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
                         imageUrl=result.imageUrl,
@@ -780,7 +807,53 @@ async def get_bangumi_details(
             errorMessage="搜索正在进行，请耐心等待"
         )
 
-    # 检查是否是后备搜索结果的bangumiId
+    # 处理新的SS格式搜索结果ID
+    if bangumiId.startswith("SS"):
+        # 新的SS格式ID，需要从所有搜索缓存中查找
+        for search_key, search_info in fallback_search_cache.items():
+            if search_info["status"] == "completed" and "ss_mapping" in search_info:
+                if bangumiId in search_info["ss_mapping"]:
+                    mapping_info = search_info["ss_mapping"][bangumiId]
+                    provider = mapping_info["provider"]
+                    media_id = mapping_info["media_id"]
+                    original_title = mapping_info["original_title"]
+
+                    # 找到对应的搜索结果
+                    for result in search_info["results"]:
+                        if result.bangumiId == bangumiId:
+                            # 返回一个包含分集信息的BangumiDetails
+                            logger.debug(f"处理搜索结果: provider={provider}, media_id={media_id}")
+                            episodes = [
+                                BangumiEpisode(
+                                    episodeId=f"{bangumiId}_ep{i}",
+                                    episodeTitle=f"第{i}集",
+                                    episodeNumber=str(i)
+                                ) for i in range(1, min(result.episodeCount + 1, 13))  # 最多显示12集
+                            ]
+
+                            bangumi_details = BangumiDetails(
+                                animeId=None,
+                                bangumiId=bangumiId,
+                                animeTitle=result.animeTitle,
+                                imageUrl=result.imageUrl,
+                                searchKeyword=original_title,
+                                type=result.type,
+                                typeDescription=result.typeDescription,
+                                episodes=episodes,
+                                year=result.year,
+                                summary=f"来自后备搜索的结果 (源: {provider})",
+                            )
+
+                            return BangumiDetailsResponse(bangumi=bangumi_details)
+
+        # 如果没找到对应的SS ID
+        return BangumiDetailsResponse(
+            success=True,
+            bangumi=None,
+            errorMessage="搜索结果不存在或已过期"
+        )
+
+    # 检查是否是后备搜索结果的bangumiId (旧格式，保持兼容性)
     if bangumiId.startswith('search_'):
         # 这是搜索结果，需要返回分集列表以供下载
         # 解析search_key和provider信息
