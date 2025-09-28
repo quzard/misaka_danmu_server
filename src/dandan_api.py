@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import re
+import time
 import ipaddress
 from typing import List, Optional, Dict, Any
 from typing import Callable
@@ -555,6 +556,28 @@ async def _execute_fallback_search_task(
             fallback_search_cache[search_key]["status"] = "completed"
             fallback_search_cache[search_key]["results"] = search_results
 
+        # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
+        try:
+            from . import crud
+            import json
+
+            # 构造缓存键，与WebUI搜索保持一致的格式
+            cache_key = f"fallback_search_{search_term}"
+
+            # 将搜索结果转换为可缓存的格式
+            cache_data = {
+                "search_term": search_term,
+                "results": [result.model_dump() for result in search_results],
+                "timestamp": time.time()
+            }
+
+            # 存储到数据库缓存（10分钟过期）
+            await crud.set_cache(session, cache_key, json.dumps(cache_data), expire_seconds=600)
+            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key}")
+
+        except Exception as e:
+            logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
+
         await progress_callback(100, "搜索完成")
 
     except Exception as e:
@@ -907,8 +930,8 @@ async def get_bangumi_details(
         # 格式1: "A" + animeId, 例如 "A123"
         anime_id_int = int(bangumiId[1:])
 
-        # 检查是否是后备搜索的animeId范围（9000000-9999999）
-        if 9000000 <= anime_id_int < 10000000:
+        # 检查是否是后备搜索的虚拟animeId范围（900000-999999）
+        if 900000 <= anime_id_int < 1000000:
             # 从所有搜索缓存中查找
             for search_key, search_info in fallback_search_cache.items():
                 if search_info["status"] == "completed" and "bangumi_mapping" in search_info:
