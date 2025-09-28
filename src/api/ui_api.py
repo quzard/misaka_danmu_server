@@ -1678,18 +1678,21 @@ async def set_custom_danmaku_path(
 
 # --- 匹配后备Token配置 ---
 
-@router.get("/config/matchFallbackTokens", response_model=models.ConfigValue, summary="获取匹配后备允许的Token列表")
+class MatchFallbackTokensResponse(BaseModel):
+    value: str
+
+@router.get("/config/matchFallbackTokens", response_model=MatchFallbackTokensResponse, summary="获取匹配后备允许的Token列表")
 async def get_match_fallback_tokens(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取匹配后备允许的Token列表（JSON格式的token ID数组）"""
     value = await crud.get_config_value(session, "matchFallbackTokens", "[]")
-    return models.ConfigValue(value=value)
+    return MatchFallbackTokensResponse(value=value)
 
 @router.put("/config/matchFallbackTokens", status_code=status.HTTP_204_NO_CONTENT, summary="设置匹配后备允许的Token列表")
 async def set_match_fallback_tokens(
-    request: models.ConfigValue,
+    request: MatchFallbackTokensResponse,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)

@@ -286,12 +286,24 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
         logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
     
     # 使用转换后的标题和季数进行查找
-    logger.debug(f"使用转换后的标题进行数据库查找: title='{converted_title}', season={converted_season}")
+    logger.debug(f"使用转换后的标题进行数据库查找: title='{converted_title}', season={converted_season}, year={year}")
+
+    # 修复：更灵活的年份匹配逻辑
+    # 1. 首先尝试精确匹配（包括年份）
     stmt = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
     if year:
         stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     anime = result.scalar_one_or_none()
+
+    # 2. 如果精确匹配失败且提供了年份，尝试忽略年份的匹配
+    if not anime and year:
+        logger.debug(f"精确年份匹配失败，尝试忽略年份进行匹配")
+        stmt_no_year = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
+        result_no_year = await session.execute(stmt_no_year)
+        anime = result_no_year.scalar_one_or_none()
+        if anime:
+            logger.info(f"找到匹配作品（忽略年份）: ID={anime.id}, 数据库年份={anime.year}, 请求年份={year}")
 
     if anime:
         logger.info(f"找到已存在的番剧: ID={anime.id}, 标题='{anime.title}', 季数={anime.season}")

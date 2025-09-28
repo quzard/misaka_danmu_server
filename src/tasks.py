@@ -1844,24 +1844,10 @@ async def auto_search_and_import_task(
         if not existing_anime:
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
-            
+
             # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
             # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
             season_for_check = season
-            # 关键修复：如果这是一个单集导入请求，我们现在需要检查该分集是否已存在。
-            if payload.episode is not None:
-                if existing_anime:
-                    anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
-                    if anime_id_to_use:
-                        episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, payload.episode)
-                        if episode_exists:
-                            final_message = f"作品 '{main_title}' 的第 {payload.episode} 集已在媒体库中，无需重复导入。"
-                            logger.info(f"自动导入任务检测到分集已存在，任务成功结束: {final_message}")
-                            raise TaskSuccess(final_message)
-                # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
-                # 因此，这里我们不再提前返回，而是让代码继续往下走。
-
-
             if media_type == 'movie' and season_for_check is None:
                 season_for_check = 1
                 logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
@@ -1870,6 +1856,25 @@ async def auto_search_and_import_task(
             existing_anime = await crud.find_anime_by_title_season_year(
                 session, main_title, season_for_check, year, title_recognition_manager
             )
+
+        # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查
+        if payload.episode is not None and existing_anime:
+            # 应用识别词转换获取实际的集数
+            episode_to_check = payload.episode
+            if title_recognition_manager:
+                _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(main_title, payload.episode, season_for_check)
+                if converted_episode is not None:
+                    episode_to_check = converted_episode
+                    logger.info(f"识别词转换: 原始集数 {payload.episode} -> 转换后集数 {episode_to_check}")
+
+            anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
+            if anime_id_to_use:
+                episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
+                if episode_exists:
+                    final_message = f"作品 '{main_title}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入。"
+                    logger.info(f"自动导入任务检测到分集已存在（经识别词转换），任务成功结束: {final_message}")
+                    raise TaskSuccess(final_message)
+            # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
         # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
         # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。
         if payload.episode is None and existing_anime:
