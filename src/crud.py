@@ -2651,13 +2651,11 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
     # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
-    # 修复MySQL排序规则冲突：使用COLLATE显式指定排序规则
+    # 使用标准 SQLAlchemy JOIN 语法，兼容 MySQL 和 PostgreSQL
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
-        .join(orm_models.TaskHistory,
-              text("task_state_cache.task_id COLLATE utf8mb4_general_ci = task_history.id COLLATE utf8mb4_general_ci"))
-        .where(text("task_history.status COLLATE utf8mb4_general_ci = :status"))
-        .params(status="运行中")
+        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .where(orm_models.TaskHistory.status == "运行中")
     )
 
     task_states = []
