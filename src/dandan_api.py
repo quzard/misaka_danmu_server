@@ -42,162 +42,7 @@ DANDAN_TYPE_DESC_MAPPING = {
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
-async def _handle_fallback_search(
-    search_term: str,
-    token: str,
-    session: AsyncSession,
-    task_manager: TaskManager,
-    scraper_manager: ScraperManager,
-    metadata_manager: MetadataSourceManager,
-    config_manager: ConfigManager,
-    rate_limiter: RateLimiter,
-    title_recognition_manager
-) -> DandanSearchAnimeResponse:
-    """
-    处理后备搜索逻辑
-    """
-    import time
-    import uuid
-
-    # 生成搜索任务的唯一标识
-    search_key = f"search_{hash(search_term + token)}"
-
-    # 检查是否已有正在进行的搜索
-    if search_key in fallback_search_cache:
-        search_info = fallback_search_cache[search_key]
-
-        # 如果搜索已完成，返回结果
-        if search_info["status"] == "completed":
-            return DandanSearchAnimeResponse(animes=search_info["results"])
-
-        # 如果搜索失败，返回空结果
-        if search_info["status"] == "failed":
-            return DandanSearchAnimeResponse(animes=[])
-
-        # 如果搜索正在进行中，返回搜索状态
-        if search_info["status"] == "running":
-            elapsed_time = time.time() - search_info["start_time"]
-            if elapsed_time >= 5:  # 5秒后返回搜索中状态
-                progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=None,
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{search_term} 搜索正在运行",
-                        type="tvseries",
-                        typeDescription=f"{progress}%",
-                        imageUrl="https://i0.hdslb.com/bfs/bangumi/image/7c8a0359274f62476c9dac77651dfdc09c64f69e.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
-
-    # 启动新的搜索任务
-    search_info = {
-        "status": "running",
-        "start_time": time.time(),
-        "search_term": search_term,
-        "results": []
-    }
-    fallback_search_cache[search_key] = search_info
-
-    # 创建搜索任务
-    task_coro = lambda session, cb: _execute_fallback_search_task(
-        search_term, search_key, session, cb, scraper_manager, metadata_manager,
-        config_manager, rate_limiter, title_recognition_manager
-    )
-
-    # 提交异步搜索任务
-    try:
-        await task_manager.submit_task(
-            task_coro,
-            f"后备搜索: {search_term}",
-            unique_key=f"fallback_search_{search_key}",
-            task_type="fallback_search",
-            task_parameters={"search_term": search_term, "search_key": search_key}
-        )
-    except Exception as e:
-        logger.error(f"提交后备搜索任务失败: {e}")
-        search_info["status"] = "failed"
-        return DandanSearchAnimeResponse(animes=[])
-
-    # 立即返回空结果，客户端需要等待5秒后再次请求
-    return DandanSearchAnimeResponse(animes=[])
-
-async def _execute_fallback_search_task(
-    search_term: str,
-    search_key: str,
-    session: AsyncSession,
-    progress_callback,
-    scraper_manager: ScraperManager,
-    metadata_manager: MetadataSourceManager,
-    config_manager: ConfigManager,
-    rate_limiter: RateLimiter,
-    title_recognition_manager
-):
-    """
-    执行后备搜索任务
-    """
-    try:
-        # 更新进度
-        progress_callback(10, "开始搜索...")
-
-        # 使用与WebUI相同的搜索逻辑
-        search_results = []
-
-        # 获取启用的搜索源
-        enabled_scrapers = await crud.get_enabled_scrapers(session)
-        progress_callback(20, "获取搜索源...")
-
-        # 对每个启用的搜索源进行搜索
-        for i, scraper_setting in enumerate(enabled_scrapers):
-            try:
-                provider = scraper_setting['providerName']
-                progress_callback(20 + (i * 60 // len(enabled_scrapers)), f"搜索 {provider}...")
-
-                # 执行搜索
-                results = await scraper_manager.search(provider, search_term)
-
-                # 转换搜索结果为DandanSearchAnimeItem格式
-                for result in results:
-                    # 生成唯一的bangumiId
-                    unique_bangumi_id = f"search_{search_key}_{provider}_{result.mediaId}"
-
-                    search_results.append(models.DandanSearchAnimeItem(
-                        animeId=None,  # 搜索结果没有本地animeId
-                        bangumiId=unique_bangumi_id,
-                        animeTitle=result.title,
-                        type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
-                        typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
-                        imageUrl=result.imageUrl,
-                        startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
-                        year=result.year,
-                        episodeCount=result.episodeCount or 0,
-                        rating=0.0,
-                        isFavorited=False
-                    ))
-
-            except Exception as e:
-                logger.warning(f"搜索源 {provider} 搜索失败: {e}")
-                continue
-
-        progress_callback(90, "整理搜索结果...")
-
-        # 更新缓存状态为完成
-        if search_key in fallback_search_cache:
-            fallback_search_cache[search_key]["status"] = "completed"
-            fallback_search_cache[search_key]["results"] = search_results
-
-        progress_callback(100, "搜索完成")
-
-    except Exception as e:
-        logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
-        # 更新缓存状态为失败
-        if search_key in fallback_search_cache:
-            fallback_search_cache[search_key]["status"] = "failed"
+# 后备搜索函数将在模型定义后添加
 # 新增：用于清理文件名中常见元数据关键词的正则表达式
 METADATA_KEYWORDS_PATTERN = re.compile(
     r'1080p|720p|2160p|4k|bluray|x264|h\s*\.?\s*264|hevc|x265|h\s*\.?\s*265|aac|flac|web-dl|BDRip|WEBRip|TVRip|DVDrip|AVC|CHT|CHS|BIG5|GB|10bit|8bit',
@@ -441,6 +286,164 @@ class DandanBatchMatchRequestItem(BaseModel):
 class DandanBatchMatchRequest(BaseModel):
     requests: List[DandanBatchMatchRequestItem]
 
+# --- 后备搜索函数 ---
+
+async def _handle_fallback_search(
+    search_term: str,
+    token: str,
+    session: AsyncSession,
+    task_manager: TaskManager,
+    scraper_manager: ScraperManager,
+    metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
+    rate_limiter: RateLimiter,
+    title_recognition_manager
+) -> DandanSearchAnimeResponse:
+    """
+    处理后备搜索逻辑
+    """
+    import time
+
+    # 生成搜索任务的唯一标识
+    search_key = f"search_{hash(search_term + token)}"
+
+    # 检查是否已有正在进行的搜索
+    if search_key in fallback_search_cache:
+        search_info = fallback_search_cache[search_key]
+
+        # 如果搜索已完成，返回结果
+        if search_info["status"] == "completed":
+            return DandanSearchAnimeResponse(animes=search_info["results"])
+
+        # 如果搜索失败，返回空结果
+        if search_info["status"] == "failed":
+            return DandanSearchAnimeResponse(animes=[])
+
+        # 如果搜索正在进行中，返回搜索状态
+        if search_info["status"] == "running":
+            elapsed_time = time.time() - search_info["start_time"]
+            if elapsed_time >= 5:  # 5秒后返回搜索中状态
+                progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
+                return DandanSearchAnimeResponse(animes=[
+                    DandanSearchAnimeItem(
+                        animeId=None,
+                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                        animeTitle=f"{search_term} 搜索正在运行",
+                        type="tvseries",
+                        typeDescription=f"{progress}%",
+                        imageUrl="https://i0.hdslb.com/bfs/bangumi/image/7c8a0359274f62476c9dac77651dfdc09c64f69e.png",
+                        startDate="2025-01-01T00:00:00+08:00",
+                        year=2025,
+                        episodeCount=1,
+                        rating=0.0,
+                        isFavorited=False
+                    )
+                ])
+
+    # 启动新的搜索任务
+    search_info = {
+        "status": "running",
+        "start_time": time.time(),
+        "search_term": search_term,
+        "results": []
+    }
+    fallback_search_cache[search_key] = search_info
+
+    # 创建搜索任务
+    task_coro = lambda session, cb: _execute_fallback_search_task(
+        search_term, search_key, session, cb, scraper_manager, metadata_manager,
+        config_manager, rate_limiter, title_recognition_manager
+    )
+
+    # 提交异步搜索任务
+    try:
+        await task_manager.submit_task(
+            task_coro,
+            f"后备搜索: {search_term}",
+            unique_key=f"fallback_search_{search_key}",
+            task_type="fallback_search",
+            task_parameters={"search_term": search_term, "search_key": search_key}
+        )
+    except Exception as e:
+        logger.error(f"提交后备搜索任务失败: {e}")
+        search_info["status"] = "failed"
+        return DandanSearchAnimeResponse(animes=[])
+
+    # 立即返回空结果，客户端需要等待5秒后再次请求
+    return DandanSearchAnimeResponse(animes=[])
+
+async def _execute_fallback_search_task(
+    search_term: str,
+    search_key: str,
+    session: AsyncSession,
+    progress_callback,
+    scraper_manager: ScraperManager,
+    metadata_manager: MetadataSourceManager,
+    config_manager: ConfigManager,
+    rate_limiter: RateLimiter,
+    title_recognition_manager
+):
+    """
+    执行后备搜索任务
+    """
+    try:
+        # 更新进度
+        progress_callback(10, "开始搜索...")
+
+        # 使用与WebUI相同的搜索逻辑
+        search_results = []
+
+        # 获取启用的搜索源
+        from . import crud
+        enabled_scrapers = await crud.get_enabled_scrapers(session)
+        progress_callback(20, "获取搜索源...")
+
+        # 对每个启用的搜索源进行搜索
+        for i, scraper_setting in enumerate(enabled_scrapers):
+            try:
+                provider = scraper_setting['providerName']
+                progress_callback(20 + (i * 60 // len(enabled_scrapers)), f"搜索 {provider}...")
+
+                # 执行搜索
+                results = await scraper_manager.search(provider, search_term)
+
+                # 转换搜索结果为DandanSearchAnimeItem格式
+                for result in results:
+                    # 生成唯一的bangumiId
+                    unique_bangumi_id = f"search_{search_key}_{provider}_{result.mediaId}"
+
+                    search_results.append(DandanSearchAnimeItem(
+                        animeId=None,  # 搜索结果没有本地animeId
+                        bangumiId=unique_bangumi_id,
+                        animeTitle=result.title,
+                        type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
+                        typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
+                        imageUrl=result.imageUrl,
+                        startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
+                        year=result.year,
+                        episodeCount=result.episodeCount or 0,
+                        rating=0.0,
+                        isFavorited=False
+                    ))
+
+            except Exception as e:
+                logger.warning(f"搜索源 {provider} 搜索失败: {e}")
+                continue
+
+        progress_callback(90, "整理搜索结果...")
+
+        # 更新缓存状态为完成
+        if search_key in fallback_search_cache:
+            fallback_search_cache[search_key]["status"] = "completed"
+            fallback_search_cache[search_key]["results"] = search_results
+
+        progress_callback(100, "搜索完成")
+
+    except Exception as e:
+        logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
+        # 更新缓存状态为失败
+        if search_key in fallback_search_cache:
+            fallback_search_cache[search_key]["status"] = "failed"
 
 async def _search_implementation(
     search_term: str,
@@ -794,8 +797,9 @@ async def get_bangumi_details(
                     for result in search_info["results"]:
                         if result.bangumiId == bangumiId:
                             # 返回一个包含分集信息的BangumiDetails
-                            # 这里需要获取实际的分集列表
+                            # 这里可以使用provider和media_id获取实际的分集列表
                             # 暂时返回一个示例分集
+                            logger.debug(f"处理搜索结果: provider={provider}, media_id={media_id}")
                             episodes = [
                                 BangumiEpisode(
                                     episodeId=f"{bangumiId}_ep1",
@@ -922,7 +926,8 @@ async def _get_match_for_item(
                 r.get('aliasCn1'), r.get('aliasCn2'), r.get('aliasCn3'),
             ]
             aliases_to_check = {t for t in all_titles_to_check if t}
-            if any(fuzz.partial_ratio(alias, parsed_info["title"]) > 85 for alias in aliases_to_check):
+            # 使用normalized_search_title进行更精确的匹配
+            if any(fuzz.partial_ratio(alias.replace("：", ":").replace(" ", ""), normalized_search_title) > 85 for alias in aliases_to_check):
                 exact_matches.append(r)
 
         if len(exact_matches) < len(results):
@@ -1288,15 +1293,8 @@ async def get_comments_for_dandan(
             for comment in comments_data:
                 comment['m'] = converter.convert(comment['m'])
 
-    # 为了避免日志过长，只打印部分弹幕作为示例
-    log_limit = 5
-    comments_to_log = comments_data[:log_limit]
-    log_message = {
-        "total_comments": len(comments_data),
-        "comments_sample": comments_to_log
-    }
     # UA 已由 get_token_from_path 依赖项记录
-    # logger.info(f"弹幕接口响应 (episodeId: {episodeId}):\n{json.dumps(log_message, indent=2, ensure_ascii=False)}")
+    logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
