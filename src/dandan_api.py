@@ -909,19 +909,32 @@ async def get_bangumi_details(
 
                         episodes = []
                         try:
-                            # 调用scraper获取真实的分集信息
+                            # 完全按照WebUI的流程：调用scraper获取真实的分集信息
                             scraper = scraper_manager.get_scraper(provider)
                             if scraper:
-                                # 从media_id获取分集列表
-                                actual_episodes = await scraper.get_episodes(media_id)
+                                # 从映射信息中获取media_type
+                                media_type = None
+                                for search_key, search_info in fallback_search_cache.items():
+                                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                                            if mapping_info.get("anime_id") == anime_id:
+                                                media_type = mapping_info.get("type")
+                                                break
+                                        if media_type:
+                                            break
+
+                                # 使用与WebUI完全相同的调用方式
+                                actual_episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
 
                                 if actual_episodes:
                                     for i, episode_data in enumerate(actual_episodes):
                                         episode_id = _generate_episode_id(anime_id, 1, i + 1)
+                                        # 在分集标题后面添加"（点击下载）"提示
+                                        episode_title = f"{episode_data.title}（点击下载）"
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
-                                            episodeTitle=episode_data.title,  # 使用ProviderEpisodeInfo的title属性
-                                            episodeNumber=str(episode_data.episodeNumber if episode_data.episodeNumber else i + 1)
+                                            episodeTitle=episode_title,
+                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else i + 1)
                                         ))
                                 else:
                                     logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
