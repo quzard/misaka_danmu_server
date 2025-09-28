@@ -316,11 +316,19 @@ class BangumiMetadataSource(BaseMetadataSource):
                 elif _clean_movie_title(subject.display_name) != subject.display_name:
                     media_type = "movie"
 
+            # 提取年份信息
+            year = None
+            if subject_data.get("date"):
+                try:
+                    year = int(subject_data["date"][:4])
+                except (ValueError, TypeError):
+                    pass
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
                 type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
-                aliasesCn=aliases.get("aliases_cn", [])
+                aliasesCn=aliases.get("aliases_cn", []), year=year
             )
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:

@@ -134,13 +134,22 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                 imdb_id_match = re.search(r'<a href="https://www.imdb.com/title/(tt\d+)"', html)
                 imdb_id = imdb_id_match.group(1) if imdb_id_match else None
 
+                # 提取年份信息
+                year = None
+                year_match = re.search(r'<span class="year">\((\d{4})\)</span>', html)
+                if year_match:
+                    try:
+                        year = int(year_match.group(1))
+                    except (ValueError, TypeError):
+                        pass
+
                 if title:
                     aliases_cn.insert(0, title)
                 aliases_cn = list(dict.fromkeys(aliases_cn))
 
                 return models.MetadataDetailsResponse(
                     id=item_id, doubanId=item_id, title=title,
-                    imdbId=imdb_id, aliasesCn=aliases_cn,
+                    imdbId=imdb_id, aliasesCn=aliases_cn, year=year
                 )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:

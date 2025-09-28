@@ -1840,17 +1840,17 @@ async def auto_search_and_import_task(
                 if existing_anime:
                     logger.info(f"精确查找到已存在的作品: {existing_anime['title']} (ID: {existing_anime['id']})")
 
+        # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+        # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+        season_for_check = season
+        if media_type == 'movie' and season_for_check is None:
+            season_for_check = 1
+            logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
         # 步骤 2b: 如果精确查找未找到，则回退到按标题和季度查找
         if not existing_anime:
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
-
-            # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
-            # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
-            season_for_check = season
-            if media_type == 'movie' and season_for_check is None:
-                season_for_check = 1
-                logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
 
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(

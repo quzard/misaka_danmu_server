@@ -110,6 +110,7 @@ class ImdbMetadataSource(BaseMetadataSource):
                 name_en: Optional[str] = None
                 aliases_cn: List[str] = []
 
+                year = None
                 next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
                 if next_data_match:
                     try:
@@ -118,6 +119,14 @@ class ImdbMetadataSource(BaseMetadataSource):
 
                         name_en = main_data.get("titleText", {}).get("text")
                         original_title = main_data.get("originalTitleText", {}).get("text")
+
+                        # 提取年份信息
+                        release_year = main_data.get("releaseYear", {})
+                        if release_year and release_year.get("year"):
+                            try:
+                                year = int(release_year["year"])
+                            except (ValueError, TypeError):
+                                pass
 
                         akas = main_data.get("akas", {})
                         if akas and akas.get("edges"):
@@ -139,6 +148,15 @@ class ImdbMetadataSource(BaseMetadataSource):
                     title_match = re.search(r'<h1.*?><span.*?>(.*?)</span></h1>', html)
                     name_en = title_match.group(1).strip() if title_match else None
 
+                    # 如果年份还没有获取到，尝试正则提取
+                    if not year:
+                        year_match = re.search(r'<span class="sc-.*?">(\d{4})</span>', html)
+                        if year_match:
+                            try:
+                                year = int(year_match.group(1))
+                            except (ValueError, TypeError):
+                                pass
+
                     # 仅在回退模式下使用正则解析别名
                     akas_section_match = re.search(r'<div data-testid="akas".*?>(.*?)</div>', html, re.DOTALL)
                     if akas_section_match:
@@ -152,7 +170,7 @@ class ImdbMetadataSource(BaseMetadataSource):
 
                 return models.MetadataDetailsResponse(
                     id=item_id, imdbId=item_id, title=name_en,
-                    nameEn=name_en,
+                    nameEn=name_en, year=year,
                     aliasesCn=list(dict.fromkeys(filter(None, aliases_cn)))
                 )
         except Exception as e:

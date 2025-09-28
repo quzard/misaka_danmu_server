@@ -85,21 +85,21 @@ class TmdbMetadataSource(BaseMetadataSource):
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         if not mediaType:
             raise ValueError("TMDB search requires a mediaType ('tv' or 'movie').")
-        
+
         try:
             async with await self._create_client() as client:
                 response = await client.get(f"/search/{mediaType}", params={"query": keyword})
                 response.raise_for_status()
                 data = response.json().get("results", [])
-                
+
                 image_base_url = await self._get_robust_image_base_url()
-                
+
                 results = []
                 for item in data:
                     title = item.get('name') if mediaType == 'tv' else item.get('title')
                     release_date = item.get('first_air_date') if mediaType == 'tv' else item.get('release_date')
                     details_str = f"{release_date or '未知年份'} / {item.get('original_language', 'N/A')}"
-                    
+
                     results.append(models.MetadataDetailsResponse(
                         id=str(item['id']),
                         tmdbId=str(item['id']),
@@ -127,10 +127,19 @@ class TmdbMetadataSource(BaseMetadataSource):
 
                 # 2. Get all aliases using the new comprehensive method
                 aliases = await self._fetch_and_structure_aliases(client, item_id, mediaType)
-                
+
                 image_base_url = await self._get_robust_image_base_url()
-                
-                # 3. Construct the response
+
+                # 3. 提取年份信息
+                release_date = details.get('first_air_date') if mediaType == 'tv' else details.get('release_date')
+                year = None
+                if release_date:
+                    try:
+                        year = int(release_date[:4])
+                    except (ValueError, TypeError):
+                        pass
+
+                # 4. Construct the response
                 return models.MetadataDetailsResponse(
                     id=str(details['id']),
                     tmdbId=str(details['id']),
@@ -141,6 +150,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                     aliasesCn=aliases.get("aliases_cn", []),
                     imageUrl=f"{image_base_url}{details.get('poster_path')}" if details.get('poster_path') else None,
                     details=details.get('overview'),
+                    year=year,
                     imdbId=details.get('external_ids', {}).get('imdb_id'),
                     tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None
                 )
