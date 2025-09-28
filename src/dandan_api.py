@@ -44,17 +44,17 @@ FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
 async def _get_next_fallback_anime_id(session: AsyncSession) -> int:
     """
-    获取下一个可用的后备搜索animeId，从250000开始。
+    获取下一个可用的后备搜索animeId，从9000000开始。
     检查数据库中已存在的animeId，返回下一个可用的。
     """
-    # 查询250000-299999范围内已使用的最大animeId
+    # 查询9000000-9999999范围内已使用的最大animeId
     result = await session.execute(
-        text("SELECT MAX(id) FROM anime WHERE id >= 250000 AND id < 300000")
+        text("SELECT MAX(id) FROM anime WHERE id >= 9000000 AND id < 10000000")
     )
     max_id = result.scalar()
 
     if max_id is None:
-        return 250000  # 如果没有找到，从250000开始
+        return 9000000  # 如果没有找到，从9000000开始
     else:
         return max_id + 1
 
@@ -505,17 +505,17 @@ async def _execute_fallback_search_task(
             # 为每个搜索结果分配一个animeId
             current_anime_id = next_anime_id + i
 
-            # 生成简洁的bangumiId格式：SS + 6位数字
-            unique_bangumi_id = f"SS{(i + 1):06d}"
+            # 使用弹幕库现有的格式：A + animeId
+            unique_bangumi_id = f"A{current_anime_id}"
 
             # 在标题后面添加来源信息
             title_with_source = f"{result.title} （来源：{result.provider}）"
 
-            # 存储SS ID到原始信息的映射
+            # 存储bangumiId到原始信息的映射
             if search_key in fallback_search_cache:
-                if "ss_mapping" not in fallback_search_cache[search_key]:
-                    fallback_search_cache[search_key]["ss_mapping"] = {}
-                fallback_search_cache[search_key]["ss_mapping"][unique_bangumi_id] = {
+                if "bangumi_mapping" not in fallback_search_cache[search_key]:
+                    fallback_search_cache[search_key]["bangumi_mapping"] = {}
+                fallback_search_cache[search_key]["bangumi_mapping"][unique_bangumi_id] = {
                     "provider": result.provider,
                     "media_id": result.mediaId,
                     "original_title": result.title,
@@ -885,83 +885,7 @@ async def get_bangumi_details(
             errorMessage="搜索正在进行，请耐心等待"
         )
 
-    # 处理新的SS格式搜索结果ID
-    if bangumiId.startswith("SS"):
-        # 新的SS格式ID，需要从所有搜索缓存中查找
-        for search_key, search_info in fallback_search_cache.items():
-            if search_info["status"] == "completed" and "ss_mapping" in search_info:
-                if bangumiId in search_info["ss_mapping"]:
-                    mapping_info = search_info["ss_mapping"][bangumiId]
-                    provider = mapping_info["provider"]
-                    media_id = mapping_info["media_id"]
-                    original_title = mapping_info["original_title"]
 
-                    # 找到对应的搜索结果
-                    for result in search_info["results"]:
-                        if result.bangumiId == bangumiId:
-                            # 返回一个包含分集信息的BangumiDetails
-                            logger.debug(f"处理搜索结果: provider={provider}, media_id={media_id}")
-                            # 为SS格式生成唯一的整数episodeId
-                            ss_number = int(bangumiId[2:])  # 提取SS后面的数字
-
-                            # 获取实际的分集列表
-                            episodes = []
-                            try:
-                                # 调用scraper获取真实的分集信息
-                                # 需要获取scraper_manager实例，这里暂时模拟
-                                # scraper_manager = get_scraper_manager()
-                                # actual_episodes = await scraper_manager.get_episodes(provider, media_id)
-
-                                # 暂时模拟获取到的真实分集数据
-                                # 实际应该从scraper获取，这里用示例数据
-                                mock_episodes = [
-                                    {"title": "第1期上：奔跑家族欢乐回归爆改QQ秀", "episode_number": 1},
-                                    {"title": "第1期下：团队合作挑战赛", "episode_number": 2},
-                                    {"title": "第2期：城市探索大冒险", "episode_number": 3},
-                                    {"title": "第3期：美食制作大比拼", "episode_number": 4},
-                                    {"title": "第4期：运动竞技挑战", "episode_number": 5},
-                                ]
-
-                                # 处理获取到的分集，在标题后面拼接"（点击下载）"
-                                max_episodes = min(len(mock_episodes), result.episodeCount, 12)
-                                anime_id = mapping_info.get("anime_id", 250000)  # 获取分配的animeId
-                                for i in range(max_episodes):
-                                    episode_data = mock_episodes[i]
-                                    title_with_download = f"{episode_data['title']}（点击下载）"
-                                    # 使用新的ID生成规则：25 + animeId(6位) + 源顺序(01) + 集编号(4位)
-                                    episode_id = _generate_episode_id(anime_id, 1, i + 1)
-                                    episodes.append(BangumiEpisode(
-                                        episodeId=episode_id,
-                                        episodeTitle=title_with_download,
-                                        episodeNumber=str(episode_data['episode_number'])
-                                    ))
-
-                            except Exception as e:
-                                logger.error(f"获取分集列表失败: {e}")
-                                # 如果获取失败，返回空列表或基本信息
-                                episodes = []
-
-                            bangumi_details = BangumiDetails(
-                                animeId=999999998,  # 搜索结果使用特定的不会冲突的数字
-                                bangumiId=bangumiId,
-                                animeTitle=result.animeTitle,
-                                imageUrl=result.imageUrl,
-                                searchKeyword=original_title,
-                                type=result.type,
-                                typeDescription=result.typeDescription,
-                                episodes=episodes,
-                                year=result.year,
-                                summary=f"来自后备搜索的结果 (源: {provider})",
-                            )
-
-                            return BangumiDetailsResponse(bangumi=bangumi_details)
-
-        # 如果没找到对应的SS ID
-        return BangumiDetailsResponse(
-            success=True,
-            bangumi=None,
-            errorMessage="搜索结果不存在或已过期"
-        )
 
 
 
@@ -969,6 +893,64 @@ async def get_bangumi_details(
     if bangumiId.startswith('A') and bangumiId[1:].isdigit():
         # 格式1: "A" + animeId, 例如 "A123"
         anime_id_int = int(bangumiId[1:])
+
+        # 检查是否是后备搜索的animeId范围（9000000-9999999）
+        if 9000000 <= anime_id_int < 10000000:
+            # 从所有搜索缓存中查找
+            for search_key, search_info in fallback_search_cache.items():
+                if search_info["status"] == "completed" and "bangumi_mapping" in search_info:
+                    if bangumiId in search_info["bangumi_mapping"]:
+                        mapping_info = search_info["bangumi_mapping"][bangumiId]
+                        provider = mapping_info["provider"]
+                        media_id = mapping_info["media_id"]
+                        original_title = mapping_info["original_title"]
+                        anime_id = mapping_info["anime_id"]
+
+                        episodes = []
+                        try:
+                            # TODO: 这里应该调用scraper获取真实的分集信息
+                            # scraper = scraper_manager.get_scraper(provider)
+                            # actual_episodes = await scraper.get_episodes_from_media_id(media_id)
+                            #
+                            # if actual_episodes:
+                            #     for i, episode_data in enumerate(actual_episodes):
+                            #         episode_id = _generate_episode_id(anime_id, 1, i + 1)
+                            #         episodes.append(BangumiEpisode(
+                            #             episodeId=episode_id,
+                            #             episodeTitle=episode_data['title'],
+                            #             episodeNumber=str(episode_data['episode_number'])
+                            #         ))
+
+                            # 暂时返回空分集列表，等待实际实现scraper获取
+                            pass
+
+                        except Exception as e:
+                            logger.error(f"获取分集列表失败: {e}")
+                            episodes = []
+
+                        bangumi_details = BangumiDetails(
+                            animeId=anime_id,  # 使用分配的animeId
+                            bangumiId=bangumiId,
+                            animeTitle=f"{original_title} （来源：{provider}）",
+                            imageUrl="/static/logo.png",
+                            searchKeyword=original_title,
+                            type="other",
+                            typeDescription="其他",
+                            episodes=episodes,
+                            year=2025,
+                            summary=f"来自后备搜索的结果 (源: {provider})",
+                        )
+
+                        return BangumiDetailsResponse(bangumi=bangumi_details)
+
+            # 如果没找到对应的后备搜索ID，但在范围内，返回过期信息
+            if 9000000 <= anime_id_int < 10000000:
+                return BangumiDetailsResponse(
+                    success=True,
+                    bangumi=None,
+                    errorMessage="搜索结果不存在或已过期"
+                )
+
     elif bangumiId.isdigit():
         # 格式2: 纯数字的 Bangumi ID, 例如 "148099"
         # 我们需要通过 bangumi_id 找到我们自己数据库中的 anime_id
@@ -1412,10 +1394,10 @@ async def get_comments_for_dandan(
             provider = None
 
             for search_key, search_info in fallback_search_cache.items():
-                if search_info.get("status") == "completed" and "ss_mapping" in search_info:
-                    for bangumi_id, mapping_info in search_info["ss_mapping"].items():
+                if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                    for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
                         # 检查animeId是否匹配
-                        if mapping_info.get("anime_id") == (250000 + anime_id_part):
+                        if mapping_info.get("anime_id") == (9000000 + anime_id_part):
                             episode_url = mapping_info["media_id"]
                             provider = mapping_info["provider"]
                             break
@@ -1454,7 +1436,7 @@ async def get_comments_for_dandan(
                                             episode_id_str = str(episodeId)
                                             anime_id_part = int(episode_id_str[2:8])
                                             episode_number = int(episode_id_str[10:14])
-                                            actual_anime_id = 250000 + anime_id_part
+                                            actual_anime_id = 9000000 + anime_id_part
 
                                             # 检查并创建虚拟anime记录
                                             existing_anime = await crud.get_anime_by_id(task_session, actual_anime_id)
@@ -1462,8 +1444,8 @@ async def get_comments_for_dandan(
                                                 # 从映射信息中获取原始标题
                                                 original_title = "后备搜索结果"
                                                 for search_key, search_info in fallback_search_cache.items():
-                                                    if search_info.get("status") == "completed" and "ss_mapping" in search_info:
-                                                        for bangumi_id, mapping_info in search_info["ss_mapping"].items():
+                                                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
                                                             if mapping_info.get("anime_id") == actual_anime_id:
                                                                 original_title = mapping_info.get("original_title", "后备搜索结果")
                                                                 break
