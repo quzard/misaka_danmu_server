@@ -276,6 +276,81 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
         logger.error(f"删除分集任务 (ID: {episodeId}) 失败: {e}", exc_info=True)
         raise
 
+async def _download_episode_comments_concurrent(
+    scraper,
+    episodes: List,
+    rate_limiter: RateLimiter,
+    progress_callback: Callable,
+    first_episode_comments: Optional[List] = None
+) -> List[Tuple[int, Optional[List]]]:
+    """
+    并发下载多个分集的弹幕（用于单集或少量分集的快速下载）
+
+    Returns:
+        List[Tuple[episode_index, comments]]: 分集索引和对应的弹幕列表
+    """
+    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（二线程模式）")
+
+    async def download_single_episode(episode_info):
+        episode_index, episode = episode_info
+        try:
+            # 如果是第一集且已有预获取的弹幕，直接使用
+            if episode_index == 0 and first_episode_comments is not None:
+                logger.info(f"使用预获取的第一集弹幕: {len(first_episode_comments)} 条")
+                return (episode.episodeIndex, first_episode_comments)
+
+            # 检查速率限制
+            await rate_limiter.check(scraper.provider_name)
+
+            # 创建子进度回调
+            sub_progress_callback = lambda p, msg: progress_callback(
+                30 + int((episode_index + p/100) * 60 / len(episodes)),
+                f"[线程{episode_index+1}] {msg}"
+            )
+
+            # 下载弹幕
+            comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+
+            # 增加速率限制计数
+            if comments is not None:
+                await rate_limiter.increment(scraper.provider_name)
+                logger.info(f"[并发下载] 分集 '{episode.title}' 获取到 {len(comments)} 条弹幕")
+            else:
+                logger.warning(f"[并发下载] 分集 '{episode.title}' 获取弹幕失败")
+
+            return (episode.episodeIndex, comments)
+
+        except Exception as e:
+            logger.error(f"[并发下载] 分集 '{episode.title}' 下载失败: {e}")
+            return (episode.episodeIndex, None)
+
+    # 使用 asyncio.Semaphore 限制并发数为2
+    semaphore = asyncio.Semaphore(2)
+
+    async def download_with_semaphore(episode_info):
+        async with semaphore:
+            return await download_single_episode(episode_info)
+
+    # 创建所有下载任务
+    download_tasks = [
+        download_with_semaphore((i, episode))
+        for i, episode in enumerate(episodes)
+    ]
+
+    # 并发执行所有下载任务
+    results = await asyncio.gather(*download_tasks, return_exceptions=True)
+
+    # 处理结果，过滤异常
+    valid_results = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"[并发下载] 任务执行异常: {result}")
+            continue
+        valid_results.append(result)
+
+    logger.info(f"并发下载完成，成功下载 {len([r for r in valid_results if r[1] is not None])}/{len(episodes)} 个分集")
+    return valid_results
+
 async def _import_episodes_iteratively(
     session: AsyncSession,
     scraper,
@@ -285,81 +360,42 @@ async def _import_episodes_iteratively(
     anime_id: int,
     source_id: int,
     first_episode_comments: Optional[List] = None,
-    config_manager = None
+    config_manager = None,
+    is_single_episode: bool = False
 ) -> Tuple[int, List[int], int]:
     """
     迭代地导入分集弹幕。
-    
+
     Args:
         first_episode_comments: 第一集预获取的弹幕（可选）
+        is_single_episode: 是否为单集下载模式（启用并发下载）
     """
     total_comments_added = 0
     successful_episodes_indices = []
     failed_episodes_count = 0
 
-    for i, episode in enumerate(episodes):
-        base_progress = 30 + (i * 60 // len(episodes))
-        await progress_callback(base_progress, f"正在处理分集: {episode.title}")
+    # 判断是否使用并发下载模式
+    # 条件：单集模式 或 电影类型 或 分集数量较少（≤3集）
+    use_concurrent_download = is_single_episode or len(episodes) <= 3
 
-        try:
-            # 如果是第一集且已有预获取的弹幕，直接使用
-            if i == 0 and first_episode_comments is not None:
-                comments = first_episode_comments
-                logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
-            else:
-                # 其他分集正常获取
-                await rate_limiter.check(scraper.provider_name)
-                
-                sub_progress_callback = lambda p, msg: progress_callback(
-                    base_progress + int(p * 0.6 / len(episodes)), msg
-                )
-                
-                comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
-                
-                # 只有在实际进行了网络请求时才增加计数
-                if comments is not None:
-                    await rate_limiter.increment(scraper.provider_name)
+    if use_concurrent_download:
+        # 使用并发下载获取所有弹幕
+        download_results = await _download_episode_comments_concurrent(
+            scraper, episodes, rate_limiter, progress_callback, first_episode_comments
+        )
 
+        # 处理下载结果，写入数据库
+        await progress_callback(90, "正在写入数据库...")
+
+        for episode_index, comments in download_results:
             if comments is not None:
-                episode_db_id = await crud.create_episode_if_not_exists(
-                    session, anime_id, source_id, episode.episodeIndex,
-                    episode.title, episode.url, episode.episodeId
-                )
+                # 找到对应的分集信息
+                episode = next((ep for ep in episodes if ep.episodeIndex == episode_index), None)
+                if episode is None:
+                    logger.error(f"无法找到分集索引 {episode_index} 对应的分集信息")
+                    continue
 
-                # 检查分集是否已有弹幕，如果有则跳过
-                episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                episode_result = await session.execute(episode_stmt)
-                existing_episode = episode_result.scalar_one_or_none()
-                if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                    successful_episodes_indices.append(episode.episodeIndex)
-                else:
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                    await session.commit()
-
-                    total_comments_added += added_count
-                    successful_episodes_indices.append(episode.episodeIndex)
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
-            else:
-                failed_episodes_count += 1
-                logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
-
-        except RateLimitExceededError as e:
-            # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
-            if e.retry_after_seconds >= 3600:
-                failed_episodes_count += 1
-                logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {str(e)}")
-                continue
-
-            logger.warning(f"分集导入因达到速率限制而暂停: {e}")
-            await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试当前分集
-            try:
-                await rate_limiter.check(scraper.provider_name)
-                comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
-                if comments is not None:
-                    await rate_limiter.increment(scraper.provider_name)
+                try:
                     episode_db_id = await crud.create_episode_if_not_exists(
                         session, anime_id, source_id, episode.episodeIndex,
                         episode.title, episode.url, episode.episodeId
@@ -378,17 +414,110 @@ async def _import_episodes_iteratively(
 
                         total_comments_added += added_count
                         successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                        logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                except Exception as e:
+                    failed_episodes_count += 1
+                    logger.error(f"[并发模式] 分集 '{episode.title}' 写入数据库失败: {e}")
+            else:
+                failed_episodes_count += 1
+                logger.warning(f"[并发模式] 分集索引 {episode_index} 获取弹幕失败。")
+
+        logger.info(f"并发下载模式完成，成功处理 {len(successful_episodes_indices)} 个分集")
+
+    else:
+        # 传统的串行下载模式
+        for i, episode in enumerate(episodes):
+            base_progress = 30 + (i * 60 // len(episodes))
+            await progress_callback(base_progress, f"正在处理分集: {episode.title}")
+
+            try:
+                # 如果是第一集且已有预获取的弹幕，直接使用
+                if i == 0 and first_episode_comments is not None:
+                    comments = first_episode_comments
+                    logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
+                else:
+                    # 其他分集正常获取
+                    await rate_limiter.check(scraper.provider_name)
+
+                    sub_progress_callback = lambda p, msg: progress_callback(
+                        base_progress + int(p * 0.6 / len(episodes)), msg
+                    )
+
+                    comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+
+                    # 只有在实际进行了网络请求时才增加计数
+                    if comments is not None:
+                        await rate_limiter.increment(scraper.provider_name)
+
+                if comments is not None:
+                    episode_db_id = await crud.create_episode_if_not_exists(
+                        session, anime_id, source_id, episode.episodeIndex,
+                        episode.title, episode.url, episode.episodeId
+                    )
+
+                    # 检查分集是否已有弹幕，如果有则跳过
+                    episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                    episode_result = await session.execute(episode_stmt)
+                    existing_episode = episode_result.scalar_one_or_none()
+                    if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                        successful_episodes_indices.append(episode.episodeIndex)
+                    else:
+                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                        await session.commit()
+
+                        total_comments_added += added_count
+                        successful_episodes_indices.append(episode.episodeIndex)
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
                 else:
                     failed_episodes_count += 1
-                    logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
-            except Exception as retry_e:
+                    logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
+
+            except RateLimitExceededError as e:
+                # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
+                if e.retry_after_seconds >= 3600:
+                    failed_episodes_count += 1
+                    logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {str(e)}")
+                    continue
+
+                logger.warning(f"分集导入因达到速率限制而暂停: {e}")
+                await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
+                await asyncio.sleep(e.retry_after_seconds)
+                # 重试当前分集
+                try:
+                    await rate_limiter.check(scraper.provider_name)
+                    comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
+                    if comments is not None:
+                        await rate_limiter.increment(scraper.provider_name)
+                        episode_db_id = await crud.create_episode_if_not_exists(
+                            session, anime_id, source_id, episode.episodeIndex,
+                            episode.title, episode.url, episode.episodeId
+                        )
+
+                        # 检查分集是否已有弹幕，如果有则跳过
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
+                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                            successful_episodes_indices.append(episode.episodeIndex)
+                        else:
+                            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                            await session.commit()
+
+                            total_comments_added += added_count
+                            successful_episodes_indices.append(episode.episodeIndex)
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                    else:
+                        failed_episodes_count += 1
+                        logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
+                except Exception as retry_e:
+                    failed_episodes_count += 1
+                    logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}")
+            except Exception as e:
                 failed_episodes_count += 1
-                logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}")
-        except Exception as e:
-            failed_episodes_count += 1
-            logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}")
-            continue
+                logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}")
+                continue
 
     return total_comments_added, successful_episodes_indices, failed_episodes_count
 
@@ -651,7 +780,8 @@ async def generic_import_task(
         anime_id=anime_id,
         source_id=source_id,
         first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
-        config_manager=config_manager
+        config_manager=config_manager,
+        is_single_episode=currentEpisodeIndex is not None  # 传递是否为单集下载模式
     )
 
     if not successful_episodes_indices and failed_episodes_count > 0:
