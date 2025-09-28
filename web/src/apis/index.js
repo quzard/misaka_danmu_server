@@ -217,6 +217,13 @@ export const getCustomDanmakuPath = () =>
 export const setCustomDanmakuPath = data =>
   api.put('/api/ui/config/customDanmakuPath', data)
 
+/** 获取匹配后备Token配置 */
+export const getMatchFallbackTokens = () =>
+  api.get('/api/ui/config/matchFallbackTokens')
+/** 设置匹配后备Token配置 */
+export const setMatchFallbackTokens = data =>
+  api.put('/api/ui/config/matchFallbackTokens', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')

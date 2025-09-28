@@ -651,7 +651,8 @@ async def _get_match_for_item(
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
     rate_limiter: RateLimiter,
-    title_recognition_manager
+    title_recognition_manager,
+    current_token: Optional[str] = None
 ) -> DandanMatchResponse:
     """
     通过文件名匹配弹幕库的核心逻辑。此接口不使用文件Hash。
@@ -766,6 +767,31 @@ async def _get_match_for_item(
     # 新增：后备机制 (Fallback Mechanism)
     fallback_enabled_str = await config_manager.get("matchFallbackEnabled", "false")
     if fallback_enabled_str.lower() == 'true':
+        # 检查Token是否被允许使用匹配后备功能
+        if current_token:
+            try:
+                import json
+                # 获取当前token的信息
+                token_stmt = select(orm_models.ApiToken).where(orm_models.ApiToken.token == current_token)
+                token_result = await session.execute(token_stmt)
+                current_token_obj = token_result.scalar_one_or_none()
+
+                if current_token_obj:
+                    # 获取允许的token列表
+                    allowed_tokens_str = await config_manager.get("matchFallbackTokens", "[]")
+                    allowed_token_ids = json.loads(allowed_tokens_str)
+
+                    # 如果配置了允许的token列表且当前token不在列表中，跳过后备机制
+                    if allowed_token_ids and current_token_obj.id not in allowed_token_ids:
+                        logger.info(f"Token '{current_token_obj.name}' (ID: {current_token_obj.id}) 未被授权使用匹配后备功能，跳过后备机制。")
+                        response = DandanMatchResponse(isMatched=False, matches=[])
+                        logger.info(f"发送匹配响应 (Token未授权): {response.model_dump_json(indent=2)}")
+                        return response
+                    else:
+                        logger.info(f"Token '{current_token_obj.name}' (ID: {current_token_obj.id}) 已被授权使用匹配后备功能。")
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"检查匹配后备Token授权时发生错误: {e}，继续执行后备机制")
+
         # 检查黑名单
         blacklist_pattern = await config_manager.get("matchFallbackBlacklist", "")
         if blacklist_pattern.strip():
@@ -868,8 +894,9 @@ async def match_single_file(
     优先进行库内直接匹配，失败后回退到TMDB剧集组映射。
     """
     return await _get_match_for_item(
-        request, session, task_manager, scraper_manager, 
-        metadata_manager, config_manager, rate_limiter, title_recognition_manager
+        request, session, task_manager, scraper_manager,
+        metadata_manager, config_manager, rate_limiter, title_recognition_manager,
+        current_token=token
     )
 
 
@@ -897,7 +924,8 @@ async def match_batch_files(
 
     tasks = [
         _get_match_for_item(
-            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager
+            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager,
+            current_token=token
         ) for item in request.requests
     ]
     results = await asyncio.gather(*tasks)

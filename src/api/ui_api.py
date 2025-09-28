@@ -1676,6 +1676,30 @@ async def set_custom_danmaku_path(
     logger.info(f"自定义弹幕路径配置已保存")
     return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
 
+# --- 匹配后备Token配置 ---
+
+@router.get("/config/matchFallbackTokens", response_model=models.ConfigValue, summary="获取匹配后备允许的Token列表")
+async def get_match_fallback_tokens(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    value = await crud.get_config_value(session, "matchFallbackTokens", "[]")
+    return models.ConfigValue(value=value)
+
+@router.put("/config/matchFallbackTokens", status_code=status.HTTP_204_NO_CONTENT, summary="设置匹配后备允许的Token列表")
+async def set_match_fallback_tokens(
+    request: models.ConfigValue,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    await crud.update_config_value(session, "matchFallbackTokens", request.value)
+    config_manager.invalidate("matchFallbackTokens")
+    logger.info(f"匹配后备Token配置已保存: {request.value}")
+    return
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,

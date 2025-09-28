@@ -1,6 +1,6 @@
-import { Card, Form, Switch, Input, Button, Space, Tooltip } from 'antd'
+import { Card, Form, Switch, Input, Button, Space, Tooltip, Select } from 'antd'
 import { useEffect, useState } from 'react'
-import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath } from '../../../apis'
+import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 
@@ -9,22 +9,37 @@ export const MatchFallbackSetting = () => {
   const [loading, setLoading] = useState(true)
   const [pathSaving, setPathSaving] = useState(false)
   const [blacklistSaving, setBlacklistSaving] = useState(false)
+  const [tokensSaving, setTokensSaving] = useState(false)
   const [customPathEnabled, setCustomPathEnabled] = useState(false)
+  const [tokenList, setTokenList] = useState([])
   const messageApi = useMessage()
 
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, pathRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, pathRes, tokensRes, tokenListRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
-        getCustomDanmakuPath()
+        getCustomDanmakuPath(),
+        getMatchFallbackTokens(),
+        getTokenList()
       ])
       const pathEnabled = pathRes.data.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
+      setTokenList(tokenListRes.data || [])
+
+      // 解析token配置
+      let selectedTokens = []
+      try {
+        selectedTokens = JSON.parse(tokensRes.data.value || '[]')
+      } catch (e) {
+        console.warn('解析匹配后备Token配置失败:', e)
+      }
+
       form.setFieldsValue({
         matchFallbackEnabled: fallbackRes.data.value === 'true',
         matchFallbackBlacklist: blacklistRes.data.value || '',
+        matchFallbackTokens: selectedTokens,
         customDanmakuPathEnabled: pathEnabled,
         customDanmakuPathTemplate: pathRes.data.template
       })
@@ -90,6 +105,20 @@ export const MatchFallbackSetting = () => {
     }
   }
 
+  const handleTokensSave = async () => {
+    try {
+      setTokensSaving(true)
+      const values = form.getFieldsValue()
+      const tokensValue = JSON.stringify(values.matchFallbackTokens || [])
+      await setMatchFallbackTokens({ value: tokensValue })
+      messageApi.success('Token配置已保存')
+    } catch (error) {
+      messageApi.error('保存Token配置失败')
+    } finally {
+      setTokensSaving(false)
+    }
+  }
+
   const handlePathReset = () => {
     // Docker环境下使用绝对路径，源码环境使用相对路径
     const defaultTemplate = '/app/config/danmaku/${animeId}/${episodeId}'
@@ -106,6 +135,7 @@ export const MatchFallbackSetting = () => {
         initialValues={{
           matchFallbackEnabled: false,
           matchFallbackBlacklist: '',
+          matchFallbackTokens: [],
           customDanmakuPathEnabled: false,
           customDanmakuPathTemplate: '/app/config/danmaku/${animeId}/${episodeId}'
         }}
@@ -117,6 +147,41 @@ export const MatchFallbackSetting = () => {
           tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
         >
           <Switch />
+        </Form.Item>
+
+        <Form.Item
+          label={
+            <Space>
+              匹配后备Token授权
+              <Tooltip title="选择允许触发匹配后备功能的Token。如果不选择任何Token，则所有Token都可以触发后备功能。只有被选中的Token才能在匹配失败时自动触发后备搜索任务。">
+                <QuestionCircleOutlined />
+              </Tooltip>
+            </Space>
+          }
+        >
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item
+              name="matchFallbackTokens"
+              style={{ flex: 1, marginBottom: 0 }}
+            >
+              <Select
+                mode="multiple"
+                placeholder={tokenList.length === 0 ? "暂无可用Token" : "选择允许使用匹配后备的Token（留空表示允许所有Token）"}
+                disabled={tokenList.length === 0}
+                options={tokenList.map(token => ({
+                  value: token.id,
+                  label: `${token.name} (${token.isEnabled ? '启用' : '禁用'})`
+                }))}
+                showSearch
+                filterOption={(input, option) =>
+                  option.label.toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+            <Button type="primary" loading={tokensSaving} onClick={handleTokensSave}>
+              保存
+            </Button>
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item
