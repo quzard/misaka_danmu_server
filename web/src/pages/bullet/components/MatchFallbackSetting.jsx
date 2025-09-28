@@ -1,6 +1,6 @@
 import { Card, Form, Switch, Input, Button, Space, Tooltip, Checkbox } from 'antd'
 import { useEffect, useState } from 'react'
-import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList } from '../../../apis'
+import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList, getSearchFallback, setSearchFallback } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 
@@ -17,12 +17,13 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, pathRes, tokensRes, tokenListRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, pathRes, tokensRes, tokenListRes, searchFallbackRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
         getCustomDanmakuPath(),
         getMatchFallbackTokens(),
-        getTokenList()
+        getTokenList(),
+        getSearchFallback()
       ])
       const pathEnabled = pathRes.data.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
@@ -41,7 +42,8 @@ export const MatchFallbackSetting = () => {
         matchFallbackBlacklist: blacklistRes.data.value || '',
         matchFallbackTokens: selectedTokens,
         customDanmakuPathEnabled: pathEnabled,
-        customDanmakuPathTemplate: pathRes.data.template
+        customDanmakuPathTemplate: pathRes.data.template,
+        searchFallbackEnabled: searchFallbackRes.data.value === 'true'
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -71,6 +73,10 @@ export const MatchFallbackSetting = () => {
       if ('matchFallbackEnabled' in changedValues) {
         await setMatchFallback({ value: String(changedValues.matchFallbackEnabled) })
         messageApi.success('匹配后备开关已保存')
+      }
+      if ('searchFallbackEnabled' in changedValues) {
+        await setSearchFallback({ value: String(changedValues.searchFallbackEnabled) })
+        messageApi.success('后备搜索开关已保存')
       }
       if ('customDanmakuPathEnabled' in changedValues) {
         setCustomPathEnabled(changedValues.customDanmakuPathEnabled)
@@ -146,20 +152,34 @@ export const MatchFallbackSetting = () => {
         layout="vertical"
         initialValues={{
           matchFallbackEnabled: false,
+          searchFallbackEnabled: false,
           matchFallbackBlacklist: '',
           matchFallbackTokens: [],
           customDanmakuPathEnabled: false,
           customDanmakuPathTemplate: '/app/config/danmaku/${animeId}/${episodeId}'
         }}
       >
-        <Form.Item
-          name="matchFallbackEnabled"
-          label="启用匹配后备"
-          valuePropName="checked"
-          tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
-        >
-          <Switch />
-        </Form.Item>
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+          <Form.Item
+            name="matchFallbackEnabled"
+            label="启用匹配后备"
+            valuePropName="checked"
+            tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
+            style={{ flex: 1 }}
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="searchFallbackEnabled"
+            label="启用后备搜索"
+            valuePropName="checked"
+            tooltip="启用后，当使用search/anime接口搜索时，如果本地库中没有结果，系统将自动触发全网搜索并返回搜索结果。用户可以直接选择搜索结果进行下载。"
+            style={{ flex: 1 }}
+          >
+            <Switch />
+          </Form.Item>
+        </div>
 
         <Form.Item
           label={

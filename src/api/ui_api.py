@@ -1703,6 +1703,30 @@ async def set_match_fallback_tokens(
     logger.info(f"匹配后备Token配置已保存: {request.value}")
     return
 
+# --- 后备搜索配置 ---
+
+@router.get("/config/searchFallbackEnabled", response_model=ConfigValueResponse, summary="获取后备搜索状态")
+async def get_search_fallback(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取后备搜索功能的启用状态"""
+    value = await crud.get_config_value(session, "searchFallbackEnabled", "false")
+    return ConfigValueResponse(value=value)
+
+@router.put("/config/searchFallbackEnabled", status_code=status.HTTP_204_NO_CONTENT, summary="设置后备搜索状态")
+async def set_search_fallback(
+    request: ConfigValueRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置后备搜索功能的启用状态"""
+    await crud.update_config_value(session, "searchFallbackEnabled", request.value)
+    config_manager.invalidate("searchFallbackEnabled")
+    logger.info(f"后备搜索状态已保存: {request.value}")
+    return
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,

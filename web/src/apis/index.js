@@ -224,6 +224,13 @@ export const getMatchFallbackTokens = () =>
 export const setMatchFallbackTokens = data =>
   api.put('/api/ui/config/matchFallbackTokens', data)
 
+/** 获取后备搜索状态 */
+export const getSearchFallback = () =>
+  api.get('/api/ui/config/searchFallbackEnabled')
+/** 设置后备搜索状态 */
+export const setSearchFallback = data =>
+  api.put('/api/ui/config/searchFallbackEnabled', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')
