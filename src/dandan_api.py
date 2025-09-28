@@ -326,7 +326,7 @@ async def _handle_fallback_search(
                 progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
                 return DandanSearchAnimeResponse(animes=[
                     DandanSearchAnimeItem(
-                        animeId=None,
+                        animeId=999999999,  # 使用特定的不会冲突的数字
                         bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
                         animeTitle=f"{search_term} 搜索正在运行",
                         type="tvseries",
@@ -372,7 +372,7 @@ async def _handle_fallback_search(
     # 立即返回"搜索中"状态，让用户知道搜索正在进行
     return DandanSearchAnimeResponse(animes=[
         DandanSearchAnimeItem(
-            animeId=None,
+            animeId=999999999,  # 使用特定的不会冲突的数字
             bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
             animeTitle=f"{search_term} 搜索正在启动",
             type="tvseries",
@@ -441,7 +441,7 @@ async def _execute_fallback_search_task(
                         }
 
                     search_results.append(DandanSearchAnimeItem(
-                        animeId=None,  # 搜索结果没有本地animeId
+                        animeId=999999998,  # 搜索结果使用特定的不会冲突的数字
                         bangumiId=unique_bangumi_id,
                         animeTitle=title_with_source,
                         type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
@@ -832,7 +832,7 @@ async def get_bangumi_details(
                             ]
 
                             bangumi_details = BangumiDetails(
-                                animeId=None,
+                                animeId=999999998,  # 搜索结果使用特定的不会冲突的数字
                                 bangumiId=bangumiId,
                                 animeTitle=result.animeTitle,
                                 imageUrl=result.imageUrl,
