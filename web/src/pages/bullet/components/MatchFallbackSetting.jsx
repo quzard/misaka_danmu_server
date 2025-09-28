@@ -182,67 +182,97 @@ export const MatchFallbackSetting = () => {
         </div>
 
         <Form.Item
-          label={
-            <Space>
-              匹配后备Token授权
-              <Tooltip title="选择允许触发匹配后备功能的Token。如果不选择任何Token，则所有Token都可以触发后备功能。只有被选中的Token才能在匹配失败时自动触发后备搜索任务。">
-                <QuestionCircleOutlined />
-              </Tooltip>
-            </Space>
+          noStyle
+          shouldUpdate={(prevValues, currentValues) =>
+            prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+            prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
           }
         >
-          <div style={{ border: '1px solid #d9d9d9', borderRadius: '6px', padding: '12px', minHeight: '120px', backgroundColor: '#fafafa' }}>
-            {tokenList.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
-                暂无可用Token
-              </div>
-            ) : (
+          {({ getFieldValue }) => {
+            const isTokenSelectionDisabled = !getFieldValue('matchFallbackEnabled') && !getFieldValue('searchFallbackEnabled')
+
+            return (
               <Form.Item
-                name="matchFallbackTokens"
-                style={{ marginBottom: 0 }}
+                label={
+                  <Space>
+                    匹配后备Token授权
+                    <Tooltip title="选择允许触发匹配后备功能的Token。如果不选择任何Token，则所有Token都可以触发后备功能。只有被选中的Token才能在匹配失败时自动触发后备搜索任务。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
               >
-                <Checkbox.Group style={{ width: '100%' }}>
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'row',
-                    flexWrap: 'wrap',
-                    gap: '8px'
-                  }}>
-                    {tokenList.map(token => (
-                      <Checkbox
-                        key={token.id}
-                        value={token.id}
-                        style={{
-                          padding: '6px 12px',
-                          border: '1px solid #e8e8e8',
-                          borderRadius: '4px',
-                          backgroundColor: '#fff',
-                          margin: 0,
-                          whiteSpace: 'nowrap'
-                        }}
+                <div style={{
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  padding: '12px',
+                  minHeight: '120px',
+                  backgroundColor: isTokenSelectionDisabled ? '#f5f5f5' : '#fafafa',
+                  opacity: isTokenSelectionDisabled ? 0.6 : 1
+                }}>
+                  {tokenList.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                      暂无可用Token
+                    </div>
+                  ) : (
+                    <Form.Item
+                      name="matchFallbackTokens"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Checkbox.Group
+                        style={{ width: '100%' }}
+                        disabled={isTokenSelectionDisabled}
                       >
-                        <span style={{ fontWeight: 'normal' }}>
-                          {token.name}
-                          <span style={{
-                            marginLeft: '8px',
-                            fontSize: '12px',
-                            color: token.isEnabled ? '#52c41a' : '#ff4d4f'
-                          }}>
-                            ({token.isEnabled ? '启用' : '禁用'})
-                          </span>
-                        </span>
-                      </Checkbox>
-                    ))}
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'row',
+                          flexWrap: 'wrap',
+                          gap: '8px'
+                        }}>
+                          {tokenList.map(token => (
+                            <Checkbox
+                              key={token.id}
+                              value={token.id}
+                              disabled={isTokenSelectionDisabled}
+                              style={{
+                                padding: '6px 12px',
+                                border: '1px solid #e8e8e8',
+                                borderRadius: '4px',
+                                backgroundColor: '#fff',
+                                margin: 0,
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              <span style={{ fontWeight: 'normal' }}>
+                                {token.name}
+                                <span style={{
+                                  marginLeft: '8px',
+                                  fontSize: '12px',
+                                  color: token.isEnabled ? '#52c41a' : '#ff4d4f'
+                                }}>
+                                  ({token.isEnabled ? '启用' : '禁用'})
+                                </span>
+                              </span>
+                            </Checkbox>
+                          ))}
+                        </div>
+                      </Checkbox.Group>
+                    </Form.Item>
+                  )}
+                  <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                    <Button
+                      type="primary"
+                      loading={tokensSaving}
+                      onClick={handleTokensSave}
+                      disabled={isTokenSelectionDisabled}
+                    >
+                      保存
+                    </Button>
                   </div>
-                </Checkbox.Group>
+                </div>
               </Form.Item>
-            )}
-            <div style={{ marginTop: '12px', textAlign: 'right' }}>
-              <Button type="primary" loading={tokensSaving} onClick={handleTokensSave}>
-                保存
-              </Button>
-            </div>
-          </div>
+            )
+          }}
         </Form.Item>
 
         <Form.Item

@@ -52,39 +52,46 @@ async def _check_related_match_fallback_task(session: AsyncSession, search_term:
     from .task_manager import TaskStatus
 
     # 查找正在进行的匹配后备任务
-    # 匹配后备任务通常包含搜索的关键词信息
-    # 我们需要检查任务参数中的搜索词是否与当前搜索词匹配
+    # 通过TaskStateCache查找match_fallback类型的任务
 
-    # 查询最近的匹配后备任务
-    stmt = select(orm_models.TaskHistory).where(
-        orm_models.TaskHistory.taskType == "match_fallback",
-        orm_models.TaskHistory.status.in_(['排队中', '运行中'])
-    ).order_by(orm_models.TaskHistory.createdAt.desc()).limit(10)  # 获取最近10个任务
+    # 查询正在进行的匹配后备任务
+    stmt = select(orm_models.TaskStateCache).where(
+        orm_models.TaskStateCache.taskType == "match_fallback"
+    ).order_by(orm_models.TaskStateCache.createdAt.desc()).limit(10)  # 获取最近10个任务
 
     result = await session.execute(stmt)
-    tasks = result.scalars().all()
+    task_caches = result.scalars().all()
 
     # 检查任务参数中是否包含相关的搜索词
-    for task in tasks:
-        # 简单的标题匹配 - 检查任务标题是否包含搜索词
-        if search_term.lower() in task.title.lower():
-            return {
-                "task_id": task.taskId,
-                "title": task.title,
-                "progress": task.progress or 0,
-                "status": task.status,
-                "description": task.description or "匹配后备正在进行"
-            }
+    for task_cache in task_caches:
+        # 获取对应的TaskHistory记录
+        history_stmt = select(orm_models.TaskHistory).where(
+            orm_models.TaskHistory.taskId == task_cache.taskId,
+            orm_models.TaskHistory.status.in_(['排队中', '运行中'])
+        )
+        history_result = await session.execute(history_stmt)
+        task_history = history_result.scalar_one_or_none()
 
-        # 也可以检查任务描述
-        if task.description and search_term.lower() in task.description.lower():
-            return {
-                "task_id": task.taskId,
-                "title": task.title,
-                "progress": task.progress or 0,
-                "status": task.status,
-                "description": task.description
-            }
+        if task_history:
+            # 简单的标题匹配 - 检查任务标题是否包含搜索词
+            if search_term.lower() in task_history.title.lower():
+                return {
+                    "task_id": task_history.taskId,
+                    "title": task_history.title,
+                    "progress": task_history.progress or 0,
+                    "status": task_history.status,
+                    "description": task_history.description or "匹配后备正在进行"
+                }
+
+            # 也可以检查任务描述
+            if task_history.description and search_term.lower() in task_history.description.lower():
+                return {
+                    "task_id": task_history.taskId,
+                    "title": task_history.title,
+                    "progress": task_history.progress or 0,
+                    "status": task_history.status,
+                    "description": task_history.description
+                }
 
     return None
 
@@ -983,6 +990,28 @@ async def search_anime_for_dandan(
     # 如果本地库无结果，检查是否启用了后备搜索
     search_fallback_enabled = await config_manager.get("searchFallbackEnabled", "false")
     if search_fallback_enabled.lower() == 'true':
+        # 检查Token是否被允许使用后备搜索功能
+        try:
+            import json
+            # 获取当前token的信息
+            token_stmt = select(orm_models.ApiToken).where(orm_models.ApiToken.token == token)
+            token_result = await session.execute(token_stmt)
+            current_token_obj = token_result.scalar_one_or_none()
+
+            if current_token_obj:
+                # 获取允许的token列表
+                allowed_tokens_str = await config_manager.get("matchFallbackTokens", "[]")
+                allowed_token_ids = json.loads(allowed_tokens_str)
+
+                # 如果配置了允许的token列表且当前token不在列表中，跳过后备搜索
+                if allowed_token_ids and current_token_obj.id not in allowed_token_ids:
+                    logger.info(f"Token '{current_token_obj.name}' (ID: {current_token_obj.id}) 未被授权使用后备搜索功能，跳过后备搜索。")
+                    return DandanSearchAnimeResponse(animes=[])
+                else:
+                    logger.info(f"Token '{current_token_obj.name}' (ID: {current_token_obj.id}) 已被授权使用后备搜索功能。")
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"检查后备搜索Token授权时发生错误: {e}，继续执行后备搜索")
+
         return await _handle_fallback_search(
             search_term, token, session, task_manager, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager
