@@ -68,8 +68,19 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
     获取下一个真实的animeId（当前最大animeId + 1）
     用于实际的episodeId生成
     """
-    from . import crud
-    return await crud.get_next_anime_id(session)
+    from sqlalchemy import func
+    from . import orm_models
+
+    # 查询当前最大的animeId
+    result = await session.execute(
+        select(func.max(orm_models.Anime.id))
+    )
+    max_id = result.scalar()
+
+    if max_id is None:
+        return 1  # 如果没有找到，从1开始
+    else:
+        return max_id + 1
 
 def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) -> int:
     """
@@ -572,7 +583,7 @@ async def _execute_fallback_search_task(
             }
 
             # 存储到数据库缓存（10分钟过期）
-            await crud.set_cache(session, cache_key, json.dumps(cache_data), expire_seconds=600)
+            await crud.set_cache(session, cache_key, json.dumps(cache_data), ttl_seconds=600)
             logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key}")
 
         except Exception as e:
@@ -968,8 +979,8 @@ async def get_bangumi_details(
                                     for i, episode_data in enumerate(actual_episodes):
                                         # 使用真实animeId生成episodeId
                                         episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
-                                        # 在分集标题后面添加"（点击下载）"提示
-                                        episode_title = f"{episode_data.title}（点击下载）"
+                                        # 直接使用原始分集标题
+                                        episode_title = episode_data.title
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
                                             episodeTitle=episode_title,
@@ -1000,7 +1011,7 @@ async def get_bangumi_details(
                         return BangumiDetailsResponse(bangumi=bangumi_details)
 
             # 如果没找到对应的后备搜索ID，但在范围内，返回过期信息
-            if 9000000 <= anime_id_int < 10000000:
+            if 900000 <= anime_id_int < 1000000:
                 return BangumiDetailsResponse(
                     success=True,
                     bangumi=None,
