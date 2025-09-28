@@ -1535,6 +1535,8 @@ ALLOWED_CONFIG_KEYS = {
     "webhookDelayedImportHours": {"type": "integer", "description": "Webhook 延时导入的小时数"},
     "webhookFilterMode": {"type": "string", "description": "Webhook 标题过滤模式 (blacklist/whitelist)"},
     "webhookFilterRegex": {"type": "string", "description": "用于过滤 Webhook 标题的正则表达式"},
+    # 识别词配置
+    "titleRecognition": {"type": "text", "description": "自定义识别词配置内容，支持屏蔽词、替换、集数偏移、季度偏移等规则"},
 }
 
 class ConfigItem(BaseModel):
@@ -1557,7 +1559,9 @@ class HelpResponse(BaseModel):
 @router.get("/config", response_model=Union[ConfigResponse, HelpResponse], summary="获取可配置的参数列表或帮助信息")
 async def get_allowed_configs(
     type: Optional[str] = Query(None, description="请求类型，使用 'help' 获取可用配置项列表"),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager),
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     获取所有可通过外部API管理的配置项及其当前值。
@@ -1578,15 +1582,27 @@ async def get_allowed_configs(
     configs = []
 
     for key, meta in ALLOWED_CONFIG_KEYS.items():
-        # 根据类型设置默认值
-        if meta["type"] == "boolean":
-            default_value = "false"
-        elif meta["type"] == "integer":
-            default_value = "0"
-        else:  # string
-            default_value = ""
+        # 特殊处理识别词配置
+        if key == "titleRecognition":
+            if title_recognition_manager:
+                # 从数据库获取识别词配置
+                from ..orm_models import TitleRecognition
+                from sqlalchemy import select
+                result = await session.execute(select(TitleRecognition).limit(1))
+                title_recognition = result.scalar_one_or_none()
+                current_value = title_recognition.content if title_recognition else ""
+            else:
+                current_value = ""
+        else:
+            # 根据类型设置默认值
+            if meta["type"] == "boolean":
+                default_value = "false"
+            elif meta["type"] == "integer":
+                default_value = "0"
+            else:  # string
+                default_value = ""
 
-        current_value = await config_manager.get(key, default_value)
+            current_value = await config_manager.get(key, default_value)
 
         configs.append(ConfigItem(
             key=key,
@@ -1600,7 +1616,8 @@ async def get_allowed_configs(
 @router.put("/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定配置项")
 async def update_config(
     request: ConfigUpdateRequest,
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     更新指定的配置项。
@@ -1630,8 +1647,20 @@ async def update_config(
                 detail=f"配置项 '{request.key}' 的值必须是整数"
             )
 
-    # 更新配置
-    await config_manager.setValue(request.key, request.value)
-    logger.info(f"外部API更新了配置项 '{request.key}' 为 '{request.value}'")
+    # 特殊处理识别词配置
+    if request.key == "titleRecognition":
+        if title_recognition_manager is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
+
+        # 更新识别词配置
+        warnings = await title_recognition_manager.update_recognition_rules(request.value)
+        if warnings:
+            logger.warning(f"外部API更新识别词配置时发现 {len(warnings)} 个警告: {warnings}")
+
+        logger.info(f"外部API更新了识别词配置，共 {len(title_recognition_manager.recognition_rules)} 条规则")
+    else:
+        # 更新普通配置
+        await config_manager.setValue(request.key, request.value)
+        logger.info(f"外部API更新了配置项 '{request.key}' 为 '{request.value}'")
 
     return

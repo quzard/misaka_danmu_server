@@ -23,7 +23,7 @@ from .config_manager import ConfigManager
 from .image_utils import download_image
 from .config import settings
 from .scraper_manager import ScraperManager
-from .metadata_manager import MetadataSourceManager 
+from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
@@ -1552,7 +1552,7 @@ async def auto_search_and_import_task(
         search_term = payload.searchTerm
         media_type = payload.mediaType
         season = payload.season
-        
+
         await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
 
         aliases = {search_term}

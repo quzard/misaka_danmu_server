@@ -353,15 +353,15 @@ class TitleRecognitionManager:
                     logger.debug(f"应用屏蔽词规则: 移除 '{rule.data['word']}'")
 
             elif rule.rule_type == 'replace':
-                # 简单替换
-                if rule.data['source'] in processed_text:
+                # 简单替换 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
                     processed_text = processed_text.replace(rule.data['source'], rule.data['target'])
                     has_changed = True
                     logger.debug(f"应用替换规则: '{rule.data['source']}' => '{rule.data['target']}'")
 
             elif rule.rule_type == 'metadata_replace':
-                # 元数据替换
-                if rule.data['source'] in processed_text:
+                # 元数据替换 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
                     processed_text = processed_text.replace(rule.data['source'], '')
                     metadata_info = {k: v for k, v in rule.data.items() if k != 'source'}
                     has_changed = True
@@ -390,8 +390,8 @@ class TitleRecognitionManager:
                     logger.debug(f"应用复合规则: '{rule.data['source']}' => '{rule.data['target']}' + 集数偏移")
 
             elif rule.rule_type == 'season_offset':
-                # 季度偏移规则
-                if rule.data['source'] in processed_text:
+                # 季度偏移规则 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
                     # 应用标题替换（如果有）
                     if 'title' in rule.data:
                         processed_text = processed_text.replace(rule.data['source'], rule.data['title'])
@@ -406,6 +406,30 @@ class TitleRecognitionManager:
                         logger.debug(f"应用季度偏移规则: '{rule.data['source']}' 季度 {processed_season} => {new_season}")
 
         return processed_text, processed_episode, processed_season, has_changed, metadata_info
+
+    def _exact_match(self, text: str, pattern: str) -> bool:
+        """
+        精确匹配检查，避免子字符串误匹配
+
+        Args:
+            text: 要检查的文本
+            pattern: 匹配模式
+
+        Returns:
+            bool: 是否精确匹配
+        """
+        # 完全匹配
+        if text == pattern:
+            return True
+
+        # 检查是否作为独立词汇存在（前后有分隔符或边界）
+        import re
+        # 创建正则表达式，确保前后有边界
+        escaped_pattern = re.escape(pattern)
+        # 使用词边界或常见分隔符作为边界
+        boundary_pattern = r'(?:^|[\s\-_\[\]()（）【】]){pattern}(?:$|[\s\-_\[\]()（）【】])'.format(pattern=escaped_pattern)
+
+        return bool(re.search(boundary_pattern, text))
 
     def _apply_episode_offset(self, text: str, episode: Optional[int], rule: TitleRecognitionRule) -> Optional[int]:
         """应用集数偏移规则"""
