@@ -870,7 +870,8 @@ async def search_anime_for_dandan(
 async def get_bangumi_details(
     bangumiId: str = Path(..., description="作品ID, A开头的备用ID, 或真实的Bangumi ID"),
     token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager)
 ):
     """
     模拟 dandanplay 的 /api/v2/bangumi/{bangumiId} 接口。
@@ -908,21 +909,24 @@ async def get_bangumi_details(
 
                         episodes = []
                         try:
-                            # TODO: 这里应该调用scraper获取真实的分集信息
-                            # scraper = scraper_manager.get_scraper(provider)
-                            # actual_episodes = await scraper.get_episodes_from_media_id(media_id)
-                            #
-                            # if actual_episodes:
-                            #     for i, episode_data in enumerate(actual_episodes):
-                            #         episode_id = _generate_episode_id(anime_id, 1, i + 1)
-                            #         episodes.append(BangumiEpisode(
-                            #             episodeId=episode_id,
-                            #             episodeTitle=episode_data['title'],
-                            #             episodeNumber=str(episode_data['episode_number'])
-                            #         ))
+                            # 调用scraper获取真实的分集信息
+                            scraper = scraper_manager.get_scraper(provider)
+                            if scraper:
+                                # 从media_id获取分集列表
+                                actual_episodes = await scraper.get_episodes_from_media_id(media_id)
 
-                            # 暂时返回空分集列表，等待实际实现scraper获取
-                            pass
+                                if actual_episodes:
+                                    for i, episode_data in enumerate(actual_episodes):
+                                        episode_id = _generate_episode_id(anime_id, 1, i + 1)
+                                        episodes.append(BangumiEpisode(
+                                            episodeId=episode_id,
+                                            episodeTitle=episode_data['title'],
+                                            episodeNumber=str(episode_data.get('episode_number', i + 1))
+                                        ))
+                                else:
+                                    logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
+                            else:
+                                logger.error(f"找不到 {provider} 的scraper")
 
                         except Exception as e:
                             logger.error(f"获取分集列表失败: {e}")
