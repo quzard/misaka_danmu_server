@@ -1838,6 +1838,23 @@ async def get_comments_for_dandan(
                         logger.info(f"弹幕下载任务未在30秒内完成，任务将继续在后台运行")
                         # 任务继续在后台运行，下次访问时就能从数据库获取
 
+                except HTTPException as e:
+                    if e.status_code == 409:  # 任务已在运行中
+                        logger.info(f"弹幕下载任务已在运行中，等待现有任务完成...")
+                        # 尝试等待现有任务完成，但设置较短的超时时间
+                        try:
+                            # 等待一段时间，看是否能从缓存中获取结果
+                            await asyncio.sleep(5.0)  # 等待5秒
+                            cache_key = f"comments_{episodeId}"
+                            if cache_key in comments_fetch_cache:
+                                comments_data = comments_fetch_cache[cache_key]
+                                logger.info(f"从缓存中获取到弹幕数据: {len(comments_data)} 条")
+                            else:
+                                logger.info(f"等待5秒后仍未从缓存获取到数据，任务可能仍在进行中")
+                        except Exception as wait_error:
+                            logger.warning(f"等待现有任务时发生错误: {wait_error}")
+                    else:
+                        logger.error(f"提交弹幕下载任务失败: {e}", exc_info=True)
                 except Exception as e:
                     logger.error(f"提交弹幕下载任务失败: {e}", exc_info=True)
 

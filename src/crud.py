@@ -1574,7 +1574,7 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
     session.add_all([
         MetadataSource(
             providerName=name, displayOrder=max_order + i + 1,
-            isAuxSearchEnabled=(name == 'tmdb'), useProxy=False
+            isAuxSearchEnabled=(name == 'tmdb'), useProxy=True
         )
         for i, name in enumerate(new_providers)
     ])

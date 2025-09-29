@@ -2412,6 +2412,7 @@ async def import_from_provider(
     config_manager: ConfigManager = Depends(get_config_manager),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
+    logger.info(f"导入请求: 用户={current_user.username}, provider={request_data.provider}, title={request_data.animeTitle}")
     try:
         # 在启动任务前检查provider是否存在
         scraper_manager.get_scraper(request_data.provider)
