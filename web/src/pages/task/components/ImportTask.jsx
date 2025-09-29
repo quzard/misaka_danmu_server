@@ -6,7 +6,7 @@ import {
   resumeTask,
   stopTask,
 } from '@/apis'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -216,24 +216,25 @@ export const ImportTask = () => {
   /**
    * 处理删除任务操作
    */
-  const handleDelete = (force = false) => {
+  const handleDelete = () => {
     const hasStuckTasks = selectList.some(task =>
       task.status === 'PAUSED' || task.status === 'RUNNING'
     )
 
-    modalApi.confirm({
-      title: force ? '强制删除任务' : '删除任务',
-      zIndex: 1002,
-      content: (
+    // 使用状态来控制强制删除选项
+    let forceDelete = false
+
+    const DeleteConfirmContent = () => {
+      const [force, setForce] = React.useState(false)
+
+      // 更新外部变量
+      React.useEffect(() => {
+        forceDelete = force
+      }, [force])
+
+      return (
         <div>
-          {force ? (
-            <div className="mb-3">
-              <div className="text-orange-600 mb-2">⚠️ 强制删除模式</div>
-              <div>将跳过中止逻辑，直接删除历史记录。适用于卡住的任务。</div>
-            </div>
-          ) : (
-            <div>您确定要从历史记录中删除任务吗？</div>
-          )}
+          <div>您确定要从历史记录中删除任务吗？</div>
           <div className="max-h-[310px] overflow-y-auto mt-3">
             {selectList.map((it, i) => (
               <div key={it.taskId}>
@@ -244,40 +245,57 @@ export const ImportTask = () => {
               </div>
             ))}
           </div>
-          {!force && hasStuckTasks && (
+
+          {/* 强制删除复选框 */}
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="mr-2"
+              />
+              <span className="text-sm">
+                强制删除
+                <span className="text-gray-500 ml-1">
+                  (跳过中止逻辑，直接删除历史记录，适用于卡住的任务)
+                </span>
+              </span>
+            </label>
+            {force && (
+              <div className="mt-2 text-xs text-orange-600">
+                ⚠️ 强制删除将绕过正常的任务中止流程
+              </div>
+            )}
+          </div>
+
+          {hasStuckTasks && !force && (
             <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
               <div className="text-sm text-yellow-700">
-                检测到运行中或暂停的任务，如果删除失败，请尝试
-                <button
-                  className="text-blue-600 underline ml-1"
-                  onClick={() => {
-                    modalApi.destroy()
-                    handleDelete(true)
-                  }}
-                >
-                  强制删除
-                </button>
+                💡 检测到运行中或暂停的任务，建议勾选"强制删除"选项
               </div>
             </div>
           )}
         </div>
-      ),
+      )
+    }
+
+    modalApi.confirm({
+      title: '删除任务',
+      zIndex: 1002,
+      content: <DeleteConfirmContent />,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
           await Promise.all(
-            selectList.map(it => deleteTask({ taskId: it.taskId, force }))
+            selectList.map(it => deleteTask({ taskId: it.taskId, force: forceDelete }))
           )
           refreshTasks()
           setSelectList([])
-          messageApi.success(force ? '强制删除成功' : '删除成功')
+          messageApi.success(forceDelete ? '强制删除成功' : '删除成功')
         } catch (error) {
-          if (!force && hasStuckTasks) {
-            messageApi.error(`删除任务失败: ${error.message}，请尝试强制删除`)
-          } else {
-            messageApi.error(`删除任务失败: ${error.message}`)
-          }
+          messageApi.error(`删除任务失败: ${error.message}`)
         }
       },
     })

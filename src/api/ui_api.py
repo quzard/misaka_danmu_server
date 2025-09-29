@@ -1522,11 +1522,11 @@ async def delete_task_from_history_endpoint(
     task_status = task['status']
 
     if force:
-        # 强制删除模式：直接删除历史记录，不尝试中止
+        # 强制删除模式：使用SQL直接删除，绕过可能的锁定问题
         logger.info(f"用户 '{current_user.username}' 强制删除任务 {task_id}，状态: {task_status}")
-        deleted = await crud.delete_task_from_history(session, task_id)
+        deleted = await crud.force_delete_task_from_history(session, task_id)
         if not deleted:
-            logger.info(f"在尝试强制删除时，任务 {task_id} 已不存在于历史记录中。")
+            logger.warning(f"强制删除失败，任务 {task_id} 可能已不存在于历史记录中。")
         return
 
     # 正常删除模式

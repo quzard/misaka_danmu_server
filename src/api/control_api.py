@@ -1408,9 +1408,9 @@ async def delete_task(
     task_status = task['status']
 
     if force:
-        # 强制删除模式：直接删除历史记录，不尝试中止
+        # 强制删除模式：使用SQL直接删除，绕过可能的锁定问题
         logger.info(f"强制删除任务 {taskId}，状态: {task_status}")
-        if await crud.delete_task_from_history(session, taskId):
+        if await crud.force_delete_task_from_history(session, taskId):
             return {"message": f"强制删除任务 {taskId} 成功。"}
         else:
             return {"message": "强制删除失败，任务可能已被处理。"}

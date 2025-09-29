@@ -2339,12 +2339,47 @@ async def get_task_from_history_by_id(session: AsyncSession, task_id: str) -> Op
     return None
 
 async def delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
-    task = await session.get(TaskHistory, task_id)
-    if task:
+    try:
+        # 先查询任务是否存在
+        task = await session.get(TaskHistory, task_id)
+        if not task:
+            logger.warning(f"尝试删除不存在的任务: {task_id}")
+            return False
+
+        logger.info(f"正在删除任务: {task_id}, 状态: {task.status}")
+
+        # 删除任务
         await session.delete(task)
         await session.commit()
+
+        logger.info(f"成功删除任务: {task_id}")
         return True
-    return False
+    except Exception as e:
+        logger.error(f"删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
+
+async def force_delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
+    """强制删除任务，使用SQL直接删除，绕过ORM可能的锁定问题"""
+    try:
+        logger.info(f"强制删除任务: {task_id}")
+
+        # 使用SQL直接删除
+        stmt = delete(TaskHistory).where(TaskHistory.taskId == task_id)
+        result = await session.execute(stmt)
+        await session.commit()
+
+        deleted_count = result.rowcount
+        if deleted_count > 0:
+            logger.info(f"强制删除任务成功: {task_id}, 删除行数: {deleted_count}")
+            return True
+        else:
+            logger.warning(f"强制删除任务失败，任务不存在: {task_id}")
+            return False
+    except Exception as e:
+        logger.error(f"强制删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
 
 async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
     """
