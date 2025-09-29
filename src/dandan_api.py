@@ -1626,7 +1626,7 @@ async def get_comments_for_dandan(
 
                 # 检查是否已有相同的弹幕下载任务正在进行
                 task_unique_key = f"fallback_comments_{episodeId}"
-                existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, hours=1)
+                existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
                 if existing_task:
                     logger.info(f"弹幕下载任务已存在: {task_unique_key}")
                     # 如果任务正在进行，返回空结果，让用户稍后再试
