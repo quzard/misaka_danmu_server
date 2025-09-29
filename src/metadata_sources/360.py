@@ -135,12 +135,33 @@ class So360MetadataSource(BaseMetadataSource):
             # 解析JSON数据
             parsed_data = json.loads(json_payload)
 
-            # 提取rows数据 (简化版本，直接访问data.longData.rows)
-            if not parsed_data.get('data', {}).get('longData', {}).get('rows'):
+            # 调试：记录数据结构类型
+            self.logger.debug(f"360搜索: 解析数据类型 {type(parsed_data)}")
+
+            # 检查数据结构并提取rows
+            rows = []
+            if isinstance(parsed_data, dict):
+                # 标准格式: {data: {longData: {rows: [...]}}}
+                data_section = parsed_data.get('data', {})
+                if isinstance(data_section, dict):
+                    long_data = data_section.get('longData', {})
+                    if isinstance(long_data, dict):
+                        rows = long_data.get('rows', [])
+                        self.logger.debug(f"360搜索: 从标准格式提取到 {len(rows)} 条数据")
+                    else:
+                        self.logger.debug(f"360搜索: longData不是字典类型: {type(long_data)}")
+                else:
+                    self.logger.debug(f"360搜索: data不是字典类型: {type(data_section)}")
+            elif isinstance(parsed_data, list):
+                # 直接是列表格式
+                rows = parsed_data
+                self.logger.debug(f"360搜索: 从列表格式提取到 {len(rows)} 条数据")
+            else:
+                self.logger.debug(f"360搜索: 未知数据格式: {type(parsed_data)}")
+
+            if not rows:
                 self.logger.info(f"360搜索: 未找到'{keyword}'的结果")
                 return []
-
-            rows = parsed_data['data']['longData']['rows']
             self.logger.info(f"360搜索: 找到 {len(rows)} 个结果")
 
             # 过滤和转换结果

@@ -1138,7 +1138,8 @@ class TencentScraper(BaseScraper):
             if has_qi_format:
                 # 有"第N期"格式时：只保留纯粹的"第N期"和"第N期上/下"，其他全部过滤
                 qi_up_down_match = re.search(r'第(\d+)期([上下])', title)
-                qi_match = re.search(r'第(\d+)期', title) and not re.search(r'第\d+期[上下]', title)
+                qi_pure_match = re.search(r'第(\d+)期', title)
+                has_up_down = re.search(r'第\d+期[上下]', title)
 
                 if qi_up_down_match:
                     # 检查是否包含无效后缀
@@ -1159,9 +1160,9 @@ class TencentScraper(BaseScraper):
                     else:
                         self.logger.debug(f"综艺过滤上下格式+后缀: {title}")
 
-                elif qi_match and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|拍摄花絮|制作花絮|幕后花絮|预告片|先导预告|彩蛋片段|抢先看|抢先版|精选合集|未播花絮|剧情回顾|制作特辑|拍摄特辑|幕后特辑|独家专访|演员访谈|导演访谈|剪辑合集|混剪视频|内容总结|剧情盘点|删减片段|未播片段|NG镜头|NG花絮|番外篇|番外特辑|精彩片段|精彩看点|精彩回顾|看点解析|看点预告|主创访谈|媒体采访|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV)', title):
+                elif qi_pure_match and not has_up_down and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|拍摄花絮|制作花絮|幕后花絮|预告片|先导预告|彩蛋片段|抢先看|抢先版|精选合集|未播花絮|剧情回顾|制作特辑|拍摄特辑|幕后特辑|独家专访|演员访谈|导演访谈|剪辑合集|混剪视频|内容总结|剧情盘点|删减片段|未播片段|NG镜头|NG花絮|番外篇|番外特辑|精彩片段|精彩看点|精彩回顾|看点解析|看点预告|主创访谈|媒体采访|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV)', title):
                     # 匹配纯粹的"第N期"格式
-                    qi_num = qi_match.group(1)
+                    qi_num = qi_pure_match.group(1)
                     episode_infos.append({
                         'title': title,
                         'url': url,
