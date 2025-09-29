@@ -1698,9 +1698,59 @@ async def get_comments_for_dandan(
 
                         if raw_comments_data:
                                 logger.info(f"成功从 {provider} 获取 {len(raw_comments_data)} 条弹幕")
-                                await progress_callback(90, "弹幕获取完成，正在存储...")
+                                await progress_callback(90, "弹幕获取完成，正在存储到数据库...")
 
-                                # 返回弹幕数据
+                                # 创建数据库条目并保存弹幕
+                                try:
+                                    # 从映射信息中获取创建条目所需的数据
+                                    original_title = mapping_info.get("original_title", "未知标题")
+                                    media_type = mapping_info.get("type", "movie")
+
+                                    # 从搜索缓存中获取更多信息
+                                    year = None
+                                    image_url = None
+                                    for search_key, search_info in fallback_search_cache.items():
+                                        if search_key in user_last_bangumi_choice:
+                                            last_bangumi_id = user_last_bangumi_choice[search_key]
+                                            if last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                # 从搜索结果中查找对应的详细信息
+                                                for result in search_info.get("results", []):
+                                                    if result.get("bangumiId") == last_bangumi_id:
+                                                        year = result.get("year")
+                                                        image_url = result.get("imageUrl")
+                                                        break
+                                                break
+
+                                    # 创建或获取动画条目
+                                    from . import crud
+                                    anime_id = await crud.get_or_create_anime(
+                                        task_session, original_title, media_type, 1,
+                                        image_url, None, year, None
+                                    )
+
+                                    # 创建源关联
+                                    source_id = await crud.link_source_to_anime(task_session, anime_id, provider, episode_url)
+
+                                    # 创建分集条目
+                                    episode_title = f"第{episode_number}集"
+                                    episode_db_id = await crud.create_episode_if_not_exists(
+                                        task_session, anime_id, source_id, episode_number,
+                                        episode_title, "", provider_episode_id
+                                    )
+
+                                    # 保存弹幕到数据库
+                                    added_count = await crud.save_danmaku_for_episode(
+                                        task_session, episode_db_id, raw_comments_data, config_manager
+                                    )
+                                    await task_session.commit()
+
+                                    logger.info(f"已创建数据库条目并保存 {added_count} 条弹幕到数据库")
+
+                                except Exception as db_error:
+                                    logger.error(f"保存弹幕到数据库失败: {db_error}", exc_info=True)
+                                    await task_session.rollback()
+
+                                # 返回弹幕数据（无论数据库操作是否成功）
                                 return raw_comments_data
                         else:
                             logger.warning(f"获取弹幕失败")
@@ -1719,15 +1769,17 @@ async def get_comments_for_dandan(
                     )
                     logger.info(f"已提交弹幕下载任务: {task_id}")
 
-                    # 等待任务完成并获取结果
-                    result = await task_manager.wait_for_task(task_id, timeout=60)
+                    # 等待任务完成，但设置较短的超时时间
+                    result = await task_manager.wait_for_task(task_id, timeout=30)
                     if result:
                         comments_data = result
                         # 存储到缓存中
                         cache_key = f"comments_{episodeId}"
                         comments_fetch_cache[cache_key] = comments_data
+                        logger.info(f"弹幕下载任务快速完成，获得 {len(comments_data)} 条弹幕")
                     else:
-                        logger.warning(f"弹幕下载任务失败或超时: {task_id}")
+                        logger.info(f"弹幕下载任务未在30秒内完成，任务将继续在后台运行")
+                        # 任务继续在后台运行，下次访问时就能从数据库获取
 
                 except Exception as e:
                     logger.error(f"提交弹幕下载任务失败: {e}", exc_info=True)

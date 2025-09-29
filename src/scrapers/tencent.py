@@ -228,7 +228,7 @@ class TencentScraper(BaseScraper):
 
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
-        self._min_interval = 0.5 # A reasonable default
+        self._min_interval = 0.2 # A reasonable default
 
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
