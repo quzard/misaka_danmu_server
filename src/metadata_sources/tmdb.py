@@ -249,22 +249,20 @@ class TmdbMetadataSource(BaseMetadataSource):
         return {alias for alias in aliases if alias}
 
     async def check_connectivity(self) -> str:
+        """检查TMDB源配置状态"""
         try:
-            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
-            proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
-            is_using_proxy = bool(proxy_to_use)
-            if is_using_proxy:
-                self.logger.debug(f"TMDB: 连接性检查将使用代理: {proxy_to_use}")
-            async with await self._create_client() as client:
-                response = await client.get("/configuration")
-                if response.status_code == 200:
-                    return "通过代理连接成功" if is_using_proxy else "连接成功"
-                else:
-                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
-        except ValueError as e: # API Key not configured
-            return f"未配置: {e}"
+            # 检查API Key配置
+            api_key = await self.config_manager.get("tmdbApiKey", "")
+            if not api_key or api_key.strip() == "":
+                return "未配置 (缺少TMDB API Key)"
+
+            # 检查API Key格式是否合理 (TMDB API Key通常是32位十六进制字符串)
+            if len(api_key.strip()) < 20:
+                return "配置异常 (API Key格式不正确)"
+
+            return "配置正常"
         except Exception as e:
-            return f"连接失败: {e}" # 代理信息已包含在异常中
+            return f"配置检查失败: {e}"
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Any) -> Any:
         try:

@@ -199,27 +199,20 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
+        """检查豆瓣源配置状态"""
         try:
-            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
-            proxy_url = await self.config_manager.get("proxyUrl", "")
-            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
-            async with self._session_factory() as session:
-                metadata_settings = await crud.get_all_metadata_source_settings(session)
-            provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-            use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
-            is_using_proxy = proxy_enabled_globally and use_proxy_for_this_provider and proxy_url
-            if is_using_proxy:
-                self.logger.debug(f"Douban: 连接性检查将使用代理: {proxy_url}")
-            async with await self._create_client() as client:
-                response = await client.get("https://movie.douban.com", timeout=10.0)
-                if "sec.douban.com" in str(response.url):
-                    return "通过代理连接失败 (需验证)" if is_using_proxy else "连接失败 (需验证)"
-                if response.status_code == 200:
-                    return "通过代理连接成功" if is_using_proxy else "连接成功"
-                else:
-                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
+            # 检查Cookie配置
+            douban_cookie = await self.config_manager.get("doubanCookie", "")
+            if not douban_cookie or douban_cookie.strip() == "":
+                return "未配置 (缺少豆瓣Cookie)"
+
+            # 检查Cookie格式是否合理
+            if "bid=" not in douban_cookie and "dbcl2=" not in douban_cookie:
+                return "配置异常 (Cookie格式不正确)"
+
+            return "配置正常"
         except Exception as e:
-            return f"连接失败: {e}" # 代理信息已包含在异常中
+            return f"配置检查失败: {e}"
 
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """Douban source does not support custom actions."""

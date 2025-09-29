@@ -696,7 +696,7 @@ export const Scrapers = () => {
           >
             <Input.TextArea rows={6} />
           </Form.Item>
-          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+          <div className="flex items-center justify-start flex-wrap gap-2 mb-4">
             <Form.Item
               name={`scraper${setname.charAt(0).toUpperCase()}${setname.slice(1)}LogResponses`}
               label="记录原始响应"

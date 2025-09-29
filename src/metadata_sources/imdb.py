@@ -201,25 +201,9 @@ class ImdbMetadataSource(BaseMetadataSource):
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
-        try:
-            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
-            proxy_url = await self.config_manager.get("proxyUrl", "")
-            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
-            async with self._session_factory() as session:
-                metadata_settings = await crud.get_all_metadata_source_settings(session)
-            provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-            use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
-            is_using_proxy = proxy_enabled_globally and use_proxy_for_this_provider and proxy_url
-            if is_using_proxy:
-                self.logger.debug(f"IMDb: 连接性检查将使用代理: {proxy_url}")
-            async with await self._create_client() as client:
-                response = await client.get("https://www.imdb.com", timeout=10.0)
-                if response.status_code == 200:
-                    return "通过代理连接成功" if is_using_proxy else "连接成功"
-                else:
-                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
-        except Exception as e:
-            return f"连接失败: {e}" # 代理信息已包含在异常中
+        """检查IMDb源配置状态"""
+        # IMDb源不需要特殊配置，只要能正常运行即可
+        return "配置正常 (无需特殊配置)"
 
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """IMDb source does not support custom actions."""

@@ -1037,6 +1037,15 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         provider_name = info["providerName"]
         provider_episode_id = info["providerEpisodeId"]
+
+        # 调试信息：检查获取到的信息
+        logger.info(f"刷新分集 {episodeId}: provider_name='{provider_name}', provider_episode_id='{provider_episode_id}'")
+
+        if not provider_name:
+            raise ValueError(f"分集 {episodeId} 的 provider_name 为空")
+        if not provider_episode_id:
+            raise ValueError(f"分集 {episodeId} 的 provider_episode_id 为空")
+
         scraper = manager.get_scraper(provider_name)
         try:
             await rate_limiter.check(provider_name)
