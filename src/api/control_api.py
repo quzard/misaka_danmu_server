@@ -1389,6 +1389,7 @@ async def get_task_status(
 @router.delete("/tasks/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
 async def delete_task(
     taskId: str,
+    force: bool = False,
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
 ):
@@ -1398,6 +1399,7 @@ async def delete_task(
     - **排队中**: 从队列中移除。
     - **运行中/已暂停**: 尝试中止任务，然后删除。
     - **已完成/失败**: 从历史记录中删除。
+    - **force=true**: 强制删除，跳过中止逻辑直接删除历史记录。
     """
     task = await crud.get_task_from_history_by_id(session, taskId)
     if not task:
@@ -1405,6 +1407,15 @@ async def delete_task(
 
     task_status = task['status']
 
+    if force:
+        # 强制删除模式：直接删除历史记录，不尝试中止
+        logger.info(f"强制删除任务 {taskId}，状态: {task_status}")
+        if await crud.delete_task_from_history(session, taskId):
+            return {"message": f"强制删除任务 {taskId} 成功。"}
+        else:
+            return {"message": "强制删除失败，任务可能已被处理。"}
+
+    # 正常删除模式
     if task_status == TaskStatus.PENDING:
         if await task_manager.cancel_pending_task(taskId):
             logger.info(f"已从队列中取消待处理任务 {taskId}。")

@@ -216,20 +216,50 @@ export const ImportTask = () => {
   /**
    * 处理删除任务操作
    */
-  const handleDelete = () => {
+  const handleDelete = (force = false) => {
+    const hasStuckTasks = selectList.some(task =>
+      task.status === 'PAUSED' || task.status === 'RUNNING'
+    )
+
     modalApi.confirm({
-      title: '删除任务',
+      title: force ? '强制删除任务' : '删除任务',
       zIndex: 1002,
       content: (
         <div>
-          您确定要从历史记录中删除任务吗？
+          {force ? (
+            <div className="mb-3">
+              <div className="text-orange-600 mb-2">⚠️ 强制删除模式</div>
+              <div>将跳过中止逻辑，直接删除历史记录。适用于卡住的任务。</div>
+            </div>
+          ) : (
+            <div>您确定要从历史记录中删除任务吗？</div>
+          )}
           <div className="max-h-[310px] overflow-y-auto mt-3">
             {selectList.map((it, i) => (
-              <div>
+              <div key={it.taskId}>
                 {i + 1}、{it.title}
+                {(it.status === 'PAUSED' || it.status === 'RUNNING') && (
+                  <span className="text-orange-500 ml-2">({it.status})</span>
+                )}
               </div>
             ))}
           </div>
+          {!force && hasStuckTasks && (
+            <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+              <div className="text-sm text-yellow-700">
+                检测到运行中或暂停的任务，如果删除失败，请尝试
+                <button
+                  className="text-blue-600 underline ml-1"
+                  onClick={() => {
+                    modalApi.destroy()
+                    handleDelete(true)
+                  }}
+                >
+                  强制删除
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ),
       okText: '确认',
@@ -237,13 +267,17 @@ export const ImportTask = () => {
       onOk: async () => {
         try {
           await Promise.all(
-            selectList.map(it => deleteTask({ taskId: it.taskId }))
+            selectList.map(it => deleteTask({ taskId: it.taskId, force }))
           )
           refreshTasks()
           setSelectList([])
-          messageApi.success('删除成功')
+          messageApi.success(force ? '强制删除成功' : '删除成功')
         } catch (error) {
-          messageApi.error(`删除任务失败: ${error.message}`)
+          if (!force && hasStuckTasks) {
+            messageApi.error(`删除任务失败: ${error.message}，请尝试强制删除`)
+          } else {
+            messageApi.error(`删除任务失败: ${error.message}`)
+          }
         }
       },
     })

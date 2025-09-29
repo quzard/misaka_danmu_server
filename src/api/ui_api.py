@@ -1508,21 +1508,31 @@ async def abort_task_endpoint(
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")
 async def delete_task_from_history_endpoint(
     task_id: str,
+    force: bool = False,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。"""
+    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。force=true时强制删除。"""
     task = await crud.get_task_from_history_by_id(session, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
 
-    status = task['status']
+    task_status = task['status']
 
-    if status == TaskStatus.PENDING:
+    if force:
+        # 强制删除模式：直接删除历史记录，不尝试中止
+        logger.info(f"用户 '{current_user.username}' 强制删除任务 {task_id}，状态: {task_status}")
+        deleted = await crud.delete_task_from_history(session, task_id)
+        if not deleted:
+            logger.info(f"在尝试强制删除时，任务 {task_id} 已不存在于历史记录中。")
+        return
+
+    # 正常删除模式
+    if task_status == TaskStatus.PENDING:
         await task_manager.cancel_pending_task(task_id)
-    elif status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+    elif task_status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
         aborted = await task_manager.abort_current_task(task_id)
         if not aborted:
             # 这可能是一个竞态条件：在我们检查和中止之间，任务可能已经完成。
@@ -1538,7 +1548,7 @@ async def delete_task_from_history_endpoint(
         # 这不是一个严重错误，可能意味着任务在处理过程中已被删除。
         logger.info(f"在尝试删除时，任务 {task_id} 已不存在于历史记录中。")
         return
-    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {status})。")
+    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {task_status})。")
     return
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")

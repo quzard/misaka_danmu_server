@@ -123,7 +123,7 @@ export const pauseTask = data => api.post(`/api/ui/tasks/${data.taskId}/pause`)
 export const resumeTask = data =>
   api.post(`/api/ui/tasks/${data.taskId}/resume`)
 /** 删除任务 */
-export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
+export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`, { params: { force: data.force || false } })
 /** 中止任务 */
 export const stopTask = data => api.post(`/api/ui/tasks/${data.taskId}/abort`)
 /** 定时任务列表 */
