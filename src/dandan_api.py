@@ -1724,9 +1724,10 @@ async def get_comments_for_dandan(
                                             last_bangumi_id = user_last_bangumi_choice[search_key]
                                             if last_bangumi_id in search_info.get("bangumi_mapping", {}):
                                                 for result in search_info.get("results", []):
-                                                    if result.get("bangumiId") == last_bangumi_id:
-                                                        year = result.get("year")
-                                                        image_url = result.get("imageUrl")
+                                                    # result 是 DandanSearchAnimeItem 对象，使用属性访问
+                                                    if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
+                                                        year = getattr(result, 'year', None)
+                                                        image_url = getattr(result, 'imageUrl', None)
                                                         break
                                                 break
 
