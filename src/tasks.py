@@ -302,11 +302,12 @@ async def _download_episode_comments_concurrent(
             # 检查速率限制
             await rate_limiter.check(scraper.provider_name)
 
-            # 创建子进度回调
-            sub_progress_callback = lambda p, msg: progress_callback(
-                30 + int((episode_index + p/100) * 60 / len(episodes)),
-                f"[线程{episode_index+1}] {msg}"
-            )
+            # 创建子进度回调（异步版本）
+            async def sub_progress_callback(p, msg):
+                await progress_callback(
+                    30 + int((episode_index + p/100) * 60 / len(episodes)),
+                    f"[线程{episode_index+1}] {msg}"
+                )
 
             # 下载弹幕
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)

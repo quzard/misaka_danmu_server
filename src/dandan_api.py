@@ -46,6 +46,9 @@ FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 # 弹幕获取缓存（避免重复获取）
 comments_fetch_cache = {}  # 存储已获取的弹幕数据
 
+# 用户最后选择的虚拟bangumiId记录（用于确定使用哪个源）
+user_last_bangumi_choice = {}  # 格式：{search_key: last_bangumi_id}
+
 async def _check_related_match_fallback_task(session: AsyncSession, search_term: str) -> Optional[Dict[str, Any]]:
     """
     检查是否有相关的后备匹配任务正在进行
@@ -1068,6 +1071,10 @@ async def get_bangumi_details(
                         original_title = mapping_info["original_title"]
                         anime_id = mapping_info["anime_id"]
 
+                        # 记录用户最后选择的虚拟bangumiId
+                        user_last_bangumi_choice[search_key] = bangumiId
+                        logger.info(f"记录用户选择: search_key={search_key}, bangumiId={bangumiId}, provider={provider}")
+
                         episodes = []
                         try:
                             # 完全按照WebUI的流程：调用scraper获取真实的分集信息
@@ -1095,8 +1102,8 @@ async def get_bangumi_details(
                                     mapping_info["real_anime_id"] = real_anime_id
 
                                     for i, episode_data in enumerate(actual_episodes):
-                                        # 使用真实animeId生成episodeId
-                                        episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
+                                        # 使用虚拟animeId生成episodeId，这样可以区分不同的源
+                                        episode_id = _generate_episode_id(anime_id, 1, i + 1)
                                         # 直接使用原始分集标题
                                         episode_title = episode_data.title
                                         episodes.append(BangumiEpisode(
@@ -1585,16 +1592,34 @@ async def get_comments_for_dandan(
             episode_url = None
             provider = None
 
-            for _, search_info in fallback_search_cache.items():
+            # 首先尝试根据用户最后的选择来确定源
+            for search_key, search_info in fallback_search_cache.items():
                 if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                    for _, mapping_info in search_info["bangumi_mapping"].items():
-                        # 检查真实animeId是否匹配
-                        if mapping_info.get("real_anime_id") == anime_id_part:
-                            episode_url = mapping_info["media_id"]
-                            provider = mapping_info["provider"]
+                    # 检查是否有用户最后的选择记录
+                    if search_key in user_last_bangumi_choice:
+                        last_bangumi_id = user_last_bangumi_choice[search_key]
+                        if last_bangumi_id in search_info["bangumi_mapping"]:
+                            mapping_info = search_info["bangumi_mapping"][last_bangumi_id]
+                            # 检查虚拟animeId是否匹配
+                            if mapping_info.get("anime_id") == anime_id_part:
+                                episode_url = mapping_info["media_id"]
+                                provider = mapping_info["provider"]
+                                logger.info(f"根据用户最后选择找到映射: bangumiId={last_bangumi_id}, provider={provider}")
+                                break
+
+            # 如果没有找到用户最后的选择，则使用原来的逻辑
+            if not episode_url:
+                for _, search_info in fallback_search_cache.items():
+                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                            # 检查虚拟animeId是否匹配
+                            if mapping_info.get("anime_id") == anime_id_part:
+                                episode_url = mapping_info["media_id"]
+                                provider = mapping_info["provider"]
+                                logger.info(f"根据虚拟animeId={anime_id_part}找到映射: bangumiId={bangumi_id}, provider={provider}")
+                                break
+                        if episode_url:
                             break
-                    if episode_url:
-                        break
 
             if episode_url and provider:
                 logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")
@@ -1626,9 +1651,12 @@ async def get_comments_for_dandan(
                                 )
 
                                 # 使用并发下载获取弹幕（三线程模式）
+                                async def dummy_progress_callback(_, __):
+                                    pass  # 空的异步进度回调，忽略所有参数
+
                                 download_results = await tasks._download_episode_comments_concurrent(
                                     scraper, [virtual_episode], rate_limiter,
-                                    lambda p, msg: None  # 空的进度回调，忽略参数
+                                    dummy_progress_callback
                                 )
 
                                 # 提取弹幕数据
@@ -1658,8 +1686,23 @@ async def get_comments_for_dandan(
                                     try:
                                         # 解析episodeId获取相关信息
                                         episode_id_str = str(episodeId)
-                                        real_anime_id = int(episode_id_str[2:8])  # 提取真实animeId
+                                        virtual_anime_id = int(episode_id_str[2:8])  # 提取虚拟animeId
                                         episode_number = int(episode_id_str[10:14])  # 提取集编号
+
+                                        # 通过虚拟animeId查找真实animeId
+                                        real_anime_id = None
+                                        for _, search_info in fallback_search_cache.items():
+                                            if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                                for _, mapping_info in search_info["bangumi_mapping"].items():
+                                                    if mapping_info.get("anime_id") == virtual_anime_id:
+                                                        real_anime_id = mapping_info.get("real_anime_id")
+                                                        break
+                                                if real_anime_id:
+                                                    break
+
+                                        if not real_anime_id:
+                                            logger.error(f"找不到虚拟animeId={virtual_anime_id}对应的真实animeId")
+                                            return
 
                                         # 获取anime和source信息
                                         anime_stmt = select(orm_models.Anime).where(orm_models.Anime.id == real_anime_id)
