@@ -376,7 +376,9 @@ class MgtvScraper(BaseScraper):
 
         self.logger.debug(f"MGTV综艺格式分析: 有期数格式={has_qi_format}")
 
+        # 使用字典存储分集和期数信息
         episode_infos = []
+        qi_info_map = {}  # 存储期数信息的映射
 
         for ep in raw_episodes:
             full_title = f"{ep.title2} {ep.title}".strip()
@@ -396,8 +398,8 @@ class MgtvScraper(BaseScraper):
                     has_invalid_suffix = re.search(r'^(加更|会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_up_mid_down)
 
                     if not has_invalid_suffix:
-                        # 添加期数信息用于排序
-                        setattr(ep, 'qi_info', [int(qi_num), up_mid_down])
+                        # 存储期数信息
+                        qi_info_map[id(ep)] = [int(qi_num), up_mid_down]
                         episode_infos.append(ep)
                         self.logger.debug(f"MGTV综艺保留上中下格式: {full_title}")
                     else:
@@ -406,7 +408,7 @@ class MgtvScraper(BaseScraper):
                 elif qi_pure_match and not has_up_mid_down and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后|访谈|采访|混剪|合集|盘点|总结|删减|未播放|NG|番外|片段|看点|精彩|制作|导演|演员|拍摄|片尾曲|插曲|主题曲|背景音乐|OST|音乐|歌曲)', full_title):
                     # 匹配纯粹的"第N期"格式
                     qi_num = qi_pure_match.group(1)
-                    setattr(ep, 'qi_info', [int(qi_num), ''])
+                    qi_info_map[id(ep)] = [int(qi_num), '']
                     episode_infos.append(ep)
                     self.logger.debug(f"MGTV综艺保留标准期数: {full_title}")
                 else:
@@ -424,8 +426,8 @@ class MgtvScraper(BaseScraper):
         if has_qi_format:
             # 有期数格式时，按期数和上中下排序
             episode_infos.sort(key=lambda x: (
-                getattr(x, 'qi_info', [0, ''])[0],  # 期数
-                {'': 0, '上': 1, '中': 2, '下': 3}.get(getattr(x, 'qi_info', [0, ''])[1], 0)  # 上中下
+                qi_info_map.get(id(x), [0, ''])[0],  # 期数
+                {'': 0, '上': 1, '中': 2, '下': 3}.get(qi_info_map.get(id(x), [0, ''])[1], 0)  # 上中下
             ))
         else:
             # 没有期数格式时，按原有逻辑排序
