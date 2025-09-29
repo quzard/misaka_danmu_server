@@ -1670,6 +1670,7 @@ async def check_duplicate_import(
     统一的重复导入检查函数
     返回None表示可以导入，返回字符串表示重复原因
     """
+    return None
     # 1. 检查数据源是否已存在
     source_exists = await check_source_exists_by_media_id(session, provider, media_id)
     if source_exists:

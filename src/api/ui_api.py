@@ -1875,16 +1875,16 @@ async def edited_import_task(
                 if episode_exists and episode_exists.danmakuFilePath and episode_exists.commentCount > 0:
                     existing_episodes.append(episode.episodeIndex)
 
-            if existing_episodes:
-                episode_list = ", ".join(map(str, existing_episodes))
-                logger.info(f"检测到已存在弹幕的分集: {episode_list}")
-                # 过滤掉已存在的分集
-                episodes = [ep for ep in episodes if ep.episodeIndex not in existing_episodes]
-                if not episodes:
-                    raise TaskSuccess(f"所有要导入的分集 ({episode_list}) 都已存在弹幕，无需重复导入。")
-                else:
-                    remaining_list = ", ".join(map(str, [ep.episodeIndex for ep in episodes]))
-                    logger.info(f"将跳过已存在的分集 ({episode_list})，继续导入分集: {remaining_list}")
+            # if existing_episodes:
+            #     episode_list = ", ".join(map(str, existing_episodes))
+            #     logger.info(f"检测到已存在弹幕的分集: {episode_list}")
+            #     # 过滤掉已存在的分集
+            #     episodes = [ep for ep in episodes if ep.episodeIndex not in existing_episodes]
+            #     if not episodes:
+            #         raise TaskSuccess(f"所有要导入的分集 ({episode_list}) 都已存在弹幕，无需重复导入。")
+            #     else:
+            #         remaining_list = ", ".join(map(str, [ep.episodeIndex for ep in episodes]))
+            #         logger.info(f"将跳过已存在的分集 ({episode_list})，继续导入分集: {remaining_list}")
 
     total_comments_added = 0
     total_episodes = len(episodes)
