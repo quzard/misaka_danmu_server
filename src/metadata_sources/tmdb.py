@@ -85,21 +85,21 @@ class TmdbMetadataSource(BaseMetadataSource):
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         if not mediaType:
             raise ValueError("TMDB search requires a mediaType ('tv' or 'movie').")
-        
+
         try:
             async with await self._create_client() as client:
                 response = await client.get(f"/search/{mediaType}", params={"query": keyword})
                 response.raise_for_status()
                 data = response.json().get("results", [])
-                
+
                 image_base_url = await self._get_robust_image_base_url()
-                
+
                 results = []
                 for item in data:
                     title = item.get('name') if mediaType == 'tv' else item.get('title')
                     release_date = item.get('first_air_date') if mediaType == 'tv' else item.get('release_date')
                     details_str = f"{release_date or '未知年份'} / {item.get('original_language', 'N/A')}"
-                    
+
                     results.append(models.MetadataDetailsResponse(
                         id=str(item['id']),
                         tmdbId=str(item['id']),
@@ -127,10 +127,19 @@ class TmdbMetadataSource(BaseMetadataSource):
 
                 # 2. Get all aliases using the new comprehensive method
                 aliases = await self._fetch_and_structure_aliases(client, item_id, mediaType)
-                
+
                 image_base_url = await self._get_robust_image_base_url()
-                
-                # 3. Construct the response
+
+                # 3. 提取年份信息
+                release_date = details.get('first_air_date') if mediaType == 'tv' else details.get('release_date')
+                year = None
+                if release_date:
+                    try:
+                        year = int(release_date[:4])
+                    except (ValueError, TypeError):
+                        pass
+
+                # 4. Construct the response
                 return models.MetadataDetailsResponse(
                     id=str(details['id']),
                     tmdbId=str(details['id']),
@@ -141,6 +150,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                     aliasesCn=aliases.get("aliases_cn", []),
                     imageUrl=f"{image_base_url}{details.get('poster_path')}" if details.get('poster_path') else None,
                     details=details.get('overview'),
+                    year=year,
                     imdbId=details.get('external_ids', {}).get('imdb_id'),
                     tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None
                 )
@@ -239,22 +249,20 @@ class TmdbMetadataSource(BaseMetadataSource):
         return {alias for alias in aliases if alias}
 
     async def check_connectivity(self) -> str:
+        """检查TMDB源配置状态"""
         try:
-            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
-            proxy_to_use = await _get_proxy_for_tmdb(self.config_manager, self._session_factory)
-            is_using_proxy = bool(proxy_to_use)
-            if is_using_proxy:
-                self.logger.debug(f"TMDB: 连接性检查将使用代理: {proxy_to_use}")
-            async with await self._create_client() as client:
-                response = await client.get("/configuration")
-                if response.status_code == 200:
-                    return "通过代理连接成功" if is_using_proxy else "连接成功"
-                else:
-                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
-        except ValueError as e: # API Key not configured
-            return f"未配置: {e}"
+            # 检查API Key配置
+            api_key = await self.config_manager.get("tmdbApiKey", "")
+            if not api_key or api_key.strip() == "":
+                return "未配置 (缺少TMDB API Key)"
+
+            # 检查API Key格式是否合理 (TMDB API Key通常是32位十六进制字符串)
+            if len(api_key.strip()) < 20:
+                return "配置异常 (API Key格式不正确)"
+
+            return "配置正常"
         except Exception as e:
-            return f"连接失败: {e}" # 代理信息已包含在异常中
+            return f"配置检查失败: {e}"
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Any) -> Any:
         try:

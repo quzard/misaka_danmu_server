@@ -34,3 +34,5 @@ cryptography
 gmssl
 brotli
 requests
+# dandanplay scraper dependency
+aiohttp

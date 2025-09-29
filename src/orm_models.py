@@ -285,3 +285,12 @@ class RateLimitState(Base):
     providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
     requestCount: Mapped[int] = mapped_column("request_count", Integer, default=0)
     lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", NaiveDateTime)
+
+class TitleRecognition(Base):
+    """识别词配置表 - 单记录全量存储"""
+    __tablename__ = "title_recognition"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    content: Mapped[str] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
+    created_at: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updated_at: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)

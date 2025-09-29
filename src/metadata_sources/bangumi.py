@@ -316,11 +316,19 @@ class BangumiMetadataSource(BaseMetadataSource):
                 elif _clean_movie_title(subject.display_name) != subject.display_name:
                     media_type = "movie"
 
+            # 提取年份信息
+            year = None
+            if subject_data.get("date"):
+                try:
+                    year = int(subject_data["date"][:4])
+                except (ValueError, TypeError):
+                    pass
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
                 type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
-                aliasesCn=aliases.get("aliases_cn", [])
+                aliasesCn=aliases.get("aliases_cn", []), year=year
             )
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
@@ -353,74 +361,40 @@ class BangumiMetadataSource(BaseMetadataSource):
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
-        """检查与Bangumi API的连接性，并遵循代理设置。优先验证Token，再检查OAuth配置。"""
-        await self._ensure_config()
-
-        # 1. 优先检查 Access Token
-        if self._token:
-            try:
-                headers = {"User-Agent": f"DanmuApiServer/1.0 ({settings.jwt.secret_key[:8]})", "Authorization": f"Bearer {self._token}"}
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get(f"{self.api_base_url}/v0/me", headers=headers)
-                if response.status_code == 200:
-                    user_info = response.json()
-                    return f"已通过 Access Token 连接 (用户: {user_info.get('nickname', '未知')})"
-                else:
-                    return f"Access Token 无效 (HTTP {response.status_code})"
-            except Exception as e:
-                self.logger.error(f"使用 Access Token 检查连接性时出错: {e}")
-                return "Access Token 连接失败"
-
-        # 2. 如果没有Token，检查OAuth是否已配置
-        client_id = await self.config_manager.get("bangumiClientId")
-        if client_id:
-            # 检查是否有任何用户已通过OAuth授权
-            try:
-                async with self._session_factory() as session:
-                    # 查找所有未过期的授权记录
-                    stmt = select(func.count(orm_models.BangumiAuth.userId)).where(
-                        orm_models.BangumiAuth.expiresAt > get_now()
-                    )
-                    valid_token_count = (await session.execute(stmt)).scalar_one()
-
-                if valid_token_count > 0:
-                    return f"已通过 OAuth 连接 ({valid_token_count} 个用户已授权)"
-                else:
-                    return "已配置 OAuth，等待用户授权"
-            except Exception as e:
-                self.logger.error(f"检查Bangumi OAuth授权状态时出错: {e}")
-                return "OAuth 状态检查失败"
-
-        # 3. 如果两者都没有，只检查网络连通性
-        proxy_to_use = None
+        """检查Bangumi源配置状态"""
         try:
-            is_using_proxy = False
-            async with self._session_factory() as session:
-                proxy_url = await crud.get_config_value(session, "proxy_url", "")
-                proxy_enabled_str = await crud.get_config_value(session, "proxy_enabled", "false")
-                ssl_verify_str = await crud.get_config_value(session, "proxySslVerify", "true")
-                ssl_verify = ssl_verify_str.lower() == 'true'
-                proxy_enabled_globally = proxy_enabled_str.lower() == 'true'
-    
-                if proxy_enabled_globally and proxy_url:
-                    source_setting = await crud.get_metadata_source_setting_by_name(session, self.provider_name)
-                    if source_setting and source_setting.get('useProxy', False):
-                        proxy_to_use = proxy_url
-                        is_using_proxy = True
-                        self.logger.debug(f"Bangumi: 连接性检查将使用代理: {proxy_to_use}")
-            
-            async with httpx.AsyncClient(timeout=10.0, proxy=proxy_to_use, verify=ssl_verify) as client:
-                response = await client.get("https://bgm.tv/")
-                if response.status_code == 200:
-                    return "通过代理连接成功 (未认证)" if is_using_proxy else "连接成功 (未认证)"
-                else:
-                    return f"通过代理连接失败 (状态码: {response.status_code})" if is_using_proxy else f"连接失败 (状态码: {response.status_code})"
-        except httpx.ProxyError as e:
-            self.logger.error(f"Bangumi: 连接性检查代理错误: {e}")
-            return "连接失败 (代理错误)"
+            await self._ensure_config()
+
+            # 1. 优先检查 Access Token
+            if self._token:
+                return "配置正常 (已配置Access Token)"
+
+            # 2. 检查OAuth配置
+            client_id = await self.config_manager.get("bangumiClientId", "")
+            client_secret = await self.config_manager.get("bangumiClientSecret", "")
+
+            if client_id and client_secret:
+                # 检查是否有用户已授权
+                try:
+                    async with self._session_factory() as session:
+                        stmt = select(func.count(orm_models.BangumiAuth.userId)).where(
+                            orm_models.BangumiAuth.expiresAt > get_now()
+                        )
+                        valid_token_count = (await session.execute(stmt)).scalar_one()
+
+                    if valid_token_count > 0:
+                        return f"配置正常 (OAuth已配置，{valid_token_count}个用户已授权)"
+                    else:
+                        return "配置正常 (OAuth已配置，等待用户授权)"
+                except Exception:
+                    return "配置正常 (OAuth已配置)"
+            elif client_id:
+                return "配置不完整 (缺少Client Secret)"
+            else:
+                return "未配置 (缺少OAuth配置)"
+
         except Exception as e:
-            self.logger.error(f"Bangumi: 连接性检查发生未知错误: {e}", exc_info=True)
-            return "通过代理连接失败" if is_using_proxy else "连接失败"
+            return f"配置检查失败: {e}"
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any], user: models.User, request: Request) -> Any:
         if action_name == "get_auth_state":

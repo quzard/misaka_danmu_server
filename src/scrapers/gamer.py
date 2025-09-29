@@ -22,12 +22,14 @@ class GamerScraper(BaseScraper):
     provider_name = "gamer"
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
-    test_url = "https://ani.gamer.com.tw"    
+    test_url = "https://ani.gamer.com.tw"
     configurable_fields: Dict[str, Tuple[str, str, str]] = {
         "gamerCookie": ("巴哈姆特动画疯 Cookie", "string", "用于访问动画疯的Cookie。"),
         "gamerUserAgent": ("巴哈姆特动画疯 User-Agent", "string", "用于访问动画疯的User-Agent。"),
         "gamerFlareSolverrUrl": ("FlareSolverr 服务地址", "string", "用于绕过Cloudflare盾的FlareSolverr服务地址，例如: http://localhost:8191")
     }
+
+    rate_limit_quota = -1
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases

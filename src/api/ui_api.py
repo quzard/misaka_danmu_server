@@ -31,6 +31,7 @@ from ..utils import parse_search_keyword
 from ..webhook_manager import WebhookManager
 from ..image_utils import download_image
 from ..scheduler import SchedulerManager
+from ..title_recognition import TitleRecognitionManager
 from .._version import APP_VERSION
 from thefuzz import fuzz
 from ..config import settings
@@ -72,6 +73,10 @@ async def get_config_manager(request: Request) -> ConfigManager:
 async def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
+
+async def get_title_recognition_manager(request: Request):
+    """依赖项：从应用状态获取标题识别管理器"""
+    return request.app.state.title_recognition_manager
 
 @router.get("/version", response_model=Dict[str, str], summary="获取应用版本号")
 async def get_app_version():
@@ -768,7 +773,8 @@ async def refresh_anime(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     为指定的数据源启动一个刷新任务。
@@ -792,7 +798,8 @@ async def refresh_anime(
         task_coro = lambda s, cb: tasks.incremental_refresh_task(
             sourceId=sourceId, nextEpisodeIndex=next_episode_index, session=s, manager=scraper_manager,
             task_manager=task_manager, config_manager=config_manager, progress_callback=cb, animeTitle=source_info["title"],
-            rate_limiter=rate_limiter, metadata_manager=metadata_manager
+            rate_limiter=rate_limiter, metadata_manager=metadata_manager,
+            title_recognition_manager=title_recognition_manager
         )
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
     elif mode == "full":
@@ -1235,6 +1242,116 @@ async def update_scraper_config(
         logger.error(f"更新搜索源 '{providerName}' 配置时出错: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
 
+
+class TitleRecognitionContent(BaseModel):
+    """识别词内容模型"""
+    content: str = Field(..., description="识别词配置内容")
+
+class TitleRecognitionUpdateResponse(BaseModel):
+    """识别词更新响应模型"""
+    success: bool = Field(..., description="是否更新成功")
+    warnings: List[str] = Field(default_factory=list, description="解析过程中的警告信息")
+
+
+@router.get("/settings/title-recognition", response_model=TitleRecognitionContent, summary="获取识别词配置内容")
+async def get_title_recognition_content(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取识别词配置内容
+    
+    Returns:
+        TitleRecognitionContent: 包含识别词配置内容的响应
+    """
+    try:
+        # 查询识别词配置（只有一条记录）
+        result = await session.execute(
+            select(orm_models.TitleRecognition).limit(1)
+        )
+        title_recognition = result.scalar_one_or_none()
+        
+        if title_recognition is None:
+            # 如果没有配置记录，返回默认内容
+            default_content = """# 自定义识别词配置 - 参考MoviePilot格式
+# 支持以下几种配置格式（注意连接符号左右的空格）：
+
+# 1. 屏蔽词：将该词从待识别文本中去除
+# 屏蔽词示例
+# 预告
+# 花絮
+
+# 2. 简单替换：被替换词 => 替换词
+# 奔跑吧 => 奔跑吧兄弟
+# 极限挑战 => 极限挑战第一季
+
+# 3. 集数偏移：前定位词 <> 后定位词 >> 集偏移量（EP）
+# 第 <> 话 >> EP-1
+# Episode <> : >> EP+5
+
+# 4. 复合格式：被替换词 => 替换词 && 前定位词 <> 后定位词 >> 集偏移量（EP）
+# 某动画 => 某动画正确名称 && 第 <> 话 >> EP-1
+
+# 5. 元数据替换：直接指定TMDB/豆瓣ID
+# 错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}
+
+# 6. 季度偏移：针对特定源的季度偏移
+# TX源某动画第9季 => {[source=tencent;season_offset=9>13]}
+# 某动画第5季 => {[source=bilibili;season_offset=5+3]}
+# 错误标题 => {[source=iqiyi;title=正确标题;season_offset=*+1]}
+
+# 集偏移支持运算：
+# EP+1：集数加1
+# 2*EP：集数翻倍
+# 2*EP-1：集数翻倍减1
+
+# 季度偏移支持格式：
+# 9>13：第9季改为第13季
+# 9+4：第9季加4变成第13季
+# 9-1：第9季减1变成第8季
+# *+4：所有季度都加4
+# *>1：所有季度都改为第1季
+"""
+            return TitleRecognitionContent(content=default_content)
+        
+        return TitleRecognitionContent(content=title_recognition.content)
+        
+    except Exception as e:
+        logger.error(f"获取识别词配置时发生错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取识别词配置时发生内部错误。")
+
+
+@router.put("/settings/title-recognition", response_model=TitleRecognitionUpdateResponse, summary="更新识别词配置内容")
+async def update_title_recognition_content(
+    payload: TitleRecognitionContent,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    title_recognition_manager = Depends(get_title_recognition_manager)
+):
+    """
+    更新识别词配置内容，使用全量替换模式
+
+    Args:
+        payload: 包含新识别词配置内容的请求体
+
+    Returns:
+        TitleRecognitionUpdateResponse: 包含更新结果和警告信息
+    """
+    try:
+        if title_recognition_manager is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
+
+        # 使用全量替换模式更新识别词规则，获取警告信息
+        warnings = await title_recognition_manager.update_recognition_rules(payload.content)
+
+        logger.info("识别词配置更新成功")
+
+        return TitleRecognitionUpdateResponse(success=True, warnings=warnings)
+
+    except Exception as e:
+        logger.error(f"更新识别词配置时发生错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新识别词配置时发生内部错误: {str(e)}")
+
 @router.get("/logs", response_model=List[str], summary="获取最新的服务器日志")
 async def get_server_logs(current_user: models.User = Depends(security.get_current_user)):
     """获取存储在内存中的最新日志条目。"""
@@ -1559,6 +1676,63 @@ async def set_custom_danmaku_path(
     logger.info(f"自定义弹幕路径配置已保存")
     return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
 
+# --- 匹配后备Token配置 ---
+
+class MatchFallbackTokensResponse(BaseModel):
+    value: str
+
+class ConfigValueResponse(BaseModel):
+    value: str
+
+class ConfigValueRequest(BaseModel):
+    value: str
+
+@router.get("/config/matchFallbackTokens", response_model=MatchFallbackTokensResponse, summary="获取匹配后备允许的Token列表")
+async def get_match_fallback_tokens(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    value = await crud.get_config_value(session, "matchFallbackTokens", "[]")
+    return MatchFallbackTokensResponse(value=value)
+
+@router.put("/config/matchFallbackTokens", status_code=status.HTTP_204_NO_CONTENT, summary="设置匹配后备允许的Token列表")
+async def set_match_fallback_tokens(
+    request: MatchFallbackTokensResponse,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    await crud.update_config_value(session, "matchFallbackTokens", request.value)
+    config_manager.invalidate("matchFallbackTokens")
+    logger.info(f"匹配后备Token配置已保存: {request.value}")
+    return
+
+# --- 后备搜索配置 ---
+
+@router.get("/config/searchFallbackEnabled", response_model=ConfigValueResponse, summary="获取后备搜索状态")
+async def get_search_fallback(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取后备搜索功能的启用状态"""
+    value = await crud.get_config_value(session, "searchFallbackEnabled", "false")
+    return ConfigValueResponse(value=value)
+
+@router.put("/config/searchFallbackEnabled", status_code=status.HTTP_204_NO_CONTENT, summary="设置后备搜索状态")
+async def set_search_fallback(
+    request: ConfigValueRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置后备搜索功能的启用状态"""
+    await crud.update_config_value(session, "searchFallbackEnabled", request.value)
+    config_manager.invalidate("searchFallbackEnabled")
+    logger.info(f"后备搜索状态已保存: {request.value}")
+    return
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,
@@ -1652,7 +1826,12 @@ async def delete_ua_rule(
     currentUser: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    deleted = await crud.delete_ua_rule(session, ruleId)
+    try:
+        rule_id_int = int(ruleId)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="规则ID必须是有效的整数。")
+
+    deleted = await crud.delete_ua_rule(session, rule_id_int)
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到指定的规则ID。")
 
@@ -2230,8 +2409,10 @@ async def import_from_provider(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
+    logger.info(f"导入请求: 用户={current_user.username}, provider={request_data.provider}, title={request_data.animeTitle}")
     try:
         # 在启动任务前检查provider是否存在
         scraper_manager.get_scraper(request_data.provider)
@@ -2278,7 +2459,8 @@ async def import_from_provider(
         progress_callback=callback,
         session=session,
         manager=scraper_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
     
     # 构造任务标题
@@ -2310,7 +2492,8 @@ async def import_edited_episodes(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
     task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
@@ -2321,7 +2504,8 @@ async def import_edited_episodes(
         manager=scraper_manager,
         config_manager=config_manager,
         rate_limiter=rate_limiter,
-        metadata_manager=metadata_manager
+        metadata_manager=metadata_manager,
+        title_recognition_manager=title_recognition_manager
     )
     # 修正：为编辑后导入任务添加一个唯一的键，以防止重复提交，同时允许对同一作品的不同分集范围进行排队。
     # 这个键基于提供商、媒体ID和正在导入的分集索引列表的哈希值。
@@ -2420,7 +2604,8 @@ async def import_from_url(
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     provider = request_data.provider
     url = request_data.url
@@ -2484,7 +2669,8 @@ async def import_from_url(
         metadata_manager=metadata_manager,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
         config_manager=config_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
     
     # 生成unique_key以避免重复任务
@@ -2744,7 +2930,8 @@ async def run_webhook_tasks_now(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
 ):
     """立即执行指定的待处理Webhook任务。"""
     task_ids = payload.get("ids", [])
@@ -2758,7 +2945,8 @@ async def run_webhook_tasks_now(
         scraper_manager=scraper_manager,
         metadata_manager=metadata_manager,
         config_manager=config_manager,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager
     )
 
     if submitted_count > 0:

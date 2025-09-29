@@ -41,7 +41,7 @@ class BaseMetadataSource(ABC):
 
     @abstractmethod
     async def check_connectivity(self) -> str:
-        """检查与源的连接性，并返回状态字符串。"""
+        """检查源的配置状态，并返回状态字符串。"""
         raise NotImplementedError
     
     @abstractmethod

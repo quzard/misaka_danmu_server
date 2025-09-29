@@ -50,7 +50,7 @@ export const Douban = () => {
         >
           <Form.Item
             name="cookie"
-            label="Cookie"
+            label="豆瓣 Cookie"
             rules={[{ required: true, message: '请输入豆瓣 Cookie' }]}
             className="mb-6"
           >

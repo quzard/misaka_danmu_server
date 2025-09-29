@@ -388,7 +388,16 @@ class MetadataSourceManager:
     async def get_details(self, provider: str, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         """从特定提供商获取详细信息。"""
         if source_instance := self.sources.get(provider):
-            return await source_instance.get_details(item_id, user, mediaType=mediaType)
+            try:
+                return await source_instance.get_details(item_id, user, mediaType=mediaType)
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadTimeout) as e:
+                # 捕获常见的网络错误，记录警告并返回None，以避免后台任务崩溃
+                self.logger.warning(f"从 '{provider}' 获取详情 (ID: {item_id}) 时发生网络错误: {e}")
+                return None
+            except Exception as e:
+                # 捕获其他潜在错误
+                self.logger.error(f"从 '{provider}' 获取详情 (ID: {item_id}) 时发生未知错误: {e}", exc_info=True)
+                return None
         raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 
     async def execute_action(self, provider: str, action_name: str, payload: Dict, user: models.User, request: Request) -> Any:

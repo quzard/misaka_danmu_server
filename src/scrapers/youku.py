@@ -123,6 +123,8 @@ class YoukuScraper(BaseScraper):
     test_url = "https://v.youku.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(版|篇)?|加更(版|篇)?|花絮|预告|特辑|彩蛋|专访|幕后(故事|花絮)?|直播|纯享|未播|衍生|番外|会员(专属|加长)?|片花|精华|看点|速览|解读|reaction|影评)(.*?)$"
 
+    rate_limit_quota = -1
+
     # 新增：为令牌过期定义一个自定义异常
     class TokenExpiredError(Exception):
         """当检测到优酷弹幕令牌过期时引发。"""

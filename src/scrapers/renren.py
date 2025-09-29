@@ -206,6 +206,8 @@ class RenrenScraper(BaseScraper):
     referer = "https://rrsp.com.cn/"
     test_url = "https://api.rrmj.plus"
 
+    rate_limit_quota = -1
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self._api_lock = asyncio.Lock()
