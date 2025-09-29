@@ -1127,7 +1127,7 @@ class TencentScraper(BaseScraper):
                 title, ep = title_ep_pairs[0]
                 cleaned_dict[title] = (url, ep)
 
-        # 第三步：检查是否有任何"第N期"格式
+        # 第三步：检查是否有任何"第N期"格式（包括上中下）
         has_qi_format = any(re.search(r'第\d+期', title) for title in cleaned_dict.keys())
         self.logger.debug(f"综艺格式分析: 有期数格式={has_qi_format}")
 
@@ -1136,31 +1136,31 @@ class TencentScraper(BaseScraper):
         # 第四步：根据是否有期数格式进行处理
         for title, (url, ep) in cleaned_dict.items():
             if has_qi_format:
-                # 有"第N期"格式时：只保留纯粹的"第N期"和"第N期上/下"，其他全部过滤
-                qi_up_down_match = re.search(r'第(\d+)期([上下])', title)
+                # 有"第N期"格式时：只保留纯粹的"第N期"和"第N期上/中/下"，其他全部过滤
+                qi_up_mid_down_match = re.search(r'第(\d+)期([上中下])', title)
                 qi_pure_match = re.search(r'第(\d+)期', title)
-                has_up_down = re.search(r'第\d+期[上下]', title)
+                has_up_mid_down = re.search(r'第\d+期[上中下]', title)
 
-                if qi_up_down_match:
+                if qi_up_mid_down_match:
                     # 检查是否包含无效后缀
-                    qi_num = qi_up_down_match.group(1)
-                    up_down = qi_up_down_match.group(2)
-                    qi_up_down_text = f"第{qi_num}期{up_down}"
-                    after_up_down = title[title.find(qi_up_down_text) + len(qi_up_down_text):]
-                    has_invalid_suffix = re.search(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_up_down)
+                    qi_num = qi_up_mid_down_match.group(1)
+                    up_mid_down = qi_up_mid_down_match.group(2)
+                    qi_up_mid_down_text = f"第{qi_num}期{up_mid_down}"
+                    after_up_mid_down = title[title.find(qi_up_mid_down_text) + len(qi_up_mid_down_text):]
+                    has_invalid_suffix = re.search(r'^(会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_up_mid_down)
 
                     if not has_invalid_suffix:
                         episode_infos.append({
                             'title': title,
                             'url': url,
                             'ep': ep,
-                            'qi_info': [int(qi_num), up_down]
+                            'qi_info': [int(qi_num), up_mid_down]
                         })
-                        self.logger.debug(f"综艺保留上下格式: {title}")
+                        self.logger.debug(f"综艺保留上中下格式: {title}")
                     else:
-                        self.logger.debug(f"综艺过滤上下格式+后缀: {title}")
+                        self.logger.debug(f"综艺过滤上中下格式+后缀: {title}")
 
-                elif qi_pure_match and not has_up_down and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|拍摄花絮|制作花絮|幕后花絮|预告片|先导预告|彩蛋片段|抢先看|抢先版|精选合集|未播花絮|剧情回顾|制作特辑|拍摄特辑|幕后特辑|独家专访|演员访谈|导演访谈|剪辑合集|混剪视频|内容总结|剧情盘点|删减片段|未播片段|NG镜头|NG花絮|番外篇|番外特辑|精彩片段|精彩看点|精彩回顾|看点解析|看点预告|主创访谈|媒体采访|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV)', title):
+                elif qi_pure_match and not has_up_mid_down and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|拍摄花絮|制作花絮|幕后花絮|预告片|先导预告|彩蛋片段|抢先看|抢先版|精选合集|未播花絮|剧情回顾|制作特辑|拍摄特辑|幕后特辑|独家专访|演员访谈|导演访谈|剪辑合集|混剪视频|内容总结|剧情盘点|删减片段|未播片段|NG镜头|NG花絮|番外篇|番外特辑|精彩片段|精彩看点|精彩回顾|看点解析|看点预告|主创访谈|媒体采访|片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV)', title):
                     # 匹配纯粹的"第N期"格式
                     qi_num = qi_pure_match.group(1)
                     episode_infos.append({
@@ -1187,10 +1187,11 @@ class TencentScraper(BaseScraper):
 
         # 第五步：排序逻辑
         if has_qi_format:
-            # 有期数格式时，按期数和上下排序
+            # 有期数格式时，按期数和上中下排序
+            # 排序优先级：期数 -> 上中下（上=1, 中=2, 下=3, 无=0）
             episode_infos.sort(key=lambda x: (
                 x['qi_info'][0] if 'qi_info' in x else 0,
-                {'': 0, '上': 1, '下': 2}.get(x['qi_info'][1] if 'qi_info' in x else '', 0)
+                {'': 0, '上': 1, '中': 2, '下': 3}.get(x['qi_info'][1] if 'qi_info' in x else '', 0)
             ))
         else:
             # 没有期数格式时，按标题排序（尝试提取数字进行智能排序）
