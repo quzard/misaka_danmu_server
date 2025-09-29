@@ -953,7 +953,8 @@ async def search_anime_for_dandan(
     """
     模拟 dandanplay 的 /api/v2/search/anime 接口。
     它会搜索 **本地弹幕库** 中的番剧信息，不包含分集列表。
-    新增：支持后备搜索功能，当库内无结果且启用后备搜索时，触发全网搜索。
+    新增：支持后备搜索功能，当库内无结果或指定集数不存在时，触发全网搜索。
+    支持SXXEXX格式的季度和集数搜索。
     """
     search_term = keyword or anime
     if not search_term:
@@ -962,11 +963,39 @@ async def search_anime_for_dandan(
             detail="Missing required query parameter: 'keyword' or 'anime'"
         )
 
+    # 解析搜索关键词，提取标题、季数和集数
+    parsed_info = parse_search_keyword(search_term)
+    title_to_search = parsed_info["title"]
+    season_to_search = parsed_info.get("season")
+    episode_to_search = parsed_info.get("episode")
+
     # 首先搜索本地库
     db_results = await crud.search_animes_for_dandan(session, search_term)
 
-    # 如果本地库有结果，直接返回
-    if db_results:
+    # 如果指定了具体集数，需要检查该集数是否存在
+    should_trigger_fallback = False
+    if db_results and episode_to_search is not None:
+        # 检查是否存在指定的集数
+        episode_exists = False
+        for anime_result in db_results:
+            anime_id = anime_result['animeId']
+            # 查询该番剧的所有分集
+            episodes = await crud.search_episodes_in_library(
+                session,
+                anime_title=title_to_search,
+                episode_number=episode_to_search,
+                season_number=season_to_search
+            )
+            if episodes:
+                episode_exists = True
+                break
+
+        if not episode_exists:
+            logger.info(f"本地库中找到番剧但不存在指定集数 E{episode_to_search:02d}，将触发后备搜索")
+            should_trigger_fallback = True
+
+    # 如果本地库有结果且不需要触发后备搜索，直接返回
+    if db_results and not should_trigger_fallback:
         animes = []
         for res in db_results:
             dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
@@ -993,9 +1022,9 @@ async def search_anime_for_dandan(
             ))
         return DandanSearchAnimeResponse(animes=animes)
 
-    # 如果本地库无结果，检查是否启用了后备搜索
+    # 如果本地库无结果或需要触发后备搜索，检查是否启用了后备搜索
     search_fallback_enabled = await config_manager.get("searchFallbackEnabled", "false")
-    if search_fallback_enabled.lower() == 'true':
+    if search_fallback_enabled.lower() == 'true' and (not db_results or should_trigger_fallback):
         # 检查Token是否被允许使用后备搜索功能
         try:
             import json
@@ -1018,8 +1047,19 @@ async def search_anime_for_dandan(
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"检查后备搜索Token授权时发生错误: {e}，继续执行后备搜索")
 
+        # 使用解析后的标题进行后备搜索，但保留原始搜索词用于缓存键
+        search_title_for_fallback = title_to_search
+        if episode_to_search is not None:
+            # 如果指定了集数，在后备搜索中包含季度和集数信息
+            if season_to_search is not None:
+                search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}E{episode_to_search:02d}"
+            else:
+                search_title_for_fallback = f"{title_to_search} E{episode_to_search:02d}"
+        elif season_to_search is not None:
+            search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}"
+
         return await _handle_fallback_search(
-            search_term, token, session, task_manager, scraper_manager,
+            search_title_for_fallback, token, session, task_manager, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager
         )
 
