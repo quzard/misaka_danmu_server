@@ -375,8 +375,8 @@ async def _import_episodes_iteratively(
     failed_episodes_count = 0
 
     # 判断是否使用并发下载模式
-    # 条件：单集模式 或 电影类型 或 分集数量较少（≤3集）
-    use_concurrent_download = is_single_episode or len(episodes) <= 3
+    # 条件：严格的单集模式（只有1集）
+    use_concurrent_download = is_single_episode and len(episodes) == 1
 
     if use_concurrent_download:
         # 使用并发下载获取所有弹幕
@@ -1052,12 +1052,31 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         await progress_callback(30, "正在从源获取新弹幕...")
 
+        # 使用三线程下载模式获取弹幕
+        # 创建一个虚拟的分集对象用于并发下载
+        from .models import ProviderEpisodeInfo
+        virtual_episode = ProviderEpisodeInfo(
+            episodeIndex=1,
+            title=f"刷新分集 {episodeId}",
+            episodeId=provider_episode_id,
+            url=""
+        )
+
         async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
             # 30% for setup, 65% for download, 5% for db write
             current_total_progress = 30 + (danmaku_progress / 100) * 65
             await progress_callback(current_total_progress, danmaku_description)
 
-        all_comments_from_source = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
+        # 使用并发下载获取弹幕（三线程模式）
+        download_results = await _download_episode_comments_concurrent(
+            scraper, [virtual_episode], rate_limiter, sub_progress_callback
+        )
+
+        # 提取弹幕数据
+        all_comments_from_source = None
+        if download_results and len(download_results) > 0:
+            episode_index, comments = download_results[0]
+            all_comments_from_source = comments
 
         if not all_comments_from_source:
             await crud.update_episode_fetch_time(session, episodeId)

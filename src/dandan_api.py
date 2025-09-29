@@ -43,6 +43,9 @@ DANDAN_TYPE_DESC_MAPPING = {
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
+# 弹幕获取缓存（避免重复获取）
+comments_fetch_cache = {}  # 存储已获取的弹幕数据
+
 async def _check_related_match_fallback_task(session: AsyncSession, search_term: str) -> Optional[Dict[str, Any]]:
     """
     检查是否有相关的后备匹配任务正在进行
@@ -1551,7 +1554,8 @@ async def get_comments_for_dandan(
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
@@ -1563,21 +1567,27 @@ async def get_comments_for_dandan(
     if not comments_data:
         logger.info(f"弹幕库中未找到 episodeId={episodeId} 的弹幕，尝试直接从源站获取")
 
-        # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
-        if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
-            # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
-            episode_id_str = str(episodeId)
-            anime_id_part = int(episode_id_str[2:8])  # 提取animeId部分
-            source_order = int(episode_id_str[8:10])  # 提取源顺序
-            episode_number = int(episode_id_str[10:14])  # 提取集编号
+        # 检查弹幕获取缓存
+        cache_key = f"comments_{episodeId}"
+        if cache_key in comments_fetch_cache:
+            logger.info(f"从缓存中获取 episodeId={episodeId} 的弹幕")
+            comments_data = comments_fetch_cache[cache_key]
+        else:
+            # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
+            if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
+                # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
+                episode_id_str = str(episodeId)
+                anime_id_part = int(episode_id_str[2:8])  # 提取animeId部分
+                _ = int(episode_id_str[8:10])  # 提取源顺序（暂时不使用）
+                episode_number = int(episode_id_str[10:14])  # 提取集编号
 
             # 查找对应的搜索缓存和映射信息
             episode_url = None
             provider = None
 
-            for search_key, search_info in fallback_search_cache.items():
+            for _, search_info in fallback_search_cache.items():
                 if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                    for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                    for _, mapping_info in search_info["bangumi_mapping"].items():
                         # 检查真实animeId是否匹配
                         if mapping_info.get("real_anime_id") == anime_id_part:
                             episode_url = mapping_info["media_id"]
@@ -1605,8 +1615,26 @@ async def get_comments_for_dandan(
                             if provider_episode_id:
                                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
-                                # 直接获取弹幕数据
-                                raw_comments_data = await scraper.get_comments(episode_id_for_comments)
+                                # 使用三线程下载模式获取弹幕
+                                from .models import ProviderEpisodeInfo
+                                virtual_episode = ProviderEpisodeInfo(
+                                    episodeIndex=episode_number,
+                                    title=f"第{episode_number}集",
+                                    episodeId=episode_id_for_comments,
+                                    url=""
+                                )
+
+                                # 使用并发下载获取弹幕（三线程模式）
+                                download_results = await tasks._download_episode_comments_concurrent(
+                                    scraper, [virtual_episode], rate_limiter,
+                                    lambda p, msg: None  # 空的进度回调，忽略参数
+                                )
+
+                                # 提取弹幕数据
+                                raw_comments_data = None
+                                if download_results and len(download_results) > 0:
+                                    _, comments = download_results[0]  # 忽略episode_index
+                                    raw_comments_data = comments
                             else:
                                 logger.warning(f"无法获取 {provider} 的分集ID: episode_number={episode_number}")
                                 raw_comments_data = None
@@ -1618,18 +1646,50 @@ async def get_comments_for_dandan(
                                 logger.info(f"成功从 {provider} 获取 {len(raw_comments_data)} 条弹幕")
                                 comments_data = raw_comments_data
 
-                                # 4. 异步存储到弹幕库（不阻塞响应）
-                                # 现在我们已经使用真实的animeId，所以直接使用现有的episodeId进行存储
-                                async def store_comments_task(task_session, progress_callback):
-                                    try:
-                                        # 直接使用现有的episodeId存储弹幕，因为它已经是基于真实animeId生成的
-                                        # episodeId格式：25 + animeId(6位) + 源顺序(01) + 集编号(4位)
-                                        # 例如：25000136010001 表示 animeId=136, 源顺序=01, 集编号=0001
+                                # 存储到缓存中，避免重复获取
+                                cache_key = f"comments_{episodeId}"
+                                comments_fetch_cache[cache_key] = raw_comments_data
 
-                                        # 直接存储弹幕到现有的episodeId
-                                        # 因为episodeId已经是基于真实animeId生成的，可以直接使用
+                                # 4. 异步存储到弹幕库（不阻塞响应）
+                                # 直接返回弹幕给播放器，同时异步存储到数据库
+                                # 现在我们已经使用真实的animeId，所以直接使用现有的episodeId进行存储
+                                async def store_comments_task(task_session, _):  # 忽略progress_callback参数
+                                    try:
+                                        # 解析episodeId获取相关信息
+                                        episode_id_str = str(episodeId)
+                                        real_anime_id = int(episode_id_str[2:8])  # 提取真实animeId
+                                        episode_number = int(episode_id_str[10:14])  # 提取集编号
+
+                                        # 获取anime和source信息
+                                        anime_stmt = select(orm_models.Anime).where(orm_models.Anime.id == real_anime_id)
+                                        anime_result = await task_session.execute(anime_stmt)
+                                        anime = anime_result.scalar_one_or_none()
+
+                                        if not anime:
+                                            logger.error(f"找不到animeId={real_anime_id}的anime记录")
+                                            return
+
+                                        # 查找对应的source
+                                        source_stmt = select(orm_models.AnimeSource).where(
+                                            orm_models.AnimeSource.animeId == real_anime_id,
+                                            orm_models.AnimeSource.providerName == provider
+                                        )
+                                        source_result = await task_session.execute(source_stmt)
+                                        source = source_result.scalar_one_or_none()
+
+                                        if not source:
+                                            logger.error(f"找不到animeId={real_anime_id}, provider={provider}的source记录")
+                                            return
+
+                                        # 创建分集条目（如果不存在）
+                                        episode_db_id = await crud.create_episode_if_not_exists(
+                                            task_session, real_anime_id, source.id, episode_number,
+                                            f"第{episode_number}集", episode_url, provider_episode_id
+                                        )
+
+                                        # 存储弹幕
                                         await crud.save_danmaku_for_episode(task_session, episodeId, raw_comments_data)
-                                        logger.info(f"已异步存储弹幕: episodeId={episodeId}")
+                                        logger.info(f"已异步存储弹幕: episodeId={episodeId}, dbEpisodeId={episode_db_id}")
 
                                     except Exception as e:
                                         logger.error(f"异步存储弹幕失败: {e}", exc_info=True)
