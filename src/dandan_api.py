@@ -1618,6 +1618,7 @@ async def get_comments_for_dandan(
                                 # 使用三线程下载模式获取弹幕
                                 from .models import ProviderEpisodeInfo
                                 virtual_episode = ProviderEpisodeInfo(
+                                    provider=provider,
                                     episodeIndex=episode_number,
                                     title=f"第{episode_number}集",
                                     episodeId=episode_id_for_comments,

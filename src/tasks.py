@@ -1056,6 +1056,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         # 创建一个虚拟的分集对象用于并发下载
         from .models import ProviderEpisodeInfo
         virtual_episode = ProviderEpisodeInfo(
+            provider=provider_name,
             episodeIndex=1,
             title=f"刷新分集 {episodeId}",
             episodeId=provider_episode_id,
@@ -1075,7 +1076,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         # 提取弹幕数据
         all_comments_from_source = None
         if download_results and len(download_results) > 0:
-            episode_index, comments = download_results[0]
+            _, comments = download_results[0]  # 忽略episode_index
             all_comments_from_source = comments
 
         if not all_comments_from_source:
