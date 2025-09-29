@@ -1633,8 +1633,6 @@ async def get_comments_for_dandan(
                     return models.CommentResponse(count=0, comments=[])
 
                 # 3. 将弹幕下载包装成任务管理器任务
-                from .task_manager import TaskManager
-                task_manager = TaskManager()
 
                 async def download_comments_task(task_session, progress_callback):
                     try:
