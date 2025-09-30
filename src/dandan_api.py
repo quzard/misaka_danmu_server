@@ -73,7 +73,7 @@ async def _store_episode_mapping(session: AsyncSession, episode_id: int, provide
     cache_key = f"{EPISODE_MAPPING_CACHE_PREFIX}{episode_id}"
     # 使用3小时过期时间（10800秒）
     await crud.set_cache(session, cache_key, json.dumps(mapping_data), ttl_seconds=10800)
-    logger.info(f"存储episodeId映射: {episode_id} -> {provider}:{media_id}")
+    logger.debug(f"存储episodeId映射: {episode_id} -> {provider}:{media_id}")
 
 async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
     """
@@ -1303,6 +1303,7 @@ async def get_bangumi_details(
                                                 session, episode_id, provider, media_id,
                                                 i + 1, original_title
                                             )
+                                        logger.info(f"源切换完成: 更新了 {len(actual_episodes)} 个分集的映射关系到 {provider}:{media_id}")
                                     else:
                                         # 新剧集，获取新的真实animeId
                                         real_anime_id = await _get_next_real_anime_id(session)
@@ -1329,6 +1330,10 @@ async def get_bangumi_details(
                                             episodeTitle=episode_title,
                                             episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else i + 1)
                                         ))
+
+                                    # 添加汇总日志
+                                    if not existing_anime:
+                                        logger.info(f"新剧集创建完成: 存储了 {len(actual_episodes)} 个分集的映射关系到 {provider}:{media_id}")
                                 else:
                                     logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
                             else:
