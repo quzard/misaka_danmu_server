@@ -49,6 +49,109 @@ comments_fetch_cache = {}  # 存储已获取的弹幕数据
 # 用户最后选择的虚拟bangumiId记录（用于确定使用哪个源）
 user_last_bangumi_choice = {}  # 格式：{search_key: last_bangumi_id}
 
+# episodeId到源映射的缓存键前缀
+EPISODE_MAPPING_CACHE_PREFIX = "episode_mapping_"
+
+async def _store_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
+    """
+    存储episodeId到源的映射关系到数据库缓存
+    """
+    from . import crud
+    import json
+
+    mapping_data = {
+        "provider": provider,
+        "media_id": media_id,
+        "episode_index": episode_index,
+        "original_title": original_title,
+        "timestamp": time.time()
+    }
+
+    cache_key = f"{EPISODE_MAPPING_CACHE_PREFIX}{episode_id}"
+    # 使用3小时过期时间（10800秒）
+    await crud.set_cache(session, cache_key, json.dumps(mapping_data), ttl_seconds=10800)
+    logger.info(f"存储episodeId映射: {episode_id} -> {provider}:{media_id}")
+
+async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Optional[Dict[str, Any]]:
+    """
+    从数据库缓存中获取episodeId的映射关系
+    """
+    from . import crud
+    import json
+
+    cache_key = f"{EPISODE_MAPPING_CACHE_PREFIX}{episode_id}"
+    cached_data = await crud.get_cache(session, cache_key)
+
+    if cached_data:
+        try:
+            # cached_data可能已经是dict类型（从crud.get_cache返回）
+            if isinstance(cached_data, str):
+                mapping_data = json.loads(cached_data)
+            else:
+                mapping_data = cached_data
+            logger.info(f"从缓存获取episodeId映射: {episode_id} -> {mapping_data['provider']}:{mapping_data['media_id']}")
+            return mapping_data
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"解析episodeId映射缓存失败: {e}")
+            return None
+
+    return None
+
+async def _find_existing_anime_by_title(session: AsyncSession, title: str) -> Optional[Dict[str, Any]]:
+    """
+    根据标题查找已存在的映射记录，返回anime信息
+    """
+    from . import crud
+    import json
+
+    # 查找所有episode_mapping缓存，寻找相同标题的记录
+    cache_keys = await crud.get_cache_keys_by_pattern(session, f"{EPISODE_MAPPING_CACHE_PREFIX}*")
+
+    for cache_key in cache_keys:
+        cached_data = await crud.get_cache(session, cache_key)
+        if cached_data:
+            try:
+                # cached_data可能已经是dict类型（从crud.get_cache返回）
+                if isinstance(cached_data, str):
+                    mapping_data = json.loads(cached_data)
+                else:
+                    mapping_data = cached_data
+
+                if mapping_data.get("original_title") == title:
+                    # 从cache_key中提取episodeId，再提取real_anime_id
+                    episode_id = int(cache_key.replace(EPISODE_MAPPING_CACHE_PREFIX, ""))
+                    real_anime_id = int(str(episode_id)[2:8])
+                    return {"animeId": real_anime_id, "title": title}
+            except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+                continue
+
+    return None
+
+async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
+    """
+    更新episodeId的映射关系（同时更新数据库缓存和内存缓存）
+    """
+    # 更新数据库缓存
+    await _store_episode_mapping(session, episode_id, provider, media_id, episode_index, original_title)
+
+    # 同时更新内存缓存中的映射关系
+    # 查找并更新fallback_search_cache中的real_anime_id映射
+    real_anime_id = int(str(episode_id)[2:8])  # 从episodeId提取real_anime_id
+
+    for search_key, search_info in fallback_search_cache.items():
+        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                if mapping_info.get("real_anime_id") == real_anime_id:
+                    # 更新映射信息
+                    mapping_info["provider"] = provider
+                    mapping_info["media_id"] = media_id
+                    # 更新用户选择记录
+                    user_last_bangumi_choice[search_key] = bangumi_id
+                    logger.info(f"更新内存缓存映射: real_anime_id={real_anime_id}, provider={provider}")
+                    break
+
+    logger.info(f"更新episodeId映射: {episode_id} -> {provider}:{media_id}")
+
 async def _check_related_match_fallback_task(session: AsyncSession, search_term: str) -> Optional[Dict[str, Any]]:
     """
     检查是否有相关的后备匹配任务正在进行
@@ -1135,8 +1238,25 @@ async def get_bangumi_details(
                                 actual_episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
 
                                 if actual_episodes:
-                                    # 获取真实的animeId用于生成episodeId
-                                    real_anime_id = await _get_next_real_anime_id(session)
+                                    # 检查是否已经有相同剧集的记录（源切换检测）
+                                    existing_anime = await _find_existing_anime_by_title(session, original_title)
+
+                                    if existing_anime:
+                                        # 找到现有剧集，这是源切换行为
+                                        real_anime_id = existing_anime['animeId']
+                                        logger.info(f"检测到源切换: 剧集'{original_title}' 已存在 (anime_id={real_anime_id})，将更新映射到新源 {provider}")
+
+                                        # 更新现有episodeId的映射关系
+                                        for i, episode_data in enumerate(actual_episodes):
+                                            episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
+                                            await _update_episode_mapping(
+                                                session, episode_id, provider, media_id,
+                                                i + 1, original_title
+                                            )
+                                    else:
+                                        # 新剧集，获取新的真实animeId
+                                        real_anime_id = await _get_next_real_anime_id(session)
+                                        logger.info(f"创建新剧集: '{original_title}' (anime_id={real_anime_id})")
 
                                     # 存储真实animeId到虚拟animeId的映射关系
                                     mapping_info["real_anime_id"] = real_anime_id
@@ -1146,6 +1266,14 @@ async def get_bangumi_details(
                                         episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
                                         # 直接使用原始分集标题
                                         episode_title = episode_data.title
+
+                                        # 只有在新剧集时才存储映射关系（源切换时已经在上面更新了）
+                                        if not existing_anime:
+                                            await _store_episode_mapping(
+                                                session, episode_id, provider, media_id,
+                                                i + 1, original_title
+                                            )
+
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
                                             episodeTitle=episode_title,
@@ -1628,38 +1756,46 @@ async def get_comments_for_dandan(
                 _ = int(episode_id_str[8:10])  # 提取源顺序（暂时不使用）
                 episode_number = int(episode_id_str[10:14])  # 提取集编号
 
-            # 查找对应的搜索缓存和映射信息
+            # 查找对应的映射信息
             episode_url = None
             provider = None
 
-            # 首先尝试根据用户最后的选择来确定源
-            for search_key, search_info in fallback_search_cache.items():
-                if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                    # 检查是否有用户最后的选择记录
-                    if search_key in user_last_bangumi_choice:
-                        last_bangumi_id = user_last_bangumi_choice[search_key]
-                        if last_bangumi_id in search_info["bangumi_mapping"]:
-                            mapping_info = search_info["bangumi_mapping"][last_bangumi_id]
-                            # 检查真实animeId是否匹配
-                            if mapping_info.get("real_anime_id") == real_anime_id:
-                                episode_url = mapping_info["media_id"]
-                                provider = mapping_info["provider"]
-                                logger.info(f"根据用户最后选择找到映射: bangumiId={last_bangumi_id}, provider={provider}")
-                                break
-
-            # 如果没有找到用户最后的选择，则使用原来的逻辑
-            if not episode_url:
-                for _, search_info in fallback_search_cache.items():
+            # 首先尝试从数据库缓存中获取episodeId的映射
+            mapping_data = await _get_episode_mapping(session, episodeId)
+            if mapping_data:
+                episode_url = mapping_data["media_id"]
+                provider = mapping_data["provider"]
+                logger.info(f"从缓存获取episodeId映射: episodeId={episodeId}, provider={provider}, url={episode_url}")
+            else:
+                # 如果缓存中没有，回退到原来的逻辑（兼容性）
+                # 首先尝试根据用户最后的选择来确定源
+                for search_key, search_info in fallback_search_cache.items():
                     if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                            # 检查真实animeId是否匹配
-                            if mapping_info.get("real_anime_id") == real_anime_id:
-                                episode_url = mapping_info["media_id"]
-                                provider = mapping_info["provider"]
-                                logger.info(f"根据真实animeId={real_anime_id}找到映射: bangumiId={bangumi_id}, provider={provider}")
+                        # 检查是否有用户最后的选择记录
+                        if search_key in user_last_bangumi_choice:
+                            last_bangumi_id = user_last_bangumi_choice[search_key]
+                            if last_bangumi_id in search_info["bangumi_mapping"]:
+                                mapping_info = search_info["bangumi_mapping"][last_bangumi_id]
+                                # 检查真实animeId是否匹配
+                                if mapping_info.get("real_anime_id") == real_anime_id:
+                                    episode_url = mapping_info["media_id"]
+                                    provider = mapping_info["provider"]
+                                    logger.info(f"根据用户最后选择找到映射: bangumiId={last_bangumi_id}, provider={provider}")
+                                    break
+
+                # 如果没有找到用户最后的选择，则使用原来的逻辑
+                if not episode_url:
+                    for _, search_info in fallback_search_cache.items():
+                        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                                # 检查真实animeId是否匹配
+                                if mapping_info.get("real_anime_id") == real_anime_id:
+                                    episode_url = mapping_info["media_id"]
+                                    provider = mapping_info["provider"]
+                                    logger.info(f"根据真实animeId={real_anime_id}找到映射: bangumiId={bangumi_id}, provider={provider}")
+                                    break
+                            if episode_url:
                                 break
-                        if episode_url:
-                            break
 
             if episode_url and provider:
                 logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")

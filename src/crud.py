@@ -1826,6 +1826,17 @@ async def delete_cache(session: AsyncSession, key: str) -> bool:
     await session.commit()
     return result.rowcount > 0
 
+async def get_cache_keys_by_pattern(session: AsyncSession, pattern: str) -> List[str]:
+    """根据模式获取缓存键列表"""
+    # 将通配符*转换为SQL的%
+    sql_pattern = pattern.replace('*', '%')
+    stmt = select(CacheData.cacheKey).where(
+        CacheData.cacheKey.like(sql_pattern),
+        CacheData.expiresAt > func.now()
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.fetchall()]
+
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
     await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now()))
     await session.commit()

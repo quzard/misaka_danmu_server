@@ -221,15 +221,15 @@ export const ImportTask = () => {
       task.status === 'PAUSED' || task.status === 'RUNNING'
     )
 
-    // 使用状态来控制强制删除选项
-    let forceDelete = false
+    // 使用 ref 来存储强制删除状态
+    const forceDeleteRef = React.useRef(false)
 
     const DeleteConfirmContent = () => {
       const [force, setForce] = React.useState(false)
 
-      // 更新外部变量
+      // 更新 ref 值
       React.useEffect(() => {
-        forceDelete = force
+        forceDeleteRef.current = force
       }, [force])
 
       return (
@@ -272,7 +272,7 @@ export const ImportTask = () => {
           {hasStuckTasks && !force && (
             <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
               <div className="text-sm text-yellow-700">
-                💡 检测到运行中或暂停的任务，建议勾选"强制删除"选项
+                💡 检测到运行中或暂停的任务，必须勾选"强制删除"才能删除
               </div>
             </div>
           )}
@@ -288,6 +288,13 @@ export const ImportTask = () => {
       cancelText: '取消',
       onOk: async () => {
         try {
+          const forceDelete = forceDeleteRef.current
+          // 如果有卡住的任务但没有勾选强制删除，阻止执行并返回rejected promise
+          if (hasStuckTasks && !forceDelete) {
+            messageApi.warning('检测到运行中或暂停的任务，请勾选"强制删除"选项')
+            return Promise.reject(new Error('需要强制删除'))
+          }
+
           await Promise.all(
             selectList.map(it => deleteTask({ taskId: it.taskId, force: forceDelete }))
           )
@@ -296,6 +303,7 @@ export const ImportTask = () => {
           messageApi.success(forceDelete ? '强制删除成功' : '删除成功')
         } catch (error) {
           messageApi.error(`删除任务失败: ${error.message}`)
+          throw error // 重新抛出错误以阻止Modal关闭
         }
       },
     })
