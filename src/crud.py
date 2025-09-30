@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc
+from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc, String
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import selectinload, joinedload, aliased, DeclarativeBase
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -2736,9 +2736,13 @@ async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, A
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
     # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
     # 使用标准 SQLAlchemy JOIN 语法，兼容 MySQL 和 PostgreSQL
+    # 使用数据库列名直接JOIN，避免字符集冲突
+    # TaskStateCache.taskId -> task_id列，TaskHistory.taskId -> id列
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
-        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .join(orm_models.TaskHistory,
+              orm_models.TaskStateCache.__table__.c.task_id ==
+              orm_models.TaskHistory.__table__.c.id)
         .where(orm_models.TaskHistory.status == "运行中")
     )
 
