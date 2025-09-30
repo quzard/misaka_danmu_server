@@ -43,6 +43,9 @@ DANDAN_TYPE_DESC_MAPPING = {
 fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
 
+# Token级别的搜索任务限制
+token_search_tasks = {}  # 格式：{token: search_key}
+
 # 弹幕获取缓存（避免重复获取）
 comments_fetch_cache = {}  # 存储已获取的弹幕数据
 
@@ -518,6 +521,31 @@ async def _handle_fallback_search(
     # 生成搜索任务的唯一标识
     search_key = f"search_{hash(search_term + token)}"
 
+    # 检查该token是否已有正在进行的搜索任务
+    if token in token_search_tasks:
+        existing_search_key = token_search_tasks[token]
+        if existing_search_key in fallback_search_cache:
+            existing_search = fallback_search_cache[existing_search_key]
+            if existing_search["status"] == "running":
+                # 返回正在进行的搜索状态
+                elapsed_time = time.time() - existing_search["start_time"]
+                progress = min(int((elapsed_time / 60) * 100), 95)
+                return DandanSearchAnimeResponse(animes=[
+                    DandanSearchAnimeItem(
+                        animeId=999999999,
+                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                        animeTitle=f"{existing_search['search_term']} 搜索正在运行",
+                        type="tvseries",
+                        typeDescription=f"{progress}%",
+                        imageUrl="/static/logo.png",
+                        startDate="2025-01-01T00:00:00+08:00",
+                        year=2025,
+                        episodeCount=1,
+                        rating=0.0,
+                        isFavorited=False
+                    )
+                ])
+
     # 首先检查是否有相关的后备匹配任务正在进行
     match_fallback_task = await _check_related_match_fallback_task(session, search_term)
     if match_fallback_task:
@@ -598,6 +626,9 @@ async def _handle_fallback_search(
     }
     fallback_search_cache[search_key] = search_info
 
+    # 记录该token正在执行的搜索任务
+    token_search_tasks[token] = search_key
+
     # 直接启动异步搜索任务，不通过任务管理器
     import asyncio
 
@@ -610,7 +641,7 @@ async def _handle_fallback_search(
 
             # 直接使用传入的session执行搜索
             await _execute_fallback_search_task(
-                search_term, search_key, session, dummy_progress_callback,
+                search_term, search_key, token, session, dummy_progress_callback,
                 scraper_manager, metadata_manager, config_manager,
                 rate_limiter, title_recognition_manager
             )
@@ -619,6 +650,10 @@ async def _handle_fallback_search(
             # 更新缓存状态为失败
             if search_key in fallback_search_cache:
                 fallback_search_cache[search_key]["status"] = "failed"
+        finally:
+            # 清理token搜索任务记录
+            if token in token_search_tasks and token_search_tasks[token] == search_key:
+                del token_search_tasks[token]
 
     # 启动后台任务
     try:
@@ -649,6 +684,7 @@ async def _handle_fallback_search(
 async def _execute_fallback_search_task(
     search_term: str,
     search_key: str,
+    token: str,
     session: AsyncSession,
     progress_callback,
     scraper_manager: ScraperManager,
@@ -740,8 +776,9 @@ async def _execute_fallback_search_task(
             # 使用弹幕库现有的格式：A + 虚拟animeId
             unique_bangumi_id = f"A{current_virtual_anime_id}"
 
-            # 在标题后面添加来源信息
-            title_with_source = f"{result.title} （来源：{result.provider}）"
+            # 在标题后面添加来源和年份信息
+            year_info = f" 年份：{result.year}" if result.year else ""
+            title_with_source = f"{result.title} （来源：{result.provider}{year_info}）"
 
             # 存储bangumiId到原始信息的映射
             if search_key in fallback_search_cache:
@@ -805,6 +842,10 @@ async def _execute_fallback_search_task(
         # 更新缓存状态为失败
         if search_key in fallback_search_cache:
             fallback_search_cache[search_key]["status"] = "failed"
+    finally:
+        # 清理token搜索任务记录
+        if token in token_search_tasks and token_search_tasks[token] == search_key:
+            del token_search_tasks[token]
 
 async def _search_implementation(
     search_term: str,

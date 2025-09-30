@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError, ProgrammingError # Import specific SQLAlchemy exceptions
+from sqlalchemy.exc import OperationalError # Import specific SQLAlchemy exceptions
 from .config import settings
 from .orm_models import Base # type: ignore
 from .timezone import get_app_timezone, get_timezone_offset_str, get_now
@@ -45,51 +45,54 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
 
 def _log_db_connection_error(context_message: str, e: Exception):
     """
-    Logs a standardized, detailed error message for database connection failures,
-    attempting to diagnose specific issues like connection refused or permission denied.
+    按照三个方面记录数据库连接错误：连接、用户名密码、权限
     """
     logger.error("="*60)
-    logger.error(f"=== {context_message}失败，应用无法启动。 ===")
-    logger.error(f"=== 错误类型: {type(e).__name__}")
-    logger.error(f"=== 错误详情: {e}")
-    logger.error("---")
-    logger.error("--- 诊断与排查建议: ---")
+    logger.error(f"数据库连接失败，应用无法启动")
+    logger.error("="*60)
 
-    # Attempt to provide more specific diagnostics based on the exception type
-    specific_diagnosis = ""
+    # 根据错误类型进行分类诊断
     if isinstance(e, OperationalError):
-        # For MySQL (pymysql) errors, e.orig often has an errno
         if hasattr(e.orig, 'errno'):
+            # MySQL错误码
             if e.orig.errno == 2003:
-                specific_diagnosis = "无法连接到数据库服务器。请检查主机和端口配置，以及网络防火墙。"
-            elif e.orig.errno == 1044:
-                specific_diagnosis = f"数据库用户 '{settings.database.user}' 权限不足，无法创建或访问数据库 '{settings.database.name}'。"
+                logger.error("1. 连接数据库方面：无法连接到数据库服务器")
+                logger.error(f"   - 数据库服务器地址：{settings.database.host}:{settings.database.port}")
+                logger.error("   - 请检查数据库服务是否启动")
+                logger.error("   - 请检查网络连接和防火墙设置")
             elif e.orig.errno == 1045:
-                specific_diagnosis = f"数据库用户 '{settings.database.user}' 的密码错误。"
+                logger.error("2. 用户名、密码方面：身份验证失败")
+                logger.error(f"   - 数据库用户：{settings.database.user}")
+                logger.error("   - 请检查用户名和密码是否正确")
+            elif e.orig.errno == 1044:
+                logger.error("3. 权限方面：数据库访问权限不足")
+                logger.error(f"   - 数据库用户：{settings.database.user}")
+                logger.error(f"   - 目标数据库：{settings.database.name}")
+                logger.error("   - 请检查用户是否有访问该数据库的权限")
             else:
-                specific_diagnosis = f"数据库操作错误 (MySQL 错误码: {e.orig.errno})。"
-        # For PostgreSQL (asyncpg) errors, check the original exception type/message
+                logger.error(f"数据库错误：{e}")
         elif isinstance(e.orig, Exception):
+            # PostgreSQL错误
             err_str = str(e.orig).lower()
             if "connection refused" in err_str or "could not connect" in err_str:
-                specific_diagnosis = "无法连接到数据库服务器。请检查主机和端口配置，以及网络防火墙。"
-            elif "permission denied" in err_str or "privilege" in err_str:
-                specific_diagnosis = f"数据库用户 '{settings.database.user}' 权限不足。"
+                logger.error("1. 连接数据库方面：无法连接到数据库服务器")
+                logger.error(f"   - 数据库服务器地址：{settings.database.host}:{settings.database.port}")
+                logger.error("   - 请检查数据库服务是否启动")
+                logger.error("   - 请检查网络连接和防火墙设置")
             elif "password authentication failed" in err_str:
-                specific_diagnosis = f"数据库用户 '{settings.database.user}' 的密码错误。"
-    elif isinstance(e, ProgrammingError):
-        specific_diagnosis = "数据库编程错误，可能是SQL语法或权限问题。"
+                logger.error("2. 用户名、密码方面：身份验证失败")
+                logger.error(f"   - 数据库用户：{settings.database.user}")
+                logger.error("   - 请检查用户名和密码是否正确")
+            elif "permission denied" in err_str or "privilege" in err_str:
+                logger.error("3. 权限方面：数据库访问权限不足")
+                logger.error(f"   - 数据库用户：{settings.database.user}")
+                logger.error(f"   - 目标数据库：{settings.database.name}")
+                logger.error("   - 请检查用户是否有访问该数据库的权限")
+            else:
+                logger.error(f"数据库错误：{e}")
+    else:
+        logger.error(f"数据库错误：{e}")
 
-    if specific_diagnosis:
-        logger.error(f"--- [!] 精确诊断: {specific_diagnosis}")
-        logger.error("---")
-
-    logger.error("--- 通用检查列表: ---")
-    logger.error("--- 1. 数据库服务是否正在运行？")
-    logger.error(f"--- 2. 数据库配置是否正确？ (主机: {settings.database.host}, 端口: {settings.database.port}, 用户: {settings.database.user})")
-    logger.error("--- 3. 数据库密码是否正确？")
-    logger.error("--- 4. 数据库用户是否有足够的权限？")
-    logger.error("--- 5. 应用与数据库之间的网络是否通畅？")
     logger.error("="*60)
 
 async def create_db_engine_and_session(app: FastAPI):
@@ -112,7 +115,8 @@ async def create_db_engine_and_session(app: FastAPI):
     except Exception as e:
         # 修正：调用标准化的错误日志函数，并提供更精确的上下文
         _log_db_connection_error(f"连接目标数据库 '{settings.database.name}'", e)
-        raise
+        import sys
+        sys.exit(1)  # 直接退出，避免显示Traceback
 
 async def _create_db_if_not_exists():
     """如果数据库不存在，则使用 SQLAlchemy 引擎创建它。"""
@@ -152,7 +156,8 @@ async def _create_db_if_not_exists():
     except Exception as e:
         # 修正：调用标准化的错误日志函数，并提供更精确的上下文
         _log_db_connection_error("检查或创建数据库时连接服务器", e)
-        raise
+        import sys
+        sys.exit(1)  # 直接退出，避免显示Traceback
     finally:
         await engine.dispose()
 
