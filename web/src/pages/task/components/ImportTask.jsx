@@ -7,7 +7,7 @@ import {
   stopTask,
 } from '@/apis'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import StopConfirmContent from './StopTaskModal'
+
 import {
   Button,
   Card,
@@ -186,10 +186,68 @@ export const ImportTask = () => {
 
     // 使用 ref 来存储强制中止状态
     const forceStopRef = React.useRef(false)
+
+    // 内联组件内容
+    const StopConfirmContent = () => {
+      const [force, setForce] = React.useState(false)
+
+      // 更新 ref 值
+      React.useEffect(() => {
+        forceStopRef.current = force
+      }, [force])
+
+      return (
+        <div>
+          <div>您确定要中止任务吗？</div>
+          <div className="max-h-[310px] overflow-y-auto mt-3">
+            {selectList.map((it, i) => (
+              <div key={it.taskId}>
+                {i + 1}、{it.title}
+                {(it.status === 'PAUSED' || it.status === 'RUNNING') && (
+                  <span className="text-orange-500 ml-2">({it.status})</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* 强制中止复选框 */}
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="mr-2"
+              />
+              <span className="text-sm">
+                强制中止
+                <span className="text-gray-500 ml-1">
+                  (直接标记为失败状态，适用于卡住的任务)
+                </span>
+              </span>
+            </label>
+            {force && (
+              <div className="mt-2 text-xs text-orange-600">
+                ⚠️ 强制中止将直接标记任务为失败状态
+              </div>
+            )}
+          </div>
+
+          {hasStuckTasks && !force && (
+            <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+              <div className="text-sm text-yellow-700">
+                💡 检测到运行中或暂停的任务，如果正常中止失败可勾选"强制中止"
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+
     modalApi.confirm({
       title: '中止任务',
       zIndex: 1002,
-      content: <StopConfirmContent selectList={selectList} forceStopRef={forceStopRef} />,
+      content: <StopConfirmContent />,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
