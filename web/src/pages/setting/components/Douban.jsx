@@ -13,7 +13,7 @@ export const Douban = () => {
     setLoading(true)
     getDoubanConfig()
       .then(res => {
-        form.setFieldsValue({ cookie: res.data?.value ?? '' })
+        form.setFieldsValue({ cookie: res.data?.doubanCookie ?? '' })
       })
       .finally(() => {
         setLoading(false)
