@@ -123,7 +123,7 @@ export const pauseTask = data => api.post(`/api/ui/tasks/${data.taskId}/pause`)
 export const resumeTask = data =>
   api.post(`/api/ui/tasks/${data.taskId}/resume`)
 /** 删除任务 */
-export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
+export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`, { params: { force: data.force || false } })
 /** 中止任务 */
 export const stopTask = data => api.post(`/api/ui/tasks/${data.taskId}/abort`)
 /** 定时任务列表 */
@@ -216,6 +216,20 @@ export const getCustomDanmakuPath = () =>
 /** 设置自定义弹幕路径配置 */
 export const setCustomDanmakuPath = data =>
   api.put('/api/ui/config/customDanmakuPath', data)
+
+/** 获取匹配后备Token配置 */
+export const getMatchFallbackTokens = () =>
+  api.get('/api/ui/config/matchFallbackTokens')
+/** 设置匹配后备Token配置 */
+export const setMatchFallbackTokens = data =>
+  api.put('/api/ui/config/matchFallbackTokens', data)
+
+/** 获取后备搜索状态 */
+export const getSearchFallback = () =>
+  api.get('/api/ui/config/searchFallbackEnabled')
+/** 设置后备搜索状态 */
+export const setSearchFallback = data =>
+  api.put('/api/ui/config/searchFallbackEnabled', data)
 
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */

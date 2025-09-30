@@ -1247,6 +1247,11 @@ class TitleRecognitionContent(BaseModel):
     """识别词内容模型"""
     content: str = Field(..., description="识别词配置内容")
 
+class TitleRecognitionUpdateResponse(BaseModel):
+    """识别词更新响应模型"""
+    success: bool = Field(..., description="是否更新成功")
+    warnings: List[str] = Field(default_factory=list, description="解析过程中的警告信息")
+
 
 @router.get("/settings/title-recognition", response_model=TitleRecognitionContent, summary="获取识别词配置内容")
 async def get_title_recognition_content(
@@ -1290,10 +1295,22 @@ async def get_title_recognition_content(
 # 5. 元数据替换：直接指定TMDB/豆瓣ID
 # 错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}
 
+# 6. 季度偏移：针对特定源的季度偏移
+# TX源某动画第9季 => {[source=tencent;season_offset=9>13]}
+# 某动画第5季 => {[source=bilibili;season_offset=5+3]}
+# 错误标题 => {[source=iqiyi;title=正确标题;season_offset=*+1]}
+
 # 集偏移支持运算：
 # EP+1：集数加1
 # 2*EP：集数翻倍
 # 2*EP-1：集数翻倍减1
+
+# 季度偏移支持格式：
+# 9>13：第9季改为第13季
+# 9+4：第9季加4变成第13季
+# 9-1：第9季减1变成第8季
+# *+4：所有季度都加4
+# *>1：所有季度都改为第1季
 """
             return TitleRecognitionContent(content=default_content)
         
@@ -1304,7 +1321,7 @@ async def get_title_recognition_content(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取识别词配置时发生内部错误。")
 
 
-@router.put("/settings/title-recognition", status_code=status.HTTP_204_NO_CONTENT, summary="更新识别词配置内容")
+@router.put("/settings/title-recognition", response_model=TitleRecognitionUpdateResponse, summary="更新识别词配置内容")
 async def update_title_recognition_content(
     payload: TitleRecognitionContent,
     current_user: models.User = Depends(security.get_current_user),
@@ -1313,19 +1330,24 @@ async def update_title_recognition_content(
 ):
     """
     更新识别词配置内容，使用全量替换模式
-    
+
     Args:
         payload: 包含新识别词配置内容的请求体
+
+    Returns:
+        TitleRecognitionUpdateResponse: 包含更新结果和警告信息
     """
     try:
         if title_recognition_manager is None:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
-        
-        # 使用全量替换模式更新识别词规则
-        await title_recognition_manager.update_recognition_rules(payload.content)
-        
+
+        # 使用全量替换模式更新识别词规则，获取警告信息
+        warnings = await title_recognition_manager.update_recognition_rules(payload.content)
+
         logger.info("识别词配置更新成功")
-        
+
+        return TitleRecognitionUpdateResponse(success=True, warnings=warnings)
+
     except Exception as e:
         logger.error(f"更新识别词配置时发生错误: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新识别词配置时发生内部错误: {str(e)}")
@@ -1486,21 +1508,31 @@ async def abort_task_endpoint(
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")
 async def delete_task_from_history_endpoint(
     task_id: str,
+    force: bool = False,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
 ):
-    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。"""
+    """从历史记录中删除一个任务。如果任务正在运行或暂停，会先尝试中止它。force=true时强制删除。"""
     task = await crud.get_task_from_history_by_id(session, task_id)
     if not task:
         # 如果任务不存在，直接返回成功，因为最终状态是一致的
         return
 
-    status = task['status']
+    task_status = task['status']
 
-    if status == TaskStatus.PENDING:
+    if force:
+        # 强制删除模式：使用SQL直接删除，绕过可能的锁定问题
+        logger.info(f"用户 '{current_user.username}' 强制删除任务 {task_id}，状态: {task_status}")
+        deleted = await crud.force_delete_task_from_history(session, task_id)
+        if not deleted:
+            logger.warning(f"强制删除失败，任务 {task_id} 可能已不存在于历史记录中。")
+        return
+
+    # 正常删除模式
+    if task_status == TaskStatus.PENDING:
         await task_manager.cancel_pending_task(task_id)
-    elif status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
+    elif task_status in [TaskStatus.RUNNING, TaskStatus.PAUSED]:
         aborted = await task_manager.abort_current_task(task_id)
         if not aborted:
             # 这可能是一个竞态条件：在我们检查和中止之间，任务可能已经完成。
@@ -1516,7 +1548,7 @@ async def delete_task_from_history_endpoint(
         # 这不是一个严重错误，可能意味着任务在处理过程中已被删除。
         logger.info(f"在尝试删除时，任务 {task_id} 已不存在于历史记录中。")
         return
-    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {status})。")
+    logger.info(f"用户 '{current_user.username}' 删除了任务 ID: {task_id} (原状态: {task_status})。")
     return
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
@@ -1653,6 +1685,63 @@ async def set_custom_danmaku_path(
     config_manager.invalidate("customDanmakuPathTemplate")
     logger.info(f"自定义弹幕路径配置已保存")
     return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
+
+# --- 匹配后备Token配置 ---
+
+class MatchFallbackTokensResponse(BaseModel):
+    value: str
+
+class ConfigValueResponse(BaseModel):
+    value: str
+
+class ConfigValueRequest(BaseModel):
+    value: str
+
+@router.get("/config/matchFallbackTokens", response_model=MatchFallbackTokensResponse, summary="获取匹配后备允许的Token列表")
+async def get_match_fallback_tokens(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    value = await crud.get_config_value(session, "matchFallbackTokens", "[]")
+    return MatchFallbackTokensResponse(value=value)
+
+@router.put("/config/matchFallbackTokens", status_code=status.HTTP_204_NO_CONTENT, summary="设置匹配后备允许的Token列表")
+async def set_match_fallback_tokens(
+    request: MatchFallbackTokensResponse,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置匹配后备允许的Token列表（JSON格式的token ID数组）"""
+    await crud.update_config_value(session, "matchFallbackTokens", request.value)
+    config_manager.invalidate("matchFallbackTokens")
+    logger.info(f"匹配后备Token配置已保存: {request.value}")
+    return
+
+# --- 后备搜索配置 ---
+
+@router.get("/config/searchFallbackEnabled", response_model=ConfigValueResponse, summary="获取后备搜索状态")
+async def get_search_fallback(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取后备搜索功能的启用状态"""
+    value = await crud.get_config_value(session, "searchFallbackEnabled", "false")
+    return ConfigValueResponse(value=value)
+
+@router.put("/config/searchFallbackEnabled", status_code=status.HTTP_204_NO_CONTENT, summary="设置后备搜索状态")
+async def set_search_fallback(
+    request: ConfigValueRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置后备搜索功能的启用状态"""
+    await crud.update_config_value(session, "searchFallbackEnabled", request.value)
+    config_manager.invalidate("searchFallbackEnabled")
+    logger.info(f"后备搜索状态已保存: {request.value}")
+    return
 
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
@@ -2333,6 +2422,7 @@ async def import_from_provider(
     config_manager: ConfigManager = Depends(get_config_manager),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
+    logger.info(f"导入请求: 用户={current_user.username}, provider={request_data.provider}, title={request_data.animeTitle}")
     try:
         # 在启动任务前检查provider是否存在
         scraper_manager.get_scraper(request_data.provider)

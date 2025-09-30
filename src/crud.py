@@ -271,9 +271,9 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     logger.debug(f"调用识别词转换前: title='{original_title}', season={original_season}")
     
     if title_recognition_manager:
-        converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
     else:
-        converted_title, converted_season, was_converted, metadata_info = title, season, False, None
+        converted_title, converted_episode, converted_season, was_converted, metadata_info = title, None, season, False, None
 
     logger.info(f"识别词转换结果: 原始='{original_title}' S{original_season:02d} -> 转换后='{converted_title}' S{converted_season:02d}, 是否转换={was_converted}")
     if metadata_info:
@@ -286,12 +286,24 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
         logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
     
     # 使用转换后的标题和季数进行查找
-    logger.debug(f"使用转换后的标题进行数据库查找: title='{converted_title}', season={converted_season}")
+    logger.debug(f"使用转换后的标题进行数据库查找: title='{converted_title}', season={converted_season}, year={year}")
+
+    # 修复：更灵活的年份匹配逻辑
+    # 1. 首先尝试精确匹配（包括年份）
     stmt = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
     if year:
         stmt = stmt.where(Anime.year == year)
     result = await session.execute(stmt)
     anime = result.scalar_one_or_none()
+
+    # 2. 如果精确匹配失败且提供了年份，尝试忽略年份的匹配
+    if not anime and year:
+        logger.debug(f"精确年份匹配失败，尝试忽略年份进行匹配")
+        stmt_no_year = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
+        result_no_year = await session.execute(stmt_no_year)
+        anime = result_no_year.scalar_one_or_none()
+        if anime:
+            logger.info(f"找到匹配作品（忽略年份）: ID={anime.id}, 数据库年份={anime.year}, 请求年份={year}")
 
     if anime:
         logger.info(f"找到已存在的番剧: ID={anime.id}, 标题='{anime.title}', 季数={anime.season}")
@@ -531,9 +543,9 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     original_season = season
     
     if title_recognition_manager:
-        converted_title, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, season)
+        converted_title, converted_episode, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
     else:
-        converted_title, converted_season, metadata_info = title, season, None
+        converted_title, converted_episode, converted_season, metadata_info = title, None, season, None
     
     # 如果发生了转换，记录日志
     if converted_title != original_title or converted_season != original_season:
@@ -1562,7 +1574,7 @@ async def sync_metadata_sources_to_db(session: AsyncSession, provider_names: Lis
     session.add_all([
         MetadataSource(
             providerName=name, displayOrder=max_order + i + 1,
-            isAuxSearchEnabled=(name == 'tmdb'), useProxy=False
+            isAuxSearchEnabled=(name == 'tmdb'), useProxy=True
         )
         for i, name in enumerate(new_providers)
     ])
@@ -1813,6 +1825,17 @@ async def delete_cache(session: AsyncSession, key: str) -> bool:
     result = await session.execute(delete(CacheData).where(CacheData.cacheKey == key))
     await session.commit()
     return result.rowcount > 0
+
+async def get_cache_keys_by_pattern(session: AsyncSession, pattern: str) -> List[str]:
+    """根据模式获取缓存键列表"""
+    # 将通配符*转换为SQL的%
+    sql_pattern = pattern.replace('*', '%')
+    stmt = select(CacheData.cacheKey).where(
+        CacheData.cacheKey.like(sql_pattern),
+        CacheData.expiresAt > func.now()
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.fetchall()]
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
     await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now()))
@@ -2327,12 +2350,47 @@ async def get_task_from_history_by_id(session: AsyncSession, task_id: str) -> Op
     return None
 
 async def delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
-    task = await session.get(TaskHistory, task_id)
-    if task:
+    try:
+        # 先查询任务是否存在
+        task = await session.get(TaskHistory, task_id)
+        if not task:
+            logger.warning(f"尝试删除不存在的任务: {task_id}")
+            return False
+
+        logger.info(f"正在删除任务: {task_id}, 状态: {task.status}")
+
+        # 删除任务
         await session.delete(task)
         await session.commit()
+
+        logger.info(f"成功删除任务: {task_id}")
         return True
-    return False
+    except Exception as e:
+        logger.error(f"删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
+
+async def force_delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
+    """强制删除任务，使用SQL直接删除，绕过ORM可能的锁定问题"""
+    try:
+        logger.info(f"强制删除任务: {task_id}")
+
+        # 使用SQL直接删除
+        stmt = delete(TaskHistory).where(TaskHistory.taskId == task_id)
+        result = await session.execute(stmt)
+        await session.commit()
+
+        deleted_count = result.rowcount
+        if deleted_count > 0:
+            logger.info(f"强制删除任务成功: {task_id}, 删除行数: {deleted_count}")
+            return True
+        else:
+            logger.warning(f"强制删除任务失败，任务不存在: {task_id}")
+            return False
+    except Exception as e:
+        logger.error(f"强制删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
 
 async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
     """
@@ -2651,13 +2709,11 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
     # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
-    # 修复MySQL排序规则冲突：使用COLLATE显式指定排序规则
+    # 使用标准 SQLAlchemy JOIN 语法，兼容 MySQL 和 PostgreSQL
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
-        .join(orm_models.TaskHistory,
-              text("task_state_cache.task_id COLLATE utf8mb4_general_ci = task_history.id COLLATE utf8mb4_general_ci"))
-        .where(text("task_history.status COLLATE utf8mb4_general_ci = :status"))
-        .params(status="运行中")
+        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .where(orm_models.TaskHistory.status == "运行中")
     )
 
     task_states = []

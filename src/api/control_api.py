@@ -397,25 +397,36 @@ async def auto_import(
                 hours_ago = time_since_creation.total_seconds() / 3600
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
 
-            # 关键修复：恢复并完善在任务提交前的重复检查。
-            # 对于自动导入，我们只关心数据源是否重复，因为作品重复的逻辑在任务内部处理。
-            # 这里的 media_id 是一个为自动任务构造的唯一标识。
-            duplicate_reason = await crud.check_duplicate_import(
-                session=session,
-                provider="auto",
-                media_id=f"auto-{searchTerm}",
-                anime_title=searchTerm,
-                media_type=mediaType.value if mediaType else "tv_series",
-                season=season,
-                year=None, # 自动导入时年份未知，在任务内部获取
-                is_single_episode=episode is not None,
-                episode_index=episode
+            # 关键修复：外部API也应该检查库内是否已存在相同作品
+            # 使用与WebUI相同的检查逻辑，通过标题+季度+集数进行检查
+            title_recognition_manager = get_title_recognition_manager(request)
+
+            # 检查作品是否已存在于库内
+            existing_anime = await crud.find_anime_by_title_season_year(
+                session, searchTerm, season, None, title_recognition_manager
             )
-            # 仅当数据源已存在时才阻止创建任务。
-            if duplicate_reason and "数据源已存在" in duplicate_reason:
+
+            if existing_anime and episode is not None:
+                # 对于单集导入，检查具体集数是否已存在（需要考虑识别词转换）
+                episode_to_check = episode
+                if title_recognition_manager:
+                    _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(searchTerm, episode, season)
+                    if converted_episode is not None:
+                        episode_to_check = converted_episode
+
+                anime_id = existing_anime.get('id')
+                if anime_id:
+                    episode_exists = await crud.find_episode_by_index(session, anime_id, episode_to_check)
+                    if episode_exists:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"作品 '{searchTerm}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入"
+                        )
+            elif existing_anime and episode is None:
+                # 对于整季导入，如果作品已存在则拒绝
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=duplicate_reason
+                    detail=f"作品 '{searchTerm}' 已在媒体库中，无需重复导入整季"
                 )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -1378,6 +1389,7 @@ async def get_task_status(
 @router.delete("/tasks/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
 async def delete_task(
     taskId: str,
+    force: bool = False,
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
 ):
@@ -1387,6 +1399,7 @@ async def delete_task(
     - **排队中**: 从队列中移除。
     - **运行中/已暂停**: 尝试中止任务，然后删除。
     - **已完成/失败**: 从历史记录中删除。
+    - **force=true**: 强制删除，跳过中止逻辑直接删除历史记录。
     """
     task = await crud.get_task_from_history_by_id(session, taskId)
     if not task:
@@ -1394,6 +1407,15 @@ async def delete_task(
 
     task_status = task['status']
 
+    if force:
+        # 强制删除模式：使用SQL直接删除，绕过可能的锁定问题
+        logger.info(f"强制删除任务 {taskId}，状态: {task_status}")
+        if await crud.force_delete_task_from_history(session, taskId):
+            return {"message": f"强制删除任务 {taskId} 成功。"}
+        else:
+            return {"message": "强制删除失败，任务可能已被处理。"}
+
+    # 正常删除模式
     if task_status == TaskStatus.PENDING:
         if await task_manager.cancel_pending_task(taskId):
             logger.info(f"已从队列中取消待处理任务 {taskId}。")
@@ -1535,6 +1557,8 @@ ALLOWED_CONFIG_KEYS = {
     "webhookDelayedImportHours": {"type": "integer", "description": "Webhook 延时导入的小时数"},
     "webhookFilterMode": {"type": "string", "description": "Webhook 标题过滤模式 (blacklist/whitelist)"},
     "webhookFilterRegex": {"type": "string", "description": "用于过滤 Webhook 标题的正则表达式"},
+    # 识别词配置
+    "titleRecognition": {"type": "text", "description": "自定义识别词配置内容，支持屏蔽词、替换、集数偏移、季度偏移等规则"},
 }
 
 class ConfigItem(BaseModel):
@@ -1557,7 +1581,9 @@ class HelpResponse(BaseModel):
 @router.get("/config", response_model=Union[ConfigResponse, HelpResponse], summary="获取可配置的参数列表或帮助信息")
 async def get_allowed_configs(
     type: Optional[str] = Query(None, description="请求类型，使用 'help' 获取可用配置项列表"),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager),
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     获取所有可通过外部API管理的配置项及其当前值。
@@ -1578,15 +1604,27 @@ async def get_allowed_configs(
     configs = []
 
     for key, meta in ALLOWED_CONFIG_KEYS.items():
-        # 根据类型设置默认值
-        if meta["type"] == "boolean":
-            default_value = "false"
-        elif meta["type"] == "integer":
-            default_value = "0"
-        else:  # string
-            default_value = ""
+        # 特殊处理识别词配置
+        if key == "titleRecognition":
+            if title_recognition_manager:
+                # 从数据库获取识别词配置
+                from ..orm_models import TitleRecognition
+                from sqlalchemy import select
+                result = await session.execute(select(TitleRecognition).limit(1))
+                title_recognition = result.scalar_one_or_none()
+                current_value = title_recognition.content if title_recognition else ""
+            else:
+                current_value = ""
+        else:
+            # 根据类型设置默认值
+            if meta["type"] == "boolean":
+                default_value = "false"
+            elif meta["type"] == "integer":
+                default_value = "0"
+            else:  # string
+                default_value = ""
 
-        current_value = await config_manager.get(key, default_value)
+            current_value = await config_manager.get(key, default_value)
 
         configs.append(ConfigItem(
             key=key,
@@ -1600,7 +1638,8 @@ async def get_allowed_configs(
 @router.put("/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定配置项")
 async def update_config(
     request: ConfigUpdateRequest,
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """
     更新指定的配置项。
@@ -1630,8 +1669,20 @@ async def update_config(
                 detail=f"配置项 '{request.key}' 的值必须是整数"
             )
 
-    # 更新配置
-    await config_manager.setValue(request.key, request.value)
-    logger.info(f"外部API更新了配置项 '{request.key}' 为 '{request.value}'")
+    # 特殊处理识别词配置
+    if request.key == "titleRecognition":
+        if title_recognition_manager is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
+
+        # 更新识别词配置
+        warnings = await title_recognition_manager.update_recognition_rules(request.value)
+        if warnings:
+            logger.warning(f"外部API更新识别词配置时发现 {len(warnings)} 个警告: {warnings}")
+
+        logger.info(f"外部API更新了识别词配置，共 {len(title_recognition_manager.recognition_rules)} 条规则")
+    else:
+        # 更新普通配置
+        await config_manager.setValue(request.key, request.value)
+        logger.info(f"外部API更新了配置项 '{request.key}' 为 '{request.value}'")
 
     return

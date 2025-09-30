@@ -19,7 +19,7 @@ class TitleRecognitionRule:
     """识别词规则类"""
 
     def __init__(self, rule_type: str, **kwargs):
-        self.rule_type = rule_type  # 'block', 'replace', 'offset', 'complex'
+        self.rule_type = rule_type  # 'block', 'replace', 'offset', 'complex', 'metadata_replace', 'season_offset'
         self.data = kwargs
 
 class TitleRecognitionManager:
@@ -55,8 +55,12 @@ class TitleRecognitionManager:
                     logger.info("数据库中未找到识别词配置，使用空规则集")
                     self.recognition_rules = []
                 else:
-                    self.recognition_rules = self._parse_recognition_content(title_recognition.content)
+                    self.recognition_rules, warnings = self._parse_recognition_content(title_recognition.content)
                     logger.info(f"从数据库加载了 {len(self.recognition_rules)} 条识别词规则")
+                    if warnings:
+                        logger.warning(f"加载识别词规则时发现 {len(warnings)} 个警告")
+                        for warning in warnings:
+                            logger.warning(f"识别词规则警告: {warning}")
 
                 self._rules_loaded = True
 
@@ -64,7 +68,7 @@ class TitleRecognitionManager:
             logger.error(f"从数据库加载识别词规则失败: {e}")
             self.recognition_rules = []
     
-    def _parse_recognition_content(self, content: str) -> List[TitleRecognitionRule]:
+    def _parse_recognition_content(self, content: str) -> Tuple[List[TitleRecognitionRule], List[str]]:
         """
         解析识别词配置内容 - 参考MoviePilot格式
 
@@ -73,17 +77,19 @@ class TitleRecognitionManager:
         2. 简单替换: 被替换词 => 替换词
         3. 集数偏移: 前定位词 <> 后定位词 >> 集偏移量
         4. 复合格式: 被替换词 => 替换词 && 前定位词 <> 后定位词 >> 集偏移量
+        5. 季度偏移: 被替换词 => {[source=源名称;season_offset=偏移规则]}
 
         Args:
             content: 识别词配置文本内容
 
         Returns:
-            List[TitleRecognitionRule]: 解析后的识别词规则列表
+            Tuple[List[TitleRecognitionRule], List[str]]: 解析后的识别词规则列表和警告信息列表
         """
         rules = []
+        warnings = []
 
         if not content:
-            return rules
+            return rules, warnings
 
         lines = content.split('\n')
 
@@ -97,10 +103,12 @@ class TitleRecognitionManager:
                 if rule:
                     rules.append(rule)
             except Exception as e:
-                logger.warning(f"识别词配置第{line_num}行解析失败，跳过: {line}, 错误: {e}")
+                warning_msg = f"第{line_num}行解析失败: {line} (错误: {e})"
+                warnings.append(warning_msg)
+                logger.warning(f"识别词配置{warning_msg}")
                 continue
 
-        return rules
+        return rules, warnings
 
     def _parse_single_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """
@@ -158,12 +166,23 @@ class TitleRecognitionManager:
             logger.warning(f"识别词配置第{line_num}行替换词为空，跳过: {line}")
             return None
 
-        # 检查是否是特殊格式 {[tmdbid/doubanid=xxx;type=movie/tv;s=xxx;e=xxx]}
+        # 检查是否是特殊格式 {[tmdbid/doubanid=xxx;type=movie/tv;s=xxx;e=xxx]} 或季度偏移格式
         if target.startswith('{[') and target.endswith(']}'):
             metadata_info = self._parse_metadata_target(target)
             if metadata_info:
-                logger.debug(f"解析元数据替换规则: {source} => {target}")
-                return TitleRecognitionRule('metadata_replace', source=source, **metadata_info)
+                # 检查是否包含季度偏移信息
+                if 'season_offset' in metadata_info:
+                    logger.debug(f"解析季度偏移规则: {source} => {target}")
+                    # 避免重复的source参数
+                    metadata_copy = metadata_info.copy()
+                    metadata_copy['source'] = source
+                    return TitleRecognitionRule('season_offset', **metadata_copy)
+                else:
+                    logger.debug(f"解析元数据替换规则: {source} => {target}")
+                    # 避免重复的source参数
+                    metadata_copy = metadata_info.copy()
+                    metadata_copy['source'] = source
+                    return TitleRecognitionRule('metadata_replace', **metadata_copy)
 
         logger.debug(f"解析简单替换规则: {source} => {target}")
         return TitleRecognitionRule('replace', source=source, target=target)
@@ -256,19 +275,25 @@ class TitleRecognitionManager:
                     metadata[key] = int(value)
                 except ValueError:
                     continue
-            elif key in ['type', 's', 'e']:
+            elif key in ['type', 's', 'e', 'source', 'season_offset', 'title']:
                 metadata[key] = value
 
         return metadata if metadata else None
 
-    async def update_recognition_rules(self, content: str):
+    async def update_recognition_rules(self, content: str) -> List[str]:
         """
         更新识别词规则，使用全量替换模式
 
         Args:
             content: 新的识别词配置内容
+
+        Returns:
+            List[str]: 解析过程中的警告信息列表
         """
         try:
+            # 先解析内容，获取警告信息
+            new_rules, warnings = self._parse_recognition_content(content)
+
             async with self.session_factory() as session:
                 # 删除所有现有记录
                 await session.execute(delete(TitleRecognition))
@@ -280,33 +305,41 @@ class TitleRecognitionManager:
                 await session.commit()
 
                 # 重新加载规则到内存
-                self.recognition_rules = self._parse_recognition_content(content)
+                self.recognition_rules = new_rules
 
                 logger.info(f"成功更新识别词规则，共 {len(self.recognition_rules)} 条规则")
+                if warnings:
+                    logger.warning(f"更新过程中发现 {len(warnings)} 个警告")
+                    for warning in warnings:
+                        logger.warning(f"识别词规则警告: {warning}")
+
+                return warnings
 
         except Exception as e:
             logger.error(f"更新识别词规则失败: {e}")
             raise
     
-    async def apply_title_recognition(self, text: str, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
+    async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
         应用标题识别词转换 - 参考MoviePilot格式
 
         Args:
             text: 原始文本（标题或文件名）
             episode: 原始集数
+            season: 原始季数
 
         Returns:
-            Tuple[转换后的文本, 转换后的集数, 是否发生了转换, 元数据信息]
+            Tuple[转换后的文本, 转换后的集数, 转换后的季数, 是否发生了转换, 元数据信息]
         """
         # 确保规则已加载
         await self._ensure_rules_loaded()
 
         if not text:
-            return text, episode, False, None
+            return text, episode, season, False, None
 
         processed_text = text
         processed_episode = episode
+        processed_season = season
         has_changed = False
         metadata_info = None
 
@@ -320,15 +353,15 @@ class TitleRecognitionManager:
                     logger.debug(f"应用屏蔽词规则: 移除 '{rule.data['word']}'")
 
             elif rule.rule_type == 'replace':
-                # 简单替换
-                if rule.data['source'] in processed_text:
+                # 简单替换 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
                     processed_text = processed_text.replace(rule.data['source'], rule.data['target'])
                     has_changed = True
                     logger.debug(f"应用替换规则: '{rule.data['source']}' => '{rule.data['target']}'")
 
             elif rule.rule_type == 'metadata_replace':
-                # 元数据替换
-                if rule.data['source'] in processed_text:
+                # 元数据替换 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
                     processed_text = processed_text.replace(rule.data['source'], '')
                     metadata_info = {k: v for k, v in rule.data.items() if k != 'source'}
                     has_changed = True
@@ -356,7 +389,47 @@ class TitleRecognitionManager:
                     has_changed = True
                     logger.debug(f"应用复合规则: '{rule.data['source']}' => '{rule.data['target']}' + 集数偏移")
 
-        return processed_text, processed_episode, has_changed, metadata_info
+            elif rule.rule_type == 'season_offset':
+                # 季度偏移规则 - 使用完全匹配避免误匹配
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 应用标题替换（如果有）
+                    if 'title' in rule.data:
+                        processed_text = processed_text.replace(rule.data['source'], rule.data['title'])
+                    else:
+                        processed_text = processed_text.replace(rule.data['source'], '').strip()
+
+                    # 应用季度偏移
+                    new_season = self._apply_season_offset(processed_season, rule.data['season_offset'])
+                    if new_season != processed_season:
+                        processed_season = new_season
+                        has_changed = True
+                        logger.debug(f"应用季度偏移规则: '{rule.data['source']}' 季度 {processed_season} => {new_season}")
+
+        return processed_text, processed_episode, processed_season, has_changed, metadata_info
+
+    def _exact_match(self, text: str, pattern: str) -> bool:
+        """
+        精确匹配检查，避免子字符串误匹配
+
+        Args:
+            text: 要检查的文本
+            pattern: 匹配模式
+
+        Returns:
+            bool: 是否精确匹配
+        """
+        # 完全匹配
+        if text == pattern:
+            return True
+
+        # 检查是否作为独立词汇存在（前后有分隔符或边界）
+        import re
+        # 创建正则表达式，确保前后有边界
+        escaped_pattern = re.escape(pattern)
+        # 使用词边界或常见分隔符作为边界
+        boundary_pattern = r'(?:^|[\s\-_\[\]()（）【】]){pattern}(?:$|[\s\-_\[\]()（）【】])'.format(pattern=escaped_pattern)
+
+        return bool(re.search(boundary_pattern, text))
 
     def _apply_episode_offset(self, text: str, episode: Optional[int], rule: TitleRecognitionRule) -> Optional[int]:
         """应用集数偏移规则"""
@@ -446,3 +519,74 @@ class TitleRecognitionManager:
                 numbers.append(chinese_numbers[char])
 
         return numbers
+
+    def _apply_season_offset(self, season: Optional[int], offset_rule: str) -> Optional[int]:
+        """
+        应用季度偏移规则
+
+        Args:
+            season: 当前季度
+            offset_rule: 偏移规则，支持格式：
+                - "9>13" - 第9季改为第13季
+                - "9+4" - 第9季加4变成第13季
+                - "9-1" - 第9季减1变成第8季
+                - "*+4" - 所有季度都加4
+                - "*>1" - 所有季度都改为第1季
+
+        Returns:
+            计算后的季度
+        """
+        if not offset_rule or season is None:
+            return season
+
+        try:
+            # 处理直接映射格式：9>13
+            if '>' in offset_rule:
+                parts = offset_rule.split('>', 1)
+                if len(parts) == 2:
+                    source_season = parts[0].strip()
+                    target_season = int(parts[1].strip())
+
+                    if source_season == '*' or int(source_season) == season:
+                        logger.debug(f"季度偏移计算: {season} => {target_season} (直接映射)")
+                        return max(1, target_season)
+
+            # 处理偏移计算格式：9+4, 9-1, *+4
+            elif any(op in offset_rule for op in ['+', '-', '*']):
+                # 提取季度条件和偏移表达式
+                if offset_rule.startswith('*'):
+                    # 通用规则，适用于所有季度
+                    offset_expr = offset_rule[1:]  # 移除 *
+                    current_season = season
+                else:
+                    # 特定季度规则
+                    for op in ['+', '-']:
+                        if op in offset_rule:
+                            parts = offset_rule.split(op, 1)
+                            if len(parts) == 2:
+                                source_season = int(parts[0].strip())
+                                if source_season != season:
+                                    return season  # 不匹配当前季度，不应用偏移
+                                offset_expr = op + parts[1].strip()
+                                current_season = season
+                                break
+                    else:
+                        return season
+
+                # 计算偏移
+                if offset_expr.startswith('+'):
+                    offset_value = int(offset_expr[1:])
+                    new_season = current_season + offset_value
+                elif offset_expr.startswith('-'):
+                    offset_value = int(offset_expr[1:])
+                    new_season = current_season - offset_value
+                else:
+                    return season
+
+                logger.debug(f"季度偏移计算: {season} {offset_expr} = {new_season}")
+                return max(1, int(new_season))  # 确保季度不小于1
+
+        except (ValueError, IndexError) as e:
+            logger.warning(f"季度偏移计算失败: {offset_rule}, 错误: {e}")
+
+        return season

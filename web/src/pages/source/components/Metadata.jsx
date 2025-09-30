@@ -354,7 +354,7 @@ export const Metadata = () => {
           <div className="my-4">
             请为 {selectedSource?.providerName} 源填写以下配置信息。
           </div>
-          <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+          <div className="flex items-center justify-start flex-wrap gap-2 mb-4">
             <Form.Item
               name="useProxy"
               label="启用代理"

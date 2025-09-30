@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from bs4 import BeautifulSoup
 
 from ..config_manager import ConfigManager
 from .. import models, crud
@@ -363,6 +364,85 @@ class MgtvScraper(BaseScraper):
             self.logger.error(f"MGTV: 解析系列页面 (collection_id={collection_id}) 时发生错误: {e}", exc_info=True)
             return None
 
+    async def _process_variety_episodes(self, raw_episodes: List[MgtvEpisode], db_media_type: Optional[str] = None) -> List[MgtvEpisode]:
+        """处理综艺分集，参考JavaScript实现的逻辑"""
+        if not raw_episodes:
+            return []
+
+        self.logger.debug(f"MGTV综艺处理开始，原始分集数: {len(raw_episodes)}")
+
+        # 检查是否有"第N期"格式
+        has_qi_format = any(re.search(r'第\d+期', f"{ep.title2} {ep.title}".strip()) for ep in raw_episodes)
+
+        self.logger.debug(f"MGTV综艺格式分析: 有期数格式={has_qi_format}")
+
+        # 使用字典存储分集和期数信息
+        episode_infos = []
+        qi_info_map = {}  # 存储期数信息的映射
+
+        for ep in raw_episodes:
+            full_title = f"{ep.title2} {ep.title}".strip()
+
+            if has_qi_format:
+                # 有"第N期"格式时：只保留纯粹的"第N期"和"第N期上/中/下"，其他全部过滤
+                qi_up_mid_down_match = re.search(r'第(\d+)期([上中下])', full_title)
+                qi_pure_match = re.search(r'第(\d+)期', full_title)
+                has_up_mid_down = re.search(r'第\d+期[上中下]', full_title)
+
+                if qi_up_mid_down_match:
+                    # 检查是否包含无效后缀
+                    qi_num = qi_up_mid_down_match.group(1)
+                    up_mid_down = qi_up_mid_down_match.group(2)
+                    qi_up_mid_down_text = f"第{qi_num}期{up_mid_down}"
+                    after_up_mid_down = full_title[full_title.find(qi_up_mid_down_text) + len(qi_up_mid_down_text):]
+                    has_invalid_suffix = re.search(r'^(加更|会员版|纯享版|特别版|独家版|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后)', after_up_mid_down)
+
+                    if not has_invalid_suffix:
+                        # 存储期数信息
+                        qi_info_map[id(ep)] = [int(qi_num), up_mid_down]
+                        episode_infos.append(ep)
+                        self.logger.debug(f"MGTV综艺保留上中下格式: {full_title}")
+                    else:
+                        self.logger.debug(f"MGTV综艺过滤上中下格式+后缀: {full_title}")
+
+                elif qi_pure_match and not has_up_mid_down and not re.search(r'(会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后|访谈|采访|混剪|合集|盘点|总结|删减|未播放|NG|番外|片段|看点|精彩|制作|导演|演员|拍摄|片尾曲|插曲|主题曲|背景音乐|OST|音乐|歌曲)', full_title):
+                    # 匹配纯粹的"第N期"格式
+                    qi_num = qi_pure_match.group(1)
+                    qi_info_map[id(ep)] = [int(qi_num), '']
+                    episode_infos.append(ep)
+                    self.logger.debug(f"MGTV综艺保留标准期数: {full_title}")
+                else:
+                    self.logger.debug(f"MGTV综艺过滤非标准期数格式: {full_title}")
+            else:
+                # 没有任何"第N期"格式时：全部保留（除了明显的广告）
+                if '广告' in full_title or '推广' in full_title:
+                    self.logger.debug(f"MGTV跳过广告内容: {full_title}")
+                    continue
+
+                episode_infos.append(ep)
+                self.logger.debug(f"MGTV综艺保留原始标题: {full_title}")
+
+        # 排序逻辑
+        if has_qi_format:
+            # 有期数格式时，按期数和上中下排序
+            episode_infos.sort(key=lambda x: (
+                qi_info_map.get(id(x), [0, ''])[0],  # 期数
+                {'': 0, '上': 1, '中': 2, '下': 3}.get(qi_info_map.get(id(x), [0, ''])[1], 0)  # 上中下
+            ))
+        else:
+            # 没有期数格式时，按原有逻辑排序
+            def get_sort_keys(episode: MgtvEpisode) -> tuple:
+                full_title = f"{episode.title2} {episode.title}".strip()
+                ep_num_match = re.search(r'第(\d+)集', full_title)
+                ep_num = int(ep_num_match.group(1)) if ep_num_match else float('inf')
+                timestamp = episode.timestamp or "9999-99-99 99:99:99.9"
+                return (ep_num, timestamp)
+
+            episode_infos.sort(key=get_sort_keys)
+
+        self.logger.debug(f"MGTV综艺处理完成，过滤后分集数: {len(episode_infos)}")
+        return episode_infos
+
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
         self.logger.info(f"MGTV: 正在为 media_id={media_id} 获取分集列表...")
 
@@ -448,14 +528,8 @@ class MgtvScraper(BaseScraper):
             if blacklist_pattern:
                 raw_episodes = [ep for ep in raw_episodes if not blacklist_pattern.search(f"{ep.title2} {ep.title}".strip())]
 
-            # 排序和编号
-            def get_sort_keys(episode: MgtvEpisode) -> tuple:
-                ep_num_match = re.search(r'第(\d+)集', episode.title2)
-                ep_num = int(ep_num_match.group(1)) if ep_num_match else float('inf')
-                timestamp = episode.timestamp or "9999-99-99 99:99:99.9"
-                return (ep_num, timestamp)
-
-            sorted_episodes = sorted(raw_episodes, key=get_sort_keys)
+            # 检测是否为综艺并进行特殊处理
+            sorted_episodes = await self._process_variety_episodes(raw_episodes, db_media_type)
 
             provider_episodes = [
                 models.ProviderEpisodeInfo(
