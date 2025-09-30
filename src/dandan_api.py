@@ -100,34 +100,22 @@ async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Option
 
     return None
 
-async def _find_existing_anime_by_title(session: AsyncSession, title: str) -> Optional[Dict[str, Any]]:
+async def _find_existing_anime_by_title_and_search(session: AsyncSession, title: str, search_key: str) -> Optional[Dict[str, Any]]:
     """
-    根据标题查找已存在的映射记录，返回anime信息
+    根据标题和搜索会话查找已存在的映射记录，返回anime信息
+    只在同一个搜索会话中查找，避免不同搜索的剧集被错误合并
     """
-    from . import crud
-    import json
-
-    # 查找所有episode_mapping缓存，寻找相同标题的记录
-    cache_keys = await crud.get_cache_keys_by_pattern(session, f"{EPISODE_MAPPING_CACHE_PREFIX}*")
-
-    for cache_key in cache_keys:
-        cached_data = await crud.get_cache(session, cache_key)
-        if cached_data:
-            try:
-                # cached_data可能已经是dict类型（从crud.get_cache返回）
-                if isinstance(cached_data, str):
-                    mapping_data = json.loads(cached_data)
-                else:
-                    mapping_data = cached_data
-
-                if mapping_data.get("original_title") == title:
-                    # 从cache_key中提取episodeId，再提取real_anime_id
-                    episode_id = int(cache_key.replace(EPISODE_MAPPING_CACHE_PREFIX, ""))
-                    real_anime_id = int(str(episode_id)[2:8])
+    # 只在当前搜索会话的结果中查找
+    if search_key in fallback_search_cache:
+        search_info = fallback_search_cache[search_key]
+        if "bangumi_mapping" in search_info:
+            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                if mapping_info.get("original_title") == title and mapping_info.get("real_anime_id"):
+                    real_anime_id = mapping_info["real_anime_id"]
+                    logger.debug(f"在当前搜索会话中找到已存在的剧集: '{title}' (anime_id={real_anime_id})")
                     return {"animeId": real_anime_id, "title": title}
-            except (json.JSONDecodeError, ValueError, KeyError, TypeError):
-                continue
 
+    logger.debug(f"在当前搜索会话中未找到已存在的剧集: '{title}'")
     return None
 
 async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
@@ -1299,7 +1287,7 @@ async def get_bangumi_details(
 
                                 if actual_episodes:
                                     # 检查是否已经有相同剧集的记录（源切换检测）
-                                    existing_anime = await _find_existing_anime_by_title(session, original_title)
+                                    existing_anime = await _find_existing_anime_by_title_and_search(session, original_title, search_key)
 
                                     if existing_anime:
                                         # 找到现有剧集，这是源切换行为
