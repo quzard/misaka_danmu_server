@@ -604,20 +604,16 @@ async def _handle_fallback_search(
     async def run_fallback_search():
         """在后台运行后备搜索，不阻塞主流程"""
         try:
-            # 创建独立的数据库会话
-            from .database import get_db_session_factory
-            session_factory = get_db_session_factory()
+            # 空的进度回调，因为不在任务管理器中
+            async def dummy_progress_callback(progress: int, message: str):
+                pass
 
-            async with session_factory() as session:
-                # 空的进度回调，因为不在任务管理器中
-                async def dummy_progress_callback(progress: int, message: str):
-                    pass
-
-                await _execute_fallback_search_task(
-                    search_term, search_key, session, dummy_progress_callback,
-                    scraper_manager, metadata_manager, config_manager,
-                    rate_limiter, title_recognition_manager
-                )
+            # 直接使用传入的session执行搜索
+            await _execute_fallback_search_task(
+                search_term, search_key, session, dummy_progress_callback,
+                scraper_manager, metadata_manager, config_manager,
+                rate_limiter, title_recognition_manager
+            )
         except Exception as e:
             logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
             # 更新缓存状态为失败
