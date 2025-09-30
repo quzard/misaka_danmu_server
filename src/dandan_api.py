@@ -617,11 +617,16 @@ async def _handle_fallback_search(
                     )
                 ])
 
+    # 解析搜索词，提取季度和集数信息
+    from .utils import parse_search_keyword
+    parsed_info = parse_search_keyword(search_term)
+
     # 启动新的搜索任务
     search_info = {
         "status": "running",
         "start_time": time.time(),
         "search_term": search_term,
+        "parsed_info": parsed_info,  # 保存解析信息
         "results": []
     }
     fallback_search_cache[search_key] = search_info
@@ -1268,6 +1273,11 @@ async def get_bangumi_details(
                         user_last_bangumi_choice[search_key] = bangumiId
                         logger.info(f"记录用户选择: search_key={search_key}, bangumiId={bangumiId}, provider={provider}")
 
+                        # 获取原始搜索的季度和集数信息
+                        parsed_info = search_info.get("parsed_info", {})
+                        target_season = parsed_info.get("season")
+                        target_episode = parsed_info.get("episode")
+
                         episodes = []
                         try:
                             # 完全按照WebUI的流程：调用scraper获取真实的分集信息
@@ -1313,8 +1323,14 @@ async def get_bangumi_details(
                                     mapping_info["real_anime_id"] = real_anime_id
 
                                     for i, episode_data in enumerate(actual_episodes):
+                                        episode_index = i + 1
+
+                                        # 如果指定了特定集数，只返回该集数
+                                        if target_episode is not None and episode_index != target_episode:
+                                            continue
+
                                         # 使用真实animeId生成标准的episodeId
-                                        episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
+                                        episode_id = _generate_episode_id(real_anime_id, 1, episode_index)
                                         # 直接使用原始分集标题
                                         episode_title = episode_data.title
 
@@ -1322,13 +1338,13 @@ async def get_bangumi_details(
                                         if not existing_anime:
                                             await _store_episode_mapping(
                                                 session, episode_id, provider, media_id,
-                                                i + 1, original_title
+                                                episode_index, original_title
                                             )
 
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
                                             episodeTitle=episode_title,
-                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else i + 1)
+                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else episode_index)
                                         ))
 
                                 else:
