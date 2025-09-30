@@ -2392,6 +2392,32 @@ async def force_delete_task_from_history(session: AsyncSession, task_id: str) ->
         await session.rollback()
         return False
 
+async def force_fail_task(session: AsyncSession, task_id: str) -> bool:
+    """强制将任务标记为失败状态"""
+    try:
+        logger.info(f"强制标记任务为失败: {task_id}")
+
+        # 使用SQL直接更新任务状态
+        stmt = update(TaskHistory).where(TaskHistory.taskId == task_id).values(
+            status="失败",
+            finishedAt=get_now(),
+            errorMessage="任务被强制中止"
+        )
+        result = await session.execute(stmt)
+        await session.commit()
+
+        updated_count = result.rowcount
+        if updated_count > 0:
+            logger.info(f"强制标记任务失败成功: {task_id}, 更新行数: {updated_count}")
+            return True
+        else:
+            logger.warning(f"强制标记任务失败，任务不存在: {task_id}")
+            return False
+    except Exception as e:
+        logger.error(f"强制标记任务失败 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
+
 async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
     """
     从一个调度任务的最终描述中，解析并返回其触发的执行任务ID。

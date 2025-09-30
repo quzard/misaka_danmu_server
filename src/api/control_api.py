@@ -1429,11 +1429,35 @@ async def delete_task(
         return {"message": "任务可能已被处理或不存在于历史记录中。"}
 
 @router.post("/tasks/{taskId}/abort", response_model=ControlActionResponse, summary="中止正在运行的任务")
-async def abort_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
-    """尝试中止一个当前正在运行或已暂停的任务。此操作会向任务发送一个取消信号，任务将在下一个检查点安全退出。"""
-    if not await task_manager.abort_current_task(taskId):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
-    return {"message": "中止任务的请求已发送。"}
+async def abort_task(
+    taskId: str,
+    force: bool = False,
+    task_manager: TaskManager = Depends(get_task_manager),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    尝试中止一个当前正在运行或已暂停的任务。
+    - force=false: 正常中止，向任务发送取消信号
+    - force=true: 强制中止，直接将任务标记为失败状态
+    """
+    if force:
+        # 强制中止：直接将任务标记为失败
+        from . import crud
+        task = await crud.get_task_from_history_by_id(session, taskId)
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+
+        # 直接更新任务状态为失败
+        success = await crud.force_fail_task(session, taskId)
+        if success:
+            return {"message": "任务已强制标记为失败状态。"}
+        else:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="强制中止任务失败")
+    else:
+        # 正常中止
+        if not await task_manager.abort_current_task(taskId):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
+        return {"message": "中止任务的请求已发送。"}
 
 @router.post("/tasks/{taskId}/pause", response_model=ControlActionResponse, summary="暂停正在运行的任务")
 async def pause_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):

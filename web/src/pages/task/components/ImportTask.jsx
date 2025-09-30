@@ -7,6 +7,7 @@ import {
   stopTask,
 } from '@/apis'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import StopConfirmContent from './StopTaskModal'
 import {
   Button,
   Card,
@@ -179,38 +180,34 @@ export const ImportTask = () => {
    * 处理中止任务操作
    */
   const handleStop = () => {
+    const hasStuckTasks = selectList.some(task =>
+      task.status === 'PAUSED' || task.status === 'RUNNING'
+    )
+
+    // 使用 ref 来存储强制中止状态
+    const forceStopRef = React.useRef(false)
     modalApi.confirm({
       title: '中止任务',
       zIndex: 1002,
-      content: (
-        <div>
-          您确定要中止任务任务吗？
-          <br />
-          此操作会尝试停止任务，如果无法停止，则会将其强制标记为“失败”状态。
-          <div className="max-h-[310px] overflow-y-auto mt-3">
-            {selectList.map((it, i) => (
-              <div>
-                {i + 1}、{it.title}
-              </div>
-            ))}
-          </div>
-        </div>
-      ),
+      content: <StopConfirmContent selectList={selectList} forceStopRef={forceStopRef} />,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
+          const forceStop = forceStopRef.current
           await Promise.all(
-            selectList.map(it => stopTask({ taskId: it.taskId }))
+            selectList.map(it => stopTask({ taskId: it.taskId, force: forceStop }))
           )
           refreshTasks()
           setSelectList([])
-          messageApi.success('中止成功')
+          messageApi.success(forceStop ? '强制中止成功' : '中止成功')
         } catch (error) {
           messageApi.error(`中止任务失败: ${error.message}`)
+          throw error // 重新抛出错误以阻止Modal关闭
         }
       },
     })
+
   }
 
   /**
