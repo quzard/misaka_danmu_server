@@ -504,7 +504,6 @@ async def _handle_fallback_search(
     search_term: str,
     token: str,
     session: AsyncSession,
-    task_manager: TaskManager,
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
@@ -599,23 +598,38 @@ async def _handle_fallback_search(
     }
     fallback_search_cache[search_key] = search_info
 
-    # 创建搜索任务
-    task_coro = lambda session, cb: _execute_fallback_search_task(
-        search_term, search_key, session, cb, scraper_manager, metadata_manager,
-        config_manager, rate_limiter, title_recognition_manager
-    )
+    # 直接启动异步搜索任务，不通过任务管理器
+    import asyncio
 
-    # 提交异步搜索任务
+    async def run_fallback_search():
+        """在后台运行后备搜索，不阻塞主流程"""
+        try:
+            # 创建独立的数据库会话
+            from .database import get_db_session_factory
+            session_factory = get_db_session_factory()
+
+            async with session_factory() as session:
+                # 空的进度回调，因为不在任务管理器中
+                async def dummy_progress_callback(progress: int, message: str):
+                    pass
+
+                await _execute_fallback_search_task(
+                    search_term, search_key, session, dummy_progress_callback,
+                    scraper_manager, metadata_manager, config_manager,
+                    rate_limiter, title_recognition_manager
+                )
+        except Exception as e:
+            logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
+            # 更新缓存状态为失败
+            if search_key in fallback_search_cache:
+                fallback_search_cache[search_key]["status"] = "failed"
+
+    # 启动后台任务
     try:
-        await task_manager.submit_task(
-            task_coro,
-            f"后备搜索: {search_term}",
-            unique_key=f"fallback_search_{search_key}",
-            task_type="fallback_search",
-            task_parameters={"search_term": search_term, "search_key": search_key}
-        )
+        asyncio.create_task(run_fallback_search())
+        logger.info(f"后备搜索任务已启动: {search_term}")
     except Exception as e:
-        logger.error(f"提交后备搜索任务失败: {e}")
+        logger.error(f"启动后备搜索任务失败: {e}")
         search_info["status"] = "failed"
         return DandanSearchAnimeResponse(animes=[])
 
@@ -1046,7 +1060,6 @@ async def search_anime_for_dandan(
     episode: Optional[str] = Query(None, description="分集标题 (此接口中未使用)"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    task_manager: TaskManager = Depends(get_task_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
@@ -1162,7 +1175,7 @@ async def search_anime_for_dandan(
             search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}"
 
         return await _handle_fallback_search(
-            search_title_for_fallback, token, session, task_manager, scraper_manager,
+            search_title_for_fallback, token, session, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager
         )
 
