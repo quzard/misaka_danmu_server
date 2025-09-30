@@ -2459,7 +2459,8 @@ async def import_from_provider(
         season=request_data.season,
         year=request_data.year,
         is_single_episode=request_data.currentEpisodeIndex is not None,
-        episode_index=request_data.currentEpisodeIndex
+        episode_index=request_data.currentEpisodeIndex,
+        title_recognition_manager=title_recognition_manager
     )
     if duplicate_reason:
         raise HTTPException(

@@ -1733,7 +1733,8 @@ async def check_duplicate_import(
     season: Optional[int] = None,
     year: Optional[int] = None,
     is_single_episode: bool = False,
-    episode_index: Optional[int] = None
+    episode_index: Optional[int] = None,
+    title_recognition_manager=None
 ) -> Optional[str]:
     """
     统一的重复导入检查函数
@@ -1780,7 +1781,7 @@ async def check_duplicate_import(
             season_for_check = 1
 
         existing_anime = await find_anime_by_title_season_year(
-            session, anime_title, season_for_check, year
+            session, anime_title, season_for_check, year, title_recognition_manager
         )
         if existing_anime:
             year_info = f" ({year}年)" if year else ""

@@ -614,7 +614,8 @@ async def direct_import(
         season=item_to_import.season,
         year=item_to_import.year,
         is_single_episode=item_to_import.currentEpisodeIndex is not None,
-        episode_index=item_to_import.currentEpisodeIndex
+        episode_index=item_to_import.currentEpisodeIndex,
+        title_recognition_manager=title_recognition_manager
     )
     if duplicate_reason:
         raise HTTPException(
@@ -743,7 +744,8 @@ async def edited_import(
         season=item_to_import.season,
         year=item_to_import.year,
         is_single_episode=False, # 先检查数据源重复
-        episode_index=None
+        episode_index=None,
+        title_recognition_manager=title_recognition_manager
     )
     # 如果数据源已存在，则需要进一步检查单集
     if duplicate_reason and "数据源已存在" in duplicate_reason:
