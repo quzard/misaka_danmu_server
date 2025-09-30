@@ -153,7 +153,7 @@ async def _update_episode_mapping(session: AsyncSession, episode_id: int, provid
                     logger.info(f"更新内存缓存映射: real_anime_id={real_anime_id}, provider={provider}")
                     break
 
-    logger.info(f"更新episodeId映射: {episode_id} -> {provider}:{media_id}")
+    logger.debug(f"更新episodeId映射: {episode_id} -> {provider}:{media_id}")
 
 async def _check_related_match_fallback_task(session: AsyncSession, search_term: str) -> Optional[Dict[str, Any]]:
     """
