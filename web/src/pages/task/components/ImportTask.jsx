@@ -6,7 +6,8 @@ import {
   resumeTask,
   stopTask,
 } from '@/apis'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
 import {
   Button,
   Card,
@@ -66,6 +67,12 @@ export const ImportTask = () => {
           !!selectList.length),
       selectList.every(item => item.status === '已暂停'),
     ]
+  }, [selectList])
+
+  const canStop = useMemo(() => {
+    return selectList.some(item =>
+      item.status === '运行中' || item.status === '已暂停'
+    ) && !!selectList.length
   }, [selectList])
 
   const canDelete = useMemo(() => {
@@ -179,35 +186,69 @@ export const ImportTask = () => {
    * 处理中止任务操作
    */
   const handleStop = () => {
-    modalApi.confirm({
-      title: '中止任务',
-      zIndex: 1002,
-      content: (
+    console.log('handleStop clicked', selectList)
+
+    let forceStop = false
+
+    const StopConfirmContent = () => {
+      const [force, setForce] = useState(false)
+
+      useEffect(() => {
+        forceStop = force
+      }, [force])
+
+      return (
         <div>
-          您确定要中止任务任务吗？
-          <br />
-          此操作会尝试停止任务，如果无法停止，则会将其强制标记为“失败”状态。
+          <div>您确定要中止任务吗？</div>
           <div className="max-h-[310px] overflow-y-auto mt-3">
             {selectList.map((it, i) => (
-              <div>
+              <div key={it.taskId}>
                 {i + 1}、{it.title}
               </div>
             ))}
           </div>
+
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="mr-2"
+              />
+              <span className="text-sm">
+                强制中止
+                <span className="text-gray-500 ml-1">
+                  (直接标记为失败状态，适用于卡住的任务)
+                </span>
+              </span>
+            </label>
+            {force && (
+              <div className="mt-2 text-xs text-orange-600">
+                ⚠️ 强制中止将直接标记任务为失败状态
+              </div>
+            )}
+          </div>
         </div>
-      ),
+      )
+    }
+
+    modalApi.confirm({
+      title: '中止任务',
+      content: <StopConfirmContent />,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
           await Promise.all(
-            selectList.map(it => stopTask({ taskId: it.taskId }))
+            selectList.map(it => stopTask({ taskId: it.taskId, force: forceStop }))
           )
           refreshTasks()
           setSelectList([])
-          messageApi.success('中止成功')
+          messageApi.success(forceStop ? '强制中止成功' : '中止成功')
         } catch (error) {
           messageApi.error(`中止任务失败: ${error.message}`)
+          throw error
         }
       },
     })
@@ -217,33 +258,90 @@ export const ImportTask = () => {
    * 处理删除任务操作
    */
   const handleDelete = () => {
-    modalApi.confirm({
-      title: '删除任务',
-      zIndex: 1002,
-      content: (
+    console.log('handleDelete clicked', selectList)
+
+    const hasStuckTasks = selectList.some(task =>
+      task.status === '运行中' || task.status === '已暂停'
+    )
+
+    let forceDelete = false
+
+    const DeleteConfirmContent = () => {
+      const [force, setForce] = useState(false)
+
+      useEffect(() => {
+        forceDelete = force
+      }, [force])
+
+      return (
         <div>
-          您确定要从历史记录中删除任务吗？
+          <div>您确定要从历史记录中删除任务吗？</div>
           <div className="max-h-[310px] overflow-y-auto mt-3">
             {selectList.map((it, i) => (
-              <div>
+              <div key={it.taskId}>
                 {i + 1}、{it.title}
+                {(it.status === '运行中' || it.status === '已暂停') && (
+                  <span className="text-orange-500 ml-2">({it.status})</span>
+                )}
               </div>
             ))}
           </div>
+
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="mr-2"
+              />
+              <span className="text-sm">
+                强制删除
+                <span className="text-gray-500 ml-1">
+                  (跳过中止逻辑，直接删除历史记录，适用于卡住的任务)
+                </span>
+              </span>
+            </label>
+            {force && (
+              <div className="mt-2 text-xs text-orange-600">
+                ⚠️ 强制删除将绕过正常的任务中止流程
+              </div>
+            )}
+          </div>
+
+          {hasStuckTasks && !force && (
+            <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+              <div className="text-sm text-yellow-700">
+                💡 检测到运行中或暂停的任务，必须勾选"强制删除"才能删除
+              </div>
+            </div>
+          )}
         </div>
-      ),
+      )
+    }
+
+    modalApi.confirm({
+      title: '删除任务',
+      content: <DeleteConfirmContent />,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
+          // 如果有卡住的任务但没有勾选强制删除，阻止执行
+          if (hasStuckTasks && !forceDelete) {
+            messageApi.warning('检测到运行中或暂停的任务，请勾选"强制删除"选项')
+            return Promise.reject(new Error('需要强制删除'))
+          }
+
           await Promise.all(
-            selectList.map(it => deleteTask({ taskId: it.taskId }))
+            selectList.map(it => deleteTask({ taskId: it.taskId, force: forceDelete }))
           )
           refreshTasks()
           setSelectList([])
-          messageApi.success('删除成功')
+          messageApi.success(forceDelete ? '强制删除成功' : '删除成功')
         } catch (error) {
           messageApi.error(`删除任务失败: ${error.message}`)
+          throw error
         }
       },
     })
@@ -354,7 +452,7 @@ export const ImportTask = () => {
                 </Tooltip>
                 <Tooltip title="中止任务">
                   <Button
-                    disabled={!canPause}
+                    disabled={!canStop}
                     type="default"
                     shape="circle"
                     icon={<StopOutlined />}

@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Type, Tuple
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc
+from sqlalchemy import select, func, delete, update, and_, or_, text, distinct, case, exc, String
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import selectinload, joinedload, aliased, DeclarativeBase
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -1733,7 +1733,8 @@ async def check_duplicate_import(
     season: Optional[int] = None,
     year: Optional[int] = None,
     is_single_episode: bool = False,
-    episode_index: Optional[int] = None
+    episode_index: Optional[int] = None,
+    title_recognition_manager=None
 ) -> Optional[str]:
     """
     统一的重复导入检查函数
@@ -1780,7 +1781,7 @@ async def check_duplicate_import(
             season_for_check = 1
 
         existing_anime = await find_anime_by_title_season_year(
-            session, anime_title, season_for_check, year
+            session, anime_title, season_for_check, year, title_recognition_manager
         )
         if existing_anime:
             year_info = f" ({year}年)" if year else ""
@@ -1825,6 +1826,17 @@ async def delete_cache(session: AsyncSession, key: str) -> bool:
     result = await session.execute(delete(CacheData).where(CacheData.cacheKey == key))
     await session.commit()
     return result.rowcount > 0
+
+async def get_cache_keys_by_pattern(session: AsyncSession, pattern: str) -> List[str]:
+    """根据模式获取缓存键列表"""
+    # 将通配符*转换为SQL的%
+    sql_pattern = pattern.replace('*', '%')
+    stmt = select(CacheData.cacheKey).where(
+        CacheData.cacheKey.like(sql_pattern),
+        CacheData.expiresAt > func.now()
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.fetchall()]
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
     await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now()))
@@ -2339,12 +2351,74 @@ async def get_task_from_history_by_id(session: AsyncSession, task_id: str) -> Op
     return None
 
 async def delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
-    task = await session.get(TaskHistory, task_id)
-    if task:
+    try:
+        # 先查询任务是否存在
+        task = await session.get(TaskHistory, task_id)
+        if not task:
+            logger.warning(f"尝试删除不存在的任务: {task_id}")
+            return False
+
+        logger.info(f"正在删除任务: {task_id}, 状态: {task.status}")
+
+        # 删除任务
         await session.delete(task)
         await session.commit()
+
+        logger.info(f"成功删除任务: {task_id}")
         return True
-    return False
+    except Exception as e:
+        logger.error(f"删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
+
+async def force_delete_task_from_history(session: AsyncSession, task_id: str) -> bool:
+    """强制删除任务，使用SQL直接删除，绕过ORM可能的锁定问题"""
+    try:
+        logger.info(f"强制删除任务: {task_id}")
+
+        # 使用SQL直接删除
+        stmt = delete(TaskHistory).where(TaskHistory.taskId == task_id)
+        result = await session.execute(stmt)
+        await session.commit()
+
+        deleted_count = result.rowcount
+        if deleted_count > 0:
+            logger.info(f"强制删除任务成功: {task_id}, 删除行数: {deleted_count}")
+            return True
+        else:
+            logger.warning(f"强制删除任务失败，任务不存在: {task_id}")
+            return False
+    except Exception as e:
+        logger.error(f"强制删除任务 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
+
+async def force_fail_task(session: AsyncSession, task_id: str) -> bool:
+    """强制将任务标记为失败状态"""
+    try:
+        logger.info(f"强制标记任务为失败: {task_id}")
+
+        # 使用SQL直接更新任务状态
+        stmt = update(TaskHistory).where(TaskHistory.taskId == task_id).values(
+            status="失败",
+            finishedAt=get_now(),
+            updatedAt=get_now(),
+            description="任务被强制中止"
+        )
+        result = await session.execute(stmt)
+        await session.commit()
+
+        updated_count = result.rowcount
+        if updated_count > 0:
+            logger.info(f"强制标记任务失败成功: {task_id}, 更新行数: {updated_count}")
+            return True
+        else:
+            logger.warning(f"强制标记任务失败，任务不存在: {task_id}")
+            return False
+    except Exception as e:
+        logger.error(f"强制标记任务失败 {task_id} 失败: {e}", exc_info=True)
+        await session.rollback()
+        return False
 
 async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
     """
@@ -2662,11 +2736,12 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
-    # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
-    # 使用标准 SQLAlchemy JOIN 语法，兼容 MySQL 和 PostgreSQL
+    # 使用CAST强制字符集一致，解决字符集冲突问题
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
-        .join(orm_models.TaskHistory, orm_models.TaskStateCache.taskId == orm_models.TaskHistory.taskId)
+        .join(orm_models.TaskHistory,
+              func.cast(orm_models.TaskStateCache.taskId, String) ==
+              func.cast(orm_models.TaskHistory.taskId, String))
         .where(orm_models.TaskHistory.status == "运行中")
     )
 

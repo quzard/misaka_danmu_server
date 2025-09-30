@@ -614,7 +614,8 @@ async def direct_import(
         season=item_to_import.season,
         year=item_to_import.year,
         is_single_episode=item_to_import.currentEpisodeIndex is not None,
-        episode_index=item_to_import.currentEpisodeIndex
+        episode_index=item_to_import.currentEpisodeIndex,
+        title_recognition_manager=title_recognition_manager
     )
     if duplicate_reason:
         raise HTTPException(
@@ -743,7 +744,8 @@ async def edited_import(
         season=item_to_import.season,
         year=item_to_import.year,
         is_single_episode=False, # 先检查数据源重复
-        episode_index=None
+        episode_index=None,
+        title_recognition_manager=title_recognition_manager
     )
     # 如果数据源已存在，则需要进一步检查单集
     if duplicate_reason and "数据源已存在" in duplicate_reason:
@@ -1389,6 +1391,7 @@ async def get_task_status(
 @router.delete("/tasks/{taskId}", response_model=ControlActionResponse, summary="删除一个历史任务")
 async def delete_task(
     taskId: str,
+    force: bool = False,
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
 ):
@@ -1398,6 +1401,7 @@ async def delete_task(
     - **排队中**: 从队列中移除。
     - **运行中/已暂停**: 尝试中止任务，然后删除。
     - **已完成/失败**: 从历史记录中删除。
+    - **force=true**: 强制删除，跳过中止逻辑直接删除历史记录。
     """
     task = await crud.get_task_from_history_by_id(session, taskId)
     if not task:
@@ -1405,6 +1409,15 @@ async def delete_task(
 
     task_status = task['status']
 
+    if force:
+        # 强制删除模式：使用SQL直接删除，绕过可能的锁定问题
+        logger.info(f"强制删除任务 {taskId}，状态: {task_status}")
+        if await crud.force_delete_task_from_history(session, taskId):
+            return {"message": f"强制删除任务 {taskId} 成功。"}
+        else:
+            return {"message": "强制删除失败，任务可能已被处理。"}
+
+    # 正常删除模式
     if task_status == TaskStatus.PENDING:
         if await task_manager.cancel_pending_task(taskId):
             logger.info(f"已从队列中取消待处理任务 {taskId}。")
@@ -1418,11 +1431,35 @@ async def delete_task(
         return {"message": "任务可能已被处理或不存在于历史记录中。"}
 
 @router.post("/tasks/{taskId}/abort", response_model=ControlActionResponse, summary="中止正在运行的任务")
-async def abort_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
-    """尝试中止一个当前正在运行或已暂停的任务。此操作会向任务发送一个取消信号，任务将在下一个检查点安全退出。"""
-    if not await task_manager.abort_current_task(taskId):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
-    return {"message": "中止任务的请求已发送。"}
+async def abort_task(
+    taskId: str,
+    force: bool = False,
+    task_manager: TaskManager = Depends(get_task_manager),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    尝试中止一个当前正在运行或已暂停的任务。
+    - force=false: 正常中止，向任务发送取消信号
+    - force=true: 强制中止，直接将任务标记为失败状态
+    """
+    if force:
+        # 强制中止：直接将任务标记为失败
+        from . import crud
+        task = await crud.get_task_from_history_by_id(session, taskId)
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+
+        # 直接更新任务状态为失败
+        success = await crud.force_fail_task(session, taskId)
+        if success:
+            return {"message": "任务已强制标记为失败状态。"}
+        else:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="强制中止任务失败")
+    else:
+        # 正常中止
+        if not await task_manager.abort_current_task(taskId):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="中止任务失败，可能任务已完成或不是当前正在执行的任务。")
+        return {"message": "中止任务的请求已发送。"}
 
 @router.post("/tasks/{taskId}/pause", response_model=ControlActionResponse, summary="暂停正在运行的任务")
 async def pause_task(taskId: str, task_manager: TaskManager = Depends(get_task_manager)):
