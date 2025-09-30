@@ -1496,13 +1496,32 @@ async def resume_task_endpoint(
 @router.post("/tasks/{task_id}/abort", status_code=status.HTTP_204_NO_CONTENT, summary="中止一个正在运行的任务")
 async def abort_task_endpoint(
     task_id: str,
+    request: dict,
     current_user: models.User = Depends(security.get_current_user),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    session: AsyncSession = Depends(get_db_session)
 ):
-    """中止一个正在运行或暂停的任务。"""
-    aborted = await task_manager.abort_current_task(task_id)
-    if not aborted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或无法中止。")
+    """
+    中止一个正在运行或暂停的任务。
+    - force=false: 正常中止，向任务发送取消信号
+    - force=true: 强制中止，直接将任务标记为失败状态
+    """
+    force = request.get('force', False)
+    if force:
+        # 强制中止：直接将任务标记为失败
+        task = await crud.get_task_from_history_by_id(session, task_id)
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+
+        # 直接更新任务状态为失败
+        success = await crud.force_fail_task(session, task_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="强制中止任务失败")
+    else:
+        # 正常中止
+        aborted = await task_manager.abort_current_task(task_id)
+        if not aborted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务未找到或无法中止。")
     return
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除一个历史任务")

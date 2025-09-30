@@ -2401,7 +2401,8 @@ async def force_fail_task(session: AsyncSession, task_id: str) -> bool:
         stmt = update(TaskHistory).where(TaskHistory.taskId == task_id).values(
             status="失败",
             finishedAt=get_now(),
-            errorMessage="任务被强制中止"
+            updatedAt=get_now(),
+            description="任务被强制中止"
         )
         result = await session.execute(stmt)
         await session.commit()
@@ -2734,15 +2735,12 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
     """获取所有正在运行的任务状态缓存，用于服务重启后的任务恢复"""
-    # 查找状态为"运行中"的任务历史记录，并获取对应的状态缓存
-    # 使用标准 SQLAlchemy JOIN 语法，兼容 MySQL 和 PostgreSQL
-    # 使用数据库列名直接JOIN，避免字符集冲突
-    # TaskStateCache.taskId -> task_id列，TaskHistory.taskId -> id列
+    # 使用CAST强制字符集一致，解决字符集冲突问题
     result = await session.execute(
         select(orm_models.TaskStateCache, orm_models.TaskHistory)
         .join(orm_models.TaskHistory,
-              orm_models.TaskStateCache.__table__.c.task_id ==
-              orm_models.TaskHistory.__table__.c.id)
+              func.cast(orm_models.TaskStateCache.taskId, String) ==
+              func.cast(orm_models.TaskHistory.taskId, String))
         .where(orm_models.TaskHistory.status == "运行中")
     )
 
