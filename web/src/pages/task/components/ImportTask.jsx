@@ -69,6 +69,12 @@ export const ImportTask = () => {
     ]
   }, [selectList])
 
+  const canStop = useMemo(() => {
+    return selectList.some(item =>
+      item.status === '运行中' || item.status === '已暂停'
+    ) && !!selectList.length
+  }, [selectList])
+
   const canDelete = useMemo(() => {
     return (
       selectList.every(
@@ -180,6 +186,7 @@ export const ImportTask = () => {
    * 处理中止任务操作
    */
   const handleStop = () => {
+    console.log('handleStop clicked', selectList)
     const hasStuckTasks = selectList.some(task =>
       task.status === 'PAUSED' || task.status === 'RUNNING'
     )
@@ -469,7 +476,7 @@ export const ImportTask = () => {
                 </Tooltip>
                 <Tooltip title="中止任务">
                   <Button
-                    disabled={!canPause}
+                    disabled={!canStop}
                     type="default"
                     shape="circle"
                     icon={<StopOutlined />}
