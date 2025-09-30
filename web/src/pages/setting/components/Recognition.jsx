@@ -47,18 +47,49 @@ export const Recognition = () => {
     <div className="my-6">
       <Card loading={loading} title="自定义识别词配置">
         <div className="mb-4">
-          <div className="text-sm mb-2">
-            <p><strong>支持的格式（参考MoviePilot）：</strong></p>
+          <div className="text-sm mb-2 opacity-75">
+            <p>
+              <strong>支持的格式（参考MoviePilot）：</strong>
+            </p>
             <ul className="list-disc list-inside space-y-1">
-              <li><strong>屏蔽词：</strong> <code>屏蔽词</code></li>
-              <li><strong>简单替换：</strong> <code>被替换词 =&gt; 替换词</code></li>
-              <li><strong>集数偏移：</strong> <code>前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code></li>
-              <li><strong>复合格式：</strong> <code>被替换词 =&gt; 替换词 &amp;&amp; 前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code></li>
-              <li><strong>元数据替换：</strong> <code>错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;</code></li>
-              <li><strong>季度偏移：</strong> <code>TX源某动画第9季 =&gt; &#123;[source=tencent;season_offset=9&gt;13]&#125;</code></li>
+              <li>
+                <strong>屏蔽词：</strong> <code>屏蔽词</code>
+              </li>
+              <li>
+                <strong>简单替换：</strong> <code>被替换词 =&gt; 替换词</code>
+              </li>
+              <li>
+                <strong>集数偏移：</strong>{' '}
+                <code>前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code>
+              </li>
+              <li>
+                <strong>复合格式：</strong>{' '}
+                <code>
+                  被替换词 =&gt; 替换词 &amp;&amp; 前定位词 &lt;&gt; 后定位词
+                  &gt;&gt; 集偏移量
+                </code>
+              </li>
+              <li>
+                <strong>元数据替换：</strong>{' '}
+                <code>
+                  错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;
+                </code>
+              </li>
+              <li>
+                <strong>季度偏移：</strong>{' '}
+                <code>
+                  TX源某动画第9季 =&gt;
+                  &#123;[source=tencent;season_offset=9&gt;13]&#125;
+                </code>
+              </li>
             </ul>
-            <p className="mt-2"><strong>集数偏移支持运算：</strong> EP+1, 2*EP, 2*EP-1 等</p>
-            <p className="mt-1"><strong>季度偏移支持格式：</strong> 9&gt;13(直接映射), 9+4(加法), 9-1(减法), *+4(通用加法), *&gt;1(通用映射)</p>
+            <p className="mt-2">
+              <strong>集数偏移支持运算：</strong> EP+1, 2*EP, 2*EP-1 等
+            </p>
+            <p className="mt-1">
+              <strong>季度偏移支持格式：</strong> 9&gt;13(直接映射), 9+4(加法),
+              9-1(减法), *+4(通用加法), *&gt;1(通用映射)
+            </p>
           </div>
         </div>
         <Input.TextArea
