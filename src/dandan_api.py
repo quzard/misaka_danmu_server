@@ -1303,11 +1303,11 @@ async def get_bangumi_details(
                                                 session, episode_id, provider, media_id,
                                                 i + 1, original_title
                                             )
-                                        logger.info(f"源切换完成: 更新了 {len(actual_episodes)} 个分集的映射关系到 {provider}:{media_id}")
+                                        logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
                                     else:
                                         # 新剧集，获取新的真实animeId
                                         real_anime_id = await _get_next_real_anime_id(session)
-                                        logger.info(f"创建新剧集: '{original_title}' (anime_id={real_anime_id})")
+                                        logger.info(f"新剧集: '{original_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
 
                                     # 存储真实animeId到虚拟animeId的映射关系
                                     mapping_info["real_anime_id"] = real_anime_id
@@ -1331,9 +1331,6 @@ async def get_bangumi_details(
                                             episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else i + 1)
                                         ))
 
-                                    # 添加汇总日志
-                                    if not existing_anime:
-                                        logger.info(f"新剧集创建完成: 存储了 {len(actual_episodes)} 个分集的映射关系到 {provider}:{media_id}")
                                 else:
                                     logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
                             else:
