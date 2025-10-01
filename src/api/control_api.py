@@ -403,14 +403,14 @@ async def auto_import(
 
             # 检查作品是否已存在于库内
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, searchTerm, season, None, title_recognition_manager
+                session, searchTerm, season, None, title_recognition_manager, None  # source参数暂时为None，因为这里是查找现有条目
             )
 
             if existing_anime and episode is not None:
                 # 对于单集导入，检查具体集数是否已存在（需要考虑识别词转换）
                 episode_to_check = episode
                 if title_recognition_manager:
-                    _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(searchTerm, episode, season)
+                    _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(searchTerm, episode, season, None)  # source参数暂时为None
                     if converted_episode is not None:
                         episode_to_check = converted_episode
 

@@ -624,7 +624,7 @@ async def generic_import_task(
                 
                 # 修正：确保在创建时也使用年份进行重复检查
                 anime_id = await crud.get_or_create_anime(
-                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager)
+                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager, provider)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
@@ -689,7 +689,8 @@ async def generic_import_task(
                 imageUrl,
                 local_image_path,
                 year,
-                title_recognition_manager
+                title_recognition_manager,
+                provider
             )
 
             # 更新元数据
@@ -744,7 +745,8 @@ async def generic_import_task(
                 imageUrl,
                 local_image_path,
                 year,
-                title_recognition_manager
+                title_recognition_manager,
+                provider
             )
 
             # 更新元数据
@@ -883,7 +885,7 @@ async def edited_import_task(
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
                 session, request_data.animeTitle, request_data.mediaType,
-                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager
+                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager, request_data.provider
             )
             
             # 更新元数据
@@ -1884,7 +1886,7 @@ async def auto_search_and_import_task(
 
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, main_title, season_for_check, year, title_recognition_manager
+                session, main_title, season_for_check, year, title_recognition_manager, None  # source参数暂时为None，因为这里是查找现有条目
             )
 
         # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查

@@ -1881,7 +1881,7 @@ async def get_comments_for_dandan(
                             title_for_creation = f"{original_title} （来源：{provider}）"
                             anime_id = await crud.get_or_create_anime(
                                 session, title_for_creation, "tv_series", 1,
-                                None, None, None, None
+                                None, None, None, None, provider
                             )
 
                             # 2. 创建源关联
@@ -2080,7 +2080,7 @@ async def get_comments_for_dandan(
                                     # 1. 创建动画条目（使用唯一标题）
                                     anime_id = await crud.get_or_create_anime(
                                         task_session, title_for_creation, media_type, 1,
-                                        image_url, None, year, None
+                                        image_url, None, year, None, current_provider
                                     )
 
                                     # 2. 创建源关联

@@ -173,15 +173,19 @@ class TitleRecognitionManager:
                 # 检查是否包含季度偏移信息
                 if 'season_offset' in metadata_info:
                     logger.debug(f"解析季度偏移规则: {source} => {target}")
-                    # 避免重复的source参数
+                    # 重命名source参数为source_restriction以避免冲突
                     metadata_copy = metadata_info.copy()
-                    metadata_copy['source'] = source
+                    if 'source' in metadata_copy:
+                        metadata_copy['source_restriction'] = metadata_copy.pop('source')
+                    metadata_copy['source'] = source  # 这是匹配的文本
                     return TitleRecognitionRule('season_offset', **metadata_copy)
                 else:
                     logger.debug(f"解析元数据替换规则: {source} => {target}")
-                    # 避免重复的source参数
+                    # 重命名source参数为source_restriction以避免冲突
                     metadata_copy = metadata_info.copy()
-                    metadata_copy['source'] = source
+                    if 'source' in metadata_copy:
+                        metadata_copy['source_restriction'] = metadata_copy.pop('source')
+                    metadata_copy['source'] = source  # 这是匹配的文本
                     return TitleRecognitionRule('metadata_replace', **metadata_copy)
 
         logger.debug(f"解析简单替换规则: {source} => {target}")
@@ -278,6 +282,10 @@ class TitleRecognitionManager:
             elif key in ['type', 's', 'e', 'source', 'season_offset', 'title']:
                 metadata[key] = value
 
+        # 如果没有指定source，默认为'all'
+        if 'source' not in metadata:
+            metadata['source'] = 'all'
+
         return metadata if metadata else None
 
     async def update_recognition_rules(self, content: str) -> List[str]:
@@ -319,7 +327,7 @@ class TitleRecognitionManager:
             logger.error(f"更新识别词规则失败: {e}")
             raise
     
-    async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
+    async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
         应用标题识别词转换 - 参考MoviePilot格式
 
@@ -327,6 +335,7 @@ class TitleRecognitionManager:
             text: 原始文本（标题或文件名）
             episode: 原始集数
             season: 原始季数
+            source: 数据源名称（用于source限制规则）
 
         Returns:
             Tuple[转换后的文本, 转换后的集数, 转换后的季数, 是否发生了转换, 元数据信息]
@@ -362,8 +371,14 @@ class TitleRecognitionManager:
             elif rule.rule_type == 'metadata_replace':
                 # 元数据替换 - 使用完全匹配避免误匹配
                 if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过元数据替换规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
                     processed_text = processed_text.replace(rule.data['source'], '')
-                    metadata_info = {k: v for k, v in rule.data.items() if k != 'source'}
+                    metadata_info = {k: v for k, v in rule.data.items() if k not in ['source', 'source_restriction']}
                     has_changed = True
                     logger.debug(f"应用元数据替换规则: '{rule.data['source']}' => 元数据")
 
@@ -392,6 +407,12 @@ class TitleRecognitionManager:
             elif rule.rule_type == 'season_offset':
                 # 季度偏移规则 - 使用完全匹配避免误匹配
                 if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')  # 避免与rule.data['source']冲突
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过季度偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
                     # 应用标题替换（如果有）
                     if 'title' in rule.data:
                         processed_text = processed_text.replace(rule.data['source'], rule.data['title'])

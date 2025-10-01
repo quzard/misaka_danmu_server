@@ -261,7 +261,7 @@ async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Opti
     row = result.mappings().first()
     return dict(row) if row else None
 
-async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None, title_recognition_manager=None) -> int:
+async def get_or_create_anime(session: AsyncSession, title: str, media_type: str, season: int, image_url: Optional[str], local_image_path: Optional[str], year: Optional[int] = None, title_recognition_manager=None, source: Optional[str] = None) -> int:
     """通过标题、季度和年份查找番剧，如果不存在则创建。如果存在但缺少海报，则更新海报。返回其ID。"""
     logger.info(f"开始处理番剧: 原始标题='{title}', 季数={season}, 年份={year}")
     
@@ -271,7 +271,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     logger.debug(f"调用识别词转换前: title='{original_title}', season={original_season}")
     
     if title_recognition_manager:
-        converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
+        converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season, source)
     else:
         converted_title, converted_episode, converted_season, was_converted, metadata_info = title, None, season, False, None
 
@@ -534,7 +534,7 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
-async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None, title_recognition_manager=None) -> Optional[Dict[str, Any]]:
+async def find_anime_by_title_season_year(session: AsyncSession, title: str, season: int, year: Optional[int] = None, title_recognition_manager=None, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     通过标题、季度和可选的年份查找番剧，返回一个简化的字典或None。
     """
@@ -543,7 +543,7 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     original_season = season
     
     if title_recognition_manager:
-        converted_title, converted_episode, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season)
+        converted_title, converted_episode, converted_season, _, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season, source)
     else:
         converted_title, converted_episode, converted_season, metadata_info = title, None, season, None
     
