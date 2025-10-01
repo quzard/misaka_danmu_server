@@ -100,6 +100,41 @@ async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Option
 
     return None
 
+
+def _format_episode_ranges(episodes: List[int]) -> str:
+    """
+    将分集列表格式化为简洁的范围表示
+    例如: [1,2,3,5,6,7,10] -> "1-3,5-7,10"
+    """
+    if not episodes:
+        return ""
+
+    episodes = sorted(set(episodes))  # 去重并排序
+    ranges = []
+    start = episodes[0]
+    end = episodes[0]
+
+    for i in range(1, len(episodes)):
+        if episodes[i] == end + 1:
+            # 连续的集数
+            end = episodes[i]
+        else:
+            # 不连续，保存当前范围
+            if start == end:
+                ranges.append(str(start))
+            else:
+                ranges.append(f"{start}-{end}")
+            start = episodes[i]
+            end = episodes[i]
+
+    # 保存最后一个范围
+    if start == end:
+        ranges.append(str(start))
+    else:
+        ranges.append(f"{start}-{end}")
+
+    return ",".join(ranges)
+
 async def _find_existing_anime_by_title_and_search(session: AsyncSession, title: str, search_key: str) -> Optional[Dict[str, Any]]:
     """
     根据标题和搜索会话查找已存在的映射记录，返回anime信息
@@ -785,12 +820,29 @@ async def _execute_fallback_search_task(
                     "anime_id": current_virtual_anime_id  # 存储虚拟animeId
                 }
 
+            # 检查库内是否已有相同标题的分集
+            base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
+            type_description = base_type_desc
+
+            try:
+                # 查询库内已有的分集信息
+                from . import crud
+                existing_episodes = await crud.get_episode_indices_by_anime_title(session, result.title)
+                if existing_episodes:
+                    # 将分集列表转换为简洁的范围表示
+                    episode_ranges = _format_episode_ranges(existing_episodes)
+                    type_description = f"{base_type_desc}（库内：{episode_ranges}）"
+            except Exception as e:
+                logger.debug(f"查询库内分集信息失败: {e}")
+                # 如果查询失败，使用原始描述
+                type_description = base_type_desc
+
             search_results.append(DandanSearchAnimeItem(
                 animeId=current_virtual_anime_id,  # 使用虚拟animeId
                 bangumiId=unique_bangumi_id,
                 animeTitle=title_with_source,
                 type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
-                typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
+                typeDescription=type_description,
                 imageUrl=result.imageUrl,
                 startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
                 year=result.year,
@@ -1803,6 +1855,57 @@ async def get_comments_for_dandan(
         if cache_key in comments_fetch_cache:
             logger.info(f"从缓存中获取 episodeId={episodeId} 的弹幕")
             comments_data = comments_fetch_cache[cache_key]
+
+            # 即使从缓存获取，也需要保存到数据库和XML文件
+            if comments_data and str(episodeId).startswith("25") and len(str(episodeId)) >= 13:
+                try:
+                    # 解析episodeId获取anime_id和episode_number
+                    episode_id_str = str(episodeId)
+                    real_anime_id = int(episode_id_str[2:8])
+                    episode_number = int(episode_id_str[10:14])
+
+                    # 获取映射信息
+                    mapping_data = await _get_episode_mapping(session, episodeId)
+                    if mapping_data:
+                        provider = mapping_data["provider"]
+                        media_id = mapping_data["media_id"]
+                        original_title = mapping_data["original_title"]
+
+                        # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
+                        try:
+                            from . import crud
+
+                            # 1. 创建动画条目
+                            anime_id = await crud.get_or_create_anime(
+                                session, original_title, "tv_series", 1,
+                                None, None, None, None
+                            )
+
+                            # 2. 创建源关联
+                            source_id = await crud.link_source_to_anime(
+                                session, anime_id, provider, media_id
+                            )
+
+                            # 3. 创建分集条目
+                            episode_title = f"第{episode_number}集"
+                            episode_db_id = await crud.create_episode_if_not_exists(
+                                session, anime_id, source_id, episode_number,
+                                episode_title, "", f"{provider}_{media_id}_{episode_number}"
+                            )
+
+                            # 4. 保存弹幕到数据库和XML文件
+                            added_count = await crud.save_danmaku_for_episode(
+                                session, episode_db_id, comments_data, config_manager
+                            )
+                            await session.commit()
+
+                            logger.info(f"缓存弹幕已保存到数据库和XML文件: anime_id={anime_id}, source_id={source_id}, episode_db_id={episode_db_id}, 保存了 {added_count} 条弹幕")
+                        except Exception as save_error:
+                            logger.error(f"保存缓存弹幕到数据库失败: {save_error}", exc_info=True)
+                            await session.rollback()
+                except Exception as e:
+                    logger.warning(f"处理缓存弹幕保存时发生错误: {e}")
+                    # 不影响弹幕返回，继续执行
         else:
             # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
             if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
