@@ -440,9 +440,10 @@ async def _import_episodes_iteratively(
                     # 其他分集正常获取
                     await rate_limiter.check(scraper.provider_name)
 
-                    sub_progress_callback = lambda p, msg: progress_callback(
-                        base_progress + int(p * 0.6 / len(episodes)), msg
-                    )
+                    async def sub_progress_callback(p, msg):
+                        await progress_callback(
+                            base_progress + int(p * 0.6 / len(episodes)), msg
+                        )
 
                     comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 

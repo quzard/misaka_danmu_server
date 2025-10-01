@@ -2149,13 +2149,15 @@ async def get_comments_for_dandan(
                                     else:
                                         # 如果不存在，直接创建新的（使用real_anime_id作为指定ID）
                                         from .orm_models import Anime
+                                        from .timezone import get_now
                                         new_anime = Anime(
                                             id=real_anime_id,
                                             title=base_title,
                                             type=media_type,
                                             season=1,
                                             year=year,
-                                            imageUrl=image_url
+                                            imageUrl=image_url,
+                                            createdAt=get_now()
                                         )
                                         task_session.add(new_anime)
                                         await task_session.flush()  # 确保ID可用
