@@ -1,11 +1,22 @@
-# 御坂网络弹幕服务
+<div align="center">
+  <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
+</div>
+
+<h2 align="center">
+御坂网络弹幕服务
+</h2>
+
+<div align="center">
 
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 ![Docker Pulls](https://img.shields.io/docker/pulls/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)
-[![telegram](https://img.shields.io/static/v1?label=telegram&message=misaka_danmu_server&color=blue)](https://t.me/misaka_danmu_server)
+[![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmu_server)
 
+</div>
+
+---
 
 
 一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
