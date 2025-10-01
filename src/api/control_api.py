@@ -417,17 +417,17 @@ async def auto_import(
                 anime_id = existing_anime.get('id')
                 if anime_id:
                     episode_exists = await crud.find_episode_by_index(session, anime_id, episode_to_check)
-                    if episode_exists:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail=f"作品 '{searchTerm}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入"
-                        )
-            elif existing_anime and episode is None:
-                # 对于整季导入，如果作品已存在则拒绝
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"作品 '{searchTerm}' 已在媒体库中，无需重复导入整季"
-                )
+                    # if episode_exists:
+                    #     raise HTTPException(
+                    #         status_code=status.HTTP_409_CONFLICT,
+                    #         detail=f"作品 '{searchTerm}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入"
+                    #     )
+            # elif existing_anime and episode is None:
+            #     # 对于整季导入，如果作品已存在则拒绝
+            #     raise HTTPException(
+            #         status_code=status.HTTP_409_CONFLICT,
+            #         detail=f"作品 '{searchTerm}' 已在媒体库中，无需重复导入整季"
+            #     )
 
     # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
     title_parts = [f"外部API自动导入: {payload.searchTerm} (类型: {payload.searchType})"]

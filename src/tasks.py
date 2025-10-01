@@ -2004,12 +2004,12 @@ async def auto_search_and_import_task(
                     logger.info(f"识别词转换: 原始集数 {payload.episode} -> 转换后集数 {episode_to_check}")
 
             anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
-            if anime_id_to_use:
-                episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
-                if episode_exists:
-                    final_message = f"作品 '{main_title}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入。"
-                    logger.info(f"自动导入任务检测到分集已存在（经识别词转换），任务成功结束: {final_message}")
-                    raise TaskSuccess(final_message)
+            # if anime_id_to_use:
+            #     episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
+            #     if episode_exists:
+            #         final_message = f"作品 '{main_title}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入。"
+            #         logger.info(f"自动导入任务检测到分集已存在（经识别词转换），任务成功结束: {final_message}")
+            #         raise TaskSuccess(final_message)
             # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
         # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
         # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。

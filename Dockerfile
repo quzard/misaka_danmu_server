@@ -36,12 +36,6 @@ RUN pip install --no-cache-dir -r requirements.txt --target .
 # --- Stage 4: Final Python Application ---
 FROM l429609201/su-exec:su-exec
 
-# 可选构建参数（用于在构建时设置默认限流参数）
-ARG RATE_LIMIT_ENABLED
-ARG RATE_LIMIT_GLOBAL
-ARG RATE_LIMIT_PERIOD_SECONDS
-ARG RATE_LIMIT_QUOTAS
-
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -83,12 +77,6 @@ RUN chmod +x /exec.sh /run.sh
 
 # 从 'builder' 阶段复制构建好的前端静态文件
 COPY --from=builder /app/web/dist ./web/dist/
-
-# 将构建参数写入环境，便于运行时读取（未提供则为空）
-ENV RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED}
-ENV RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL}
-ENV RATE_LIMIT_PERIOD_SECONDS=${RATE_LIMIT_PERIOD_SECONDS}
-ENV RATE_LIMIT_QUOTAS=${RATE_LIMIT_QUOTAS}
 
 # 更改工作目录所有权为新创建的用户
 RUN chown -R appuser:appgroup /app

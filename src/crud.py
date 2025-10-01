@@ -1750,7 +1750,7 @@ async def check_duplicate_import(
             if anime_id:
                 episode_exists = await find_episode_by_index(session, anime_id, episode_index)
                 if episode_exists:
-                    return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中，无需重复导入"
+                    return None
                 else:
                     # 数据源存在但集数不存在，允许导入
                     return None
