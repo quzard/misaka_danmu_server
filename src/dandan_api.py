@@ -100,34 +100,57 @@ async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Option
 
     return None
 
-async def _find_existing_anime_by_title(session: AsyncSession, title: str) -> Optional[Dict[str, Any]]:
+
+def _format_episode_ranges(episodes: List[int]) -> str:
     """
-    根据标题查找已存在的映射记录，返回anime信息
+    将分集列表格式化为简洁的范围表示
+    例如: [1,2,3,5,6,7,10] -> "1-3,5-7,10"
     """
-    from . import crud
-    import json
+    if not episodes:
+        return ""
 
-    # 查找所有episode_mapping缓存，寻找相同标题的记录
-    cache_keys = await crud.get_cache_keys_by_pattern(session, f"{EPISODE_MAPPING_CACHE_PREFIX}*")
+    episodes = sorted(set(episodes))  # 去重并排序
+    ranges = []
+    start = episodes[0]
+    end = episodes[0]
 
-    for cache_key in cache_keys:
-        cached_data = await crud.get_cache(session, cache_key)
-        if cached_data:
-            try:
-                # cached_data可能已经是dict类型（从crud.get_cache返回）
-                if isinstance(cached_data, str):
-                    mapping_data = json.loads(cached_data)
-                else:
-                    mapping_data = cached_data
+    for i in range(1, len(episodes)):
+        if episodes[i] == end + 1:
+            # 连续的集数
+            end = episodes[i]
+        else:
+            # 不连续，保存当前范围
+            if start == end:
+                ranges.append(str(start))
+            else:
+                ranges.append(f"{start}-{end}")
+            start = episodes[i]
+            end = episodes[i]
 
-                if mapping_data.get("original_title") == title:
-                    # 从cache_key中提取episodeId，再提取real_anime_id
-                    episode_id = int(cache_key.replace(EPISODE_MAPPING_CACHE_PREFIX, ""))
-                    real_anime_id = int(str(episode_id)[2:8])
+    # 保存最后一个范围
+    if start == end:
+        ranges.append(str(start))
+    else:
+        ranges.append(f"{start}-{end}")
+
+    return ",".join(ranges)
+
+async def _find_existing_anime_by_title_and_search(session: AsyncSession, title: str, search_key: str) -> Optional[Dict[str, Any]]:
+    """
+    根据标题和搜索会话查找已存在的映射记录，返回anime信息
+    只在同一个搜索会话中查找，避免不同搜索的剧集被错误合并
+    """
+    # 只在当前搜索会话的结果中查找
+    if search_key in fallback_search_cache:
+        search_info = fallback_search_cache[search_key]
+        if "bangumi_mapping" in search_info:
+            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                if mapping_info.get("original_title") == title and mapping_info.get("real_anime_id"):
+                    real_anime_id = mapping_info["real_anime_id"]
+                    logger.debug(f"在当前搜索会话中找到已存在的剧集: '{title}' (anime_id={real_anime_id})")
                     return {"animeId": real_anime_id, "title": title}
-            except (json.JSONDecodeError, ValueError, KeyError, TypeError):
-                continue
 
+    logger.debug(f"在当前搜索会话中未找到已存在的剧集: '{title}'")
     return None
 
 async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
@@ -617,11 +640,16 @@ async def _handle_fallback_search(
                     )
                 ])
 
+    # 解析搜索词，提取季度和集数信息
+    from .utils import parse_search_keyword
+    parsed_info = parse_search_keyword(search_term)
+
     # 启动新的搜索任务
     search_info = {
         "status": "running",
         "start_time": time.time(),
         "search_term": search_term,
+        "parsed_info": parsed_info,  # 保存解析信息
         "results": []
     }
     fallback_search_cache[search_key] = search_info
@@ -792,12 +820,29 @@ async def _execute_fallback_search_task(
                     "anime_id": current_virtual_anime_id  # 存储虚拟animeId
                 }
 
+            # 检查库内是否已有相同标题的分集
+            base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
+            type_description = base_type_desc
+
+            try:
+                # 查询库内已有的分集信息
+                from . import crud
+                existing_episodes = await crud.get_episode_indices_by_anime_title(session, result.title)
+                if existing_episodes:
+                    # 将分集列表转换为简洁的范围表示
+                    episode_ranges = _format_episode_ranges(existing_episodes)
+                    type_description = f"{base_type_desc}（库内：{episode_ranges}）"
+            except Exception as e:
+                logger.debug(f"查询库内分集信息失败: {e}")
+                # 如果查询失败，使用原始描述
+                type_description = base_type_desc
+
             search_results.append(DandanSearchAnimeItem(
                 animeId=current_virtual_anime_id,  # 使用虚拟animeId
                 bangumiId=unique_bangumi_id,
                 animeTitle=title_with_source,
                 type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
-                typeDescription=DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他"),
+                typeDescription=type_description,
                 imageUrl=result.imageUrl,
                 startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
                 year=result.year,
@@ -1268,6 +1313,11 @@ async def get_bangumi_details(
                         user_last_bangumi_choice[search_key] = bangumiId
                         logger.info(f"记录用户选择: search_key={search_key}, bangumiId={bangumiId}, provider={provider}")
 
+                        # 获取原始搜索的季度和集数信息
+                        parsed_info = search_info.get("parsed_info", {})
+                        target_season = parsed_info.get("season")
+                        target_episode = parsed_info.get("episode")
+
                         episodes = []
                         try:
                             # 完全按照WebUI的流程：调用scraper获取真实的分集信息
@@ -1289,7 +1339,7 @@ async def get_bangumi_details(
 
                                 if actual_episodes:
                                     # 检查是否已经有相同剧集的记录（源切换检测）
-                                    existing_anime = await _find_existing_anime_by_title(session, original_title)
+                                    existing_anime = await _find_existing_anime_by_title_and_search(session, original_title, search_key)
 
                                     if existing_anime:
                                         # 找到现有剧集，这是源切换行为
@@ -1313,8 +1363,14 @@ async def get_bangumi_details(
                                     mapping_info["real_anime_id"] = real_anime_id
 
                                     for i, episode_data in enumerate(actual_episodes):
+                                        episode_index = i + 1
+
+                                        # 如果指定了特定集数，只返回该集数
+                                        if target_episode is not None and episode_index != target_episode:
+                                            continue
+
                                         # 使用真实animeId生成标准的episodeId
-                                        episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
+                                        episode_id = _generate_episode_id(real_anime_id, 1, episode_index)
                                         # 直接使用原始分集标题
                                         episode_title = episode_data.title
 
@@ -1322,13 +1378,13 @@ async def get_bangumi_details(
                                         if not existing_anime:
                                             await _store_episode_mapping(
                                                 session, episode_id, provider, media_id,
-                                                i + 1, original_title
+                                                episode_index, original_title
                                             )
 
                                         episodes.append(BangumiEpisode(
                                             episodeId=episode_id,
                                             episodeTitle=episode_title,
-                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else i + 1)
+                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else episode_index)
                                         ))
 
                                 else:
@@ -1788,6 +1844,9 @@ async def get_comments_for_dandan(
     模拟 dandanplay 的弹幕获取接口。
     优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
+    # 导入必要的模块
+    from . import crud
+
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
@@ -1799,6 +1858,56 @@ async def get_comments_for_dandan(
         if cache_key in comments_fetch_cache:
             logger.info(f"从缓存中获取 episodeId={episodeId} 的弹幕")
             comments_data = comments_fetch_cache[cache_key]
+
+            # 即使从缓存获取，也需要保存到数据库和XML文件
+            if comments_data and str(episodeId).startswith("25") and len(str(episodeId)) >= 13:
+                try:
+                    # 解析episodeId获取anime_id和episode_number
+                    episode_id_str = str(episodeId)
+                    real_anime_id = int(episode_id_str[2:8])
+                    episode_number = int(episode_id_str[10:14])
+
+                    # 获取映射信息
+                    mapping_data = await _get_episode_mapping(session, episodeId)
+                    if mapping_data:
+                        provider = mapping_data["provider"]
+                        media_id = mapping_data["media_id"]
+                        original_title = mapping_data["original_title"]
+
+                        # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
+                        try:
+
+                            # 1. 创建动画条目
+                            anime_id = await crud.get_or_create_anime(
+                                session, original_title, "tv_series", 1,
+                                None, None, None, None
+                            )
+
+                            # 2. 创建源关联
+                            source_id = await crud.link_source_to_anime(
+                                session, anime_id, provider, media_id
+                            )
+
+                            # 3. 创建分集条目（使用原生标题）
+                            episode_title = f"第{episode_number}集"  # 缓存弹幕时暂时使用默认标题
+                            episode_db_id = await crud.create_episode_if_not_exists(
+                                session, anime_id, source_id, episode_number,
+                                episode_title, "", f"{provider}_{media_id}_{episode_number}"
+                            )
+
+                            # 4. 保存弹幕到数据库和XML文件
+                            added_count = await crud.save_danmaku_for_episode(
+                                session, episode_db_id, comments_data, config_manager
+                            )
+                            await session.commit()
+
+                            logger.info(f"缓存弹幕已保存到数据库和XML文件: anime_id={anime_id}, source_id={source_id}, episode_db_id={episode_db_id}, 保存了 {added_count} 条弹幕")
+                        except Exception as save_error:
+                            logger.error(f"保存缓存弹幕到数据库失败: {save_error}", exc_info=True)
+                            await session.rollback()
+                except Exception as e:
+                    logger.warning(f"处理缓存弹幕保存时发生错误: {e}")
+                    # 不影响弹幕返回，继续执行
         else:
             # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
             if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
@@ -1897,6 +2006,8 @@ async def get_comments_for_dandan(
                             # 获取对应集数的分集信息（episode_number是从1开始的）
                             target_episode = episodes_list[current_episode_number - 1]
                             provider_episode_id = target_episode.episodeId
+                            # 使用原生分集标题
+                            original_episode_title = target_episode.title
 
                             if provider_episode_id:
                                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
@@ -1906,7 +2017,7 @@ async def get_comments_for_dandan(
                                 virtual_episode = ProviderEpisodeInfo(
                                     provider=current_provider,
                                     episodeIndex=current_episode_number,
-                                    title=f"第{current_episode_number}集",
+                                    title=original_episode_title,  # 使用原生标题
                                     episodeId=episode_id_for_comments,
                                     url=""
                                 )
@@ -1970,11 +2081,10 @@ async def get_comments_for_dandan(
                                         task_session, anime_id, current_provider, current_episode_url
                                     )
 
-                                    # 3. 创建分集条目
-                                    episode_title = f"第{current_episode_number}集"
+                                    # 3. 创建分集条目（使用原生标题）
                                     episode_db_id = await crud.create_episode_if_not_exists(
                                         task_session, anime_id, source_id, current_episode_number,
-                                        episode_title, "", provider_episode_id
+                                        original_episode_title, "", provider_episode_id
                                     )
 
                                     # 4. 保存弹幕到数据库
