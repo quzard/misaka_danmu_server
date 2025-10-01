@@ -1900,7 +1900,7 @@ async def get_comments_for_dandan(
 
                                 if existing_anime_by_title:
                                     # 如果已存在，直接使用
-                                    anime_id = existing_anime_by_title['animeId']
+                                    anime_id = existing_anime_by_title['id']
                                     logger.info(f"找到已存在的番剧（按标题）: ID={anime_id}, 标题='{base_title}'")
                                 else:
                                     # 如果不存在，创建新的（使用解析后的纯标题）
@@ -2115,7 +2115,7 @@ async def get_comments_for_dandan(
 
                                     if existing_anime:
                                         # 如果已存在，直接使用
-                                        anime_id = existing_anime['animeId']
+                                        anime_id = existing_anime['id']
                                         logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
                                     else:
                                         # 如果不存在，创建新的（使用解析后的纯标题）
