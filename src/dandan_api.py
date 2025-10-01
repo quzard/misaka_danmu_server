@@ -2147,11 +2147,20 @@ async def get_comments_for_dandan(
                                         anime_id = real_anime_id
                                         logger.info(f"使用已存在的番剧: ID={anime_id}")
                                     else:
-                                        # 如果不存在，创建新的（使用解析后的纯标题）
-                                        anime_id = await crud.get_or_create_anime(
-                                            task_session, base_title, media_type, 1,
-                                            image_url, None, year, None, current_provider
+                                        # 如果不存在，直接创建新的（使用real_anime_id作为指定ID）
+                                        from .orm_models import Anime
+                                        new_anime = Anime(
+                                            id=real_anime_id,
+                                            title=base_title,
+                                            type=media_type,
+                                            season=1,
+                                            year=year,
+                                            imageUrl=image_url
                                         )
+                                        task_session.add(new_anime)
+                                        await task_session.flush()  # 确保ID可用
+                                        anime_id = real_anime_id
+                                        logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
 
                                     # 2. 创建源关联
                                     source_id = await crud.link_source_to_anime(
