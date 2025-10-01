@@ -1221,7 +1221,7 @@ async def delete_episode(episodeId: int, session: AsyncSession = Depends(get_db_
 
 @router.get("/danmaku/{episodeId}", response_model=models.CommentResponse, summary="获取弹幕")
 async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_session)):
-    """获取指定分集的所有弹幕，返回dandanplay兼容格式。"""
+    """获取指定分集的所有弹幕，返回dandanplay兼容格式。用于弹幕调整，不受输出限制控制。"""
     if not await crud.check_episode_exists(session, episodeId): raise HTTPException(404, "分集未找到")
     comments = await crud.fetch_comments(session, episodeId)
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
@@ -1348,14 +1348,14 @@ async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
 
 @router.get("/settings/danmaku-output", response_model=DanmakuOutputSettings, summary="获取弹幕输出设置")
 async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_session)):
-    """获取全局的弹幕输出设置，如数量限制和是否聚合。"""
+    """获取全局的弹幕输出设置，如输出上限和是否聚合。"""
     limit = await crud.get_config_value(session, 'danmaku_output_limit_per_source', '-1')
     enabled = await crud.get_config_value(session, 'danmaku_aggregation_enabled', 'true')
     return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
 
 @router.put("/settings/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
-    """更新全局的弹幕输出设置。"""
+    """更新全局的弹幕输出设置，包括输出上限和聚合选项。"""
     await crud.update_config_value(session, 'danmaku_output_limit_per_source', str(payload.limitPerSource)) # type: ignore
     await crud.update_config_value(session, 'danmaku_aggregation_enabled', str(payload.aggregationEnabled).lower()) # type: ignore
     config_manager.invalidate('danmaku_output_limit_per_source')

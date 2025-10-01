@@ -1,5 +1,6 @@
 import re
-from typing import Any, Dict
+import logging
+from typing import Any, Dict, List
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
@@ -88,3 +89,91 @@ def clean_xml_string(xml_string: str) -> str:
         r'[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]'
     )
     return invalid_xml_char_re.sub('', xml_string)
+
+def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    """
+    按时间段均匀采样弹幕，确保弹幕在整个视频时长中分布均匀
+
+    Args:
+        comments: 原始弹幕列表，每个弹幕包含 'p' 字段（时间,类型,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID）
+        target_count: 目标弹幕数量
+
+    Returns:
+        采样后的弹幕列表
+    """
+    logger = logging.getLogger(__name__)
+
+    if len(comments) <= target_count:
+        return comments
+
+    if target_count <= 0:
+        return []
+
+    # 解析弹幕时间并排序
+    timed_comments = []
+    for comment in comments:
+        try:
+            p_attr = comment.get('p', '')
+            if p_attr:
+                # p属性格式：时间,类型,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID
+                time_str = p_attr.split(',')[0]
+                time_seconds = float(time_str)
+                timed_comments.append((time_seconds, comment))
+        except (ValueError, IndexError):
+            # 如果解析失败，跳过这条弹幕
+            continue
+
+    if not timed_comments:
+        return comments[:target_count]  # 如果没有有效时间，直接截取
+
+    # 按时间排序
+    timed_comments.sort(key=lambda x: x[0])
+
+    # 获取时间范围
+    min_time = timed_comments[0][0]
+    max_time = timed_comments[-1][0]
+
+    if max_time <= min_time:
+        # 如果所有弹幕时间相同，直接均匀采样
+        step = len(timed_comments) // target_count
+        if step <= 1:
+            return [comment for _, comment in timed_comments[:target_count]]
+        else:
+            return [timed_comments[i * step][1] for i in range(target_count)]
+
+    # 计算时间段
+    time_duration = max_time - min_time
+    segment_duration = time_duration / target_count
+
+    sampled_comments = []
+    current_segment = 0
+
+    for time_seconds, comment in timed_comments:
+        # 计算当前弹幕属于哪个时间段
+        segment_index = int((time_seconds - min_time) / segment_duration)
+
+        # 确保不超出范围
+        if segment_index >= target_count:
+            segment_index = target_count - 1
+
+        # 如果这是新的时间段，且我们还没有为这个时间段采样弹幕
+        if segment_index >= current_segment and len(sampled_comments) < target_count:
+            sampled_comments.append(comment)
+            current_segment = segment_index + 1
+
+    # 如果采样不足，从剩余弹幕中补充
+    if len(sampled_comments) < target_count:
+        sampled_times = {comment.get('p', '').split(',')[0] for comment in sampled_comments}
+        remaining_comments = [
+            comment for _, comment in timed_comments
+            if comment.get('p', '').split(',')[0] not in sampled_times
+        ]
+
+        needed = target_count - len(sampled_comments)
+        if remaining_comments:
+            step = max(1, len(remaining_comments) // needed)
+            additional = remaining_comments[::step][:needed]
+            sampled_comments.extend(additional)
+
+    logger.info(f"弹幕均匀采样: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条)")
+    return sampled_comments[:target_count]

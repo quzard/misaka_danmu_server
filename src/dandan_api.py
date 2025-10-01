@@ -2249,16 +2249,17 @@ async def get_comments_for_dandan(
             logger.warning(f"无法获取 episodeId={episodeId} 的弹幕数据")
             return models.CommentResponse(count=0, comments=[])
 
-    # 应用输出数量限制
+    # 应用弹幕输出上限（按时间段均匀采样）
     limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
     try:
         limit = int(limit_str)
     except (ValueError, TypeError):
         limit = -1
 
-    # 应用限制
+    # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
-        comments_data = comments_data[:limit]
+        from .utils import sample_comments_evenly
+        comments_data = sample_comments_evenly(comments_data, limit)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
