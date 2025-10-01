@@ -1,11 +1,22 @@
-# 御坂网络弹幕服务
+<div align="center">
+  <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
+</div>
+
+<h2 align="center">
+御坂网络弹幕服务
+</h2>
+
+<div align="center">
 
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 ![Docker Pulls](https://img.shields.io/docker/pulls/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)
-[![telegram](https://img.shields.io/static/v1?label=telegram&message=misaka_danmu_server&color=blue)](https://t.me/misaka_danmu_server)
+[![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmu_server)
 
+</div>
+
+---
 
 
 一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
@@ -334,6 +345,82 @@ networks:
 - 管理媒体库、数据源和分集。
 - 查看和管理后台任务。
 
+## 🔍 智能搜索与匹配功能
+
+本服务提供两种智能搜索机制，确保您能够获取到所需的弹幕内容：**后备搜索**和**后备匹配**。
+
+### 后备搜索 (Fallback Search)
+
+当本地弹幕库中没有找到匹配的内容时，系统会自动启动**后备搜索**功能，从配置的搜索源中实时搜索弹幕。
+
+**调用接口**: `/search/anime`
+
+#### 触发条件
+
+后备搜索在以下情况下自动触发：
+
+1. **本地库无结果**: 搜索关键词在本地弹幕库中没有找到任何匹配的作品
+2. **指定集数不存在**: 本地库中有该作品，但缺少用户搜索的特定集数（如搜索 `神话 S01E05` 但本地只有前4集）
+3. **启用后备搜索**: 在"搜索源-元信息搜索源"页面中，至少有一个搜索源开启了"强制辅助搜索"选项
+
+#### 搜索语法
+
+后备搜索支持多种精确搜索语法：
+
+**基础搜索**
+```
+神话                    # 搜索所有相关作品
+```
+
+**季度和集数搜索**
+```
+神话 S01               # 搜索第1季的所有集数
+神话 S01E03            # 只搜索第1季第3集
+神话 E05               # 搜索第5集（默认第1季）
+```
+
+#### 搜索结果展示
+
+后备搜索的结果会显示以下信息：
+
+- **作品标题**: 显示为 `作品名 （来源：搜索源）` 格式
+- **类型描述**: 显示作品类型和库内已有集数，如 `TV动画（库内：1,3,5,6-10）`
+- **分集信息**: 使用搜索源的原生分集标题，而非生成的"第X集"
+- **虚拟ID**: 使用900000-999999范围的虚拟ID，选择后转换为真实ID
+
+### 后备匹配 (Fallback Match)
+
+当播放器发送文件名进行弹幕匹配时，如果本地库中没有找到匹配的内容，系统会启动**后备匹配**功能。
+
+**调用接口**: `/match` 
+
+#### 工作原理
+
+1. **文件名解析**: 系统解析播放器发送的文件名，提取作品名称、季数、集数等信息
+2. **本地匹配**: 首先在本地弹幕库中搜索匹配的内容
+3. **TMDB映射**: 如果本地无结果，通过TMDB等元数据源进行二次匹配
+4. **后备匹配**: 如果仍无结果，启动后备匹配任务，从搜索源中查找并导入弹幕
+
+#### 匹配策略
+
+- **精确匹配**: 优先匹配完全相同的作品名称和集数
+- **模糊匹配**: 支持别名、简繁体转换、标点符号差异等
+- **智能识别**: 自动识别常见的文件命名格式（如 `S01E01`、`第01集` 等）
+
+### 使用流程
+
+1. **搜索/匹配**: 在播放器中搜索作品或播放文件
+2. **等待**: 系统显示搜索/匹配进度（0%-95%）
+3. **选择**: 从搜索结果中选择合适的作品和源（仅后备搜索）
+4. **获取**: 系统自动下载并缓存弹幕到本地库
+5. **复用**: 后续相同搜索直接从本地库返回，无需重复下载
+
+### 配置建议
+
+- **启用多个搜索源**: 在"搜索源"页面启用多个不同的搜索源，提高搜索成功率
+- **配置元数据源**: 在"搜索源-元信息搜索源"页面配置TMDB、TVDB等，提升匹配准确性
+- **设置优先级**: 调整搜索源的显示顺序，优先显示质量更好的源
+- **合理使用**: 避免频繁搜索，减少对源站的请求压力
 
 ## 常见问题
 
@@ -385,3 +472,4 @@ networks:
  - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)      
  - [swagger-ui](https://github.com/swagger-api/swagger-ui)
  - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
+ - [MoviePilot](https://github.com/jxxghp/MoviePilot)

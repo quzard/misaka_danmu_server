@@ -123,9 +123,9 @@ export const pauseTask = data => api.post(`/api/ui/tasks/${data.taskId}/pause`)
 export const resumeTask = data =>
   api.post(`/api/ui/tasks/${data.taskId}/resume`)
 /** 删除任务 */
-export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`)
+export const deleteTask = data => api.delete(`/api/ui/tasks/${data.taskId}`, { params: { force: data.force || false } })
 /** 中止任务 */
-export const stopTask = data => api.post(`/api/ui/tasks/${data.taskId}/abort`)
+export const stopTask = data => api.post(`/api/ui/tasks/${data.taskId}/abort`, { force: data.force || false })
 /** 定时任务列表 */
 export const getScheduledTaskList = data =>
   api.get('/api/ui/scheduled-tasks', data)
@@ -217,6 +217,20 @@ export const getCustomDanmakuPath = () =>
 export const setCustomDanmakuPath = data =>
   api.put('/api/ui/config/customDanmakuPath', data)
 
+/** 获取匹配后备Token配置 */
+export const getMatchFallbackTokens = () =>
+  api.get('/api/ui/config/matchFallbackTokens')
+/** 设置匹配后备Token配置 */
+export const setMatchFallbackTokens = data =>
+  api.put('/api/ui/config/matchFallbackTokens', data)
+
+/** 获取后备搜索状态 */
+export const getSearchFallback = () =>
+  api.get('/api/ui/config/searchFallbackEnabled')
+/** 设置后备搜索状态 */
+export const setSearchFallback = data =>
+  api.put('/api/ui/config/searchFallbackEnabled', data)
+
 /** ---------------------------------------------- webhook ----------------------------------------------*/
 /** 获取webhook apikey */
 export const getWebhookApikey = () => api.get('/api/ui/config/webhookApiKey')
@@ -234,13 +248,16 @@ export const getWebhookServices = () => api.get('/api/ui/webhooks/available')
 /** 获取webhook设置 */
 export const getWebhookSettings = () => api.get('/api/ui/settings/webhook')
 /** 设置webhook设置 */
-export const setWebhookSettings = data => api.put('/api/ui/settings/webhook', data)
+export const setWebhookSettings = data =>
+  api.put('/api/ui/settings/webhook', data)
 /** 获取webhook任务列表 */
 export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
 /** 批量删除webhook任务 */
-export const deleteWebhookTasks = data => api.post('/api/ui/webhook-tasks/delete-bulk', data)
+export const deleteWebhookTasks = data =>
+  api.post('/api/ui/webhook-tasks/delete-bulk', data)
 /** 立即执行webhook任务 */
-export const runWebhookTasksNow = data => api.post('/api/ui/webhook-tasks/run-now', data)
+export const runWebhookTasksNow = data =>
+  api.post('/api/ui/webhook-tasks/run-now', data)
 
 /** ---------------------------------------------- Bangumi  ----------------------------------------------*/
 /** 获取bangumi api配置 */
@@ -315,8 +332,7 @@ export const setProviderConfig = (providerName, data) =>
   api.put(`/api/ui/metadata-sources/${providerName}/config`, data)
 /** ---------------------------------------------- 全局过滤设置 ----------------------------------------------  */
 /** 获取全局过滤规则 */
-export const getGlobalFilter = () =>
-  api.get('/api/ui/settings/global-filter')
+export const getGlobalFilter = () => api.get('/api/ui/settings/global-filter')
 /** 更新全局过滤规则 */
 export const setGlobalFilter = data =>
   api.put('/api/ui/settings/global-filter', data)
@@ -462,3 +478,10 @@ export const refreshControlApiKey = () =>
 
 /** apikey 访问日志 */
 export const getControlApiKeyLog = () => api.get('api/ui/external-logs')
+
+/** 识别词管理 */
+export const getRecognition = () =>
+  api.get('/api/ui/settings/title-recognition')
+
+export const setRecognition = data =>
+  api.put('/api/ui/settings/title-recognition', data)

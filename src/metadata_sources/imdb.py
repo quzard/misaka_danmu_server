@@ -110,6 +110,7 @@ class ImdbMetadataSource(BaseMetadataSource):
                 name_en: Optional[str] = None
                 aliases_cn: List[str] = []
 
+                year = None
                 next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
                 if next_data_match:
                     try:
@@ -118,6 +119,14 @@ class ImdbMetadataSource(BaseMetadataSource):
 
                         name_en = main_data.get("titleText", {}).get("text")
                         original_title = main_data.get("originalTitleText", {}).get("text")
+
+                        # 提取年份信息
+                        release_year = main_data.get("releaseYear", {})
+                        if release_year and release_year.get("year"):
+                            try:
+                                year = int(release_year["year"])
+                            except (ValueError, TypeError):
+                                pass
 
                         akas = main_data.get("akas", {})
                         if akas and akas.get("edges"):
@@ -139,6 +148,15 @@ class ImdbMetadataSource(BaseMetadataSource):
                     title_match = re.search(r'<h1.*?><span.*?>(.*?)</span></h1>', html)
                     name_en = title_match.group(1).strip() if title_match else None
 
+                    # 如果年份还没有获取到，尝试正则提取
+                    if not year:
+                        year_match = re.search(r'<span class="sc-.*?">(\d{4})</span>', html)
+                        if year_match:
+                            try:
+                                year = int(year_match.group(1))
+                            except (ValueError, TypeError):
+                                pass
+
                     # 仅在回退模式下使用正则解析别名
                     akas_section_match = re.search(r'<div data-testid="akas".*?>(.*?)</div>', html, re.DOTALL)
                     if akas_section_match:
@@ -152,7 +170,7 @@ class ImdbMetadataSource(BaseMetadataSource):
 
                 return models.MetadataDetailsResponse(
                     id=item_id, imdbId=item_id, title=name_en,
-                    nameEn=name_en,
+                    nameEn=name_en, year=year,
                     aliasesCn=list(dict.fromkeys(filter(None, aliases_cn)))
                 )
         except Exception as e:
@@ -183,25 +201,9 @@ class ImdbMetadataSource(BaseMetadataSource):
         return {alias for alias in local_aliases if alias}
 
     async def check_connectivity(self) -> str:
-        try:
-            # 修正：在创建客户端之前就确定是否使用代理，以避免AttributeError
-            proxy_url = await self.config_manager.get("proxyUrl", "")
-            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
-            async with self._session_factory() as session:
-                metadata_settings = await crud.get_all_metadata_source_settings(session)
-            provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-            use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
-            is_using_proxy = proxy_enabled_globally and use_proxy_for_this_provider and proxy_url
-            if is_using_proxy:
-                self.logger.debug(f"IMDb: 连接性检查将使用代理: {proxy_url}")
-            async with await self._create_client() as client:
-                response = await client.get("https://www.imdb.com", timeout=10.0)
-                if response.status_code == 200:
-                    return "通过代理连接成功" if is_using_proxy else "连接成功"
-                else:
-                    return f"通过代理连接失败 ({response.status_code})" if is_using_proxy else f"连接失败 ({response.status_code})"
-        except Exception as e:
-            return f"连接失败: {e}" # 代理信息已包含在异常中
+        """检查IMDb源配置状态"""
+        # IMDb源不需要特殊配置，只要能正常运行即可
+        return "配置正常 (无需特殊配置)"
 
     async def execute_action(self, action_name: str, payload: Dict, user: models.User) -> Any:
         """IMDb source does not support custom actions."""

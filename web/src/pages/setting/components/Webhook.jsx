@@ -11,6 +11,7 @@ import {
   Space,
   Spin,
   Switch,
+  Tooltip,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import {
@@ -20,7 +21,7 @@ import {
   getWebhookSettings,
   setWebhookSettings,
 } from '../../../apis'
-import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CopyOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons'
 import copy from 'copy-to-clipboard'
 import { useMessage } from '../../../MessageContext'
 
@@ -145,6 +146,12 @@ export const Webhook = () => {
               <Col md={5} xs={12}>
                 <div className='h-full flex items-center gap-2'>
                   <span>启用延时导入</span>
+                  <Tooltip
+                    title="延时导入需要配合定时任务功能使用。启用后，Webhook接收到的通知会先存储到数据库中，等待定时任务在指定时间后执行导入。这样可以避免媒体文件还未完全扫描完成就开始导入弹幕的问题。请确保在【任务管理-定时任务】中启用了Webhook任务处理。"
+                    placement="top"
+                  >
+                    <InfoCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} />
+                  </Tooltip>
                   <Form.Item
                     name="webhookDelayedImportEnabled"
                     valuePropName="checked"

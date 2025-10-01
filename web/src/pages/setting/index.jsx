@@ -7,6 +7,7 @@ import { Douban } from './components/Douban'
 import { TVDB } from './components/TVDB'
 import { Proxy } from './components/Proxy'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Recognition } from './components/Recognition'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
@@ -51,6 +52,11 @@ export const Setting = () => {
           label: 'TVDB配置',
           key: 'tvdb',
           children: <TVDB />,
+        },
+        {
+          label: '识别词配置',
+          key: 'recognition',
+          children: <Recognition />,
         },
       ]}
       onChange={key => {

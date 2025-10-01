@@ -160,6 +160,8 @@ class BilibiliScraper(BaseScraper):
     test_url = "https://api.bilibili.com"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(看|版)?|加更|花絮|预告|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员(专享)?|片花|精华|看点|速看|解读|reaction|影评|解说|吐槽|盘点)(.*?)$"
 
+    rate_limit_quota = -1
+
     # For WBI signing
     _WBI_MIXIN_KEY_CACHE: Dict[str, Any] = {"key": None, "timestamp": 0}
     _WBI_MIXIN_KEY_CACHE_TTL = 3600  # Cache for 1 hour

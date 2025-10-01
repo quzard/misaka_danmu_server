@@ -23,11 +23,12 @@ from .config_manager import ConfigManager
 from .image_utils import download_image
 from .config import settings
 from .scraper_manager import ScraperManager
-from .metadata_manager import MetadataSourceManager 
+from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
 from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
+from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,82 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
         logger.error(f"删除分集任务 (ID: {episodeId}) 失败: {e}", exc_info=True)
         raise
 
+async def _download_episode_comments_concurrent(
+    scraper,
+    episodes: List,
+    rate_limiter: RateLimiter,
+    progress_callback: Callable,
+    first_episode_comments: Optional[List] = None
+) -> List[Tuple[int, Optional[List]]]:
+    """
+    并发下载多个分集的弹幕（用于单集或少量分集的快速下载）
+
+    Returns:
+        List[Tuple[episode_index, comments]]: 分集索引和对应的弹幕列表
+    """
+    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）")
+
+    async def download_single_episode(episode_info):
+        episode_index, episode = episode_info
+        try:
+            # 如果是第一集且已有预获取的弹幕，直接使用
+            if episode_index == 0 and first_episode_comments is not None:
+                logger.info(f"使用预获取的第一集弹幕: {len(first_episode_comments)} 条")
+                return (episode.episodeIndex, first_episode_comments)
+
+            # 检查速率限制
+            await rate_limiter.check(scraper.provider_name)
+
+            # 创建子进度回调（异步版本）
+            async def sub_progress_callback(p, msg):
+                await progress_callback(
+                    30 + int((episode_index + p/100) * 60 / len(episodes)),
+                    f"[线程{episode_index+1}] {msg}"
+                )
+
+            # 下载弹幕
+            comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+
+            # 增加速率限制计数
+            if comments is not None:
+                await rate_limiter.increment(scraper.provider_name)
+                logger.info(f"[并发下载] 分集 '{episode.title}' 获取到 {len(comments)} 条弹幕")
+            else:
+                logger.warning(f"[并发下载] 分集 '{episode.title}' 获取弹幕失败")
+
+            return (episode.episodeIndex, comments)
+
+        except Exception as e:
+            logger.error(f"[并发下载] 分集 '{episode.title}' 下载失败: {e}")
+            return (episode.episodeIndex, None)
+
+    # 使用 asyncio.Semaphore 限制并发数为3
+    semaphore = asyncio.Semaphore(3)
+
+    async def download_with_semaphore(episode_info):
+        async with semaphore:
+            return await download_single_episode(episode_info)
+
+    # 创建所有下载任务
+    download_tasks = [
+        download_with_semaphore((i, episode))
+        for i, episode in enumerate(episodes)
+    ]
+
+    # 并发执行所有下载任务
+    results = await asyncio.gather(*download_tasks, return_exceptions=True)
+
+    # 处理结果，过滤异常
+    valid_results = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"[并发下载] 任务执行异常: {result}")
+            continue
+        valid_results.append(result)
+
+    logger.info(f"并发下载完成，成功下载 {len([r for r in valid_results if r[1] is not None])}/{len(episodes)} 个分集")
+    return valid_results
+
 async def _import_episodes_iteratively(
     session: AsyncSession,
     scraper,
@@ -284,81 +361,42 @@ async def _import_episodes_iteratively(
     anime_id: int,
     source_id: int,
     first_episode_comments: Optional[List] = None,
-    config_manager = None
+    config_manager = None,
+    is_single_episode: bool = False
 ) -> Tuple[int, List[int], int]:
     """
     迭代地导入分集弹幕。
-    
+
     Args:
         first_episode_comments: 第一集预获取的弹幕（可选）
+        is_single_episode: 是否为单集下载模式（启用并发下载）
     """
     total_comments_added = 0
     successful_episodes_indices = []
     failed_episodes_count = 0
 
-    for i, episode in enumerate(episodes):
-        base_progress = 30 + (i * 60 // len(episodes))
-        await progress_callback(base_progress, f"正在处理分集: {episode.title}")
+    # 判断是否使用并发下载模式
+    # 条件：严格的单集模式（只有1集）
+    use_concurrent_download = is_single_episode and len(episodes) == 1
 
-        try:
-            # 如果是第一集且已有预获取的弹幕，直接使用
-            if i == 0 and first_episode_comments is not None:
-                comments = first_episode_comments
-                logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
-            else:
-                # 其他分集正常获取
-                await rate_limiter.check(scraper.provider_name)
-                
-                sub_progress_callback = lambda p, msg: progress_callback(
-                    base_progress + int(p * 0.6 / len(episodes)), msg
-                )
-                
-                comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
-                
-                # 只有在实际进行了网络请求时才增加计数
-                if comments is not None:
-                    await rate_limiter.increment(scraper.provider_name)
+    if use_concurrent_download:
+        # 使用并发下载获取所有弹幕
+        download_results = await _download_episode_comments_concurrent(
+            scraper, episodes, rate_limiter, progress_callback, first_episode_comments
+        )
 
+        # 处理下载结果，写入数据库
+        await progress_callback(90, "正在写入数据库...")
+
+        for episode_index, comments in download_results:
             if comments is not None:
-                episode_db_id = await crud.create_episode_if_not_exists(
-                    session, anime_id, source_id, episode.episodeIndex,
-                    episode.title, episode.url, episode.episodeId
-                )
+                # 找到对应的分集信息
+                episode = next((ep for ep in episodes if ep.episodeIndex == episode_index), None)
+                if episode is None:
+                    logger.error(f"无法找到分集索引 {episode_index} 对应的分集信息")
+                    continue
 
-                # 检查分集是否已有弹幕，如果有则跳过
-                episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                episode_result = await session.execute(episode_stmt)
-                existing_episode = episode_result.scalar_one_or_none()
-                if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                    successful_episodes_indices.append(episode.episodeIndex)
-                else:
-                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                    await session.commit()
-
-                    total_comments_added += added_count
-                    successful_episodes_indices.append(episode.episodeIndex)
-                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
-            else:
-                failed_episodes_count += 1
-                logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
-
-        except RateLimitExceededError as e:
-            # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
-            if e.retry_after_seconds >= 3600:
-                failed_episodes_count += 1
-                logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {str(e)}")
-                continue
-
-            logger.warning(f"分集导入因达到速率限制而暂停: {e}")
-            await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试当前分集
-            try:
-                await rate_limiter.check(scraper.provider_name)
-                comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
-                if comments is not None:
-                    await rate_limiter.increment(scraper.provider_name)
+                try:
                     episode_db_id = await crud.create_episode_if_not_exists(
                         session, anime_id, source_id, episode.episodeIndex,
                         episode.title, episode.url, episode.episodeId
@@ -377,17 +415,110 @@ async def _import_episodes_iteratively(
 
                         total_comments_added += added_count
                         successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                        logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                except Exception as e:
+                    failed_episodes_count += 1
+                    logger.error(f"[并发模式] 分集 '{episode.title}' 写入数据库失败: {e}")
+            else:
+                failed_episodes_count += 1
+                logger.warning(f"[并发模式] 分集索引 {episode_index} 获取弹幕失败。")
+
+        logger.info(f"并发下载模式完成，成功处理 {len(successful_episodes_indices)} 个分集")
+
+    else:
+        # 传统的串行下载模式
+        for i, episode in enumerate(episodes):
+            base_progress = 30 + (i * 60 // len(episodes))
+            await progress_callback(base_progress, f"正在处理分集: {episode.title}")
+
+            try:
+                # 如果是第一集且已有预获取的弹幕，直接使用
+                if i == 0 and first_episode_comments is not None:
+                    comments = first_episode_comments
+                    logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
+                else:
+                    # 其他分集正常获取
+                    await rate_limiter.check(scraper.provider_name)
+
+                    sub_progress_callback = lambda p, msg: progress_callback(
+                        base_progress + int(p * 0.6 / len(episodes)), msg
+                    )
+
+                    comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
+
+                    # 只有在实际进行了网络请求时才增加计数
+                    if comments is not None:
+                        await rate_limiter.increment(scraper.provider_name)
+
+                if comments is not None:
+                    episode_db_id = await crud.create_episode_if_not_exists(
+                        session, anime_id, source_id, episode.episodeIndex,
+                        episode.title, episode.url, episode.episodeId
+                    )
+
+                    # 检查分集是否已有弹幕，如果有则跳过
+                    episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                    episode_result = await session.execute(episode_stmt)
+                    existing_episode = episode_result.scalar_one_or_none()
+                    if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                        successful_episodes_indices.append(episode.episodeIndex)
+                    else:
+                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                        await session.commit()
+
+                        total_comments_added += added_count
+                        successful_episodes_indices.append(episode.episodeIndex)
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
                 else:
                     failed_episodes_count += 1
-                    logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
-            except Exception as retry_e:
+                    logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
+
+            except RateLimitExceededError as e:
+                # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
+                if e.retry_after_seconds >= 3600:
+                    failed_episodes_count += 1
+                    logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {str(e)}")
+                    continue
+
+                logger.warning(f"分集导入因达到速率限制而暂停: {e}")
+                await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
+                await asyncio.sleep(e.retry_after_seconds)
+                # 重试当前分集
+                try:
+                    await rate_limiter.check(scraper.provider_name)
+                    comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
+                    if comments is not None:
+                        await rate_limiter.increment(scraper.provider_name)
+                        episode_db_id = await crud.create_episode_if_not_exists(
+                            session, anime_id, source_id, episode.episodeIndex,
+                            episode.title, episode.url, episode.episodeId
+                        )
+
+                        # 检查分集是否已有弹幕，如果有则跳过
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
+                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                            successful_episodes_indices.append(episode.episodeIndex)
+                        else:
+                            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                            await session.commit()
+
+                            total_comments_added += added_count
+                            successful_episodes_indices.append(episode.episodeIndex)
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                    else:
+                        failed_episodes_count += 1
+                        logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
+                except Exception as retry_e:
+                    failed_episodes_count += 1
+                    logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}")
+            except Exception as e:
                 failed_episodes_count += 1
-                logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}")
-        except Exception as e:
-            failed_episodes_count += 1
-            logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}")
-            continue
+                logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}")
+                continue
 
     return total_comments_added, successful_episodes_indices, failed_episodes_count
 
@@ -444,7 +575,8 @@ async def generic_import_task(
     session: AsyncSession,
     manager: ScraperManager, 
     task_manager: TaskManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -492,7 +624,7 @@ async def generic_import_task(
                 
                 # 修正：确保在创建时也使用年份进行重复检查
                 anime_id = await crud.get_or_create_anime(
-                    session, title_to_use, mediaType, season_to_use, year, imageUrl, local_image_path)
+                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
@@ -556,7 +688,8 @@ async def generic_import_task(
                 season_to_use,
                 imageUrl,
                 local_image_path,
-                year
+                year,
+                title_recognition_manager
             )
 
             # 更新元数据
@@ -610,7 +743,8 @@ async def generic_import_task(
                 season_to_use,
                 imageUrl,
                 local_image_path,
-                year
+                year,
+                title_recognition_manager
             )
 
             # 更新元数据
@@ -647,7 +781,8 @@ async def generic_import_task(
         anime_id=anime_id,
         source_id=source_id,
         first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
-        config_manager=config_manager
+        config_manager=config_manager,
+        is_single_episode=currentEpisodeIndex is not None  # 传递是否为单集下载模式
     )
 
     if not successful_episodes_indices and failed_episodes_count > 0:
@@ -668,7 +803,8 @@ async def edited_import_task(
     config_manager: ConfigManager,
     manager: ScraperManager,
     rate_limiter: RateLimiter,
-    metadata_manager: MetadataSourceManager
+    metadata_manager: MetadataSourceManager,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """后台任务：处理编辑后的导入请求。修改流程：先获取弹幕再创建条目。"""
     scraper = manager.get_scraper(request_data.provider)
@@ -747,7 +883,7 @@ async def edited_import_task(
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
                 session, request_data.animeTitle, request_data.mediaType,
-                request_data.season, request_data.imageUrl, local_image_path, request_data.year
+                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager
             )
             
             # 更新元数据
@@ -901,6 +1037,15 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         provider_name = info["providerName"]
         provider_episode_id = info["providerEpisodeId"]
+
+        # 调试信息：检查获取到的信息
+        logger.info(f"刷新分集 {episodeId}: provider_name='{provider_name}', provider_episode_id='{provider_episode_id}'")
+
+        if not provider_name:
+            raise ValueError(f"分集 {episodeId} 的 provider_name 为空")
+        if not provider_episode_id:
+            raise ValueError(f"分集 {episodeId} 的 provider_episode_id 为空")
+
         scraper = manager.get_scraper(provider_name)
         try:
             await rate_limiter.check(provider_name)
@@ -917,12 +1062,32 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         await progress_callback(30, "正在从源获取新弹幕...")
 
+        # 使用三线程下载模式获取弹幕
+        # 创建一个虚拟的分集对象用于并发下载
+        from .models import ProviderEpisodeInfo
+        virtual_episode = ProviderEpisodeInfo(
+            provider=provider_name,
+            episodeIndex=1,
+            title=f"刷新分集 {episodeId}",
+            episodeId=provider_episode_id,
+            url=""
+        )
+
         async def sub_progress_callback(danmaku_progress: int, danmaku_description: str):
             # 30% for setup, 65% for download, 5% for db write
             current_total_progress = 30 + (danmaku_progress / 100) * 65
             await progress_callback(current_total_progress, danmaku_description)
 
-        all_comments_from_source = await scraper.get_comments(provider_episode_id, progress_callback=sub_progress_callback)
+        # 使用并发下载获取弹幕（三线程模式）
+        download_results = await _download_episode_comments_concurrent(
+            scraper, [virtual_episode], rate_limiter, sub_progress_callback
+        )
+
+        # 提取弹幕数据
+        all_comments_from_source = None
+        if download_results and len(download_results) > 0:
+            _, comments = download_results[0]  # 忽略episode_index
+            all_comments_from_source = comments
 
         if not all_comments_from_source:
             await crud.update_episode_fetch_time(session, episodeId)
@@ -1165,7 +1330,7 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         logger.error(f"集数偏移任务失败: {e}", exc_info=True)
         raise
 
-async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str):
+async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str, title_recognition_manager: TitleRecognitionManager):
     """后台任务：增量刷新一个已存在的番剧。"""
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
@@ -1186,7 +1351,8 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
             session=session,
             manager=manager, # type: ignore
             task_manager=task_manager,
-            rate_limiter=rate_limiter)
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager)
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
         raise
@@ -1286,7 +1452,8 @@ async def run_webhook_tasks_directly_manual(
     scraper_manager: "ScraperManager",
     metadata_manager: "MetadataSourceManager",
     config_manager: "ConfigManager",
-    rate_limiter: "RateLimiter"
+    rate_limiter: "RateLimiter",
+    title_recognition_manager: "TitleRecognitionManager"
 ) -> int:
     """直接获取并执行指定的待处理Webhook任务。"""
     if not task_ids:
@@ -1303,7 +1470,8 @@ async def run_webhook_tasks_directly_manual(
                 webhookSource=task.webhookSource, progress_callback=cb, session=s,
                 manager=scraper_manager, task_manager=task_manager,
                 metadata_manager=metadata_manager, config_manager=config_manager,
-                rate_limiter=rate_limiter, **payload
+                rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager,
+                **payload
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
             await session.delete(task)
@@ -1349,7 +1517,8 @@ async def webhook_search_and_dispatch_task(
     task_manager: TaskManager, # type: ignore
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager: TitleRecognitionManager
 ):
     """
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
@@ -1362,7 +1531,7 @@ async def webhook_search_and_dispatch_task(
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season)
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager)
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
@@ -1383,7 +1552,8 @@ async def webhook_search_and_dispatch_task(
                     config_manager=config_manager, metadata_manager=metadata_manager,
                     bangumiId=bangumiId, rate_limiter=rate_limiter,
                     progress_callback=cb, session=session, manager=manager,
-                    task_manager=task_manager
+                    task_manager=task_manager,
+                    title_recognition_manager=title_recognition_manager
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
                 raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
@@ -1404,10 +1574,15 @@ async def webhook_search_and_dispatch_task(
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 3. 从所有源的返回结果中，根据类型、季度和标题相似度选择最佳匹配项
+        # 3. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
         valid_candidates = []
+        # 调试：打印排序前的概览（来自上游增强日志）
+        logger.info(f"Webhook 任务: 排序前的媒体类型: media_type='{mediaType}', 共 {len(all_search_results)} 个结果")
+        for i, item in enumerate(all_search_results[:5]):
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
+
         for item in all_search_results:
             if item.type == 'tv_series' and _is_movie_by_title(item.title):
                 item.type = 'movie'
@@ -1429,9 +1604,30 @@ async def webhook_search_and_dispatch_task(
                     continue
                 valid_candidates.append(item)
 
-        if not valid_candidates:
-            raise ValueError(f"未找到 '{animeTitle}' 的精确匹配项。")
+        # 使用与WebUI相同的智能排序逻辑
+        all_search_results.sort(
+            key=lambda item: (
+                # 1. 季度匹配（仅对电视剧）
+                1 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
+                # 2. 最高优先级：完全匹配的标题
+                1000 if item.title.strip() == animeTitle.strip() else 0,
+                # 3. 次高优先级：去除标点符号后的完全匹配
+                500 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
+                # 4. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                200 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
+                # 5. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                100 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
+                # 6. 第五优先级：一般相似度，但必须达到85%以上才考虑
+                fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
+                # 7. 惩罚标题长度差异大的结果
+                -abs(len(item.title) - len(animeTitle)),
+                # 8. 最后考虑源优先级
+                -provider_order.get(item.provider, 999)
+            ),
+            reverse=True # 按得分从高到低排序
+        )
 
+        # 使用基于相似度与源优先级的排序，并输出调试信息
         valid_candidates.sort(
             key=lambda item: (
                 fuzz.token_set_ratio(animeTitle, item.title),
@@ -1440,7 +1636,7 @@ async def webhook_search_and_dispatch_task(
             reverse=True
         )
         logger.info(f"Webhook 任务: 找到 {len(valid_candidates)} 个有效候选源，按相似度排序如下:")
-        for idx, candidate in enumerate(valid_candidates, start=1):
+        for idx, candidate in enumerate(valid_candidates[:5], start=1):
             score = fuzz.token_set_ratio(animeTitle, candidate.title)
             logger.info(f"  {idx}. {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}) [Score: {score}]")
 
@@ -1544,26 +1740,15 @@ async def webhook_search_and_dispatch_task(
         unique_key = "-".join(unique_key_parts)
 
         task_coro = lambda session, cb: generic_import_task(
-            provider=best_match.provider,
-            mediaId=best_match.mediaId,
-            year=year,
-            animeTitle=best_match.title,
-            mediaType=best_match.type,
-            season=season,
-            currentEpisodeIndex=currentEpisodeIndex,
-            imageUrl=best_match.imageUrl,
-            config_manager=config_manager,
+            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
+            animeTitle=best_match.title, mediaType=best_match.type,
+            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex,
+            imageUrl=best_match.imageUrl, config_manager=config_manager,
             metadata_manager=metadata_manager,
-            doubanId=doubanId,
-            tmdbId=tmdbId,
-            imdbId=imdbId,
-            tvdbId=tvdbId,
-            bangumiId=bangumiId,
-            rate_limiter=rate_limiter,
-            progress_callback=cb,
-            session=session,
-            manager=manager,
-            task_manager=task_manager
+            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId,
+            rate_limiter=rate_limiter, progress_callback=cb, session=session,
+            manager=manager, task_manager=task_manager,
+            title_recognition_manager=title_recognition_manager
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
         raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
@@ -1673,6 +1858,7 @@ async def auto_search_and_import_task(
     task_manager: TaskManager,
     rate_limiter: Optional[RateLimiter] = None,
     api_key: Optional[str] = None,
+    title_recognition_manager: Optional[TitleRecognitionManager] = None,
 ):
     """
     全自动搜索并导入的核心任务逻辑。
@@ -1688,7 +1874,7 @@ async def auto_search_and_import_task(
         search_term = payload.searchTerm
         media_type = payload.mediaType
         season = payload.season
-        
+
         await progress_callback(5, f"开始处理，类型: {search_type}, 搜索词: {search_term}")
 
         aliases = {search_term}
@@ -1790,36 +1976,41 @@ async def auto_search_and_import_task(
                 if existing_anime:
                     logger.info(f"精确查找到已存在的作品: {existing_anime['title']} (ID: {existing_anime['id']})")
 
+        # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
+        # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
+        season_for_check = season
+        if media_type == 'movie' and season_for_check is None:
+            season_for_check = 1
+            logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
+
         # 步骤 2b: 如果精确查找未找到，则回退到按标题和季度查找
         if not existing_anime:
             if search_type != "keyword":
                 logger.info("通过元数据ID+季度未找到匹配项，回退到按标题查找...")
-            
-            # 关键修复：如果媒体类型是电影，则强制使用季度1进行查找，
-            # 以匹配UI导入时为电影设置的默认季度，从而防止重复导入。
-            season_for_check = season
-            # 关键修复：如果这是一个单集导入请求，我们现在需要检查该分集是否已存在。
-            # if payload.episode is not None:
-            #     if existing_anime:
-            #         anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
-            #         if anime_id_to_use:
-            #             episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, payload.episode)
-            #             if episode_exists:
-            #                 final_message = f"作品 '{main_title}' 的第 {payload.episode} 集已在媒体库中，无需重复导入。"
-            #                 logger.info(f"自动导入任务检测到分集已存在，任务成功结束: {final_message}")
-            #                 raise TaskSuccess(final_message)
-                # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
-                # 因此，这里我们不再提前返回，而是让代码继续往下走。
-
-
-            if media_type == 'movie' and season_for_check is None:
-                season_for_check = 1
-                logger.info(f"检测到媒体类型为电影，将使用默认季度 {season_for_check} 进行重复检查。")
 
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, main_title, season_for_check, year
+                session, main_title, season_for_check, year, title_recognition_manager
             )
+
+        # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查
+        if payload.episode is not None and existing_anime:
+            # 应用识别词转换获取实际的集数
+            episode_to_check = payload.episode
+            if title_recognition_manager:
+                _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(main_title, payload.episode, season_for_check)
+                if converted_episode is not None:
+                    episode_to_check = converted_episode
+                    logger.info(f"识别词转换: 原始集数 {payload.episode} -> 转换后集数 {episode_to_check}")
+
+            anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
+            if anime_id_to_use:
+                episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
+                if episode_exists:
+                    final_message = f"作品 '{main_title}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入。"
+                    logger.info(f"自动导入任务检测到分集已存在（经识别词转换），任务成功结束: {final_message}")
+                    raise TaskSuccess(final_message)
+            # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
         # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
         # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。
         # if payload.episode is None and existing_anime:
@@ -2013,7 +2204,8 @@ async def auto_search_and_import_task(
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
-            rate_limiter=rate_limiter
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。

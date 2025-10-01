@@ -30,21 +30,40 @@ print(f"当前环境: {settings.environment}")
 
 logger = logging.getLogger(__name__)
 
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+def _ensure_required_directories():
+    """确保应用运行所需的目录存在"""
+    if _is_docker_environment():
+        required_dirs = [
+            Path("/app/config/image"),
+        ]
+    else:
+        required_dirs = [
+            Path("config/image"),
+        ]
+
+    for dir_path in required_dirs:
+        try:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"确保目录存在: {dir_path}")
+        except (OSError, PermissionError) as e:
+            logger.warning(f"无法创建目录 {dir_path}: {e}")
+
 def _get_default_danmaku_path_template():
     """根据运行环境获取默认弹幕路径模板"""
-    def _is_docker_environment():
-        """检测是否在Docker容器中运行"""
-        import os
-        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-        if Path("/.dockerenv").exists():
-            return True
-        # 方法2: 检查环境变量
-        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-            return True
-        # 方法3: 检查当前工作目录是否为 /app
-        if Path.cwd() == Path("/app"):
-            return True
-        return False
 
     if _is_docker_environment():
         return '/app/config/danmaku/${animeId}/${episodeId}'
@@ -63,6 +82,9 @@ async def lifespan(app: FastAPI):
 
     # 新增：在日志系统初始化后立即打印版本号
     logger.info(f"Misaka Danmaku API 版本 {APP_VERSION} 正在启动...")
+
+    # 创建必要的目录
+    _ensure_required_directories()
 
     # init_db_tables 现在处理数据库创建、引擎和会话工厂的创建
     await init_db_tables(app)
@@ -119,6 +141,7 @@ async def lifespan(app: FastAPI):
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
         'matchFallbackEnabled': ('false', '是否为匹配接口启用后备机制（自动搜索导入）。'),
         'matchFallbackBlacklist': ('', '匹配后备黑名单，使用正则表达式过滤文件名，匹配的文件不会触发后备机制。'),
+        'searchFallbackEnabled': ('false', '是否为搜索接口启用后备搜索功能（全网搜索）。'),
         # 弹幕文件路径配置
         'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
         'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
@@ -153,8 +176,13 @@ async def lifespan(app: FastAPI):
 
 
     app.state.task_manager = TaskManager(session_factory, app.state.config_manager)
+    
+    # 初始化识别词管理器
+    from .title_recognition import TitleRecognitionManager
+    app.state.title_recognition_manager = TitleRecognitionManager(session_factory)
+    
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager
     )
     app.state.task_manager.start()
     await create_initial_admin_user(app)
@@ -174,7 +202,7 @@ async def lifespan(app: FastAPI):
             logger.info("已创建系统内置定时任务：重置API Token每日调用次数")
     
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager)
+    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager)
     await app.state.scheduler_manager.start()
     
     # --- 前端服务 (生产环境) ---
