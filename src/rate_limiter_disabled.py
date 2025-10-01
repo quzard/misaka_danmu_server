@@ -26,7 +26,7 @@ class RateLimiter:
         self._scraper_manager = scraper_manager
 
         self.enabled = False
-        self.global_limit = 0
+        self.global_limit = 10000
         self.global_period_seconds = 3600
         self._verification_failed = False
 
