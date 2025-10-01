@@ -17,3 +17,4 @@ generate_rate_limit_config.py
 src/security_core.py
 src/rate_limiter.py
 .vscode/settings.json
+generator_config.ini
