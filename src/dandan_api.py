@@ -1844,6 +1844,9 @@ async def get_comments_for_dandan(
     模拟 dandanplay 的弹幕获取接口。
     优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
+    # 导入必要的模块
+    from . import crud
+
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
@@ -1873,7 +1876,6 @@ async def get_comments_for_dandan(
 
                         # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
                         try:
-                            from . import crud
 
                             # 1. 创建动画条目
                             anime_id = await crud.get_or_create_anime(
