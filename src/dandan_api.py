@@ -1356,9 +1356,30 @@ async def get_bangumi_details(
                                             )
                                         logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
                                     else:
-                                        # 新剧集，获取新的真实animeId
-                                        real_anime_id = await _get_next_real_anime_id(session)
-                                        logger.info(f"新剧集: '{original_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+                                        # 新剧集，先检查数据库中是否已有相同标题的条目
+                                        from .utils import parse_search_keyword
+                                        from .orm_models import Anime
+
+                                        # 解析搜索关键词，提取纯标题
+                                        parsed_info = parse_search_keyword(original_title)
+                                        base_title = parsed_info["title"]
+
+                                        # 直接在数据库中查找相同标题的条目
+                                        stmt = select(Anime.id, Anime.title).where(
+                                            Anime.title == base_title,
+                                            Anime.season == 1
+                                        )
+                                        result = await session.execute(stmt)
+                                        existing_db_anime = result.mappings().first()
+
+                                        if existing_db_anime:
+                                            # 如果数据库中已有相同标题的条目，使用已有的anime_id
+                                            real_anime_id = existing_db_anime['id']
+                                            logger.info(f"复用已存在的番剧: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+                                        else:
+                                            # 如果数据库中没有，获取新的真实animeId
+                                            real_anime_id = await _get_next_real_anime_id(session)
+                                            logger.info(f"新剧集: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
 
                                     # 存储真实animeId到虚拟animeId的映射关系
                                     mapping_info["real_anime_id"] = real_anime_id
@@ -1893,14 +1914,17 @@ async def get_comments_for_dandan(
                                 parsed_info = parse_search_keyword(original_title)
                                 base_title = parsed_info["title"]
 
-                                # 检查数据库中是否已有相同标题的条目
-                                existing_anime_by_title = await crud.find_anime_by_title_season_year(
-                                    session, base_title, 1, None, None, provider
+                                # 直接在数据库中查找相同标题的条目（不应用标题识别转换）
+                                stmt = select(Anime.id, Anime.title).where(
+                                    Anime.title == base_title,
+                                    Anime.season == 1
                                 )
+                                result = await session.execute(stmt)
+                                existing_anime_row = result.mappings().first()
 
-                                if existing_anime_by_title:
+                                if existing_anime_row:
                                     # 如果已存在，直接使用
-                                    anime_id = existing_anime_by_title['id']
+                                    anime_id = existing_anime_row['id']
                                     logger.info(f"找到已存在的番剧（按标题）: ID={anime_id}, 标题='{base_title}'")
                                 else:
                                     # 如果不存在，创建新的（使用解析后的纯标题）
@@ -2108,15 +2132,20 @@ async def get_comments_for_dandan(
                                     parsed_info = parse_search_keyword(search_term)
                                     base_title = parsed_info["title"]
 
-                                    # 检查数据库中是否已有相同标题、年份、源的条目
-                                    existing_anime = await crud.find_anime_by_title_season_year(
-                                        task_session, base_title, 1, year, None, current_provider
-                                    )
+                                    # 由于我们在分配real_anime_id时已经检查了数据库，这里直接使用real_anime_id
+                                    # 如果数据库中已有相同标题的条目，real_anime_id就是已有的anime_id
+                                    # 如果没有，real_anime_id就是新分配的anime_id，需要创建条目
 
-                                    if existing_anime:
+                                    # 检查数据库中是否已有这个anime_id的条目
+                                    from .orm_models import Anime
+                                    stmt = select(Anime.id).where(Anime.id == real_anime_id)
+                                    result = await task_session.execute(stmt)
+                                    existing_anime_row = result.scalar_one_or_none()
+
+                                    if existing_anime_row:
                                         # 如果已存在，直接使用
-                                        anime_id = existing_anime['id']
-                                        logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+                                        anime_id = real_anime_id
+                                        logger.info(f"使用已存在的番剧: ID={anime_id}")
                                     else:
                                         # 如果不存在，创建新的（使用解析后的纯标题）
                                         anime_id = await crud.get_or_create_anime(
