@@ -1887,10 +1887,9 @@ async def get_comments_for_dandan(
                                 anime_id = existing_anime.id
                                 logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
                             else:
-                                # 如果不存在，创建新的（使用包含源信息的唯一标题）
-                                title_for_creation = f"{original_title} （来源：{provider}）"
+                                # 如果不存在，创建新的（使用原始标题，不包含源信息）
                                 anime_id = await crud.get_or_create_anime(
-                                    session, title_for_creation, "tv_series", 1,
+                                    session, original_title, "tv_series", 1,
                                     None, None, None, None, provider
                                 )
 
@@ -2087,15 +2086,12 @@ async def get_comments_for_dandan(
                                                         break
                                                 break
 
-                                    # 使用搜索关键词创建唯一标题，确保不同搜索不会被合并
+                                    # 使用搜索关键词作为数据库标题，确保不同搜索不会被合并
                                     base_title = search_keyword or original_title
-                                    title_for_creation = f"{base_title} （来源：{current_provider}）"
-                                    if year:
-                                        title_for_creation = f"{base_title} （来源：{current_provider} 年份：{year}）"
 
-                                    # 1. 创建动画条目（使用唯一标题）
+                                    # 1. 创建动画条目（使用原始标题，不包含源信息）
                                     anime_id = await crud.get_or_create_anime(
-                                        task_session, title_for_creation, media_type, 1,
+                                        task_session, base_title, media_type, 1,
                                         image_url, None, year, None, current_provider
                                     )
 
