@@ -134,7 +134,7 @@ def _format_episode_ranges(episodes: List[int]) -> str:
         ranges.append(f"{start}-{end}")
 
     return ",".join(ranges)
- 
+  
 async def _find_existing_anime_by_bangumi_id(session: AsyncSession, bangumi_id: str, search_key: str) -> Optional[Dict[str, Any]]:
     """
     根据bangumiId和搜索会话查找已存在的映射记录，返回anime信息
