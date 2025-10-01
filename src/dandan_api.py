@@ -1877,9 +1877,10 @@ async def get_comments_for_dandan(
                         # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
                         try:
 
-                            # 1. 创建动画条目
+                            # 1. 创建动画条目（使用包含源信息的唯一标题）
+                            title_for_creation = f"{original_title} （来源：{provider}）"
                             anime_id = await crud.get_or_create_anime(
-                                session, original_title, "tv_series", 1,
+                                session, title_for_creation, "tv_series", 1,
                                 None, None, None, None
                             )
 
@@ -2058,6 +2059,7 @@ async def get_comments_for_dandan(
                                     # 从搜索缓存中获取更多信息（年份、海报等）
                                     year = None
                                     image_url = None
+                                    unique_title_with_source = None
                                     for search_key, search_info in fallback_search_cache.items():
                                         if search_key in user_last_bangumi_choice:
                                             last_bangumi_id = user_last_bangumi_choice[search_key]
@@ -2067,12 +2069,17 @@ async def get_comments_for_dandan(
                                                     if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
                                                         year = getattr(result, 'year', None)
                                                         image_url = getattr(result, 'imageUrl', None)
+                                                        # 使用搜索结果中的完整标题（包含源信息）
+                                                        unique_title_with_source = getattr(result, 'animeTitle', None)
                                                         break
                                                 break
 
-                                    # 1. 创建动画条目（参考 WebUI 逻辑）
+                                    # 使用包含源信息的唯一标题，确保不同搜索结果不会被合并
+                                    title_for_creation = unique_title_with_source or f"{original_title} （来源：{current_provider}）"
+
+                                    # 1. 创建动画条目（使用唯一标题）
                                     anime_id = await crud.get_or_create_anime(
-                                        task_session, original_title, media_type, 1,
+                                        task_session, title_for_creation, media_type, 1,
                                         image_url, None, year, None
                                     )
 
