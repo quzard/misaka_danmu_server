@@ -1874,15 +1874,25 @@ async def get_comments_for_dandan(
                         media_id = mapping_data["media_id"]
                         original_title = mapping_data["original_title"]
 
-                        # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
+                        # 复用现有的保存逻辑：查找或创建动画条目、源关联、分集条目，然后保存弹幕
                         try:
+                            # 1. 首先尝试根据real_anime_id查找已存在的anime记录
+                            from .orm_models import Anime
+                            existing_anime_stmt = select(Anime).where(Anime.id == real_anime_id)
+                            existing_anime_result = await session.execute(existing_anime_stmt)
+                            existing_anime = existing_anime_result.scalar_one_or_none()
 
-                            # 1. 创建动画条目（使用包含源信息的唯一标题）
-                            title_for_creation = f"{original_title} （来源：{provider}）"
-                            anime_id = await crud.get_or_create_anime(
-                                session, title_for_creation, "tv_series", 1,
-                                None, None, None, None, provider
-                            )
+                            if existing_anime:
+                                # 如果已存在，直接使用
+                                anime_id = existing_anime.id
+                                logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
+                            else:
+                                # 如果不存在，创建新的（使用包含源信息的唯一标题）
+                                title_for_creation = f"{original_title} （来源：{provider}）"
+                                anime_id = await crud.get_or_create_anime(
+                                    session, title_for_creation, "tv_series", 1,
+                                    None, None, None, None, provider
+                                )
 
                             # 2. 创建源关联
                             source_id = await crud.link_source_to_anime(
@@ -2024,7 +2034,7 @@ async def get_comments_for_dandan(
                                 )
 
                                 # 使用并发下载获取弹幕（三线程模式）
-                                async def dummy_progress_callback(_, __):
+                                async def dummy_progress_callback(_, _unused):
                                     pass  # 空的异步进度回调，忽略所有参数
 
                                 download_results = await tasks._download_episode_comments_concurrent(
@@ -2056,26 +2066,32 @@ async def get_comments_for_dandan(
                                     original_title = mapping_info.get("original_title", "未知标题")
                                     media_type = mapping_info.get("type", "movie")
 
-                                    # 从搜索缓存中获取更多信息（年份、海报等）
+                                    # 从搜索缓存中获取更多信息（年份、海报等）和搜索关键词
                                     year = None
                                     image_url = None
-                                    unique_title_with_source = None
+                                    search_keyword = None
                                     for search_key, search_info in fallback_search_cache.items():
                                         if search_key in user_last_bangumi_choice:
                                             last_bangumi_id = user_last_bangumi_choice[search_key]
                                             if last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                # 获取搜索关键词（从search_key中提取）
+                                                if search_key.startswith("search_"):
+                                                    # 从fallback_search_cache中获取原始搜索词
+                                                    search_keyword = search_info.get("search_term")
+
                                                 for result in search_info.get("results", []):
                                                     # result 是 DandanSearchAnimeItem 对象，使用属性访问
                                                     if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
                                                         year = getattr(result, 'year', None)
                                                         image_url = getattr(result, 'imageUrl', None)
-                                                        # 使用搜索结果中的完整标题（包含源信息）
-                                                        unique_title_with_source = getattr(result, 'animeTitle', None)
                                                         break
                                                 break
 
-                                    # 使用包含源信息的唯一标题，确保不同搜索结果不会被合并
-                                    title_for_creation = unique_title_with_source or f"{original_title} （来源：{current_provider}）"
+                                    # 使用搜索关键词创建唯一标题，确保不同搜索不会被合并
+                                    base_title = search_keyword or original_title
+                                    title_for_creation = f"{base_title} （来源：{current_provider}）"
+                                    if year:
+                                        title_for_creation = f"{base_title} （来源：{current_provider} 年份：{year}）"
 
                                     # 1. 创建动画条目（使用唯一标题）
                                     anime_id = await crud.get_or_create_anime(
