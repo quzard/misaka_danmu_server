@@ -2,6 +2,7 @@ import uvicorn
 import asyncio
 import secrets
 import httpx
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, status
@@ -23,7 +24,8 @@ from .scheduler import SchedulerManager
 from .config import settings
 from . import crud, security, orm_models  # 添加 orm_models 导入
 from .log_manager import setup_logging
-from .rate_limiter import RateLimiter
+from .rate_limiter import RateLimiter  # 默认（可能为 .so 实现）
+from .rate_limiter_disabled import RateLimiter as DisabledRateLimiter  # 可选的无操作实现
 from ._version import APP_VERSION
 
 print(f"当前环境: {settings.environment}")
@@ -169,7 +171,13 @@ async def lifespan(app: FastAPI):
     await app.state.metadata_manager.initialize()
 
     # 5. 初始化其他依赖于上述管理器的组件
-    app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
+    # 支持通过环境变量关闭限速：DISABLE_RATE_LIMITER=true/1/yes
+    disable_rl = os.getenv("DISABLE_RATE_LIMITER", "").lower() in ("1", "true", "yes", "on")
+    if disable_rl:
+        logger.info("RateLimiter 已禁用（使用 DisabledRateLimiter）。设置 DISABLE_RATE_LIMITER=false 可恢复限速。")
+        app.state.rate_limiter = DisabledRateLimiter(session_factory, app.state.scraper_manager)
+    else:
+        app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
 
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
