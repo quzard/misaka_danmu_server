@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from opencc import OpenCC
 from thefuzz import fuzz
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
@@ -135,22 +135,24 @@ def _format_episode_ranges(episodes: List[int]) -> str:
 
     return ",".join(ranges)
 
-async def _find_existing_anime_by_title_and_search(session: AsyncSession, title: str, search_key: str) -> Optional[Dict[str, Any]]:
+async def _find_existing_anime_by_bangumi_id(session: AsyncSession, bangumi_id: str, search_key: str) -> Optional[Dict[str, Any]]:
     """
-    根据标题和搜索会话查找已存在的映射记录，返回anime信息
-    只在同一个搜索会话中查找，避免不同搜索的剧集被错误合并
+    根据bangumiId和搜索会话查找已存在的映射记录，返回anime信息
+    使用bangumiId确保精确匹配，避免不同搜索结果被错误合并
     """
     # 只在当前搜索会话的结果中查找
     if search_key in fallback_search_cache:
         search_info = fallback_search_cache[search_key]
         if "bangumi_mapping" in search_info:
-            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                if mapping_info.get("original_title") == title and mapping_info.get("real_anime_id"):
+            if bangumi_id in search_info["bangumi_mapping"]:
+                mapping_info = search_info["bangumi_mapping"][bangumi_id]
+                if mapping_info.get("real_anime_id"):
                     real_anime_id = mapping_info["real_anime_id"]
-                    logger.debug(f"在当前搜索会话中找到已存在的剧集: '{title}' (anime_id={real_anime_id})")
+                    title = mapping_info.get("original_title", "未知")
+                    logger.debug(f"在当前搜索会话中找到已存在的剧集: bangumiId={bangumi_id}, title='{title}' (anime_id={real_anime_id})")
                     return {"animeId": real_anime_id, "title": title}
 
-    logger.debug(f"在当前搜索会话中未找到已存在的剧集: '{title}'")
+    logger.debug(f"在当前搜索会话中未找到已存在的剧集: bangumiId={bangumi_id}")
     return None
 
 async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
@@ -255,7 +257,6 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
     获取下一个真实的animeId（当前最大animeId + 1）
     用于实际的episodeId生成
     """
-    from sqlalchemy import func
     from . import orm_models
 
     # 查询当前最大的animeId
@@ -1339,7 +1340,7 @@ async def get_bangumi_details(
 
                                 if actual_episodes:
                                     # 检查是否已经有相同剧集的记录（源切换检测）
-                                    existing_anime = await _find_existing_anime_by_title_and_search(session, original_title, search_key)
+                                    existing_anime = await _find_existing_anime_by_bangumi_id(session, bangumiId, search_key)
 
                                     if existing_anime:
                                         # 找到现有剧集，这是源切换行为
@@ -1887,11 +1888,26 @@ async def get_comments_for_dandan(
                                 anime_id = existing_anime.id
                                 logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
                             else:
-                                # 如果不存在，创建新的（使用原始标题，不包含源信息）
-                                anime_id = await crud.get_or_create_anime(
-                                    session, original_title, "tv_series", 1,
-                                    None, None, None, None, provider
+                                # 如果不存在，解析标题并检查数据库中是否已有相同条目
+                                from .utils import parse_search_keyword
+                                parsed_info = parse_search_keyword(original_title)
+                                base_title = parsed_info["title"]
+
+                                # 检查数据库中是否已有相同标题的条目
+                                existing_anime_by_title = await crud.find_anime_by_title_season_year(
+                                    session, base_title, 1, None, None, provider
                                 )
+
+                                if existing_anime_by_title:
+                                    # 如果已存在，直接使用
+                                    anime_id = existing_anime_by_title['animeId']
+                                    logger.info(f"找到已存在的番剧（按标题）: ID={anime_id}, 标题='{base_title}'")
+                                else:
+                                    # 如果不存在，创建新的（使用解析后的纯标题）
+                                    anime_id = await crud.get_or_create_anime(
+                                        session, base_title, "tv_series", 1,
+                                        None, None, None, None, provider
+                                    )
 
                             # 2. 创建源关联
                             source_id = await crud.link_source_to_anime(
@@ -2086,14 +2102,27 @@ async def get_comments_for_dandan(
                                                         break
                                                 break
 
-                                    # 使用搜索关键词作为数据库标题，确保不同搜索不会被合并
-                                    base_title = search_keyword or original_title
+                                    # 解析搜索关键词，提取纯标题（如"天才基本法 S01E13" -> "天才基本法"）
+                                    from .utils import parse_search_keyword
+                                    search_term = search_keyword or original_title
+                                    parsed_info = parse_search_keyword(search_term)
+                                    base_title = parsed_info["title"]
 
-                                    # 1. 创建动画条目（使用原始标题，不包含源信息）
-                                    anime_id = await crud.get_or_create_anime(
-                                        task_session, base_title, media_type, 1,
-                                        image_url, None, year, None, current_provider
+                                    # 检查数据库中是否已有相同标题、年份、源的条目
+                                    existing_anime = await crud.find_anime_by_title_season_year(
+                                        task_session, base_title, 1, year, None, current_provider
                                     )
+
+                                    if existing_anime:
+                                        # 如果已存在，直接使用
+                                        anime_id = existing_anime['animeId']
+                                        logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+                                    else:
+                                        # 如果不存在，创建新的（使用解析后的纯标题）
+                                        anime_id = await crud.get_or_create_anime(
+                                            task_session, base_title, media_type, 1,
+                                            image_url, None, year, None, current_provider
+                                        )
 
                                     # 2. 创建源关联
                                     source_id = await crud.link_source_to_anime(
