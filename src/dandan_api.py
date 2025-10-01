@@ -1886,8 +1886,8 @@ async def get_comments_for_dandan(
                                 session, anime_id, provider, media_id
                             )
 
-                            # 3. 创建分集条目
-                            episode_title = f"第{episode_number}集"
+                            # 3. 创建分集条目（使用原生标题）
+                            episode_title = f"第{episode_number}集"  # 缓存弹幕时暂时使用默认标题
                             episode_db_id = await crud.create_episode_if_not_exists(
                                 session, anime_id, source_id, episode_number,
                                 episode_title, "", f"{provider}_{media_id}_{episode_number}"
@@ -2004,6 +2004,8 @@ async def get_comments_for_dandan(
                             # 获取对应集数的分集信息（episode_number是从1开始的）
                             target_episode = episodes_list[current_episode_number - 1]
                             provider_episode_id = target_episode.episodeId
+                            # 使用原生分集标题
+                            original_episode_title = target_episode.title
 
                             if provider_episode_id:
                                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
@@ -2013,7 +2015,7 @@ async def get_comments_for_dandan(
                                 virtual_episode = ProviderEpisodeInfo(
                                     provider=current_provider,
                                     episodeIndex=current_episode_number,
-                                    title=f"第{current_episode_number}集",
+                                    title=original_episode_title,  # 使用原生标题
                                     episodeId=episode_id_for_comments,
                                     url=""
                                 )
@@ -2077,11 +2079,10 @@ async def get_comments_for_dandan(
                                         task_session, anime_id, current_provider, current_episode_url
                                     )
 
-                                    # 3. 创建分集条目
-                                    episode_title = f"第{current_episode_number}集"
+                                    # 3. 创建分集条目（使用原生标题）
                                     episode_db_id = await crud.create_episode_if_not_exists(
                                         task_session, anime_id, source_id, current_episode_number,
-                                        episode_title, "", provider_episode_id
+                                        original_episode_title, "", provider_episode_id
                                     )
 
                                     # 4. 保存弹幕到数据库
