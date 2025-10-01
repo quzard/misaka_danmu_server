@@ -1,4 +1,5 @@
 import uvicorn
+import os
 import asyncio
 import secrets
 import httpx
@@ -166,10 +167,106 @@ async def lifespan(app: FastAPI):
 
     # 4. 现在可以安全地初始化所有管理器
     await app.state.scraper_manager.initialize()
+
+    # 可选：通过环境变量为特定源设置独立配额，例如
+    # - RATE_LIMIT_QUOTA_BILIBILI=500（单个变量），或
+    # - RATE_LIMIT_QUOTAS="bilibili=500,tencent=200"（批量）
+    try:
+        # 批量语法
+        rlq = os.getenv("RATE_LIMIT_QUOTAS")
+        if rlq:
+            for pair in rlq.split(','):
+                if not pair.strip():
+                    continue
+                if '=' not in pair:
+                    logger.warning(f"忽略非法的配额项: '{pair}'，应为 provider=quota 格式")
+                    continue
+                provider, value = pair.split('=', 1)
+                provider = provider.strip().lower()
+                try:
+                    quota = int(value.strip())
+                except ValueError:
+                    logger.warning(f"忽略非法的配额值: '{pair}'")
+                    continue
+                scraper = app.state.scraper_manager.scrapers.get(provider)
+                if scraper is None:
+                    available = ", ".join(sorted(app.state.scraper_manager.scrapers.keys()))
+                    logger.warning(f"未找到名为 '{provider}' 的搜索源，无法应用配额。可用: {available}")
+                    continue
+                setattr(scraper, 'rate_limit_quota', quota)
+                logger.info(f"已为搜索源 '{provider}' 应用配额: {quota}")
+
+        # 单个环境变量语法（前缀式）
+        for k, v in os.environ.items():
+            if not k.startswith("RATE_LIMIT_QUOTA_"):
+                continue
+            provider = k.removeprefix("RATE_LIMIT_QUOTA_").lower()
+            try:
+                quota = int(v)
+            except ValueError:
+                logger.warning(f"忽略非法的配额值 {k}={v}")
+                continue
+            scraper = app.state.scraper_manager.scrapers.get(provider)
+            if scraper is None:
+                # 记录可用 provider，便于排错
+                available = ", ".join(sorted(app.state.scraper_manager.scrapers.keys()))
+                logger.warning(f"未找到名为 '{provider}' 的搜索源，无法应用配额 {k}。可用: {available}")
+                continue
+            setattr(scraper, 'rate_limit_quota', quota)
+            logger.info(f"已为搜索源 '{provider}' 应用配额: {quota}")
+    except Exception as e:
+        logger.warning(f"应用各源配额失败，将使用默认值。错误: {e}")
     await app.state.metadata_manager.initialize()
 
     # 5. 初始化其他依赖于上述管理器的组件
     app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
+
+    # 可选：通过环境变量在运行时/构建时覆盖全局限流参数
+    # 支持的变量：
+    # - RATE_LIMIT_ENABLED: 'true'/'false'（默认不覆盖）
+    # - RATE_LIMIT_GLOBAL: 整数，<=0 表示不限制
+    # - RATE_LIMIT_PERIOD_SECONDS: 整数，限流周期秒
+    try:
+        # 读取环境覆盖
+        env_enabled = os.getenv("RATE_LIMIT_ENABLED")
+        env_global = os.getenv("RATE_LIMIT_GLOBAL")
+        env_period = os.getenv("RATE_LIMIT_PERIOD_SECONDS")
+
+        def _apply_env_overrides():
+            if env_enabled is not None:
+                app.state.rate_limiter.enabled = str(env_enabled).lower() in ("1", "true", "yes", "on")
+            if env_global is not None and str(env_global).strip() != "":
+                app.state.rate_limiter.global_limit = int(env_global)
+            if env_period is not None and str(env_period).strip() != "":
+                app.state.rate_limiter.global_period_seconds = int(env_period)
+
+        # 首次应用一次
+        _apply_env_overrides()
+        logger.info(
+            f"RateLimiter 覆盖: enabled={app.state.rate_limiter.enabled}, "
+            f"global_limit={app.state.rate_limiter.global_limit}, "
+            f"period={app.state.rate_limiter.global_period_seconds}s"
+        )
+
+        # 加固：为 check/increment 包装一层，确保每次调用前再次应用覆盖，防止上游内部重置
+        if not getattr(app.state.rate_limiter, "_env_patched", False):
+            _orig_check = app.state.rate_limiter.check
+            _orig_increment = app.state.rate_limiter.increment
+
+            async def _wrapped_check(provider_name: str):
+                _apply_env_overrides()
+                return await _orig_check(provider_name)
+
+            async def _wrapped_increment(provider_name: str):
+                _apply_env_overrides()
+                return await _orig_increment(provider_name)
+
+            app.state.rate_limiter.check = _wrapped_check  # type: ignore
+            app.state.rate_limiter.increment = _wrapped_increment  # type: ignore
+            app.state.rate_limiter._env_patched = True  # type: ignore
+            logger.info("RateLimiter 方法已包装，确保环境覆盖在每次调用前生效。")
+    except Exception as e:
+        logger.warning(f"应用 RateLimiter 覆盖参数失败，使用默认值。错误: {e}")
 
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
