@@ -22,32 +22,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 步骤2: 准备 Docker 镜像标签
-      # 根据触发事件（分支或标签）动态生成镜像标签和平台
+      # 步骤2: 准备 Docker 镜像标签和构建参数
+      # 根据触发事件（分支或标签）动态生成镜像标签、平台和SO_TAG
       - name: Prepare Docker tags and platforms
         id: prep
         run: |
           DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
-          # 默认构建所有平台
+          # 默认构建所有平台和SO_TAG
           PLATFORMS="linux/amd64,linux/arm64"
+          SO_TAG="latest"
           # 如果是标签推送 (e.g., v1.2.3)
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             # 从 ref 中提取标签名 (e.g., v1.2.3)
             TAG=${GITHUB_REF#refs/tags/}
             # 设置输出: "user/repo:v1.2.3,user/repo:latest"
             echo "tags=${DOCKER_IMAGE}:${TAG},${DOCKER_IMAGE}:latest" >> $GITHUB_OUTPUT
+            SO_TAG="latest"
           # 如果是推送到 test 分支
           elif [[ $GITHUB_REF == refs/heads/test ]]; then
             # 设置输出: "user/repo:test"
             echo "tags=${DOCKER_IMAGE}:test" >> $GITHUB_OUTPUT
-            # 仅为 test 分支构建 amd64
+            # 仅为 test 分支构建 amd64，并使用test标签的.so文件
             PLATFORMS="linux/amd64"
+            SO_TAG="test"
           # 如果是推送到 beta 分支
           elif [[ $GITHUB_REF == refs/heads/beta ]]; then
             # 设置输出: "user/repo:beta"
             echo "tags=${DOCKER_IMAGE}:beta" >> $GITHUB_OUTPUT
+            SO_TAG="latest"
           fi
           echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
+          echo "so_tag=${SO_TAG}" >> $GITHUB_OUTPUT
 
       # 步骤3: 设置 Docker Buildx
       - name: Set up Docker Buildx
@@ -71,5 +76,7 @@ jobs:
           platforms: ${{ steps.prep.outputs.platforms }}
           push: true
           tags: ${{ steps.prep.outputs.tags }}
+          build-args: |
+            SO_TAG=${{ steps.prep.outputs.so_tag }}
           secrets: |
             XOR_KEY_SECRET=${{ secrets.XOR_KEY_SECRET }}
