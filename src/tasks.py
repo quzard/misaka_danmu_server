@@ -2150,9 +2150,7 @@ async def auto_search_and_import_task(
             key=lambda item: (
                 # 移除媒体类型匹配，因为match接口会将电影识别为TV剧
                 # 1 if item.type == media_type else 0,
-                # 最高优先级：季度匹配（如果用户指定了季度）
-                2000 if season is not None and item.season == season else 0,
-                # 次高优先级：完全匹配的标题
+                # 最高优先级：完全匹配的标题
                 1000 if item.title.strip() == main_title.strip() else 0,
                 # 次高优先级：去除标点符号后的完全匹配
                 500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
