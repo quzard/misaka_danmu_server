@@ -2030,6 +2030,7 @@ async def auto_search_and_import_task(
         
         # 尝试识别词反向查找，获取原始搜索关键词
         search_keywords = [main_title]
+        logger.info(f"识别词管理器状态: {title_recognition_manager is not None}")
         if title_recognition_manager:
             try:
                 # 构造用户搜索的完整标题（包含季度信息）
