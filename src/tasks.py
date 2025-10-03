@@ -2037,8 +2037,9 @@ async def auto_search_and_import_task(
                 user_search_title = f"{main_title} 第{season}季" if season and season > 1 else main_title
                 logger.info(f"尝试识别词反向查找: '{user_search_title}'")
 
-                # 获取所有识别词规则
-                rules = await title_recognition_manager.get_all_rules()
+                # 确保识别词规则已加载
+                await title_recognition_manager._ensure_rules_loaded()
+                rules = title_recognition_manager.recognition_rules
                 original_keywords = []
 
                 for rule in rules:
