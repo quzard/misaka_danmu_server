@@ -2028,9 +2028,59 @@ async def auto_search_and_import_task(
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
         episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
         
-        # 使用主标题进行搜索
-        logger.info(f"将使用主标题 '{main_title}' 进行全网搜索...")
-        all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
+        # 尝试识别词反向查找，获取原始搜索关键词
+        search_keywords = [main_title]
+        if title_recognition_manager:
+            try:
+                # 构造用户搜索的完整标题（包含季度信息）
+                user_search_title = f"{main_title} 第{season}季" if season and season > 1 else main_title
+                logger.info(f"尝试识别词反向查找: '{user_search_title}'")
+
+                # 获取所有识别词规则
+                rules = await title_recognition_manager.get_all_rules()
+                original_keywords = []
+
+                for rule in rules:
+                    if rule.rule_type == 'season_offset' and 'title' in rule.data:
+                        # 检查是否匹配转换后的标题
+                        converted_title = rule.data['title']
+                        if converted_title == main_title:
+                            # 找到匹配的规则，获取原始标题
+                            original_title = rule.data['source']
+
+                            # 如果用户搜索包含季度信息，尝试构造原始搜索词
+                            if season and season > 1:
+                                # 检查季度偏移规则
+                                season_offset = rule.data.get('season_offset', '')
+                                if '>' in season_offset:
+                                    # 解析偏移规则，如 "9>13"
+                                    parts = season_offset.split('>')
+                                    if len(parts) == 2:
+                                        try:
+                                            target_season = int(parts[1].strip())
+                                            source_season = int(parts[0].strip())
+                                            # 如果用户搜索的季度匹配转换后的季度
+                                            if season == target_season:
+                                                original_keyword = f"{original_title} 第{source_season}季"
+                                                original_keywords.append(original_keyword)
+                                                logger.info(f"✓ 识别词反向查找成功: '{user_search_title}' -> '{original_keyword}'")
+                                        except ValueError:
+                                            pass
+
+                            # 也添加不带季度的原始标题
+                            if original_title not in original_keywords:
+                                original_keywords.append(original_title)
+                                logger.info(f"✓ 识别词反向查找: '{main_title}' -> '{original_title}'")
+
+                # 将原始关键词添加到搜索列表
+                search_keywords.extend(original_keywords)
+
+            except Exception as e:
+                logger.warning(f"识别词反向查找失败: {e}")
+
+        # 使用所有搜索关键词进行搜索
+        logger.info(f"将使用搜索关键词 {search_keywords} 进行全网搜索...")
+        all_results = await scraper_manager.search_all(search_keywords, episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
         # 使用所有别名进行过滤
