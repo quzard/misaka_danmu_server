@@ -2028,61 +2028,9 @@ async def auto_search_and_import_task(
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
         episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
         
-        # 尝试识别词反向查找，获取原始搜索关键词
-        search_keywords = [main_title]
-        logger.info(f"识别词管理器状态: {title_recognition_manager is not None}")
-        if title_recognition_manager:
-            try:
-                # 构造用户搜索的完整标题（包含季度信息）
-                user_search_title = f"{main_title} 第{season}季" if season and season > 1 else main_title
-                logger.info(f"尝试识别词反向查找: '{user_search_title}'")
-
-                # 确保识别词规则已加载
-                await title_recognition_manager._ensure_rules_loaded()
-                rules = title_recognition_manager.recognition_rules
-                original_keywords = []
-
-                for rule in rules:
-                    if rule.rule_type == 'season_offset' and 'title' in rule.data:
-                        # 检查是否匹配转换后的标题
-                        converted_title = rule.data['title']
-                        if converted_title == main_title:
-                            # 找到匹配的规则，获取原始标题
-                            original_title = rule.data['source']
-
-                            # 如果用户搜索包含季度信息，尝试构造原始搜索词
-                            if season and season > 1:
-                                # 检查季度偏移规则
-                                season_offset = rule.data.get('season_offset', '')
-                                if '>' in season_offset:
-                                    # 解析偏移规则，如 "9>13"
-                                    parts = season_offset.split('>')
-                                    if len(parts) == 2:
-                                        try:
-                                            target_season = int(parts[1].strip())
-                                            source_season = int(parts[0].strip())
-                                            # 如果用户搜索的季度匹配转换后的季度
-                                            if season == target_season:
-                                                original_keyword = f"{original_title} 第{source_season}季"
-                                                original_keywords.append(original_keyword)
-                                                logger.info(f"✓ 识别词反向查找成功: '{user_search_title}' -> '{original_keyword}'")
-                                        except ValueError:
-                                            pass
-
-                            # 也添加不带季度的原始标题
-                            if original_title not in original_keywords:
-                                original_keywords.append(original_title)
-                                logger.info(f"✓ 识别词反向查找: '{main_title}' -> '{original_title}'")
-
-                # 将原始关键词添加到搜索列表
-                search_keywords.extend(original_keywords)
-
-            except Exception as e:
-                logger.warning(f"识别词反向查找失败: {e}")
-
-        # 使用所有搜索关键词进行搜索
-        logger.info(f"将使用搜索关键词 {search_keywords} 进行全网搜索...")
-        all_results = await scraper_manager.search_all(search_keywords, episode_info=episode_info)
+        # 使用WebUI相同的搜索逻辑进行全网搜索
+        logger.info(f"将使用解析后的标题 '{main_title}' 进行全网搜索...")
+        all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
         # 使用所有别名进行过滤
@@ -2119,15 +2067,56 @@ async def auto_search_and_import_task(
 
         # 详细记录保留的结果
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        all_results = filtered_results
+
+        # 添加WebUI的季度过滤逻辑
+        if season and season > 0:
+            original_count = len(all_results)
+            # 当指定季度时，我们只关心电视剧类型
+            filtered_by_type = [item for item in all_results if item.type == 'tv_series']
+
+            # 然后在电视剧类型中，我们按季度号过滤
+            filtered_by_season = []
+            for item in filtered_by_type:
+                # 使用模型中已解析好的 season 字段进行比较
+                if item.season == season:
+                    filtered_by_season.append(item)
+
+            logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。")
+            all_results = filtered_by_season
+
         if filtered_results:
             logger.info("保留的结果列表:")
-            for i, item in enumerate(filtered_results, 1):  # 显示所有结果
+            for i, item in enumerate(all_results, 1):  # 显示所有结果
                 logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type}, Season: {item.season})")
-            logger.info(f"总共 {len(filtered_results)} 个结果")
-        all_results = filtered_results
+            logger.info(f"总共 {len(all_results)} 个结果")
 
         if not all_results:
             raise ValueError("全网搜索未找到任何结果。")
+
+        # 添加搜索结果映射逻辑：将搜索结果标题映射为识别词目标标题
+        await progress_callback(50, "正在应用识别词映射...")
+        if title_recognition_manager:
+            try:
+                await title_recognition_manager._ensure_rules_loaded()
+                rules = title_recognition_manager.recognition_rules
+
+                for item in all_results:
+                    # 尝试将搜索结果的标题映射为识别词中的目标标题
+                    for rule in rules:
+                        if rule.rule_type == 'season_offset' and 'title' in rule.data and 'source' in rule.data:
+                            source_title = rule.data['source']
+                            target_title = rule.data['title']
+
+                            # 检查搜索结果是否匹配识别词的源标题
+                            if source_title in item.title or item.title in source_title:
+                                logger.info(f"映射搜索结果: '{item.title}' -> '{target_title}'")
+                                # 将搜索结果的标题映射为目标标题，但保留原始的provider等信息
+                                item.title = target_title
+                                break
+
+            except Exception as e:
+                logger.warning(f"搜索结果映射失败: {e}")
 
         # 4. 选择最佳源
         ordered_settings = await crud.get_all_scraper_settings(session)
@@ -2145,23 +2134,14 @@ async def auto_search_and_import_task(
         for i, item in enumerate(all_results[:5]):
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
+        # 简化排序逻辑：由于已经有季度过滤和标题映射，主要按源优先级排序
         all_results.sort(
             key=lambda item: (
-                # 移除媒体类型匹配，因为match接口会将电影识别为TV剧
-                # 1 if item.type == media_type else 0,
-                # 最高优先级：完全匹配的标题
+                # 优先级1：完全匹配的标题
                 1000 if item.title.strip() == main_title.strip() else 0,
-                # 次高优先级：去除标点符号后的完全匹配
-                500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
-                # 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
-                200 if (fuzz.token_sort_ratio(main_title, item.title) > 98 and abs(len(item.title) - len(main_title)) <= 10) else 0,
-                # 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
-                100 if (fuzz.token_sort_ratio(main_title, item.title) > 95 and abs(len(item.title) - len(main_title)) <= 20) else 0,
-                # 第五优先级：一般相似度，但必须达到85%以上才考虑
-                fuzz.token_set_ratio(main_title, item.title) if fuzz.token_set_ratio(main_title, item.title) >= 85 else 0,
-                # 惩罚标题长度差异大的结果
-                -abs(len(item.title) - len(main_title)),
-                # 最后考虑源优先级
+                # 优先级2：标题相似度
+                fuzz.token_set_ratio(main_title, item.title),
+                # 优先级3：源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
@@ -2173,36 +2153,14 @@ async def auto_search_and_import_task(
             title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
             similarity = fuzz.token_set_ratio(main_title, item.title)
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
-        # 并行评估前3个最佳匹配项
-        max_candidates = min(3, len(all_results))  # 最多评估3个候选项
-        min_similarity_threshold = 75  # 最低相似度阈值
+        # 简化候选项选择：直接选择第一个结果（已经过季度过滤和排序）
+        if not all_results:
+            raise ValueError("没有找到合适的搜索结果")
 
-        # 同时计算前3个候选项的相似度
-        candidates_with_similarity = []
-        for i in range(max_candidates):
-            candidate = all_results[i]
-            similarity = fuzz.token_set_ratio(main_title, candidate.title)
-            candidates_with_similarity.append({
-                'candidate': candidate,
-                'similarity': similarity,
-                'rank': i + 1
-            })
-            logger.info(f"候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+        best_match = all_results[0]
+        similarity = fuzz.token_set_ratio(main_title, best_match.title)
 
-        # 按优先级选择：优先选择排名最高且符合阈值的候选项
-        best_match = None
-        for item in candidates_with_similarity:  # 已经按排名顺序
-            if item['similarity'] >= min_similarity_threshold:
-                best_match = item['candidate']
-                logger.info(f"自动导入：选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {item['similarity']}%)")
-                break
-            else:
-                logger.debug(f"候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
-
-        if best_match is None:
-            logger.warning(f"经过并行评估 {max_candidates} 个候选项，未找到相似度达到 {min_similarity_threshold}% 的匹配项，跳过自动导入。")
-            logger.info("匹配后备任务完成，但未找到足够相似的匹配项进行自动导入。")
-            return  # 直接返回，不抛出异常
+        logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
