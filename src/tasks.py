@@ -2134,6 +2134,8 @@ async def auto_search_and_import_task(
                             # 检查搜索结果是否匹配识别词的源标题
                             if source_title in item.title or item.title in source_title:
                                 logger.info(f"映射搜索结果: '{item.title}' -> '{target_title}'")
+                                # 保存原始标题用于识别词匹配
+                                item.original_title = item.title
                                 # 将搜索结果的标题映射为目标标题，但保留原始的provider等信息
                                 item.title = target_title
                                 break
@@ -2181,9 +2183,14 @@ async def auto_search_and_import_task(
             raise ValueError("没有找到合适的搜索结果")
 
         best_match = all_results[0]
+
+        # 保存原始搜索结果标题（用于识别词匹配）
+        original_search_title = getattr(best_match, 'original_title', None) or best_match.title
+
         similarity = fuzz.token_set_ratio(main_title, best_match.title)
 
         logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
+        logger.info(f"原始搜索结果标题: '{original_search_title}' (用于识别词匹配)")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
@@ -2202,7 +2209,7 @@ async def auto_search_and_import_task(
         unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
-            animeTitle=best_match.title, mediaType=best_match.type, season=season, year=best_match.year,
+            animeTitle=original_search_title, mediaType=best_match.type, season=season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
