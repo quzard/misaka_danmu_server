@@ -2034,22 +2034,21 @@ async def auto_search_and_import_task(
         # 使用元数据源获取别名（与WebUI相同的逻辑）
         if metadata_manager:
             try:
-                # 从数据库获取admin用户（与WebUI相同的方式）
-                from src.database import get_session
+                # 从数据库获取admin用户（使用传入的session）
+                admin_user = await crud.get_user_by_username(session, "admin")
+                if admin_user:
+                    user_model = models.User.model_validate(admin_user)
 
-                async with get_session() as db_session:
-                    admin_user = await crud.get_user_by_username(db_session, "admin")
-                    if admin_user:
-                        user_model = models.User.model_validate(admin_user)
+                    logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
 
-                        # 调用正确的方法
-                        supplemental_aliases, _ = await metadata_manager.search_supplemental_sources(main_title, user_model)
-                        aliases.update(supplemental_aliases)
+                    # 调用正确的方法
+                    supplemental_aliases, _ = await metadata_manager.search_supplemental_sources(main_title, user_model)
+                    aliases.update(supplemental_aliases)
 
-                        logger.info(f"元数据源辅助搜索完成，最终别名集大小: {len(aliases)}")
-                        logger.info(f"用于过滤的别名列表: {list(aliases)}")
-                    else:
-                        logger.warning("未找到admin用户，跳过元数据源辅助搜索")
+                    logger.info(f"所有辅助搜索完成，最终别名集大小: {len(aliases)}")
+                    logger.info(f"用于过滤的别名列表: {list(aliases)}")
+                else:
+                    logger.warning("未找到admin用户，跳过元数据源辅助搜索")
             except Exception as e:
                 logger.warning(f"元数据源辅助搜索失败: {e}")
 
