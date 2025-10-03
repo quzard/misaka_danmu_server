@@ -2121,10 +2121,9 @@ async def auto_search_and_import_task(
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
         if filtered_results:
             logger.info("保留的结果列表:")
-            for i, item in enumerate(filtered_results[:20], 1):  # 最多显示前20个
+            for i, item in enumerate(filtered_results, 1):  # 显示所有结果
                 logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type}, Season: {item.season})")
-            if len(filtered_results) > 20:
-                logger.info(f"  ... 还有 {len(filtered_results) - 20} 个结果未显示")
+            logger.info(f"总共 {len(filtered_results)} 个结果")
         all_results = filtered_results
 
         if not all_results:
