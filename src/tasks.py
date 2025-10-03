@@ -2028,7 +2028,24 @@ async def auto_search_and_import_task(
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
         episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
         
-        # 使用WebUI相同的搜索逻辑进行全网搜索
+        # 使用WebUI相同的搜索逻辑：先获取元数据源别名，再进行全网搜索
+        await progress_callback(30, "正在获取元数据源别名...")
+
+        # 使用元数据源获取别名（与WebUI相同的逻辑）
+        if metadata_manager:
+            try:
+                metadata_results = await metadata_manager.search_all_sources(main_title)
+                for _, results in metadata_results.items():
+                    for result in results:
+                        if hasattr(result, 'title') and result.title:
+                            aliases.add(result.title)
+                        if hasattr(result, 'aliases') and result.aliases:
+                            aliases.update(result.aliases)
+                logger.info(f"元数据源辅助搜索完成，最终别名集大小: {len(aliases)}")
+                logger.info(f"用于过滤的别名列表: {list(aliases)}")
+            except Exception as e:
+                logger.warning(f"元数据源辅助搜索失败: {e}")
+
         logger.info(f"将使用解析后的标题 '{main_title}' 进行全网搜索...")
         all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
