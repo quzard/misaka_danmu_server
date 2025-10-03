@@ -406,7 +406,10 @@ class TitleRecognitionManager:
 
             elif rule.rule_type == 'season_offset':
                 # 季度偏移规则 - 使用完全匹配避免误匹配
+                logger.debug(f"检查季度偏移规则匹配: 文本='{processed_text}' vs 规则='{rule.data['source']}'")
                 if self._exact_match(processed_text, rule.data['source']):
+                    logger.info(f"✓ 季度偏移规则匹配成功: '{processed_text}' 匹配 '{rule.data['source']}'")
+
                     # 检查source限制（如果规则指定了source）
                     rule_source = rule.data.get('source_restriction')  # 避免与rule.data['source']冲突
                     if rule_source and rule_source != 'all' and source and rule_source != source:
@@ -414,17 +417,23 @@ class TitleRecognitionManager:
                         continue
 
                     # 应用标题替换（如果有）
+                    old_text = processed_text
                     if 'title' in rule.data:
                         processed_text = processed_text.replace(rule.data['source'], rule.data['title'])
+                        logger.info(f"✓ 标题替换: '{old_text}' -> '{processed_text}'")
                     else:
                         processed_text = processed_text.replace(rule.data['source'], '').strip()
+                        logger.info(f"✓ 标题清理: '{old_text}' -> '{processed_text}'")
 
                     # 应用季度偏移
+                    old_season = processed_season
                     new_season = self._apply_season_offset(processed_season, rule.data['season_offset'])
                     if new_season != processed_season:
                         processed_season = new_season
                         has_changed = True
-                        logger.debug(f"应用季度偏移规则: '{rule.data['source']}' 季度 {processed_season} => {new_season}")
+                        logger.info(f"✓ 季度偏移: {old_season} -> {new_season} (规则: {rule.data['season_offset']})")
+                else:
+                    logger.debug(f"○ 季度偏移规则不匹配: '{processed_text}' 不匹配 '{rule.data['source']}'")
 
         return processed_text, processed_episode, processed_season, has_changed, metadata_info
 
