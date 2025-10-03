@@ -2171,7 +2171,7 @@ async def auto_search_and_import_task(
         unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
-            animeTitle=best_match.title, mediaType=best_match.type, season=best_match.season, year=best_match.year,
+            animeTitle=best_match.title, mediaType=best_match.type, season=season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
@@ -2200,7 +2200,7 @@ async def auto_search_and_import_task(
             "mediaId": best_match.mediaId,
             "animeTitle": best_match.title,
             "mediaType": best_match.type,
-            "season": best_match.season,
+            "season": season,  # 使用用户请求的季度，而不是搜索结果的季度
             "year": best_match.year,
             "currentEpisodeIndex": payload.episode,
             "imageUrl": image_url,
