@@ -2119,6 +2119,8 @@ async def auto_search_and_import_task(
 
         # 添加搜索结果映射逻辑：将搜索结果标题映射为识别词目标标题
         await progress_callback(50, "正在应用识别词映射...")
+        original_titles = {}  # 保存原始标题的字典，key为item的id或唯一标识
+
         if title_recognition_manager:
             try:
                 await title_recognition_manager._ensure_rules_loaded()
@@ -2135,7 +2137,8 @@ async def auto_search_and_import_task(
                             if source_title in item.title or item.title in source_title:
                                 logger.info(f"映射搜索结果: '{item.title}' -> '{target_title}'")
                                 # 保存原始标题用于识别词匹配
-                                item.original_title = item.title
+                                item_key = f"{item.provider}_{item.mediaId}"
+                                original_titles[item_key] = item.title
                                 # 将搜索结果的标题映射为目标标题，但保留原始的provider等信息
                                 item.title = target_title
                                 break
@@ -2184,8 +2187,9 @@ async def auto_search_and_import_task(
 
         best_match = all_results[0]
 
-        # 保存原始搜索结果标题（用于识别词匹配）
-        original_search_title = getattr(best_match, 'original_title', None) or best_match.title
+        # 获取原始搜索结果标题（用于识别词匹配）
+        item_key = f"{best_match.provider}_{best_match.mediaId}"
+        original_search_title = original_titles.get(item_key, best_match.title)
 
         similarity = fuzz.token_set_ratio(main_title, best_match.title)
 
