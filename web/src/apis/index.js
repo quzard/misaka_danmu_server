@@ -485,3 +485,9 @@ export const getRecognition = () =>
 
 export const setRecognition = data =>
   api.put('/api/ui/settings/title-recognition', data)
+
+/** 获取TMDB反查配置 */
+export const getTmdbReverseLookupConfig = () => api.get('/api/ui/config/tmdbReverseLookup')
+
+/** 保存TMDB反查配置 */
+export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tmdbReverseLookup', JSON.stringify(data))

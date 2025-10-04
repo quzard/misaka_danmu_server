@@ -2,6 +2,7 @@ import { Tabs } from 'antd'
 import { ApiKey } from './components/ApiKey'
 import { ApiDoc } from './components/ApiDoc'
 import { ApiLogs } from './components/ApiLogs'
+import { TmdbReverseLookup } from './components/TmdbReverseLookup'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 export const Control = () => {
@@ -17,6 +18,11 @@ export const Control = () => {
           label: 'API密钥',
           key: 'apikey',
           children: <ApiKey />,
+        },
+        {
+          label: '设置',
+          key: 'tmdbReverseLookup',
+          children: <TmdbReverseLookup />,
         },
         {
           label: 'API访问日志',

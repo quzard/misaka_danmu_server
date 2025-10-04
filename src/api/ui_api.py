@@ -1817,6 +1817,52 @@ async def regenerate_external_api_key(
     logger.info(f"用户 '{current_user.username}' 重新生成了外部 API Key。")
     return {"key": "externalApiKey", "value": new_key}
 
+# --- TMDB反查配置 ---
+
+class TmdbReverseLookupConfig(BaseModel):
+    enabled: bool
+    sources: List[str]  # 启用反查的源列表，如 ['imdb', 'tvdb', 'douban', 'bangumi']
+
+@router.get("/config/tmdbReverseLookup", response_model=TmdbReverseLookupConfig, summary="获取TMDB反查配置")
+async def get_tmdb_reverse_lookup_config(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取TMDB反查配置"""
+    enabled = await crud.get_config_value(session, "tmdbReverseLookupEnabled", "false")
+    sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb"]')
+
+    try:
+        sources = json.loads(sources_json)
+    except:
+        sources = ["imdb", "tvdb"]  # 默认值
+
+    return TmdbReverseLookupConfig(
+        enabled=enabled.lower() == "true",
+        sources=sources
+    )
+
+class TmdbReverseLookupConfigRequest(BaseModel):
+    enabled: bool
+    sources: List[str]
+
+@router.post("/config/tmdbReverseLookup", summary="保存TMDB反查配置")
+async def save_tmdb_reverse_lookup_config(
+    request: TmdbReverseLookupConfigRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """保存TMDB反查配置"""
+    await crud.update_config_value(session, "tmdbReverseLookupEnabled", str(request.enabled).lower())
+    await crud.update_config_value(session, "tmdbReverseLookupSources", json.dumps(request.sources))
+
+    config_manager.invalidate("tmdbReverseLookupEnabled")
+    config_manager.invalidate("tmdbReverseLookupSources")
+
+    logger.info(f"用户 '{current_user.username}' 更新了TMDB反查配置: enabled={request.enabled}, sources={request.sources}")
+    return {"message": "TMDB反查配置已保存"}
+
 @router.get("/external-logs", response_model=List[models.ExternalApiLogInfo], summary="获取最新的外部API访问日志")
 async def get_external_api_logs(
     current_user: models.User = Depends(security.get_current_user),
