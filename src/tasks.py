@@ -2155,7 +2155,7 @@ async def auto_search_and_import_task(
             existing_anime = await crud.find_anime_by_title_season_year(
                 session, main_title, season_for_check, year, title_recognition_manager, None  # source参数暂时为None，因为这里是查找现有条目
             )
-
+ 
         # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查
         if payload.episode is not None and existing_anime:
             # 应用识别词转换获取实际的集数
