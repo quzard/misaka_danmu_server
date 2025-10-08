@@ -13,33 +13,39 @@ class PlexWebhook(BaseWebhook):
         self.logger.info(f"Plex Webhook: 收到请求")
         self.logger.info(f"Headers: {dict(request.headers)}")
 
-        # 处理器现在负责解析请求体。
-        # 支持Plex原生webhook和Tautulli webhook两种格式
-        try:
-            payload = await request.json()
-        except Exception:
-            self.logger.error("Plex Webhook: 无法解析请求体为JSON。")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
+        content_type = request.headers.get("content-type", "")
 
-        # 记录完整的webhook请求内容
-        self.logger.info(f"Plex Webhook完整请求: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+        # 根据Content-Type判断请求格式
+        if "multipart/form-data" in content_type:
+            # Plex原生webhook - multipart/form-data格式
+            self.logger.info("检测到Plex原生webhook格式 (multipart/form-data)")
+            try:
+                form_data = await request.form()
+                payload = dict(form_data)
+                self.logger.info(f"Plex原生Webhook表单数据: {payload}")
+                await self._handle_plex_native(payload, webhook_source)
+            except Exception as e:
+                self.logger.error(f"Plex原生Webhook: 无法解析multipart/form-data: {e}")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析multipart/form-data")
 
-        # 区分Plex原生webhook和Tautulli webhook
-        if self._is_plex_native_webhook(payload):
-            self.logger.info("检测到Plex原生webhook格式")
-            await self._handle_plex_native(payload, webhook_source)
-        elif self._is_tautulli_webhook(payload):
-            self.logger.info("检测到Tautulli webhook格式")
-            await self._handle_tautulli(payload, webhook_source)
+        elif "application/json" in content_type:
+            # Tautulli webhook - JSON格式
+            self.logger.info("检测到Tautulli webhook格式 (application/json)")
+            try:
+                payload = await request.json()
+                self.logger.info(f"Tautulli Webhook JSON数据: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+
+                if self._is_tautulli_webhook(payload):
+                    await self._handle_tautulli(payload, webhook_source)
+                else:
+                    self.logger.warning("JSON格式但不是有效的Tautulli webhook格式")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的Tautulli webhook格式")
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Tautulli Webhook: 无法解析JSON: {e}")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析JSON")
         else:
-            self.logger.warning("未知的webhook格式，无法处理")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知的webhook格式")
-
-    def _is_plex_native_webhook(self, payload: Dict) -> bool:
-        """检测是否为Plex原生webhook格式"""
-        # Plex原生webhook特征：包含event、Account、Metadata字段
-        plex_fields = {"event", "Account", "Metadata"}
-        return plex_fields.issubset(payload.keys())
+            self.logger.warning(f"未知的Content-Type: {content_type}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的Content-Type")
 
     def _is_tautulli_webhook(self, payload: Dict) -> bool:
         """检测是否为Tautulli webhook格式"""
@@ -48,27 +54,48 @@ class PlexWebhook(BaseWebhook):
         return tautulli_fields.issubset(payload.keys())
 
     async def _handle_plex_native(self, payload: Dict, webhook_source: str):
-        """处理Plex原生webhook"""
+        """处理Plex原生webhook - multipart/form-data格式"""
+        # Plex原生webhook发送multipart/form-data格式
+        # payload实际上是表单数据，JSON在payload字段中
+
+        # 从表单数据中提取JSON payload
+        json_payload_str = payload.get("payload")
+        if not json_payload_str:
+            self.logger.warning("Plex原生Webhook: 表单数据中缺少 'payload' 字段")
+            return
+
+        try:
+            json_payload = json.loads(json_payload_str)
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Plex原生Webhook: 无法解析payload JSON: {e}")
+            return
+
         # 检查事件类型
-        event = payload.get("event")
+        event = json_payload.get("event")
         if event != "library.new":
             self.logger.info(f"Plex原生Webhook: 忽略非 'library.new' 事件 (事件类型: {event})")
             return
 
         # 获取媒体信息
-        metadata = payload.get("Metadata", {})
+        metadata = json_payload.get("Metadata", {})
         if not metadata:
             self.logger.warning("Plex原生Webhook: 负载中缺少 'Metadata' 信息")
             return
 
-        # 获取媒体类型
-        media_type = metadata.get("type")
-        if media_type not in ["episode", "movie"]:
-            self.logger.info(f"Plex原生Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
+        # 获取媒体类型并映射
+        raw_media_type = metadata.get("type")
+
+        # Plex原生类型映射：show -> episode, movie -> movie
+        if raw_media_type == "show":
+            media_type = "episode"
+        elif raw_media_type == "movie":
+            media_type = "movie"
+        else:
+            self.logger.info(f"Plex原生Webhook: 忽略不支持的媒体类型 (原始类型: {raw_media_type})")
             return
 
         # 获取用户信息
-        account = payload.get("Account", {})
+        account = json_payload.get("Account", {})
         user_name = account.get("title", "Unknown")
 
         if media_type == "episode":
@@ -139,6 +166,10 @@ class PlexWebhook(BaseWebhook):
 
     async def _handle_tautulli(self, payload: Dict, webhook_source: str):
         """处理Tautulli webhook"""
+        # 注意：Tautulli webhook需要配置为只在library.new事件时触发
+        # 这里不检查事件类型，因为Tautulli的自定义模板中没有事件字段
+        # 用户需要在Tautulli中配置触发条件为"Recently Added"
+
         # 获取媒体类型
         media_type = payload.get("media_type", "").lower()
         if media_type not in ["episode", "movie"]:
@@ -149,7 +180,7 @@ class PlexWebhook(BaseWebhook):
         title = payload.get("title", "")
         ori_title = payload.get("ori_title", "")
         user_name = payload.get("user_name", "Unknown")
-        
+
         if not title:
             self.logger.warning("Tautulli Webhook: 缺少标题信息")
             return
