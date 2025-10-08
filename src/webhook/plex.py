@@ -4,7 +4,6 @@ from typing import Any, Dict
 from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
-from ..scraper_manager import ScraperManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,180 +13,200 @@ class PlexWebhook(BaseWebhook):
         self.logger.info(f"Plex Webhook: 收到请求")
         self.logger.info(f"Headers: {dict(request.headers)}")
 
+        # 处理器现在负责解析请求体。
+        # 支持Plex原生webhook和Tautulli webhook两种格式
         try:
-            # 根据官方文档，Plex发送multipart/form-data格式的POST请求
-            # payload以JSON格式包含在multipart请求的一个部分中
-            # 对于某些事件（如media.play），还可能包含JPEG缩略图
+            payload = await request.json()
+        except Exception:
+            self.logger.error("Plex Webhook: 无法解析请求体为JSON。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
 
-            content_type = request.headers.get("content-type", "").lower()
-            self.logger.info(f"Content-Type: {content_type}")
+        # 记录完整的webhook请求内容
+        self.logger.info(f"Plex Webhook完整请求: {json.dumps(payload, indent=2, ensure_ascii=False)}")
 
-            if "multipart/form-data" in content_type:
-                # 处理multipart/form-data格式
-                form_data = await request.form()
-                self.logger.info(f"Form data keys: {list(form_data.keys())}")
+        # 区分Plex原生webhook和Tautulli webhook
+        if self._is_plex_native_webhook(payload):
+            self.logger.info("检测到Plex原生webhook格式")
+            await self._handle_plex_native(payload, webhook_source)
+        elif self._is_tautulli_webhook(payload):
+            self.logger.info("检测到Tautulli webhook格式")
+            await self._handle_tautulli(payload, webhook_source)
+        else:
+            self.logger.warning("未知的webhook格式，无法处理")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知的webhook格式")
 
-                # 获取payload字段
-                payload_str = form_data.get("payload")
-                if not payload_str:
-                    self.logger.error("Plex Webhook: multipart数据中缺少 'payload' 字段")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少payload字段")
+    def _is_plex_native_webhook(self, payload: Dict) -> bool:
+        """检测是否为Plex原生webhook格式"""
+        # Plex原生webhook特征：包含event、Account、Metadata字段
+        plex_fields = {"event", "Account", "Metadata"}
+        return plex_fields.issubset(payload.keys())
 
-                # 记录原始payload
-                self.logger.info(f"Raw payload: {payload_str}")
+    def _is_tautulli_webhook(self, payload: Dict) -> bool:
+        """检测是否为Tautulli webhook格式"""
+        # Tautulli webhook特征：包含media_type、title、season、episode字段
+        tautulli_fields = {"media_type", "title", "season", "episode"}
+        return tautulli_fields.issubset(payload.keys())
 
-                # 解析JSON payload
-                try:
-                    payload = json.loads(payload_str)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"Plex Webhook: 无法解析payload为JSON: {e}")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="payload不是有效的JSON")
-
-            elif "application/json" in content_type:
-                # 处理直接的JSON格式（备用方案）
-                self.logger.info("检测到JSON格式的请求")
-                payload = await request.json()
-
-            else:
-                # 尝试两种格式都处理
-                self.logger.warning(f"未知的Content-Type: {content_type}，尝试解析为multipart")
-                try:
-                    form_data = await request.form()
-                    payload_str = form_data.get("payload")
-                    if payload_str:
-                        payload = json.loads(payload_str)
-                    else:
-                        # 如果multipart失败，尝试JSON
-                        payload = await request.json()
-                except Exception:
-                    self.logger.error("无法解析请求格式")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析请求格式")
-
-            # 记录解析后的payload结构
-            self.logger.info(f"Parsed payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            self.logger.error(f"Plex Webhook: 解析请求失败: {e}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析请求")
-
+    async def _handle_plex_native(self, payload: Dict, webhook_source: str):
+        """处理Plex原生webhook"""
         # 检查事件类型
         event = payload.get("event")
         if event != "library.new":
-            self.logger.info(f"Plex Webhook: 忽略非 'library.new' 事件 (事件类型: {event})")
+            self.logger.info(f"Plex原生Webhook: 忽略非 'library.new' 事件 (事件类型: {event})")
             return
 
         # 获取媒体信息
         metadata = payload.get("Metadata", {})
         if not metadata:
-            self.logger.warning("Plex Webhook: 负载中缺少 'Metadata' 信息")
+            self.logger.warning("Plex原生Webhook: 负载中缺少 'Metadata' 信息")
             return
 
         # 获取媒体类型
         media_type = metadata.get("type")
         if media_type not in ["episode", "movie"]:
-            self.logger.info(f"Plex Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
+            self.logger.info(f"Plex原生Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
             return
 
-        # 提取通用信息
-        guid_list = metadata.get("Guid", [])
-        provider_ids = self._extract_provider_ids(guid_list)
-        
-        tmdb_id = provider_ids.get("tmdb")
-        imdb_id = provider_ids.get("imdb")
-        tvdb_id = provider_ids.get("tvdb")
-        # Plex可能不直接支持豆瓣和Bangumi ID，但我们保留字段以备将来使用
-        douban_id = provider_ids.get("douban")
-        bangumi_id = provider_ids.get("bangumi")
-        
-        year = metadata.get("year")
-        
-        self.logger.info(f"提取的Provider IDs: TMDB={tmdb_id}, IMDB={imdb_id}, TVDB={tvdb_id}")
+        # 获取用户信息
+        account = payload.get("Account", {})
+        user_name = account.get("title", "Unknown")
 
-        # 根据媒体类型分别处理
         if media_type == "episode":
             # 处理剧集
-            episode_title = metadata.get("title", "")
-            series_title = metadata.get("grandparentTitle", "")  # 剧集的系列标题
-            season_number = metadata.get("parentIndex")  # 季数
-            episode_number = metadata.get("index")  # 集数
+            series_title = metadata.get("grandparentTitle", "")
+            season_number = metadata.get("parentIndex", 1)
+            episode_number = metadata.get("index", 1)
             
-            if not all([series_title, season_number is not None, episode_number is not None]):
-                self.logger.warning("Plex Webhook: 忽略剧集，因为缺少系列标题、季度或集数信息")
-                self.logger.warning(f"系列标题: {series_title}, 季数: {season_number}, 集数: {episode_number}")
+            if not series_title:
+                self.logger.warning("Plex原生Webhook: 剧集缺少系列标题")
                 return
 
-            self.logger.info(f"Plex Webhook: 解析到剧集 - 系列: '{series_title}', 集标题: '{episode_title}', S{season_number:02d}E{episode_number:02d}")
-            
-            task_title = f"Webhook（plex）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
-            search_keyword = f"{series_title} S{season_number:02d}E{episode_number:02d}"
-            final_media_type = "tv_series"
-            anime_title = series_title
-            
+            self.logger.info(f"Plex原生Webhook: 处理剧集 - {series_title} S{season_number:02d}E{episode_number:02d}")
+
+            # 提取Provider IDs
+            guid_list = metadata.get("Guid", [])
+            provider_ids = self._extract_provider_ids(guid_list)
+
+            await self.dispatch_task(
+                task_title=f"{series_title} S{season_number:02d}E{episode_number:02d}",
+                unique_key=f"plex_episode_{series_title}_{season_number}_{episode_number}_{user_name}",
+                payload={
+                    "animeTitle": series_title,
+                    "season": season_number,
+                    "episode": episode_number,
+                    "tmdbId": provider_ids.get("tmdb"),
+                    "imdbId": provider_ids.get("imdb"),
+                    "tvdbId": provider_ids.get("tvdb"),
+                    "doubanId": provider_ids.get("douban"),
+                    "bangumiId": provider_ids.get("bangumi"),
+                    "userName": user_name,
+                    "mediaType": "episode"
+                },
+                webhook_source=webhook_source
+            )
+
         elif media_type == "movie":
             # 处理电影
             movie_title = metadata.get("title", "")
+            year = metadata.get("year")
+            
             if not movie_title:
-                self.logger.warning("Plex Webhook: 忽略电影，因为缺少标题信息")
+                self.logger.warning("Plex原生Webhook: 电影缺少标题")
                 return
-            
-            self.logger.info(f"Plex Webhook: 解析到电影 - 标题: '{movie_title}'")
-            
-            task_title = f"Webhook（plex）搜索: {movie_title}"
-            search_keyword = movie_title
-            final_media_type = "movie"
-            season_number = 1
-            episode_number = 1  # 电影按单集处理
-            anime_title = movie_title
 
-        # 创建搜索任务
-        unique_key = f"webhook-plex-search-{anime_title}-S{season_number}-E{episode_number}"
-        self.logger.info(f"Plex Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID")
+            self.logger.info(f"Plex原生Webhook: 处理电影 - {movie_title} ({year})")
 
-        # 将所有需要的信息打包成 payload
-        task_payload = {
-            "animeTitle": anime_title,
-            "mediaType": final_media_type,
-            "season": season_number,
-            "currentEpisodeIndex": episode_number,
-            "year": year,
-            "searchKeyword": search_keyword,
-            "doubanId": str(douban_id) if douban_id else None,
-            "tmdbId": str(tmdb_id) if tmdb_id else None,
-            "imdbId": str(imdb_id) if imdb_id else None,
-            "tvdbId": str(tvdb_id) if tvdb_id else None,
-            "bangumiId": str(bangumi_id) if bangumi_id else None,
-        }
+            # 提取Provider IDs
+            guid_list = metadata.get("Guid", [])
+            provider_ids = self._extract_provider_ids(guid_list)
 
-        await self.dispatch_task(
-            task_title=task_title,
-            unique_key=unique_key,
-            payload=task_payload,
-            webhook_source=webhook_source
-        )
+            await self.dispatch_task(
+                task_title=f"{movie_title} ({year})" if year else movie_title,
+                unique_key=f"plex_movie_{movie_title}_{year}_{user_name}",
+                payload={
+                    "animeTitle": movie_title,
+                    "year": year,
+                    "tmdbId": provider_ids.get("tmdb"),
+                    "imdbId": provider_ids.get("imdb"),
+                    "tvdbId": provider_ids.get("tvdb"),
+                    "doubanId": provider_ids.get("douban"),
+                    "bangumiId": provider_ids.get("bangumi"),
+                    "userName": user_name,
+                    "mediaType": "movie"
+                },
+                webhook_source=webhook_source
+            )
 
-    def _extract_provider_ids(self, guid_list):
-        """
-        从Plex的Guid列表中提取provider IDs
+    async def _handle_tautulli(self, payload: Dict, webhook_source: str):
+        """处理Tautulli webhook"""
+        # 获取媒体类型
+        media_type = payload.get("media_type", "").lower()
+        if media_type not in ["episode", "movie"]:
+            self.logger.info(f"Tautulli Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
+            return
+
+        # 获取基本信息
+        title = payload.get("title", "")
+        ori_title = payload.get("ori_title", "")
+        user_name = payload.get("user_name", "Unknown")
         
-        Plex的Guid格式示例：
-        - "plex://movie/5d776b59ad5437001f79c6f8"
-        - "imdb://tt0111161"
-        - "tmdb://278"
-        - "tvdb://290434"
-        """
+        if not title:
+            self.logger.warning("Tautulli Webhook: 缺少标题信息")
+            return
+
+        if media_type == "episode":
+            # 处理剧集
+            season = payload.get("season", 1)
+            episode = payload.get("episode", 1)
+            
+            self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode:02d}")
+
+            await self.dispatch_task(
+                task_title=f"{title} S{season:02d}E{episode:02d}",
+                unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
+                payload={
+                    "animeTitle": title,
+                    "originalTitle": ori_title,
+                    "season": season,
+                    "episode": episode,
+                    "userName": user_name,
+                    "mediaType": "episode"
+                },
+                webhook_source=webhook_source
+            )
+
+        elif media_type == "movie":
+            # 处理电影
+            release_date = payload.get("release_date", "")
+            year = None
+            if release_date:
+                try:
+                    year = int(release_date.split("-")[0])
+                except (ValueError, IndexError):
+                    pass
+            
+            self.logger.info(f"Tautulli Webhook: 处理电影 - {title} ({year})")
+
+            await self.dispatch_task(
+                task_title=f"{title} ({year})" if year else title,
+                unique_key=f"tautulli_movie_{title}_{year}_{user_name}",
+                payload={
+                    "animeTitle": title,
+                    "originalTitle": ori_title,
+                    "year": year,
+                    "userName": user_name,
+                    "mediaType": "movie"
+                },
+                webhook_source=webhook_source
+            )
+
+    def _extract_provider_ids(self, guid_list: list) -> Dict[str, str]:
+        """从Plex的Guid列表中提取各种provider ID"""
         provider_ids = {}
         
-        for guid_info in guid_list:
-            if isinstance(guid_info, dict):
-                guid_id = guid_info.get("id", "")
-            else:
-                guid_id = str(guid_info)
+        for guid_item in guid_list:
+            guid_id = guid_item.get("id", "")
             
-            self.logger.debug(f"处理GUID: {guid_id}")
-            
-            # 解析不同的provider格式
             if guid_id.startswith("imdb://"):
                 provider_ids["imdb"] = guid_id.replace("imdb://", "")
             elif guid_id.startswith("tmdb://"):
