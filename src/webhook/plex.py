@@ -117,17 +117,16 @@ class PlexWebhook(BaseWebhook):
                 unique_key=f"plex_episode_{series_title}_{season_number}_{episode_number}_{user_name}",
                 payload={
                     "animeTitle": series_title,
+                    "mediaType": "tv_series",
                     "season": season_number,
-                    "currentEpisodeIndex": episode_number,  # 修正：使用正确的参数名
-                    "searchKeyword": f"{series_title} S{season_number:02d}E{episode_number:02d}",
+                    "currentEpisodeIndex": episode_number,
                     "year": metadata.get("year"),
+                    "searchKeyword": f"{series_title} S{season_number:02d}E{episode_number:02d}",
+                    "doubanId": provider_ids.get("douban"),
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
                     "tvdbId": provider_ids.get("tvdb"),
-                    "doubanId": provider_ids.get("douban"),
-                    "bangumiId": provider_ids.get("bangumi"),
-                    "userName": user_name,
-                    "mediaType": "tv_series"  # 修正：使用正确的媒体类型
+                    "bangumiId": provider_ids.get("bangumi")
                 },
                 webhook_source=webhook_source
             )
@@ -152,17 +151,16 @@ class PlexWebhook(BaseWebhook):
                 unique_key=f"plex_movie_{movie_title}_{year}_{user_name}",
                 payload={
                     "animeTitle": movie_title,
-                    "season": 1,  # 电影默认为第1季
-                    "currentEpisodeIndex": 1,  # 电影默认为第1集
-                    "searchKeyword": f"{movie_title} ({year})" if year else movie_title,
+                    "mediaType": "movie",
+                    "season": 1,
+                    "currentEpisodeIndex": 1,
                     "year": year,
+                    "searchKeyword": f"{movie_title} ({year})" if year else movie_title,
+                    "doubanId": provider_ids.get("douban"),
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
                     "tvdbId": provider_ids.get("tvdb"),
-                    "doubanId": provider_ids.get("douban"),
-                    "bangumiId": provider_ids.get("bangumi"),
-                    "userName": user_name,
-                    "mediaType": "movie"
+                    "bangumiId": provider_ids.get("bangumi")
                 },
                 webhook_source=webhook_source
             )
@@ -202,13 +200,11 @@ class PlexWebhook(BaseWebhook):
                 unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
                 payload={
                     "animeTitle": title,
-                    "originalTitle": ori_title,
+                    "mediaType": "tv_series",
                     "season": season,
-                    "currentEpisodeIndex": episode,  # 修正：使用正确的参数名
-                    "userName": user_name,
-                    "mediaType": "tv_series",  # 修正：使用正确的媒体类型
-                    "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
+                    "currentEpisodeIndex": episode,
                     "year": None,
+                    "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
                     "doubanId": None,
                     "tmdbId": None,
                     "imdbId": None,
@@ -235,12 +231,10 @@ class PlexWebhook(BaseWebhook):
                 unique_key=f"tautulli_movie_{title}_{year}_{user_name}",
                 payload={
                     "animeTitle": title,
-                    "originalTitle": ori_title,
-                    "season": 1,  # 电影默认为第1季
-                    "currentEpisodeIndex": 1,  # 电影默认为第1集
-                    "year": year,
-                    "userName": user_name,
                     "mediaType": "movie",
+                    "season": 1,
+                    "currentEpisodeIndex": 1,
+                    "year": year,
                     "searchKeyword": f"{title} ({year})" if year else title,
                     "doubanId": None,
                     "tmdbId": None,
