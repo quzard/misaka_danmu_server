@@ -82,16 +82,10 @@ class PlexWebhook(BaseWebhook):
             self.logger.warning("Plex原生Webhook: 负载中缺少 'Metadata' 信息")
             return
 
-        # 获取媒体类型并映射
-        raw_media_type = metadata.get("type")
-
-        # Plex原生类型映射：show -> episode, movie -> movie
-        if raw_media_type == "show":
-            media_type = "episode"
-        elif raw_media_type == "movie":
-            media_type = "movie"
-        else:
-            self.logger.info(f"Plex原生Webhook: 忽略不支持的媒体类型 (原始类型: {raw_media_type})")
+        # 获取媒体类型
+        media_type = metadata.get("type")
+        if media_type not in ["episode", "movie"]:
+            self.logger.info(f"Plex原生Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
             return
 
         # 获取用户信息
@@ -101,11 +95,15 @@ class PlexWebhook(BaseWebhook):
         if media_type == "episode":
             # 处理剧集
             series_title = metadata.get("grandparentTitle", "")
-            season_number = metadata.get("parentIndex", 1)
-            episode_number = metadata.get("index", 1)
-            
+            season_number = metadata.get("parentIndex")  # 季数
+            episode_number = metadata.get("index")       # 集数
+
             if not series_title:
                 self.logger.warning("Plex原生Webhook: 剧集缺少系列标题")
+                return
+
+            if season_number is None or episode_number is None:
+                self.logger.warning(f"Plex原生Webhook: 剧集缺少季数或集数信息 (季数: {season_number}, 集数: {episode_number})")
                 return
 
             self.logger.info(f"Plex原生Webhook: 处理剧集 - {series_title} S{season_number:02d}E{episode_number:02d}")
