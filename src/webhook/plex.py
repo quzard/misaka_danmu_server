@@ -92,6 +92,8 @@ class PlexWebhook(BaseWebhook):
         account = json_payload.get("Account", {})
         user_name = account.get("title", "Unknown")
 
+        self.logger.info(f"🎬 Plex原生Webhook处理: 用户={user_name}, 媒体类型={media_type}")
+
         if media_type == "episode":
             # 处理剧集
             series_title = metadata.get("grandparentTitle", "")
@@ -181,8 +183,9 @@ class PlexWebhook(BaseWebhook):
 
         # 获取基本信息
         title = payload.get("title", "")
-        ori_title = payload.get("ori_title", "")
         user_name = payload.get("user_name", "Unknown")
+
+        self.logger.info(f"📺 Tautulli Webhook处理: 用户={user_name}, 媒体类型={media_type}, 标题={title}")
 
         if not title:
             self.logger.warning("Tautulli Webhook: 缺少标题信息")
