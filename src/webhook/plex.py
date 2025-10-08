@@ -164,9 +164,11 @@ class PlexWebhook(BaseWebhook):
 
     async def _handle_tautulli(self, payload: Dict, webhook_source: str):
         """处理Tautulli webhook"""
-        # 注意：Tautulli webhook需要配置为只在library.new事件时触发
-        # 这里不检查事件类型，因为Tautulli的自定义模板中没有事件字段
-        # 用户需要在Tautulli中配置触发条件为"Recently Added"
+        # 检查事件类型（如果提供）
+        action = payload.get("action", "").lower()
+        if action and action != "created":
+            self.logger.info(f"Tautulli Webhook: 忽略非新入库事件 (action: {action})")
+            return
 
         # 获取媒体类型
         media_type = payload.get("media_type", "").lower()
