@@ -25,8 +25,11 @@ export const Login = () => {
       const res = await login(values)
 
       if (res.data.accessToken) {
-        Cookies.set('token', res.data.accessToken, {
+        Cookies.set('danmu_token', res.data.accessToken, {
           expires: 30,
+          path: '/',
+          secure: location.protocol === 'https:',
+          sameSite: 'lax'
         })
         messageApi.success('登录成功！')
         navigate('/')

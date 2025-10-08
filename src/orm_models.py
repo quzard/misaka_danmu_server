@@ -44,7 +44,7 @@ class Anime(Base):
     season: Mapped[int] = mapped_column(Integer, default=1)
     episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer)
     year: Mapped[Optional[int]] = mapped_column("year", Integer)
-    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now, nullable=False)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
     metadataRecord: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)

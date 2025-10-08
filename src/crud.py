@@ -173,7 +173,7 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
             Anime.type,
             Anime.season,
             Anime.year,
-            Anime.createdAt.label("createdAt"),
+            func.coalesce(Anime.createdAt, func.now()).label("createdAt"),  # 处理NULL值
             case(
                 (Anime.type == 'movie', 1),
                 else_=func.coalesce(func.max(Episode.episodeIndex), 0)
@@ -222,7 +222,7 @@ async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optio
             Anime.type,
             Anime.season,
             Anime.year,
-            Anime.createdAt.label("createdAt"),
+            func.coalesce(Anime.createdAt, func.now()).label("createdAt"),  # 处理NULL值
             case(
                 (Anime.type == 'movie', 1),
                 else_=func.coalesce(func.max(Episode.episodeIndex), 0)
@@ -330,17 +330,21 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     # 步骤3：如果都没找到，创建新番剧（使用原始标题）
     logger.info(f"创建新番剧: 标题='{original_title}', 季数={original_season}, 类型={media_type}")
+    from .timezone import get_now
+    created_time = get_now()
+    logger.info(f"设置创建时间: {created_time}")
     new_anime = Anime(
         title=original_title,  # 使用原始标题创建
         season=original_season,  # 使用原始季数创建
         type=media_type,
         year=year,
         imageUrl=image_url,
-        localImagePath=local_image_path
+        localImagePath=local_image_path,
+        createdAt=created_time  # 设置创建时间
     )
     session.add(new_anime)
     await session.flush()  # 获取ID但不提交事务
-    logger.info(f"新番剧创建完成: ID={new_anime.id}, 标题='{new_anime.title}', 季数={new_anime.season}")
+    logger.info(f"新番剧创建完成: ID={new_anime.id}, 标题='{new_anime.title}', 季数={new_anime.season}, createdAt={new_anime.createdAt}")
     return new_anime.id
 
 async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) -> Anime:
@@ -355,13 +359,15 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     if existing_anime:
         raise ValueError(f"作品 '{anime_data.title}' (第 {anime_data.season} 季) 已存在。")
 
+    created_time = get_now().replace(tzinfo=None)
+    logger.info(f"create_anime: 设置创建时间: {created_time}")
     new_anime = Anime(
         title=anime_data.title,
         type=anime_data.type,
         season=anime_data.season,
         year=anime_data.year,
         imageUrl=anime_data.imageUrl,
-        createdAt=get_now().replace(tzinfo=None)
+        createdAt=created_time
     )
     session.add(new_anime)
     await session.flush()
