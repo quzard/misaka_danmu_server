@@ -118,14 +118,16 @@ class PlexWebhook(BaseWebhook):
                 payload={
                     "animeTitle": series_title,
                     "season": season_number,
-                    "episode": episode_number,
+                    "currentEpisodeIndex": episode_number,  # 修正：使用正确的参数名
+                    "searchKeyword": f"{series_title} S{season_number:02d}E{episode_number:02d}",
+                    "year": metadata.get("year"),
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
                     "tvdbId": provider_ids.get("tvdb"),
                     "doubanId": provider_ids.get("douban"),
                     "bangumiId": provider_ids.get("bangumi"),
                     "userName": user_name,
-                    "mediaType": "episode"
+                    "mediaType": "tv_series"  # 修正：使用正确的媒体类型
                 },
                 webhook_source=webhook_source
             )
@@ -150,6 +152,9 @@ class PlexWebhook(BaseWebhook):
                 unique_key=f"plex_movie_{movie_title}_{year}_{user_name}",
                 payload={
                     "animeTitle": movie_title,
+                    "season": 1,  # 电影默认为第1季
+                    "currentEpisodeIndex": 1,  # 电影默认为第1集
+                    "searchKeyword": f"{movie_title} ({year})" if year else movie_title,
                     "year": year,
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
@@ -199,9 +204,16 @@ class PlexWebhook(BaseWebhook):
                     "animeTitle": title,
                     "originalTitle": ori_title,
                     "season": season,
-                    "episode": episode,
+                    "currentEpisodeIndex": episode,  # 修正：使用正确的参数名
                     "userName": user_name,
-                    "mediaType": "episode"
+                    "mediaType": "tv_series",  # 修正：使用正确的媒体类型
+                    "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
+                    "year": None,
+                    "doubanId": None,
+                    "tmdbId": None,
+                    "imdbId": None,
+                    "tvdbId": None,
+                    "bangumiId": None
                 },
                 webhook_source=webhook_source
             )
@@ -224,9 +236,17 @@ class PlexWebhook(BaseWebhook):
                 payload={
                     "animeTitle": title,
                     "originalTitle": ori_title,
+                    "season": 1,  # 电影默认为第1季
+                    "currentEpisodeIndex": 1,  # 电影默认为第1集
                     "year": year,
                     "userName": user_name,
-                    "mediaType": "movie"
+                    "mediaType": "movie",
+                    "searchKeyword": f"{title} ({year})" if year else title,
+                    "doubanId": None,
+                    "tmdbId": None,
+                    "imdbId": None,
+                    "tvdbId": None,
+                    "bangumiId": None
                 },
                 webhook_source=webhook_source
             )
