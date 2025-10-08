@@ -10,78 +10,20 @@ logger = logging.getLogger(__name__)
 
 class PlexWebhook(BaseWebhook):
     async def handle(self, request: Request, webhook_source: str):
-        """
-        处理Plex webhook请求
-
-        根据Plex官方文档：
-        - 负载以JSON格式发送在multipart HTTP POST请求中
-        - 对于media.play和media.rate事件，POST请求的第二部分包含媒体的JPEG缩略图
-        - payload字段包含JSON格式的事件信息
-        - 支持详细的事件过滤（用户、播放器、服务器等）
-        """
-        # 记录原始请求信息
+        # 记录收到webhook请求
         self.logger.info(f"Plex Webhook: 收到请求")
-        self.logger.info(f"Content-Type: {request.headers.get('content-type', 'N/A')}")
-        self.logger.info(f"User-Agent: {request.headers.get('user-agent', 'N/A')}")
         self.logger.info(f"Headers: {dict(request.headers)}")
-        
+
+        # 处理器现在负责解析请求体。
+        # Plex 发送 JSON 格式的请求。
         try:
-            # 根据官方文档，Plex发送multipart/form-data格式的POST请求
-            # payload以JSON格式包含在multipart请求的一个部分中
-            # 对于某些事件（如media.play），还可能包含JPEG缩略图
+            payload = await request.json()
+        except Exception:
+            self.logger.error("Plex Webhook: 无法解析请求体为JSON。")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
 
-            content_type = request.headers.get("content-type", "").lower()
-            self.logger.info(f"Content-Type: {content_type}")
-
-            if "multipart/form-data" in content_type:
-                # 处理multipart/form-data格式
-                form_data = await request.form()
-                self.logger.info(f"Form data keys: {list(form_data.keys())}")
-
-                # 获取payload字段
-                payload_str = form_data.get("payload")
-                if not payload_str:
-                    self.logger.error("Plex Webhook: multipart数据中缺少 'payload' 字段")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少payload字段")
-
-                # 记录原始payload
-                self.logger.info(f"Raw payload: {payload_str}")
-
-                # 解析JSON payload
-                try:
-                    payload = json.loads(payload_str)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"Plex Webhook: 无法解析payload为JSON: {e}")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="payload不是有效的JSON")
-
-            elif "application/json" in content_type:
-                # 处理直接的JSON格式（备用方案）
-                self.logger.info("检测到JSON格式的请求")
-                payload = await request.json()
-
-            else:
-                # 尝试两种格式都处理
-                self.logger.warning(f"未知的Content-Type: {content_type}，尝试解析为multipart")
-                try:
-                    form_data = await request.form()
-                    payload_str = form_data.get("payload")
-                    if payload_str:
-                        payload = json.loads(payload_str)
-                    else:
-                        # 如果multipart失败，尝试JSON
-                        payload = await request.json()
-                except Exception:
-                    self.logger.error("无法解析请求格式")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析请求格式")
-
-            # 记录解析后的payload结构
-            self.logger.info(f"Parsed payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            self.logger.error(f"Plex Webhook: 解析请求失败: {e}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法解析请求")
+        # 记录完整的webhook请求内容
+        self.logger.info(f"Plex Webhook完整请求: {json.dumps(payload, indent=2, ensure_ascii=False)}")
 
         # 检查事件类型
         event = payload.get("event")
@@ -89,24 +31,11 @@ class PlexWebhook(BaseWebhook):
             self.logger.info(f"Plex Webhook: 忽略非 'library.new' 事件 (事件类型: {event})")
             return
 
-        # 获取账户信息
-        account = payload.get("Account", {})
-        account_title = account.get("title", "Unknown")
-        self.logger.info(f"Plex Webhook: 来自账户 '{account_title}' 的library.new事件")
-
-        # 获取服务器信息
-        server = payload.get("Server", {})
-        server_title = server.get("title", "Unknown")
-        self.logger.info(f"Plex Webhook: 来自服务器 '{server_title}' 的事件")
-
         # 获取媒体信息
         metadata = payload.get("Metadata", {})
         if not metadata:
             self.logger.warning("Plex Webhook: 负载中缺少 'Metadata' 信息")
             return
-
-        # 记录完整的metadata信息
-        self.logger.info(f"Metadata: {json.dumps(metadata, indent=2, ensure_ascii=False)}")
 
         # 获取媒体类型
         media_type = metadata.get("type")
