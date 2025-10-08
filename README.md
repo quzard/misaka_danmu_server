@@ -458,6 +458,24 @@ networks:
 
 > **对于PostgreSQL用户**: PostgreSQL没有Binlog机制，其WAL日志通常会自动管理，因此空间占用问题没有MySQL那么突出。您只需关注应用日志的自动清理即可。
 
+### 国外VPS搭建弹幕库搜索不到内容怎么办？
+
+如果您在国外VPS上部署本项目，可能会遇到搜索不到弹幕或搜索结果很少的问题。这主要是由于原因：**IP地区限制**
+
+#### 解决方案：VPS回家
+
+为了获得完整的搜索体验，建议使用"VPS回家"的方案，即让您的国外VPS通过国内网络进行弹幕搜索。
+
+**推荐方案**：
+- 使用国内中转服务器或代理
+- 配置网络路由，让弹幕搜索请求通过国内IP发出
+- 使用VPN或隧道技术将流量回传到国内
+
+**详细教程**：
+群友 [@wdnmlgbd](https://blog.tencentx.de/) 提供了完整的解决方案：
+- **教程链接**: [国外VPS搭建的MisakaDump正常获取bilibili弹幕](https://blog.tencentx.de/p/build-%E5%9B%BD%E5%A4%96vps%E6%90%AD%E5%BB%BA%E7%9A%84misakadump%E6%AD%A3%E5%B8%B8%E8%8E%B7%E5%8F%96bilibili%E5%BC%B9%E5%B9%95/)
+
+
 
 
 ### 贡献者
