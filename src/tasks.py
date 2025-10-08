@@ -1774,7 +1774,8 @@ async def webhook_search_and_dispatch_task(
         progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager)
+        logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager, source=None)
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
@@ -2387,6 +2388,20 @@ async def auto_search_and_import_task(
         logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
         logger.info(f"原始搜索结果标题: '{original_search_title}' (用于识别词匹配)")
 
+        # 应用识别词转换，使用选定的数据源
+        final_title = animeTitle
+        final_season = season
+        if title_recognition_manager:
+            converted_title, _, converted_season, was_converted, _ = await title_recognition_manager.apply_title_recognition(
+                animeTitle, None, season, best_match.provider
+            )
+            if was_converted:
+                final_title = converted_title
+                final_season = converted_season
+                logger.info(f"✓ 应用识别词转换: '{animeTitle}' S{season:02d} -> '{final_title}' S{final_season:02d} (数据源: {best_match.provider})")
+            else:
+                logger.info(f"○ 识别词转换未生效: '{animeTitle}' S{season:02d} (数据源: {best_match.provider})")
+
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
         # 修正：如果初始搜索是基于关键词，我们没有预先获取元数据。
@@ -2397,14 +2412,14 @@ async def auto_search_and_import_task(
 
         # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
         unique_key_parts = ["import", best_match.provider, best_match.mediaId]
-        if season is not None:
-            unique_key_parts.append(f"s{season}")
+        if final_season is not None:
+            unique_key_parts.append(f"s{final_season}")
         if payload.episode is not None:
             unique_key_parts.append(f"e{payload.episode}")
         unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
-            animeTitle=original_search_title, mediaType=best_match.type, season=season, year=best_match.year,
+            animeTitle=final_title, mediaType=best_match.type, season=final_season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
@@ -2414,15 +2429,15 @@ async def auto_search_and_import_task(
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
-        title_parts = [f"自动导入 (库内): {main_title}"]
+        title_parts = [f"自动导入 (库内): {final_title}"]
         if media_type == 'movie':
             # 对于电影，添加源和ID以确保唯一性，因为电影没有季/集
             if search_type != "keyword":
                 title_parts.append(f"({payload.searchType.value}:{payload.searchTerm})")
         else:
             # 对于电视剧，添加季/集信息
-            if payload.season is not None:
-                title_parts.append(f"S{payload.season:02d}")
+            if final_season is not None:
+                title_parts.append(f"S{final_season:02d}")
             if payload.episode is not None:
                 title_parts.append(f"E{payload.episode:02d}")
         task_title = " ".join(title_parts)
