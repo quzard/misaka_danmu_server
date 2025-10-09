@@ -1941,7 +1941,14 @@ async def set_provider_settings(
     if providerName in ["douban", "tvdb"]:
         key = config_keys_map.get(providerName)
         if key:
-            await config_manager.setValue(configKey=key, configValue=settings.get("value", ""))
+            # 修复：使用正确的字段名获取配置值
+            if providerName == "tvdb":
+                value = settings.get("tvdbApiKey", "")
+            elif providerName == "douban":
+                value = settings.get("doubanCookie", "")
+            else:
+                value = settings.get("value", "")
+            await config_manager.setValue(configKey=key, configValue=value)
     else:
         keys_to_update = config_keys_map.get(providerName, [])
         tasks = [

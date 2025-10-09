@@ -25,7 +25,7 @@ export const Douban = () => {
       setIsSaveLoading(true)
       const values = await form.validateFields()
       await setDoubanConfig({
-        value: values.cookie,
+        doubanCookie: values.cookie,
       })
       setIsSaveLoading(false)
       messageApi.success('保存成功')
