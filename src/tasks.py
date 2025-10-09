@@ -2389,18 +2389,18 @@ async def auto_search_and_import_task(
         logger.info(f"原始搜索结果标题: '{original_search_title}' (用于识别词匹配)")
 
         # 应用识别词转换，使用选定的数据源
-        final_title = animeTitle
+        final_title = main_title
         final_season = season
         if title_recognition_manager:
             converted_title, _, converted_season, was_converted, _ = await title_recognition_manager.apply_title_recognition(
-                animeTitle, None, season, best_match.provider
+                main_title, None, season, best_match.provider
             )
             if was_converted:
                 final_title = converted_title
                 final_season = converted_season
-                logger.info(f"✓ 应用识别词转换: '{animeTitle}' S{season:02d} -> '{final_title}' S{final_season:02d} (数据源: {best_match.provider})")
+                logger.info(f"✓ 应用识别词转换: '{main_title}' S{season:02d} -> '{final_title}' S{final_season:02d} (数据源: {best_match.provider})")
             else:
-                logger.info(f"○ 识别词转换未生效: '{animeTitle}' S{season:02d} (数据源: {best_match.provider})")
+                logger.info(f"○ 识别词转换未生效: '{main_title}' S{season:02d} (数据源: {best_match.provider})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
