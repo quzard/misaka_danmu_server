@@ -8,7 +8,7 @@
 
 ## 2. 配置弹幕接口
 
-在您的播放器（如 Yamby, Hills, 小幻影视等）的自定义弹幕接口设置中，填入以下格式的地址：
+在您的播放器（如 Yamby, Hills, 小幻影视, SenPlayer 等）的自定义弹幕接口设置中，填入以下格式的地址：
 
 `http://<服务器IP>:<端口>/api/v1/<你的Token>`
 
@@ -27,6 +27,14 @@
   
 - **对于 小幻影视:**
   小幻影视您可以添加含有 `/api/v2` 的路径，可以直接填写复制得到的url：
-  `http://192.168.1.100:7768/api/v1/Q2KHYcveM0SaRKvxomQm/api/v2   #可加可不加/api/v2 ` 
-  
+  `http://192.168.1.100:7768/api/v1/Q2KHYcveM0SaRKvxomQm/api/v2   #可加可不加/api/v2 `
+
+- **对于 SenPlayer（版本要大于5.7）:**
+  SenPlayer 是一款支持 ISO 播放的智能视频播放器，在弹幕设置中填写：
+  `http://192.168.1.100:7768/api/v1/Q2KHYcveM0SaRKvxomQm`
+
 > **兼容性说明**: 本服务已对路由进行特殊处理，无论您使用 `.../api/v1/<Token>` 还是 `.../api/v1/<Token>/api/v2` 格式，服务都能正确响应，以最大程度兼容不同客户端。
+
+## 3. 项目参考
+
+本项目参考了 [dandanplayapi](https://api.dandanplay.net/swagger/index.html)，同时增加了使用访问令牌管理弹幕API，支持上述多种播放器客户端。
