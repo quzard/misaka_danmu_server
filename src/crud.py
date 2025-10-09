@@ -328,14 +328,21 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
         else:
             logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
 
-    # 步骤3：如果都没找到，创建新番剧（使用原始标题）
-    logger.info(f"创建新番剧: 标题='{original_title}', 季数={original_season}, 类型={media_type}")
+    # 步骤3：如果都没找到，创建新番剧
+    # 如果识别词转换生效了，使用转换后的标题和季数；否则使用原始标题
+    final_title = converted_title if was_converted else original_title
+    final_season = converted_season if was_converted else original_season
+
+    logger.info(f"创建新番剧: 标题='{final_title}', 季数={final_season}, 类型={media_type}")
+    if was_converted:
+        logger.info(f"✓ 使用识别词转换后的标题和季数创建新条目")
+
     from .timezone import get_now
     created_time = get_now()
     logger.info(f"设置创建时间: {created_time}")
     new_anime = Anime(
-        title=original_title,  # 使用原始标题创建
-        season=original_season,  # 使用原始季数创建
+        title=final_title,  # 使用最终标题创建
+        season=final_season,  # 使用最终季数创建
         type=media_type,
         year=year,
         imageUrl=image_url,
