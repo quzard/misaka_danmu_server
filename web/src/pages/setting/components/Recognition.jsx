@@ -55,7 +55,7 @@ export const Recognition = () => {
               <p className="font-semibold text-blue-800 mb-2">🔍 搜索预处理（在搜索前执行）</p>
               <p className="text-blue-700 mb-2">用于修正搜索关键词，提高搜索准确性</p>
               <ul className="list-disc list-inside space-y-1 text-blue-700">
-                <li><strong>屏蔽词：</strong> <code>预告</code> <code>花絮</code></li>
+                <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code> <code>BLOCK:花絮</code> （从搜索词中移除）</li>
                 <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
                 <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
               </ul>
@@ -80,8 +80,8 @@ export const Recognition = () => {
           onChange={value => setText(value.target.value)}
           placeholder="# ===== 搜索预处理规则 =====
 # 屏蔽词（从搜索关键词中移除）
-预告
-花絮
+BLOCK:预告
+BLOCK:花絮
 
 # 简单替换（搜索前修正关键词）
 奔跑吧 => 奔跑吧兄弟

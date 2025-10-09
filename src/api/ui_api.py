@@ -111,7 +111,8 @@ async def search_anime_provider(
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -119,9 +120,23 @@ async def search_anime_provider(
     """
     try:
         parsed_keyword = parse_search_keyword(keyword)
-        search_title = parsed_keyword["title"]
+        original_title = parsed_keyword["title"]
         season_to_filter = parsed_keyword["season"]
         episode_to_filter = parsed_keyword["episode"]
+
+        # 应用搜索预处理规则
+        search_title = original_title
+        if title_recognition_manager:
+            processed_title, processed_episode, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter)
+            if preprocessing_applied:
+                search_title = processed_title
+                logger.info(f"✓ WebUI搜索预处理: '{original_title}' -> '{search_title}'")
+                # 如果集数发生了变化，更新episode_to_filter
+                if processed_episode != episode_to_filter:
+                    episode_to_filter = processed_episode
+                    logger.info(f"✓ WebUI集数预处理: {parsed_keyword['episode']} -> {episode_to_filter}")
+            else:
+                logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
 
         # --- 新增：按季缓存逻辑 ---
         # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存

@@ -2245,8 +2245,22 @@ async def auto_search_and_import_task(
             except Exception as e:
                 logger.warning(f"元数据源辅助搜索失败: {e}")
 
-        logger.info(f"将使用解析后的标题 '{main_title}' 进行全网搜索...")
-        all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
+        # 应用搜索预处理规则
+        search_title = main_title
+        if title_recognition_manager:
+            processed_title, processed_episode, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(main_title, payload.episode)
+            if preprocessing_applied:
+                search_title = processed_title
+                logger.info(f"✓ 应用搜索预处理: '{main_title}' -> '{search_title}'")
+                # 如果集数发生了变化，更新episode_info
+                if processed_episode != payload.episode:
+                    logger.info(f"✓ 集数预处理: {payload.episode} -> {processed_episode}")
+                    # 这里可以根据需要更新episode_info
+            else:
+                logger.info(f"○ 搜索预处理未生效: '{main_title}'")
+
+        logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
+        all_results = await scraper_manager.search_all([search_title], episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
         # 使用所有别名进行过滤
@@ -2354,14 +2368,10 @@ async def auto_search_and_import_task(
 
         best_match = all_results[0]
 
-        # 获取原始搜索结果标题（用于识别词匹配）
-        item_key = f"{best_match.provider}_{best_match.mediaId}"
-        original_search_title = original_titles.get(item_key, best_match.title)
-
         similarity = fuzz.token_set_ratio(main_title, best_match.title)
 
         logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
-        logger.info(f"原始搜索结果标题: '{original_search_title}' (用于识别词匹配)")
+        logger.info(f"原始搜索结果标题: '{best_match.title}' (用于识别词匹配)")
 
         # 应用入库后处理规则（季度偏移等），使用选定的数据源
         final_title = main_title

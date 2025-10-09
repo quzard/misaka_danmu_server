@@ -122,6 +122,10 @@ class TitleRecognitionManager:
         Returns:
             TitleRecognitionRule: 解析后的规则对象，解析失败返回None
         """
+        # 检查是否是屏蔽词格式
+        if line.startswith('BLOCK:'):
+            return self._parse_block_rule(line, line_num)
+
         # 检查是否包含复合格式标识符
         has_replace = ' => ' in line
         has_offset = ' <> ' in line and ' >> ' in line
@@ -137,12 +141,17 @@ class TitleRecognitionManager:
             # 集数偏移: 前定位词 <> 后定位词 >> 集偏移量
             return self._parse_offset_rule(line, line_num)
         else:
-            # 屏蔽词: 屏蔽词
-            return self._parse_block_rule(line, line_num)
+            # 如果没有特殊格式，跳过（避免误解析）
+            logger.warning(f"识别词配置第{line_num}行格式不明确，跳过: {line}")
+            return None
 
     def _parse_block_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """解析屏蔽词规则"""
-        block_word = line.strip()
+        if line.startswith('BLOCK:'):
+            block_word = line[6:].strip()  # 移除 'BLOCK:' 前缀
+        else:
+            block_word = line.strip()
+
         if not block_word:
             logger.warning(f"识别词配置第{line_num}行屏蔽词为空，跳过: {line}")
             return None
