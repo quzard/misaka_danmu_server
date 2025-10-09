@@ -1,6 +1,7 @@
 import logging
 import json
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
@@ -194,28 +195,59 @@ class PlexWebhook(BaseWebhook):
         if media_type == "episode":
             # 处理剧集
             season = payload.get("season", 1)
-            episode = payload.get("episode", 1)
-            
-            self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode:02d}")
+            episode_raw = payload.get("episode", 1)
 
-            await self.dispatch_task(
-                task_title=f"{title} S{season:02d}E{episode:02d}",
-                unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
-                payload={
-                    "animeTitle": title,
-                    "mediaType": "tv_series",
-                    "season": season,
-                    "currentEpisodeIndex": episode,
-                    "year": None,
-                    "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
-                    "doubanId": None,
-                    "tmdbId": None,
-                    "imdbId": None,
-                    "tvdbId": None,
-                    "bangumiId": None
-                },
-                webhook_source=webhook_source
-            )
+            # 检查是否为多集格式（包含逗号或连字符）
+            if isinstance(episode_raw, str) and (("," in episode_raw) or ("-" in episode_raw and not episode_raw.isdigit())):
+                # 多集格式，解析所有集数
+                episodes = self._parse_episode_ranges(episode_raw)
+                self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
+
+                # 为每一集创建单独的任务
+                for episode_num in episodes:
+                    self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode_num:02d}")
+
+                    await self.dispatch_task(
+                        task_title=f"{title} S{season:02d}E{episode_num:02d}",
+                        unique_key=f"tautulli_episode_{title}_{season}_{episode_num}_{user_name}",
+                        payload={
+                            "animeTitle": title,
+                            "mediaType": "tv_series",
+                            "season": season,
+                            "currentEpisodeIndex": episode_num,
+                            "year": None,
+                            "searchKeyword": f"{title} S{season:02d}E{episode_num:02d}",
+                            "doubanId": None,
+                            "tmdbId": None,
+                            "imdbId": None,
+                            "tvdbId": None,
+                            "bangumiId": None
+                        },
+                        webhook_source=webhook_source
+                    )
+            else:
+                # 单集格式
+                episode = int(episode_raw) if isinstance(episode_raw, str) and episode_raw.isdigit() else episode_raw
+                self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode:02d}")
+
+                await self.dispatch_task(
+                    task_title=f"{title} S{season:02d}E{episode:02d}",
+                    unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
+                    payload={
+                        "animeTitle": title,
+                        "mediaType": "tv_series",
+                        "season": season,
+                        "currentEpisodeIndex": episode,
+                        "year": None,
+                        "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
+                        "doubanId": None,
+                        "tmdbId": None,
+                        "imdbId": None,
+                        "tvdbId": None,
+                        "bangumiId": None
+                    },
+                    webhook_source=webhook_source
+                )
 
         elif media_type == "movie":
             # 处理电影
@@ -267,3 +299,46 @@ class PlexWebhook(BaseWebhook):
                 provider_ids["bangumi"] = guid_id.replace("bangumi://", "")
         
         return provider_ids
+
+    def _parse_episode_ranges(self, episode_str: str) -> List[int]:
+        """
+        解析集数范围字符串，支持多种格式：
+        - 单集: "1"
+        - 范围: "1-3"
+        - 混合: "1-3,6,8,10-13,26,31-39"
+
+        返回所有集数的列表
+        """
+        episodes = []
+
+        # 移除所有空格
+        episode_str = episode_str.replace(" ", "")
+
+        # 按逗号分割
+        parts = episode_str.split(",")
+
+        for part in parts:
+            if "-" in part:
+                # 处理范围，如 "1-3" 或 "31-39"
+                try:
+                    start, end = part.split("-", 1)
+                    start_num = int(start)
+                    end_num = int(end)
+                    episodes.extend(range(start_num, end_num + 1))
+                except (ValueError, IndexError) as e:
+                    self.logger.warning(f"无法解析集数范围 '{part}': {e}")
+                    continue
+            else:
+                # 处理单集，如 "6" 或 "8"
+                try:
+                    episode_num = int(part)
+                    episodes.append(episode_num)
+                except ValueError as e:
+                    self.logger.warning(f"无法解析集数 '{part}': {e}")
+                    continue
+
+        # 去重并排序
+        episodes = sorted(list(set(episodes)))
+        self.logger.info(f"解析集数范围 '{episode_str}' -> {episodes}")
+
+        return episodes
