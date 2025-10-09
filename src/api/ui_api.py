@@ -126,8 +126,9 @@ async def search_anime_provider(
 
         # 应用搜索预处理规则
         search_title = original_title
+        search_season = season_to_filter
         if title_recognition_manager:
-            processed_title, processed_episode, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter)
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter, season_to_filter)
             if preprocessing_applied:
                 search_title = processed_title
                 logger.info(f"✓ WebUI搜索预处理: '{original_title}' -> '{search_title}'")
@@ -135,6 +136,11 @@ async def search_anime_provider(
                 if processed_episode != episode_to_filter:
                     episode_to_filter = processed_episode
                     logger.info(f"✓ WebUI集数预处理: {parsed_keyword['episode']} -> {episode_to_filter}")
+                # 如果季数发生了变化，更新season_to_filter
+                if processed_season != season_to_filter:
+                    search_season = processed_season
+                    season_to_filter = processed_season
+                    logger.info(f"✓ WebUI季度预处理: {parsed_keyword['season']} -> {season_to_filter}")
             else:
                 logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
 

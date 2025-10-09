@@ -93,6 +93,10 @@ async def _reverse_lookup_tmdb_chinese_title(
             external_ids['imdb_id'] = imdb_id
         if tvdb_id:
             external_ids['tvdb_id'] = tvdb_id
+        if douban_id:
+            external_ids['douban_id'] = douban_id
+        if bangumi_id:
+            external_ids['bangumi_id'] = bangumi_id
 
         if external_ids:
             logger.info(f"尝试通过外部ID反查TMDB: {external_ids}")
@@ -138,11 +142,11 @@ async def _is_tmdb_reverse_lookup_enabled(session: AsyncSession, source_type: st
             return False
 
         # 检查源类型是否在启用列表中
-        sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb"]')
+        sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb", "douban", "bangumi"]')
         try:
             enabled_sources = json.loads(sources_json)
         except:
-            enabled_sources = ["imdb", "tvdb"]  # 默认值
+            enabled_sources = ["imdb", "tvdb", "douban", "bangumi"]  # 默认值
 
         return source_type in enabled_sources
 
@@ -193,6 +197,30 @@ async def _find_tmdb_by_external_ids(
             for result in tvdb_results:
                 if hasattr(result, 'tmdbId') and result.tmdbId:
                     logger.info(f"通过TVDB找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        # 如果有Douban ID，类似处理
+        if 'douban_id' in external_ids:
+            douban_id = external_ids['douban_id']
+            logger.info(f"尝试通过Douban ID {douban_id} 查找TMDB...")
+
+            # 通过Douban搜索
+            douban_results = await metadata_manager.search('douban', douban_id, user)
+            for result in douban_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过Douban找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        # 如果有Bangumi ID，类似处理
+        if 'bangumi_id' in external_ids:
+            bangumi_id = external_ids['bangumi_id']
+            logger.info(f"尝试通过Bangumi ID {bangumi_id} 查找TMDB...")
+
+            # 通过Bangumi搜索
+            bangumi_results = await metadata_manager.search('bangumi', bangumi_id, user)
+            for result in bangumi_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过Bangumi找到TMDB ID: {result.tmdbId}")
                     return result.tmdbId
 
         return None
@@ -2094,14 +2122,23 @@ async def auto_search_and_import_task(
             )
 
             # TMDB反查功能：如果标题不是中文且不是TMDB搜索，尝试通过其他ID反查TMDB获取中文标题
+            logger.info(f"TMDB反查检查: effective_search_type='{effective_search_type}', main_title='{main_title}', is_chinese={_is_chinese_title(main_title)}")
             if effective_search_type != 'tmdb' and main_title and not _is_chinese_title(main_title):
                 # 检查TMDB反查是否启用
                 tmdb_reverse_enabled = await _is_tmdb_reverse_lookup_enabled(session, effective_search_type)
+                logger.info(f"TMDB反查配置检查: enabled={tmdb_reverse_enabled}, source_type='{effective_search_type}'")
                 if tmdb_reverse_enabled:
                     logger.info(f"检测到非中文标题 '{main_title}'，尝试通过其他ID反查TMDB获取中文标题...")
+                    # 如果是通过外部ID搜索，直接使用搜索的ID
+                    lookup_tmdb_id = tmdb_id
+                    lookup_imdb_id = imdb_id if effective_search_type != 'imdb' else search_term
+                    lookup_tvdb_id = tvdb_id if effective_search_type != 'tvdb' else search_term
+                    lookup_douban_id = douban_id if effective_search_type != 'douban' else search_term
+                    lookup_bangumi_id = bangumi_id if effective_search_type != 'bangumi' else search_term
+
                     chinese_title = await _reverse_lookup_tmdb_chinese_title(
                         metadata_manager, user, effective_search_type, search_term,
-                        tmdb_id, imdb_id, tvdb_id, douban_id, bangumi_id
+                        lookup_tmdb_id, lookup_imdb_id, lookup_tvdb_id, lookup_douban_id, lookup_bangumi_id
                     )
                     if chinese_title:
                         logger.info(f"TMDB反查成功，使用中文标题: '{chinese_title}' (原标题: '{main_title}')")
@@ -2247,8 +2284,9 @@ async def auto_search_and_import_task(
 
         # 应用搜索预处理规则
         search_title = main_title
+        search_season = season
         if title_recognition_manager:
-            processed_title, processed_episode, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(main_title, payload.episode)
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(main_title, payload.episode, season)
             if preprocessing_applied:
                 search_title = processed_title
                 logger.info(f"✓ 应用搜索预处理: '{main_title}' -> '{search_title}'")
@@ -2256,6 +2294,12 @@ async def auto_search_and_import_task(
                 if processed_episode != payload.episode:
                     logger.info(f"✓ 集数预处理: {payload.episode} -> {processed_episode}")
                     # 这里可以根据需要更新episode_info
+                # 如果季数发生了变化，更新搜索季数
+                if processed_season != season:
+                    search_season = processed_season
+                    logger.info(f"✓ 季度预处理: {season} -> {search_season}")
+                    # 更新episode_info中的季数
+                    episode_info = {"season": search_season, "episode": payload.episode} if payload.episode else {"season": search_season}
             else:
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
@@ -2373,22 +2417,22 @@ async def auto_search_and_import_task(
         logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
         logger.info(f"原始搜索结果标题: '{best_match.title}' (用于识别词匹配)")
 
-        # 应用入库后处理规则（季度偏移等），使用选定的数据源
-        final_title = main_title
+        # 应用入库后处理规则（季度偏移等），使用选定的搜索结果标题
+        final_title = best_match.title  # 使用搜索结果的标题而不是原始搜索标题
         final_season = season
         if title_recognition_manager:
             converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
-                main_title, season, best_match.provider
+                best_match.title, season, best_match.provider
             )
             if was_converted:
                 final_title = converted_title
                 final_season = converted_season
                 season_str = f"S{season:02d}" if season is not None else "S??"
                 final_season_str = f"S{final_season:02d}" if final_season is not None else "S??"
-                logger.info(f"✓ 应用入库后处理: '{main_title}' {season_str} -> '{final_title}' {final_season_str} (数据源: {best_match.provider})")
+                logger.info(f"✓ 应用入库后处理: '{best_match.title}' {season_str} -> '{final_title}' {final_season_str} (数据源: {best_match.provider})")
             else:
                 season_str = f"S{season:02d}" if season is not None else "S??"
-                logger.info(f"○ 入库后处理未生效: '{main_title}' {season_str} (数据源: {best_match.provider})")
+                logger.info(f"○ 入库后处理未生效: '{best_match.title}' {season_str} (数据源: {best_match.provider})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 

@@ -58,6 +58,7 @@ export const Recognition = () => {
                 <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code> <code>BLOCK:花絮</code> （从搜索词中移除）</li>
                 <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
                 <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
+                <li><strong>季度预处理：</strong> <code>新说唱2025 =&gt; &#123;&lt;search_season=8&gt;&#125;</code> （搜索时使用指定季度）</li>
               </ul>
             </div>
             <div className="bg-green-50 p-3 rounded">
@@ -90,6 +91,10 @@ BLOCK:花絮
 # 集数偏移（搜索前修正集数）
 第 <> 话 >> EP-1
 Episode <> : >> EP+5
+
+# 季度预处理（搜索时使用指定季度）
+新说唱2025 => {<search_season=8>}
+某动画 第1季 => {<search_season=5>}
 
 # ===== 入库后处理规则 =====
 # 季度偏移（入库时修正标题和季数）

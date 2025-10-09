@@ -176,8 +176,17 @@ class TitleRecognitionManager:
             logger.warning(f"识别词配置第{line_num}行替换词为空，跳过: {line}")
             return None
 
+        # 检查是否是搜索预处理格式 {<search_season=8>}
+        if target.startswith('{<') and target.endswith('>}'):
+            search_info = self._parse_search_target(target)
+            if search_info:
+                logger.debug(f"解析搜索预处理规则: {source} => {target}")
+                search_copy = search_info.copy()
+                search_copy['source'] = source  # 这是匹配的文本
+                return TitleRecognitionRule('search_season', 'preprocess', **search_copy)
+
         # 检查是否是特殊格式 {[tmdbid/doubanid=xxx;type=movie/tv;s=xxx;e=xxx]} 或季度偏移格式
-        if target.startswith('{[') and target.endswith(']}'):
+        elif target.startswith('{[') and target.endswith(']}'):
             metadata_info = self._parse_metadata_target(target)
             if metadata_info:
                 # 检查是否包含季度偏移信息
@@ -289,14 +298,51 @@ class TitleRecognitionManager:
                     metadata[key] = int(value)
                 except ValueError:
                     continue
-            elif key in ['type', 's', 'e', 'source', 'season_offset', 'title']:
-                metadata[key] = value
+            elif key in ['type', 's', 'e', 'source', 'season_offset', 'title', 'search_season']:
+                if key == 'search_season':
+                    try:
+                        metadata[key] = int(value)
+                    except ValueError:
+                        continue
+                else:
+                    metadata[key] = value
 
         # 如果没有指定source，默认为'all'
         if 'source' not in metadata:
             metadata['source'] = 'all'
 
         return metadata if metadata else None
+
+    def _parse_search_target(self, target: str) -> Optional[Dict[str, Any]]:
+        """
+        解析搜索预处理目标格式: {<search_season=8>}
+
+        Args:
+            target: 目标字符串
+
+        Returns:
+            Dict: 解析后的搜索信息
+        """
+        if not target.startswith('{<') or not target.endswith('>}'):
+            return None
+
+        content = target[2:-2]  # 移除 {< 和 >}
+        search_info = {}
+
+        for part in content.split(';'):
+            if '=' not in part:
+                continue
+            key, value = part.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+
+            if key == 'search_season':
+                try:
+                    search_info[key] = int(value)
+                except ValueError:
+                    continue
+
+        return search_info if search_info else None
 
     async def update_recognition_rules(self, content: str) -> List[str]:
         """
@@ -337,16 +383,17 @@ class TitleRecognitionManager:
             logger.error(f"更新识别词规则失败: {e}")
             raise
 
-    async def apply_search_preprocessing(self, text: str, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool]:
+    async def apply_search_preprocessing(self, text: str, episode: Optional[int] = None, season: Optional[int] = None) -> Tuple[str, Optional[int], Optional[int], bool]:
         """
         应用搜索预处理规则（在搜索前执行）
 
         Args:
             text: 原始搜索关键词
             episode: 原始集数
+            season: 原始季数
 
         Returns:
-            Tuple[处理后的文本, 处理后的集数, 是否发生了转换]
+            Tuple[处理后的文本, 处理后的集数, 处理后的季数, 是否发生了转换]
         """
         await self._ensure_rules_loaded()
 
@@ -355,6 +402,7 @@ class TitleRecognitionManager:
 
         processed_text = text
         processed_episode = episode
+        processed_season = season
         has_changed = False
 
         # 只应用预处理阶段的规则
@@ -398,7 +446,14 @@ class TitleRecognitionManager:
                     has_changed = True
                     logger.debug(f"搜索预处理 - 应用复合规则: '{rule.data['source']}' => '{rule.data['target']}'")
 
-        return processed_text, processed_episode, has_changed
+            elif rule.rule_type == 'search_season':
+                # 季度预处理：指定搜索时使用的季度
+                if self._exact_match(processed_text, rule.data['source']):
+                    processed_season = rule.data['search_season']
+                    has_changed = True
+                    logger.debug(f"搜索预处理 - 应用季度预处理规则: '{rule.data['source']}' => 季度 {processed_season}")
+
+        return processed_text, processed_episode, processed_season, has_changed
 
     async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
         """
