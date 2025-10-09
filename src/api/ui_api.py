@@ -2568,11 +2568,27 @@ async def import_from_provider(
         title_recognition_manager=title_recognition_manager
     )
     
-    # 构造任务标题
-    task_title = f"导入: {request_data.animeTitle} ({request_data.provider})"
+    # 预先应用识别词转换来生成正确的任务标题
+    display_title = request_data.animeTitle
+    display_season = request_data.season
+
+    if title_recognition_manager:
+        try:
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                request_data.animeTitle, request_data.season, request_data.provider
+            )
+            if was_converted:
+                display_title = converted_title
+                display_season = converted_season
+                logger.info(f"任务标题应用识别词转换: '{request_data.animeTitle}' S{request_data.season:02d} -> '{display_title}' S{display_season:02d}")
+        except Exception as e:
+            logger.warning(f"任务标题识别词转换失败: {e}")
+
+    # 构造任务标题（使用转换后的标题）
+    task_title = f"导入: {display_title} ({request_data.provider})"
     # 如果是电视剧且指定了单集导入，则在标题中追加季和集信息
-    if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
-        task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
+    if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and display_season is not None:
+        task_title += f" - S{display_season:02d}E{request_data.currentEpisodeIndex:02d}"
 
     # 生成unique_key以避免重复任务
     unique_key_parts = [request_data.provider, request_data.mediaId]
@@ -2601,7 +2617,23 @@ async def import_edited_episodes(
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
-    task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
+    # 预先应用识别词转换来生成正确的任务标题
+    display_title = request_data.animeTitle
+    display_season = request_data.season
+
+    if title_recognition_manager:
+        try:
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                request_data.animeTitle, request_data.season, request_data.provider
+            )
+            if was_converted:
+                display_title = converted_title
+                display_season = converted_season
+                logger.info(f"编辑导入任务标题应用识别词转换: '{request_data.animeTitle}' S{request_data.season:02d} -> '{display_title}' S{display_season:02d}")
+        except Exception as e:
+            logger.warning(f"编辑导入任务标题识别词转换失败: {e}")
+
+    task_title = f"编辑后导入: {display_title} ({request_data.provider})"
     task_coro = lambda session, callback: tasks.edited_import_task(
         request_data=request_data,
         progress_callback=callback,
