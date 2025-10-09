@@ -302,7 +302,9 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
         converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season, source)
 
         if was_converted:
-            logger.info(f"🔍 尝试识别词转换匹配: '{original_title}' S{original_season:02d} -> '{converted_title}' S{converted_season:02d}")
+            original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"
+            converted_season_str = f"S{converted_season:02d}" if converted_season is not None else "S??"
+            logger.info(f"🔍 尝试识别词转换匹配: '{original_title}' {original_season_str} -> '{converted_title}' {converted_season_str}")
 
             # 使用转换后的标题和季数进行查找
             stmt = select(Anime).where(Anime.title == converted_title, Anime.season == converted_season)
@@ -326,7 +328,8 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
             else:
                 logger.info(f"○ 识别词转换匹配也失败: 未找到匹配的番剧")
         else:
-            logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
+            original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"
+            logger.info(f"○ 标题识别转换未生效: '{original_title}' {original_season_str} (无匹配规则)")
 
     # 步骤3：如果都没找到，创建新番剧
     # 如果识别词转换生效了，使用转换后的标题和季数；否则使用原始标题
@@ -560,7 +563,8 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     row = result.mappings().first()
 
     if row:
-        logger.info(f"✓ 完全匹配成功: 找到作品 '{original_title}' S{original_season:02d}")
+        original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"
+        logger.info(f"✓ 完全匹配成功: 找到作品 '{original_title}' {original_season_str}")
         return dict(row)
 
     # 步骤2：如果完全匹配失败，尝试应用识别词转换
@@ -570,7 +574,9 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
         converted_title, converted_episode, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_title_recognition(title, None, season, source)
 
         if was_converted:
-            logger.info(f"🔍 尝试识别词转换匹配: '{original_title}' S{original_season:02d} -> '{converted_title}' S{converted_season:02d}")
+            original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"
+            converted_season_str = f"S{converted_season:02d}" if converted_season is not None else "S??"
+            logger.info(f"🔍 尝试识别词转换匹配: '{original_title}' {original_season_str} -> '{converted_title}' {converted_season_str}")
 
             # 使用转换后的标题和季数进行查找
             stmt = (
@@ -589,12 +595,14 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
             row = result.mappings().first()
 
             if row:
-                logger.info(f"✓ 识别词转换匹配成功: 找到作品 '{converted_title}' S{converted_season:02d}")
+                converted_season_str = f"S{converted_season:02d}" if converted_season is not None else "S??"
+                logger.info(f"✓ 识别词转换匹配成功: 找到作品 '{converted_title}' {converted_season_str}")
                 return dict(row)
             else:
                 logger.info(f"○ 识别词转换匹配也失败: 未找到匹配的番剧")
         else:
-            logger.info(f"○ 标题识别转换未生效: '{original_title}' S{original_season:02d} (无匹配规则)")
+            season_str = f"S{original_season:02d}" if original_season is not None else "S??"
+            logger.info(f"○ 标题识别转换未生效: '{original_title}' {season_str} (无匹配规则)")
 
     return None
 
