@@ -87,6 +87,7 @@
 - **[🔗 Webhook 配置](docs/webhook-configuration.md)** - Emby/Jellyfin/Plex 自动化配置
 - **[🤖 Telegram Bot](docs/telegram-bot.md)** - 机器人集成指南
 - **[🔍 智能搜索](docs/smart-search.md)** - 后备搜索与匹配功能
+- **[⚡ MySQL 优化](docs/mysql-optimization.md)** - 内存优化配置指南
 - **[❓ 常见问题](docs/faq.md)** - 故障排除与解决方案
 
 ---

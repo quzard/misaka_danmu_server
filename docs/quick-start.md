@@ -9,13 +9,15 @@
     ```bash
     mkdir -p ~/danmuku
     cd ~/danmuku
-    mkdir db-data,config                 
+    mkdir -p db-data config
     touch docker-compose.yaml
     ```
 
 2.  根据您选择的数据库，将以下内容之一复制到 `docker-compose.yaml` 文件中。
 
 ### 方案 A: 使用 MySQL (推荐)
+
+> 💡 **内存优化提示**：如果您的服务器内存有限（如 1GB 以下的 VPS），建议使用 [MySQL 内存优化配置](mysql-optimization.md) 来减少内存占用。
 
 ```yaml
 version: "3.8"
@@ -36,11 +38,11 @@ services:
     command:
       - '--character-set-server=utf8mb4'
       - '--collation-server=utf8mb4_unicode_ci'
-      - '--expire_logs_days=3' # 自动清理超过3天的binlog日志
-      - '--binlog_expire_logs_seconds=259200' # 兼容MariaDB的等效设置 (3天)
+      - '--binlog_expire_logs_seconds=259200' # 自动清理超过3天的binlog日志
+      - '--default-authentication-plugin=mysql_native_password' # 使用传统密码认证方式
     healthcheck:
       # 使用mysqladmin ping命令进行健康检查，通过环境变量引用密码
-      test: ["CMD-SHELL", "mysqladmin ping -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
+      test: ["CMD-SHELL", "mysqladmin ping -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
       interval: 5s
       timeout: 3s
       retries: 5
