@@ -840,7 +840,8 @@ async def generic_import_task(
         season=season,
         year=year,
         is_single_episode=currentEpisodeIndex is not None,
-        episode_index=currentEpisodeIndex
+        episode_index=currentEpisodeIndex,
+        title_recognition_manager=title_recognition_manager
     )
     if duplicate_reason:
         raise ValueError(duplicate_reason)
