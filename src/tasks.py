@@ -2310,34 +2310,8 @@ async def auto_search_and_import_task(
         if not all_results:
             raise ValueError("全网搜索未找到任何结果。")
 
-        # 添加搜索结果映射逻辑：将搜索结果标题映射为识别词目标标题
-        await progress_callback(50, "正在应用识别词映射...")
-        original_titles = {}  # 保存原始标题的字典，key为item的id或唯一标识
-
-        if title_recognition_manager:
-            try:
-                await title_recognition_manager._ensure_rules_loaded()
-                rules = title_recognition_manager.recognition_rules
-
-                for item in all_results:
-                    # 尝试将搜索结果的标题映射为识别词中的目标标题
-                    for rule in rules:
-                        if rule.rule_type == 'season_offset' and 'title' in rule.data and 'source' in rule.data:
-                            source_title = rule.data['source']
-                            target_title = rule.data['title']
-
-                            # 检查搜索结果是否匹配识别词的源标题
-                            if source_title in item.title or item.title in source_title:
-                                logger.info(f"映射搜索结果: '{item.title}' -> '{target_title}'")
-                                # 保存原始标题用于识别词匹配
-                                item_key = f"{item.provider}_{item.mediaId}"
-                                original_titles[item_key] = item.title
-                                # 将搜索结果的标题映射为目标标题，但保留原始的provider等信息
-                                item.title = target_title
-                                break
-
-            except Exception as e:
-                logger.warning(f"搜索结果映射失败: {e}")
+        # 移除提前映射逻辑，改为在选择最佳匹配后应用识别词转换
+        await progress_callback(50, "正在准备选择最佳源...")
 
         # 4. 选择最佳源
         ordered_settings = await crud.get_all_scraper_settings(session)
@@ -2389,19 +2363,22 @@ async def auto_search_and_import_task(
         logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
         logger.info(f"原始搜索结果标题: '{original_search_title}' (用于识别词匹配)")
 
-        # 应用识别词转换，使用选定的数据源
+        # 应用入库后处理规则（季度偏移等），使用选定的数据源
         final_title = main_title
         final_season = season
         if title_recognition_manager:
-            converted_title, _, converted_season, was_converted, _ = await title_recognition_manager.apply_title_recognition(
-                main_title, None, season, best_match.provider
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                main_title, season, best_match.provider
             )
             if was_converted:
                 final_title = converted_title
                 final_season = converted_season
-                logger.info(f"✓ 应用识别词转换: '{main_title}' S{season:02d} -> '{final_title}' S{final_season:02d} (数据源: {best_match.provider})")
+                season_str = f"S{season:02d}" if season is not None else "S??"
+                final_season_str = f"S{final_season:02d}" if final_season is not None else "S??"
+                logger.info(f"✓ 应用入库后处理: '{main_title}' {season_str} -> '{final_title}' {final_season_str} (数据源: {best_match.provider})")
             else:
-                logger.info(f"○ 识别词转换未生效: '{main_title}' S{season:02d} (数据源: {best_match.provider})")
+                season_str = f"S{season:02d}" if season is not None else "S??"
+                logger.info(f"○ 入库后处理未生效: '{main_title}' {season_str} (数据源: {best_match.provider})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 

@@ -49,46 +49,28 @@ export const Recognition = () => {
         <div className="mb-4">
           <div className="text-sm mb-2 opacity-75">
             <p>
-              <strong>支持的格式（参考MoviePilot）：</strong>
+              <strong>识别词配置说明：</strong>
             </p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>
-                <strong>屏蔽词：</strong> <code>屏蔽词</code>
-              </li>
-              <li>
-                <strong>简单替换：</strong> <code>被替换词 =&gt; 替换词</code>
-              </li>
-              <li>
-                <strong>集数偏移：</strong>{' '}
-                <code>前定位词 &lt;&gt; 后定位词 &gt;&gt; 集偏移量</code>
-              </li>
-              <li>
-                <strong>复合格式：</strong>{' '}
-                <code>
-                  被替换词 =&gt; 替换词 &amp;&amp; 前定位词 &lt;&gt; 后定位词
-                  &gt;&gt; 集偏移量
-                </code>
-              </li>
-              <li>
-                <strong>元数据替换：</strong>{' '}
-                <code>
-                  错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;
-                </code>
-              </li>
-              <li>
-                <strong>季度偏移：</strong>{' '}
-                <code>
-                  TX源某动画第9季 =&gt;
-                  &#123;[source=tencent;season_offset=9&gt;13]&#125;
-                </code>
-              </li>
-            </ul>
-            <p className="mt-2">
-              <strong>集数偏移支持运算：</strong> EP+1, 2*EP, 2*EP-1 等
-            </p>
-            <p className="mt-1">
-              <strong>季度偏移支持格式：</strong> 9&gt;13(直接映射), 9+4(加法),
-              9-1(减法), *+4(通用加法), *&gt;1(通用映射)
+            <div className="bg-blue-50 p-3 rounded mb-3">
+              <p className="font-semibold text-blue-800 mb-2">🔍 搜索预处理（在搜索前执行）</p>
+              <p className="text-blue-700 mb-2">用于修正搜索关键词，提高搜索准确性</p>
+              <ul className="list-disc list-inside space-y-1 text-blue-700">
+                <li><strong>屏蔽词：</strong> <code>预告</code> <code>花絮</code></li>
+                <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
+                <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
+              </ul>
+            </div>
+            <div className="bg-green-50 p-3 rounded">
+              <p className="font-semibold text-green-800 mb-2">🎯 入库后处理（选择最佳匹配后执行）</p>
+              <p className="text-green-700 mb-2">用于修正最终存储的标题和季数信息</p>
+              <ul className="list-disc list-inside space-y-1 text-green-700">
+                <li><strong>季度偏移：</strong> <code>新说唱2025 =&gt; &#123;[title=中国新说唱 第8季;season_offset=1&gt;8]&#125;</code></li>
+                <li><strong>元数据替换：</strong> <code>错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;</code></li>
+                <li><strong>源特定偏移：</strong> <code>某动画 =&gt; &#123;[source=tencent;title=正确标题;season_offset=9&gt;13]&#125;</code></li>
+              </ul>
+            </div>
+            <p className="mt-2 text-gray-600">
+              <strong>偏移格式：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法), *&gt;1(通用映射)
             </p>
           </div>
         </div>
@@ -96,23 +78,26 @@ export const Recognition = () => {
           rows={12}
           value={text}
           onChange={value => setText(value.target.value)}
-          placeholder="# 示例配置：
-# 屏蔽词
+          placeholder="# ===== 搜索预处理规则 =====
+# 屏蔽词（从搜索关键词中移除）
 预告
 花絮
 
-# 简单替换
+# 简单替换（搜索前修正关键词）
 奔跑吧 => 奔跑吧兄弟
+极限挑战 => 极限挑战第一季
 
-# 集数偏移
+# 集数偏移（搜索前修正集数）
 第 <> 话 >> EP-1
+Episode <> : >> EP+5
 
-# 复合格式
-某动画 => 某动画正确名称 && 第 <> 话 >> EP-1
+# ===== 入库后处理规则 =====
+# 季度偏移（入库时修正标题和季数）
+新说唱2025 => {[title=中国新说唱 第8季;season_offset=1>8]}
+奔跑吧 第9季 => {[source=tencent;title=奔跑吧兄弟;season_offset=9>13]}
 
-# 季度偏移
-TX源某动画第9季 => {[source=tencent;season_offset=9>13]}
-某动画第5季 => {[source=bilibili;season_offset=5+3]}"
+# 元数据替换（直接指定TMDB ID）
+错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}"
         />
         <div className="flex justify-end mt-4">
           <Button type="primary" onClick={handleSave} loading={isSaveLoading}>
