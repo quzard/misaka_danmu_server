@@ -2250,7 +2250,7 @@ async def get_comments_for_dandan(
             return models.CommentResponse(count=0, comments=[])
 
     # 应用弹幕输出上限（按时间段均匀采样）
-    limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
+    limit_str = await config_manager.get('danmakuOutputLimitPerSource', '-1')
     try:
         limit = int(limit_str)
     except (ValueError, TypeError):
@@ -2258,8 +2258,11 @@ async def get_comments_for_dandan(
 
     # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
+        logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
         from .utils import sample_comments_evenly
+        original_count = len(comments_data)
         comments_data = sample_comments_evenly(comments_data, limit)
+        logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")

@@ -144,6 +144,8 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
     time_duration = max_time - min_time
     segment_duration = time_duration / target_count
 
+    logger.debug(f"弹幕采样详情: 时间范围 {min_time:.1f}s - {max_time:.1f}s (总时长 {time_duration:.1f}s), 每段 {segment_duration:.1f}s")
+
     sampled_comments = []
     current_segment = 0
 
@@ -158,10 +160,12 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
         # 如果这是新的时间段，且我们还没有为这个时间段采样弹幕
         if segment_index >= current_segment and len(sampled_comments) < target_count:
             sampled_comments.append(comment)
+            logger.debug(f"采样弹幕: 时间段 {segment_index} (时间 {time_seconds:.1f}s)")
             current_segment = segment_index + 1
 
     # 如果采样不足，从剩余弹幕中补充
     if len(sampled_comments) < target_count:
+        logger.debug(f"采样不足，需要补充: 已采样 {len(sampled_comments)}, 目标 {target_count}")
         sampled_times = {comment.get('p', '').split(',')[0] for comment in sampled_comments}
         remaining_comments = [
             comment for _, comment in timed_comments
@@ -173,6 +177,7 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
             step = max(1, len(remaining_comments) // needed)
             additional = remaining_comments[::step][:needed]
             sampled_comments.extend(additional)
+            logger.debug(f"补充采样: 从 {len(remaining_comments)} 条剩余弹幕中补充 {len(additional)} 条")
 
     logger.info(f"弹幕均匀采样: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条)")
     return sampled_comments[:target_count]
