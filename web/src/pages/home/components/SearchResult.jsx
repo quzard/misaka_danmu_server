@@ -375,7 +375,7 @@ export const SearchResult = () => {
         key: 'all',
         label: (
           <>
-            <MyIcon icon="list" size={16} className="mr-2" />
+            <MyIcon icon="tvlibrary" size={16} className="mr-2" />
             所有类型
           </>
         ),
@@ -605,7 +605,7 @@ export const SearchResult = () => {
                   <Button>
                     {typeFilter === 'all' ? (
                       <>
-                        <MyIcon icon="list" size={16} className="mr-1" />
+                        <MyIcon icon="tvlibrary" size={16} className="mr-1" />
                         按类型
                       </>
                     ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
