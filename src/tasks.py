@@ -1896,36 +1896,103 @@ async def webhook_search_and_dispatch_task(
             })
             logger.info(f"Webhook 任务: 候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
 
-        # 按优先级选择：优先选择排名最高且符合阈值的候选项
-        best_match = None
-        for item in candidates_with_similarity:
-            if item['similarity'] >= min_similarity_threshold:
-                best_match = item['candidate']
-                logger.info(f"Webhook 任务: 选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, 相似度: {item['similarity']}%)")
-                break
-            else:
-                logger.debug(f"Webhook 任务: 候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
+        # 获取符合阈值的候选项
+        valid_candidates = [item for item in candidates_with_similarity if item['similarity'] >= min_similarity_threshold]
 
-        if best_match is None:
+        if not valid_candidates:
             raise ValueError(f"未找到 '{animeTitle}' 的足够相似的匹配项（最低阈值: {min_similarity_threshold}%）。")
 
-        logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
-        await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+        # 检查是否启用顺延机制
+        fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
 
-        current_time = get_now().strftime("%H:%M:%S")
-        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
-        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
-        task_coro = lambda session, cb: generic_import_task(
-            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
-            animeTitle=best_match.title, mediaType=best_match.type,
-            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
-            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-            progress_callback=cb, session=session, manager=manager,
-            task_manager=task_manager,
-            title_recognition_manager=title_recognition_manager
-        )
-        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+        if not fallback_enabled:
+            # 顺延机制关闭，使用原来的逻辑（只尝试第一个候选项）
+            best_match = valid_candidates[0]['candidate']
+            logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个候选项 '{best_match.title}' (Provider: {best_match.provider})")
+            await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+
+            current_time = get_now().strftime("%H:%M:%S")
+            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+
+            task_coro = lambda session, cb: generic_import_task(
+                provider=best_match.provider, mediaId=best_match.mediaId, year=year,
+                animeTitle=best_match.title, mediaType=best_match.type,
+                season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                progress_callback=cb, session=session, manager=manager,
+                task_manager=task_manager,
+                title_recognition_manager=title_recognition_manager
+            )
+            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+        # 顺延机制：依次尝试每个候选源，直到找到有效的分集
+        logger.info(f"Webhook 任务: 顺延机制已启用，将依次验证 {len(valid_candidates)} 个候选源")
+        last_error = None
+        for attempt, item in enumerate(valid_candidates, 1):
+            candidate = item['candidate']
+            logger.info(f"Webhook 任务: 尝试候选项 {item['rank']} '{candidate.title}' (Provider: {candidate.provider}, 相似度: {item['similarity']}%)")
+            await progress_callback(50 + attempt * 10, f"尝试源 {candidate.provider} ({attempt}/{len(valid_candidates)})")
+
+            try:
+                current_time = get_now().strftime("%H:%M:%S")
+                task_title = f"Webhook（{webhookSource}）自动导入：{candidate.title} - S{season:02d}E{currentEpisodeIndex:02d} ({candidate.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{candidate.title} ({candidate.provider}) [{current_time}]"
+                unique_key = f"import-{candidate.provider}-{candidate.mediaId}-ep{currentEpisodeIndex}"
+
+                # 先验证该源是否有有效分集
+                scraper = manager.get_scraper(candidate.provider)
+                if not scraper:
+                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 不可用，跳过")
+                    continue
+
+                # 获取分集列表进行验证
+                episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                if not episodes:
+                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 没有分集列表，跳过")
+                    continue
+
+                # 检查是否有目标集数
+                target_episode = None
+                for ep in episodes:
+                    if ep.episodeIndex == currentEpisodeIndex:
+                        target_episode = ep
+                        break
+
+                if not target_episode:
+                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 没有第 {currentEpisodeIndex} 集，跳过")
+                    continue
+
+                logger.info(f"Webhook 任务: 源 '{candidate.provider}' 验证通过，找到第 {currentEpisodeIndex} 集")
+
+                # 创建导入任务
+                task_coro = lambda session, cb: generic_import_task(
+                    provider=candidate.provider, mediaId=candidate.mediaId, year=year,
+                    animeTitle=candidate.title, mediaType=candidate.type,
+                    season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                    doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                    progress_callback=cb, session=session, manager=manager,
+                    task_manager=task_manager,
+                    title_recognition_manager=title_recognition_manager
+                )
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                raise TaskSuccess(f"Webhook: 已为源 '{candidate.provider}' 创建导入任务。")
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 验证失败: {e}")
+                if attempt < len(valid_candidates):
+                    logger.info(f"Webhook 任务: 继续尝试下一个源...")
+                    continue
+                else:
+                    logger.error(f"Webhook 任务: 所有候选源都失败了")
+                    break
+
+        # 如果所有候选源都失败了
+        if last_error:
+            raise last_error
+        else:
+            raise ValueError(f"所有候选源都无法提供第 {currentEpisodeIndex} 集")
     except TaskSuccess:
         raise
     except Exception as e:
@@ -2406,15 +2473,81 @@ async def auto_search_and_import_task(
             title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
             similarity = fuzz.token_set_ratio(main_title, item.title)
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
-        # 简化候选项选择：直接选择第一个结果（已经过季度过滤和排序）
+        # 候选项选择：检查是否启用顺延机制
         if not all_results:
             raise ValueError("没有找到合适的搜索结果")
 
-        best_match = all_results[0]
+        # 检查是否启用外部控制API顺延机制
+        fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == 'true'
 
-        similarity = fuzz.token_set_ratio(main_title, best_match.title)
+        if not fallback_enabled:
+            # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+            best_match = all_results[0]
+            similarity = fuzz.token_set_ratio(main_title, best_match.title)
+            logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
+        else:
+            # 顺延机制启用：依次验证候选源，直到找到有效的分集
+            logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
 
-        logger.info(f"自动导入：选择最佳匹配 '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {similarity}%)")
+            best_match = None
+            last_error = None
+
+            for attempt, candidate in enumerate(all_results, 1):
+                similarity = fuzz.token_set_ratio(main_title, candidate.title)
+                logger.info(f"自动导入：尝试候选项 {attempt} '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+                await progress_callback(70 + attempt * 5, f"验证源 {candidate.provider} ({attempt}/{len(all_results)})")
+
+                try:
+                    # 验证该源是否有有效分集
+                    scraper = scraper_manager.get_scraper(candidate.provider)
+                    if not scraper:
+                        logger.warning(f"自动导入：源 '{candidate.provider}' 不可用，跳过")
+                        continue
+
+                    # 获取分集列表进行验证
+                    episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                    if not episodes:
+                        logger.warning(f"自动导入：源 '{candidate.provider}' 没有分集列表，跳过")
+                        continue
+
+                    # 如果指定了集数，检查是否有目标集数
+                    if payload.episode is not None:
+                        target_episode = None
+                        for ep in episodes:
+                            if ep.episodeIndex == payload.episode:
+                                target_episode = ep
+                                break
+
+                        if not target_episode:
+                            logger.warning(f"自动导入：源 '{candidate.provider}' 没有第 {payload.episode} 集，跳过")
+                            continue
+
+                    logger.info(f"自动导入：源 '{candidate.provider}' 验证通过")
+                    best_match = candidate
+                    break
+
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"自动导入：源 '{candidate.provider}' 验证失败: {e}")
+                    if attempt < len(all_results):
+                        logger.info(f"自动导入：继续尝试下一个源...")
+                        continue
+                    else:
+                        logger.error(f"自动导入：所有候选源都失败了")
+                        break
+
+            if best_match is None:
+                if last_error:
+                    raise last_error
+                else:
+                    error_msg = f"所有候选源都无法提供有效分集"
+                    if payload.episode is not None:
+                        error_msg += f"（第 {payload.episode} 集）"
+                    raise ValueError(error_msg)
+
+            similarity = fuzz.token_set_ratio(main_title, best_match.title)
+            logger.info(f"自动导入：顺延验证完成，选择 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
+
         logger.info(f"原始搜索结果标题: '{best_match.title}' (用于识别词匹配)")
 
         # 应用入库后处理规则（季度偏移等），使用选定的搜索结果标题

@@ -97,6 +97,7 @@ export const Webhook = () => {
         webhookFilterMode: values.webhookFilterMode ?? 'blacklist',
         webhookFilterRegex: values.webhookFilterRegex ?? '',
         webhookLogRawRequest: values.webhookLogRawRequest ?? false,
+        webhookFallbackEnabled: values.webhookFallbackEnabled ?? false,
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')
@@ -225,6 +226,33 @@ export const Webhook = () => {
 
           <Form.Item name="webhookCustomDomain" label="自定义域名 (可选)">
             <Input placeholder="例如：https://your.domain.com" />
+          </Form.Item>
+
+          <Form.Item
+            label={
+              <div className="flex items-center gap-2">
+                <span className="text-base font-medium">启用顺延机制</span>
+                <Tooltip
+                  title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源。关闭此选项时，将使用传统的单源选择模式。"
+                  placement="top"
+                >
+                  <InfoCircleOutlined />
+                </Tooltip>
+              </div>
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Form.Item
+                name="webhookFallbackEnabled"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch disabled={!webhookEnabled} />
+              </Form.Item>
+              <span className="text-gray-400 text-sm">
+                启用后，当首选源无法提供有效分集时，会自动尝试其他候选源
+              </span>
+            </div>
           </Form.Item>
 
           {webhookEnabled &&

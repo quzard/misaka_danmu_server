@@ -2982,6 +2982,7 @@ class WebhookSettings(BaseModel):
     webhookFilterMode: str
     webhookFilterRegex: str
     webhookLogRawRequest: bool
+    webhookFallbackEnabled: bool
 
 @router.get("/settings/webhook", response_model=WebhookSettings, summary="获取Webhook设置")
 async def get_webhook_settings(
@@ -2991,7 +2992,7 @@ async def get_webhook_settings(
     # 使用 asyncio.gather 并发获取所有配置项
     (
         enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
-        filter_mode, filter_regex, log_raw_request_str
+        filter_mode, filter_regex, log_raw_request_str, fallback_enabled_str
     ) = await asyncio.gather(
         config.get("webhookEnabled", "true"),
         config.get("webhookDelayedImportEnabled", "false"),
@@ -2999,7 +3000,8 @@ async def get_webhook_settings(
         config.get("webhookCustomDomain", ""),
         config.get("webhookFilterMode", "blacklist"),
         config.get("webhookFilterRegex", ""),
-        config.get("webhookLogRawRequest", "false")
+        config.get("webhookLogRawRequest", "false"),
+        config.get("webhookFallbackEnabled", "false")
     )
     return WebhookSettings(
         webhookEnabled=enabled_str.lower() == 'true',
@@ -3008,7 +3010,8 @@ async def get_webhook_settings(
         webhookCustomDomain=custom_domain_str,
         webhookFilterMode=filter_mode,
         webhookFilterRegex=filter_regex,
-        webhookLogRawRequest=log_raw_request_str.lower() == 'true'
+        webhookLogRawRequest=log_raw_request_str.lower() == 'true',
+        webhookFallbackEnabled=fallback_enabled_str.lower() == 'true'
     )
 
 @router.put("/settings/webhook", status_code=status.HTTP_204_NO_CONTENT, summary="更新Webhook设置")
@@ -3025,7 +3028,8 @@ async def update_webhook_settings(
         config.setValue("webhookCustomDomain", payload.webhookCustomDomain),
         config.setValue("webhookFilterMode", payload.webhookFilterMode),
         config.setValue("webhookFilterRegex", payload.webhookFilterRegex),
-        config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower())
+        config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower()),
+        config.setValue("webhookFallbackEnabled", str(payload.webhookFallbackEnabled).lower())
     )
     return
 

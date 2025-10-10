@@ -490,4 +490,8 @@ export const setRecognition = data =>
 export const getTmdbReverseLookupConfig = () => api.get('/api/ui/config/tmdbReverseLookup')
 
 /** 保存TMDB反查配置 */
-export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tmdbReverseLookup', JSON.stringify(data))
+export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tmdbReverseLookup', data)
+
+/** 通用配置管理 */
+export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
+export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
