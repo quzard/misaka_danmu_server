@@ -100,19 +100,24 @@
    - **Webhook Method**: 选择 `POST`
    - **Description**: 填入描述，如 "弹幕服务器通知"
 
-   ![Tautulli Configuration 配置](https://camo.githubusercontent.com/0974336acba68a60df0ca9a50ee3f60393b753e3961a3f3fb16c45e037c88f75/68747470733a2f2f702e736461312e6465762f31362f33653038343430646265346333356333356261343938316134633839343565642f322e6a7067)
+
+   ![Tautulli Configuration 配置](https://github.com/user-attachments/assets/05f64783-6ad5-474f-9c06-14ddc96a56ca)
 
 4. **Triggers 标签页配置**
    - 勾选 **Recently Added**（新媒体入库事件）
    - 其他事件保持不勾选
 
-5. **Conditions 标签页配置（可选但推荐）**
+   ![Tautulli Triggers 标签页配置](https://github.com/user-attachments/assets/0a081782-451a-4b4f-bc63-2aeb136e5e1b)
+   
+6. **Conditions 标签页配置（可选但推荐）**
    - 添加条件以减少不必要的通知：
      - **Condition 1**: `Library Name` `is` `您的动漫库名称`（限制特定媒体库）
      - **Condition 2**: `Media Type` `is` `episode`（限制剧集类型）
      - **Condition Logic**: `{1} and {2}`（两个条件同时满足）
 
-6. **Data 标签页配置**
+   ![Tautulli Conditions 标签页配置（可选但推荐）](https://github.com/user-attachments/assets/10d22dec-0554-41fb-bb45-41d04987915e)
+   
+7. **Data 标签页配置**
    - 展开 **Recently Added** 部分
    - 在 **JSON Data** 字段中填入以下模板：
      ```json
@@ -128,11 +133,11 @@
      }
      ```
 
-   ![Tautulli Data 配置](https://camo.githubusercontent.com/34eb18168e88218add4409a34c66bbb6a398afc825feb5a004ca8e21314bcefd/68747470733a2f2f702e736461312e6465762f31362f36383730636637633431363732303331313462633464663765616334623431612f352e6a706)
+   ![Tautulli Data 配置](https://github.com/user-attachments/assets/2dd093d2-a718-4eac-b328-0ce25b226724)
 
    > ⚠️ **重要**: 请确保 JSON 格式正确，任何语法错误都会导致 webhook 失败。建议复制粘贴上述模板以避免输入错误。
 
-7. **保存并测试**
+8. **保存并测试**
    - 点击 **Save** 保存配置
    - 可以使用 **Test** 功能验证配置是否正确
 
