@@ -582,7 +582,7 @@ export const SearchResult = () => {
       <Card title="搜索结果" loading={searchLoading}>
         <div>
           <Row gutter={[12, 12]} className="mb-6">
-            <Col md={9} xs={24}>
+            <Col md={20} xs={24}>
               <Space wrap align="center">
                 <Button
                   type="primary"
@@ -598,10 +598,6 @@ export const SearchResult = () => {
                     ? '取消全选'
                     : '全选'}
                 </Button>
-              </Space>
-            </Col>
-            <Col md={11} xs={24}>
-              <Space wrap align="center">
                 <Dropdown menu={typeMenu}>
                   <Button>
                     {typeFilter === 'all' ? (
