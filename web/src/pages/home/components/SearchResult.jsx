@@ -21,6 +21,7 @@ import {
   InputNumber,
   Dropdown,
   Space,
+  Checkbox,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
