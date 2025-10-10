@@ -50,9 +50,10 @@ class PlexWebhook(BaseWebhook):
 
     def _is_tautulli_webhook(self, payload: Dict) -> bool:
         """检测是否为Tautulli webhook格式"""
-        # Tautulli webhook特征：包含media_type、title、season、episode字段
-        tautulli_fields = {"media_type", "title", "season", "episode"}
-        return tautulli_fields.issubset(payload.keys())
+        # Tautulli webhook特征：包含media_type、season、episode字段，以及title或show_name之一
+        required_fields = {"media_type", "season", "episode"}
+        title_fields = {"title", "show_name"}
+        return required_fields.issubset(payload.keys()) and any(field in payload for field in title_fields)
 
     async def _handle_plex_native(self, payload: Dict, webhook_source: str):
         """处理Plex原生webhook - multipart/form-data格式"""
@@ -178,22 +179,32 @@ class PlexWebhook(BaseWebhook):
 
         # 获取媒体类型
         media_type = payload.get("media_type", "").lower()
-        if media_type not in ["episode", "movie"]:
-            self.logger.info(f"Tautulli Webhook: 忽略非 'episode' 或 'movie' 的媒体项 (类型: {media_type})")
+        if media_type not in ["episode", "movie", "season"]:
+            self.logger.info(f"Tautulli Webhook: 忽略非 'episode'、'movie' 或 'season' 的媒体项 (类型: {media_type})")
             return
 
-        # 获取基本信息
-        title = payload.get("title", "")
+        # 获取基本信息 - 优先使用show_name（剧集），回退到title（电影）
+        show_name = payload.get("show_name", "")
+        title_field = payload.get("title", "")
+        title = show_name or title_field
         user_name = payload.get("user_name", "Unknown")
+
+        # 调试日志：显示字段使用情况
+        if show_name and title_field:
+            self.logger.debug(f"Tautulli Webhook: 使用 show_name='{show_name}'，忽略 title='{title_field}'")
+        elif show_name:
+            self.logger.debug(f"Tautulli Webhook: 使用 show_name='{show_name}'")
+        elif title_field:
+            self.logger.debug(f"Tautulli Webhook: 使用 title='{title_field}'")
 
         self.logger.info(f"📺 Tautulli Webhook处理: 用户={user_name}, 媒体类型={media_type}, 标题={title}")
 
         if not title:
-            self.logger.warning("Tautulli Webhook: 缺少标题信息")
+            self.logger.warning("Tautulli Webhook: 缺少标题信息（show_name 和 title 字段都为空）")
             return
 
-        if media_type == "episode":
-            # 处理剧集
+        if media_type in ["episode", "season"]:
+            # 处理剧集（单集或多集）
             season = payload.get("season", 1)
             episode_raw = payload.get("episode", 1)
 

@@ -49,6 +49,8 @@
 
 ### 对于 Plex
 
+#### 方式一：Plex 原生 Webhooks（需要 Plex Pass，有局限性）
+
 1. 登录您的 Plex 服务器管理后台。
 2. 导航到 **设置** -> **Webhooks**。
 3. 点击 **添加 Webhook**。
@@ -58,6 +60,99 @@
    ```
 5. 保存设置。
 
-> **注意**: Plex 会在所有事件（播放、暂停、新媒体入库等）时发送 webhook，但本服务只会处理 `library.new` 事件（新媒体入库）。
+![Plex 原生 Webhooks 配置](https://camo.githubusercontent.com/7e859e2957bebc2048916d29746aca752a9c35519f819c86a34957c7b7884018/68747470733a2f2f702e736461312e6465762f31362f65363837323965316434353462646432336137633966653736636137313235312f312e6a7067)
 
-现在，当有新的电影或剧集添加到您的媒体库时，本服务将自动收到通知，并创建一个后台任务来为其搜索和导入弹幕。
+> **⚠️ 重要限制**:
+> - **需要 Plex Pass 订阅**
+> - **无法处理批量入库**：当您一次性添加多集剧集时（如第1-7集），Plex 原生 webhook 只会发送一个剧集级别的通知，无法获取具体的集数信息
+> - **事件过多**：Plex 会在所有事件（播放、暂停、新媒体入库等）时发送 webhook，增加服务器负担
+> - 本服务只会处理 `library.new` 事件（新媒体入库），其他事件会被忽略
+
+#### 方式二：通过 Tautulli（强烈推荐）
+
+**为什么推荐 Tautulli？**
+- ✅ **解决批量入库问题**：完美处理连续剧集入库（如一次性添加第1-7集）
+- ✅ **无需 Plex Pass**：免费使用，无订阅要求
+- ✅ **精确事件控制**：只在真正需要时触发，减少无用请求
+- ✅ **丰富的过滤条件**：可按用户、媒体库、媒体类型等过滤
+- ✅ **完整的元数据**：提供更详细的媒体信息
+
+**详细配置步骤：**
+
+1. **安装 Tautulli**
+   - 访问 [Tautulli 官网](https://tautulli.com/) 下载并安装
+   - 配置 Tautulli 连接到您的 Plex 服务器
+
+2. **创建 Webhook 通知**
+   - 登录 Tautulli 管理后台
+   - 导航到 **Settings** -> **Notification Agents**
+   - 点击 **Add a new notification agent**，选择 **Webhook**
+
+   ![Tautulli 通知代理设置](https://camo.githubusercontent.com/c91d11ad195d1bc300de1dffd80ab57fa274599ec9ebaa789c5a21c0cb2f785c/68747470733a2f2f702e736461312e6465762f31362f63303165396465353638393234393863303136336130666662376431313266652f312e6a7067)
+
+   > 💡 **提示**: 如果您是第一次使用 Tautulli，建议先熟悉其基本功能，确保它能正常监控您的 Plex 服务器活动。
+
+3. **Configuration 标签页配置**
+   - **Webhook URL**: 填入您的 Plex Webhook URL：
+     ```
+     http://192.168.1.100:7768/api/webhook/plex?api_key=your_webhook_api_key_here
+     ```
+   - **Webhook Method**: 选择 `POST`
+   - **Description**: 填入描述，如 "弹幕服务器通知"
+
+   ![Tautulli Configuration 配置](https://camo.githubusercontent.com/0974336acba68a60df0ca9a50ee3f60393b753e3961a3f3fb16c45e037c88f75/68747470733a2f2f702e736461312e6465762f31362f33653038343430646265346333356333356261343938316134633839343565642f322e6a7067)
+
+4. **Triggers 标签页配置**
+   - 勾选 **Recently Added**（新媒体入库事件）
+   - 其他事件保持不勾选
+
+5. **Conditions 标签页配置（可选但推荐）**
+   - 添加条件以减少不必要的通知：
+     - **Condition 1**: `Library Name` `is` `您的动漫库名称`（限制特定媒体库）
+     - **Condition 2**: `Media Type` `is` `episode`（限制剧集类型）
+     - **Condition Logic**: `{1} and {2}`（两个条件同时满足）
+
+6. **Data 标签页配置**
+   - 展开 **Recently Added** 部分
+   - 在 **JSON Data** 字段中填入以下模板：
+     ```json
+     {
+       "media_type": "{media_type}",
+       "title": "{title}",
+       "show_name": "{show_name}",
+       "season": "{season_num}",
+       "episode": "{episode_num}",
+       "release_date": "{air_date}",
+       "user_name": "{username}",
+       "action": "created"
+     }
+     ```
+
+   ![Tautulli Data 配置](https://camo.githubusercontent.com/34eb18168e88218add4409a34c66bbb6a398afc825feb5a004ca8e21314bcefd/68747470733a2f2f702e736461312e6465762f31362f36383730636637633431363732303331313462633464663765616334623431612f352e6a706)
+
+   > ⚠️ **重要**: 请确保 JSON 格式正确，任何语法错误都会导致 webhook 失败。建议复制粘贴上述模板以避免输入错误。
+
+7. **保存并测试**
+   - 点击 **Save** 保存配置
+   - 可以使用 **Test** 功能验证配置是否正确
+
+   > 💡 **测试建议**:
+   > - 先使用 Tautulli 的测试功能确保 webhook 能正常发送
+   > - 然后在 Plex 中添加一个测试媒体文件，观察是否触发弹幕搜索任务
+   > - 检查弹幕服务器的日志以确认 webhook 被正确接收和处理
+
+**字段说明：**
+- `{media_type}`: 媒体类型（movie, episode, season 等）
+- `{title}`: 通用标题（电影完整名称，剧集包含集数信息）
+- `{show_name}`: 电视剧名称（仅剧集有效，提供纯净剧名）
+- `{season_num}`: 季数（支持范围格式如 "1-3"）
+- `{episode_num}`: 集数（支持范围格式如 "1-7" 或混合格式如 "1-3,6,8,10-13"）
+- `{air_date}`: 首播日期
+- `{username}`: 触发用户名
+
+**批量入库处理示例：**
+当您一次性添加《某动漫》第1-7集时：
+- Plex 原生 webhook：只发送1个剧集级别通知，无法获取具体集数
+- Tautulli webhook：发送包含 `"episode": "1-7"` 的通知，本服务会自动解析为7个独立任务
+
+

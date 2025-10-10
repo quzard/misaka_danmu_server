@@ -39,7 +39,7 @@
 - **Web管理界面**: 提供一个直观的Web UI，用于：
   - 搜索和手动导入弹幕。
   - 管理已收录的媒体库、数据源和分集。
-  - 创建和管理供第三方客户端（如 yamby, hills, 小幻影视, SenPlayer）使用的API令牌。
+  - 创建和管理供第三方客户端（如 yamby, hills, 小幻影视, SenPlayer等）使用的API令牌。
   - 配置搜索源的优先级和启用状态。
   - 查看后台任务进度和系统日志。
 - **元数据整合**: 支持与 TMDB, TVDB, Bangumi, Douban, IMDb 集成，丰富您的媒体信息。
@@ -100,9 +100,10 @@
 
 ## 参考项目
 
- - [dandanplayapi](https://api.dandanplay.net/swagger/index.html)
+ - [dandanplayapi](https://api.dandanplay.net/swagger/index.html) 
  - [danmuku](https://github.com/lyz05/danmaku)
- - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
+ - [emby-toolkit](https://github.com/hbq0405/emby-toolkit) 
  - [swagger-ui](https://github.com/swagger-api/swagger-ui)
+ - [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
  - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
  - [MoviePilot](https://github.com/jxxghp/MoviePilot)
