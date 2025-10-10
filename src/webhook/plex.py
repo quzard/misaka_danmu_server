@@ -211,7 +211,9 @@ class PlexWebhook(BaseWebhook):
             # 检查是否为多集格式（包含逗号或连字符）
             if isinstance(episode_raw, str) and (("," in episode_raw) or ("-" in episode_raw and not episode_raw.isdigit())):
                 # 多集格式，解析所有集数
+                self.logger.info(f"Tautulli Webhook: 准备解析集数范围 '{episode_raw}'")
                 episodes = self._parse_episode_ranges(episode_raw)
+                self.logger.info(f"Tautulli Webhook: 解析完成，返回集数列表: {episodes}")
                 self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
 
                 # 为每一集创建单独的任务
