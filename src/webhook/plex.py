@@ -214,7 +214,12 @@ class PlexWebhook(BaseWebhook):
                 self.logger.info(f"Tautulli Webhook: 准备解析集数范围 '{episode_raw}'")
                 episodes = self._parse_episode_ranges(episode_raw)
                 self.logger.info(f"Tautulli Webhook: 解析完成，返回集数列表: {episodes}")
-                self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
+                self.logger.info(f"Tautulli Webhook: 准备格式化日志，title='{title}', season={season}, episodes_len={len(episodes)}")
+                try:
+                    self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
+                except Exception as e:
+                    self.logger.error(f"Tautulli Webhook: 格式化日志失败: {e}, title='{title}', season={season}, episodes={episodes}")
+                    raise
 
                 # 为每一集创建单独的任务
                 for episode_num in episodes:
