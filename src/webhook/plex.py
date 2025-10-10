@@ -205,21 +205,21 @@ class PlexWebhook(BaseWebhook):
 
         if media_type in ["episode", "season"]:
             # 处理剧集（单集或多集）
-            season = payload.get("season", 1)
+            season_raw = payload.get("season", 1)
+            # 确保 season 是整数
+            try:
+                season = int(season_raw)
+            except (ValueError, TypeError):
+                self.logger.error(f"无法解析季数 '{season_raw}'，webhook 数据格式错误")
+                return
+
             episode_raw = payload.get("episode", 1)
 
             # 检查是否为多集格式（包含逗号或连字符）
             if isinstance(episode_raw, str) and (("," in episode_raw) or ("-" in episode_raw and not episode_raw.isdigit())):
                 # 多集格式，解析所有集数
-                self.logger.info(f"Tautulli Webhook: 准备解析集数范围 '{episode_raw}'")
                 episodes = self._parse_episode_ranges(episode_raw)
-                self.logger.info(f"Tautulli Webhook: 解析完成，返回集数列表: {episodes}")
-                self.logger.info(f"Tautulli Webhook: 准备格式化日志，title='{title}', season={season}, episodes_len={len(episodes)}")
-                try:
-                    self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
-                except Exception as e:
-                    self.logger.error(f"Tautulli Webhook: 格式化日志失败: {e}, title='{title}', season={season}, episodes={episodes}")
-                    raise
+                self.logger.info(f"Tautulli Webhook: 检测到多集格式 - {title} S{season:02d} 包含 {len(episodes)} 集")
 
                 # 为每一集创建单独的任务
                 for episode_num in episodes:
