@@ -486,6 +486,11 @@ class RenrenScraper(BaseScraper):
 
         if target_episode_index is None and db_media_type is None and provider_eps:
             await self._set_to_cache(cache_key, [e.model_dump() for e in provider_eps], 'episodes_ttl_seconds', 1800)
+
+        # 如果指定了目标集数，只返回该集
+        if target_episode_index is not None:
+            return [ep for ep in provider_eps if ep.episodeIndex == target_episode_index]
+
         return provider_eps
 
     async def _fetch_episode_danmu(self, sid: str) -> List[Dict[str, Any]]:
