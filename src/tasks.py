@@ -1614,7 +1614,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
+        await progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
         return
     try:
@@ -1800,7 +1800,7 @@ async def webhook_search_and_dispatch_task(
     """
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
-        progress_callback(5, "正在检查已收藏的源...")
+        await progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
         logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
@@ -1810,7 +1810,7 @@ async def webhook_search_and_dispatch_task(
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
             if favorited_source:
                 logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
-                progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
+                await progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
                 task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
                 unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
@@ -1828,7 +1828,7 @@ async def webhook_search_and_dispatch_task(
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
-        progress_callback(20, "并发搜索所有源...")
+        await progress_callback(20, "并发搜索所有源...")
 
         parsed_keyword = parse_search_keyword(searchKeyword)
         search_title_only = parsed_keyword["title"]
@@ -1910,7 +1910,7 @@ async def webhook_search_and_dispatch_task(
             raise ValueError(f"未找到 '{animeTitle}' 的足够相似的匹配项（最低阈值: {min_similarity_threshold}%）。")
 
         logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
-        progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+        await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
         current_time = get_now().strftime("%H:%M:%S")
         task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
