@@ -507,22 +507,23 @@ class YoukuScraper(BaseScraper):
     async def _ensure_token_cookie(self, force_refresh: bool = False):
         """
         确保获取弹幕签名所需的 cna 和 _m_h5_tk cookie。
-        此逻辑严格参考了 C# 代码，并针对网络环境进行了优化。
+        此逻辑严格参考了 jellyfin-plugin-danmu 的 C# 实现。
         """
         # 修正：在函数开头就确保客户端已初始化，以防止在后续代码中对 NoneType 对象进行操作。
         client = await self._ensure_client()
 
-        # 步骤 1: 获取 'cna' cookie。它通常由优酷主站或其统计服务设置。
-        # 我们优先访问主站，因为它更不容易出网络问题。
+        # 步骤 1: 获取 'cna' cookie。
+        # 参考项目从 https://log.mmstat.com/eg.js 获取，这是优酷统计服务的标准做法。
         cna_val = client.cookies.get("cna")
         if not cna_val or force_refresh:
             try:
-                log_msg = "强制刷新 'cna' cookie..." if force_refresh else "'cna' cookie 未找到, 正在访问 youku.com 以获取..."
+                log_msg = "强制刷新 'cna' cookie..." if force_refresh else "'cna' cookie 未找到, 正在从 mmstat.com 获取..."
                 self.logger.debug(f"Youku: {log_msg}")
-                await client.get("https://www.youku.com/")
-                cna_val = self.client.cookies.get("cna")
+                # 修正：使用参考项目的方式获取CNA
+                await client.get("https://log.mmstat.com/eg.js")
+                cna_val = client.cookies.get("cna")
             except httpx.ConnectError as e:
-                self.logger.warning(f"Youku: 无法连接到 youku.com 获取 'cna' cookie。错误: {e}")
+                self.logger.warning(f"Youku: 无法连接到 mmstat.com 获取 'cna' cookie。错误: {e}")
         self._cna = cna_val or ""
 
         # 步骤 2: 获取 '_m_h5_tk' 令牌, 此请求可能依赖于 'cna' cookie 的存在。
@@ -535,10 +536,12 @@ class YoukuScraper(BaseScraper):
                 token_val = client.cookies.get("_m_h5_tk")
             except httpx.ConnectError as e:
                 self.logger.error(f"Youku: 无法连接到 acs.youku.com 获取令牌 cookie。弹幕获取很可能会失败。错误: {e}")
-        
-        self._token = token_val.split("_")[0] if token_val else ""
+
+        # 修正：参考项目使用 token.Substring(0, 32)，即取前32位字符，而不是按下划线分割
+        # 这是关键修复：签名算法需要使用token的前32位
+        self._token = token_val[:32] if token_val and len(token_val) >= 32 else ""
         if self._token:
-            self.logger.info("Youku: 已成功获取/确认弹幕签名令牌。")
+            self.logger.info(f"Youku: 已成功获取/确认弹幕签名令牌 (前32位)。")
         else:
             self.logger.warning("Youku: 未能获取到弹幕签名所需的 token cookie (_m_h5_tk)，弹幕获取可能会失败。")
             raise self.TokenExpiredError("无法获取有效的 _m_h5_tk 令牌。")
