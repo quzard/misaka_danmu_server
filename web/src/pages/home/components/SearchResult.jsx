@@ -744,6 +744,9 @@ export const SearchResult = () => {
                               setEditEpisodeList(res.data)
                               setEditImportOpen(true)
                               setEditItem(item)
+                              // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
+                              const endValue = item.episodeCount > 0 ? item.episodeCount : 1
+                              setRange([1, endValue])
                             } catch (error) {
                             } finally {
                               setEditLoading(false)
