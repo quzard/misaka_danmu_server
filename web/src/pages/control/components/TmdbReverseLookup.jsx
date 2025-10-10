@@ -11,7 +11,10 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { useMessage } from '../../../MessageContext'
-import { getTmdbReverseLookupConfig, saveTmdbReverseLookupConfig } from '../../../apis'
+import {
+  getTmdbReverseLookupConfig,
+  saveTmdbReverseLookupConfig,
+} from '../../../apis'
 
 const { Text } = Typography
 
@@ -42,7 +45,7 @@ export const TmdbReverseLookup = () => {
     }
   }
 
-  const saveConfig = async (values) => {
+  const saveConfig = async values => {
     try {
       const response = await saveTmdbReverseLookupConfig(values)
       return response.data
@@ -96,9 +99,9 @@ export const TmdbReverseLookup = () => {
           description="当使用TVDB、IMDB、豆瓣、Bangumi等ID搜索时，如果获取到的标题不是中文，系统会自动通过这些ID反查TMDB获取中文标题，提高搜索准确性。"
           type="info"
           showIcon
-          className="mb-4"
+          className="!mb-4"
         />
-        
+
         <Form
           form={form}
           layout="vertical"
@@ -128,24 +131,20 @@ export const TmdbReverseLookup = () => {
 
           <Form.Item>
             <Space>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={isSaving}
-              >
+              <Button type="primary" htmlType="submit" loading={isSaving}>
                 保存配置
               </Button>
-              <Button onClick={loadConfig}>
-                重置
-              </Button>
+              <Button onClick={loadConfig}>重置</Button>
             </Space>
           </Form.Item>
         </Form>
 
         {enabled && (
-          <div className="mt-4 p-4 bg-gray-50 rounded">
-            <Text strong>工作流程：</Text>
-            <ol className="mt-2 ml-4 text-sm text-gray-600">
+          <div className="mt-4 p-4 bg-base-bg rounded">
+            <Text strong className="te">
+              工作流程：
+            </Text>
+            <ol className="p-0 mt-2 text-sm">
               <li>1. 使用选中的元数据源ID进行搜索</li>
               <li>2. 检测获取到的标题是否为中文</li>
               <li>3. 如果不是中文，通过该ID反查TMDB获取中文标题</li>
