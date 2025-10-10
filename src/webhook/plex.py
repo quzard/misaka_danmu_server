@@ -218,16 +218,45 @@ class PlexWebhook(BaseWebhook):
                 for episode_num in episodes:
                     self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode_num:02d}")
 
+                    try:
+                        await self.dispatch_task(
+                            task_title=f"{title} S{season:02d}E{episode_num:02d}",
+                            unique_key=f"tautulli_episode_{title}_{season}_{episode_num}_{user_name}",
+                            payload={
+                                "animeTitle": title,
+                                "mediaType": "tv_series",
+                                "season": season,
+                                "currentEpisodeIndex": episode_num,
+                                "year": None,
+                                "searchKeyword": f"{title} S{season:02d}E{episode_num:02d}",
+                                "doubanId": None,
+                                "tmdbId": None,
+                                "imdbId": None,
+                                "tvdbId": None,
+                                "bangumiId": None
+                            },
+                            webhook_source=webhook_source
+                        )
+                        self.logger.info(f"Tautulli Webhook: 成功创建任务 - {title} S{season:02d}E{episode_num:02d}")
+                    except Exception as e:
+                        self.logger.error(f"Tautulli Webhook: 创建任务失败 - {title} S{season:02d}E{episode_num:02d}: {e}", exc_info=True)
+                        raise
+            else:
+                # 单集格式
+                episode = int(episode_raw) if isinstance(episode_raw, str) and episode_raw.isdigit() else episode_raw
+                self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode:02d}")
+
+                try:
                     await self.dispatch_task(
-                        task_title=f"{title} S{season:02d}E{episode_num:02d}",
-                        unique_key=f"tautulli_episode_{title}_{season}_{episode_num}_{user_name}",
+                        task_title=f"{title} S{season:02d}E{episode:02d}",
+                        unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
                         payload={
                             "animeTitle": title,
                             "mediaType": "tv_series",
                             "season": season,
-                            "currentEpisodeIndex": episode_num,
+                            "currentEpisodeIndex": episode,
                             "year": None,
-                            "searchKeyword": f"{title} S{season:02d}E{episode_num:02d}",
+                            "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
                             "doubanId": None,
                             "tmdbId": None,
                             "imdbId": None,
@@ -236,29 +265,10 @@ class PlexWebhook(BaseWebhook):
                         },
                         webhook_source=webhook_source
                     )
-            else:
-                # 单集格式
-                episode = int(episode_raw) if isinstance(episode_raw, str) and episode_raw.isdigit() else episode_raw
-                self.logger.info(f"Tautulli Webhook: 处理剧集 - {title} S{season:02d}E{episode:02d}")
-
-                await self.dispatch_task(
-                    task_title=f"{title} S{season:02d}E{episode:02d}",
-                    unique_key=f"tautulli_episode_{title}_{season}_{episode}_{user_name}",
-                    payload={
-                        "animeTitle": title,
-                        "mediaType": "tv_series",
-                        "season": season,
-                        "currentEpisodeIndex": episode,
-                        "year": None,
-                        "searchKeyword": f"{title} S{season:02d}E{episode:02d}",
-                        "doubanId": None,
-                        "tmdbId": None,
-                        "imdbId": None,
-                        "tvdbId": None,
-                        "bangumiId": None
-                    },
-                    webhook_source=webhook_source
-                )
+                    self.logger.info(f"Tautulli Webhook: 成功创建任务 - {title} S{season:02d}E{episode:02d}")
+                except Exception as e:
+                    self.logger.error(f"Tautulli Webhook: 创建任务失败 - {title} S{season:02d}E{episode:02d}: {e}", exc_info=True)
+                    raise
 
         elif media_type == "movie":
             # 处理电影
@@ -272,24 +282,29 @@ class PlexWebhook(BaseWebhook):
             
             self.logger.info(f"Tautulli Webhook: 处理电影 - {title} ({year})")
 
-            await self.dispatch_task(
-                task_title=f"{title} ({year})" if year else title,
-                unique_key=f"tautulli_movie_{title}_{year}_{user_name}",
-                payload={
-                    "animeTitle": title,
-                    "mediaType": "movie",
-                    "season": 1,
-                    "currentEpisodeIndex": 1,
-                    "year": year,
-                    "searchKeyword": f"{title} ({year})" if year else title,
-                    "doubanId": None,
-                    "tmdbId": None,
-                    "imdbId": None,
-                    "tvdbId": None,
-                    "bangumiId": None
-                },
-                webhook_source=webhook_source
-            )
+            try:
+                await self.dispatch_task(
+                    task_title=f"{title} ({year})" if year else title,
+                    unique_key=f"tautulli_movie_{title}_{year}_{user_name}",
+                    payload={
+                        "animeTitle": title,
+                        "mediaType": "movie",
+                        "season": 1,
+                        "currentEpisodeIndex": 1,
+                        "year": year,
+                        "searchKeyword": f"{title} ({year})" if year else title,
+                        "doubanId": None,
+                        "tmdbId": None,
+                        "imdbId": None,
+                        "tvdbId": None,
+                        "bangumiId": None
+                    },
+                    webhook_source=webhook_source
+                )
+                self.logger.info(f"Tautulli Webhook: 成功创建任务 - {title} ({year})")
+            except Exception as e:
+                self.logger.error(f"Tautulli Webhook: 创建任务失败 - {title} ({year}): {e}", exc_info=True)
+                raise
 
     def _extract_provider_ids(self, guid_list: list) -> Dict[str, str]:
         """从Plex的Guid列表中提取各种provider ID"""
