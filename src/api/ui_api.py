@@ -1784,6 +1784,52 @@ async def set_search_fallback(
     logger.info(f"后备搜索状态已保存: {request.value}")
     return
 
+# --- TMDB反查配置 ---
+# 注意：这些专用路由必须在通用的 /config/{config_key} 路由之前定义，
+# 否则会被通用路由拦截
+
+class TmdbReverseLookupConfig(BaseModel):
+    enabled: bool
+    sources: List[str]  # 启用反查的源列表，如 ['imdb', 'tvdb', 'douban', 'bangumi']
+
+@router.get("/config/tmdbReverseLookup", response_model=TmdbReverseLookupConfig, summary="获取TMDB反查配置")
+async def get_tmdb_reverse_lookup_config(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取TMDB反查配置"""
+    enabled = await crud.get_config_value(session, "tmdbReverseLookupEnabled", "false")
+    sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb"]')
+
+    try:
+        sources = json.loads(sources_json)
+    except:
+        sources = ["imdb", "tvdb"]  # 默认值
+
+    return TmdbReverseLookupConfig(
+        enabled=enabled.lower() == "true",
+        sources=sources
+    )
+
+class TmdbReverseLookupConfigRequest(BaseModel):
+    enabled: bool
+    sources: List[str]
+
+@router.post("/config/tmdbReverseLookup", summary="保存TMDB反查配置")
+async def save_tmdb_reverse_lookup_config(
+    request: TmdbReverseLookupConfigRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """保存TMDB反查配置"""
+    # 修正：使用 config_manager.setValue 来确保在同一个事务中更新两个配置项
+    # 这样可以避免多次 commit 导致的问题
+    await config_manager.setValue("tmdbReverseLookupEnabled", str(request.enabled).lower())
+    await config_manager.setValue("tmdbReverseLookupSources", json.dumps(request.sources))
+
+    logger.info(f"用户 '{current_user.username}' 更新了TMDB反查配置: enabled={request.enabled}, sources={request.sources}")
+    return {"message": "TMDB反查配置已保存"}
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,
@@ -1838,50 +1884,6 @@ async def regenerate_external_api_key(
     config_manager.invalidate("externalApiKey")
     logger.info(f"用户 '{current_user.username}' 重新生成了外部 API Key。")
     return {"key": "externalApiKey", "value": new_key}
-
-# --- TMDB反查配置 ---
-
-class TmdbReverseLookupConfig(BaseModel):
-    enabled: bool
-    sources: List[str]  # 启用反查的源列表，如 ['imdb', 'tvdb', 'douban', 'bangumi']
-
-@router.get("/config/tmdbReverseLookup", response_model=TmdbReverseLookupConfig, summary="获取TMDB反查配置")
-async def get_tmdb_reverse_lookup_config(
-    current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """获取TMDB反查配置"""
-    enabled = await crud.get_config_value(session, "tmdbReverseLookupEnabled", "false")
-    sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb"]')
-
-    try:
-        sources = json.loads(sources_json)
-    except:
-        sources = ["imdb", "tvdb"]  # 默认值
-
-    return TmdbReverseLookupConfig(
-        enabled=enabled.lower() == "true",
-        sources=sources
-    )
-
-class TmdbReverseLookupConfigRequest(BaseModel):
-    enabled: bool
-    sources: List[str]
-
-@router.post("/config/tmdbReverseLookup", summary="保存TMDB反查配置")
-async def save_tmdb_reverse_lookup_config(
-    request: TmdbReverseLookupConfigRequest,
-    current_user: models.User = Depends(security.get_current_user),
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
-    """保存TMDB反查配置"""
-    # 修正：使用 config_manager.setValue 来确保在同一个事务中更新两个配置项
-    # 这样可以避免多次 commit 导致的问题
-    await config_manager.setValue("tmdbReverseLookupEnabled", str(request.enabled).lower())
-    await config_manager.setValue("tmdbReverseLookupSources", json.dumps(request.sources))
-
-    logger.info(f"用户 '{current_user.username}' 更新了TMDB反查配置: enabled={request.enabled}, sources={request.sources}")
-    return {"message": "TMDB反查配置已保存"}
 
 @router.get("/external-logs", response_model=List[models.ExternalApiLogInfo], summary="获取最新的外部API访问日志")
 async def get_external_api_logs(
