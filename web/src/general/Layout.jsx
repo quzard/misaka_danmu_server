@@ -13,21 +13,21 @@ export const Layout = () => {
   const setUserinfo = useSetAtom(userinfoAtom)
   const isMobile = useAtomValue(isMobileAtom)
   useEffect(() => {
-    const token = Cookies.get('token')
+    const token = Cookies.get('danmu_token')
     if (!token) {
       window.location.href = '/login'
     } else {
       getUserInfo()
         .then(res => {
           if (!res.data || !res.data.username) {
-            Cookies.remove('token')
+            Cookies.remove('danmu_token', { path: '/' })
             window.location.href = '/login'
           } else {
             setUserinfo(res.data)
           }
         })
         .catch(err => {
-          // Cookies.remove('token')
+          // Cookies.remove('danmu_token', { path: '/' })
           window.location.href = '/login'
         })
     }

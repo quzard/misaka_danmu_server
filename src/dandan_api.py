@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from opencc import OpenCC
 from thefuzz import fuzz
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status, Response
@@ -134,25 +134,27 @@ def _format_episode_ranges(episodes: List[int]) -> str:
         ranges.append(f"{start}-{end}")
 
     return ",".join(ranges)
-
-async def _find_existing_anime_by_title_and_search(session: AsyncSession, title: str, search_key: str) -> Optional[Dict[str, Any]]:
+   
+async def _find_existing_anime_by_bangumi_id(session: AsyncSession, bangumi_id: str, search_key: str) -> Optional[Dict[str, Any]]:
     """
-    根据标题和搜索会话查找已存在的映射记录，返回anime信息
-    只在同一个搜索会话中查找，避免不同搜索的剧集被错误合并
+    根据bangumiId和搜索会话查找已存在的映射记录，返回anime信息
+    使用bangumiId确保精确匹配，避免不同搜索结果被错误合并
     """
     # 只在当前搜索会话的结果中查找
     if search_key in fallback_search_cache:
         search_info = fallback_search_cache[search_key]
         if "bangumi_mapping" in search_info:
-            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                if mapping_info.get("original_title") == title and mapping_info.get("real_anime_id"):
+            if bangumi_id in search_info["bangumi_mapping"]:
+                mapping_info = search_info["bangumi_mapping"][bangumi_id]
+                if mapping_info.get("real_anime_id"):
                     real_anime_id = mapping_info["real_anime_id"]
-                    logger.debug(f"在当前搜索会话中找到已存在的剧集: '{title}' (anime_id={real_anime_id})")
+                    title = mapping_info.get("original_title", "未知")
+                    logger.debug(f"在当前搜索会话中找到已存在的剧集: bangumiId={bangumi_id}, title='{title}' (anime_id={real_anime_id})")
                     return {"animeId": real_anime_id, "title": title}
 
-    logger.debug(f"在当前搜索会话中未找到已存在的剧集: '{title}'")
+    logger.debug(f"在当前搜索会话中未找到已存在的剧集: bangumiId={bangumi_id}")
     return None
-
+  
 async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
     """
     更新episodeId的映射关系（同时更新数据库缓存和内存缓存）
@@ -255,7 +257,6 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
     获取下一个真实的animeId（当前最大animeId + 1）
     用于实际的episodeId生成
     """
-    from sqlalchemy import func
     from . import orm_models
 
     # 查询当前最大的animeId
@@ -1339,7 +1340,7 @@ async def get_bangumi_details(
 
                                 if actual_episodes:
                                     # 检查是否已经有相同剧集的记录（源切换检测）
-                                    existing_anime = await _find_existing_anime_by_title_and_search(session, original_title, search_key)
+                                    existing_anime = await _find_existing_anime_by_bangumi_id(session, bangumiId, search_key)
 
                                     if existing_anime:
                                         # 找到现有剧集，这是源切换行为
@@ -1355,9 +1356,30 @@ async def get_bangumi_details(
                                             )
                                         logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
                                     else:
-                                        # 新剧集，获取新的真实animeId
-                                        real_anime_id = await _get_next_real_anime_id(session)
-                                        logger.info(f"新剧集: '{original_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+                                        # 新剧集，先检查数据库中是否已有相同标题的条目
+                                        from .utils import parse_search_keyword
+                                        from .orm_models import Anime
+
+                                        # 解析搜索关键词，提取纯标题
+                                        parsed_info = parse_search_keyword(original_title)
+                                        base_title = parsed_info["title"]
+
+                                        # 直接在数据库中查找相同标题的条目
+                                        stmt = select(Anime.id, Anime.title).where(
+                                            Anime.title == base_title,
+                                            Anime.season == 1
+                                        )
+                                        result = await session.execute(stmt)
+                                        existing_db_anime = result.mappings().first()
+
+                                        if existing_db_anime:
+                                            # 如果数据库中已有相同标题的条目，使用已有的anime_id
+                                            real_anime_id = existing_db_anime['id']
+                                            logger.info(f"复用已存在的番剧: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+                                        else:
+                                            # 如果数据库中没有，获取新的真实animeId
+                                            real_anime_id = await _get_next_real_anime_id(session)
+                                            logger.info(f"新剧集: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
 
                                     # 存储真实animeId到虚拟animeId的映射关系
                                     mapping_info["real_anime_id"] = real_anime_id
@@ -1874,14 +1896,42 @@ async def get_comments_for_dandan(
                         media_id = mapping_data["media_id"]
                         original_title = mapping_data["original_title"]
 
-                        # 复用现有的保存逻辑：创建动画条目、源关联、分集条目，然后保存弹幕
+                        # 复用现有的保存逻辑：查找或创建动画条目、源关联、分集条目，然后保存弹幕
                         try:
+                            # 1. 首先尝试根据real_anime_id查找已存在的anime记录
+                            from .orm_models import Anime
+                            existing_anime_stmt = select(Anime).where(Anime.id == real_anime_id)
+                            existing_anime_result = await session.execute(existing_anime_stmt)
+                            existing_anime = existing_anime_result.scalar_one_or_none()
 
-                            # 1. 创建动画条目
-                            anime_id = await crud.get_or_create_anime(
-                                session, original_title, "tv_series", 1,
-                                None, None, None, None
-                            )
+                            if existing_anime:
+                                # 如果已存在，直接使用
+                                anime_id = existing_anime.id
+                                logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
+                            else:
+                                # 如果不存在，解析标题并检查数据库中是否已有相同条目
+                                from .utils import parse_search_keyword
+                                parsed_info = parse_search_keyword(original_title)
+                                base_title = parsed_info["title"]
+
+                                # 直接在数据库中查找相同标题的条目（不应用标题识别转换）
+                                stmt = select(Anime.id, Anime.title).where(
+                                    Anime.title == base_title,
+                                    Anime.season == 1
+                                )
+                                result = await session.execute(stmt)
+                                existing_anime_row = result.mappings().first()
+
+                                if existing_anime_row:
+                                    # 如果已存在，直接使用
+                                    anime_id = existing_anime_row['id']
+                                    logger.info(f"找到已存在的番剧（按标题）: ID={anime_id}, 标题='{base_title}'")
+                                else:
+                                    # 如果不存在，创建新的（使用解析后的纯标题）
+                                    anime_id = await crud.get_or_create_anime(
+                                        session, base_title, "tv_series", 1,
+                                        None, None, None, None, provider
+                                    )
 
                             # 2. 创建源关联
                             source_id = await crud.link_source_to_anime(
@@ -2023,7 +2073,7 @@ async def get_comments_for_dandan(
                                 )
 
                                 # 使用并发下载获取弹幕（三线程模式）
-                                async def dummy_progress_callback(_, __):
+                                async def dummy_progress_callback(_, _unused):
                                     pass  # 空的异步进度回调，忽略所有参数
 
                                 download_results = await tasks._download_episode_comments_concurrent(
@@ -2055,13 +2105,19 @@ async def get_comments_for_dandan(
                                     original_title = mapping_info.get("original_title", "未知标题")
                                     media_type = mapping_info.get("type", "movie")
 
-                                    # 从搜索缓存中获取更多信息（年份、海报等）
+                                    # 从搜索缓存中获取更多信息（年份、海报等）和搜索关键词
                                     year = None
                                     image_url = None
+                                    search_keyword = None
                                     for search_key, search_info in fallback_search_cache.items():
                                         if search_key in user_last_bangumi_choice:
                                             last_bangumi_id = user_last_bangumi_choice[search_key]
                                             if last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                # 获取搜索关键词（从search_key中提取）
+                                                if search_key.startswith("search_"):
+                                                    # 从fallback_search_cache中获取原始搜索词
+                                                    search_keyword = search_info.get("search_term")
+
                                                 for result in search_info.get("results", []):
                                                     # result 是 DandanSearchAnimeItem 对象，使用属性访问
                                                     if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
@@ -2070,11 +2126,43 @@ async def get_comments_for_dandan(
                                                         break
                                                 break
 
-                                    # 1. 创建动画条目（参考 WebUI 逻辑）
-                                    anime_id = await crud.get_or_create_anime(
-                                        task_session, original_title, media_type, 1,
-                                        image_url, None, year, None
-                                    )
+                                    # 解析搜索关键词，提取纯标题（如"天才基本法 S01E13" -> "天才基本法"）
+                                    from .utils import parse_search_keyword
+                                    search_term = search_keyword or original_title
+                                    parsed_info = parse_search_keyword(search_term)
+                                    base_title = parsed_info["title"]
+
+                                    # 由于我们在分配real_anime_id时已经检查了数据库，这里直接使用real_anime_id
+                                    # 如果数据库中已有相同标题的条目，real_anime_id就是已有的anime_id
+                                    # 如果没有，real_anime_id就是新分配的anime_id，需要创建条目
+
+                                    # 检查数据库中是否已有这个anime_id的条目
+                                    from .orm_models import Anime
+                                    stmt = select(Anime.id).where(Anime.id == real_anime_id)
+                                    result = await task_session.execute(stmt)
+                                    existing_anime_row = result.scalar_one_or_none()
+
+                                    if existing_anime_row:
+                                        # 如果已存在，直接使用
+                                        anime_id = real_anime_id
+                                        logger.info(f"使用已存在的番剧: ID={anime_id}")
+                                    else:
+                                        # 如果不存在，直接创建新的（使用real_anime_id作为指定ID）
+                                        from .orm_models import Anime
+                                        from .timezone import get_now
+                                        new_anime = Anime(
+                                            id=real_anime_id,
+                                            title=base_title,
+                                            type=media_type,
+                                            season=1,
+                                            year=year,
+                                            imageUrl=image_url,
+                                            createdAt=get_now()
+                                        )
+                                        task_session.add(new_anime)
+                                        await task_session.flush()  # 确保ID可用
+                                        anime_id = real_anime_id
+                                        logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
 
                                     # 2. 创建源关联
                                     source_id = await crud.link_source_to_anime(
@@ -2161,16 +2249,20 @@ async def get_comments_for_dandan(
             logger.warning(f"无法获取 episodeId={episodeId} 的弹幕数据")
             return models.CommentResponse(count=0, comments=[])
 
-    # 应用输出数量限制
-    limit_str = await config_manager.get('danmaku_output_limit_per_source', '-1')
+    # 应用弹幕输出上限（按时间段均匀采样）
+    limit_str = await config_manager.get('danmakuOutputLimitPerSource', '-1')
     try:
         limit = int(limit_str)
     except (ValueError, TypeError):
         limit = -1
 
-    # 应用限制
+    # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
-        comments_data = comments_data[:limit]
+        logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
+        from .utils import sample_comments_evenly
+        original_count = len(comments_data)
+        comments_data = sample_comments_evenly(comments_data, limit)
+        logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")

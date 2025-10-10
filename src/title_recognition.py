@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class TitleRecognitionRule:
     """识别词规则类"""
 
-    def __init__(self, rule_type: str, **kwargs):
+    def __init__(self, rule_type: str, stage: str, **kwargs):
         self.rule_type = rule_type  # 'block', 'replace', 'offset', 'complex', 'metadata_replace', 'season_offset'
+        self.stage = stage  # 'preprocess' (搜索预处理) 或 'postprocess' (入库后处理)
         self.data = kwargs
 
 class TitleRecognitionManager:
@@ -121,6 +122,10 @@ class TitleRecognitionManager:
         Returns:
             TitleRecognitionRule: 解析后的规则对象，解析失败返回None
         """
+        # 检查是否是屏蔽词格式
+        if line.startswith('BLOCK:'):
+            return self._parse_block_rule(line, line_num)
+
         # 检查是否包含复合格式标识符
         has_replace = ' => ' in line
         has_offset = ' <> ' in line and ' >> ' in line
@@ -136,18 +141,23 @@ class TitleRecognitionManager:
             # 集数偏移: 前定位词 <> 后定位词 >> 集偏移量
             return self._parse_offset_rule(line, line_num)
         else:
-            # 屏蔽词: 屏蔽词
-            return self._parse_block_rule(line, line_num)
+            # 如果没有特殊格式，跳过（避免误解析）
+            logger.warning(f"识别词配置第{line_num}行格式不明确，跳过: {line}")
+            return None
 
     def _parse_block_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """解析屏蔽词规则"""
-        block_word = line.strip()
+        if line.startswith('BLOCK:'):
+            block_word = line[6:].strip()  # 移除 'BLOCK:' 前缀
+        else:
+            block_word = line.strip()
+
         if not block_word:
             logger.warning(f"识别词配置第{line_num}行屏蔽词为空，跳过: {line}")
             return None
 
         logger.debug(f"解析屏蔽词规则: {block_word}")
-        return TitleRecognitionRule('block', word=block_word)
+        return TitleRecognitionRule('block', 'preprocess', word=block_word)
 
     def _parse_replace_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """解析简单替换规则"""
@@ -166,26 +176,39 @@ class TitleRecognitionManager:
             logger.warning(f"识别词配置第{line_num}行替换词为空，跳过: {line}")
             return None
 
+        # 检查是否是搜索预处理格式 {<search_season=8>}
+        if target.startswith('{<') and target.endswith('>}'):
+            search_info = self._parse_search_target(target)
+            if search_info:
+                logger.debug(f"解析搜索预处理规则: {source} => {target}")
+                search_copy = search_info.copy()
+                search_copy['source'] = source  # 这是匹配的文本
+                return TitleRecognitionRule('search_season', 'preprocess', **search_copy)
+
         # 检查是否是特殊格式 {[tmdbid/doubanid=xxx;type=movie/tv;s=xxx;e=xxx]} 或季度偏移格式
-        if target.startswith('{[') and target.endswith(']}'):
+        elif target.startswith('{[') and target.endswith(']}'):
             metadata_info = self._parse_metadata_target(target)
             if metadata_info:
                 # 检查是否包含季度偏移信息
                 if 'season_offset' in metadata_info:
                     logger.debug(f"解析季度偏移规则: {source} => {target}")
-                    # 避免重复的source参数
+                    # 重命名source参数为source_restriction以避免冲突
                     metadata_copy = metadata_info.copy()
-                    metadata_copy['source'] = source
-                    return TitleRecognitionRule('season_offset', **metadata_copy)
+                    if 'source' in metadata_copy:
+                        metadata_copy['source_restriction'] = metadata_copy.pop('source')
+                    metadata_copy['source'] = source  # 这是匹配的文本
+                    return TitleRecognitionRule('season_offset', 'postprocess', **metadata_copy)
                 else:
                     logger.debug(f"解析元数据替换规则: {source} => {target}")
-                    # 避免重复的source参数
+                    # 重命名source参数为source_restriction以避免冲突
                     metadata_copy = metadata_info.copy()
-                    metadata_copy['source'] = source
-                    return TitleRecognitionRule('metadata_replace', **metadata_copy)
+                    if 'source' in metadata_copy:
+                        metadata_copy['source_restriction'] = metadata_copy.pop('source')
+                    metadata_copy['source'] = source  # 这是匹配的文本
+                    return TitleRecognitionRule('metadata_replace', 'postprocess', **metadata_copy)
 
         logger.debug(f"解析简单替换规则: {source} => {target}")
-        return TitleRecognitionRule('replace', source=source, target=target)
+        return TitleRecognitionRule('replace', 'preprocess', source=source, target=target)
 
     def _parse_offset_rule(self, line: str, line_num: int) -> Optional[TitleRecognitionRule]:
         """解析集数偏移规则"""
@@ -210,7 +233,7 @@ class TitleRecognitionManager:
         after_locator = locator_parts[1].strip()
 
         logger.debug(f"解析集数偏移规则: {before_locator} <> {after_locator} >> {offset_part}")
-        return TitleRecognitionRule('offset',
+        return TitleRecognitionRule('offset', 'preprocess',
                                    before_locator=before_locator,
                                    after_locator=after_locator,
                                    offset=offset_part)
@@ -240,7 +263,7 @@ class TitleRecognitionManager:
             return None
 
         logger.debug(f"解析复合规则: {line}")
-        return TitleRecognitionRule('complex',
+        return TitleRecognitionRule('complex', 'preprocess',
                                    source=replace_rule.data['source'],
                                    target=replace_rule.data['target'],
                                    before_locator=offset_rule.data['before_locator'],
@@ -275,10 +298,51 @@ class TitleRecognitionManager:
                     metadata[key] = int(value)
                 except ValueError:
                     continue
-            elif key in ['type', 's', 'e', 'source', 'season_offset', 'title']:
-                metadata[key] = value
+            elif key in ['type', 's', 'e', 'source', 'season_offset', 'title', 'search_season']:
+                if key == 'search_season':
+                    try:
+                        metadata[key] = int(value)
+                    except ValueError:
+                        continue
+                else:
+                    metadata[key] = value
+
+        # 如果没有指定source，默认为'all'
+        if 'source' not in metadata:
+            metadata['source'] = 'all'
 
         return metadata if metadata else None
+
+    def _parse_search_target(self, target: str) -> Optional[Dict[str, Any]]:
+        """
+        解析搜索预处理目标格式: {<search_season=8>}
+
+        Args:
+            target: 目标字符串
+
+        Returns:
+            Dict: 解析后的搜索信息
+        """
+        if not target.startswith('{<') or not target.endswith('>}'):
+            return None
+
+        content = target[2:-2]  # 移除 {< 和 >}
+        search_info = {}
+
+        for part in content.split(';'):
+            if '=' not in part:
+                continue
+            key, value = part.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+
+            if key == 'search_season':
+                try:
+                    search_info[key] = int(value)
+                except ValueError:
+                    continue
+
+        return search_info if search_info else None
 
     async def update_recognition_rules(self, content: str) -> List[str]:
         """
@@ -318,8 +382,144 @@ class TitleRecognitionManager:
         except Exception as e:
             logger.error(f"更新识别词规则失败: {e}")
             raise
-    
-    async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
+
+    async def apply_search_preprocessing(self, text: str, episode: Optional[int] = None, season: Optional[int] = None) -> Tuple[str, Optional[int], Optional[int], bool]:
+        """
+        应用搜索预处理规则（在搜索前执行）
+
+        Args:
+            text: 原始搜索关键词
+            episode: 原始集数
+            season: 原始季数
+
+        Returns:
+            Tuple[处理后的文本, 处理后的集数, 处理后的季数, 是否发生了转换]
+        """
+        await self._ensure_rules_loaded()
+
+        if not text:
+            return text, episode, False
+
+        processed_text = text
+        processed_episode = episode
+        processed_season = season
+        has_changed = False
+
+        # 只应用预处理阶段的规则
+        for rule in self.recognition_rules:
+            if rule.stage != 'preprocess':
+                continue
+
+            if rule.rule_type == 'block':
+                # 屏蔽词：从文本中移除
+                if rule.data['word'] in processed_text:
+                    processed_text = processed_text.replace(rule.data['word'], '').strip()
+                    has_changed = True
+                    logger.debug(f"搜索预处理 - 应用屏蔽词规则: 移除 '{rule.data['word']}'")
+
+            elif rule.rule_type == 'replace':
+                # 简单替换
+                if self._exact_match(processed_text, rule.data['source']):
+                    processed_text = processed_text.replace(rule.data['source'], rule.data['target'])
+                    has_changed = True
+                    logger.debug(f"搜索预处理 - 应用替换规则: '{rule.data['source']}' => '{rule.data['target']}'")
+
+            elif rule.rule_type == 'offset':
+                # 集数偏移
+                new_episode = self._apply_episode_offset(processed_text, processed_episode, rule)
+                if new_episode != processed_episode:
+                    processed_episode = new_episode
+                    has_changed = True
+
+            elif rule.rule_type == 'complex':
+                # 复合规则：先替换，再偏移
+                if rule.data['source'] in processed_text:
+                    processed_text = processed_text.replace(rule.data['source'], rule.data['target'])
+                    new_episode = self._apply_episode_offset_with_locators(
+                        processed_text, processed_episode,
+                        rule.data['before_locator'],
+                        rule.data['after_locator'],
+                        rule.data['offset']
+                    )
+                    if new_episode != processed_episode:
+                        processed_episode = new_episode
+                    has_changed = True
+                    logger.debug(f"搜索预处理 - 应用复合规则: '{rule.data['source']}' => '{rule.data['target']}'")
+
+            elif rule.rule_type == 'search_season':
+                # 季度预处理：指定搜索时使用的季度
+                if self._exact_match(processed_text, rule.data['source']):
+                    processed_season = rule.data['search_season']
+                    has_changed = True
+                    logger.debug(f"搜索预处理 - 应用季度预处理规则: '{rule.data['source']}' => 季度 {processed_season}")
+
+        return processed_text, processed_episode, processed_season, has_changed
+
+    async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
+        """
+        应用入库后处理规则（在选择最佳匹配后执行）
+
+        Args:
+            text: 选择的最佳匹配标题
+            season: 原始季数
+            source: 数据源名称
+
+        Returns:
+            Tuple[处理后的标题, 处理后的季数, 是否发生了转换, 元数据信息]
+        """
+        await self._ensure_rules_loaded()
+
+        if not text:
+            return text, season, False, None
+
+        processed_text = text
+        processed_season = season
+        has_changed = False
+        metadata_info = None
+
+        # 只应用后处理阶段的规则
+        for rule in self.recognition_rules:
+            if rule.stage != 'postprocess':
+                continue
+
+            if rule.rule_type == 'season_offset':
+                # 季度偏移规则
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过季度偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
+                    # 应用标题替换（如果有）
+                    if 'title' in rule.data:
+                        processed_text = rule.data['title']
+                        has_changed = True
+                        logger.debug(f"入库后处理 - 应用标题替换: '{rule.data['source']}' => '{processed_text}'")
+
+                    # 应用季度偏移
+                    new_season = self._apply_season_offset(processed_season, rule.data['season_offset'])
+                    if new_season != processed_season:
+                        processed_season = new_season
+                        has_changed = True
+                        logger.debug(f"入库后处理 - 应用季度偏移: {season} => {processed_season}")
+
+            elif rule.rule_type == 'metadata_replace':
+                # 元数据替换规则
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过元数据替换规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
+                    metadata_info = {k: v for k, v in rule.data.items() if k not in ['source', 'source_restriction']}
+                    has_changed = True
+                    logger.debug(f"入库后处理 - 应用元数据替换规则: '{rule.data['source']}' => 元数据")
+
+        return processed_text, processed_season, has_changed, metadata_info
+
+    async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
         应用标题识别词转换 - 参考MoviePilot格式
 
@@ -327,6 +527,7 @@ class TitleRecognitionManager:
             text: 原始文本（标题或文件名）
             episode: 原始集数
             season: 原始季数
+            source: 数据源名称（用于source限制规则）
 
         Returns:
             Tuple[转换后的文本, 转换后的集数, 转换后的季数, 是否发生了转换, 元数据信息]
@@ -362,8 +563,14 @@ class TitleRecognitionManager:
             elif rule.rule_type == 'metadata_replace':
                 # 元数据替换 - 使用完全匹配避免误匹配
                 if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过元数据替换规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
                     processed_text = processed_text.replace(rule.data['source'], '')
-                    metadata_info = {k: v for k, v in rule.data.items() if k != 'source'}
+                    metadata_info = {k: v for k, v in rule.data.items() if k not in ['source', 'source_restriction']}
                     has_changed = True
                     logger.debug(f"应用元数据替换规则: '{rule.data['source']}' => 元数据")
 
@@ -391,19 +598,34 @@ class TitleRecognitionManager:
 
             elif rule.rule_type == 'season_offset':
                 # 季度偏移规则 - 使用完全匹配避免误匹配
+                logger.debug(f"检查季度偏移规则匹配: 文本='{processed_text}' vs 规则='{rule.data['source']}'")
                 if self._exact_match(processed_text, rule.data['source']):
+                    logger.info(f"✓ 季度偏移规则匹配成功: '{processed_text}' 匹配 '{rule.data['source']}'")
+
+                    # 检查source限制（如果规则指定了source）
+                    rule_source = rule.data.get('source_restriction')  # 避免与rule.data['source']冲突
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过季度偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
                     # 应用标题替换（如果有）
+                    old_text = processed_text
                     if 'title' in rule.data:
                         processed_text = processed_text.replace(rule.data['source'], rule.data['title'])
+                        logger.info(f"✓ 标题替换: '{old_text}' -> '{processed_text}'")
                     else:
                         processed_text = processed_text.replace(rule.data['source'], '').strip()
+                        logger.info(f"✓ 标题清理: '{old_text}' -> '{processed_text}'")
 
                     # 应用季度偏移
+                    old_season = processed_season
                     new_season = self._apply_season_offset(processed_season, rule.data['season_offset'])
                     if new_season != processed_season:
                         processed_season = new_season
                         has_changed = True
-                        logger.debug(f"应用季度偏移规则: '{rule.data['source']}' 季度 {processed_season} => {new_season}")
+                        logger.info(f"✓ 季度偏移: {old_season} -> {new_season} (规则: {rule.data['season_offset']})")
+                else:
+                    logger.debug(f"○ 季度偏移规则不匹配: '{processed_text}' 不匹配 '{rule.data['source']}'")
 
         return processed_text, processed_episode, processed_season, has_changed, metadata_info
 

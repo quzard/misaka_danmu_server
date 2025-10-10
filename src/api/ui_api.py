@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import string
 import time
+import json
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
@@ -110,7 +111,8 @@ async def search_anime_provider(
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager)
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -118,9 +120,29 @@ async def search_anime_provider(
     """
     try:
         parsed_keyword = parse_search_keyword(keyword)
-        search_title = parsed_keyword["title"]
+        original_title = parsed_keyword["title"]
         season_to_filter = parsed_keyword["season"]
         episode_to_filter = parsed_keyword["episode"]
+
+        # 应用搜索预处理规则
+        search_title = original_title
+        search_season = season_to_filter
+        if title_recognition_manager:
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter, season_to_filter)
+            if preprocessing_applied:
+                search_title = processed_title
+                logger.info(f"✓ WebUI搜索预处理: '{original_title}' -> '{search_title}'")
+                # 如果集数发生了变化，更新episode_to_filter
+                if processed_episode != episode_to_filter:
+                    episode_to_filter = processed_episode
+                    logger.info(f"✓ WebUI集数预处理: {parsed_keyword['episode']} -> {episode_to_filter}")
+                # 如果季数发生了变化，更新season_to_filter
+                if processed_season != season_to_filter:
+                    search_season = processed_season
+                    season_to_filter = processed_season
+                    logger.info(f"✓ WebUI季度预处理: {parsed_keyword['season']} -> {season_to_filter}")
+            else:
+                logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
 
         # --- 新增：按季缓存逻辑 ---
         # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
@@ -1762,6 +1784,52 @@ async def set_search_fallback(
     logger.info(f"后备搜索状态已保存: {request.value}")
     return
 
+# --- TMDB反查配置 ---
+# 注意：这些专用路由必须在通用的 /config/{config_key} 路由之前定义，
+# 否则会被通用路由拦截
+
+class TmdbReverseLookupConfig(BaseModel):
+    enabled: bool
+    sources: List[str]  # 启用反查的源列表，如 ['imdb', 'tvdb', 'douban', 'bangumi']
+
+@router.get("/config/tmdbReverseLookup", response_model=TmdbReverseLookupConfig, summary="获取TMDB反查配置")
+async def get_tmdb_reverse_lookup_config(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取TMDB反查配置"""
+    enabled = await crud.get_config_value(session, "tmdbReverseLookupEnabled", "false")
+    sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb"]')
+
+    try:
+        sources = json.loads(sources_json)
+    except:
+        sources = ["imdb", "tvdb"]  # 默认值
+
+    return TmdbReverseLookupConfig(
+        enabled=enabled.lower() == "true",
+        sources=sources
+    )
+
+class TmdbReverseLookupConfigRequest(BaseModel):
+    enabled: bool
+    sources: List[str]
+
+@router.post("/config/tmdbReverseLookup", summary="保存TMDB反查配置")
+async def save_tmdb_reverse_lookup_config(
+    request: TmdbReverseLookupConfigRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """保存TMDB反查配置"""
+    # 修正：使用 config_manager.setValue 来确保在同一个事务中更新两个配置项
+    # 这样可以避免多次 commit 导致的问题
+    await config_manager.setValue("tmdbReverseLookupEnabled", str(request.enabled).lower())
+    await config_manager.setValue("tmdbReverseLookupSources", json.dumps(request.sources))
+
+    logger.info(f"用户 '{current_user.username}' 更新了TMDB反查配置: enabled={request.enabled}, sources={request.sources}")
+    return {"message": "TMDB反查配置已保存"}
+
 @router.get("/config/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,
@@ -1894,7 +1962,14 @@ async def set_provider_settings(
     if providerName in ["douban", "tvdb"]:
         key = config_keys_map.get(providerName)
         if key:
-            await config_manager.setValue(configKey=key, configValue=settings.get("value", ""))
+            # 修复：使用正确的字段名获取配置值
+            if providerName == "tvdb":
+                value = settings.get("tvdbApiKey", "")
+            elif providerName == "douban":
+                value = settings.get("doubanCookie", "")
+            else:
+                value = settings.get("value", "")
+            await config_manager.setValue(configKey=key, configValue=value)
     else:
         keys_to_update = config_keys_map.get(providerName, [])
         tasks = [
@@ -2493,11 +2568,27 @@ async def import_from_provider(
         title_recognition_manager=title_recognition_manager
     )
     
-    # 构造任务标题
-    task_title = f"导入: {request_data.animeTitle} ({request_data.provider})"
+    # 预先应用识别词转换来生成正确的任务标题
+    display_title = request_data.animeTitle
+    display_season = request_data.season
+
+    if title_recognition_manager:
+        try:
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                request_data.animeTitle, request_data.season, request_data.provider
+            )
+            if was_converted:
+                display_title = converted_title
+                display_season = converted_season
+                logger.info(f"任务标题应用识别词转换: '{request_data.animeTitle}' S{request_data.season:02d} -> '{display_title}' S{display_season:02d}")
+        except Exception as e:
+            logger.warning(f"任务标题识别词转换失败: {e}")
+
+    # 构造任务标题（使用转换后的标题）
+    task_title = f"导入: {display_title} ({request_data.provider})"
     # 如果是电视剧且指定了单集导入，则在标题中追加季和集信息
-    if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and request_data.season is not None:
-        task_title += f" - S{request_data.season:02d}E{request_data.currentEpisodeIndex:02d}"
+    if request_data.type == "tv_series" and request_data.currentEpisodeIndex is not None and display_season is not None:
+        task_title += f" - S{display_season:02d}E{request_data.currentEpisodeIndex:02d}"
 
     # 生成unique_key以避免重复任务
     unique_key_parts = [request_data.provider, request_data.mediaId]
@@ -2526,7 +2617,23 @@ async def import_edited_episodes(
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """提交一个后台任务，使用用户在前端编辑过的分集列表进行导入。"""
-    task_title = f"编辑后导入: {request_data.animeTitle} ({request_data.provider})"
+    # 预先应用识别词转换来生成正确的任务标题
+    display_title = request_data.animeTitle
+    display_season = request_data.season
+
+    if title_recognition_manager:
+        try:
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                request_data.animeTitle, request_data.season, request_data.provider
+            )
+            if was_converted:
+                display_title = converted_title
+                display_season = converted_season
+                logger.info(f"编辑导入任务标题应用识别词转换: '{request_data.animeTitle}' S{request_data.season:02d} -> '{display_title}' S{display_season:02d}")
+        except Exception as e:
+            logger.warning(f"编辑导入任务标题识别词转换失败: {e}")
+
+    task_title = f"编辑后导入: {display_title} ({request_data.provider})"
     task_coro = lambda session, callback: tasks.edited_import_task(
         request_data=request_data,
         progress_callback=callback,
@@ -2875,6 +2982,7 @@ class WebhookSettings(BaseModel):
     webhookFilterMode: str
     webhookFilterRegex: str
     webhookLogRawRequest: bool
+    webhookFallbackEnabled: bool
 
 @router.get("/settings/webhook", response_model=WebhookSettings, summary="获取Webhook设置")
 async def get_webhook_settings(
@@ -2884,7 +2992,7 @@ async def get_webhook_settings(
     # 使用 asyncio.gather 并发获取所有配置项
     (
         enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
-        filter_mode, filter_regex, log_raw_request_str
+        filter_mode, filter_regex, log_raw_request_str, fallback_enabled_str
     ) = await asyncio.gather(
         config.get("webhookEnabled", "true"),
         config.get("webhookDelayedImportEnabled", "false"),
@@ -2892,7 +3000,8 @@ async def get_webhook_settings(
         config.get("webhookCustomDomain", ""),
         config.get("webhookFilterMode", "blacklist"),
         config.get("webhookFilterRegex", ""),
-        config.get("webhookLogRawRequest", "false")
+        config.get("webhookLogRawRequest", "false"),
+        config.get("webhookFallbackEnabled", "false")
     )
     return WebhookSettings(
         webhookEnabled=enabled_str.lower() == 'true',
@@ -2901,7 +3010,8 @@ async def get_webhook_settings(
         webhookCustomDomain=custom_domain_str,
         webhookFilterMode=filter_mode,
         webhookFilterRegex=filter_regex,
-        webhookLogRawRequest=log_raw_request_str.lower() == 'true'
+        webhookLogRawRequest=log_raw_request_str.lower() == 'true',
+        webhookFallbackEnabled=fallback_enabled_str.lower() == 'true'
     )
 
 @router.put("/settings/webhook", status_code=status.HTTP_204_NO_CONTENT, summary="更新Webhook设置")
@@ -2918,7 +3028,8 @@ async def update_webhook_settings(
         config.setValue("webhookCustomDomain", payload.webhookCustomDomain),
         config.setValue("webhookFilterMode", payload.webhookFilterMode),
         config.setValue("webhookFilterRegex", payload.webhookFilterRegex),
-        config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower())
+        config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower()),
+        config.setValue("webhookFallbackEnabled", str(payload.webhookFallbackEnabled).lower())
     )
     return
 

@@ -1,0 +1,85 @@
+[mysqld]
+# === 基础配置 ===
+user = mysql
+port = 3306
+bind-address = 0.0.0.0
+skip-name-resolve = 1
+default-authentication-plugin = mysql_native_password
+
+# === 字符集配置 ===
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+init_connect = 'SET NAMES utf8mb4'
+
+# === 内存优化配置 ===
+# InnoDB 缓冲池大小 - 设置为较小值以节省内存
+innodb_buffer_pool_size = 64M
+# 减少 InnoDB 日志缓冲区大小
+innodb_log_buffer_size = 8M
+# 减少查询缓存大小（MySQL 8.0 中已移除，但保留兼容性）
+# query_cache_size = 0
+# 减少表缓存大小
+table_open_cache = 64
+# 减少线程缓存大小
+thread_cache_size = 8
+# 减少临时表大小
+tmp_table_size = 16M
+max_heap_table_size = 16M
+# 减少排序缓冲区大小
+sort_buffer_size = 256K
+# 减少连接缓冲区大小
+read_buffer_size = 128K
+read_rnd_buffer_size = 256K
+# 减少批量插入缓冲区大小
+bulk_insert_buffer_size = 8M
+
+# === 连接配置 ===
+max_connections = 50
+max_connect_errors = 10
+connect_timeout = 10
+wait_timeout = 600
+interactive_timeout = 600
+
+# === InnoDB 优化 ===
+# 减少 InnoDB 日志文件大小
+innodb_log_file_size = 32M
+# 减少 InnoDB 日志文件数量
+innodb_log_files_in_group = 2
+# 优化 InnoDB 刷新方法
+innodb_flush_method = O_DIRECT
+# 减少 InnoDB 线程并发数
+innodb_thread_concurrency = 2
+# 减少 InnoDB 读写 IO 线程
+innodb_read_io_threads = 2
+innodb_write_io_threads = 2
+
+# === 日志配置 ===
+# 禁用一般查询日志以节省空间和性能
+general_log = 0
+# 启用慢查询日志但设置较高阈值
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 5
+# 二进制日志配置
+log-bin = mysql-bin
+binlog_expire_logs_seconds = 259200
+max_binlog_size = 100M
+
+# === 安全配置 ===
+# 禁用符号链接
+symbolic-links = 0
+# 设置 SQL 模式
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO
+
+# === 性能优化 ===
+# 禁用性能模式以节省内存
+performance_schema = OFF
+# 减少信息模式统计信息缓存
+information_schema_stats_expiry = 86400
+
+[mysql]
+default-character-set = utf8mb4
+
+[client]
+default-character-set = utf8mb4
+port = 3306

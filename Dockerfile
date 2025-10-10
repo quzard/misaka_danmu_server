@@ -1,5 +1,7 @@
 # --- Stage 1: Extract SO files ---
-FROM l429609201/so:latest AS so-extractor
+# 定义构建参数，用于确定.so文件来源镜像的标签
+ARG SO_TAG=latest
+FROM l429609201/so:${SO_TAG} AS so-extractor
 
 # --- Stage 2: Build Frontend ---
 FROM node:20-alpine AS builder

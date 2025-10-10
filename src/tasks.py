@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, List, Optional, Dict, Tuple
+from typing import Callable, List, Optional, Dict, Tuple, Any
 import json
 import asyncio
 import re
@@ -32,6 +32,206 @@ from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
+
+
+def _is_chinese_title(title: str) -> bool:
+    """检查标题是否包含中文字符"""
+    if not title:
+        return False
+    # 检查是否包含中文字符（包括中文标点符号）
+    chinese_pattern = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
+    return bool(chinese_pattern.search(title))
+
+
+async def _reverse_lookup_tmdb_chinese_title(
+    metadata_manager: MetadataSourceManager,
+    user: models.User,
+    source_type: str,
+    source_id: str,
+    tmdb_id: Optional[str],
+    imdb_id: Optional[str],
+    tvdb_id: Optional[str],
+    douban_id: Optional[str],
+    bangumi_id: Optional[str]
+) -> Optional[str]:
+    """
+    通过其他ID反查TMDB获取中文标题
+
+    Args:
+        metadata_manager: 元数据管理器
+        user: 用户对象
+        source_type: 原始搜索类型 (tvdb, imdb, douban, bangumi)
+        source_id: 原始搜索ID
+        tmdb_id: 已知的TMDB ID（如果有）
+        imdb_id: IMDB ID
+        tvdb_id: TVDB ID
+        douban_id: 豆瓣ID
+        bangumi_id: Bangumi ID
+
+    Returns:
+        中文标题（如果找到）
+    """
+    try:
+        # 如果已经有TMDB ID，直接用它获取中文标题
+        if tmdb_id:
+            logger.info(f"使用已知TMDB ID {tmdb_id} 获取中文标题...")
+            tmdb_details = await metadata_manager.get_details(
+                provider='tmdb', item_id=tmdb_id, user=user, mediaType='tv'
+            )
+            if not tmdb_details:
+                # 尝试movie类型
+                tmdb_details = await metadata_manager.get_details(
+                    provider='tmdb', item_id=tmdb_id, user=user, mediaType='movie'
+                )
+
+            if tmdb_details and tmdb_details.title and _is_chinese_title(tmdb_details.title):
+                return tmdb_details.title
+
+        # 如果没有TMDB ID或TMDB查询失败，尝试通过其他ID反查
+        external_ids = {}
+        if imdb_id:
+            external_ids['imdb_id'] = imdb_id
+        if tvdb_id:
+            external_ids['tvdb_id'] = tvdb_id
+        if douban_id:
+            external_ids['douban_id'] = douban_id
+        if bangumi_id:
+            external_ids['bangumi_id'] = bangumi_id
+
+        if external_ids:
+            logger.info(f"尝试通过外部ID反查TMDB: {external_ids}")
+            # 尝试通过TMDB的find API查找
+            tmdb_id_from_external = await _find_tmdb_by_external_ids(metadata_manager, user, external_ids)
+            if tmdb_id_from_external:
+                logger.info(f"通过外部ID找到TMDB ID: {tmdb_id_from_external}")
+                # 使用找到的TMDB ID获取中文标题
+                tmdb_details = await metadata_manager.get_details(
+                    provider='tmdb', item_id=tmdb_id_from_external, user=user, mediaType='tv'
+                )
+                if not tmdb_details:
+                    tmdb_details = await metadata_manager.get_details(
+                        provider='tmdb', item_id=tmdb_id_from_external, user=user, mediaType='movie'
+                    )
+
+                if tmdb_details and tmdb_details.title and _is_chinese_title(tmdb_details.title):
+                    return tmdb_details.title
+
+        logger.info(f"未能通过 {source_type} ID {source_id} 反查到中文标题")
+        return None
+
+    except Exception as e:
+        logger.warning(f"TMDB反查失败: {e}")
+        return None
+
+
+async def _is_tmdb_reverse_lookup_enabled(session: AsyncSession, source_type: str) -> bool:
+    """
+    检查TMDB反查功能是否启用，以及指定的源类型是否在启用列表中
+
+    Args:
+        session: 数据库会话
+        source_type: 源类型 (imdb, tvdb, douban, bangumi)
+
+    Returns:
+        是否启用TMDB反查
+    """
+    try:
+        # 检查总开关
+        enabled_value = await crud.get_config_value(session, "tmdbReverseLookupEnabled", "false")
+        if enabled_value.lower() != "true":
+            return False
+
+        # 检查源类型是否在启用列表中
+        sources_json = await crud.get_config_value(session, "tmdbReverseLookupSources", '["imdb", "tvdb", "douban", "bangumi"]')
+        try:
+            enabled_sources = json.loads(sources_json)
+        except:
+            enabled_sources = ["imdb", "tvdb", "douban", "bangumi"]  # 默认值
+
+        return source_type in enabled_sources
+
+    except Exception as e:
+        logger.warning(f"检查TMDB反查配置失败: {e}")
+        return False
+
+
+async def _find_tmdb_by_external_ids(
+    metadata_manager: MetadataSourceManager,
+    user: models.User,
+    external_ids: Dict[str, str]
+) -> Optional[str]:
+    """
+    通过外部ID查找TMDB ID
+
+    Args:
+        metadata_manager: 元数据管理器
+        user: 用户对象
+        external_ids: 外部ID字典，如 {'imdb_id': 'tt1234567', 'tvdb_id': '12345'}
+
+    Returns:
+        TMDB ID（如果找到）
+    """
+    try:
+        # 目前简化实现：通过搜索来查找
+        # TODO: 实现真正的TMDB find API调用
+
+        # 如果有IMDB ID，尝试通过IMDB搜索然后查看结果中的TMDB ID
+        if 'imdb_id' in external_ids:
+            imdb_id = external_ids['imdb_id']
+            logger.info(f"尝试通过IMDB ID {imdb_id} 查找TMDB...")
+
+            # 通过IMDB搜索
+            imdb_results = await metadata_manager.search('imdb', imdb_id, user)
+            for result in imdb_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过IMDB找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        # 如果有TVDB ID，类似处理
+        if 'tvdb_id' in external_ids:
+            tvdb_id = external_ids['tvdb_id']
+            logger.info(f"尝试通过TVDB ID {tvdb_id} 查找TMDB...")
+
+            # 通过TVDB搜索
+            tvdb_results = await metadata_manager.search('tvdb', tvdb_id, user)
+            for result in tvdb_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过TVDB找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        # 如果有Douban ID，类似处理
+        if 'douban_id' in external_ids:
+            douban_id = external_ids['douban_id']
+            logger.info(f"尝试通过Douban ID {douban_id} 查找TMDB...")
+
+            # 通过Douban搜索
+            douban_results = await metadata_manager.search('douban', douban_id, user)
+            for result in douban_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过Douban找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        # 如果有Bangumi ID，类似处理
+        if 'bangumi_id' in external_ids:
+            bangumi_id = external_ids['bangumi_id']
+            logger.info(f"尝试通过Bangumi ID {bangumi_id} 查找TMDB...")
+
+            # 通过Bangumi搜索
+            bangumi_results = await metadata_manager.search('bangumi', bangumi_id, user)
+            for result in bangumi_results:
+                if hasattr(result, 'tmdbId') and result.tmdbId:
+                    logger.info(f"通过Bangumi找到TMDB ID: {result.tmdbId}")
+                    return result.tmdbId
+
+        return None
+
+    except Exception as e:
+        logger.warning(f"通过外部ID查找TMDB失败: {e}")
+        return None
+
+    except Exception as e:
+        logger.warning(f"TMDB反查失败: {e}")
+        return None
 
 def _parse_xml_content(xml_content: str) -> List[Dict[str, str]]:
     """
@@ -362,7 +562,8 @@ async def _import_episodes_iteratively(
     source_id: int,
     first_episode_comments: Optional[List] = None,
     config_manager = None,
-    is_single_episode: bool = False
+    is_single_episode: bool = False,
+    smart_refresh: bool = False
 ) -> Tuple[int, List[int], int]:
     """
     迭代地导入分集弹幕。
@@ -370,6 +571,7 @@ async def _import_episodes_iteratively(
     Args:
         first_episode_comments: 第一集预获取的弹幕（可选）
         is_single_episode: 是否为单集下载模式（启用并发下载）
+        smart_refresh: 是否为智能刷新模式（先下载比较，只有更多弹幕才覆盖）
     """
     total_comments_added = 0
     successful_episodes_indices = []
@@ -402,20 +604,48 @@ async def _import_episodes_iteratively(
                         episode.title, episode.url, episode.episodeId
                     )
 
-                    # 检查分集是否已有弹幕，如果有则跳过
-                    episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                    episode_result = await session.execute(episode_stmt)
-                    existing_episode = episode_result.scalar_one_or_none()
-                    if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                        successful_episodes_indices.append(episode.episodeIndex)
+                    # 智能刷新模式：比较弹幕数量
+                    if smart_refresh:
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
+
+                        if existing_episode and existing_episode.commentCount > 0:
+                            new_count = len(comments)
+                            existing_count = existing_episode.commentCount
+
+                            if new_count > existing_count:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                                await session.commit()
+                            elif new_count == existing_count:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                successful_episodes_indices.append(episode.episodeIndex)
+                                continue
+                            else:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                successful_episodes_indices.append(episode.episodeIndex)
+                                continue
+                        else:
+                            # 没有现有弹幕，直接导入
+                            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                            await session.commit()
                     else:
+                        # 普通模式：检查是否已有弹幕，如果有则跳过
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
+                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                            successful_episodes_indices.append(episode.episodeIndex)
+                            continue
+
                         added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                         await session.commit()
 
-                        total_comments_added += added_count
-                        successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                    total_comments_added += added_count
+                    successful_episodes_indices.append(episode.episodeIndex)
+                    logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
                 except Exception as e:
                     failed_episodes_count += 1
                     logger.error(f"[并发模式] 分集 '{episode.title}' 写入数据库失败: {e}")
@@ -440,9 +670,10 @@ async def _import_episodes_iteratively(
                     # 其他分集正常获取
                     await rate_limiter.check(scraper.provider_name)
 
-                    sub_progress_callback = lambda p, msg: progress_callback(
-                        base_progress + int(p * 0.6 / len(episodes)), msg
-                    )
+                    async def sub_progress_callback(p, msg):
+                        await progress_callback(
+                            base_progress + int(p * 0.6 / len(episodes)), msg
+                        )
 
                     comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
@@ -456,20 +687,42 @@ async def _import_episodes_iteratively(
                         episode.title, episode.url, episode.episodeId
                     )
 
-                    # 检查分集是否已有弹幕，如果有则跳过
-                    episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                    episode_result = await session.execute(episode_stmt)
-                    existing_episode = episode_result.scalar_one_or_none()
-                    if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                        successful_episodes_indices.append(episode.episodeIndex)
-                    else:
-                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                        await session.commit()
+                    # 智能刷新模式：比较弹幕数量
+                    if smart_refresh:
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
 
-                        total_comments_added += added_count
-                        successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                        if existing_episode and existing_episode.commentCount > 0:
+                            new_count = len(comments)
+                            existing_count = existing_episode.commentCount
+
+                            if new_count > existing_count:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                            elif new_count == existing_count:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                successful_episodes_indices.append(episode.episodeIndex)
+                                continue
+                            else:
+                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                successful_episodes_indices.append(episode.episodeIndex)
+                                continue
+                    else:
+                        # 普通模式：检查是否已有弹幕，如果有则跳过
+                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                        episode_result = await session.execute(episode_stmt)
+                        existing_episode = episode_result.scalar_one_or_none()
+                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                            successful_episodes_indices.append(episode.episodeIndex)
+                            continue
+
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                    await session.commit()
+
+                    total_comments_added += added_count
+                    successful_episodes_indices.append(episode.episodeIndex)
+                    logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
                 else:
                     failed_episodes_count += 1
                     logger.warning(f"分集 '{episode.title}' 获取弹幕失败（返回 None）。")
@@ -495,20 +748,42 @@ async def _import_episodes_iteratively(
                             episode.title, episode.url, episode.episodeId
                         )
 
-                        # 检查分集是否已有弹幕，如果有则跳过
-                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                        episode_result = await session.execute(episode_stmt)
-                        existing_episode = episode_result.scalar_one_or_none()
-                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                            successful_episodes_indices.append(episode.episodeIndex)
-                        else:
-                            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                            await session.commit()
+                        # 智能刷新模式：比较弹幕数量
+                        if smart_refresh:
+                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                            episode_result = await session.execute(episode_stmt)
+                            existing_episode = episode_result.scalar_one_or_none()
 
-                            total_comments_added += added_count
-                            successful_episodes_indices.append(episode.episodeIndex)
-                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                            if existing_episode and existing_episode.commentCount > 0:
+                                new_count = len(comments)
+                                existing_count = existing_episode.commentCount
+
+                                if new_count > existing_count:
+                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                                elif new_count == existing_count:
+                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    continue
+                                else:
+                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    continue
+                        else:
+                            # 普通模式：检查是否已有弹幕，如果有则跳过
+                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
+                            episode_result = await session.execute(episode_stmt)
+                            existing_episode = episode_result.scalar_one_or_none()
+                            if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
+                                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
+                                successful_episodes_indices.append(episode.episodeIndex)
+                                continue
+
+                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                        await session.commit()
+
+                        total_comments_added += added_count
+                        successful_episodes_indices.append(episode.episodeIndex)
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
                     else:
                         failed_episodes_count += 1
                         logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
@@ -593,7 +868,8 @@ async def generic_import_task(
         season=season,
         year=year,
         is_single_episode=currentEpisodeIndex is not None,
-        episode_index=currentEpisodeIndex
+        episode_index=currentEpisodeIndex,
+        title_recognition_manager=title_recognition_manager
     )
     if duplicate_reason:
         raise ValueError(duplicate_reason)
@@ -624,7 +900,7 @@ async def generic_import_task(
                 
                 # 修正：确保在创建时也使用年份进行重复检查
                 anime_id = await crud.get_or_create_anime(
-                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager)
+                    session, title_to_use, mediaType, season_to_use, imageUrl, local_image_path, year, title_recognition_manager, provider)
                 await crud.update_metadata_if_empty(
                     session, anime_id,
                     tmdb_id=tmdbId,
@@ -689,7 +965,8 @@ async def generic_import_task(
                 imageUrl,
                 local_image_path,
                 year,
-                title_recognition_manager
+                title_recognition_manager,
+                provider
             )
 
             # 更新元数据
@@ -744,7 +1021,8 @@ async def generic_import_task(
                 imageUrl,
                 local_image_path,
                 year,
-                title_recognition_manager
+                title_recognition_manager,
+                provider
             )
 
             # 更新元数据
@@ -883,7 +1161,7 @@ async def edited_import_task(
             # 修正：确保在创建时也使用年份进行重复检查
             anime_id = await crud.get_or_create_anime(
                 session, request_data.animeTitle, request_data.mediaType,
-                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager
+                request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager, request_data.provider
             )
             
             # 更新元数据
@@ -967,7 +1245,8 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
             episodes=new_episodes_meta,
             anime_id=source_info["animeId"],
             source_id=sourceId,
-            config_manager=config_manager
+            config_manager=config_manager,
+            smart_refresh=True  # 全量刷新时启用智能比较模式
         )
 
         # 步骤 3: 在所有导入/更新操作完成后，清理过时的分集
@@ -1335,7 +1614,7 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
     logger.info(f"开始增量刷新源 ID: {sourceId}，尝试获取第{nextEpisodeIndex}集")
     source_info = await crud.get_anime_source_info(session, sourceId)
     if not source_info:
-        progress_callback(100, "失败: 找不到源信息")
+        await progress_callback(100, "失败: 找不到源信息")
         logger.error(f"刷新失败：在数据库中找不到源 ID: {sourceId}")
         return
     try:
@@ -1521,16 +1800,17 @@ async def webhook_search_and_dispatch_task(
     """
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
-        progress_callback(5, "正在检查已收藏的源...")
+        await progress_callback(5, "正在检查已收藏的源...")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager)
+        logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager, source=None)
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
             if favorited_source:
                 logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
-                progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
+                await progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
                 task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
                 unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
@@ -1548,7 +1828,7 @@ async def webhook_search_and_dispatch_task(
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
-        progress_callback(20, "并发搜索所有源...")
+        await progress_callback(20, "并发搜索所有源...")
 
         parsed_keyword = parse_search_keyword(searchKeyword)
         search_title_only = parsed_keyword["title"]
@@ -1616,36 +1896,92 @@ async def webhook_search_and_dispatch_task(
             })
             logger.info(f"Webhook 任务: 候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
 
-        # 按优先级选择：优先选择排名最高且符合阈值的候选项
-        best_match = None
-        for item in candidates_with_similarity:
-            if item['similarity'] >= min_similarity_threshold:
-                best_match = item['candidate']
-                logger.info(f"Webhook 任务: 选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, 相似度: {item['similarity']}%)")
-                break
-            else:
-                logger.debug(f"Webhook 任务: 候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
+        # 获取符合阈值的候选项
+        valid_candidates = [item for item in candidates_with_similarity if item['similarity'] >= min_similarity_threshold]
 
-        if best_match is None:
+        if not valid_candidates:
             raise ValueError(f"未找到 '{animeTitle}' 的足够相似的匹配项（最低阈值: {min_similarity_threshold}%）。")
 
-        logger.info(f"Webhook 任务: 在所有源中找到最佳匹配项 '{best_match.title}' (来自: {best_match.provider})，将为其创建导入任务。")
-        progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+        # 检查是否启用顺延机制
+        fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
 
-        current_time = get_now().strftime("%H:%M:%S")
-        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
-        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
-        task_coro = lambda session, cb: generic_import_task(
-            provider=best_match.provider, mediaId=best_match.mediaId, year=year,
-            animeTitle=best_match.title, mediaType=best_match.type,
-            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
-            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-            progress_callback=cb, session=session, manager=manager,
-            task_manager=task_manager,
-            title_recognition_manager=title_recognition_manager
-        )
-        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+        if not fallback_enabled:
+            # 顺延机制关闭，使用原来的逻辑（只尝试第一个候选项）
+            best_match = valid_candidates[0]['candidate']
+            logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个候选项 '{best_match.title}' (Provider: {best_match.provider})")
+            await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+
+            current_time = get_now().strftime("%H:%M:%S")
+            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+
+            # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
+            final_year = best_match.year if best_match.year is not None else year
+            task_coro = lambda session, cb: generic_import_task(
+                provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
+                animeTitle=best_match.title, mediaType=best_match.type,
+                season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                progress_callback=cb, session=session, manager=manager,
+                task_manager=task_manager,
+                title_recognition_manager=title_recognition_manager
+            )
+            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+        # 顺延机制：依次尝试每个候选源，直到有一个导入成功
+        logger.info(f"🔄 Webhook 顺延机制: 已启用，共有 {len(valid_candidates)} 个候选源待尝试")
+        last_error = None
+        for attempt, item in enumerate(valid_candidates, 1):
+            candidate = item['candidate']
+            logger.info(f"→ [{attempt}/{len(valid_candidates)}] 尝试候选源: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {item['similarity']}%)")
+            await progress_callback(50 + attempt * 10, f"尝试源 {candidate.provider} ({attempt}/{len(valid_candidates)})")
+
+            current_time = get_now().strftime("%H:%M:%S")
+            task_title = f"Webhook（{webhookSource}）自动导入：{candidate.title} - S{season:02d}E{currentEpisodeIndex:02d} ({candidate.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{candidate.title} ({candidate.provider}) [{current_time}]"
+            unique_key = f"import-{candidate.provider}-{candidate.mediaId}-ep{currentEpisodeIndex}"
+
+            # 直接尝试导入，不进行预验证
+            logger.info(f"⚡ 开始导入: 源='{candidate.provider}', 媒体ID={candidate.mediaId}, 集数={currentEpisodeIndex}")
+
+            # 创建并立即执行导入任务
+            # 修正：优先使用候选源的年份，如果候选源没有年份则使用webhook传入的年份
+            final_year = candidate.year if candidate.year is not None else year
+            try:
+                await generic_import_task(
+                    provider=candidate.provider, mediaId=candidate.mediaId, year=final_year,
+                    animeTitle=candidate.title, mediaType=candidate.type,
+                    season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                    doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                    progress_callback=progress_callback, session=session, manager=manager,
+                    task_manager=task_manager,
+                    title_recognition_manager=title_recognition_manager
+                )
+                # 如果执行到这里没有抛出异常，说明导入成功但没有抛出TaskSuccess（不应该发生）
+                logger.warning(f"⚠️ 异常情况: 源 '{candidate.provider}' 导入完成但未抛出TaskSuccess异常")
+                raise TaskSuccess(f"Webhook: 源 '{candidate.provider}' 导入成功。")
+            except TaskSuccess as success:
+                # 导入成功，记录详细信息并结束顺延循环
+                success_msg = str(success)
+                logger.info(f"✓ Webhook 任务: 源 '{candidate.provider}' 导入成功 - {success_msg}")
+                raise
+            except Exception as import_error:
+                error_msg = str(import_error)
+                logger.warning(f"✗ Webhook 任务: 源 '{candidate.provider}' 导入失败 - {error_msg}")
+                if attempt < len(valid_candidates):
+                    logger.info(f"→ Webhook 任务: 继续尝试下一个候选源 ({attempt + 1}/{len(valid_candidates)})...")
+                    last_error = import_error
+                    continue
+                else:
+                    logger.error(f"✗ Webhook 任务: 所有 {len(valid_candidates)} 个候选源都导入失败")
+                    last_error = import_error
+                    break
+
+        # 如果所有候选源都失败了
+        if last_error:
+            raise last_error
+        else:
+            raise ValueError(f"所有候选源都无法提供第 {currentEpisodeIndex} 集")
     except TaskSuccess:
         raise
     except Exception as e:
@@ -1840,6 +2176,34 @@ async def auto_search_and_import_task(
                 details.tmdbId, details.bangumiId, details.doubanId,
                 details.tvdbId, details.imdbId
             )
+
+            # TMDB反查功能：如果标题不是中文且不是TMDB搜索，尝试通过其他ID反查TMDB获取中文标题
+            logger.info(f"TMDB反查检查: effective_search_type='{effective_search_type}', main_title='{main_title}', is_chinese={_is_chinese_title(main_title)}")
+            if effective_search_type != 'tmdb' and main_title and not _is_chinese_title(main_title):
+                # 检查TMDB反查是否启用
+                tmdb_reverse_enabled = await _is_tmdb_reverse_lookup_enabled(session, effective_search_type)
+                logger.info(f"TMDB反查配置检查: enabled={tmdb_reverse_enabled}, source_type='{effective_search_type}'")
+                if tmdb_reverse_enabled:
+                    logger.info(f"检测到非中文标题 '{main_title}'，尝试通过其他ID反查TMDB获取中文标题...")
+                    # 如果是通过外部ID搜索，直接使用搜索的ID
+                    lookup_tmdb_id = tmdb_id
+                    lookup_imdb_id = imdb_id if effective_search_type != 'imdb' else search_term
+                    lookup_tvdb_id = tvdb_id if effective_search_type != 'tvdb' else search_term
+                    lookup_douban_id = douban_id if effective_search_type != 'douban' else search_term
+                    lookup_bangumi_id = bangumi_id if effective_search_type != 'bangumi' else search_term
+
+                    chinese_title = await _reverse_lookup_tmdb_chinese_title(
+                        metadata_manager, user, effective_search_type, search_term,
+                        lookup_tmdb_id, lookup_imdb_id, lookup_tvdb_id, lookup_douban_id, lookup_bangumi_id
+                    )
+                    if chinese_title:
+                        logger.info(f"TMDB反查成功，使用中文标题: '{chinese_title}' (原标题: '{main_title}')")
+                        main_title = chinese_title
+                        aliases.add(chinese_title)
+                    else:
+                        logger.info(f"TMDB反查未找到中文标题，继续使用原标题: '{main_title}'")
+                else:
+                    logger.info(f"TMDB反查功能未启用或不支持源 '{effective_search_type}'，继续使用原标题: '{main_title}'")
             if hasattr(details, 'type') and details.type:
                 media_type = models.AutoImportMediaType(details.type)
             if hasattr(details, 'year') and details.year:
@@ -1884,9 +2248,9 @@ async def auto_search_and_import_task(
 
             # 如果通过ID未找到，或不是按ID搜索，则回退到按标题和季度查找
             existing_anime = await crud.find_anime_by_title_season_year(
-                session, main_title, season_for_check, year, title_recognition_manager
+                session, main_title, season_for_check, year, title_recognition_manager, None  # source参数暂时为None，因为这里是查找现有条目
             )
-
+ 
         # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查
         if payload.episode is not None and existing_anime:
             # 应用识别词转换获取实际的集数
@@ -1950,9 +2314,53 @@ async def auto_search_and_import_task(
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
         episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
         
-        # 使用主标题进行搜索
-        logger.info(f"将使用主标题 '{main_title}' 进行全网搜索...")
-        all_results = await scraper_manager.search_all([main_title], episode_info=episode_info)
+        # 使用WebUI相同的搜索逻辑：先获取元数据源别名，再进行全网搜索
+        await progress_callback(30, "正在获取元数据源别名...")
+
+        # 使用元数据源获取别名（与WebUI相同的逻辑）
+        if metadata_manager:
+            try:
+                # 从数据库获取admin用户（使用传入的session）
+                admin_user = await crud.get_user_by_username(session, "admin")
+                if admin_user:
+                    user_model = models.User.model_validate(admin_user)
+
+                    logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
+
+                    # 调用正确的方法
+                    supplemental_aliases, _ = await metadata_manager.search_supplemental_sources(main_title, user_model)
+                    aliases.update(supplemental_aliases)
+
+                    logger.info(f"所有辅助搜索完成，最终别名集大小: {len(aliases)}")
+                    logger.info(f"用于过滤的别名列表: {list(aliases)}")
+                else:
+                    logger.warning("未找到admin用户，跳过元数据源辅助搜索")
+            except Exception as e:
+                logger.warning(f"元数据源辅助搜索失败: {e}")
+
+        # 应用搜索预处理规则
+        search_title = main_title
+        search_season = season
+        if title_recognition_manager:
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(main_title, payload.episode, season)
+            if preprocessing_applied:
+                search_title = processed_title
+                logger.info(f"✓ 应用搜索预处理: '{main_title}' -> '{search_title}'")
+                # 如果集数发生了变化，更新episode_info
+                if processed_episode != payload.episode:
+                    logger.info(f"✓ 集数预处理: {payload.episode} -> {processed_episode}")
+                    # 这里可以根据需要更新episode_info
+                # 如果季数发生了变化，更新搜索季数
+                if processed_season != season:
+                    search_season = processed_season
+                    logger.info(f"✓ 季度预处理: {season} -> {search_season}")
+                    # 更新episode_info中的季数
+                    episode_info = {"season": search_season, "episode": payload.episode} if payload.episode else {"season": search_season}
+            else:
+                logger.info(f"○ 搜索预处理未生效: '{main_title}'")
+
+        logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
+        all_results = await scraper_manager.search_all([search_title], episode_info=episode_info)
         logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
         # 使用所有别名进行过滤
@@ -1989,16 +2397,35 @@ async def auto_search_and_import_task(
 
         # 详细记录保留的结果
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+        all_results = filtered_results
+
+        # 添加WebUI的季度过滤逻辑
+        if season and season > 0:
+            original_count = len(all_results)
+            # 当指定季度时，我们只关心电视剧类型
+            filtered_by_type = [item for item in all_results if item.type == 'tv_series']
+
+            # 然后在电视剧类型中，我们按季度号过滤
+            filtered_by_season = []
+            for item in filtered_by_type:
+                # 使用模型中已解析好的 season 字段进行比较
+                if item.season == season:
+                    filtered_by_season.append(item)
+
+            logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。")
+            all_results = filtered_by_season
+
         if filtered_results:
             logger.info("保留的结果列表:")
-            for i, item in enumerate(filtered_results[:20], 1):  # 最多显示前20个
-                logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type})")
-            if len(filtered_results) > 20:
-                logger.info(f"  ... 还有 {len(filtered_results) - 20} 个结果未显示")
-        all_results = filtered_results
+            for i, item in enumerate(all_results, 1):  # 显示所有结果
+                logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type}, Season: {item.season})")
+            logger.info(f"总共 {len(all_results)} 个结果")
 
         if not all_results:
             raise ValueError("全网搜索未找到任何结果。")
+
+        # 移除提前映射逻辑，改为在选择最佳匹配后应用识别词转换
+        await progress_callback(50, "正在准备选择最佳源...")
 
         # 4. 选择最佳源
         ordered_settings = await crud.get_all_scraper_settings(session)
@@ -2016,24 +2443,14 @@ async def auto_search_and_import_task(
         for i, item in enumerate(all_results[:5]):
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
+        # 简化排序逻辑：由于已经有季度过滤和标题映射，主要按源优先级排序
         all_results.sort(
             key=lambda item: (
-                # 移除媒体类型匹配，因为match接口会将电影识别为TV剧
-                # 1 if item.type == media_type else 0,
-                1 if season is not None and item.season == season else 0,
-                # 最高优先级：完全匹配的标题
+                # 优先级1：完全匹配的标题
                 1000 if item.title.strip() == main_title.strip() else 0,
-                # 次高优先级：去除标点符号后的完全匹配
-                500 if item.title.replace("：", ":").replace(" ", "").strip() == main_title.replace("：", ":").replace(" ", "").strip() else 0,
-                # 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
-                200 if (fuzz.token_sort_ratio(main_title, item.title) > 98 and abs(len(item.title) - len(main_title)) <= 10) else 0,
-                # 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
-                100 if (fuzz.token_sort_ratio(main_title, item.title) > 95 and abs(len(item.title) - len(main_title)) <= 20) else 0,
-                # 第五优先级：一般相似度，但必须达到85%以上才考虑
-                fuzz.token_set_ratio(main_title, item.title) if fuzz.token_set_ratio(main_title, item.title) >= 85 else 0,
-                # 惩罚标题长度差异大的结果
-                -abs(len(item.title) - len(main_title)),
-                # 最后考虑源优先级
+                # 优先级2：标题相似度
+                fuzz.token_set_ratio(main_title, item.title),
+                # 优先级3：源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
@@ -2045,36 +2462,99 @@ async def auto_search_and_import_task(
             title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
             similarity = fuzz.token_set_ratio(main_title, item.title)
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
-        # 并行评估前3个最佳匹配项
-        max_candidates = min(3, len(all_results))  # 最多评估3个候选项
-        min_similarity_threshold = 75  # 最低相似度阈值
+        # 候选项选择：检查是否启用顺延机制
+        if not all_results:
+            raise ValueError("没有找到合适的搜索结果")
 
-        # 同时计算前3个候选项的相似度
-        candidates_with_similarity = []
-        for i in range(max_candidates):
-            candidate = all_results[i]
-            similarity = fuzz.token_set_ratio(main_title, candidate.title)
-            candidates_with_similarity.append({
-                'candidate': candidate,
-                'similarity': similarity,
-                'rank': i + 1
-            })
-            logger.info(f"候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+        # 检查是否启用外部控制API顺延机制
+        fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == 'true'
 
-        # 按优先级选择：优先选择排名最高且符合阈值的候选项
-        best_match = None
-        for item in candidates_with_similarity:  # 已经按排名顺序
-            if item['similarity'] >= min_similarity_threshold:
-                best_match = item['candidate']
-                logger.info(f"自动导入：选择候选项 {item['rank']} '{best_match.title}' (Provider: {best_match.provider}, MediaID: {best_match.mediaId}, Season: {best_match.season}, 相似度: {item['similarity']}%)")
-                break
+        if not fallback_enabled:
+            # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+            best_match = all_results[0]
+            similarity = fuzz.token_set_ratio(main_title, best_match.title)
+            logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
+        else:
+            # 顺延机制启用：依次验证候选源，直到找到有效的分集
+            logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
+
+            best_match = None
+            last_error = None
+
+            for attempt, candidate in enumerate(all_results, 1):
+                similarity = fuzz.token_set_ratio(main_title, candidate.title)
+                logger.info(f"自动导入：尝试候选项 {attempt} '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+                await progress_callback(70 + attempt * 5, f"验证源 {candidate.provider} ({attempt}/{len(all_results)})")
+
+                try:
+                    # 验证该源是否有有效分集
+                    scraper = scraper_manager.get_scraper(candidate.provider)
+                    if not scraper:
+                        logger.warning(f"自动导入：源 '{candidate.provider}' 不可用，跳过")
+                        continue
+
+                    # 获取分集列表进行验证
+                    episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                    if not episodes:
+                        logger.warning(f"自动导入：源 '{candidate.provider}' 没有分集列表，跳过")
+                        continue
+
+                    # 如果指定了集数，检查是否有目标集数
+                    if payload.episode is not None:
+                        target_episode = None
+                        for ep in episodes:
+                            if ep.episodeIndex == payload.episode:
+                                target_episode = ep
+                                break
+
+                        if not target_episode:
+                            logger.warning(f"自动导入：源 '{candidate.provider}' 没有第 {payload.episode} 集，跳过")
+                            continue
+
+                    logger.info(f"自动导入：源 '{candidate.provider}' 验证通过")
+                    best_match = candidate
+                    break
+
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"自动导入：源 '{candidate.provider}' 验证失败: {e}")
+                    if attempt < len(all_results):
+                        logger.info(f"自动导入：继续尝试下一个源...")
+                        continue
+                    else:
+                        logger.error(f"自动导入：所有候选源都失败了")
+                        break
+
+            if best_match is None:
+                if last_error:
+                    raise last_error
+                else:
+                    error_msg = f"所有候选源都无法提供有效分集"
+                    if payload.episode is not None:
+                        error_msg += f"（第 {payload.episode} 集）"
+                    raise ValueError(error_msg)
+
+            similarity = fuzz.token_set_ratio(main_title, best_match.title)
+            logger.info(f"自动导入：顺延验证完成，选择 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
+
+        logger.info(f"原始搜索结果标题: '{best_match.title}' (用于识别词匹配)")
+
+        # 应用入库后处理规则（季度偏移等），使用选定的搜索结果标题
+        final_title = best_match.title  # 使用搜索结果的标题而不是原始搜索标题
+        final_season = season
+        if title_recognition_manager:
+            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+                best_match.title, season, best_match.provider
+            )
+            if was_converted:
+                final_title = converted_title
+                final_season = converted_season
+                season_str = f"S{season:02d}" if season is not None else "S??"
+                final_season_str = f"S{final_season:02d}" if final_season is not None else "S??"
+                logger.info(f"✓ 应用入库后处理: '{best_match.title}' {season_str} -> '{final_title}' {final_season_str} (数据源: {best_match.provider})")
             else:
-                logger.debug(f"候选项 {item['rank']} '{item['candidate'].title}' 相似度过低 ({item['similarity']}%)，继续评估下一个...")
-
-        if best_match is None:
-            logger.warning(f"经过并行评估 {max_candidates} 个候选项，未找到相似度达到 {min_similarity_threshold}% 的匹配项，跳过自动导入。")
-            logger.info("匹配后备任务完成，但未找到足够相似的匹配项进行自动导入。")
-            return  # 直接返回，不抛出异常
+                season_str = f"S{season:02d}" if season is not None else "S??"
+                logger.info(f"○ 入库后处理未生效: '{best_match.title}' {season_str} (数据源: {best_match.provider})")
 
         await progress_callback(80, f"选择最佳源: {best_match.provider}")
 
@@ -2086,14 +2566,14 @@ async def auto_search_and_import_task(
 
         # 修正：在unique_key中包含season和episode信息，避免重复任务检测问题
         unique_key_parts = ["import", best_match.provider, best_match.mediaId]
-        if season is not None:
-            unique_key_parts.append(f"s{season}")
+        if final_season is not None:
+            unique_key_parts.append(f"s{final_season}")
         if payload.episode is not None:
             unique_key_parts.append(f"e{payload.episode}")
         unique_key = "-".join(unique_key_parts)
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
-            animeTitle=best_match.title, mediaType=best_match.type, season=best_match.season, year=best_match.year,
+            animeTitle=final_title, mediaType=best_match.type, season=final_season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
             currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
@@ -2103,15 +2583,15 @@ async def auto_search_and_import_task(
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
-        title_parts = [f"自动导入 (库内): {main_title}"]
+        title_parts = [f"自动导入 (库内): {final_title}"]
         if media_type == 'movie':
             # 对于电影，添加源和ID以确保唯一性，因为电影没有季/集
             if search_type != "keyword":
                 title_parts.append(f"({payload.searchType.value}:{payload.searchTerm})")
         else:
             # 对于电视剧，添加季/集信息
-            if payload.season is not None:
-                title_parts.append(f"S{payload.season:02d}")
+            if final_season is not None:
+                title_parts.append(f"S{final_season:02d}")
             if payload.episode is not None:
                 title_parts.append(f"E{payload.episode:02d}")
         task_title = " ".join(title_parts)
@@ -2122,7 +2602,7 @@ async def auto_search_and_import_task(
             "mediaId": best_match.mediaId,
             "animeTitle": best_match.title,
             "mediaType": best_match.type,
-            "season": best_match.season,
+            "season": season,  # 使用用户请求的季度，而不是搜索结果的季度
             "year": best_match.year,
             "currentEpisodeIndex": payload.episode,
             "imageUrl": image_url,

@@ -45,6 +45,15 @@ export const TokenManage = () => {
         >
           小幻影视
         </a>
+        、
+        <a
+          href="https://apps.apple.com/cn/app/senplayer-%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E5%99%A8-8%E5%80%8D%E9%80%9F/id6443975850"
+          target="_blank"
+          className="text-primary"
+          rel="noopener noreferrer"
+        >
+          SenPlayer
+        </a>
         。
       </p>
     </>

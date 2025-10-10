@@ -476,16 +476,25 @@ class RenrenScraper(BaseScraper):
         provider_eps = []
         for i, ep in enumerate(raw_episodes):
             ep_title = str(ep.get("title") or f"第{i+1:02d}集")
+            sid = str(ep.get("sid"))
+            # 修正：生成人人影视的官方链接
+            # 格式: https://rrys2020.com/v/{media_id}/{sid}
+            episode_url = f"https://rrys2020.com/v/{media_id}/{sid}" if sid else None
             provider_eps.append(models.ProviderEpisodeInfo(
                 provider=self.provider_name,
-                episodeId=str(ep.get("sid")),
+                episodeId=sid,
                 title=ep_title,
                 episodeIndex=i + 1,
-                url=None,
+                url=episode_url,
             ))
 
         if target_episode_index is None and db_media_type is None and provider_eps:
             await self._set_to_cache(cache_key, [e.model_dump() for e in provider_eps], 'episodes_ttl_seconds', 1800)
+
+        # 如果指定了目标集数，只返回该集
+        if target_episode_index is not None:
+            return [ep for ep in provider_eps if ep.episodeIndex == target_episode_index]
+
         return provider_eps
 
     async def _fetch_episode_danmu(self, sid: str) -> List[Dict[str, Any]]:

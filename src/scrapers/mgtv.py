@@ -80,6 +80,8 @@ class MgtvEpisode(BaseModel):
     time: Optional[str] = None
     video_id: str = Field(alias="video_id")
     timestamp: Optional[str] = Field(None, alias="ts")
+    is_intact: Optional[str] = Field(None, alias="isIntact")  # "1" 表示正片
+    is_new: Optional[str] = Field(None, alias="isnew")  # "2" 表示预告片
 
 class MgtvEpisodeListTab(BaseModel):
     month: str = Field(alias="m")
@@ -459,12 +461,12 @@ class MgtvScraper(BaseScraper):
 
                 if result.data and result.data.list:
                     # 智能地寻找正片：
-                    # 1. 优先寻找 `isIntact` 为 "1" 的条目，这通常是正片。
-                    main_feature = next((ep for ep in result.data.list if ep.isIntact == "1"), None)
-                    
-                    # 2. 如果找不到，则回退到寻找第一个不是预告片 (`isnew` 不为 "2") 的条目。
+                    # 1. 优先寻找 `is_intact` 为 "1" 的条目，这通常是正片。
+                    main_feature = next((ep for ep in result.data.list if ep.is_intact == "1"), None)
+
+                    # 2. 如果找不到，则回退到寻找第一个不是预告片 (`is_new` 不为 "2") 的条目。
                     if not main_feature:
-                        main_feature = next((ep for ep in result.data.list if ep.isnew != "2"), None)
+                        main_feature = next((ep for ep in result.data.list if ep.is_new != "2"), None)
 
                     # 3. 如果还是找不到，作为最后的备用方案，直接使用列表中的第一个条目。
                     if not main_feature:

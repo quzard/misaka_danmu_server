@@ -185,16 +185,16 @@ export const deleteUaRule = data => api.delete(`/api/ui/ua-rules/${data.id}`)
 
 /** 弹幕输出控制 单源输出总数 */
 export const getDanmuOutputTotal = () =>
-  api.get('/api/ui/config/danmaku_output_limit_per_source')
+  api.get('/api/ui/config/danmakuOutputLimitPerSource')
 
 export const setDanmuOutputTotal = data =>
-  api.put('/api/ui/config/danmaku_output_limit_per_source', data)
+  api.put('/api/ui/config/danmakuOutputLimitPerSource', data)
 /** 弹幕输出控制 启用弹幕聚合 */
 export const getDanmuOutputAggregation = () =>
-  api.get('/api/ui/config/danmaku_aggregation_enabled')
+  api.get('/api/ui/config/danmakuAggregationEnabled')
 /** 弹幕输出控制 启用弹幕聚合 */
 export const setDanmuOutputAggregation = data =>
-  api.put('/api/ui/config/danmaku_aggregation_enabled', data)
+  api.put('/api/ui/config/danmakuAggregationEnabled', data)
 
 /** 获取匹配后备机制状态 */
 export const getMatchFallback = () =>
@@ -485,3 +485,13 @@ export const getRecognition = () =>
 
 export const setRecognition = data =>
   api.put('/api/ui/settings/title-recognition', data)
+
+/** 获取TMDB反查配置 */
+export const getTmdbReverseLookupConfig = () => api.get('/api/ui/config/tmdbReverseLookup')
+
+/** 保存TMDB反查配置 */
+export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tmdbReverseLookup', data)
+
+/** 通用配置管理 */
+export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
+export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })

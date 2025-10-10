@@ -10,3 +10,4 @@ venv/
 .gitignore
 .idea/
 docker-compose.yml
+docs/
