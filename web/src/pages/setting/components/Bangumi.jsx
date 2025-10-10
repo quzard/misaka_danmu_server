@@ -218,9 +218,9 @@ export const Bangumi = () => {
                     href="https://next.bgm.tv/demo/access-token"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="ml-1"
+                    className="ml-1 !text-inherit"
                   >
-                    <QuestionCircleOutlined className="cursor-pointer text-gray-400" />
+                    <QuestionCircleOutlined className="cursor-pointer" />
                   </a>
                 </span>
               }

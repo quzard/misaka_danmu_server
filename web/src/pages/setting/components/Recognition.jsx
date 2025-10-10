@@ -48,30 +48,71 @@ export const Recognition = () => {
       <Card loading={loading} title="自定义识别词配置">
         <div className="mb-4">
           <div className="text-sm mb-2 opacity-75">
-            <p>
+            <p className="mb-3">
               <strong>识别词配置说明：</strong>
             </p>
             <div className="bg-blue-50 p-3 rounded mb-3">
-              <p className="font-semibold text-blue-800 mb-2">🔍 搜索预处理（在搜索前执行）</p>
-              <p className="text-blue-700 mb-2">用于修正搜索关键词，提高搜索准确性</p>
+              <p className="font-semibold text-blue-800 mb-2">
+                🔍 搜索预处理（在搜索前执行）
+              </p>
+              <p className="text-blue-700 mb-2">
+                用于修正搜索关键词，提高搜索准确性
+              </p>
               <ul className="list-disc list-inside space-y-1 text-blue-700">
-                <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code> <code>BLOCK:花絮</code> （从搜索词中移除）</li>
-                <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
-                <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
-                <li><strong>季度预处理：</strong> <code>新说唱2025 =&gt; &#123;&lt;search_season=8&gt;&#125;</code> （搜索时使用指定季度）</li>
+                <li>
+                  <strong>屏蔽词：</strong> <code>BLOCK:预告</code>{' '}
+                  <code>BLOCK:花絮</code> （从搜索词中移除）
+                </li>
+                <li>
+                  <strong>简单替换：</strong>{' '}
+                  <code>奔跑吧 =&gt; 奔跑吧兄弟</code>
+                </li>
+                <li>
+                  <strong>集数偏移：</strong>{' '}
+                  <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code>
+                </li>
+                <li>
+                  <strong>季度预处理：</strong>{' '}
+                  <code>
+                    新说唱2025 =&gt; &#123;&lt;search_season=8&gt;&#125;
+                  </code>{' '}
+                  （搜索时使用指定季度）
+                </li>
               </ul>
             </div>
             <div className="bg-green-50 p-3 rounded">
-              <p className="font-semibold text-green-800 mb-2">🎯 入库后处理（选择最佳匹配后执行）</p>
-              <p className="text-green-700 mb-2">用于修正最终存储的标题和季数信息</p>
+              <p className="font-semibold text-green-800 mb-2">
+                🎯 入库后处理（选择最佳匹配后执行）
+              </p>
+              <p className="text-green-700 mb-2">
+                用于修正最终存储的标题和季数信息
+              </p>
               <ul className="list-disc list-inside space-y-1 text-green-700">
-                <li><strong>季度偏移：</strong> <code>新说唱2025 =&gt; &#123;[title=中国新说唱 第8季;season_offset=1&gt;8]&#125;</code></li>
-                <li><strong>元数据替换：</strong> <code>错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;</code></li>
-                <li><strong>源特定偏移：</strong> <code>某动画 =&gt; &#123;[source=tencent;title=正确标题;season_offset=9&gt;13]&#125;</code></li>
+                <li>
+                  <strong>季度偏移：</strong>{' '}
+                  <code>
+                    新说唱2025 =&gt; &#123;[title=中国新说唱
+                    第8季;season_offset=1&gt;8]&#125;
+                  </code>
+                </li>
+                <li>
+                  <strong>元数据替换：</strong>{' '}
+                  <code>
+                    错误标题 =&gt; &#123;[tmdbid=12345;type=tv;s=1;e=1]&#125;
+                  </code>
+                </li>
+                <li>
+                  <strong>源特定偏移：</strong>{' '}
+                  <code>
+                    某动画 =&gt;
+                    &#123;[source=tencent;title=正确标题;season_offset=9&gt;13]&#125;
+                  </code>
+                </li>
               </ul>
             </div>
-            <p className="mt-2 text-gray-600">
-              <strong>偏移格式：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法), *&gt;1(通用映射)
+            <p className="mt-2">
+              <strong>偏移格式：</strong> 1&gt;8(直接映射), 1+7(加法),
+              9-1(减法), *+4(通用加法), *&gt;1(通用映射)
             </p>
           </div>
         </div>
