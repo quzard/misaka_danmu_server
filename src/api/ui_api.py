@@ -1872,15 +1872,13 @@ class TmdbReverseLookupConfigRequest(BaseModel):
 async def save_tmdb_reverse_lookup_config(
     request: TmdbReverseLookupConfigRequest,
     current_user: models.User = Depends(security.get_current_user),
-    session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """保存TMDB反查配置"""
-    await crud.update_config_value(session, "tmdbReverseLookupEnabled", str(request.enabled).lower())
-    await crud.update_config_value(session, "tmdbReverseLookupSources", json.dumps(request.sources))
-
-    config_manager.invalidate("tmdbReverseLookupEnabled")
-    config_manager.invalidate("tmdbReverseLookupSources")
+    # 修正：使用 config_manager.setValue 来确保在同一个事务中更新两个配置项
+    # 这样可以避免多次 commit 导致的问题
+    await config_manager.setValue("tmdbReverseLookupEnabled", str(request.enabled).lower())
+    await config_manager.setValue("tmdbReverseLookupSources", json.dumps(request.sources))
 
     logger.info(f"用户 '{current_user.username}' 更新了TMDB反查配置: enabled={request.enabled}, sources={request.sources}")
     return {"message": "TMDB反查配置已保存"}

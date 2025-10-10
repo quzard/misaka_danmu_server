@@ -1915,8 +1915,10 @@ async def webhook_search_and_dispatch_task(
             task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
             unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
+            # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
+            final_year = best_match.year if best_match.year is not None else year
             task_coro = lambda session, cb: generic_import_task(
-                provider=best_match.provider, mediaId=best_match.mediaId, year=year,
+                provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
                 animeTitle=best_match.title, mediaType=best_match.type,
                 season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
                 doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
@@ -1943,9 +1945,11 @@ async def webhook_search_and_dispatch_task(
             logger.info(f"⚡ 开始导入: 源='{candidate.provider}', 媒体ID={candidate.mediaId}, 集数={currentEpisodeIndex}")
 
             # 创建并立即执行导入任务
+            # 修正：优先使用候选源的年份，如果候选源没有年份则使用webhook传入的年份
+            final_year = candidate.year if candidate.year is not None else year
             try:
                 await generic_import_task(
-                    provider=candidate.provider, mediaId=candidate.mediaId, year=year,
+                    provider=candidate.provider, mediaId=candidate.mediaId, year=final_year,
                     animeTitle=candidate.title, mediaType=candidate.type,
                     season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
                     doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,

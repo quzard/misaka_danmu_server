@@ -476,12 +476,16 @@ class RenrenScraper(BaseScraper):
         provider_eps = []
         for i, ep in enumerate(raw_episodes):
             ep_title = str(ep.get("title") or f"第{i+1:02d}集")
+            sid = str(ep.get("sid"))
+            # 修正：生成人人影视的官方链接
+            # 格式: https://rrys2020.com/v/{media_id}/{sid}
+            episode_url = f"https://rrys2020.com/v/{media_id}/{sid}" if sid else None
             provider_eps.append(models.ProviderEpisodeInfo(
                 provider=self.provider_name,
-                episodeId=str(ep.get("sid")),
+                episodeId=sid,
                 title=ep_title,
                 episodeIndex=i + 1,
-                url=None,
+                url=episode_url,
             ))
 
         if target_episode_index is None and db_media_type is None and provider_eps:
