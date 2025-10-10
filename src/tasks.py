@@ -1927,8 +1927,8 @@ async def webhook_search_and_dispatch_task(
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
             raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
 
-        # 顺延机制：依次尝试每个候选源，直到找到有效的分集
-        logger.info(f"Webhook 任务: 顺延机制已启用，将依次验证 {len(valid_candidates)} 个候选源")
+        # 顺延机制：依次尝试每个候选源，直到有一个导入成功
+        logger.info(f"Webhook 任务: 顺延机制已启用，将依次尝试 {len(valid_candidates)} 个候选源")
         last_error = None
         for attempt, item in enumerate(valid_candidates, 1):
             candidate = item['candidate']
@@ -1940,47 +1940,39 @@ async def webhook_search_and_dispatch_task(
                 task_title = f"Webhook（{webhookSource}）自动导入：{candidate.title} - S{season:02d}E{currentEpisodeIndex:02d} ({candidate.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{candidate.title} ({candidate.provider}) [{current_time}]"
                 unique_key = f"import-{candidate.provider}-{candidate.mediaId}-ep{currentEpisodeIndex}"
 
-                # 先验证该源是否有有效分集
-                scraper = manager.get_scraper(candidate.provider)
-                if not scraper:
-                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 不可用，跳过")
-                    continue
+                # 直接尝试导入，不进行预验证
+                logger.info(f"Webhook 任务: 开始尝试从源 '{candidate.provider}' 导入")
 
-                # 获取分集列表进行验证
-                episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
-                if not episodes:
-                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 没有分集列表，跳过")
-                    continue
-
-                # 检查是否有目标集数
-                target_episode = None
-                for ep in episodes:
-                    if ep.episodeIndex == currentEpisodeIndex:
-                        target_episode = ep
+                # 创建并立即执行导入任务
+                try:
+                    await generic_import_task(
+                        provider=candidate.provider, mediaId=candidate.mediaId, year=year,
+                        animeTitle=candidate.title, mediaType=candidate.type,
+                        season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                        doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                        progress_callback=progress_callback, session=session, manager=manager,
+                        task_manager=task_manager,
+                        title_recognition_manager=title_recognition_manager
+                    )
+                    logger.info(f"Webhook 任务: 源 '{candidate.provider}' 导入成功")
+                    raise TaskSuccess(f"Webhook: 源 '{candidate.provider}' 导入成功。")
+                except Exception as import_error:
+                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 导入失败: {import_error}")
+                    if attempt < len(valid_candidates):
+                        logger.info(f"Webhook 任务: 继续尝试下一个源...")
+                        last_error = import_error
+                        continue
+                    else:
+                        logger.error(f"Webhook 任务: 所有候选源都导入失败")
+                        last_error = import_error
                         break
 
-                if not target_episode:
-                    logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 没有第 {currentEpisodeIndex} 集，跳过")
-                    continue
-
-                logger.info(f"Webhook 任务: 源 '{candidate.provider}' 验证通过，找到第 {currentEpisodeIndex} 集")
-
-                # 创建导入任务
-                task_coro = lambda session, cb: generic_import_task(
-                    provider=candidate.provider, mediaId=candidate.mediaId, year=year,
-                    animeTitle=candidate.title, mediaType=candidate.type,
-                    season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
-                    doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-                    progress_callback=cb, session=session, manager=manager,
-                    task_manager=task_manager,
-                    title_recognition_manager=title_recognition_manager
-                )
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-                raise TaskSuccess(f"Webhook: 已为源 '{candidate.provider}' 创建导入任务。")
-
+            except TaskSuccess:
+                # 导入成功，重新抛出以结束循环
+                raise
             except Exception as e:
                 last_error = e
-                logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 验证失败: {e}")
+                logger.warning(f"Webhook 任务: 源 '{candidate.provider}' 处理失败: {e}")
                 if attempt < len(valid_candidates):
                     logger.info(f"Webhook 任务: 继续尝试下一个源...")
                     continue
