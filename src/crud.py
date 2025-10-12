@@ -1776,57 +1776,51 @@ async def check_duplicate_import(
     title_recognition_manager=None
 ) -> Optional[str]:
     """
-    统一的重复导入检查函数
+    统一的重复导入检查函数 - 精确检查模式
+    只有完全重复（相同provider + media_id + 集数 + 已有弹幕）时才阻止导入
     返回None表示可以导入，返回字符串表示重复原因
     """
-    # 1. 检查数据源是否已存在
+    # 检查数据源是否已存在
     source_exists = await check_source_exists_by_media_id(session, provider, media_id)
-    if source_exists:
-        # 对于单集导入，即使数据源存在，也要检查具体集数是否存在
-        if is_single_episode and episode_index is not None:
-            anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
-            if anime_id:
-                episode_exists = await find_episode_by_index(session, anime_id, episode_index)
-                if episode_exists:
-                    return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中，无需重复导入"
-                else:
-                    # 数据源存在但集数不存在，允许导入
-                    return None
-        # 修复：对于全量导入，检查该数据源是否已有弹幕，而不是简单阻止
-        # 这样允许同一作品的不同来源（如bilibili和youku）都能导入
-        anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
-        if anime_id:
-            # 检查该数据源下是否已有分集和弹幕
-            stmt = select(func.count(Episode.id)).join(
-                AnimeSource, Episode.sourceId == AnimeSource.id
-            ).where(
-                AnimeSource.providerName == provider,
-                AnimeSource.mediaId == media_id,
-                Episode.danmakuFilePath.isnot(None),
-                Episode.commentCount > 0
-            )
-            result = await session.execute(stmt)
-            episode_count = result.scalar_one()
-            if episode_count > 0:
-                return f"该数据源 ({provider}) 已存在于弹幕库中，且已有 {episode_count} 集弹幕"
-            else:
-                # 数据源存在但没有弹幕，允许导入
-                return None
+    if not source_exists:
+        # 数据源不存在，允许导入
+        return None
 
-    if not is_single_episode:  # 只在全量导入时检查作品重复
-        # 2. 检查作品是否已存在（标题+季度+年份都相同才算重复）
-        season_for_check = season if season is not None else 1
-        if media_type == 'movie':
-            season_for_check = 1
+    # 数据源存在，获取anime_id
+    anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
+    if not anime_id:
+        # 理论上不应该发生，但为了安全起见
+        return None
 
-        existing_anime = await find_anime_by_title_season_year(
-            session, anime_title, season_for_check, year, title_recognition_manager
-        )
-        if existing_anime:
-            year_info = f" ({year}年)" if year else ""
-            return f"作品 '{anime_title}'{year_info} (第 {season_for_check} 季) 已存在于媒体库中"
+    # 对于单集导入，检查该集是否已有弹幕
+    if is_single_episode and episode_index is not None:
+        episode_exists = await find_episode_by_index(session, anime_id, episode_index)
+        if episode_exists and episode_exists.danmakuFilePath and episode_exists.commentCount > 0:
+            return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中且已有 {episode_exists.commentCount} 条弹幕，无需重复导入"
+        else:
+            # 集数不存在或没有弹幕，允许导入
+            return None
 
-    return None
+    # 对于全量导入，检查该数据源下已有弹幕的集数
+    stmt = select(func.count(Episode.id)).join(
+        AnimeSource, Episode.sourceId == AnimeSource.id
+    ).where(
+        AnimeSource.providerName == provider,
+        AnimeSource.mediaId == media_id,
+        Episode.danmakuFilePath.isnot(None),
+        Episode.commentCount > 0
+    )
+    result = await session.execute(stmt)
+    episode_count = result.scalar_one()
+
+    if episode_count > 0:
+        # 有弹幕的集数，给出提示但不完全阻止
+        # 因为可能有新增的集数需要导入
+        logger.info(f"数据源 ({provider}/{media_id}) 已有 {episode_count} 集弹幕，但允许导入新集数")
+        return None
+    else:
+        # 数据源存在但没有弹幕，允许导入
+        return None
 
 async def update_config_value(session: AsyncSession, key: str, value: str):
     dialect = session.bind.dialect.name

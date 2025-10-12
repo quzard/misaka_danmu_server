@@ -16,7 +16,6 @@ import httpx
 from .. import models
 from .base import BaseScraper, get_season_from_title
 from ..config_manager import ConfigManager
-from ..security_core import get_secure_function, is_security_verified
 
 
 class HanjuTVScraper(BaseScraper):
@@ -333,13 +332,6 @@ class HanjuTVScraper(BaseScraper):
             "con": str  # 弹幕内容
         }
         """
-        # 安全检查点：验证是否可以使用弹幕解析功能
-        if not get_secure_function("danmaku_parser"):
-            self.logger.error("安全验证未通过，使用受限解析模式")
-            # 返回空结果而不是解析数据
-            return []
-
-        # 安全验证通过，使用完整解析逻辑
         formatted = []
         for danmu in raw_danmus:
             try:
@@ -381,11 +373,6 @@ class HanjuTVScraper(BaseScraper):
         Returns:
             List[Dict]: 格式化后的弹幕列表
         """
-        # 安全检查点：验证安全状态（降级为警告，不阻止功能）
-        if not is_security_verified():
-            self.logger.warning("安全验证未通过，但继续执行弹幕获取功能")
-            # 不返回空列表，继续执行
-
         # 1. 获取原始弹幕
         raw_danmus = await self.fetch_danmaku(pid, progress_callback)
 
