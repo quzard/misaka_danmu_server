@@ -88,7 +88,7 @@ const MobileHeader = ({ activeKey }) => {
 
   const onLogout = async () => {
     await logout()
-    Cookies.remove('token')
+    Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
   }
 
@@ -178,7 +178,7 @@ const DesktopHeader = ({ activeKey, version }) => {
 
   const onLogout = async () => {
     await logout()
-    Cookies.remove('token')
+    Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
   }
   return (

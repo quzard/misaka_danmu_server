@@ -14,7 +14,7 @@ const instance = axios.create({
 
 instance.interceptors.request.use(
   async config => {
-    const token = Cookies.get('token')
+    const token = Cookies.get('danmu_token')
     if (config.headers && !!token) {
       config.headers['Authorization'] = `Bearer ${token}`
     }

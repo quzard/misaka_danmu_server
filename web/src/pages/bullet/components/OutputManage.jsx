@@ -60,13 +60,13 @@ export const OutputManage = () => {
         <div>在这里调整弹幕API的输出行为。</div>
         <div className="my-4">
           <div className="flex items-center justify-start gap-4 mb-2">
-            <div>单源输出总数</div>
+            <div>弹幕输出上限</div>
             <InputNumber value={limit} onChange={v => setLimit(v)} />
           </div>
           <div>
-            设置从单个数据源（或聚合后）返回的弹幕最大数量。-1
-            表示无限制。为防止客户端卡顿，建议设置一个合理的数值（如
-            3000-5000）。弹幕将从视频时长中均匀采样。
+            设置弹幕API返回的弹幕最大数量。-1表示无限制。
+            为防止客户端卡顿，建议设置一个合理的数值（如3000-5000）。
+            当弹幕总数超过此限制时，系统将按时间段均匀采样，确保弹幕在整个视频时长中分布均匀。
           </div>
         </div>
         {/* <div className="my-4">

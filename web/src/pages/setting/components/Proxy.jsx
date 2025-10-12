@@ -90,7 +90,9 @@ export const Proxy = () => {
   const ResultTag = ({ result }) => {
     const isSuccess = result.status === 'success'
     const color = isSuccess ? 'green' : 'red'
-    const text = isSuccess ? `成功 (${result.latency.toFixed(0)} ms)` : `失败: ${result.error}`
+    const text = isSuccess
+      ? `成功 (${result.latency.toFixed(0)} ms)`
+      : `失败: ${result.error}`
     return <Tag color={color}>{text}</Tag>
   }
   return (

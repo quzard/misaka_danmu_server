@@ -11,8 +11,6 @@ import {
   Card,
   Col,
   List,
-  message,
-  Checkbox,
   Row,
   Tag,
   Input,
@@ -23,6 +21,7 @@ import {
   InputNumber,
   Dropdown,
   Space,
+  Checkbox,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -31,12 +30,11 @@ import {
   searchLoadingAtom,
 } from '../../../../store'
 import {
-  CheckOutlined,
   CloseCircleOutlined,
   CalendarOutlined,
   CloudServerOutlined,
 } from '@ant-design/icons'
-import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../../configs'
+import { DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
 
 import { MyIcon } from '@/components/MyIcon'
@@ -127,11 +125,7 @@ export const SearchResult = () => {
   const [importMode, setImportMode] = useState(IMPORT_MODE[0].key)
 
   /** 筛选条件 */
-  const [checkedList, setCheckedList] = useState([
-    DANDAN_TYPE_MAPPING.movie,
-    DANDAN_TYPE_MAPPING.tvseries,
-  ])
-
+  const [typeFilter, setTypeFilter] = useState('all')
   const [yearFilter, setYearFilter] = useState('all')
   const [providerFilter, setProviderFilter] = useState('all')
 
@@ -175,13 +169,13 @@ export const SearchResult = () => {
     const list =
       lastSearchResultData.results
         ?.filter(it => it.title.includes(keyword))
-        ?.filter(it => checkedList.includes(it.type))
+        ?.filter(it => typeFilter === 'all' || it.type === typeFilter)
         ?.filter(it => yearFilter === 'all' || it.year === yearFilter)
         ?.filter(
           it => providerFilter === 'all' || it.provider === providerFilter
         ) || []
     setRenderData(list)
-  }, [keyword, checkedList, lastSearchResultData, yearFilter, providerFilter])
+  }, [keyword, typeFilter, lastSearchResultData, yearFilter, providerFilter])
 
   const { years, providers } = useMemo(() => {
     if (!lastSearchResultData.results?.length)
@@ -197,11 +191,6 @@ export const SearchResult = () => {
       providers: Array.from(providerSet).sort(),
     }
   }, [lastSearchResultData.results])
-
-  const onTypeChange = values => {
-    console.log(values, 'values')
-    setCheckedList(values)
-  }
 
   const handleImportDanmu = async item => {
     try {
@@ -378,6 +367,40 @@ export const SearchResult = () => {
     })
 
     setActiveItem(null)
+  }
+
+  // 类型筛选菜单
+  const typeMenu = {
+    items: [
+      {
+        key: 'all',
+        label: (
+          <>
+            <MyIcon icon="tvlibrary" size={16} className="mr-2" />
+            所有类型
+          </>
+        ),
+      },
+      {
+        key: DANDAN_TYPE_MAPPING.movie,
+        label: (
+          <>
+            <MyIcon icon="movie" size={16} className="mr-2" />
+            电影/剧场版
+          </>
+        ),
+      },
+      {
+        key: DANDAN_TYPE_MAPPING.tvseries,
+        label: (
+          <>
+            <MyIcon icon="tv" size={16} className="mr-2" />
+            电视节目
+          </>
+        ),
+      },
+    ],
+    onClick: ({ key }) => setTypeFilter(key),
   }
 
   // 年份筛选菜单
@@ -559,7 +582,7 @@ export const SearchResult = () => {
       <Card title="搜索结果" loading={searchLoading}>
         <div>
           <Row gutter={[12, 12]} className="mb-6">
-            <Col md={9} xs={24}>
+            <Col md={20} xs={24}>
               <Space wrap align="center">
                 <Button
                   type="primary"
@@ -575,35 +598,26 @@ export const SearchResult = () => {
                     ? '取消全选'
                     : '全选'}
                 </Button>
-                <Checkbox.Group
-                  className="shrink-0"
-                  options={[
-                    {
-                      label: (
-                        <>
-                          <MyIcon icon="movie" size={16} className="mr-1" />
-                          电影/剧场版
-                        </>
-                      ),
-                      value: DANDAN_TYPE_MAPPING.movie,
-                    },
-                    {
-                      label: (
-                        <>
-                          <MyIcon icon="tv" size={16} className="mr-1" />
-                          电视节目
-                        </>
-                      ),
-                      value: DANDAN_TYPE_MAPPING.tvseries,
-                    },
-                  ]}
-                  value={checkedList}
-                  onChange={onTypeChange}
-                />
-              </Space>
-            </Col>
-            <Col md={11} xs={24}>
-              <Space wrap align="center">
+                <Dropdown menu={typeMenu}>
+                  <Button>
+                    {typeFilter === 'all' ? (
+                      <>
+                        <MyIcon icon="tvlibrary" size={16} className="mr-1" />
+                        按类型
+                      </>
+                    ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
+                      <>
+                        <MyIcon icon="movie" size={16} className="mr-1" />
+                        电影/剧场版
+                      </>
+                    ) : (
+                      <>
+                        <MyIcon icon="tv" size={16} className="mr-1" />
+                        电视节目
+                      </>
+                    )}
+                  </Button>
+                </Dropdown>
                 <Dropdown menu={yearMenu} disabled={!years.length}>
                   <Button icon={<CalendarOutlined />}>
                     {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
@@ -727,6 +741,9 @@ export const SearchResult = () => {
                               setEditEpisodeList(res.data)
                               setEditImportOpen(true)
                               setEditItem(item)
+                              // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
+                              const endValue = item.episodeCount > 0 ? item.episodeCount : 1
+                              setRange([1, endValue])
                             } catch (error) {
                             } finally {
                               setEditLoading(false)
