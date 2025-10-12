@@ -194,12 +194,5 @@ docker exec danmu-mysql mysql -u root -p -e "SHOW GLOBAL STATUS LIKE 'Innodb_buf
    docker-compose up -d
    ```
 
-## 📚 更多优化
-
-如果您需要更极致的内存优化，可以考虑：
-
-- 使用 MariaDB 替代 MySQL
-- 使用 SQLite（适合单用户场景）
-- 调整更多 InnoDB 参数
 
 有问题请参考 [MySQL 官方文档](https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html) 或在项目中提 Issue。
