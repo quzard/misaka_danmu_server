@@ -13,9 +13,9 @@ from fastapi.security import APIKeyQuery
 from thefuzz import fuzz
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import exc
+from sqlalchemy import exc, select
 
-from .. import crud, models, tasks, utils
+from .. import crud, models, tasks, utils, orm_models
 from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
 from ..database import get_db_session
@@ -733,49 +733,39 @@ async def edited_import(
     item_to_import = cached_results[payload.resultIndex]
 
     # 关键修复：恢复并完善在任务提交前的重复检查。
-    # 对于编辑后导入，我们需要检查每个单集是否已存在。
-    # 首先检查数据源是否重复
-    duplicate_reason = await crud.check_duplicate_import(
-        session=session,
-        provider=item_to_import.provider,
-        media_id=item_to_import.mediaId,
-        anime_title=payload.title or item_to_import.title,
-        media_type=item_to_import.type,
-        season=item_to_import.season,
-        year=item_to_import.year,
-        is_single_episode=False, # 先检查数据源重复
-        episode_index=None,
-        title_recognition_manager=title_recognition_manager
-    )
-    # 如果数据源已存在，则需要进一步检查单集
-    if duplicate_reason and "数据源已存在" in duplicate_reason:
-        # 获取现有的anime_id
-        anime_id = await crud.get_anime_id_by_source_media_id(session, item_to_import.provider, item_to_import.mediaId)
-        if anime_id:
-            # 检查每个要导入的单集是否已存在
-            existing_episodes = []
-            for episode in payload.episodes:
-                episode_exists = await crud.find_episode_by_index(session, anime_id, episode.episodeIndex)
-                if episode_exists:
-                    existing_episodes.append(episode.episodeIndex)
+    # 对于编辑后导入，我们需要检查每个单集是否已存在（必须是相同数据源）
+    # 检查数据源是否已存在
+    source_exists = await crud.check_source_exists_by_media_id(session, item_to_import.provider, item_to_import.mediaId)
 
-            # 如果所有集都已存在，则阻止导入
-            if len(existing_episodes) == len(payload.episodes):
-                episode_list = ", ".join(map(str, existing_episodes))
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"所有要导入的分集 ({episode_list}) 都已存在于媒体库中"
-                )
-            # 如果部分集已存在，给出警告但允许导入
-            elif existing_episodes:
-                episode_list = ", ".join(map(str, existing_episodes))
-                logger.warning(f"编辑导入: 分集 {episode_list} 已存在，将跳过这些分集")
-        else:
-            # 如果找不到anime_id，说明数据源存在但关联有问题，阻止导入
+    if source_exists:
+        # 数据源已存在，检查每个要导入的单集是否已有弹幕（必须是相同 provider + media_id）
+        existing_episodes = []
+        for episode in payload.episodes:
+            # 使用精确检查：provider + media_id + episode_index
+            stmt = select(orm_models.Episode.id).join(
+                orm_models.AnimeSource, orm_models.Episode.sourceId == orm_models.AnimeSource.id
+            ).where(
+                orm_models.AnimeSource.providerName == item_to_import.provider,
+                orm_models.AnimeSource.mediaId == item_to_import.mediaId,
+                orm_models.Episode.episodeIndex == episode.episodeIndex,
+                orm_models.Episode.danmakuFilePath.isnot(None),
+                orm_models.Episode.commentCount > 0
+            ).limit(1)
+            result = await session.execute(stmt)
+            if result.scalar_one_or_none() is not None:
+                existing_episodes.append(episode.episodeIndex)
+
+        # 如果所有集都已存在，则阻止导入
+        if len(existing_episodes) == len(payload.episodes):
+            episode_list = ", ".join(map(str, existing_episodes))
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=duplicate_reason
+                detail=f"所有要导入的分集 ({episode_list}) 都已在该数据源（{item_to_import.provider}）中存在弹幕"
             )
+        # 如果部分集已存在，给出警告但允许导入
+        elif existing_episodes:
+            episode_list = ", ".join(map(str, existing_episodes))
+            logger.warning(f"外部API编辑导入: 分集 {episode_list} 已在该数据源（{item_to_import.provider}）中存在，将跳过这些分集")
 
 
     # 构建编辑导入请求

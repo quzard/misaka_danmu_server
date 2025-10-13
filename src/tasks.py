@@ -1158,12 +1158,13 @@ async def edited_import_task(
         if source_id:
             existing_episodes = []
             for episode in episodes:
-                # 检查是否有任何一个episode已经有弹幕
+                # 检查该数据源的该集是否已经有弹幕（必须是相同 provider + media_id）
                 stmt = (
                     select(orm_models.Episode.id)
                     .join(orm_models.AnimeSource, orm_models.Episode.sourceId == orm_models.AnimeSource.id)
                     .where(
-                        orm_models.AnimeSource.animeId == anime_id,
+                        orm_models.AnimeSource.providerName == provider,
+                        orm_models.AnimeSource.mediaId == media_id,
                         orm_models.Episode.episodeIndex == episode.episodeIndex,
                         orm_models.Episode.danmakuFilePath.isnot(None),
                         orm_models.Episode.commentCount > 0
