@@ -1792,13 +1792,23 @@ async def check_duplicate_import(
         # 理论上不应该发生，但为了安全起见
         return None
 
-    # 对于单集导入，检查该集是否已有弹幕
+    # 对于单集导入，检查该数据源的该集是否已有弹幕
     if is_single_episode and episode_index is not None:
-        episode_exists = await find_episode_by_index(session, anime_id, episode_index)
+        # 获取该数据源的该集的详细信息（必须是相同 provider + media_id）
+        stmt = select(Episode).join(
+            AnimeSource, Episode.sourceId == AnimeSource.id
+        ).where(
+            AnimeSource.providerName == provider,
+            AnimeSource.mediaId == media_id,
+            Episode.episodeIndex == episode_index
+        ).limit(1)
+        result = await session.execute(stmt)
+        episode_exists = result.scalar_one_or_none()
+
         if episode_exists and episode_exists.danmakuFilePath and episode_exists.commentCount > 0:
-            return f"作品 '{anime_title}' 的第 {episode_index} 集已在媒体库中且已有 {episode_exists.commentCount} 条弹幕，无需重复导入"
+            return f"作品 '{anime_title}' 的第 {episode_index} 集（{provider}源）已在媒体库中且已有 {episode_exists.commentCount} 条弹幕，无需重复导入"
         else:
-            # 集数不存在或没有弹幕，允许导入
+            # 该数据源的该集不存在或没有弹幕，允许导入
             return None
 
     # 对于全量导入，检查该数据源下已有弹幕的集数
