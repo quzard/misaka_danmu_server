@@ -23,7 +23,9 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 
 class LetvDanmuItem(BaseModel):
     """乐视弹幕单条数据模型"""
-    _id: str = Field(alias="_id")
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
     txt: str
     start: float
     position: int
@@ -433,7 +435,8 @@ class LetvScraper(BaseScraper):
             # 去重（根据弹幕ID）
             unique_danmu = {}
             for danmu in all_danmu:
-                danmu_id = danmu.get('_id')
+                # 支持两种字段名：id (Pydantic模型) 和 _id (原始JSON)
+                danmu_id = danmu.get('id') or danmu.get('_id')
                 if danmu_id and danmu_id not in unique_danmu:
                     unique_danmu[danmu_id] = danmu
             
@@ -457,8 +460,8 @@ class LetvScraper(BaseScraper):
                     color_hex = danmu.get('color', 'FFFFFF')
                     color = int(color_hex, 16)
 
-                    # 弹幕ID
-                    danmu_id = danmu.get('_id', '')
+                    # 弹幕ID - 支持两种字段名
+                    danmu_id = danmu.get('id') or danmu.get('_id', '')
 
                     # 弹幕内容
                     content = danmu.get('txt', '')
