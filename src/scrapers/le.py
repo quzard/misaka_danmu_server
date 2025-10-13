@@ -80,15 +80,33 @@ class LetvScraper(BaseScraper):
             params = {
                 'wd': keyword,
                 'from': 'pc',
-                'index': '0',
                 'ref': 'click',
                 'click_area': 'search_button',
+                'query': keyword,
+                'is_default_query': '0',
                 'module': 'search_rst_page'
             }
 
+            # 设置请求头，模拟浏览器
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://so.le.com/',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin'
+            }
+
             async with await self._create_client() as client:
-                response = await client.get(search_url, params=params, timeout=15)
+                response = await client.get(search_url, params=params, headers=headers, timeout=15, follow_redirects=True)
+                response.raise_for_status()
                 html_content = response.text
+
+            self.logger.debug(f"乐视网: 搜索请求成功，响应长度: {len(html_content)} 字符")
 
             # 解析HTML，提取data-info属性
             results = []
@@ -96,7 +114,9 @@ class LetvScraper(BaseScraper):
             # 使用正则表达式提取所有 data-info 属性
             # 注意：data-info 可能使用单引号或双引号包裹JSON
             pattern = r'<div class="So-detail[^"]*"[^>]*data-info=["\']({[^"\']+})["\']\s*>'
-            matches = re.finditer(pattern, html_content)
+            matches = list(re.finditer(pattern, html_content))
+
+            self.logger.debug(f"乐视网: 从HTML中找到 {len(matches)} 个 data-info 块")
 
             for match in matches:
                 try:
@@ -180,17 +200,27 @@ class LetvScraper(BaseScraper):
                     )
 
                     results.append(result)
-                    self.logger.debug(f"找到结果: {title} (pid={pid}, type={result_type}, episodes={episode_count})")
+                    self.logger.debug(f"乐视网: 解析成功 - {title} (pid={pid}, type={result_type}, episodes={episode_count})")
 
                 except Exception as e:
-                    self.logger.warning(f"解析搜索结果项失败: {e}")
+                    self.logger.warning(f"乐视网: 解析搜索结果项失败: {e}")
                     continue
 
-            self.logger.info(f"搜索完成: {keyword}, 找到 {len(results)} 个结果")
+            if results:
+                self.logger.info(f"乐视网: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
+                self.logger.info(f"乐视网: 搜索结果列表:")
+                for r in results:
+                    self.logger.info(f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year})")
+            else:
+                self.logger.info(f"乐视网: 网络搜索 '{keyword}' 完成，找到 0 个结果。")
+
             return results
 
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"乐视网: HTTP请求失败 (状态码: {e.response.status_code}): {e}", exc_info=True)
+            return []
         except Exception as e:
-            self.logger.error(f"搜索失败: {e}", exc_info=True)
+            self.logger.error(f"乐视网: 搜索失败: {e}", exc_info=True)
             return []
     
     async def get_episodes(
