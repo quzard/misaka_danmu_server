@@ -5,7 +5,7 @@ import logging
 import re
 import time
 import math
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, Union
 from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -296,6 +296,120 @@ class LetvScraper(BaseScraper):
         except Exception as e:
             self.logger.error(f"获取分集列表失败: {e}", exc_info=True)
             return []
+
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """
+        从乐视网URL中提取作品信息
+
+        Args:
+            url: 乐视网作品URL
+
+        Returns:
+            作品信息，如果解析失败则返回None
+        """
+        try:
+            # 从URL中提取media_id
+            # 支持的URL格式:
+            # https://www.le.com/tv/{pid}.html
+            # https://www.le.com/comic/{pid}.html
+            # https://www.le.com/playlet/{pid}.html
+            # https://www.le.com/movie/{pid}.html
+            match = re.search(r'le\.com/(?:tv|comic|playlet|movie)/(\d+)\.html', url)
+            if not match:
+                self.logger.warning(f"无法从URL中提取media_id: {url}")
+                return None
+
+            media_id = match.group(1)
+
+            # 获取页面内容
+            async with await self._create_client() as client:
+                response = await client.get(url, timeout=10)
+                if response.status_code != 200:
+                    return None
+                html_content = response.text
+
+            # 解析data-info
+            data_info_match = re.search(r'data-info=["\']({[^"\']+})["\']', html_content)
+            if not data_info_match:
+                return None
+
+            data_info = json.loads(data_info_match.group(1))
+
+            # 提取标题
+            title_match = re.search(r'<title>([^<]+)</title>', html_content)
+            title = title_match.group(1).split('-')[0].strip() if title_match else ''
+
+            # 提取年份
+            year_match = re.search(r'年份：</b><b><a[^>]*>(\d{4})</a>', html_content)
+            if not year_match:
+                year_match = re.search(r'上映时间：</b><b><a[^>]*>(\d{4})</a>', html_content)
+            year = int(year_match.group(1)) if year_match else None
+
+            # 提取海报
+            img_match = re.search(r'<img[^>]*(?:src|data-src)="([^"]+)"', html_content)
+            image_url = img_match.group(1) if img_match else None
+
+            # 映射类型
+            media_type_str = data_info.get('type', '')
+            type_map = {
+                'tv': 'tv_series',
+                'movie': 'movie',
+                'cartoon': 'anime',
+                'comic': 'anime'
+            }
+            result_type = type_map.get(media_type_str, 'tv_series')
+
+            # 总集数
+            total = data_info.get('total', '0')
+            episode_count = int(total) if total and total.isdigit() else 0
+
+            return models.ProviderSearchInfo(
+                provider=self.provider_name,
+                mediaId=media_id,
+                title=title,
+                type=result_type,
+                season=1,
+                year=year,
+                imageUrl=image_url if image_url and image_url.startswith('http') else f"https:{image_url}" if image_url else None,
+                episodeCount=episode_count,
+                currentEpisodeIndex=None
+            )
+
+        except Exception as e:
+            self.logger.error(f"从URL提取信息失败: {e}", exc_info=True)
+            return None
+
+    async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
+        """
+        从乐视网URL中提取ID
+
+        Args:
+            url: 乐视网URL
+
+        Returns:
+            media_id 或包含ID信息的字典
+        """
+        try:
+            # 从作品URL中提取media_id
+            match = re.search(r'le\.com/(?:tv|comic|playlet|movie)/(\d+)\.html', url)
+            if match:
+                return match.group(1)
+
+            # 从播放页URL中提取video_id
+            match = re.search(r'le\.com/ptv/vplay/(\d+)\.html', url)
+            if match:
+                return {'video_id': match.group(1)}
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"从URL提取ID失败: {e}", exc_info=True)
+            return None
+
+    async def close(self):
+        """关闭资源"""
+        # 乐视网scraper没有需要关闭的持久连接
+        pass
     
     async def _get_video_duration(self, video_id: str) -> int:
         """获取视频时长（秒）"""
