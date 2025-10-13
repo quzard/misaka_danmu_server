@@ -60,27 +60,20 @@ class LetvScraper(BaseScraper):
     async def search(
         self,
         keyword: str,
-        media_type: Optional[str] = None,
-        season: Optional[int] = None,
-        progress_callback: Optional[Callable] = None
-    ) -> List[models.SearchResultItem]:
+        episode_info: Optional[Dict[str, Any]] = None
+    ) -> List[models.ProviderSearchInfo]:
         """
         搜索乐视网内容
 
         Args:
             keyword: 搜索关键词
-            media_type: 媒体类型（暂不使用）
-            season: 季度（暂不使用）
-            progress_callback: 进度回调
+            episode_info: 分集信息（可选）
 
         Returns:
             搜索结果列表
         """
         try:
             self.logger.info(f"开始搜索: {keyword}")
-
-            if progress_callback:
-                await progress_callback(10, "正在搜索...")
 
             # 构造搜索URL
             search_url = "https://so.le.com/s"
@@ -96,9 +89,6 @@ class LetvScraper(BaseScraper):
             async with await self._create_client() as client:
                 response = await client.get(search_url, params=params, timeout=15)
                 html_content = response.text
-
-            if progress_callback:
-                await progress_callback(50, "正在解析搜索结果...")
 
             # 解析HTML，提取data-info属性
             results = []
@@ -177,16 +167,16 @@ class LetvScraper(BaseScraper):
                     episode_count = int(total) if total and total.isdigit() else 0
 
                     # 创建搜索结果
-                    result = models.SearchResultItem(
+                    result = models.ProviderSearchInfo(
                         provider=self.provider_name,
                         mediaId=pid,
                         title=title,
                         type=result_type,
-                        season=season or 1,
+                        season=1,  # 乐视网不区分季度，默认为1
                         year=year,
                         imageUrl=image_url if image_url.startswith('http') else f"https:{image_url}" if image_url else None,
                         episodeCount=episode_count,
-                        currentEpisodeIndex=episode_count if episode_count > 0 else None
+                        currentEpisodeIndex=episode_info.get("episode") if episode_info else None
                     )
 
                     results.append(result)
@@ -195,9 +185,6 @@ class LetvScraper(BaseScraper):
                 except Exception as e:
                     self.logger.warning(f"解析搜索结果项失败: {e}")
                     continue
-
-            if progress_callback:
-                await progress_callback(100, f"搜索完成，找到 {len(results)} 个结果")
 
             self.logger.info(f"搜索完成: {keyword}, 找到 {len(results)} 个结果")
             return results
@@ -287,6 +274,7 @@ class LetvScraper(BaseScraper):
                         continue
 
                     episode = models.ProviderEpisodeInfo(
+                        provider=self.provider_name,
                         episodeId=video_id,
                         episodeIndex=episode_index,
                         title=f"第{episode_index}集",
