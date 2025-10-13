@@ -112,8 +112,9 @@ class LetvScraper(BaseScraper):
             results = []
 
             # 使用正则表达式提取所有 data-info 属性
-            # 注意：data-info 可能使用单引号或双引号包裹JSON
-            pattern = r'<div class="So-detail[^"]*"[^>]*data-info=["\']({[^"\']+})["\']\s*>'
+            # 注意：data-info 的值是用单引号包裹的，且内部的字符串也用单引号
+            # 格式：data-info="{pid:'10026580',type:'tv',...}"
+            pattern = r'<div class="So-detail[^"]*"[^>]*data-info=\'({[^\']+})\'[^>]*>'
             matches = list(re.finditer(pattern, html_content))
 
             self.logger.debug(f"乐视网: 从HTML中找到 {len(matches)} 个 data-info 块")
@@ -121,8 +122,15 @@ class LetvScraper(BaseScraper):
             for match in matches:
                 try:
                     data_info_str = match.group(1)
+
+                    self.logger.debug(f"乐视网: 提取到 data-info 原始字符串: {data_info_str[:200]}...")
+
                     # 解析JSON数据
+                    # 乐视的data-info使用单引号，需要转换为双引号
+                    data_info_str = data_info_str.replace("'", '"')
                     data_info = json.loads(data_info_str)
+
+                    self.logger.debug(f"乐视网: 成功解析 data-info，pid={data_info.get('pid')}, type={data_info.get('type')}")
 
                     # 提取基本信息
                     pid = data_info.get('pid', '')
