@@ -40,10 +40,13 @@ class LetvDanmuResponse(BaseModel):
 
 class LetvScraper(BaseScraper):
     """乐视网弹幕获取器"""
-    
+
     provider_name = "le"
     provider_display_name = "乐视网"
-    
+    handled_domains = ["le.com", "www.le.com", "so.le.com"]
+    referer = "https://www.le.com/"
+    test_url = "https://www.le.com"
+
     # 位置映射：乐视 -> B站格式
     POSITION_MAP = {
         4: 1,  # 滚动弹幕
@@ -106,6 +109,10 @@ class LetvScraper(BaseScraper):
                 response.raise_for_status()
                 html_content = response.text
 
+            # 记录原始响应
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Letv Search Response (keyword='{keyword}'): {html_content}")
+
             self.logger.debug(f"乐视网: 搜索请求成功，响应长度: {len(html_content)} 字符")
 
             # 解析HTML，提取data-info属性
@@ -113,9 +120,10 @@ class LetvScraper(BaseScraper):
 
             # 使用正则表达式提取所有 data-info 属性
             # 注意：data-info 的值是用单引号包裹的，且内部的字符串也用单引号
-            # 格式：data-info="{pid:'10026580',type:'tv',...}"
-            pattern = r'<div class="So-detail[^"]*"[^>]*data-info=\'({[^\']+})\'[^>]*>'
-            matches = list(re.finditer(pattern, html_content))
+            # 格式：data-info='{pid:"10026580",type:"tv",...}'
+            # 使用非贪婪匹配 .*? 来匹配到下一个 '> 为止
+            pattern = r'<div class="So-detail[^"]*"[^>]*data-info=\'({.*?})\'[^>]*>'
+            matches = list(re.finditer(pattern, html_content, re.DOTALL))
 
             self.logger.debug(f"乐视网: 从HTML中找到 {len(matches)} 个 data-info 块")
 
@@ -126,8 +134,17 @@ class LetvScraper(BaseScraper):
                     self.logger.debug(f"乐视网: 提取到 data-info 原始字符串: {data_info_str[:200]}...")
 
                     # 解析JSON数据
-                    # 乐视的data-info使用单引号，需要转换为双引号
+                    # 乐视的data-info格式: {pid:'10026580',type:'tv',...}
+                    # 这不是标准JSON，需要特殊处理：
+                    # 1. 键没有引号
+                    # 2. 值用单引号
+                    # 解决方案：使用正则表达式将键添加双引号，将单引号值转为双引号
+
+                    # 先将所有单引号替换为双引号
                     data_info_str = data_info_str.replace("'", '"')
+                    # 然后为没有引号的键添加引号 (匹配 {key: 或 ,key: 的模式)
+                    data_info_str = re.sub(r'([{,])(\w+):', r'\1"\2":', data_info_str)
+
                     data_info = json.loads(data_info_str)
 
                     self.logger.debug(f"乐视网: 成功解析 data-info，pid={data_info.get('pid')}, type={data_info.get('type')}")
