@@ -252,6 +252,7 @@ class LetvScraper(BaseScraper):
         self,
         media_id: str,
         target_episode_index: Optional[int] = None,
+        db_media_type: Optional[str] = None,
         progress_callback: Optional[Callable] = None
     ) -> List[models.ProviderEpisodeInfo]:
         """
