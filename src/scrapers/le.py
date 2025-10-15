@@ -303,7 +303,8 @@ class LetvScraper(BaseScraper):
 
             # 从HTML中提取data-info
             # HTML属性值用双引号包裹，内部是JavaScript对象字面量
-            data_info_match = re.search(r'data-info="({[^"]+})"', html_content)
+            # 使用 DOTALL 标志以匹配跨行内容，使用非贪婪匹配
+            data_info_match = re.search(r'data-info="({.*?})"', html_content, re.DOTALL)
             if not data_info_match:
                 self.logger.error(f"未找到data-info: media_id={media_id}")
                 return []
