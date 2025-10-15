@@ -194,13 +194,21 @@ class LetvScraper(BaseScraper):
                     image_url = img_match.group(1) if img_match else ''
 
                     # 提取年份 - 支持多种格式
-                    year_match = re.search(r'年份：</b><b><a[^>]*>(\d{4})</a>', html_block)
+                    year = None
+                    # 方法1: 从年份标签中提取 <b>年份：</b><a...>2016</a>
+                    year_match = re.search(r'<b>年份：</b>.*?>(\d{4})</a>', html_block)
                     if not year_match:
-                        year_match = re.search(r'上映时间：</b><b><a[^>]*>(\d{4})</a>', html_block)
+                        # 方法2: 从上映时间标签中提取
+                        year_match = re.search(r'<b>上映时间：</b>.*?>(\d{4})</a>', html_block)
                     if not year_match:
-                        # 尝试从 data-info 中获取年份（如果有的话）
-                        year_match = re.search(r'y(\d{4})', data_info.get('keyWord', ''))
-                    year = int(year_match.group(1)) if year_match else None
+                        # 方法3: 从年份链接的href中提取 (y2016)
+                        year_match = re.search(r'_y(\d{4})_', html_block)
+                    if not year_match:
+                        # 方法4: 从 data-info 的 keyWord 中提取
+                        year_match = re.search(r'(\d{4})', data_info.get('keyWord', ''))
+
+                    if year_match:
+                        year = int(year_match.group(1))
 
                     # 映射媒体类型
                     type_map = {
@@ -377,7 +385,7 @@ class LetvScraper(BaseScraper):
                         episodeId=video_id,
                         episodeIndex=episode_index,
                         title=f"第{episode_index}集",
-                        officialUrl=f"https://www.le.com/ptv/vplay/{video_id}.html"
+                        url=f"https://www.le.com/ptv/vplay/{video_id}.html"
                     )
 
                     episodes.append(episode)
