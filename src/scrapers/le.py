@@ -302,12 +302,20 @@ class LetvScraper(BaseScraper):
                 await progress_callback(50, "正在解析分集列表...")
 
             # 从HTML中提取data-info
-            data_info_match = re.search(r'data-info=\'({[^\']+})\'', html_content)
+            # HTML属性值用双引号包裹，内部是JavaScript对象字面量
+            data_info_match = re.search(r'data-info="({[^"]+})"', html_content)
             if not data_info_match:
                 self.logger.error(f"未找到data-info: media_id={media_id}")
                 return []
 
-            data_info = json.loads(data_info_match.group(1))
+            # 解析JavaScript对象字面量为JSON
+            data_info_str = data_info_match.group(1)
+            # 1. 先将所有单引号替换为双引号
+            data_info_str = data_info_str.replace("'", '"')
+            # 2. 然后为没有引号的键添加引号
+            data_info_str = re.sub(r'([{,])(\w+):', r'\1"\2":', data_info_str)
+
+            data_info = json.loads(data_info_str)
             vid_episode_str = data_info.get('vidEpisode', '')
 
             if not vid_episode_str:
