@@ -47,6 +47,9 @@ class LetvScraper(BaseScraper):
     referer = "https://www.le.com/"
     test_url = "https://www.le.com"
 
+    # 缓存搜索时提取的分集信息
+    _episode_cache: Dict[str, str] = {}
+
     # 位置映射：乐视 -> B站格式
     POSITION_MAP = {
         4: 1,  # 滚动弹幕
@@ -211,6 +214,12 @@ class LetvScraper(BaseScraper):
                     # 解析集数
                     episode_count = int(total) if total and total.isdigit() else 0
 
+                    # 缓存分集信息（用于后续 get_episodes 调用）
+                    vid_episode = data_info.get('vidEpisode', '')
+                    if vid_episode:
+                        self._episode_cache[pid] = vid_episode
+                        self.logger.debug(f"乐视网: 缓存分集信息 pid={pid}, vidEpisode长度={len(vid_episode)}")
+
                     # 创建搜索结果
                     result = models.ProviderSearchInfo(
                         provider=self.provider_name,
@@ -272,52 +281,77 @@ class LetvScraper(BaseScraper):
             if progress_callback:
                 await progress_callback(10, "正在获取分集信息...")
 
-            # 构造作品页面URL（需要根据类型判断）
-            # 先尝试电视剧页面
-            urls_to_try = [
-                f"https://www.le.com/tv/{media_id}.html",
-                f"https://www.le.com/comic/{media_id}.html",
-                f"https://www.le.com/playlet/{media_id}.html",
-                f"https://www.le.com/movie/{media_id}.html"
-            ]
+            # 优先使用缓存的分集信息（从搜索结果中提取的）
+            vid_episode_str = self._episode_cache.get(media_id, '')
 
-            html_content = None
-            async with await self._create_client() as client:
-                for url in urls_to_try:
-                    try:
-                        response = await client.get(url, timeout=10)
-                        if response.status_code == 200:
-                            html_content = response.text
-                            self.logger.debug(f"成功获取页面: {url}")
-                            break
-                    except Exception as e:
-                        self.logger.debug(f"尝试URL失败 {url}: {e}")
-                        continue
+            if vid_episode_str:
+                self.logger.debug(f"乐视网: 使用缓存的分集信息 media_id={media_id}")
+            else:
+                # 如果缓存中没有，尝试从详情页获取
+                self.logger.debug(f"乐视网: 缓存中没有分集信息，尝试从详情页获取 media_id={media_id}")
 
-            if not html_content:
-                self.logger.error(f"无法获取作品页面: media_id={media_id}")
-                return []
+                # 构造作品页面URL（需要根据类型判断）
+                urls_to_try = [
+                    f"https://www.le.com/tv/{media_id}.html",
+                    f"https://www.le.com/comic/{media_id}.html",
+                    f"https://www.le.com/playlet/{media_id}.html",
+                    f"https://www.le.com/movie/{media_id}.html"
+                ]
+
+                html_content = None
+                async with await self._create_client() as client:
+                    for url in urls_to_try:
+                        try:
+                            response = await client.get(url, timeout=10)
+                            if response.status_code == 200:
+                                html_content = response.text
+                                self.logger.debug(f"成功获取页面: {url}")
+                                break
+                        except Exception as e:
+                            self.logger.debug(f"尝试URL失败 {url}: {e}")
+                            continue
+
+                if not html_content:
+                    self.logger.error(f"无法获取作品页面: media_id={media_id}")
+                    return []
+
+                # 记录原始响应（用于调试）
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Letv Detail Page Response (media_id='{media_id}'): {html_content}")
+
+                # 从HTML中提取data-info
+                # HTML属性值用双引号包裹，内部是JavaScript对象字面量
+                # 使用 DOTALL 标志以匹配跨行内容，使用非贪婪匹配
+                data_info_match = re.search(r'data-info="({.*?})"', html_content, re.DOTALL)
+                if not data_info_match:
+                    # 尝试查找是否存在 data-info 属性（用于调试）
+                    if 'data-info' in html_content:
+                        self.logger.error(f"找到data-info关键字但正则匹配失败: media_id={media_id}")
+                        # 尝试提取一小段包含 data-info 的内容
+                        idx = html_content.find('data-info')
+                        if idx != -1:
+                            snippet = html_content[max(0, idx-50):min(len(html_content), idx+200)]
+                            self.logger.debug(f"data-info 附近的内容: {snippet}")
+                    else:
+                        self.logger.error(f"HTML中不包含data-info: media_id={media_id}")
+                    return []
+
+                # 解析JavaScript对象字面量为JSON
+                data_info_str = data_info_match.group(1)
+                # 1. 先将所有单引号替换为双引号
+                data_info_str = data_info_str.replace("'", '"')
+                # 2. 然后为没有引号的键添加引号
+                data_info_str = re.sub(r'([{,])(\w+):', r'\1"\2":', data_info_str)
+
+                data_info = json.loads(data_info_str)
+                vid_episode_str = data_info.get('vidEpisode', '')
+
+                # 缓存提取到的分集信息
+                if vid_episode_str:
+                    self._episode_cache[media_id] = vid_episode_str
 
             if progress_callback:
                 await progress_callback(50, "正在解析分集列表...")
-
-            # 从HTML中提取data-info
-            # HTML属性值用双引号包裹，内部是JavaScript对象字面量
-            # 使用 DOTALL 标志以匹配跨行内容，使用非贪婪匹配
-            data_info_match = re.search(r'data-info="({.*?})"', html_content, re.DOTALL)
-            if not data_info_match:
-                self.logger.error(f"未找到data-info: media_id={media_id}")
-                return []
-
-            # 解析JavaScript对象字面量为JSON
-            data_info_str = data_info_match.group(1)
-            # 1. 先将所有单引号替换为双引号
-            data_info_str = data_info_str.replace("'", '"')
-            # 2. 然后为没有引号的键添加引号
-            data_info_str = re.sub(r'([{,])(\w+):', r'\1"\2":', data_info_str)
-
-            data_info = json.loads(data_info_str)
-            vid_episode_str = data_info.get('vidEpisode', '')
 
             if not vid_episode_str:
                 self.logger.warning(f"未找到分集信息: media_id={media_id}")
