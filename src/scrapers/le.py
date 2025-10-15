@@ -119,10 +119,10 @@ class LetvScraper(BaseScraper):
             results = []
 
             # 使用正则表达式提取所有 data-info 属性
-            # 注意：data-info 的值是用单引号包裹的，且内部的字符串也用单引号
-            # 格式：data-info='{pid:"10026580",type:"tv",...}'
-            # 使用非贪婪匹配 .*? 来匹配到下一个 '> 为止
-            pattern = r'<div class="So-detail[^"]*"[^>]*data-info=\'({.*?})\'[^>]*>'
+            # 注意：HTML属性值用双引号包裹，内部是JavaScript对象字面量
+            # 格式：data-info="{pid:'10026580',type:'tv',...}"
+            # 使用非贪婪匹配 .*? 来匹配整个对象
+            pattern = r'<div class="So-detail[^"]*"[^>]*data-info="({.*?})"[^>]*>'
             matches = list(re.finditer(pattern, html_content, re.DOTALL))
 
             self.logger.debug(f"乐视网: 从HTML中找到 {len(matches)} 个 data-info 块")
