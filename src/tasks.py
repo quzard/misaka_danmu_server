@@ -1163,8 +1163,8 @@ async def edited_import_task(
                     select(orm_models.Episode.id)
                     .join(orm_models.AnimeSource, orm_models.Episode.sourceId == orm_models.AnimeSource.id)
                     .where(
-                        orm_models.AnimeSource.providerName == provider,
-                        orm_models.AnimeSource.mediaId == media_id,
+                        orm_models.AnimeSource.providerName == request_data.provider,
+                        orm_models.AnimeSource.mediaId == request_data.mediaId,
                         orm_models.Episode.episodeIndex == episode.episodeIndex,
                         orm_models.Episode.danmakuFilePath.isnot(None),
                         orm_models.Episode.commentCount > 0
