@@ -105,12 +105,12 @@ class YoukuDanmakuResult(BaseModel):
 
 # 修正：更新模型以正确处理优酷API的成功和错误响应结构
 class YoukuRpcData(BaseModel):
-    result: str # This is a JSON string
+    result: Optional[str] = None # This is a JSON string, 可能为空
 
 class YoukuRpcResult(BaseModel):
     # 新增：添加 api, ret, v 字段以匹配真实响应
     api: str
-    data: Optional[YoukuRpcData] = None # data 在出错时可能不存在
+    data: Optional[YoukuRpcData] = None # data 在出错时可能不存在或为空对象
     ret: List[str]
     v: str
 
@@ -537,11 +537,11 @@ class YoukuScraper(BaseScraper):
             except httpx.ConnectError as e:
                 self.logger.error(f"Youku: 无法连接到 acs.youku.com 获取令牌 cookie。弹幕获取很可能会失败。错误: {e}")
 
-        # 修正：参考项目使用 token.Substring(0, 32)，即取前32位字符，而不是按下划线分割
-        # 这是关键修复：签名算法需要使用token的前32位
-        self._token = token_val[:32] if token_val and len(token_val) >= 32 else ""
-        if self._token:
-            self.logger.info(f"Youku: 已成功获取/确认弹幕签名令牌 (前32位)。")
+        # 修正：保存完整的token值，在签名时才取前32位（参考C#项目实现）
+        # token格式通常是：{32位}_时间戳，例如：abc123...xyz_1697123456789
+        self._token = token_val if token_val else ""
+        if self._token and len(self._token) >= 32:
+            self.logger.info(f"Youku: 已成功获取/确认弹幕签名令牌。")
         else:
             self.logger.warning("Youku: 未能获取到弹幕签名所需的 token cookie (_m_h5_tk)，弹幕获取可能会失败。")
             raise self.TokenExpiredError("无法获取有效的 _m_h5_tk 令牌。")
@@ -551,7 +551,9 @@ class YoukuScraper(BaseScraper):
         return hashlib.md5(s.encode('utf-8')).hexdigest().lower()
 
     def _generate_token_sign(self, t: str, app_key: str, data: str) -> str:
-        s = "&".join([self._token, t, app_key, data])
+        # 签名时使用token的前32位（参考C#项目：this._token.Substring(0, 32)）
+        token_part = self._token[:32] if self._token and len(self._token) >= 32 else self._token
+        s = "&".join([token_part, t, app_key, data])
         return hashlib.md5(s.encode('utf-8')).hexdigest().lower()
 
     async def _get_danmu_content_by_mat(self, vid: str, mat: int) -> Optional[List[YoukuComment]]:
