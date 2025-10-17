@@ -40,10 +40,10 @@ class SohuDanmuResponse(BaseModel):
 
 class SohuVideo(BaseModel):
     """搜狐视频信息"""
-    vid: str = Field(..., description="视频ID")
-    video_name: str = Field(..., description="视频标题")
-    video_order: int = Field(..., description="集数序号")
-    url_html5: str = Field(..., description="移动端URL")
+    vid: Union[str, int] = Field(..., description="视频ID")
+    video_name: Optional[str] = Field(None, description="视频标题")
+    video_order: Optional[int] = Field(None, description="集数序号")
+    url_html5: Optional[str] = Field(None, description="移动端URL")
     isFee: int = Field(0, description="是否付费 0=免费 1=会员")
 
 class SohuPlaylistResponse(BaseModel):
@@ -66,7 +66,7 @@ class SohuSearchVideoInfo(BaseModel):
 
 class SohuSearchItem(BaseModel):
     """搜狐搜索结果项"""
-    data_type: int
+    data_type: Optional[int] = None  # 有些item没有这个字段
     aid: Optional[int] = None
     kisId: Optional[int] = None
     album_name: Optional[str] = None
@@ -79,7 +79,7 @@ class SohuSearchItem(BaseModel):
     latest_video_count: Optional[int] = None
     videos: List[SohuVideo] = Field(default_factory=list)
     # 单个视频字段
-    vid: Optional[int] = None
+    vid: Optional[Union[str, int]] = None
     video_name: Optional[str] = None
 
 class SohuSearchData(BaseModel):
