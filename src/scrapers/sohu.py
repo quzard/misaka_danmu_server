@@ -222,9 +222,6 @@ class SohuScraper(BaseScraper):
                     episodeCount=item.total_video_count or 0
                 ))
 
-            # 应用全局过滤规则
-            results = self._apply_global_search_filters(results, keyword)
-
             self.logger.info(f"搜狐视频: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
             return results
 
