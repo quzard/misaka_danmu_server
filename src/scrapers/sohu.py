@@ -64,6 +64,10 @@ class SohuSearchVideoInfo(BaseModel):
     latest_video_count: Optional[int] = None
     videos: List[SohuVideo] = Field(default_factory=list)
 
+class SohuMeta(BaseModel):
+    """搜狐meta信息"""
+    txt: str
+
 class SohuSearchItem(BaseModel):
     """搜狐搜索结果项"""
     data_type: Optional[int] = None  # 有些item没有这个字段
@@ -81,8 +85,8 @@ class SohuSearchItem(BaseModel):
     # 单个视频字段
     vid: Optional[Union[str, int]] = None
     video_name: Optional[str] = None
-    # 类型相关字段
-    category_name: Optional[str] = None  # 分类名称，如"电影"、"电视剧"、"动漫"、"综艺"
+    # meta信息
+    meta: List[SohuMeta] = Field(default_factory=list)
 
 class SohuSearchData(BaseModel):
     """搜狐搜索响应数据"""
@@ -204,12 +208,21 @@ class SohuScraper(BaseScraper):
                 # 提取季度信息
                 season = get_season_from_title(title)
 
+                # 从meta中提取类型信息
+                # meta格式: ["20集全", "电视剧 | 内地 | 2018年", "主演：..."]
+                category_name = None
+                if len(item.meta) >= 2:
+                    meta_text = item.meta[1].txt  # "电视剧 | 内地 | 2018年"
+                    parts = meta_text.split('|')
+                    if parts:
+                        category_name = parts[0].strip()  # "电视剧"
+
                 # 映射类型
-                media_type = self._map_category_to_type(item.category_name)
+                media_type = self._map_category_to_type(category_name)
 
                 # 过滤掉不支持的类型
                 if media_type is None:
-                    self.logger.debug(f"搜狐视频: 过滤不支持的类型 '{item.category_name}': {title}")
+                    self.logger.debug(f"搜狐视频: 过滤不支持的类型 '{category_name}': {title}")
                     continue
 
                 results.append(models.ProviderSearchInfo(
