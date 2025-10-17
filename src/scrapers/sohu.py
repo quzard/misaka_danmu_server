@@ -81,6 +81,8 @@ class SohuSearchItem(BaseModel):
     # 单个视频字段
     vid: Optional[Union[str, int]] = None
     video_name: Optional[str] = None
+    # 类型相关字段
+    category_name: Optional[str] = None  # 分类名称，如"电影"、"电视剧"、"动漫"、"综艺"
 
 class SohuSearchData(BaseModel):
     """搜狐搜索响应数据"""
@@ -198,14 +200,23 @@ class SohuScraper(BaseScraper):
 
                 # 清理标题中的高亮标记
                 title = item.album_name.replace('<<<', '').replace('>>>', '')
-                
+
                 # 提取季度信息
                 season = get_season_from_title(title)
+
+                # 映射类型
+                media_type = self._map_category_to_type(item.category_name)
+
+                # 过滤掉不支持的类型
+                if media_type is None:
+                    self.logger.debug(f"搜狐视频: 过滤不支持的类型 '{item.category_name}': {title}")
+                    continue
 
                 results.append(models.ProviderSearchInfo(
                     provider=self.provider_name,
                     mediaId=str(item.aid),
                     title=title,
+                    type=media_type,
                     year=item.year,
                     season=season,
                     episodeCount=item.total_video_count or 0
@@ -504,6 +515,32 @@ class SohuScraper(BaseScraper):
         debug_enabled = await self.config_manager.get("debugEnabled", "false")
         return debug_enabled.lower() == "true"
 
+    def _map_category_to_type(self, category_name: Optional[str]) -> Optional[str]:
+        """
+        将搜狐视频的分类名称映射到标准类型
+
+        Args:
+            category_name: 分类名称，如"电影"、"电视剧"、"动漫"、"综艺"、"纪录片"
+
+        Returns:
+            标准类型: 'movie' 或 'tv_series'，如果不是支持的类型则返回None
+        """
+        if not category_name:
+            return None  # 没有分类信息，过滤掉
+
+        category_lower = category_name.lower()
+
+        # 电影类型
+        if '电影' in category_lower or 'movie' in category_lower:
+            return 'movie'
+
+        # 电视剧、动漫、综艺、纪录片等映射为tv_series
+        if any(keyword in category_lower for keyword in ['电视剧', '动漫', '综艺', '纪录片', 'tv', 'anime', 'variety']):
+            return 'tv_series'
+
+        # 其他类型不支持，返回None进行过滤
+        return None
+
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
         """
         从搜狐视频URL中提取作品信息
@@ -537,6 +574,7 @@ class SohuScraper(BaseScraper):
                             provider=self.provider_name,
                             mediaId=aid,
                             title=title,
+                            type='tv_series',
                             season=get_season_from_title(title)
                         )
 
@@ -556,6 +594,7 @@ class SohuScraper(BaseScraper):
                             provider=self.provider_name,
                             mediaId=aid,
                             title=title,
+                            type='tv_series',
                             season=get_season_from_title(title)
                         )
 
