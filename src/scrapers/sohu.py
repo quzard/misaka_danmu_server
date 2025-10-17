@@ -19,6 +19,8 @@ from .base import BaseScraper, get_season_from_title
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
 
+scraper_responses_logger = logging.getLogger("scraper_responses")
+
 # --- Pydantic Models for Sohu API ---
 
 class SohuComment(BaseModel):
@@ -460,10 +462,10 @@ class SohuScraper(BaseScraper):
                 'act': 'dmlist_v2',
                 'vid': vid,
                 'aid': aid,
-                'pct': '2',
-                'time_begin': str(start),
-                'time_end': str(end),
-                'dct': '1',
+                'pct': 2,
+                'time_begin': start,
+                'time_end': end,
+                'dct': 1,
                 'request_from': 'h5_js'
             }
 
@@ -473,6 +475,9 @@ class SohuScraper(BaseScraper):
                     params=params,
                     timeout=10.0
                 )
+
+                if await self._should_log_responses():
+                    scraper_responses_logger.debug(f"Sohu Danmu Segment Response (vid={vid}, {start}-{end}s): {response.text}")
 
                 response.raise_for_status()
 
