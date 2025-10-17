@@ -88,8 +88,7 @@ class SohuSearchItem(BaseModel):
     # meta信息
     meta: List[SohuMeta] = Field(default_factory=list)
     # 海报图片
-    hor_img_5_3: Optional[str] = None  # 横版海报 5:3
-    ver_img_3_4: Optional[str] = None  # 竖版海报 3:4
+    ver_big_pic: Optional[str] = None  # 竖版大图
 
 class SohuSearchData(BaseModel):
     """搜狐搜索响应数据"""
@@ -228,13 +227,6 @@ class SohuScraper(BaseScraper):
                     self.logger.debug(f"搜狐视频: 过滤不支持的类型 '{category_name}': {title}")
                     continue
 
-                # 选择海报图片
-                image_url = None
-                if item.hor_img_5_3:
-                    image_url = item.hor_img_5_3 if item.hor_img_5_3.startswith('http') else f"https:{item.hor_img_5_3}"
-                elif item.ver_img_3_4:
-                    image_url = item.ver_img_3_4 if item.ver_img_3_4.startswith('http') else f"https:{item.ver_img_3_4}"
-
                 results.append(models.ProviderSearchInfo(
                     provider=self.provider_name,
                     mediaId=str(item.aid),
@@ -243,7 +235,7 @@ class SohuScraper(BaseScraper):
                     year=item.year,
                     season=season,
                     episodeCount=item.total_video_count or 0,
-                    imageUrl=image_url
+                    imageUrl=item.ver_big_pic
                 ))
 
             self.logger.info(f"搜狐视频: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
