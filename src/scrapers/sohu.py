@@ -320,25 +320,26 @@ class SohuScraper(BaseScraper):
             self.logger.error(f"搜狐视频: 获取分集列表时发生未知错误: {e}", exc_info=True)
             return []
 
-    async def get_danmu(
+    async def get_comments(
         self,
         episode_id: str,
-        episode_index: int = 1,
-        media_id: Optional[str] = None
-    ) -> List[models.DanmakuItem]:
+        progress_callback: Optional[Callable] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         获取指定分集的弹幕
 
         Args:
             episode_id: 分集ID (vid)
-            episode_index: 分集序号
-            media_id: 媒体ID (aid, 可选)
+            progress_callback: 进度回调函数
 
         Returns:
-            弹幕列表
+            弹幕列表，格式为 [{'cid': '', 'p': '时间,类型,字号,颜色,[来源]', 'm': '弹幕内容', 't': 时间}, ...]
         """
         try:
             self.logger.info(f"开始获取弹幕: episode_id={episode_id}")
+
+            if progress_callback:
+                await progress_callback(10, "正在获取弹幕...")
 
             # 获取视频时长（用于确定需要获取多少段弹幕）
             # 默认最大7200秒（2小时）
@@ -347,16 +348,22 @@ class SohuScraper(BaseScraper):
             # 分段获取弹幕（60秒一段）
             all_comments: List[SohuComment] = []
             segment_duration = 60
+            total_segments = max_time // segment_duration
 
-            for start in range(0, max_time, segment_duration):
+            for i, start in enumerate(range(0, max_time, segment_duration)):
                 end = start + segment_duration
-                comments = await self._get_danmu_segment(episode_id, media_id or '0', start, end)
+                comments = await self._get_danmu_segment(episode_id, '0', start, end)
 
                 if comments:
                     all_comments.extend(comments)
                     self.logger.debug(f"获取第 {start//60+1} 分钟: {len(comments)} 条弹幕")
                 elif start > 600:  # 10分钟后无数据可能到末尾
                     break
+
+                # 更新进度
+                if progress_callback:
+                    progress = 10 + int((i + 1) / total_segments * 70)
+                    await progress_callback(progress, f"已获取 {i + 1}/{total_segments} 个时间段")
 
                 # 避免请求过快
                 await asyncio.sleep(0.1)
@@ -365,30 +372,45 @@ class SohuScraper(BaseScraper):
                 self.logger.info(f"搜狐视频: 未找到弹幕 (episode_id={episode_id})")
                 return []
 
+            if progress_callback:
+                await progress_callback(85, "正在格式化弹幕...")
+
             # 转换为标准格式
-            danmaku_items: List[models.DanmakuItem] = []
+            formatted_comments: List[Dict[str, Any]] = []
             for comment in all_comments:
-                # 解析颜色
-                color = self._parse_color(comment)
+                try:
+                    # 解析颜色
+                    color = self._parse_color(comment)
 
-                # 解析位置（默认滚动弹幕）
-                position = 1
+                    # 解析位置（默认滚动弹幕）
+                    position = 1
 
-                # 时间戳
-                timestamp = int(comment.created) if comment.created else int(time.time())
+                    # 时间（秒）
+                    time_val = float(comment.v)
 
-                danmaku_items.append(models.DanmakuItem(
-                    cid=episode_id,
-                    p=f"{comment.v},{position},25,{color},{timestamp},0,{comment.uid or ''},{comment.i or ''}",
-                    m=comment.c
-                ))
+                    # 构造p属性：时间,模式,字体大小,颜色,[来源]
+                    p_string = f"{time_val:.2f},{position},25,{color},[{self.provider_name}]"
 
-            self.logger.info(f"搜狐视频: 成功获取 {len(danmaku_items)} 条弹幕 (episode_id={episode_id})")
-            return danmaku_items
+                    formatted_comments.append({
+                        'cid': comment.i or '',
+                        'p': p_string,
+                        'm': comment.c,
+                        't': round(time_val, 2)
+                    })
+
+                except Exception as e:
+                    self.logger.warning(f"格式化弹幕失败: {e}, 弹幕数据: {comment}")
+                    continue
+
+            if progress_callback:
+                await progress_callback(100, f"获取完成，共 {len(formatted_comments)} 条弹幕")
+
+            self.logger.info(f"搜狐视频: 成功获取 {len(formatted_comments)} 条弹幕 (episode_id={episode_id})")
+            return formatted_comments
 
         except Exception as e:
             self.logger.error(f"搜狐视频: 获取弹幕时发生错误: {e}", exc_info=True)
-            return []
+            return None
 
     async def _get_danmu_segment(
         self,
@@ -481,4 +503,96 @@ class SohuScraper(BaseScraper):
         """检查是否应该记录原始响应"""
         debug_enabled = await self.config_manager.get("debugEnabled", "false")
         return debug_enabled.lower() == "true"
+
+    async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
+        """
+        从搜狐视频URL中提取作品信息
+
+        Args:
+            url: 搜狐视频作品URL
+
+        Returns:
+            作品信息，如果解析失败则返回None
+        """
+        try:
+            # 从URL中提取aid
+            # 支持的URL格式:
+            # https://tv.sohu.com/s2017/fyqm2zqdf/
+            # http://tv.sohu.com/item/MTI4NzY5Mw==.html
+
+            # 尝试从详情页URL提取
+            match = re.search(r'tv\.sohu\.com/s\d+/([^/]+)', url)
+            if match:
+                # 这种URL需要访问页面获取aid
+                async with await self._create_client() as client:
+                    response = await client.get(url, timeout=10)
+                    aid_match = re.search(r'var\s+playlistId\s*=\s*["\']?(\d+)["\']?', response.text)
+                    if aid_match:
+                        aid = aid_match.group(1)
+                        # 获取标题
+                        title_match = re.search(r'<title>([^<]+)</title>', response.text)
+                        title = title_match.group(1).split('_')[0].strip() if title_match else ''
+
+                        return models.ProviderSearchInfo(
+                            provider=self.provider_name,
+                            mediaId=aid,
+                            title=title,
+                            season=get_season_from_title(title)
+                        )
+
+            # 尝试从item URL提取
+            match = re.search(r'tv\.sohu\.com/item/([^/]+)\.html', url)
+            if match:
+                # 这种URL也需要访问页面
+                async with await self._create_client() as client:
+                    response = await client.get(url, timeout=10)
+                    aid_match = re.search(r'var\s+playlistId\s*=\s*["\']?(\d+)["\']?', response.text)
+                    if aid_match:
+                        aid = aid_match.group(1)
+                        title_match = re.search(r'<title>([^<]+)</title>', response.text)
+                        title = title_match.group(1).split('_')[0].strip() if title_match else ''
+
+                        return models.ProviderSearchInfo(
+                            provider=self.provider_name,
+                            mediaId=aid,
+                            title=title,
+                            season=get_season_from_title(title)
+                        )
+
+            self.logger.warning(f"搜狐视频: 无法从URL中提取信息: {url}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"搜狐视频: 从URL提取信息失败: {e}")
+            return None
+
+    async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
+        """
+        从搜狐视频URL中提取ID
+
+        Args:
+            url: 搜狐视频URL
+
+        Returns:
+            aid 或包含ID信息的字典
+        """
+        try:
+            # 从作品URL中提取aid
+            async with await self._create_client() as client:
+                response = await client.get(url, timeout=10)
+                aid_match = re.search(r'var\s+playlistId\s*=\s*["\']?(\d+)["\']?', response.text)
+                if aid_match:
+                    return aid_match.group(1)
+
+            self.logger.warning(f"搜狐视频: 无法从URL中提取ID: {url}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"搜狐视频: 从URL提取ID失败: {e}")
+            return None
+
+    async def close(self):
+        """关闭资源"""
+        # 搜狐视频scraper没有需要关闭的持久连接
+        pass
 
