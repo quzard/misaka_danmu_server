@@ -124,6 +124,9 @@ class SohuScraper(BaseScraper):
         self.search_api_url = "https://m.so.tv.sohu.com/search/pc/keyword"
         self.playlist_api_url = "https://pl.hd.sohu.com/videolist"
         self.api_key = "f351515304020cad28c92f70f002261c"
+
+        # 缓存搜索结果中的分集列表
+        self._episodes_cache: Dict[str, List[SohuVideo]] = {}
     
     async def search(
         self,
@@ -229,6 +232,11 @@ class SohuScraper(BaseScraper):
                     self.logger.debug(f"搜狐视频: 过滤不支持的类型 '{category_name}': {title}")
                     continue
 
+                # 缓存分集列表（如果搜索结果中包含）
+                if item.videos:
+                    self._episodes_cache[str(item.aid)] = item.videos
+                    self.logger.debug(f"搜狐视频: 缓存了 {len(item.videos)} 个分集 (aid={item.aid})")
+
                 results.append(models.ProviderSearchInfo(
                     provider=self.provider_name,
                     mediaId=str(item.aid),
@@ -270,58 +278,73 @@ class SohuScraper(BaseScraper):
         try:
             self.logger.info(f"开始获取分集列表: media_id={media_id}")
 
-            # 构造播放列表API URL
-            params = {
-                'playlistid': media_id,
-                'api_key': self.api_key
-            }
-
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://tv.sohu.com/'
-            }
-
-            # 发送请求
-            async with await self._create_client() as client:
-                response = await client.get(
-                    self.playlist_api_url,
-                    params=params,
-                    headers=headers,
-                    timeout=15.0
-                )
-
-                if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Sohu Playlist Response (media_id={media_id}): {response.text}")
-
-                response.raise_for_status()
-
-            # 解析JSONP响应
-            text = response.text
-            if text.startswith('jsonp'):
-                # 提取括号内的JSON
-                start = text.find('(') + 1
-                end = text.rfind(')')
-                if start > 0 and end > start:
-                    json_str = text[start:end]
-                    data = json.loads(json_str)
-                else:
-                    self.logger.error(f"搜狐视频: 无法解析JSONP响应")
-                    return []
+            # 方案1：优先使用缓存的分集列表
+            videos_data = None
+            if media_id in self._episodes_cache:
+                self.logger.debug(f"搜狐视频: 使用缓存的分集列表 (media_id={media_id})")
+                videos_data = self._episodes_cache[media_id]
             else:
-                data = json.loads(text)
+                # 方案2：调用播放列表API作为后备
+                self.logger.debug(f"搜狐视频: 缓存未命中，调用播放列表API (media_id={media_id})")
 
-            # 提取视频列表
-            videos = data.get('videos', [])
-            if not videos:
+                params = {
+                    'playlistid': media_id,
+                    'api_key': self.api_key
+                }
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': 'https://tv.sohu.com/'
+                }
+
+                # 发送请求
+                async with await self._create_client() as client:
+                    response = await client.get(
+                        self.playlist_api_url,
+                        params=params,
+                        headers=headers,
+                        timeout=15.0
+                    )
+
+                    if await self._should_log_responses():
+                        scraper_responses_logger.debug(f"Sohu Playlist Response (media_id={media_id}): {response.text}")
+
+                    response.raise_for_status()
+
+                # 解析JSONP响应
+                text = response.text
+                if text.startswith('jsonp'):
+                    # 提取括号内的JSON
+                    start = text.find('(') + 1
+                    end = text.rfind(')')
+                    if start > 0 and end > start:
+                        json_str = text[start:end]
+                        data = json.loads(json_str)
+                    else:
+                        self.logger.error(f"搜狐视频: 无法解析JSONP响应")
+                        return []
+                else:
+                    data = json.loads(text)
+
+                # 提取视频列表
+                videos_data = data.get('videos', [])
+
+            if not videos_data:
                 self.logger.warning(f"搜狐视频: 未找到分集列表 (media_id={media_id})")
                 return []
 
             # 转换为标准格式
             episodes: List[models.ProviderEpisodeInfo] = []
-            for i, video in enumerate(videos):
-                vid = video.get('vid', '')
-                title = video.get('name', f'第{i+1}集')
-                url = video.get('pageUrl', '')
+            for i, video in enumerate(videos_data):
+                # 处理SohuVideo对象或字典
+                if isinstance(video, SohuVideo):
+                    vid = str(video.vid)
+                    title = video.video_name or f'第{i+1}集'
+                    url = video.url_html5 or ''
+                else:
+                    vid = str(video.get('vid', ''))
+                    title = video.get('name', '') or video.get('video_name', f'第{i+1}集')
+                    url = video.get('pageUrl', '') or video.get('url_html5', '')
 
                 # 转换为HTTPS
                 if url.startswith('http://'):
@@ -395,7 +418,7 @@ class SohuScraper(BaseScraper):
                 await asyncio.sleep(0.1)
 
             if not all_comments:
-                self.logger.info(f"搜狐视频: 未找到弹幕 (episode_id={episode_id})")
+                self.logger.info(f"搜狐视频: 该视频暂无弹幕数据 (vid={episode_id})")
                 return []
 
             if progress_callback:
