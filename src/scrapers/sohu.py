@@ -350,9 +350,10 @@ class SohuScraper(BaseScraper):
                 if url.startswith('http://'):
                     url = url.replace('http://', 'https://')
 
+                # episodeId 格式: "vid:aid" (需要aid来获取弹幕)
                 episode = models.ProviderEpisodeInfo(
                     provider=self.provider_name,
-                    episodeId=str(vid),
+                    episodeId=f"{vid}:{media_id}",  # 存储 vid:aid
                     episodeIndex=i + 1,
                     title=title,
                     url=url
@@ -387,6 +388,15 @@ class SohuScraper(BaseScraper):
         try:
             self.logger.info(f"开始获取弹幕: episode_id={episode_id}")
 
+            # 解析 episode_id (格式: "vid:aid")
+            if ':' in episode_id:
+                vid, aid = episode_id.split(':', 1)
+            else:
+                # 兼容旧格式（只有vid）
+                vid = episode_id
+                aid = '0'
+                self.logger.warning(f"搜狐视频: episode_id 格式不正确，缺少 aid: {episode_id}")
+
             if progress_callback:
                 await progress_callback(10, "正在获取弹幕...")
 
@@ -401,7 +411,7 @@ class SohuScraper(BaseScraper):
 
             for i, start in enumerate(range(0, max_time, segment_duration)):
                 end = start + segment_duration
-                comments = await self._get_danmu_segment(episode_id, '0', start, end)
+                comments = await self._get_danmu_segment(vid, aid, start, end)
 
                 if comments:
                     all_comments.extend(comments)
@@ -483,8 +493,8 @@ class SohuScraper(BaseScraper):
         try:
             params = {
                 'act': 'dmlist_v2',
-                'vid': vid,
-                'aid': aid,
+                'vid': int(vid),  # 必须是整数
+                'aid': int(aid),  # 必须是整数
                 'pct': 2,
                 'time_begin': start,
                 'time_end': end,
