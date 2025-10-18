@@ -25,12 +25,12 @@ scraper_responses_logger = logging.getLogger("scraper_responses")
 
 class SohuComment(BaseModel):
     """搜狐弹幕单条数据模型"""
-    v: float = Field(..., description="弹幕时间(秒)")
+    v: Union[float, int, str] = Field(..., description="弹幕时间(秒)")
     c: str = Field(..., description="弹幕内容")
-    t: Optional[Dict[str, Any]] = Field(None, description="弹幕样式信息")
-    created: Optional[float] = Field(None, description="创建时间戳")
-    uid: Optional[str] = Field(None, description="用户ID")
-    i: Optional[str] = Field(None, description="弹幕ID")
+    t: Optional[Union[Dict[str, Any], str]] = Field(None, description="弹幕样式信息")
+    created: Optional[Union[float, int, str]] = Field(None, description="创建时间戳")
+    uid: Optional[Union[str, int]] = Field(None, description="用户ID")
+    i: Optional[Union[str, int]] = Field(None, description="弹幕ID")
 
 class SohuDanmuInfo(BaseModel):
     """搜狐弹幕响应信息"""
@@ -444,14 +444,17 @@ class SohuScraper(BaseScraper):
                     # 解析位置（默认滚动弹幕）
                     position = 1
 
-                    # 时间（秒）
-                    time_val = float(comment.v)
+                    # 时间（秒）- 处理可能的字符串类型
+                    time_val = float(comment.v) if isinstance(comment.v, (int, float)) else float(str(comment.v))
 
                     # 构造p属性：时间,模式,字体大小,颜色,[来源]
                     p_string = f"{time_val:.2f},{position},25,{color},[{self.provider_name}]"
 
+                    # 处理 cid - 可能是字符串或整数
+                    cid = str(comment.i) if comment.i is not None else ''
+
                     formatted_comments.append({
-                        'cid': comment.i or '',
+                        'cid': cid,
                         'p': p_string,
                         'm': comment.c,
                         't': round(time_val, 2)
@@ -542,7 +545,8 @@ class SohuScraper(BaseScraper):
             颜色值（整数）
         """
         try:
-            if comment.t and 'c' in comment.t:
+            # t 字段可能是字典或字符串
+            if comment.t and isinstance(comment.t, dict) and 'c' in comment.t:
                 color = comment.t['c']
 
                 # 处理十六进制颜色
