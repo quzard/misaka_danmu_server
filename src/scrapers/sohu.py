@@ -350,10 +350,10 @@ class SohuScraper(BaseScraper):
                 if url.startswith('http://'):
                     url = url.replace('http://', 'https://')
 
-                # episodeId 格式: "vid:aid" (需要aid来获取弹幕)
+                # episodeId 格式: "vid:aid" (搜索API返回的vid和aid是正确的)
                 episode = models.ProviderEpisodeInfo(
                     provider=self.provider_name,
-                    episodeId=f"{vid}:{media_id}",  # 存储 vid:aid
+                    episodeId=f"{vid}:{media_id}",  # vid:aid
                     episodeIndex=i + 1,
                     title=title,
                     url=url
@@ -389,6 +389,7 @@ class SohuScraper(BaseScraper):
             self.logger.info(f"开始获取弹幕: episode_id={episode_id}")
 
             # 解析 episode_id (格式: "vid:aid")
+            # 搜索API返回的vid和aid是正确的，直接使用
             if ':' in episode_id:
                 vid, aid = episode_id.split(':', 1)
             else:
@@ -404,8 +405,8 @@ class SohuScraper(BaseScraper):
             # 默认最大7200秒（2小时）
             max_time = 7200
 
-            # 分段获取弹幕（60秒一段）
-            all_comments: List[SohuComment] = []
+            # 分段获取弹幕（60秒一段）- 使用字典列表，不使用Pydantic
+            all_comments: List[Dict[str, Any]] = []
             segment_duration = 60
             total_segments = max_time // segment_duration
 
@@ -434,30 +435,31 @@ class SohuScraper(BaseScraper):
             if progress_callback:
                 await progress_callback(85, "正在格式化弹幕...")
 
-            # 转换为标准格式
+            # 转换为标准格式（完全参考用户提供的代码）
             formatted_comments: List[Dict[str, Any]] = []
             for comment in all_comments:
                 try:
                     # 解析颜色
                     color = self._parse_color(comment)
 
-                    # 解析位置（默认滚动弹幕）
-                    position = 1
+                    # 时间（秒）
+                    vtime = comment.get('v', 0)
 
-                    # 时间（秒）- 处理可能的字符串类型
-                    time_val = float(comment.v) if isinstance(comment.v, (int, float)) else float(str(comment.v))
+                    # 时间戳
+                    timestamp = int(float(comment.get('created', time.time())))
 
-                    # 构造p属性：时间,模式,字体大小,颜色,[来源]
-                    p_string = f"{time_val:.2f},{position},25,{color},[{self.provider_name}]"
+                    # 用户ID和弹幕ID
+                    uid = comment.get('uid', '')
+                    danmu_id = comment.get('i', '')
 
-                    # 处理 cid - 可能是字符串或整数
-                    cid = str(comment.i) if comment.i is not None else ''
+                    # 构造p属性：时间,模式,字体大小,颜色,时间戳,池,用户ID,弹幕ID
+                    p_string = f"{vtime},1,25,{color},{timestamp},0,{uid},{danmu_id}"
 
                     formatted_comments.append({
-                        'cid': cid,
+                        'cid': str(danmu_id),
                         'p': p_string,
-                        'm': comment.c,
-                        't': round(time_val, 2)
+                        'm': comment.get('c', ''),
+                        't': float(vtime)
                     })
 
                 except Exception as e:
@@ -480,7 +482,7 @@ class SohuScraper(BaseScraper):
         aid: str,
         start: int,
         end: int
-    ) -> List[SohuComment]:
+    ) -> List[Dict[str, Any]]:
         """
         获取单个时间段的弹幕数据
 
@@ -491,7 +493,7 @@ class SohuScraper(BaseScraper):
             end: 结束时间（秒）
 
         Returns:
-            弹幕列表
+            弹幕列表（字典列表，不使用Pydantic验证）
         """
         try:
             params = {
@@ -517,15 +519,14 @@ class SohuScraper(BaseScraper):
 
                 response.raise_for_status()
 
-            # 解析响应
-            try:
-                danmu_result = SohuDanmuResponse.model_validate(response.json())
-                if danmu_result.info and danmu_result.info.comments:
-                    return danmu_result.info.comments
-            except (json.JSONDecodeError, ValidationError) as e:
-                self.logger.error(f"搜狐视频: 解析弹幕响应失败: {e}")
-
-            return []
+                # 解析响应 - 不使用Pydantic验证，直接使用字典（参考代码方式）
+                try:
+                    data = response.json()
+                    comments = data.get('info', {}).get('comments', [])
+                    return comments
+                except (json.JSONDecodeError, Exception) as e:
+                    self.logger.error(f"搜狐视频: 解析弹幕响应失败: {e}")
+                    return []
 
         except httpx.HTTPError as e:
             self.logger.debug(f"搜狐视频: 获取弹幕段失败 (vid={vid}, {start}-{end}s): {e}")
@@ -534,36 +535,23 @@ class SohuScraper(BaseScraper):
             self.logger.error(f"搜狐视频: 获取弹幕段时发生错误: {e}")
             return []
 
-    def _parse_color(self, comment: SohuComment) -> int:
+    def _parse_color(self, comment: Dict[str, Any]) -> int:
         """
-        解析弹幕颜色值
+        解析弹幕颜色值（完全参考用户提供的代码）
 
         Args:
-            comment: 弹幕对象
+            comment: 弹幕字典
 
         Returns:
             颜色值（整数）
         """
         try:
-            # t 字段可能是字典或字符串
-            if comment.t and isinstance(comment.t, dict) and 'c' in comment.t:
-                color = comment.t['c']
-
-                # 处理十六进制颜色
-                if isinstance(color, str) and color.startswith('#'):
-                    return int(color[1:], 16)
-
-                # 处理数字字符串
-                if isinstance(color, str):
-                    return int(color, 16) if not color.isdigit() else int(color)
-
-                # 处理整数
-                return int(color)
-        except (ValueError, KeyError, TypeError):
-            pass
-
-        # 默认白色
-        return 16777215
+            color = comment.get('t', {}).get('c', '16777215')
+            if isinstance(color, str) and color.startswith('#'):
+                return int(color[1:], 16)
+            return int(str(color), 16) if not str(color).isdigit() else int(color)
+        except:
+            return 16777215
 
     async def _should_log_responses(self) -> bool:
         """检查是否应该记录原始响应"""
