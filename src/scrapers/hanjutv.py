@@ -39,12 +39,12 @@ class HanjuTVScraper(BaseScraper):
     # 提供商特定的分集黑名单（正则表达式）
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(预告|花絮|特辑|彩蛋|专访|幕后|直播|纯享|未播|衍生|番外|会员|片花|精华|看点|速看|解读|影评|解说|吐槽|盘点)(.*?)$"
 
-    # 分类映射
+    # 分类映射（映射为数据库接受的类型）
     CATEGORY_MAP = {
-        1: "韩剧",
-        2: "韩剧",  # 综艺 -> 韩剧
-        3: "电影",
-        5: "韩剧"   # 美剧 -> 韩剧
+        1: "tv_series",  # 韩剧
+        2: "tv_series",  # 综艺
+        3: "movie",      # 电影
+        5: "tv_series"   # 美剧
     }
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
@@ -135,15 +135,15 @@ class HanjuTVScraper(BaseScraper):
     @staticmethod
     def get_category(category_id: int) -> str:
         """
-        获取分类名称
-        
+        获取分类名称（返回数据库接受的类型）
+
         Args:
             category_id: 分类ID
-            
+
         Returns:
-            str: 分类名称
+            str: 分类名称 ('tv_series', 'movie', 'ova', 'other')
         """
-        return HanjuTVScraper.CATEGORY_MAP.get(category_id, "其他")
+        return HanjuTVScraper.CATEGORY_MAP.get(category_id, "other")
     
     async def _search_raw(self, keyword: str) -> List[Dict[str, Any]]:
         """
