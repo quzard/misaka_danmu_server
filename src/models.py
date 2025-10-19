@@ -417,6 +417,7 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
     taskId: str
     lastRunAt: Optional[datetime] = None
     nextRunAt: Optional[datetime] = None
+    isSystemTask: bool = False
 
 class AvailableJobInfo(BaseModel):
     jobType: str
