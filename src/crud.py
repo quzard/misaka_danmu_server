@@ -2350,9 +2350,10 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         TaskHistory.status,
         TaskHistory.progress,
         TaskHistory.description,
-        TaskHistory.createdAt
+        TaskHistory.createdAt,
+        TaskHistory.scheduledTaskId
     )
-    
+
     if search_term:
         base_stmt = base_stmt.where(TaskHistory.title.like(f"%{search_term}%"))
     if status_filter == 'in_progress':
@@ -2365,10 +2366,18 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
 
     offset = (page - 1) * page_size
     data_stmt = base_stmt.order_by(TaskHistory.createdAt.desc()).offset(offset).limit(page_size)
-    
+
     result = await session.execute(data_stmt)
     items = [
-        {"taskId": row.taskId, "title": row.title, "status": row.status, "progress": row.progress, "description": row.description, "createdAt": row.createdAt}
+        {
+            "taskId": row.taskId,
+            "title": row.title,
+            "status": row.status,
+            "progress": row.progress,
+            "description": row.description,
+            "createdAt": row.createdAt,
+            "isSystemTask": row.scheduledTaskId == "system_token_reset"
+        }
         for row in result.mappings()
     ]
     return {"total": total_count, "list": items}

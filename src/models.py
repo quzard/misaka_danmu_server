@@ -232,6 +232,7 @@ class TaskInfo(BaseModel):
     progress: int
     description: str
     createdAt: datetime
+    isSystemTask: bool = False
 
 class PaginatedTasksResponse(BaseModel):
     """用于任务列表分页的响应模型"""

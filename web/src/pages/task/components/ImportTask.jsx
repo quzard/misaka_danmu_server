@@ -60,29 +60,35 @@ export const ImportTask = () => {
   const messageApi = useMessage()
 
   const [canPause, isPause] = useMemo(() => {
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
     return [
-      (selectList.every(item => item.status === '运行中') &&
-        !!selectList.length) ||
-        (selectList.every(item => item.status === '已暂停') &&
-          !!selectList.length),
-      selectList.every(item => item.status === '已暂停'),
+      (nonSystemTasks.every(item => item.status === '运行中') &&
+        nonSystemTasks.length > 0) ||
+        (nonSystemTasks.every(item => item.status === '已暂停') &&
+          nonSystemTasks.length > 0),
+      nonSystemTasks.every(item => item.status === '已暂停'),
     ]
   }, [selectList])
 
   const canStop = useMemo(() => {
-    return selectList.some(item =>
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
+    return nonSystemTasks.some(item =>
       item.status === '运行中' || item.status === '已暂停'
-    ) && !!selectList.length
+    ) && nonSystemTasks.length > 0
   }, [selectList])
 
   const canDelete = useMemo(() => {
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
     return (
-      selectList.every(
+      nonSystemTasks.every(
         item =>
           item.status === '已完成' ||
           item.status === '失败' ||
           item.status === '排队中'
-      ) && !!selectList.length
+      ) && nonSystemTasks.length > 0
     )
   }, [selectList])
 
@@ -159,10 +165,17 @@ export const ImportTask = () => {
    * 处理暂停/恢复任务操作
    */
   const handlePause = async () => {
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
+    if (nonSystemTasks.length === 0) {
+      message.warning('系统任务不允许暂停/恢复操作')
+      return
+    }
+
     if (isPause) {
       try {
         await Promise.all(
-          selectList.map(it => resumeTask({ taskId: it.taskId }))
+          nonSystemTasks.map(it => resumeTask({ taskId: it.taskId }))
         )
         refreshTasks()
         setSelectList([])
@@ -172,7 +185,7 @@ export const ImportTask = () => {
     } else {
       try {
         await Promise.all(
-          selectList.map(it => pauseTask({ taskId: it.taskId }))
+          nonSystemTasks.map(it => pauseTask({ taskId: it.taskId }))
         )
         refreshTasks()
         setSelectList([])
@@ -188,6 +201,13 @@ export const ImportTask = () => {
   const handleStop = () => {
     console.log('handleStop clicked', selectList)
 
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
+    if (nonSystemTasks.length === 0) {
+      message.warning('系统任务不允许中止操作')
+      return
+    }
+
     let forceStop = false
 
     const StopConfirmContent = () => {
@@ -201,7 +221,7 @@ export const ImportTask = () => {
         <div>
           <div>您确定要中止任务吗？</div>
           <div className="max-h-[310px] overflow-y-auto mt-3">
-            {selectList.map((it, i) => (
+            {nonSystemTasks.map((it, i) => (
               <div key={it.taskId}>
                 {i + 1}、{it.title}
               </div>
@@ -241,7 +261,7 @@ export const ImportTask = () => {
       onOk: async () => {
         try {
           await Promise.all(
-            selectList.map(it => stopTask({ taskId: it.taskId, force: forceStop }))
+            nonSystemTasks.map(it => stopTask({ taskId: it.taskId, force: forceStop }))
           )
           refreshTasks()
           setSelectList([])
@@ -260,7 +280,14 @@ export const ImportTask = () => {
   const handleDelete = () => {
     console.log('handleDelete clicked', selectList)
 
-    const hasStuckTasks = selectList.some(task =>
+    // 过滤掉系统任务
+    const nonSystemTasks = selectList.filter(task => !task.isSystemTask)
+    if (nonSystemTasks.length === 0) {
+      message.warning('系统任务不允许删除操作')
+      return
+    }
+
+    const hasStuckTasks = nonSystemTasks.some(task =>
       task.status === '运行中' || task.status === '已暂停'
     )
 
@@ -277,7 +304,7 @@ export const ImportTask = () => {
         <div>
           <div>您确定要从历史记录中删除任务吗？</div>
           <div className="max-h-[310px] overflow-y-auto mt-3">
-            {selectList.map((it, i) => (
+            {nonSystemTasks.map((it, i) => (
               <div key={it.taskId}>
                 {i + 1}、{it.title}
                 {(it.status === '运行中' || it.status === '已暂停') && (
@@ -334,7 +361,7 @@ export const ImportTask = () => {
           }
 
           await Promise.all(
-            selectList.map(it => deleteTask({ taskId: it.taskId, force: forceDelete }))
+            nonSystemTasks.map(it => deleteTask({ taskId: it.taskId, force: forceDelete }))
           )
           refreshTasks()
           setSelectList([])
@@ -524,6 +551,11 @@ export const ImportTask = () => {
                       </>
                     }
                     onClick={() => {
+                      // 系统任务不允许选中
+                      if (item.isSystemTask) {
+                        message.warning('系统任务不允许操作')
+                        return
+                      }
                       setSelectList(list => {
                         return list.map(it => it.taskId).includes(item.taskId)
                           ? list.filter(i => i.taskId !== item.taskId)
@@ -543,7 +575,12 @@ export const ImportTask = () => {
                         />
                       )}
 
-                      <div className="text-base mb-1">{item.title}</div>
+                      <div className="text-base mb-1">
+                        {item.title}
+                        {item.isSystemTask && (
+                          <Tag color="blue" className="ml-2">系统任务</Tag>
+                        )}
+                      </div>
                       <div className="mb-2">{item.description}</div>
                       <Progress
                         percent={item.progress}
