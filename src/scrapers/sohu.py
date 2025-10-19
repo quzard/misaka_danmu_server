@@ -496,10 +496,11 @@ class SohuScraper(BaseScraper):
             弹幕列表（字典列表，不使用Pydantic验证）
         """
         try:
+            # 参数格式：完全参考用户代码，vid和aid保持字符串
             params = {
                 'act': 'dmlist_v2',
-                'vid': int(vid),  # 必须是整数
-                'aid': int(aid),  # 必须是整数
+                'vid': vid,  # 字符串格式
+                'aid': aid,  # 字符串格式
                 'pct': 2,
                 'time_begin': start,
                 'time_end': end,
