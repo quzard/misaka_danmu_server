@@ -133,38 +133,37 @@ export const ScheduleTask = () => {
       fixed: 'right',
       render: (_, record) => {
         const isSystemTask = record.isSystemTask || false
-        
+
+        // 系统任务不显示操作按钮
+        if (isSystemTask) {
+          return null
+        }
+
         return (
           <Space>
             <span
-              className={`cursor-pointer ${isSystemTask ? 'text-gray-400 cursor-not-allowed' : 'hover:text-primary'}`}
-              onClick={() => !isSystemTask && handleRun(record)}
-              title={isSystemTask ? '系统任务不允许手动运行' : '立即运行'}
+              className="cursor-pointer hover:text-primary"
+              onClick={() => handleRun(record)}
+              title="立即运行"
             >
               <MyIcon icon="canshuzhihang" size={20}></MyIcon>
             </span>
             <span
-              className={`cursor-pointer ${isSystemTask ? 'text-gray-400 cursor-not-allowed' : 'hover:text-primary'}`}
+              className="cursor-pointer hover:text-primary"
               onClick={() => {
-                if (!isSystemTask) {
-                  form.setFieldsValue({
-                    ...record,
-                  })
-                  setAddOpen(true)
-                }
+                form.setFieldsValue({
+                  ...record,
+                })
+                setAddOpen(true)
               }}
-              title={isSystemTask ? '系统任务不允许编辑' : '编辑任务'}
+              title="编辑任务"
             >
               <MyIcon icon="edit" size={20}></MyIcon>
             </span>
             <span
-              className={`cursor-pointer ${isSystemTask ? 'text-gray-400 cursor-not-allowed' : 'hover:text-primary'}`}
-              onClick={() => {
-                if (!isSystemTask) {
-                  handleDelete(record)
-                }
-              }}
-              title={isSystemTask ? '系统任务不允许删除' : '删除任务'}
+              className="cursor-pointer hover:text-primary"
+              onClick={() => handleDelete(record)}
+              title="删除任务"
             >
               <MyIcon icon="delete" size={20}></MyIcon>
             </span>
@@ -292,10 +291,16 @@ export const ScheduleTask = () => {
             className="mb-4"
           >
             <Select
-              options={availableJobTypes.map(job => ({
-                value: job.jobType,
-                label: job.name,
-              }))}
+              options={availableJobTypes
+                .filter(job => !job.isSystemTask) // 过滤掉系统任务
+                .map(job => ({
+                  value: job.jobType,
+                  label: (
+                    <span title={job.description || job.name}>
+                      {job.name}
+                    </span>
+                  ),
+                }))}
             />
           </Form.Item>
           <Form.Item

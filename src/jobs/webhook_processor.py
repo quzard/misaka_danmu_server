@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class WebhookProcessorJob(BaseJob):
     job_type = "webhookProcessor"
     job_name = "Webhook 延时任务处理器"
+    description = "定期检查并处理来自Emby/Jellyfin等媒体服务器的延时Webhook请求，自动导入新增的剧集弹幕。"
 
     async def run(self, session: AsyncSession, progress_callback: Callable):
         """

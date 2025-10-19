@@ -421,6 +421,8 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
 class AvailableJobInfo(BaseModel):
     jobType: str
     name: str
+    description: str = ""
+    isSystemTask: bool = False
 
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str

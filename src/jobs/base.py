@@ -16,6 +16,7 @@ class BaseJob(ABC):
     # 每个子类都必须覆盖这些类属性
     job_type: str = "" # 任务的唯一标识符, e.g., "incremental_refresh"
     job_name: str = "" # 任务的默认显示名称, e.g., "TMDB自动映射与更新"
+    description: str = "" # 任务的详细描述，用于前端显示
     is_system_task: bool = False  # 新增：标识是否为系统内置任务
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager=None):

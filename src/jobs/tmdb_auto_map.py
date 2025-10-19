@@ -15,6 +15,7 @@ from ..metadata_manager import MetadataSourceManager
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoMap"
     job_name = "TMDB自动映射与更新"
+    description = "自动从TMDB获取已导入作品的剧集组信息，更新别名和分集映射关系。帮助解决分集顺序不一致的问题。"
 
     # 修正：此任务不涉及弹幕下载，因此移除不必要的 rate_limiter 依赖
     # 修正：接收正确的依赖项
