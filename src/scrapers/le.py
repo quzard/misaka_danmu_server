@@ -224,6 +224,25 @@ class LetvScraper(BaseScraper):
 
                     # 缓存分集信息（用于后续 get_episodes 调用）
                     vid_episode = data_info.get('vidEpisode', '')
+
+                    # 验证分集数据完整性
+                    # 只有当 vidEpisode 中的集数 = total 时，才认为数据完整
+                    if episode_count > 0:
+                        if not vid_episode:
+                            self.logger.warning(f"乐视网: 跳过结果 '{title}' (pid={pid})，原因：声称有{episode_count}集，但vidEpisode为空")
+                            continue
+
+                        # 解析 vidEpisode 中的集数
+                        # vidEpisode 格式: "1-vid1,2-vid2,3-vid3,..."
+                        vid_episode_parts = vid_episode.split(',')
+                        actual_episode_count = len(vid_episode_parts)
+
+                        if actual_episode_count != episode_count:
+                            self.logger.warning(f"乐视网: 跳过结果 '{title}' (pid={pid})，原因：声称有{episode_count}集，但vidEpisode只有{actual_episode_count}集")
+                            continue
+
+                        self.logger.debug(f"乐视网: 验证通过 '{title}' (pid={pid})，vidEpisode集数={actual_episode_count}，total={episode_count}")
+
                     if vid_episode:
                         self._episode_cache[pid] = vid_episode
                         self.logger.debug(f"乐视网: 缓存分集信息 pid={pid}, vidEpisode长度={len(vid_episode)}")
