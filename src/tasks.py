@@ -33,6 +33,41 @@ from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger(__name__)
 
+def _extract_short_error_message(error: Exception) -> str:
+    """
+    从异常对象中提取简短的错误消息，用于任务管理器显示
+
+    Args:
+        error: 异常对象
+
+    Returns:
+        简短的错误描述（不包含SQL语句、堆栈等详细信息）
+    """
+    error_str = str(error)
+
+    # 如果是数据库错误，只保留错误类型和简短描述
+    if "DataError" in error_str or "IntegrityError" in error_str or "OperationalError" in error_str:
+        # 提取错误类型
+        error_type = type(error).__name__
+
+        # 尝试提取MySQL/PostgreSQL错误消息（在括号中）
+        import re
+        match = re.search(r'\((\d+),\s*"([^"]+)"\)', error_str)
+        if match:
+            error_code = match.group(1)
+            error_msg = match.group(2)
+            return f"{error_type} ({error_code}): {error_msg}"
+
+        # 如果没有匹配到，返回错误类型
+        return error_type
+
+    # 对于其他错误，只返回第一行
+    first_line = error_str.split('\n')[0]
+    # 限制长度
+    if len(first_line) > 100:
+        return first_line[:97] + "..."
+    return first_line
+
 
 def _is_chinese_title(title: str) -> bool:
     """检查标题是否包含中文字符"""
@@ -659,9 +694,9 @@ async def _import_episodes_iteratively(
                     logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
                 except Exception as e:
                     failed_episodes_count += 1
-                    error_msg = str(e)
+                    error_msg = _extract_short_error_message(e)
                     failed_episodes_details[episode.episodeIndex] = f"写入数据库失败: {error_msg}"
-                    logger.error(f"[并发模式] 分集 '{episode.title}' 写入数据库失败: {e}")
+                    logger.error(f"[并发模式] 分集 '{episode.title}' 写入数据库失败: {e}", exc_info=True)
             else:
                 # 修正：获取弹幕失败或为空时，不创建分集记录
                 failed_episodes_count += 1
@@ -747,9 +782,9 @@ async def _import_episodes_iteratively(
                     except Exception as db_error:
                         # 数据库写入失败
                         failed_episodes_count += 1
-                        error_msg = str(db_error)
+                        error_msg = _extract_short_error_message(db_error)
                         failed_episodes_details[episode.episodeIndex] = f"写入数据库失败: {error_msg}"
-                        logger.error(f"分集 '{episode.title}' 写入数据库失败: {db_error}")
+                        logger.error(f"分集 '{episode.title}' 写入数据库失败: {db_error}", exc_info=True)
                         continue
                 else:
                     # 修正：获取弹幕失败或为空时，不创建分集记录
@@ -765,7 +800,7 @@ async def _import_episodes_iteratively(
                 # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
                 if e.retry_after_seconds >= 3600:
                     failed_episodes_count += 1
-                    error_msg = str(e)
+                    error_msg = _extract_short_error_message(e)
                     failed_episodes_details[episode.episodeIndex] = f"流控配置验证失败: {error_msg}"
                     logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {error_msg}")
                     continue
@@ -832,14 +867,14 @@ async def _import_episodes_iteratively(
                             logger.warning(f"分集 '{episode.title}' 重试后获取弹幕为空（0条）。")
                 except Exception as retry_e:
                     failed_episodes_count += 1
-                    error_msg = str(retry_e)
+                    error_msg = _extract_short_error_message(retry_e)
                     failed_episodes_details[episode.episodeIndex] = f"重试失败: {error_msg}"
-                    logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}")
+                    logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}", exc_info=True)
             except Exception as e:
                 failed_episodes_count += 1
-                error_msg = str(e)
+                error_msg = _extract_short_error_message(e)
                 failed_episodes_details[episode.episodeIndex] = error_msg
-                logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}")
+                logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}", exc_info=True)
                 continue
 
     return total_comments_added, successful_episodes_indices, failed_episodes_count, failed_episodes_details
@@ -1239,8 +1274,9 @@ async def edited_import_task(
         raise
     except Exception as e:
         # 其他异常（网络错误、解析错误等）
-        error_msg = f"数据源验证失败：获取 '{first_episode.title}' 弹幕时发生错误 - {type(e).__name__}: {str(e)}。未创建数据库条目。"
-        logger.error(error_msg)
+        short_error = _extract_short_error_message(e)
+        error_msg = f"数据源验证失败：获取 '{first_episode.title}' 弹幕时发生错误 - {short_error}。未创建数据库条目。"
+        logger.error(f"数据源验证失败：获取 '{first_episode.title}' 弹幕时发生错误: {e}", exc_info=True)
         raise TaskSuccess(error_msg)
 
     # 处理所有分集
