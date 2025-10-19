@@ -9,6 +9,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import {
@@ -290,18 +291,17 @@ export const ScheduleTask = () => {
             rules={[{ required: true, message: '请选择任务类型' }]}
             className="mb-4"
           >
-            <Select
-              options={availableJobTypes
+            <Select>
+              {availableJobTypes
                 .filter(job => !job.isSystemTask) // 过滤掉系统任务
-                .map(job => ({
-                  value: job.jobType,
-                  label: (
-                    <span title={job.description || job.name}>
-                      {job.name}
-                    </span>
-                  ),
-                }))}
-            />
+                .map(job => (
+                  <Select.Option key={job.jobType} value={job.jobType}>
+                    <Tooltip title={job.description} placement="right">
+                      <span>{job.name}</span>
+                    </Tooltip>
+                  </Select.Option>
+                ))}
+            </Select>
           </Form.Item>
           <Form.Item
             name="cronExpression"
