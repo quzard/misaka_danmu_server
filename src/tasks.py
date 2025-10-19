@@ -1199,7 +1199,7 @@ async def edited_import_task(
         
         if first_episode_comments:
             await progress_callback(20, "数据源验证成功，正在创建数据库条目...")
-            
+
             # 下载海报
             local_image_path = None
             if request_data.imageUrl:
@@ -1216,7 +1216,7 @@ async def edited_import_task(
                 session, request_data.animeTitle, request_data.mediaType,
                 request_data.season, request_data.imageUrl, local_image_path, request_data.year, title_recognition_manager, request_data.provider
             )
-            
+
             # 更新元数据
             await crud.update_metadata_if_empty(
                 session, anime_id,
@@ -1230,10 +1230,18 @@ async def edited_import_task(
             source_id = await crud.link_source_to_anime(session, anime_id, request_data.provider, request_data.mediaId)
             await session.commit()
         else:
-            raise TaskSuccess("数据源验证失败，未能获取到弹幕，未创建数据库条目。")
+            # 验证分集没有弹幕，数据源无效
+            error_msg = f"数据源验证失败：'{first_episode.title}' 未获取到任何弹幕数据。请到 {request_data.provider} 源验证该视频是否有弹幕。未创建数据库条目。"
+            logger.warning(error_msg)
+            raise TaskSuccess(error_msg)
+    except TaskSuccess:
+        # 重新抛出 TaskSuccess 异常
+        raise
     except Exception as e:
-        logger.error(f"验证第一集时发生错误: {e}")
-        raise TaskSuccess("数据源验证失败，未创建数据库条目。")
+        # 其他异常（网络错误、解析错误等）
+        error_msg = f"数据源验证失败：获取 '{first_episode.title}' 弹幕时发生错误 - {type(e).__name__}: {str(e)}。未创建数据库条目。"
+        logger.error(error_msg)
+        raise TaskSuccess(error_msg)
 
     # 处理所有分集
     total_comments_added, successful_indices, failed_count, failed_details = await _import_episodes_iteratively(

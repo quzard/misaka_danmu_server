@@ -524,6 +524,11 @@ class SohuScraper(BaseScraper):
                 try:
                     data = response.json()
                     comments = data.get('info', {}).get('comments', [])
+
+                    # 调试：打印弹幕数量
+                    if comments:
+                        self.logger.info(f"搜狐视频: 获取到 {len(comments)} 条弹幕 (vid={vid}, {start}-{end}s)")
+
                     return comments
                 except (json.JSONDecodeError, Exception) as e:
                     self.logger.error(f"搜狐视频: 解析弹幕响应失败: {e}")
