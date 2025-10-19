@@ -101,11 +101,17 @@ class TvdbMetadataSource(BaseMetadataSource):
         except ValueError as e:
             self.logger.error(f"TVDB搜索失败，配置错误: {e}")
             return []
+        except httpx.ConnectError as e:
+            self.logger.warning(f"TVDB搜索失败，连接错误（可能是网络问题或服务不可用）: {e}")
+            return []
+        except httpx.TimeoutException as e:
+            self.logger.warning(f"TVDB搜索失败，请求超时: {e}")
+            return []
         except httpx.HTTPStatusError as e:
             self.logger.error(f"TVDB搜索失败，HTTP错误: {e.response.status_code} for URL: {e.request.url}")
             return []
         except Exception as e:
-            self.logger.error(f"TVDB搜索失败，发生意外错误: {e}", exc_info=True)
+            self.logger.warning(f"TVDB搜索失败，发生意外错误: {e}")
             return []
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:

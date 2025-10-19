@@ -100,6 +100,7 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
     Returns:
         采样后的弹幕列表
     """
+    import random
     logger = logging.getLogger(__name__)
 
     if len(comments) <= target_count:
@@ -133,12 +134,8 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
     max_time = timed_comments[-1][0]
 
     if max_time <= min_time:
-        # 如果所有弹幕时间相同，直接均匀采样
-        step = len(timed_comments) // target_count
-        if step <= 1:
-            return [comment for _, comment in timed_comments[:target_count]]
-        else:
-            return [timed_comments[i * step][1] for i in range(target_count)]
+        # 如果所有弹幕时间相同，随机采样
+        return [comment for _, comment in random.sample(timed_comments, min(target_count, len(timed_comments)))]
 
     # 计算时间段
     time_duration = max_time - min_time
@@ -146,8 +143,8 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
 
     logger.debug(f"弹幕采样详情: 时间范围 {min_time:.1f}s - {max_time:.1f}s (总时长 {time_duration:.1f}s), 每段 {segment_duration:.1f}s")
 
-    sampled_comments = []
-    current_segment = 0
+    # 为每个时间段分配弹幕
+    segments = [[] for _ in range(target_count)]
 
     for time_seconds, comment in timed_comments:
         # 计算当前弹幕属于哪个时间段
@@ -157,27 +154,51 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
         if segment_index >= target_count:
             segment_index = target_count - 1
 
-        # 如果这是新的时间段，且我们还没有为这个时间段采样弹幕
-        if segment_index >= current_segment and len(sampled_comments) < target_count:
-            sampled_comments.append(comment)
-            logger.debug(f"采样弹幕: 时间段 {segment_index} (时间 {time_seconds:.1f}s)")
-            current_segment = segment_index + 1
+        segments[segment_index].append(comment)
 
-    # 如果采样不足，从剩余弹幕中补充
-    if len(sampled_comments) < target_count:
-        logger.debug(f"采样不足，需要补充: 已采样 {len(sampled_comments)}, 目标 {target_count}")
-        sampled_times = {comment.get('p', '').split(',')[0] for comment in sampled_comments}
-        remaining_comments = [
-            comment for _, comment in timed_comments
-            if comment.get('p', '').split(',')[0] not in sampled_times
-        ]
+    # 从每个时间段随机选择一条弹幕
+    sampled_comments = []
+    empty_segments = []
 
-        needed = target_count - len(sampled_comments)
-        if remaining_comments:
-            step = max(1, len(remaining_comments) // needed)
-            additional = remaining_comments[::step][:needed]
-            sampled_comments.extend(additional)
-            logger.debug(f"补充采样: 从 {len(remaining_comments)} 条剩余弹幕中补充 {len(additional)} 条")
+    for i, segment in enumerate(segments):
+        if segment:
+            # 随机选择一条
+            sampled_comments.append(random.choice(segment))
+            logger.debug(f"时间段 {i}: 从 {len(segment)} 条弹幕中随机选择 1 条")
+        else:
+            # 记录空时间段
+            empty_segments.append(i)
+            logger.debug(f"时间段 {i}: 无弹幕")
 
-    logger.info(f"弹幕均匀采样: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条)")
+    # 如果有空时间段，从有多条弹幕的时间段补充
+    if empty_segments and len(sampled_comments) < target_count:
+        logger.debug(f"发现 {len(empty_segments)} 个空时间段，需要补充")
+
+        # 找出有多条弹幕的时间段
+        multi_comment_segments = [(i, seg) for i, seg in enumerate(segments) if len(seg) > 1]
+
+        if multi_comment_segments:
+            # 从这些时间段中随机补充
+            needed = min(len(empty_segments), target_count - len(sampled_comments))
+
+            for _ in range(needed):
+                if not multi_comment_segments:
+                    break
+
+                # 随机选择一个有多条弹幕的时间段
+                seg_idx, segment = random.choice(multi_comment_segments)
+
+                # 从该时间段中随机选择一条未被采样的弹幕
+                available = [c for c in segment if c not in sampled_comments]
+                if available:
+                    sampled_comments.append(random.choice(available))
+                    logger.debug(f"补充采样: 从时间段 {seg_idx} 补充 1 条")
+
+                # 如果该时间段只剩1条可用弹幕，移除它
+                if len(available) <= 1:
+                    multi_comment_segments = [(i, s) for i, s in multi_comment_segments if i != seg_idx]
+
+    logger.info(f"弹幕均匀采样: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条, 空时间段{len(empty_segments)}个)")
+
+    # 确保返回的数量不超过目标数量
     return sampled_comments[:target_count]

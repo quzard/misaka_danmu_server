@@ -381,15 +381,6 @@ class TencentScraper(BaseScraper):
             self.logger.debug(f"跳过非腾讯视频内容: {title} (无qq平台)")
             return None
 
-        # New logic to cache chapterInfo from episodeSites
-        qq_episode_site = next((site for site in (video_info.episode_sites or []) if site.get("enName") == 'qq'), None)
-        if qq_episode_site and qq_episode_site.get("chapterInfo"):
-            chapter_info = qq_episode_site["chapterInfo"]
-            if chapter_info:
-                chapter_cache_key = f"chapter_info_{media_id}"
-                await self._set_to_cache(chapter_cache_key, chapter_info, 'episodes_ttl_seconds', 1800)
-                self.logger.info(f"Tencent: Cached chapterInfo for media_id={media_id}")
-
         # Filter movie-like non-formal content (e.g., documentaries, behind-the-scenes)
         if content_type == "电影":
             non_formal_keywords = [ "花絮", "彩蛋", "幕后", "独家", "解说", "特辑", "探班", "拍摄", "制作", "导演", "记录", "回顾", "盘点", "混剪", "解析", "抢先"]
@@ -712,47 +703,20 @@ class TencentScraper(BaseScraper):
             self.logger.info(f"Tencent: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
             network_episodes = []
             try:
-                # 策略1: 优先尝试从搜索时缓存的 chapter_info 获取分集
-                chapter_info = await self._get_from_cache(f"chapter_info_{media_id}")
-                if chapter_info and chapter_info.get("chapters"):
-                    self.logger.info(f"Tencent: 从缓存中找到 {len(chapter_info['chapters'])} 个季/章，将分别获取分集。")
-                    all_episodes_from_chapters: Dict[str, TencentEpisode] = {}
-                    
-                    chapter_tabs = [
-                        TencentEpisodeTabInfo(begin=0, end=0, page_context=chap['pageContext'])
-                        for chap in chapter_info['chapters'] if 'pageContext' in chap
-                    ]
-                    
-                    tasks = [self._fetch_episodes_by_tab(media_id, tab) for tab in chapter_tabs]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                # 直接使用分页卡片API获取完整分集列表，不依赖搜索时的缓存
+                # 原因：搜索时缓存的 chapter_info 可能只包含部分章节，导致分集列表不完整
+                self.logger.info(f"Tencent: 正在尝试使用分页卡片API获取分集 (cid={media_id})")
+                network_episodes = await self._fetch_episodes_with_tabs(media_id)
 
-                    for res in results:
-                        if isinstance(res, list):
-                            for ep in res:
-                                all_episodes_from_chapters[ep.vid] = ep
-                        elif isinstance(res, Exception):
-                            self.logger.error(f"获取分集章节时出错: {res}")
-                    
-                    network_episodes = list(all_episodes_from_chapters.values())
-
-                # 策略2: 如果缓存策略失败或无缓存，则执行完整的网络获取流程
-                if not network_episodes:
-                    if chapter_info: # Log if we tried cache and it failed
-                        self.logger.info("Tencent: 缓存的章节信息未能获取到分集，回退到完整网络获取。")
-                    
-                    # 遵循JS逻辑：优先尝试分页卡片API，然后是通用分页API，最后是旧版API。
-                    self.logger.info(f"Tencent: 正在尝试使用分页卡片API获取分集 (cid={media_id})")
-                    network_episodes = await self._fetch_episodes_with_tabs(media_id)
-                    
+                if network_episodes:
+                    self.logger.info(f"Tencent: 分页卡片API成功获取 {len(network_episodes)} 集。")
+                else:
+                    self.logger.info(f"Tencent: 分页卡片API未获取到数据，回退到通用分页方法。")
+                    network_episodes = await self._fetch_episodes_paginated(media_id, db_media_type)
                     if network_episodes:
-                        self.logger.info(f"Tencent: 分页卡片API成功获取 {len(network_episodes)} 集。")
+                        self.logger.info(f"Tencent: 通用分页方法成功获取 {len(network_episodes)} 集。")
                     else:
-                        self.logger.info(f"Tencent: 分页卡片API未获取到数据，回退到通用分页方法。")
-                        network_episodes = await self._fetch_episodes_paginated(media_id, db_media_type)
-                        if network_episodes:
-                            self.logger.info(f"Tencent: 通用分页方法成功获取 {len(network_episodes)} 集。")
-                        else:
-                            self.logger.info(f"Tencent: 通用分页方法未获取到数据。")
+                        self.logger.info(f"Tencent: 通用分页方法未获取到数据。")
 
             except Exception as e:
                 self.logger.error(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {e}", exc_info=True)

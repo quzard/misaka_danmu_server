@@ -101,8 +101,16 @@ class SchedulerManager:
                 logger.error(f"从模块 {name} 加载定时任务失败: {e}")
 
     def get_available_jobs(self) -> List[Dict[str, str]]:
-        """获取所有已加载的可用任务类型及其名称。"""
-        return [{"jobType": job.job_type, "name": job.job_name} for job in self._job_classes.values()]
+        """获取所有已加载的可用任务类型及其名称、描述和系统任务标识。"""
+        return [
+            {
+                "jobType": job.job_type,
+                "name": job.job_name,
+                "description": getattr(job, 'description', ''),
+                "isSystemTask": getattr(job, 'is_system_task', False)
+            }
+            for job in self._job_classes.values()
+        ]
 
     def _create_job_runner(self, job_type: str, scheduled_task_id: str) -> Callable:
         """创建一个包装器，用于在 TaskManager 中运行任务，并等待其完成。"""

@@ -62,9 +62,9 @@ export const ImportTask = () => {
   const [canPause, isPause] = useMemo(() => {
     return [
       (selectList.every(item => item.status === '运行中') &&
-        !!selectList.length) ||
+        selectList.length > 0) ||
         (selectList.every(item => item.status === '已暂停') &&
-          !!selectList.length),
+          selectList.length > 0),
       selectList.every(item => item.status === '已暂停'),
     ]
   }, [selectList])
@@ -72,7 +72,7 @@ export const ImportTask = () => {
   const canStop = useMemo(() => {
     return selectList.some(item =>
       item.status === '运行中' || item.status === '已暂停'
-    ) && !!selectList.length
+    ) && selectList.length > 0
   }, [selectList])
 
   const canDelete = useMemo(() => {
@@ -82,7 +82,7 @@ export const ImportTask = () => {
           item.status === '已完成' ||
           item.status === '失败' ||
           item.status === '排队中'
-      ) && !!selectList.length
+      ) && selectList.length > 0
     )
   }, [selectList])
 
@@ -543,7 +543,9 @@ export const ImportTask = () => {
                         />
                       )}
 
-                      <div className="text-base mb-1">{item.title}</div>
+                      <div className="text-base mb-1">
+                        {item.title}
+                      </div>
                       <div className="mb-2">{item.description}</div>
                       <Progress
                         percent={item.progress}

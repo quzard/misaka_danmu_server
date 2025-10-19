@@ -232,6 +232,7 @@ class TaskInfo(BaseModel):
     progress: int
     description: str
     createdAt: datetime
+    isSystemTask: bool = False
 
 class PaginatedTasksResponse(BaseModel):
     """用于任务列表分页的响应模型"""
@@ -416,10 +417,13 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
     taskId: str
     lastRunAt: Optional[datetime] = None
     nextRunAt: Optional[datetime] = None
+    isSystemTask: bool = False
 
 class AvailableJobInfo(BaseModel):
     jobType: str
     name: str
+    description: str = ""
+    isSystemTask: bool = False
 
 class ProxySettingsUpdate(BaseModel):
     proxyProtocol: str
