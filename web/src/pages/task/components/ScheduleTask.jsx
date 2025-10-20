@@ -3,14 +3,15 @@ import {
   Card,
   Form,
   Input,
-  message,
   Modal,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Tooltip,
 } from 'antd'
+import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import {
   deleteScheduledTask,
@@ -24,6 +25,9 @@ import { MyIcon } from '@/components/MyIcon.jsx'
 import dayjs from 'dayjs'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+import { Cron } from 'react-js-cron'
+import 'react-js-cron/dist/styles.css'
+import cronstrue from 'cronstrue/i18n'
 
 export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
@@ -31,11 +35,32 @@ export const ScheduleTask = () => {
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [tasks, setTasks] = useState([])
   const [availableJobTypes, setAvailableJobTypes] = useState([])
+  const [advancedMode, setAdvancedMode] = useState(false)
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('taskId', form)
   const modalApi = useModal()
   const messageApi = useMessage()
+
+  // 获取Cron表达式的人类可读描述
+  const getCronDescription = (cronExpression) => {
+    try {
+      return cronstrue.toString(cronExpression, { locale: 'zh_CN' })
+    } catch (error) {
+      return '无效的Cron表达式'
+    }
+  }
+
+  // 验证Cron表达式是否合法
+  const validateCron = (cronExpression) => {
+    if (!cronExpression) return false
+    try {
+      cronstrue.toString(cronExpression, { locale: 'zh_CN' })
+      return true
+    } catch (error) {
+      return false
+    }
+  }
 
   const fetchData = async () => {
     try {
@@ -85,9 +110,22 @@ export const ScheduleTask = () => {
     },
     {
       title: 'Cron表达式',
-      width: 100,
+      width: 150,
       dataIndex: 'cronExpression',
       key: 'cronExpression',
+    },
+    {
+      title: '执行时间描述',
+      width: 200,
+      dataIndex: 'cronExpression',
+      key: 'cronDescription',
+      render: (cronExpression) => {
+        return (
+          <div className="text-gray-600">
+            {getCronDescription(cronExpression)}
+          </div>
+        )
+      },
     },
     {
       title: '状态',
@@ -193,6 +231,7 @@ export const ScheduleTask = () => {
         form.resetFields()
         fetchData()
         setAddOpen(false)
+        setAdvancedMode(false)
       } catch (error) {
         messageApi.error(error?.detail ?? '任务编辑失败，请稍后重试。')
       } finally {
@@ -205,6 +244,7 @@ export const ScheduleTask = () => {
         form.resetFields()
         fetchData()
         setAddOpen(false)
+        setAdvancedMode(false)
       } catch (error) {
         messageApi.error(error?.detail ?? '任务添加失败，请稍后重试。')
       } finally {
@@ -267,7 +307,14 @@ export const ScheduleTask = () => {
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
-        onCancel={() => setAddOpen(false)}
+        onCancel={() => {
+          setAddOpen(false)
+          setAdvancedMode(false)
+        }}
+        afterClose={() => {
+          form.resetFields()
+          setAdvancedMode(false)
+        }}
       >
         <Form
           form={form}
@@ -275,6 +322,7 @@ export const ScheduleTask = () => {
           initialValues={{
             jobType: 'tmdbAutoMap',
             isEnabled: true,
+            cronExpression: '0 2 * * *',
           }}
         >
           <Form.Item
@@ -305,24 +353,146 @@ export const ScheduleTask = () => {
           </Form.Item>
           <Form.Item
             name="cronExpression"
-            label="Corn表达式"
-            rules={[{ required: true, message: '请输入Corn表达式' }]}
+            label={
+              <div className="flex items-center justify-between w-full">
+                <span>Cron表达式</span>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => setAdvancedMode(!advancedMode)}
+                  className="p-0"
+                >
+                  {advancedMode ? '可视化模式' : '高级模式'}
+                </Button>
+              </div>
+            }
+            rules={[{ required: true, message: '请输入Cron表达式' }]}
             className="mb-4"
           >
-            <Input placeholder="例如：0 2 * * *（每天凌晨2点）" />
+            {advancedMode ? (
+              <Input
+                placeholder="例如：0 2 * * *（每天凌晨2点）"
+                suffix={
+                  form.getFieldValue('cronExpression') ? (
+                    validateCron(form.getFieldValue('cronExpression')) ? (
+                      <CheckCircleOutlined
+                        style={{ color: '#52c41a', fontSize: 16 }}
+                      />
+                    ) : (
+                      <CloseCircleOutlined
+                        style={{ color: '#ff4d4f', fontSize: 16 }}
+                      />
+                    )
+                  ) : null
+                }
+              />
+            ) : (
+              <Cron
+                value={form.getFieldValue('cronExpression') || '0 2 * * *'}
+                setValue={(newValue) => {
+                  form.setFieldsValue({ cronExpression: newValue })
+                }}
+                clearButton={false}
+                locale={{
+                  everyText: '每',
+                  emptyMonths: '每月',
+                  emptyMonthDays: '每天',
+                  emptyMonthDaysShort: '天',
+                  emptyWeekDays: '每周',
+                  emptyWeekDaysShort: '周',
+                  emptyHours: '每小时',
+                  emptyMinutes: '每分钟',
+                  emptyMinutesForHourPeriod: '每分钟',
+                  yearOption: '年',
+                  monthOption: '月',
+                  weekOption: '周',
+                  dayOption: '天',
+                  hourOption: '小时',
+                  minuteOption: '分钟',
+                  rebootOption: '重启时',
+                  prefixPeriod: '每',
+                  prefixMonths: '在',
+                  prefixMonthDays: '在',
+                  prefixWeekDays: '在',
+                  prefixWeekDaysForMonthAndYearPeriod: '和',
+                  prefixHours: '在',
+                  prefixMinutes: '在',
+                  prefixMinutesForHourPeriod: '在',
+                  suffixMinutesForHourPeriod: '分',
+                  errorInvalidCron: '无效的Cron表达式',
+                  weekDays: [
+                    '星期日',
+                    '星期一',
+                    '星期二',
+                    '星期三',
+                    '星期四',
+                    '星期五',
+                    '星期六',
+                  ],
+                  months: [
+                    '一月',
+                    '二月',
+                    '三月',
+                    '四月',
+                    '五月',
+                    '六月',
+                    '七月',
+                    '八月',
+                    '九月',
+                    '十月',
+                    '十一月',
+                    '十二月',
+                  ],
+                  altWeekDays: [
+                    '周日',
+                    '周一',
+                    '周二',
+                    '周三',
+                    '周四',
+                    '周五',
+                    '周六',
+                  ],
+                  altMonths: [
+                    '1月',
+                    '2月',
+                    '3月',
+                    '4月',
+                    '5月',
+                    '6月',
+                    '7月',
+                    '8月',
+                    '9月',
+                    '10月',
+                    '11月',
+                    '12月',
+                  ],
+                }}
+              />
+            )}
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate>
+            {() => {
+              const currentCron = form.getFieldValue('cronExpression')
+              if (currentCron && !advancedMode) {
+                return (
+                  <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
+                    <div className="text-sm text-gray-600">
+                      <span className="font-medium">执行时间：</span>
+                      {getCronDescription(currentCron)}
+                    </div>
+                  </div>
+                )
+              }
+              return null
+            }}
           </Form.Item>
           <Form.Item
             name="isEnabled"
             label="是否启用"
-            rules={[{ required: true, message: '请选择启用状态' }]}
+            valuePropName="checked"
             className="mb-4"
           >
-            <Select
-              options={[
-                { value: true, label: '启用' },
-                { value: false, label: '禁用' },
-              ]}
-            />
+            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
           </Form.Item>
           <Form.Item name="taskId" label="taskId" hidden>
             <Input disabled />
