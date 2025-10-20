@@ -232,6 +232,10 @@ class TencentScraper(BaseScraper):
 
         self.episodes_api_url = "https://pbaccess.video.qq.com/trpc.universal_backend_service.page_server_rpc.PageServer/GetPageData?video_appid=3000010&vversion_name=8.2.96&vversion_platform=2"
 
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造腾讯视频播放页面URL"""
+        return f"https://v.qq.com/x/cover/{media_id}.html"
+
     def _get_episode_headers(self, cid: str) -> Dict[str, str]: # type: ignore
         """获取用于分集API请求的移动端头部。"""
         return {
@@ -405,7 +409,8 @@ class TencentScraper(BaseScraper):
             year=int(year) if year else None,
             imageUrl=cover_url,
             episodeCount=episode_count,
-            currentEpisodeIndex=episode_info.get("episode") if episode_info else None
+            currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+            url=self.build_media_url(media_id)
         )
 
     async def _search_with_payload(self, keyword: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
@@ -600,7 +605,8 @@ class TencentScraper(BaseScraper):
                     pass
 
             return models.ProviderSearchInfo(
-                provider=self.provider_name, mediaId=cid, title=title, type=media_type, season=get_season_from_title(title)
+                provider=self.provider_name, mediaId=cid, title=title, type=media_type, season=get_season_from_title(title),
+                url=self.build_media_url(cid)
             )
         except Exception as e:
             self.logger.error(f"Tencent: 从URL '{url}' 提取信息失败: {e}", exc_info=True)

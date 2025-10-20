@@ -129,6 +129,11 @@ class YoukuScraper(BaseScraper):
     class TokenExpiredError(Exception):
         """当检测到优酷弹幕令牌过期时引发。"""
         pass
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造优酷视频播放页面URL"""
+        return f"https://v.youku.com/v_show/id_{media_id}.html"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         # Regexes from C#
@@ -269,7 +274,8 @@ class YoukuScraper(BaseScraper):
                     year=year,
                     imageUrl=common_data.poster_dto.v_thumb_url if common_data.poster_dto else None,
                     episodeCount=common_data.episode_total,
-                    currentEpisodeIndex=current_episode
+                    currentEpisodeIndex=current_episode,
+                    url=self.build_media_url(common_data.show_id)
                 )
                 self.logger.debug(f"Youku: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
 
@@ -332,7 +338,7 @@ class YoukuScraper(BaseScraper):
                 return best_match
             else:
                 # 如果搜索未找到，则基于已抓取的信息构建一个基础对象
-                return models.ProviderSearchInfo(provider=self.provider_name, mediaId=show_id, title=cleaned_title, type="tv_series", season=get_season_from_title(cleaned_title), imageUrl=image_url)
+                return models.ProviderSearchInfo(provider=self.provider_name, mediaId=show_id, title=cleaned_title, type="tv_series", season=get_season_from_title(cleaned_title), imageUrl=image_url, url=self.build_media_url(show_id))
         except Exception as e:
             self.logger.error(f"Youku: 从URL '{url}' 提取信息失败: {e}", exc_info=True)
             return None

@@ -208,6 +208,10 @@ class RenrenScraper(BaseScraper):
 
     rate_limit_quota = -1
 
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造人人影视播放页面URL"""
+        return f"https://www.rrys2020.com/resource/{media_id}"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self._api_lock = asyncio.Lock()
@@ -323,6 +327,7 @@ class RenrenScraper(BaseScraper):
                     imageUrl=item.cover,
                     episodeCount=episode_count,
                     currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                    url=self.build_media_url(str(item.id))
                 ))
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
@@ -373,7 +378,8 @@ class RenrenScraper(BaseScraper):
                 return models.ProviderSearchInfo(
                     provider=self.provider_name, mediaId=drama_id, title=title_clean,
                     type=media_type, season=get_season_from_title(title_clean),
-                    episodeCount=episode_count if episode_count > 0 else None
+                    episodeCount=episode_count if episode_count > 0 else None,
+                    url=self.build_media_url(drama_id)
                 )
 
             # 4. 如果搜索结果中没有集数，从详情中补充

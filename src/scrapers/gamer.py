@@ -30,6 +30,11 @@ class GamerScraper(BaseScraper):
     }
 
     rate_limit_quota = -1
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造巴哈姆特动画疯播放页面URL"""
+        return f"https://ani.gamer.com.tw/animeRef.php?sn={media_id}"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
@@ -315,7 +320,8 @@ class GamerScraper(BaseScraper):
                     year=year,
                     imageUrl=image_url,
                     episodeCount=episode_count,
-                    currentEpisodeIndex=episode_info.get("episode") if episode_info else None
+                    currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                    url=self.build_media_url(media_id)
                 )
                 results.append(provider_search_info)
             
@@ -399,7 +405,8 @@ class GamerScraper(BaseScraper):
             return models.ProviderSearchInfo(
                 provider=self.provider_name, mediaId=media_id, title=title_simp,
                 type=media_type, season=get_season_from_title(title_simp),
-                imageUrl=image_url, episodeCount=episode_count
+                imageUrl=image_url, episodeCount=episode_count,
+                url=self.build_media_url(media_id)
             )
         except Exception as e:
             self.logger.error(f"Gamer: 解析系列页面 (sn={media_id}) 时发生错误: {e}", exc_info=True)

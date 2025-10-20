@@ -696,6 +696,18 @@ export const SearchResult = () => {
                               ) : (
                                 <MyIcon icon="tv" size={20} className="ml-2" />
                               )}
+                              {item.url && (
+                                <a
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="ml-2 text-blue-500 hover:text-blue-700 inline-flex items-center"
+                                  title="在平台打开"
+                                >
+                                  <MyIcon icon="link" size={18} />
+                                </a>
+                              )}
                             </div>
                             <div className="flex items-center flex-wrap gap-2">
                               <Tag color="magenta">

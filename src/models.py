@@ -60,6 +60,7 @@ class ProviderSearchInfo(BaseModel):
     imageUrl: Optional[str] = Field(None, description="封面图片URL")
     episodeCount: Optional[int] = Field(None, description="总集数")
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索词指定了集数，则为当前集数")
+    url: Optional[str] = Field(None, description="平台播放页面URL")
 
 
 class ProviderSearchResponse(BaseModel):

@@ -157,6 +157,10 @@ class MgtvScraper(BaseScraper):
 
     rate_limit_quota = -1
 
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造芒果TV播放页面URL"""
+        return f"https://www.mgtv.com/b/{media_id}.html"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self._api_lock = asyncio.Lock()
@@ -295,7 +299,8 @@ class MgtvScraper(BaseScraper):
                                 year=item.year,
                                 imageUrl=item.img,
                                 episodeCount=episode_count,
-                                currentEpisodeIndex=episode_info.get("episode") if episode_info else None
+                                currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                                url=self.build_media_url(item.id)
                             )
                             results.append(provider_search_info)
                         except ValidationError:
@@ -360,7 +365,8 @@ class MgtvScraper(BaseScraper):
             return models.ProviderSearchInfo(
                 provider=self.provider_name, mediaId=collection_id, title=title,
                 type=media_type, season=get_season_from_title(title),
-                imageUrl=image_url, episodeCount=episode_count if episode_count > 0 else None
+                imageUrl=image_url, episodeCount=episode_count if episode_count > 0 else None,
+                url=self.build_media_url(collection_id)
             )
         except Exception as e:
             self.logger.error(f"MGTV: 解析系列页面 (collection_id={collection_id}) 时发生错误: {e}", exc_info=True)
