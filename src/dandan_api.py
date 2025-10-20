@@ -4,7 +4,7 @@ import json
 import re
 import time
 import ipaddress
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from typing import Callable
 from datetime import datetime, timezone
 from opencc import OpenCC
@@ -48,6 +48,11 @@ token_search_tasks = {}  # 格式：{token: search_key}
 
 # 弹幕获取缓存（避免重复获取）
 comments_fetch_cache = {}  # 存储已获取的弹幕数据
+
+# 弹幕采样结果缓存（避免重复采样）
+# 格式: {f"sampled_{episodeId}_{limit}": (sampled_comments, timestamp)}
+sampled_comments_cache: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+SAMPLED_CACHE_TTL = 86400  # 缓存1天 (24小时)
 
 # 用户最后选择的虚拟bangumiId记录（用于确定使用哪个源）
 user_last_bangumi_choice = {}  # 格式：{search_key: last_bangumi_id}
@@ -2249,7 +2254,7 @@ async def get_comments_for_dandan(
             logger.warning(f"无法获取 episodeId={episodeId} 的弹幕数据")
             return models.CommentResponse(count=0, comments=[])
 
-    # 应用弹幕输出上限（按时间段均匀采样）
+    # 应用弹幕输出上限（按时间段均匀采样，带缓存）
     limit_str = await config_manager.get('danmakuOutputLimitPerSource', '-1')
     try:
         limit = int(limit_str)
@@ -2258,11 +2263,46 @@ async def get_comments_for_dandan(
 
     # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
-        logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
-        from .utils import sample_comments_evenly
-        original_count = len(comments_data)
-        comments_data = sample_comments_evenly(comments_data, limit)
-        logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
+        # 检查缓存
+        cache_key = f"sampled_{episodeId}_{limit}"
+        current_time = time.time()
+
+        # 清理过期缓存
+        expired_keys = [
+            key for key, (_, timestamp) in sampled_comments_cache.items()
+            if current_time - timestamp > SAMPLED_CACHE_TTL
+        ]
+        for key in expired_keys:
+            del sampled_comments_cache[key]
+            logger.debug(f"清理过期采样缓存: {key}")
+
+        # 尝试从缓存获取
+        if cache_key in sampled_comments_cache:
+            cached_comments, cached_time = sampled_comments_cache[cache_key]
+            if current_time - cached_time <= SAMPLED_CACHE_TTL:
+                logger.info(f"使用缓存的采样结果: episodeId={episodeId}, limit={limit}, 缓存时间={int(current_time - cached_time)}秒前")
+                comments_data = cached_comments
+            else:
+                # 缓存过期,重新采样
+                logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样 (缓存已过期)")
+                from .utils import sample_comments_evenly
+                original_count = len(comments_data)
+                comments_data = sample_comments_evenly(comments_data, limit)
+                logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
+
+                # 更新缓存
+                sampled_comments_cache[cache_key] = (comments_data, current_time)
+        else:
+            # 无缓存,执行采样
+            logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
+            from .utils import sample_comments_evenly
+            original_count = len(comments_data)
+            comments_data = sample_comments_evenly(comments_data, limit)
+            logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
+
+            # 存入缓存
+            sampled_comments_cache[cache_key] = (comments_data, current_time)
+            logger.debug(f"采样结果已缓存: {cache_key}")
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
