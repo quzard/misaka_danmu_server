@@ -91,6 +91,8 @@ class SohuSearchItem(BaseModel):
     meta: List[SohuMeta] = Field(default_factory=list)
     # 海报图片
     ver_big_pic: Optional[str] = None  # 竖版大图
+    # PC端播放页面URL
+    pc_url: Optional[str] = None
 
 class SohuSearchData(BaseModel):
     """搜狐搜索响应数据"""
@@ -250,7 +252,7 @@ class SohuScraper(BaseScraper):
                     season=season,
                     episodeCount=item.total_video_count or 0,
                     imageUrl=item.ver_big_pic,
-                    url=self.build_media_url(str(item.aid))
+                    url=item.pc_url  # 直接使用API返回的URL
                 ))
 
             self.logger.info(f"搜狐视频: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")

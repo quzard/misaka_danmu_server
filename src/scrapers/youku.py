@@ -131,8 +131,8 @@ class YoukuScraper(BaseScraper):
         pass
 
     def build_media_url(self, media_id: str) -> Optional[str]:
-        """构造优酷视频播放页面URL"""
-        return f"https://v.youku.com/v_show/id_{media_id}.html"
+        """优酷的URL构造暂时禁用,因为mediaId格式不统一"""
+        return None
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
