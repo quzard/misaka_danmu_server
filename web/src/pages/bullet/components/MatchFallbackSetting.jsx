@@ -294,7 +294,6 @@ export const MatchFallbackSetting = () => {
                 placeholder="输入正则表达式，例如：预告|广告|花絮"
                 rows={2}
                 showCount
-                maxLength={500}
               />
             </Form.Item>
             <Button type="primary" loading={blacklistSaving} onClick={handleBlacklistSave}>
