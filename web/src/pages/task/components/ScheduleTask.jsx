@@ -115,19 +115,6 @@ export const ScheduleTask = () => {
       key: 'cronExpression',
     },
     {
-      title: '执行时间描述',
-      width: 200,
-      dataIndex: 'cronExpression',
-      key: 'cronDescription',
-      render: (cronExpression) => {
-        return (
-          <div className="text-gray-600">
-            {getCronDescription(cronExpression)}
-          </div>
-        )
-      },
-    },
-    {
       title: '状态',
       dataIndex: 'isEnabled',
       key: 'isEnabled',
