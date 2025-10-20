@@ -91,6 +91,8 @@ class SohuSearchItem(BaseModel):
     meta: List[SohuMeta] = Field(default_factory=list)
     # 海报图片
     ver_big_pic: Optional[str] = None  # 竖版大图
+    # PC端播放页面URL
+    pc_url: Optional[str] = None
 
 class SohuSearchData(BaseModel):
     """搜狐搜索响应数据"""
@@ -116,7 +118,11 @@ class SohuScraper(BaseScraper):
         4: 5,  # 顶部弹幕
         5: 4,  # 底部弹幕
     }
-    
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造搜狐视频播放页面URL"""
+        return f"https://tv.sohu.com/item/{media_id}.html"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.base_url = "https://tv.sohu.com"
@@ -245,7 +251,8 @@ class SohuScraper(BaseScraper):
                     year=item.year,
                     season=season,
                     episodeCount=item.total_video_count or 0,
-                    imageUrl=item.ver_big_pic
+                    imageUrl=item.ver_big_pic,
+                    url=item.pc_url  # 直接使用API返回的URL
                 ))
 
             self.logger.info(f"搜狐视频: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
@@ -624,7 +631,8 @@ class SohuScraper(BaseScraper):
                             mediaId=aid,
                             title=title,
                             type='tv_series',
-                            season=get_season_from_title(title)
+                            season=get_season_from_title(title),
+                            url=self.build_media_url(aid)
                         )
 
             # 尝试从item URL提取
@@ -644,7 +652,8 @@ class SohuScraper(BaseScraper):
                             mediaId=aid,
                             title=title,
                             type='tv_series',
-                            season=get_season_from_title(title)
+                            season=get_season_from_title(title),
+                            url=self.build_media_url(aid)
                         )
 
             self.logger.warning(f"搜狐视频: 无法从URL中提取信息: {url}")

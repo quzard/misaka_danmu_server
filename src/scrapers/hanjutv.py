@@ -47,6 +47,10 @@ class HanjuTVScraper(BaseScraper):
         5: "tv_series"   # 美剧
     }
 
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造韩剧TV播放页面URL"""
+        return f"https://hanju.com/series/{media_id}"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.display_name = "韩剧TV"
@@ -459,6 +463,7 @@ class HanjuTVScraper(BaseScraper):
                 imageUrl=anime.get("image", {}).get("thumb", ""),
                 episodeCount=len(episodes),
                 currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                url=self.build_media_url(anime["sid"])
             ))
 
         # 缓存结果
@@ -594,7 +599,8 @@ class HanjuTVScraper(BaseScraper):
                 season=get_season_from_title(title),
                 year=year,
                 imageUrl=detail.get("image", {}).get("thumb", ""),
-                episodeCount=len(episodes)
+                episodeCount=len(episodes),
+                url=self.build_media_url(sid)
             )
 
         except Exception as e:

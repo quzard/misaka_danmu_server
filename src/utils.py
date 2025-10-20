@@ -91,16 +91,16 @@ def clean_xml_string(xml_string: str) -> str:
 
 def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
     """
-    按固定时间段（6分钟）均匀采样弹幕
+    按固定时间段（3分钟）随机均匀采样弹幕
 
-    新逻辑：
-    1. 将视频按6分钟（360秒）分段，最后一段不足6分钟也算一段
-    2. 计算每段应该采样的弹幕数 = target_count / 总段数
-    3. 从每段中随机采样对应数量的弹幕
-    4. 如果某段弹幕不足，从其他段补充
+    采样策略:
+    1. 将视频按3分钟分段
+    2. 按每段弹幕密度比例分配采样配额
+    3. 在每段内等间隔采样,确保时间均匀分布
+    4. 如有缺口,从有剩余的段中按比例补充
 
     Args:
-        comments: 原始弹幕列表，每个弹幕包含 'p' 字段（时间,类型,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID）
+        comments: 原始弹幕列表,每个弹幕包含 'p' 字段（时间,类型,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID）
         target_count: 目标弹幕数量
 
     Returns:
@@ -116,8 +116,8 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
     if target_count <= 0:
         return []
 
-    # 固定时间段长度：6分钟 = 360秒
-    SEGMENT_DURATION = 360.0
+    # 固定时间段长度：3分钟 = 180秒
+    SEGMENT_DURATION = 180.0
 
     # 解析弹幕时间并排序
     timed_comments = []
@@ -166,23 +166,71 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
 
         segments[segment_index].append(comment)
 
-    # 计算每段应该采样的弹幕数（基础配额）
-    base_quota_per_segment = target_count // total_segments
-    remainder = target_count % total_segments
+    # === 按密度比例分配配额 ===
+    # 计算每段的弹幕密度权重
+    segment_weights = []
+    for i, segment in enumerate(segments):
+        weight = len(segment) if len(segment) > 0 else 0
+        segment_weights.append(weight)
 
-    logger.debug(f"每段基础配额: {base_quota_per_segment} 条, 余数: {remainder} 条")
+    total_weight = sum(segment_weights)
 
-    # 第一轮：从每段中采样基础配额
+    if total_weight == 0:
+        # 所有段都没有弹幕
+        logger.warning("所有时间段都没有弹幕")
+        return []
+
+    # 按权重分配配额
+    segment_quotas = []
+    allocated_total = 0
+
+    for i, weight in enumerate(segment_weights):
+        if weight == 0:
+            segment_quotas.append(0)
+        else:
+            # 按比例分配
+            quota = int(target_count * weight / total_weight)
+            segment_quotas.append(quota)
+            allocated_total += quota
+
+    # 处理余数: 将剩余配额分配给弹幕最多的段
+    remainder = target_count - allocated_total
+    if remainder > 0:
+        # 找出弹幕最多的段
+        sorted_indices = sorted(range(len(segment_weights)), key=lambda i: segment_weights[i], reverse=True)
+        for i in range(remainder):
+            if i < len(sorted_indices):
+                idx = sorted_indices[i]
+                segment_quotas[idx] += 1
+
+    logger.debug(f"按密度分配配额: {segment_quotas}")
+
+    # === 从每段中等间隔采样 ===
     sampled_comments = []
-    segment_stats = []  # 记录每段的统计信息
+    segment_stats = []
 
     for i, segment in enumerate(segments):
-        # 计算当前段的配额（前remainder个段多分配1条）
-        quota = base_quota_per_segment + (1 if i < remainder else 0)
+        quota = segment_quotas[i]
+
+        if quota == 0 or len(segment) == 0:
+            segment_stats.append({
+                'index': i,
+                'total': len(segment),
+                'sampled': 0,
+                'remaining': len(segment),
+                'deficit': quota
+            })
+            continue
 
         if len(segment) >= quota:
-            # 弹幕充足，随机采样
-            sampled = random.sample(segment, quota)
+            # 弹幕充足,等间隔采样
+            if quota == len(segment):
+                sampled = segment
+            else:
+                # 等间隔采样
+                step = len(segment) / quota
+                sampled = [segment[int(j * step)] for j in range(quota)]
+
             sampled_comments.extend(sampled)
             segment_stats.append({
                 'index': i,
@@ -190,34 +238,24 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
                 'sampled': quota,
                 'remaining': len(segment) - quota
             })
-            logger.debug(f"时间段 {i} ({i*SEGMENT_DURATION:.0f}s-{(i+1)*SEGMENT_DURATION:.0f}s): 从 {len(segment)} 条中采样 {quota} 条")
-        elif len(segment) > 0:
-            # 弹幕不足，全部采样
+            logger.debug(f"时间段 {i} ({i*SEGMENT_DURATION:.0f}s-{(i+1)*SEGMENT_DURATION:.0f}s): 从 {len(segment)} 条中等间隔采样 {quota} 条")
+        else:
+            # 弹幕不足,全部采样
             sampled_comments.extend(segment)
             segment_stats.append({
                 'index': i,
                 'total': len(segment),
                 'sampled': len(segment),
                 'remaining': 0,
-                'deficit': quota - len(segment)  # 记录缺口
+                'deficit': quota - len(segment)
             })
-            logger.debug(f"时间段 {i} ({i*SEGMENT_DURATION:.0f}s-{(i+1)*SEGMENT_DURATION:.0f}s): 弹幕不足，全部采样 {len(segment)} 条 (缺口 {quota - len(segment)} 条)")
-        else:
-            # 空段
-            segment_stats.append({
-                'index': i,
-                'total': 0,
-                'sampled': 0,
-                'remaining': 0,
-                'deficit': quota
-            })
-            logger.debug(f"时间段 {i} ({i*SEGMENT_DURATION:.0f}s-{(i+1)*SEGMENT_DURATION:.0f}s): 无弹幕 (缺口 {quota} 条)")
+            logger.debug(f"时间段 {i} ({i*SEGMENT_DURATION:.0f}s-{(i+1)*SEGMENT_DURATION:.0f}s): 弹幕不足,全部采样 {len(segment)} 条 (缺口 {quota - len(segment)} 条)")
 
-    # 第二轮：如果有缺口，从有剩余弹幕的段中补充
+    # === 补充缺口 ===
     total_deficit = sum(stat.get('deficit', 0) for stat in segment_stats)
 
     if total_deficit > 0:
-        logger.debug(f"总缺口: {total_deficit} 条，开始从有剩余的段中补充")
+        logger.debug(f"总缺口: {total_deficit} 条,开始从有剩余的段中按比例补充")
 
         # 找出有剩余弹幕的段
         segments_with_remaining = [
@@ -226,29 +264,31 @@ def sample_comments_evenly(comments: List[Dict[str, Any]], target_count: int) ->
         ]
 
         if segments_with_remaining:
-            # 按剩余数量排序（从多到少）
-            segments_with_remaining.sort(key=lambda x: x[2], reverse=True)
+            # 计算每段的补充配额(按剩余数量比例)
+            total_remaining = sum(r for _, _, r in segments_with_remaining)
 
-            补充计数 = 0
             for seg_idx, segment, remaining in segments_with_remaining:
-                if 补充计数 >= total_deficit:
-                    break
+                # 按比例分配补充配额
+                补充配额 = int(total_deficit * remaining / total_remaining)
 
-                # 计算可以补充的数量
-                can_补充 = min(remaining, total_deficit - 补充计数)
+                if 补充配额 > 0:
+                    # 找出该段中未被采样的弹幕
+                    already_sampled_set = set(id(c) for c in sampled_comments if c in segment)
+                    available = [c for c in segment if id(c) not in already_sampled_set]
 
-                # 找出该段中未被采样的弹幕
-                already_sampled = [c for c in sampled_comments if c in segment]
-                available = [c for c in segment if c not in already_sampled]
+                    if available:
+                        actual_补充 = min(补充配额, len(available))
+                        # 等间隔补充
+                        if actual_补充 == len(available):
+                            补充_comments = available
+                        else:
+                            step = len(available) / actual_补充
+                            补充_comments = [available[int(j * step)] for j in range(actual_补充)]
 
-                if available:
-                    actual_补充 = min(can_补充, len(available))
-                    补充_comments = random.sample(available, actual_补充)
-                    sampled_comments.extend(补充_comments)
-                    补充计数 += actual_补充
-                    logger.debug(f"从时间段 {seg_idx} 补充 {actual_补充} 条弹幕")
+                        sampled_comments.extend(补充_comments)
+                        logger.debug(f"从时间段 {seg_idx} 等间隔补充 {actual_补充} 条弹幕")
 
-    logger.info(f"弹幕均匀采样: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条, 分{total_segments}段, 每段{SEGMENT_DURATION}s)")
+    logger.info(f"弹幕均匀采样完成: 原始{len(comments)}条 -> 采样{len(sampled_comments)}条 (目标{target_count}条, 分{total_segments}段, 每段{SEGMENT_DURATION}s)")
 
     # 确保返回的数量不超过目标数量
     return sampled_comments[:target_count]

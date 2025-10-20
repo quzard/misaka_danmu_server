@@ -57,7 +57,11 @@ class LetvScraper(BaseScraper):
         1: 5,  # 顶部弹幕
         2: 1,  # 其他 -> 滚动
     }
-    
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造乐视网播放页面URL"""
+        return f"https://www.le.com/ptv/vplay/{media_id}.html"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.base_url = "https://www.le.com"
@@ -257,7 +261,8 @@ class LetvScraper(BaseScraper):
                         year=year,
                         imageUrl=image_url if image_url.startswith('http') else f"https:{image_url}" if image_url else None,
                         episodeCount=episode_count,
-                        currentEpisodeIndex=episode_info.get("episode") if episode_info else None
+                        currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                        url=self.build_media_url(pid)
                     )
 
                     results.append(result)
@@ -498,7 +503,8 @@ class LetvScraper(BaseScraper):
                 year=year,
                 imageUrl=image_url if image_url and image_url.startswith('http') else f"https:{image_url}" if image_url else None,
                 episodeCount=episode_count,
-                currentEpisodeIndex=None
+                currentEpisodeIndex=None,
+                url=self.build_media_url(media_id)
             )
 
         except Exception as e:

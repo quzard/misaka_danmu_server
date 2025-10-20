@@ -2472,21 +2472,53 @@ async def force_fail_task(session: AsyncSession, task_id: str) -> bool:
         await session.rollback()
         return False
 
-async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> Optional[str]:
+async def get_execution_task_id_from_scheduler_task(session: AsyncSession, scheduler_task_id: str) -> tuple[Optional[str], Optional[str]]:
     """
-    从一个调度任务的最终描述中，解析并返回其触发的执行任务ID。
+    从一个调度任务的最终描述中，解析并返回其触发的执行任务ID和状态。
+
+    Returns:
+        (execution_task_id, status): 执行任务ID和状态,如果未找到则返回(None, None)
     """
-    stmt = select(TaskHistory.description).where(
-        TaskHistory.taskId == scheduler_task_id,
-        TaskHistory.status == '已完成'
+    # 先查询调度任务本身的状态
+    stmt = select(TaskHistory.description, TaskHistory.status).where(
+        TaskHistory.taskId == scheduler_task_id
     )
     result = await session.execute(stmt)
-    description = result.scalar_one_or_none()
-    if description:
+    row = result.one_or_none()
+
+    if not row:
+        return (None, None)
+
+    description, scheduler_status = row
+
+    # 如果调度任务失败,直接返回失败状态
+    if scheduler_status == '失败':
+        return (None, '失败')
+
+    # 如果调度任务已取消,直接返回已取消状态
+    if scheduler_status == '已取消':
+        return (None, '已取消')
+
+    # 如果调度任务还在运行中或等待中,返回对应状态
+    if scheduler_status in ['运行中', '等待中', '已暂停']:
+        return (None, scheduler_status)
+
+    # 如果调度任务已完成,尝试解析执行任务ID
+    if scheduler_status == '已完成' and description:
         match = re.search(r'执行任务ID:\s*([a-f0-9\-]+)', description)
         if match:
-            return match.group(1)
-    return None
+            execution_task_id = match.group(1)
+
+            # 查询执行任务的状态
+            exec_stmt = select(TaskHistory.status).where(
+                TaskHistory.taskId == execution_task_id
+            )
+            exec_result = await session.execute(exec_stmt)
+            exec_status = exec_result.scalar_one_or_none()
+
+            return (execution_task_id, exec_status if exec_status else '未知')
+
+    return (None, None)
 
 async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
     stmt = (

@@ -166,6 +166,7 @@ class ExecutionTaskResponse(BaseModel):
     """用于返回执行任务ID的响应模型"""
     schedulerTaskId: str
     executionTaskId: Optional[str] = None
+    status: Optional[str] = Field(None, description="执行任务状态: 运行中/已完成/失败/已取消/等待中/已暂停")
 
 class ControlSearchResultItem(models.ProviderSearchInfo):
     resultIndex: int = Field(..., alias="result_index", description="结果在列表中的顺序索引，从0开始")
@@ -1465,19 +1466,31 @@ async def resume_task(taskId: str, task_manager: TaskManager = Depends(get_task_
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="恢复任务失败，可能任务未被暂停。")
     return {"message": "任务已恢复。"}
 
-@router.get("/tasks/{taskId}/execution", response_model=ExecutionTaskResponse, summary="获取调度任务触发的执行任务ID")
+@router.get("/tasks/{taskId}/execution", response_model=ExecutionTaskResponse, summary="获取调度任务触发的执行任务ID和状态")
 async def get_execution_task_id(
     taskId: str,
     session: AsyncSession = Depends(get_db_session)
 ):
     """
     在调用 `/import/auto` 等接口后，使用返回的调度任务ID来查询其触发的、
-    真正执行下载导入工作的任务ID。
-    如果调度任务尚未完成或未成功触发执行任务，`executionTaskId` 将为 `null`。
-    您可以轮询此接口，直到获取到 `executionTaskId`。
+    真正执行下载导入工作的任务ID和状态。
+
+    返回字段说明:
+    - `schedulerTaskId`: 调度任务ID (输入的taskId)
+    - `executionTaskId`: 执行任务ID,如果调度任务尚未触发执行任务则为null
+    - `status`: 任务状态,可能的值:
+        - `运行中`: 任务正在执行
+        - `已完成`: 任务已成功完成
+        - `失败`: 任务执行失败
+        - `已取消`: 任务已被取消
+        - `等待中`: 任务等待执行
+        - `已暂停`: 任务已暂停
+        - `null`: 调度任务尚未完成,无法获取状态
+
+    您可以轮询此接口，直到获取到 `executionTaskId` 和最终状态。
     """
-    execution_id = await crud.get_execution_task_id_from_scheduler_task(session, taskId)
-    return ExecutionTaskResponse(schedulerTaskId=taskId, executionTaskId=execution_id)
+    execution_id, status = await crud.get_execution_task_id_from_scheduler_task(session, taskId)
+    return ExecutionTaskResponse(schedulerTaskId=taskId, executionTaskId=execution_id, status=status)
 
 @router.get("/rate-limit/status", response_model=models.ControlRateLimitStatusResponse, summary="获取流控状态")
 async def get_rate_limit_status(

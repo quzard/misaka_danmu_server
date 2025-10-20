@@ -661,15 +661,16 @@ async def _import_episodes_iteratively(
                             existing_count = existing_episode.commentCount
 
                             if new_count > existing_count:
-                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                                actual_new_count = new_count - existing_count
+                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
                                 added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                                 await session.commit()
                             elif new_count == existing_count:
-                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
                                 successful_episodes_indices.append(episode.episodeIndex)
                                 continue
                             else:
-                                logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
                                 successful_episodes_indices.append(episode.episodeIndex)
                                 continue
                         else:
@@ -691,7 +692,7 @@ async def _import_episodes_iteratively(
 
                     total_comments_added += added_count
                     successful_episodes_indices.append(episode.episodeIndex)
-                    logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                    logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 写入 {added_count} 条弹幕并已提交。")
                 except Exception as e:
                     failed_episodes_count += 1
                     error_msg = _extract_short_error_message(e)
@@ -754,13 +755,14 @@ async def _import_episodes_iteratively(
                                 existing_count = existing_episode.commentCount
 
                                 if new_count > existing_count:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                                    actual_new_count = new_count - existing_count
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
                                 elif new_count == existing_count:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
                                     successful_episodes_indices.append(episode.episodeIndex)
                                     continue
                                 else:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
                                     successful_episodes_indices.append(episode.episodeIndex)
                                     continue
                         else:
@@ -778,7 +780,7 @@ async def _import_episodes_iteratively(
 
                         total_comments_added += added_count
                         successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 新增 {added_count} 条弹幕并已提交。")
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 写入 {added_count} 条弹幕并已提交。")
                     except Exception as db_error:
                         # 数据库写入失败
                         failed_episodes_count += 1
@@ -831,13 +833,14 @@ async def _import_episodes_iteratively(
                                 existing_count = existing_episode.commentCount
 
                                 if new_count > existing_count:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 大于现有数量 ({existing_count})，更新弹幕。")
+                                    actual_new_count = new_count - existing_count
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
                                 elif new_count == existing_count:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 与现有数量相同，跳过更新。")
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
                                     successful_episodes_indices.append(episode.episodeIndex)
                                     continue
                                 else:
-                                    logger.info(f"分集 '{episode.title}' 新弹幕数量 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
+                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
                                     successful_episodes_indices.append(episode.episodeIndex)
                                     continue
                         else:
@@ -855,7 +858,7 @@ async def _import_episodes_iteratively(
 
                         total_comments_added += added_count
                         successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后新增 {added_count} 条弹幕并已提交。")
+                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后写入 {added_count} 条弹幕并已提交。")
                     else:
                         # 修正：重试后获取弹幕失败或为空时，不创建分集记录
                         failed_episodes_count += 1

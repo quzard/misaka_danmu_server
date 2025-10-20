@@ -171,6 +171,16 @@ class BilibiliScraper(BaseScraper):
         61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
         36, 20, 34, 44, 52
     ]
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造B站播放页面URL"""
+        # media_id可能是ss{season_id}或bv{bvid}格式
+        if media_id.startswith('ss') or media_id.startswith('ep'):
+            return f"https://www.bilibili.com/bangumi/play/{media_id}"
+        else:
+            # 假设是bvid
+            return f"https://www.bilibili.com/video/{media_id}"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self._api_lock = asyncio.Lock()
@@ -555,7 +565,8 @@ class BilibiliScraper(BaseScraper):
                         provider=self.provider_name, mediaId=media_id, title=cleaned_title,
                         type=media_type, season=get_season_from_title(cleaned_title),
                         year=year, imageUrl=item.cover, episodeCount=episode_count,
-                        currentEpisodeIndex=episode_info.get("episode") if episode_info else None
+                        currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                        url=self.build_media_url(media_id)
                     ))
             else:
                 self.logger.info(f"Bilibili: API for type '{search_type}' returned no results. (Code: {api_result.code}, Message: '{api_result.message}')")
@@ -598,7 +609,8 @@ class BilibiliScraper(BaseScraper):
             year=year,
             imageUrl=item.cover,
             episodeCount=item.ep_size,
-            currentEpisodeIndex=None # This is not available in this context
+            currentEpisodeIndex=None, # This is not available in this context
+            url=self.build_media_url(media_id)
         )
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:

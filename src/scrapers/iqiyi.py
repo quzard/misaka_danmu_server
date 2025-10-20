@@ -285,6 +285,11 @@ class IqiyiScraper(BaseScraper):
     _xor_key: ClassVar[int] = 0x75706971676c
     _secret_key: ClassVar[str] = "howcuteitis"
     _key_name: ClassVar[str] = "secret_key"
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """构造爱奇艺播放页面URL"""
+        return f"https://www.iqiyi.com/v_{media_id}.html"
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
@@ -573,6 +578,7 @@ class IqiyiScraper(BaseScraper):
                     imageUrl=album.img or album.imgH, # Use the correct image field
                     episodeCount=episode_count,
                     currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                    url=self.build_media_url(album.link_id)
                 )
                 results.append(provider_search_info)
         except Exception as e:
@@ -707,6 +713,7 @@ class IqiyiScraper(BaseScraper):
                     imageUrl=album.album_img,
                     episodeCount=episode_count,
                     currentEpisodeIndex=current_episode,
+                    url=self.build_media_url(link_id)
                 )
                 self.logger.debug(f"爱奇艺: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
@@ -737,7 +744,8 @@ class IqiyiScraper(BaseScraper):
                 type=media_type,
                 season=get_season_from_title(v3_info.title),
                 year=v3_info.current_video_year,
-                imageUrl=v3_info.image_url
+                imageUrl=v3_info.image_url,
+                url=self.build_media_url(link_id)
             )
 
         self.logger.warning(f"爱奇艺 (get_info): v3 API 获取信息失败，回退到旧版 API。")
@@ -754,7 +762,8 @@ class IqiyiScraper(BaseScraper):
             mediaId=link_id,
             title=base_info.video_name,
             type=media_type,
-            season=get_season_from_title(base_info.video_name)
+            season=get_season_from_title(base_info.video_name),
+            url=self.build_media_url(link_id)
         )
 
     async def _get_v3_full_response(self, media_id: str) -> Optional[IqiyiV3ApiResponse]:

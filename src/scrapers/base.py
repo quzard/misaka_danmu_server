@@ -171,6 +171,19 @@ class BaseScraper(ABC):
     is_loggable: bool = True
 
     rate_limit_quota: Optional[int] = None # 新增：特定源的配额
+
+    def build_media_url(self, media_id: str) -> Optional[str]:
+        """
+        构造平台播放页面URL。
+        子类可以覆盖此方法以提供特定平台的URL构造逻辑。
+
+        Args:
+            media_id: 媒体ID
+
+        Returns:
+            平台播放页面URL，如果无法构造则返回None
+        """
+        return None
     
     async def _should_log_responses(self) -> bool:
         """动态检查是否应记录原始响应，确保配置实时生效。"""
