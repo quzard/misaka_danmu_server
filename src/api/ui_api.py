@@ -2587,7 +2587,7 @@ async def import_from_provider(
         doubanId=request_data.doubanId,
         config_manager=config_manager,
         tmdbId=request_data.tmdbId,
-        imdbId=None, 
+        imdbId=None,
         tvdbId=None, # 手动导入时这些ID为空,
         bangumiId=request_data.bangumiId,
         metadata_manager=metadata_manager,
@@ -2596,7 +2596,10 @@ async def import_from_provider(
         session=session,
         manager=scraper_manager,
         rate_limiter=rate_limiter,
-        title_recognition_manager=title_recognition_manager
+        title_recognition_manager=title_recognition_manager,
+        # 新增: 补充源信息
+        supplementProvider=request_data.supplementProvider,
+        supplementMediaId=request_data.supplementMediaId
     )
     
     # 预先应用识别词转换来生成正确的任务标题

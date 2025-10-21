@@ -88,6 +88,9 @@ class ImportRequest(BaseModel):
     doubanId: Optional[str] = None
     bangumiId: Optional[str] = None
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索时指定了集数，则只导入此分集")
+    # 新增: 补充源信息
+    supplementProvider: Optional[str] = Field(None, description="补充源提供商 (如360), 用于获取分集列表")
+    supplementMediaId: Optional[str] = Field(None, description="补充源中的媒体ID")
 
 class MetadataDetailsResponse(BaseModel):
     """所有元数据源详情接口的统一响应模型。"""

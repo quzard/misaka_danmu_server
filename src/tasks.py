@@ -933,10 +933,13 @@ async def generic_import_task(
     bangumiId: Optional[str],
     progress_callback: Callable,
     session: AsyncSession,
-    manager: ScraperManager, 
+    manager: ScraperManager,
     task_manager: TaskManager,
     rate_limiter: RateLimiter,
-    title_recognition_manager: TitleRecognitionManager
+    title_recognition_manager: TitleRecognitionManager,
+    # 新增: 补充源信息
+    supplementProvider: Optional[str] = None,
+    supplementMediaId: Optional[str] = None
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -969,6 +972,65 @@ async def generic_import_task(
         target_episode_index=currentEpisodeIndex,
         db_media_type=mediaType
     )
+
+    # 如果主源无分集且有补充源,使用补充源获取分集URL
+    if not episodes and supplementProvider and supplementMediaId:
+        logger.info(f"主源无分集,尝试使用补充源 {supplementProvider} 获取分集列表")
+        await progress_callback(12, f"主源无分集,尝试使用补充源 {supplementProvider}...")
+
+        try:
+            # 获取补充源实例(360)
+            supplement_source = metadata_manager.sources.get(supplementProvider)
+            if not supplement_source:
+                logger.warning(f"补充源 {supplementProvider} 不可用")
+            else:
+                # 获取补充源详情
+                supplement_details = await supplement_source.get_details(supplementMediaId, None)
+                if not supplement_details:
+                    logger.warning(f"无法获取补充源详情 (mediaId={supplementMediaId})")
+                else:
+                    logger.info(f"补充源详情: {supplement_details.title}")
+
+                    # 使用360源获取分集URL列表
+                    episode_urls = []
+                    max_episodes = 200  # 最多尝试200集
+
+                    for i in range(1, max_episodes + 1):
+                        if i % 10 == 0:
+                            await progress_callback(12 + int((i / max_episodes) * 8), f"正在获取第{i}集URL...")
+
+                        # 调用360源的内部方法获取URL
+                        url = await supplement_source._get_episode_url_from_360(
+                            supplement_details, i, provider  # 目标平台
+                        )
+                        if not url:
+                            break
+                        episode_urls.append((i, url))
+
+                    logger.info(f"补充源获取到 {len(episode_urls)} 个分集URL")
+
+                    if episode_urls:
+                        # 解析URL获取分集信息
+                        episodes = []
+                        for i, url in episode_urls:
+                            try:
+                                # 从URL提取episode_id
+                                episode_id = await scraper.get_id_from_url(url)
+                                if episode_id:
+                                    episodes.append(models.ProviderEpisodeInfo(
+                                        provider=provider,
+                                        episodeId=episode_id,
+                                        title=f"第{i}集",
+                                        episodeIndex=i,
+                                        url=url
+                                    ))
+                            except Exception as e:
+                                logger.warning(f"解析URL失败 (第{i}集): {e}")
+
+                        logger.info(f"补充源成功解析 {len(episodes)} 个分集")
+                        await progress_callback(20, f"补充源成功获取 {len(episodes)} 个分集")
+        except Exception as e:
+            logger.error(f"使用补充源获取分集失败: {e}", exc_info=True)
 
     if not episodes:
         # 故障转移逻辑保持不变
