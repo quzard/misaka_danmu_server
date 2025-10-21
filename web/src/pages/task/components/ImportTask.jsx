@@ -437,7 +437,7 @@ export const ImportTask = () => {
             padding: isMobile ? '16px 0' : '0',
           }}>
             <Col md={13} xs={24}>
-              <div className='flex items-center justify-center gap-2'>
+              <div className='flex items-center justify-center gap-3 flex-wrap'>
                 <Dropdown menu={statusMenu}>
                   <Button icon={<FilterOutlined />}>
                     {getStatusLabel(status)}
@@ -553,23 +553,6 @@ export const ImportTask = () => {
                 return (
                   <List.Item
                     key={index}
-                    extra={
-                      <>
-                        <Tag
-                          className="!mb-3"
-                          color={item.status.includes('失败') ? 'red' : 'green'}
-                        >
-                          {item.status}
-                        </Tag>
-                        <Tag
-                          className="!mb-3"
-                          color={item.queueType === 'management' ? 'cyan' : 'blue'}
-                          icon={getQueueIcon(item.queueType)}
-                        >
-                          {item.queueType === 'management' ? '管理' : '下载'}
-                        </Tag>
-                      </>
-                    }
                     onClick={() => {
                       setSelectList(list => {
                         return list.map(it => it.taskId).includes(item.taskId)
@@ -577,9 +560,10 @@ export const ImportTask = () => {
                           : [...list, item]
                       })
                     }}
+                    style={{ padding: '16px 24px' }}
                   >
                     <div
-                      className={classNames('relative', {
+                      className={classNames('relative w-full', {
                         'pl-9': isActive,
                       })}
                     >
@@ -590,17 +574,32 @@ export const ImportTask = () => {
                         />
                       )}
 
-                      <div className="text-base mb-1">
-                        <span style={{ marginRight: '8px' }}>
+                      <div className="text-base mb-2 font-semibold">
+                        <span style={{ marginRight: '8px', fontSize: '18px' }}>
                           {getQueueIcon(item.queueType)}
                         </span>
                         {item.title}
                       </div>
-                      <div className="mb-2">{item.description}</div>
+                      <div className="mb-3 text-gray-600">{item.description}</div>
                       <Progress
                         percent={item.progress}
                         status={item.status.includes('失败') && 'exception'}
+                        strokeWidth={10}
+                        showInfo={true}
                       />
+                      <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                        <Tag
+                          color={item.status.includes('失败') ? 'red' : item.status.includes('运行') ? 'green' : item.status.includes('暂停') ? 'orange' : 'blue'}
+                        >
+                          {item.status}
+                        </Tag>
+                        <Tag
+                          color={item.queueType === 'management' ? 'cyan' : 'blue'}
+                          icon={getQueueIcon(item.queueType)}
+                        >
+                          {item.queueType === 'management' ? '管理队列' : '下载队列'}
+                        </Tag>
+                      </div>
                     </div>
                   </List.Item>
                 )
