@@ -1524,13 +1524,45 @@ async def get_rate_limit_status(
         time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
+    # 获取后备流控状态
+    fallback_match_state = states_map.get("__fallback_match__")
+    fallback_search_state = states_map.get("__fallback_search__")
+    match_count = fallback_match_state.requestCount if fallback_match_state else 0
+    search_count = fallback_search_state.requestCount if fallback_search_state else 0
+    fallback_total = match_count + search_count
+    fallback_limit = 50  # 固定50次
+
+    fallback_status = models.ControlRateLimitFallbackStatus(
+        totalCount=fallback_total,
+        totalLimit=fallback_limit,
+        matchCount=match_count,
+        searchCount=search_count
+    )
+
     provider_items = []
     all_scrapers_raw = await crud.get_all_scraper_settings(session)
     # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
     all_scrapers = [s for s in all_scrapers_raw if s['providerName'] != 'custom']
+
+    # 收集所有后备相关的provider状态（用于计算fallbackCount）
+    fallback_provider_names = set()
+    for state_name in states_map.keys():
+        if state_name.startswith("__fallback_") and state_name.endswith("__"):
+            # 这些是后备类型的状态，跳过
+            continue
+        if state_name not in ["__global__"] and state_name in [s['providerName'] for s in all_scrapers]:
+            fallback_provider_names.add(state_name)
+
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
+        total_count = provider_state.requestCount if provider_state else 0
+
+        # 计算后备调用计数（这需要从后备流控的详细记录中获取，暂时设为0）
+        # TODO: 需要在数据库中记录每个provider的后备调用次数
+        fallback_count = 0
+        direct_count = total_count - fallback_count
+
         quota: Union[int, str] = "∞"
         try:
             scraper_instance = scraper_manager.get_scraper(provider_name)
@@ -1539,16 +1571,26 @@ async def get_rate_limit_status(
                 quota = provider_quota
         except ValueError:
             pass
-        provider_items.append(models.ControlRateLimitProviderStatus(providerName=provider_name, requestCount=provider_state.requestCount if provider_state else 0, quota=quota))
+
+        provider_items.append(models.ControlRateLimitProviderStatus(
+            providerName=provider_name,
+            directCount=direct_count,
+            fallbackCount=fallback_count,
+            requestCount=total_count,
+            quota=quota
+        ))
 
     # 修正：将秒数转换为可读的字符串以匹配响应模型
     global_period_str = f"{period_seconds} 秒"
 
     return models.ControlRateLimitStatusResponse(
-        globalEnabled=global_enabled, 
-        globalRequestCount=global_state.requestCount if global_state else 0, 
-        globalLimit=global_limit, globalPeriod=global_period_str, 
-        secondsUntilReset=seconds_until_reset, providers=provider_items)
+        globalEnabled=global_enabled,
+        globalRequestCount=global_state.requestCount if global_state else 0,
+        globalLimit=global_limit, globalPeriod=global_period_str,
+        secondsUntilReset=seconds_until_reset,
+        providers=provider_items,
+        fallback=fallback_status
+    )
 
 
 # --- 定时任务管理 ---

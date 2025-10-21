@@ -234,6 +234,7 @@ class TaskInfo(BaseModel):
     description: str
     createdAt: datetime
     isSystemTask: bool = False
+    queueType: str = "download"  # 队列类型: "download" 或 "management"
 
 class PaginatedTasksResponse(BaseModel):
     """用于任务列表分页的响应模型"""
@@ -558,8 +559,17 @@ class RateLimitStatusResponse(BaseModel):
 class ControlRateLimitProviderStatus(BaseModel):
     """用于外部API的单个流控规则状态"""
     providerName: str
-    requestCount: int
+    directCount: int = Field(0, description="直接下载计数")
+    fallbackCount: int = Field(0, description="后备调用计数")
+    requestCount: int = Field(0, description="总计数 (directCount + fallbackCount)")
     quota: Union[int, str]
+
+class ControlRateLimitFallbackStatus(BaseModel):
+    """后备流控状态"""
+    totalCount: int = Field(0, description="后备调用总计数")
+    totalLimit: int = Field(50, description="后备调用总限制")
+    matchCount: int = Field(0, description="后备匹配计数")
+    searchCount: int = Field(0, description="后备搜索计数")
 
 class ControlRateLimitStatusResponse(BaseModel):
     """用于外部API的流控状态响应模型"""
@@ -569,3 +579,4 @@ class ControlRateLimitStatusResponse(BaseModel):
     globalPeriod: str
     secondsUntilReset: int
     providers: List[ControlRateLimitProviderStatus]
+    fallback: ControlRateLimitFallbackStatus

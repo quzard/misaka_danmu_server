@@ -707,7 +707,7 @@ async def reorder_source_episodes(
 
     task_title = f"重整集数: {source_info['title']} ({source_info['providerName']})"
     task_coro = lambda session, callback: tasks.reorder_episodes_task(sourceId, session, callback)
-    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title, queue_type="management")
 
     logger.info(f"用户 '{current_user.username}' 提交了重整源 ID: {sourceId} 集数的任务 (Task ID: {task_id})。")
     return {"message": f"重整集数任务 '{task_title}' 已提交。", "taskId": task_id}
@@ -759,10 +759,10 @@ async def offset_episodes(
     task_coro = lambda session, callback: tasks.offset_episodes_task(
         request_data.episodeIds, request_data.offset, session, callback
     )
-    
+
     unique_key = f"modify-episodes-{first_episode.sourceId}"
     try:
-        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, queue_type="management")
     except HTTPException as e:
         # 重新抛出由 task_manager 引发的异常 (例如，任务已在运行)
         raise e

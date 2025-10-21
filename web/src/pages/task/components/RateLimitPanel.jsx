@@ -50,7 +50,7 @@ export const RateLimitPanel = () => {
         <Typography>
           <Title level={4}>流控状态面板</Title>
           <Paragraph>
-            此面板实时显示全局和各源的弹幕下载速率限制状态。特定源的配额包含在全局限制内。
+            此面板实时显示全局、弹幕下载和后备调用的速率限制状态。
           </Paragraph>
         </Typography>
         {status && (
@@ -64,6 +64,8 @@ export const RateLimitPanel = () => {
                 className="!mb-4"
               />
             )}
+
+            {/* 全局限制 */}
             <Card type="inner" title="全局限制" className="!mb-6">
               <Row gutter={[16, 16]} align="middle">
                 <Col xs={24} sm={12} md={8}>
@@ -109,30 +111,125 @@ export const RateLimitPanel = () => {
                 </Col>
               </Row>
             </Card>
-            <Card
-              type="inner"
-              title="各源配额使用情况"
-              className={status.verificationFailed ? 'opacity-50' : ''}
-            >
-              <Table
-                columns={[
-                  {
-                    title: '搜索源',
-                    dataIndex: 'providerName',
-                    key: 'providerName',
-                  },
-                  {
-                    title: '使用情况 (已用 / 配额)',
-                    key: 'usage',
-                    render: (_, record) =>
-                      `${record.requestCount} / ${record.quota}`,
-                  },
-                ]}
-                dataSource={status.providers}
-                rowKey="providerName"
-                pagination={false}
-              />
-            </Card>
+
+            {/* 左右分栏布局 */}
+            <Row gutter={16}>
+              {/* 左侧：弹幕下载流控 */}
+              <Col xs={24} lg={12}>
+                <Card
+                  type="inner"
+                  title="弹幕下载流控"
+                  className={status.verificationFailed ? 'opacity-50' : ''}
+                >
+                  <Table
+                    columns={[
+                      {
+                        title: '源名称',
+                        dataIndex: 'providerName',
+                        key: 'providerName',
+                        width: 100,
+                      },
+                      {
+                        title: '直接下载',
+                        dataIndex: 'directCount',
+                        key: 'directCount',
+                        width: 80,
+                        align: 'center',
+                      },
+                      {
+                        title: '后备调用',
+                        dataIndex: 'fallbackCount',
+                        key: 'fallbackCount',
+                        width: 80,
+                        align: 'center',
+                      },
+                      {
+                        title: '总计/配额',
+                        key: 'usage',
+                        width: 100,
+                        align: 'center',
+                        render: (_, record) =>
+                          `${record.requestCount} / ${record.quota}`,
+                      },
+                      {
+                        title: '状态',
+                        key: 'status',
+                        width: 80,
+                        align: 'center',
+                        render: (_, record) => {
+                          if (record.quota === '∞') return '正常'
+                          const percent = (record.requestCount / record.quota) * 100
+                          if (percent >= 100) return '🔴 已满'
+                          if (percent >= 80) return '🟡 接近'
+                          return '🟢 正常'
+                        },
+                      },
+                    ]}
+                    dataSource={status.providers}
+                    rowKey="providerName"
+                    pagination={false}
+                    size="small"
+                  />
+                </Card>
+              </Col>
+
+              {/* 右侧：后备调用流控 */}
+              <Col xs={24} lg={12}>
+                <Card
+                  type="inner"
+                  title="后备调用流控"
+                  className={status.verificationFailed ? 'opacity-50' : ''}
+                >
+                  <Row gutter={[16, 16]}>
+                    <Col span={12}>
+                      <Statistic
+                        title="后备匹配"
+                        value={status.fallback?.matchCount || 0}
+                        suffix={`/ ${status.fallback?.totalLimit || 50}`}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic
+                        title="后备搜索"
+                        value={status.fallback?.searchCount || 0}
+                        suffix={`/ ${status.fallback?.totalLimit || 50}`}
+                      />
+                    </Col>
+                    <Col span={24}>
+                      <Statistic
+                        title="总计"
+                        value={status.fallback?.totalCount || 0}
+                        suffix={`/ ${status.fallback?.totalLimit || 50}`}
+                      />
+                    </Col>
+                    <Col span={24}>
+                      <Progress
+                        percent={
+                          status.fallback?.totalLimit > 0
+                            ? (status.fallback.totalCount / status.fallback.totalLimit) * 100
+                            : 0
+                        }
+                        status={
+                          status.fallback?.totalCount >= status.fallback?.totalLimit
+                            ? 'exception'
+                            : status.fallback?.totalCount >= status.fallback?.totalLimit * 0.8
+                              ? 'normal'
+                              : 'success'
+                        }
+                      />
+                    </Col>
+                    <Col span={24}>
+                      <Statistic.Timer
+                        title="重置倒计时"
+                        value={Date.now() + status.secondsUntilReset * 1000}
+                        format="HH:mm:ss"
+                        type="countdown"
+                      />
+                    </Col>
+                  </Row>
+                </Card>
+              </Col>
+            </Row>
           </>
         )}
       </Card>

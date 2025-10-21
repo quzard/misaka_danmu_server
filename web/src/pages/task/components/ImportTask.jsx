@@ -33,6 +33,8 @@ import {
   StepBackwardOutlined,
   StopOutlined,
   FilterOutlined,
+  DownloadOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
@@ -87,6 +89,7 @@ export const ImportTask = () => {
   }, [selectList])
 
   const [searchParams] = useSearchParams()
+  const [queueFilter, setQueueFilter] = useState('all') // 队列类型过滤: all, download, management
 
   const [search, status] = useMemo(() => {
     return [
@@ -101,7 +104,7 @@ export const ImportTask = () => {
       pageSize: 100,
       current: 1,
     }))
-  }, [search, status])
+  }, [search, status, queueFilter])
 
 
 
@@ -117,14 +120,20 @@ export const ImportTask = () => {
         pageSize: pagination.pageSize,
       })
 
-      const newData = res.data?.list || []
+      let newData = res.data?.list || []
+
+      // 前端过滤队列类型
+      if (queueFilter !== 'all') {
+        newData = newData.filter(task => task.queueType === queueFilter)
+      }
+
       setTaskList(newData)
 
 
     } catch (error) {
       console.error('轮询获取数据失败:', error)
     }
-  }, [search, status, pagination.current, pagination.pageSize])
+  }, [search, status, pagination.current, pagination.pageSize, queueFilter])
 
   /**
    * 刷新任务列表
@@ -392,6 +401,32 @@ export const ImportTask = () => {
     }
   }
 
+  // 队列类型筛选菜单
+  const queueMenu = {
+    items: [
+      { key: 'all', label: '全部队列' },
+      { key: 'download', label: '下载队列' },
+      { key: 'management', label: '管理队列' },
+    ],
+    onClick: ({ key }) => {
+      setQueueFilter(key)
+    },
+  }
+
+  const getQueueLabel = (queue) => {
+    switch (queue) {
+      case 'all': return '全部队列'
+      case 'download': return '下载队列'
+      case 'management': return '管理队列'
+      default: return '全部队列'
+    }
+  }
+
+  // 获取队列类型图标
+  const getQueueIcon = (queueType) => {
+    return queueType === 'management' ? <SettingOutlined /> : <DownloadOutlined />
+  }
+
   return (
     <div className="my-6">
       <Card
@@ -406,6 +441,11 @@ export const ImportTask = () => {
                 <Dropdown menu={statusMenu}>
                   <Button icon={<FilterOutlined />}>
                     {getStatusLabel(status)}
+                  </Button>
+                </Dropdown>
+                <Dropdown menu={queueMenu}>
+                  <Button icon={<FilterOutlined />}>
+                    {getQueueLabel(queueFilter)}
                   </Button>
                 </Dropdown>
                 <Tooltip title="全选/取消全选">
@@ -521,6 +561,13 @@ export const ImportTask = () => {
                         >
                           {item.status}
                         </Tag>
+                        <Tag
+                          className="!mb-3"
+                          color={item.queueType === 'management' ? 'cyan' : 'blue'}
+                          icon={getQueueIcon(item.queueType)}
+                        >
+                          {item.queueType === 'management' ? '管理' : '下载'}
+                        </Tag>
                       </>
                     }
                     onClick={() => {
@@ -544,6 +591,9 @@ export const ImportTask = () => {
                       )}
 
                       <div className="text-base mb-1">
+                        <span style={{ marginRight: '8px' }}>
+                          {getQueueIcon(item.queueType)}
+                        </span>
                         {item.title}
                       </div>
                       <div className="mb-2">{item.description}</div>

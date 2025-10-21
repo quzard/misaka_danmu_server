@@ -2529,14 +2529,16 @@ async def create_task_in_history(
     status: str,
     description: str,
     scheduled_task_id: Optional[str] = None,
-    unique_key: Optional[str] = None
+    unique_key: Optional[str] = None,
+    queue_type: str = "download"
 ):
     now = get_now()
     new_task = TaskHistory(
-        taskId=task_id, title=title, status=status, 
+        taskId=task_id, title=title, status=status,
         description=description, scheduledTaskId=scheduled_task_id,
         createdAt=now, # type: ignore
         uniqueKey=unique_key,
+        queueType=queue_type,
         updatedAt=now
     )
     session.add(new_task)
@@ -2574,7 +2576,8 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         TaskHistory.progress,
         TaskHistory.description,
         TaskHistory.createdAt,
-        TaskHistory.scheduledTaskId
+        TaskHistory.scheduledTaskId,
+        TaskHistory.queueType
     )
 
     if search_term:
@@ -2599,7 +2602,8 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
             "progress": row.progress,
             "description": row.description,
             "createdAt": row.createdAt,
-            "isSystemTask": row.scheduledTaskId == "system_token_reset"
+            "isSystemTask": row.scheduledTaskId == "system_token_reset",
+            "queueType": row.queueType
         }
         for row in result.mappings()
     ]

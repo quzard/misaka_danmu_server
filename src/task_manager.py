@@ -27,7 +27,7 @@ class TaskSuccess(Exception):
     pass
 
 class Task:
-    def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None):
+    def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None, queue_type: str = "download"):
         self.task_id = task_id
         self.title = title
         self.coro_factory: Callable[[AsyncSession, Callable], Coroutine] = coro_factory
@@ -40,14 +40,19 @@ class Task:
         self.unique_key = unique_key
         self.task_type = task_type  # 任务类型，用于恢复
         self.task_parameters = task_parameters or {}  # 任务参数，用于恢复
+        self.queue_type = queue_type  # 队列类型: "download" 或 "management"
         self.pause_event.set() # 默认为运行状态 (事件被设置)
 
 class TaskManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         self._session_factory = session_factory
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._worker_task: asyncio.Task | None = None
-        self._current_task: Optional[Task] = None
+        # 双队列架构: 下载队列和管理队列
+        self._download_queue: asyncio.Queue = asyncio.Queue()
+        self._management_queue: asyncio.Queue = asyncio.Queue()
+        self._download_worker_task: asyncio.Task | None = None
+        self._management_worker_task: asyncio.Task | None = None
+        self._current_download_task: Optional[Task] = None
+        self._current_management_task: Optional[Task] = None
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
         self._lock = asyncio.Lock()
@@ -56,24 +61,29 @@ class TaskManager:
 
     def start(self):
         """启动后台工作协程来处理任务队列。"""
-        if self._worker_task is None:
-            self._worker_task = asyncio.create_task(self._worker())
+        if self._download_worker_task is None:
+            self._download_worker_task = asyncio.create_task(self._download_worker())
+            self._management_worker_task = asyncio.create_task(self._management_worker())
             # 启动时处理中断的任务
             asyncio.create_task(self._handle_interrupted_tasks())
-            self.logger.info("任务管理器已启动。")
+            self.logger.info("任务管理器已启动 (下载队列 + 管理队列)。")
 
-    async def _run_task_wrapper(self, task: Task):
+    async def _run_task_wrapper(self, task: Task, queue_type: str = "download"):
         """
         一个独立的包装器，用于在后台安全地执行单个任务。
         这可以防止单个任务的失败或阻塞影响到整个任务管理器。
+
+        Args:
+            task: 要执行的任务
+            queue_type: 队列类型 ("download" 或 "management")
         """
-        self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id})")
+        self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id}) [队列: {queue_type}]")
         try:
             # This task is now running, remove it from pending titles
             # This is now the single point of responsibility for this cleanup.
             async with self._lock:
                 self._pending_titles.discard(task.title)
-                
+
             async with self._session_factory() as session:
                 await crud.update_task_progress_in_history(
                     session, task.task_id, TaskStatus.RUNNING, 0, "正在初始化..."
@@ -95,7 +105,7 @@ class TaskManager:
                 await crud.finalize_task_in_history(
                     session, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
                 )
-                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成。")
+                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成 [队列: {queue_type}]。")
         except TaskSuccess as e:
             final_message = str(e) if str(e) else "任务成功完成"
             async with self._session_factory() as final_session:
@@ -126,26 +136,47 @@ class TaskManager:
 
     async def stop(self):
         """停止任务管理器。"""
-        if self._worker_task:
-            self._worker_task.cancel()
+        if self._download_worker_task:
+            self._download_worker_task.cancel()
             try:
-                await self._worker_task
+                await self._download_worker_task
             except asyncio.CancelledError:
                 pass
-            self._worker_task = None
-            self.logger.info("任务管理器已停止。")
+            self._download_worker_task = None
 
-    async def _worker(self):
-        """从队列中获取并执行任务。"""
-        while True:
-            task: Task = await self._queue.get()
+        if self._management_worker_task:
+            self._management_worker_task.cancel()
             try:
-                self._current_task = task
+                await self._management_worker_task
+            except asyncio.CancelledError:
+                pass
+            self._management_worker_task = None
+
+        self.logger.info("任务管理器已停止。")
+
+    async def _download_worker(self):
+        """从下载队列中获取并执行任务。"""
+        while True:
+            task: Task = await self._download_queue.get()
+            try:
+                self._current_download_task = task
                 # The wrapper now handles removing the title from the pending set.
-                await self._run_task_wrapper(task)
+                await self._run_task_wrapper(task, queue_type="download")
             finally:
-                self._current_task = None
-                self._queue.task_done()
+                self._current_download_task = None
+                self._download_queue.task_done()
+
+    async def _management_worker(self):
+        """从管理队列中获取并执行任务。"""
+        while True:
+            task: Task = await self._management_queue.get()
+            try:
+                self._current_management_task = task
+                # The wrapper now handles removing the title from the pending set.
+                await self._run_task_wrapper(task, queue_type="management")
+            finally:
+                self._current_management_task = None
+                self._management_queue.task_done()
 
     async def submit_task(
         self,
@@ -155,9 +186,14 @@ class TaskManager:
         unique_key: Optional[str] = None,
         run_immediately: bool = False,
         task_type: Optional[str] = None,
-        task_parameters: Optional[Dict] = None
+        task_parameters: Optional[Dict] = None,
+        queue_type: str = "download"
     ) -> Tuple[str, asyncio.Event]:
-        """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。"""
+        """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。
+
+        Args:
+            queue_type: 队列类型，"download" (下载队列) 或 "management" (管理队列)
+        """
         async with self._lock:
             # 检查是否有同名任务正在排队或运行
             if title in self._pending_titles:
@@ -165,12 +201,14 @@ class TaskManager:
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"任务 '{title}' 已在队列中，请勿重复提交。"
                 )
-            if self._current_task and self._current_task.title == title:
+            # 检查两个队列的当前任务
+            if (self._current_download_task and self._current_download_task.title == title) or \
+               (self._current_management_task and self._current_management_task.title == title):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"任务 '{title}' 已在运行中，请勿重复提交。"
                 )
-            
+
             # 新增：检查唯一键，防止同一资源的多个任务同时进行
             if unique_key:
                 if unique_key in self._active_unique_keys:
@@ -182,19 +220,21 @@ class TaskManager:
             self._pending_titles.add(title)
 
         task_id = str(uuid4())
-        task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters)
-        
+        task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters, queue_type=queue_type)
+
         async with self._session_factory() as session:
             await crud.create_task_in_history(
-                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id
+                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, queue_type=queue_type
             )
-        
+
         if run_immediately:
-            self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过主队列。")
-            asyncio.create_task(self._run_task_wrapper(task))
+            self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过队列 [{queue_type}]。")
+            asyncio.create_task(self._run_task_wrapper(task, queue_type=queue_type))
         else:
-            await self._queue.put(task)
-            self.logger.info(f"任务 '{title}' 已提交到队列，ID: {task_id}")
+            # 根据队列类型选择队列
+            target_queue = self._download_queue if queue_type == "download" else self._management_queue
+            await target_queue.put(task)
+            self.logger.info(f"任务 '{title}' 已提交到 {queue_type} 队列，ID: {task_id}")
         return task_id, task.done_event
 
     def _get_progress_callback(self, task: Task) -> Callable:
@@ -234,22 +274,43 @@ class TaskManager:
         """
         found_and_removed = False
         task_to_remove: Optional[Task] = None
+
+        # 检查下载队列
         temp_list = []
-        while not self._queue.empty():
+        while not self._download_queue.empty():
             try:
-                task = self._queue.get_nowait()
+                task = self._download_queue.get_nowait()
                 if task.task_id == task_id:
                     found_and_removed = True
                     task_to_remove = task
                     task.done_event.set()
-                    self.logger.info(f"已从队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
+                    self.logger.info(f"已从下载队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                 else:
                     temp_list.append(task)
             except asyncio.QueueEmpty:
                 break
 
         for task in temp_list:
-            await self._queue.put(task)
+            await self._download_queue.put(task)
+
+        # 如果在下载队列中没找到，检查管理队列
+        if not found_and_removed:
+            temp_list = []
+            while not self._management_queue.empty():
+                try:
+                    task = self._management_queue.get_nowait()
+                    if task.task_id == task_id:
+                        found_and_removed = True
+                        task_to_remove = task
+                        task.done_event.set()
+                        self.logger.info(f"已从管理队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
+                    else:
+                        temp_list.append(task)
+                except asyncio.QueueEmpty:
+                    break
+
+            for task in temp_list:
+                await self._management_queue.put(task)
 
         # 修正：如果一个待处理任务被取消，必须同时清理其在管理器中的状态（任务标题和唯一键），
         # 以允许用户重新提交该任务。
@@ -264,35 +325,66 @@ class TaskManager:
 
     async def abort_current_task(self, task_id: str) -> bool:
         """如果ID匹配，则中止当前正在运行或暂停的任务。"""
-        if self._current_task and self._current_task.task_id == task_id and self._current_task.running_coro_task:
-            self.logger.info(f"正在中止当前任务 '{self._current_task.title}' (ID: {task_id})")
+        # 检查下载队列的当前任务
+        if self._current_download_task and self._current_download_task.task_id == task_id and self._current_download_task.running_coro_task:
+            self.logger.info(f"正在中止下载队列任务 '{self._current_download_task.title}' (ID: {task_id})")
             # 解除暂停，以便任务可以接收到取消异常
-            self._current_task.pause_event.set()
+            self._current_download_task.pause_event.set()
             # 取消底层的协程
-            self._current_task.running_coro_task.cancel()
+            self._current_download_task.running_coro_task.cancel()
             return True
+
+        # 检查管理队列的当前任务
+        if self._current_management_task and self._current_management_task.task_id == task_id and self._current_management_task.running_coro_task:
+            self.logger.info(f"正在中止管理队列任务 '{self._current_management_task.title}' (ID: {task_id})")
+            # 解除暂停，以便任务可以接收到取消异常
+            self._current_management_task.pause_event.set()
+            # 取消底层的协程
+            self._current_management_task.running_coro_task.cancel()
+            return True
+
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
     async def pause_task(self, task_id: str) -> bool:
         """如果ID匹配，则暂停当前正在运行的任务。"""
-        if self._current_task and self._current_task.task_id == task_id:
+        # 检查下载队列的当前任务
+        if self._current_download_task and self._current_download_task.task_id == task_id:
             async with self._session_factory() as session:
-                self._current_task.pause_event.clear()
-                await crud.update_task_status(session, self._current_task.task_id, TaskStatus.PAUSED)
-                self.logger.info(f"已暂停任务 '{self._current_task.title}' (ID: {task_id})。")
+                self._current_download_task.pause_event.clear()
+                await crud.update_task_status(session, self._current_download_task.task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停下载队列任务 '{self._current_download_task.title}' (ID: {task_id})。")
                 return True
+
+        # 检查管理队列的当前任务
+        if self._current_management_task and self._current_management_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_management_task.pause_event.clear()
+                await crud.update_task_status(session, self._current_management_task.task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
     async def resume_task(self, task_id: str) -> bool:
         """如果ID匹配，则恢复当前已暂停的任务。"""
-        if self._current_task and self._current_task.task_id == task_id:
+        # 检查下载队列的当前任务
+        if self._current_download_task and self._current_download_task.task_id == task_id:
             async with self._session_factory() as session:
-                self._current_task.pause_event.set()
-                await crud.update_task_status(session, self._current_task.task_id, TaskStatus.RUNNING)
-                self.logger.info(f"已恢复任务 '{self._current_task.title}' (ID: {task_id})。")
+                self._current_download_task.pause_event.set()
+                await crud.update_task_status(session, self._current_download_task.task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复下载队列任务 '{self._current_download_task.title}' (ID: {task_id})。")
                 return True
+
+        # 检查管理队列的当前任务
+        if self._current_management_task and self._current_management_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_management_task.pause_event.set()
+                await crud.update_task_status(session, self._current_management_task.task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
         return False
 
