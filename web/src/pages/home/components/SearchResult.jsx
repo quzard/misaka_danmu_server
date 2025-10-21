@@ -583,24 +583,32 @@ export const SearchResult = () => {
         const key = `${item.provider}_${item.mediaId}`
         const isChecked = supplementMap[key]?.enabled || false
 
+        // 检查补充源是否支持分集URL获取 (目前只有360源支持)
+        // 未来如果有其他源支持,可以在这里添加
+        const supports_episode_urls = best_supplement.provider === '360'
+
         return (
           <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2 flex-wrap justify-start">
             <Tag color="purple">{best_supplement.provider}</Tag>
             <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
               找到补充源: {best_supplement.title}
             </span>
-            <Checkbox
-              checked={isChecked}
-              onChange={e => {
-                e.stopPropagation()
-                handleSupplementToggle(item, best_supplement, e.target.checked)
-              }}
-            >
-              使用补充源分集列表
-            </Checkbox>
-            <span className="text-xs text-gray-400">
-              (将从{best_supplement.provider}获取其他平台的分集链接)
-            </span>
+            {supports_episode_urls && (
+              <>
+                <Checkbox
+                  checked={isChecked}
+                  onChange={e => {
+                    e.stopPropagation()
+                    handleSupplementToggle(item, best_supplement, e.target.checked)
+                  }}
+                >
+                  使用补充源分集列表
+                </Checkbox>
+                <span className="text-xs text-gray-400">
+                  (将从{best_supplement.provider}获取其他平台的分集链接)
+                </span>
+              </>
+            )}
           </div>
         )
       }

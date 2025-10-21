@@ -66,6 +66,7 @@ class So360MetadataSource(BaseMetadataSource):
     test_url = "https://so.360kan.com"
     is_failover_source = True
     has_force_aux_search_toggle = True
+    supports_episode_urls = True  # 360源支持获取分集URL
 
     def __init__(self, session_factory, config_manager: ConfigManager, scraper_manager):
         super().__init__(session_factory, config_manager, scraper_manager)

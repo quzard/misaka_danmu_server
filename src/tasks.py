@@ -979,10 +979,12 @@ async def generic_import_task(
         await progress_callback(12, f"主源无分集,尝试使用补充源 {supplementProvider}...")
 
         try:
-            # 获取补充源实例(360)
+            # 获取补充源实例
             supplement_source = metadata_manager.sources.get(supplementProvider)
             if not supplement_source:
                 logger.warning(f"补充源 {supplementProvider} 不可用")
+            elif not getattr(supplement_source, 'supports_episode_urls', False):
+                logger.warning(f"补充源 {supplementProvider} 不支持分集URL获取")
             else:
                 # 获取补充源详情
                 supplement_details = await supplement_source.get_details(supplementMediaId, None)
@@ -991,7 +993,7 @@ async def generic_import_task(
                 else:
                     logger.info(f"补充源详情: {supplement_details.title}")
 
-                    # 使用360源获取分集URL列表
+                    # 使用补充源获取分集URL列表
                     episode_urls = []
                     max_episodes = 200  # 最多尝试200集
 
@@ -999,7 +1001,7 @@ async def generic_import_task(
                         if i % 10 == 0:
                             await progress_callback(12 + int((i / max_episodes) * 8), f"正在获取第{i}集URL...")
 
-                        # 调用360源的内部方法获取URL
+                        # 调用补充源的内部方法获取URL (目前只有360源实现了此方法)
                         url = await supplement_source._get_episode_url_from_360(
                             supplement_details, i, provider  # 目标平台
                         )

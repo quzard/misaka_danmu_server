@@ -17,6 +17,8 @@ class BaseMetadataSource(ABC):
     provider_name: str
     # 新增：声明可配置字段 { "db_key": ("UI标签", "类型", "提示") }
     configurable_fields: Dict[str, Tuple[str, str, str]] = {}
+    # 新增：是否支持获取分集URL (用于补充源功能)
+    supports_episode_urls: bool = False
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
         self._session_factory = session_factory
