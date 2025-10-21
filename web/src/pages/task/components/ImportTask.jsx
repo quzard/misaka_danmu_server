@@ -22,8 +22,6 @@ import {
   Tag,
   Tooltip,
   Dropdown,
-  Row,
-  Col,
 } from 'antd'
 import {
   CheckOutlined,
@@ -433,92 +431,85 @@ export const ImportTask = () => {
         loading={loading}
         title="任务管理器"
         extra={
-         <Row gutter={[8, 12]} style={{
-            padding: isMobile ? '16px 0' : '0',
-          }}>
-            <Col md={24} xs={24}>
-              <div className='flex items-center justify-end gap-2 flex-wrap'>
-                <Dropdown menu={statusMenu}>
-                  <Button icon={<FilterOutlined />} size="small">
-                    {getStatusLabel(status)}
-                  </Button>
-                </Dropdown>
-                <Dropdown menu={queueMenu}>
-                  <Button icon={<FilterOutlined />} size="small">
-                    {getQueueLabel(queueFilter)}
-                  </Button>
-                </Dropdown>
-                <Tooltip title="全选/取消全选">
-                  <Button
-                    type="default"
-                    shape="circle"
-                    size="small"
-                    icon={
-                      selectList.length === taskList.length &&
-                      !!selectList.length ? (
-                        <CheckOutlined />
-                      ) : (
-                        <MinusOutlined />
-                      )
-                    }
-                    onClick={() => {
-                      if (
-                        selectList.length === taskList.length &&
-                        !!selectList.length
-                      ) {
-                        setSelectList([])
-                      } else {
-                        setSelectList(taskList)
-                      }
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="启用/暂停任务">
-                  <Button
-                    disabled={!canPause}
-                    type="default"
-                    shape="circle"
-                    size="small"
-                    icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
-                    onClick={handlePause}
-                  />
-                </Tooltip>
-                <Tooltip title="删除任务">
-                  <Button
-                    disabled={!canDelete}
-                    type="default"
-                    shape="circle"
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={handleDelete}
-                  />
-                </Tooltip>
-                <Tooltip title="中止任务">
-                  <Button
-                    disabled={!canStop}
-                    type="default"
-                    shape="circle"
-                    size="small"
-                    icon={<StopOutlined />}
-                    onClick={handleStop}
-                  />
-                </Tooltip>
-              </div>
-            </Col>
-            <Col md={24} xs={24} style={{ marginTop: isMobile ? '12px' : '0' }}>
-              <Input.Search
-                placeholder="按任务标题搜索"
-                allowClear
-                enterButton
+          <div className='flex items-center justify-end gap-2 flex-wrap' style={{ maxWidth: '100%' }}>
+            <Dropdown menu={statusMenu}>
+              <Button icon={<FilterOutlined />} size="small">
+                {getStatusLabel(status)}
+              </Button>
+            </Dropdown>
+            <Dropdown menu={queueMenu}>
+              <Button icon={<FilterOutlined />} size="small">
+                {getQueueLabel(queueFilter)}
+              </Button>
+            </Dropdown>
+            <Tooltip title="全选/取消全选">
+              <Button
+                type="default"
+                shape="circle"
                 size="small"
-                onSearch={value => {
-                  navigate(`/task?search=${value}&status=${status}`, {
-                    replace: true,
-                  })
+                icon={
+                  selectList.length === taskList.length &&
+                  !!selectList.length ? (
+                    <CheckOutlined />
+                  ) : (
+                    <MinusOutlined />
+                  )
+                }
+                onClick={() => {
+                  if (
+                    selectList.length === taskList.length &&
+                    !!selectList.length
+                  ) {
+                    setSelectList([])
+                  } else {
+                    setSelectList(taskList)
+                  }
                 }}
               />
-            </Col>
-          </Row>
+            </Tooltip>
+            <Tooltip title="启用/暂停任务">
+              <Button
+                disabled={!canPause}
+                type="default"
+                shape="circle"
+                size="small"
+                icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
+                onClick={handlePause}
+              />
+            </Tooltip>
+            <Tooltip title="删除任务">
+              <Button
+                disabled={!canDelete}
+                type="default"
+                shape="circle"
+                size="small"
+                icon={<DeleteOutlined />}
+                onClick={handleDelete}
+              />
+            </Tooltip>
+            <Tooltip title="中止任务">
+              <Button
+                disabled={!canStop}
+                type="default"
+                shape="circle"
+                size="small"
+                icon={<StopOutlined />}
+                onClick={handleStop}
+              />
+            </Tooltip>
+            <Input.Search
+              placeholder="按任务标题搜索"
+              allowClear
+              enterButton
+              size="small"
+              style={{ width: isMobile ? '100%' : '200px' }}
+              onSearch={value => {
+                navigate(`/task?search=${value}&status=${status}`, {
+                  replace: true,
+                })
+              }}
+            />
+          </div>
         }
       >
         <div>

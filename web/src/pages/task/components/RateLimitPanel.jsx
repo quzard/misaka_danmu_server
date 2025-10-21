@@ -65,14 +65,34 @@ export const RateLimitPanel = () => {
               />
             )}
 
-            {/* 顶部卡片区 - 左右分栏 */}
+            {/* 顶部状态卡片 */}
+            <Card type="inner" className="!mb-4">
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <Statistic
+                    title="流控状态"
+                    value={status.enabled ? '已启用' : '已禁用'}
+                    valueStyle={{ color: status.enabled ? '#3f8600' : '#cf1322' }}
+                  />
+                </Col>
+                <Col xs={24} sm={12}>
+                  <Statistic.Countdown
+                    title="重置倒计时"
+                    value={Date.now() + status.secondsUntilReset * 1000}
+                    format="HH:mm:ss"
+                  />
+                </Col>
+              </Row>
+            </Card>
+
+            {/* 中间卡片区 - 左右分栏 */}
             <Row gutter={16} className="!mb-6">
-              {/* 左侧卡片 - 全局流控状态 */}
+              {/* 左侧卡片 - 全局流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🌐 全局流控状态">
+                <Card type="inner" title="🌐 全局流控">
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span><strong>全局限制:</strong></span>
+                      <span><strong>弹幕下载:</strong></span>
                       <span>{status.globalRequestCount} / {status.globalLimit}</span>
                     </div>
                     <Progress
@@ -93,13 +113,6 @@ export const RateLimitPanel = () => {
                       }
                     />
                   </div>
-                  <div style={{ marginBottom: 8 }}>
-                    <Statistic
-                      title="⏱️ 重置倒计时"
-                      value={status.secondsUntilReset}
-                      suffix="秒"
-                    />
-                  </div>
                 </Card>
               </Col>
 
@@ -108,7 +121,7 @@ export const RateLimitPanel = () => {
                 <Card type="inner" title="🔄 后备调用流控">
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span><strong>后备限制:</strong></span>
+                      <span><strong>匹配/搜索:</strong></span>
                       <span>{status.fallback?.totalCount || 0} / {status.fallback?.totalLimit || 0}</span>
                     </div>
                     <Progress
