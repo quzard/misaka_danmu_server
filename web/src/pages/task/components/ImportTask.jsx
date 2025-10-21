@@ -587,16 +587,28 @@ export const ImportTask = () => {
                         strokeWidth={10}
                         showInfo={true}
                       />
-                      <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                      <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         <Tag
-                          color={item.status.includes('失败') ? 'red' : item.status.includes('运行') ? 'green' : item.status.includes('暂停') ? 'orange' : 'blue'}
+                          color={
+                            item.status.includes('失败')
+                              ? 'red'
+                              : item.status.includes('运行中')
+                                ? 'green'
+                                : item.status.includes('已暂停')
+                                  ? 'orange'
+                                  : item.status.includes('已完成')
+                                    ? 'blue'
+                                    : 'default'
+                          }
                         >
                           {item.status}
                         </Tag>
                         <Tag
-                          color={item.queueType === 'management' ? 'cyan' : 'blue'}
-                          icon={getQueueIcon(item.queueType)}
+                          color={item.queueType === 'management' ? 'cyan' : 'geekblue'}
                         >
+                          <span style={{ marginRight: '4px' }}>
+                            {getQueueIcon(item.queueType)}
+                          </span>
                           {item.queueType === 'management' ? '管理队列' : '下载队列'}
                         </Tag>
                       </div>

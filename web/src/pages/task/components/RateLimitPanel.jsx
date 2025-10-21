@@ -94,11 +94,10 @@ export const RateLimitPanel = () => {
                     />
                   </div>
                   <div style={{ marginBottom: 8 }}>
-                    <Statistic.Timer
+                    <Statistic
                       title="⏱️ 重置倒计时"
-                      value={Date.now() + status.secondsUntilReset * 1000}
-                      format="HH:mm:ss"
-                      type="countdown"
+                      value={status.secondsUntilReset}
+                      suffix="秒"
                     />
                   </div>
                 </Card>
