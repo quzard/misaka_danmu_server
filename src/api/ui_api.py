@@ -2928,14 +2928,21 @@ class RateLimitProviderStatus(BaseModel):
     requestCount: int
     quota: Union[int, str]  # Can be a number or "∞"
 
+class FallbackRateLimitStatus(BaseModel):
+    totalCount: int
+    totalLimit: int
+    matchCount: int
+    searchCount: int
+
 class RateLimitStatusResponse(BaseModel):
-    globalEnabled: bool
+    enabled: bool  # 改为enabled以匹配前端
     verificationFailed: bool = Field(False, description="配置文件验证是否失败")
     globalRequestCount: int
     globalLimit: int
     globalPeriod: str
     secondsUntilReset: int
     providers: List[RateLimitProviderStatus]
+    fallback: Optional[FallbackRateLimitStatus] = None
 
 @router.get("/rate-limit/status", response_model=RateLimitStatusResponse, summary="获取所有流控规则的状态")
 async def get_rate_limit_status(
@@ -2995,14 +3002,26 @@ async def get_rate_limit_status(
     # 修正：将秒数转换为可读的字符串以匹配响应模型
     global_period_str = f"{period_seconds} 秒"
 
+    # 获取后备流控状态
+    fallback_state = states_map.get("__fallback__")
+    fallback_status = None
+    if fallback_state:
+        fallback_status = FallbackRateLimitStatus(
+            totalCount=fallback_state.requestCount,
+            totalLimit=rate_limiter.fallback_limit,
+            matchCount=fallback_state.matchCount if hasattr(fallback_state, 'matchCount') else 0,
+            searchCount=fallback_state.searchCount if hasattr(fallback_state, 'searchCount') else 0
+        )
+
     return RateLimitStatusResponse(
-        globalEnabled=global_enabled,
+        enabled=global_enabled,
         verificationFailed=rate_limiter._verification_failed,
         globalRequestCount=global_state.requestCount if global_state else 0,
         globalLimit=global_limit,
         globalPeriod=global_period_str,
         secondsUntilReset=seconds_until_reset,
-        providers=provider_items
+        providers=provider_items,
+        fallback=fallback_status
     )
 
 class WebhookSettings(BaseModel):

@@ -87,13 +87,13 @@ export const RateLimitPanel = () => {
 
             {/* 中间卡片区 - 左右分栏 */}
             <Row gutter={16} className="!mb-6">
-              {/* 左侧卡片 - 全局流控 */}
+              {/* 左侧卡片 - 弹幕下载流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🌐 全局流控">
-                  <div style={{ marginBottom: 12 }}>
+                <Card type="inner" title="🌐 弹幕下载流控">
+                  <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span><strong>弹幕下载:</strong></span>
-                      <span>{status.globalRequestCount} / {status.globalLimit}</span>
+                      <span><strong>弹幕下载详情:</strong></span>
+                      <span>{status.globalRequestCount} 次 / {status.globalLimit} 次</span>
                     </div>
                     <Progress
                       percent={status.globalLimit > 0 ? (status.globalRequestCount / status.globalLimit) * 100 : 0}
@@ -119,10 +119,10 @@ export const RateLimitPanel = () => {
               {/* 右侧卡片 - 后备调用流控 */}
               <Col xs={24} lg={12}>
                 <Card type="inner" title="🔄 后备调用流控">
-                  <div style={{ marginBottom: 12 }}>
+                  <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span><strong>匹配/搜索:</strong></span>
-                      <span>{status.fallback?.totalCount || 0} / {status.fallback?.totalLimit || 0}</span>
+                      <span><strong>后备流控详情:</strong></span>
+                      <span>{status.fallback?.totalCount || 0} 次 / {status.fallback?.totalLimit || 0} 次</span>
                     </div>
                     <Progress
                       percent={status.fallback?.totalLimit > 0 ? (status.fallback.totalCount / status.fallback.totalLimit) * 100 : 0}
@@ -142,14 +142,10 @@ export const RateLimitPanel = () => {
                       }
                     />
                   </div>
-                  <div>
-                    <div style={{ marginBottom: 8 }}>
-                      <strong>📊 调用统计:</strong>
-                    </div>
-                    <div style={{ paddingLeft: 16 }}>
-                      <div>• 匹配: {status.fallback?.matchCount || 0} 次</div>
-                      <div>• 搜索: {status.fallback?.searchCount || 0} 次</div>
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '12px' }}>
+                    <strong>📊 调用统计:</strong>
+                    <span>匹配: {status.fallback?.matchCount || 0} 次</span>
+                    <span>搜索: {status.fallback?.searchCount || 0} 次</span>
                   </div>
                 </Card>
               </Col>
