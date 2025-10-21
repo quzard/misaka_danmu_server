@@ -512,6 +512,20 @@ async def get_source_details(
 class ReassociationRequest(models.BaseModel):
     targetAnimeId: int
 
+@router.post("/library/anime/{sourceAnimeId}/reassociate/check", response_model=models.ReassociationConflictResponse, summary="检测关联冲突")
+async def check_reassociation_conflicts(
+    sourceAnimeId: int,
+    request_data: models.ReassociationRequest = Body(...),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """检测关联操作是否存在冲突"""
+    if sourceAnimeId == request_data.targetAnimeId:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="源作品和目标作品不能相同。")
+
+    conflicts = await crud.check_reassociation_conflicts(session, sourceAnimeId, request_data.targetAnimeId)
+    return conflicts
+
 @router.post("/library/anime/{sourceAnimeId}/reassociate", status_code=status.HTTP_204_NO_CONTENT, summary="重新关联作品的数据源")
 async def reassociate_anime_sources(
     sourceAnimeId: int,
@@ -527,6 +541,23 @@ async def reassociate_anime_sources(
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="源作品或目标作品未找到，或操作失败。")
     logger.info(f"用户 '{current_user.username}' 将作品 ID {sourceAnimeId} 的源关联到了 ID {request_data.targetAnimeId}。")
+    return
+
+@router.post("/library/anime/{sourceAnimeId}/reassociate/resolve", status_code=status.HTTP_204_NO_CONTENT, summary="执行关联并解决冲突")
+async def reassociate_with_conflict_resolution(
+    sourceAnimeId: int,
+    request_data: models.ReassociationResolveRequest = Body(...),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """根据用户选择执行关联操作,解决冲突"""
+    if sourceAnimeId == request_data.targetAnimeId:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="源作品和目标作品不能相同。")
+
+    success = await crud.reassociate_anime_sources_with_resolution(session, sourceAnimeId, request_data)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="源作品或目标作品未找到，或操作失败。")
+    logger.info(f"用户 '{current_user.username}' 将作品 ID {sourceAnimeId} 的源关联到了 ID {request_data.targetAnimeId}，并解决了冲突。")
     return
 
 @router.delete("/library/source/{sourceId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定数据源的任务")

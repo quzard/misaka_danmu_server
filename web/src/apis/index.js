@@ -379,10 +379,23 @@ export const batchManualImport = data =>
 export const getAnimeSource = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/sources`)
 
+/** 检测关联冲突 */
+export const checkReassociationConflicts = data =>
+  api.post(`/api/ui/library/anime/${data.sourceAnimeId}/reassociate/check`, {
+    targetAnimeId: data.targetAnimeId,
+  })
+
 /** 关联数据源 */
 export const setAnimeSource = data =>
   api.post(`/api/ui/library/anime/${data.sourceAnimeId}/reassociate`, {
     targetAnimeId: data.targetAnimeId,
+  })
+
+/** 关联数据源并解决冲突 */
+export const reassociateWithResolution = data =>
+  api.post(`/api/ui/library/anime/${data.sourceAnimeId}/reassociate/resolve`, {
+    targetAnimeId: data.targetAnimeId,
+    resolutions: data.resolutions,
   })
 
 /** 批量删除数据源 */
