@@ -1514,10 +1514,16 @@ async def reassociate_anime_sources(session: AsyncSession, source_anime_id: int,
     # 4. 重新编号目标番剧的所有源的 sourceOrder
     sorted_sources = sorted(target_anime.sources, key=lambda s: s.sourceOrder)
     logger.info(f"正在为目标番剧 (ID: {target_anime_id}) 的 {len(sorted_sources)} 个源重新编号...")
+
+    # 先将所有源的 sourceOrder 设置为负数,避免唯一约束冲突
     for i, source in enumerate(sorted_sources):
-        new_order = i + 1
-        if source.sourceOrder != new_order:
-            source.sourceOrder = new_order
+        source.sourceOrder = -(i + 1)
+    await session.flush()
+
+    # 再设置为正确的顺序
+    for i, source in enumerate(sorted_sources):
+        source.sourceOrder = i + 1
+    await session.flush()
 
     # 5. 删除现已为空的源番剧
     logger.info(f"正在删除现已为空的源番剧 (ID: {source_anime_id})。")
