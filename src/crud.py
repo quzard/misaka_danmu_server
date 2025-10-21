@@ -1411,10 +1411,10 @@ async def check_reassociation_conflicts(
                         episodeIndex=source_ep.episodeIndex,
                         sourceEpisodeId=source_ep.id,
                         targetEpisodeId=target_ep.id,
-                        sourceDanmakuCount=source_ep.danmakuCount or 0,
-                        targetDanmakuCount=target_ep.danmakuCount or 0,
-                        sourceLastFetchTime=source_ep.lastFetchTime,
-                        targetLastFetchTime=target_ep.lastFetchTime
+                        sourceDanmakuCount=source_ep.commentCount or 0,
+                        targetDanmakuCount=target_ep.commentCount or 0,
+                        sourceLastFetchTime=source_ep.fetchedAt,
+                        targetLastFetchTime=target_ep.fetchedAt
                     ))
 
             if conflict_episodes:
