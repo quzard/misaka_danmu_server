@@ -586,6 +586,15 @@ export const SearchResult = () => {
         // 从API响应中读取是否支持分集URL获取
         const supports_episode_urls = best_supplement.supportsEpisodeUrls === true
 
+        // 调试日志
+        console.log('[补充源调试]', {
+          provider: best_supplement.provider,
+          title: best_supplement.title,
+          supportsEpisodeUrls: best_supplement.supportsEpisodeUrls,
+          supports_episode_urls,
+          best_supplement
+        })
+
         return (
           <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2 flex-wrap justify-start">
             <Tag color="purple">{best_supplement.provider}</Tag>

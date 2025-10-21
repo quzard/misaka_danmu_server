@@ -225,7 +225,11 @@ class MetadataSourceManager:
                     if provider_name in ['douban', '360']:
                         supplemental_results.append(models.ProviderSearchInfo(
                             provider=provider_name, mediaId=item.id, title=item.title,
-                            type='unknown', season=1, year=None, imageUrl=item.imageUrl
+                            type=item.type if hasattr(item, 'type') and item.type else 'unknown',
+                            season=1,
+                            year=item.year if hasattr(item, 'year') else None,
+                            imageUrl=item.imageUrl,
+                            supportsEpisodeUrls=item.supportsEpisodeUrls  # 传递是否支持分集URL的标志
                         ))
             elif isinstance(res, Exception):
                 if isinstance(res, httpx.ConnectError):

@@ -83,16 +83,34 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                 movie_res, tv_res = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
 
                 all_subjects = []
-                for res in [movie_res, tv_res]:
-                    if isinstance(res, httpx.Response) and res.status_code == 200:
-                        await log_response(f"search '{keyword}'", res)
-                        try:
-                            data = DoubanJsonSearchResponse.model_validate(res.json())
-                            all_subjects.extend(data.subjects)
-                        except ValidationError as e:
-                            self.logger.warning(f"解析豆瓣JSON API响应失败: {e} - 响应: {res.text[:200]}")
-                    elif isinstance(res, Exception):
-                        self.logger.error(f"请求豆瓣JSON API时发生网络错误: {res}")
+                # 记录每个subject的类型
+                subject_types = {}
+
+                # 处理电影结果
+                if isinstance(movie_res, httpx.Response) and movie_res.status_code == 200:
+                    await log_response(f"search '{keyword}'", movie_res)
+                    try:
+                        data = DoubanJsonSearchResponse.model_validate(movie_res.json())
+                        all_subjects.extend(data.subjects)
+                        for subject in data.subjects:
+                            subject_types[subject.id] = "movie"
+                    except ValidationError as e:
+                        self.logger.warning(f"解析豆瓣JSON API响应失败: {e} - 响应: {movie_res.text[:200]}")
+                elif isinstance(movie_res, Exception):
+                    self.logger.error(f"请求豆瓣JSON API时发生网络错误: {movie_res}")
+
+                # 处理电视剧结果
+                if isinstance(tv_res, httpx.Response) and tv_res.status_code == 200:
+                    await log_response(f"search '{keyword}'", tv_res)
+                    try:
+                        data = DoubanJsonSearchResponse.model_validate(tv_res.json())
+                        all_subjects.extend(data.subjects)
+                        for subject in data.subjects:
+                            subject_types[subject.id] = "tv_series"
+                    except ValidationError as e:
+                        self.logger.warning(f"解析豆瓣JSON API响应失败: {e} - 响应: {tv_res.text[:200]}")
+                elif isinstance(tv_res, Exception):
+                    self.logger.error(f"请求豆瓣JSON API时发生网络错误: {tv_res}")
 
                 seen_ids = set()
                 results = []
@@ -101,6 +119,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                         results.append(models.MetadataDetailsResponse(
                             id=subject.id, doubanId=subject.id, title=subject.title,
                             details=f"评分: {subject.rate}", imageUrl=subject.cover,
+                            type=subject_types.get(subject.id, "unknown"),  # 从记录的类型中获取
                             supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
                         ))
                         seen_ids.add(subject.id)

@@ -61,6 +61,7 @@ class ProviderSearchInfo(BaseModel):
     episodeCount: Optional[int] = Field(None, description="总集数")
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索词指定了集数，则为当前集数")
     url: Optional[str] = Field(None, description="平台播放页面URL")
+    supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
 
 
 class ProviderSearchResponse(BaseModel):
