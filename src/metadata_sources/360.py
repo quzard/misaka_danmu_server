@@ -199,7 +199,8 @@ class So360MetadataSource(BaseMetadataSource):
                     imageUrl=item.get('cover'),
                     year=int(item['year']) if item.get('year') and str(item['year']).isdigit() else None,
                     aliasesCn=item.get('alias', []),
-                    extra={"item_data": item}  # 保存原始数据用于后续处理
+                    extra={"item_data": item},  # 保存原始数据用于后续处理
+                    supportsEpisodeUrls=True  # 360源支持获取分集URL
                 ))
 
             self.logger.info(f"360搜索: 过滤后返回 {len(results)} 个结果")
@@ -273,7 +274,8 @@ class So360MetadataSource(BaseMetadataSource):
                             imageUrl=cover_info.cover,
                             details=cover_info.description,
                             aliasesCn=aliases,
-                            year=int(cover_info.year) if cover_info.year and cover_info.year.isdigit() else None
+                            year=int(cover_info.year) if cover_info.year and cover_info.year.isdigit() else None,
+                            supportsEpisodeUrls=True  # 360源支持获取分集URL
                         )
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:

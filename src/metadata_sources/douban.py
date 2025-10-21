@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+import urllib.parse
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
@@ -34,6 +36,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
     test_url = "https://movie.douban.com"
     has_force_aux_search_toggle = True # 新增：硬编码标志
     is_failover_source = True
+    supports_episode_urls = True  # 支持获取分集URL
     async def _create_client(self) -> httpx.AsyncClient:
         """Creates an httpx.AsyncClient with Douban cookie and proxy settings."""
         cookie = await self.config_manager.get("doubanCookie", "")
@@ -98,6 +101,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                         results.append(models.MetadataDetailsResponse(
                             id=subject.id, doubanId=subject.id, title=subject.title,
                             details=f"评分: {subject.rate}", imageUrl=subject.cover,
+                            supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
                         ))
                         seen_ids.add(subject.id)
                 return results
@@ -149,7 +153,8 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
 
                 return models.MetadataDetailsResponse(
                     id=item_id, doubanId=item_id, title=title,
-                    imdbId=imdb_id, aliasesCn=aliases_cn, year=year
+                    imdbId=imdb_id, aliasesCn=aliases_cn, year=year,
+                    supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
                 )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:
@@ -219,8 +224,91 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         raise NotImplementedError(f"源 '{self.provider_name}' 不支持任何自定义操作。")
 
     async def _get_provider_setting(self) -> Dict[str, Any]:
-        """辅助函数，用于从数据库获取当前源的设置。"""
+        """辅助函数,用于从数据库获取当前源的设置。"""
         async with self._session_factory() as session:
             settings = await crud.get_all_metadata_source_settings(session)
             provider_setting = next((s for s in settings if s['providerName'] == self.provider_name), None)
             return provider_setting or {}
+
+    async def _get_episode_urls_from_douban_page(self, douban_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
+        """
+        从豆瓣电影页面解析播放链接
+
+        Args:
+            douban_id: 豆瓣条目ID
+            target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv), 如果为None则返回所有平台
+
+        Returns:
+            List[Tuple[int, str]]: (集数, 播放URL) 的列表
+        """
+        # 平台映射: 你的项目provider名称 -> 豆瓣subtype ID
+        provider_to_subtype = {
+            "tencent": "1",   # 腾讯视频
+            "iqiyi": "9",     # 爱奇艺
+            "youku": "3",     # 优酷
+            "bilibili": "11", # B站
+            "mgtv": "17"      # 芒果TV
+        }
+
+        url = f"https://movie.douban.com/subject/{douban_id}/"
+        self.logger.info(f"豆瓣: 正在从页面获取播放链接 {url}")
+
+        try:
+            async with await self._create_client() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+
+                # 提取sources数据: sources[9] = [...];
+                pattern = r'sources\[(\d+)\]\s*=\s*(\[.*?\]);'
+                matches = re.findall(pattern, html, re.DOTALL)
+
+                if not matches:
+                    self.logger.warning(f"豆瓣: 未在页面中找到播放链接数据 (douban_id={douban_id})")
+                    return []
+
+                episode_urls: List[Tuple[int, str]] = []
+
+                for source_id, json_str in matches:
+                    # 如果指定了target_provider,只处理对应的source_id
+                    if target_provider:
+                        expected_subtype = provider_to_subtype.get(target_provider)
+                        if expected_subtype and source_id != expected_subtype:
+                            continue
+
+                    try:
+                        episodes = json.loads(json_str)
+                        for ep_data in episodes:
+                            ep_num = int(ep_data['ep'])
+                            encoded_url = ep_data['play_link']
+
+                            # 解析link2跳转链接: https://www.douban.com/link2/?url=<编码后的URL>&...
+                            parsed = urllib.parse.urlparse(encoded_url)
+                            query = urllib.parse.parse_qs(parsed.query)
+
+                            if 'url' not in query:
+                                self.logger.warning(f"豆瓣: 播放链接格式异常,缺少url参数: {encoded_url}")
+                                continue
+
+                            real_url = urllib.parse.unquote(query['url'][0])
+                            episode_urls.append((ep_num, real_url))
+
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"豆瓣: 解析播放链接JSON失败 (source_id={source_id}): {e}")
+                        continue
+                    except (KeyError, ValueError) as e:
+                        self.logger.error(f"豆瓣: 解析播放链接数据失败: {e}")
+                        continue
+
+                # 按集数排序
+                episode_urls.sort(key=lambda x: x[0])
+
+                self.logger.info(f"豆瓣: 成功解析 {len(episode_urls)} 个播放链接")
+                return episode_urls
+
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"豆瓣: 获取页面失败 (HTTP {e.response.status_code}): {url}")
+            return []
+        except Exception as e:
+            self.logger.error(f"豆瓣: 解析播放链接时发生异常: {e}", exc_info=True)
+            return []

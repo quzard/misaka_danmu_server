@@ -995,19 +995,32 @@ async def generic_import_task(
 
                     # 使用补充源获取分集URL列表
                     episode_urls = []
-                    max_episodes = 200  # 最多尝试200集
 
-                    for i in range(1, max_episodes + 1):
-                        if i % 10 == 0:
-                            await progress_callback(12 + int((i / max_episodes) * 8), f"正在获取第{i}集URL...")
+                    # 判断补充源类型,使用不同的获取方法
+                    if supplementProvider == "360":
+                        # 360源: 逐集尝试获取URL
+                        max_episodes = 200  # 最多尝试200集
+                        for i in range(1, max_episodes + 1):
+                            if i % 10 == 0:
+                                await progress_callback(12 + int((i / max_episodes) * 8), f"正在获取第{i}集URL...")
 
-                        # 调用补充源的内部方法获取URL (目前只有360源实现了此方法)
-                        url = await supplement_source._get_episode_url_from_360(
-                            supplement_details, i, provider  # 目标平台
+                            url = await supplement_source._get_episode_url_from_360(
+                                supplement_details, i, provider  # 目标平台
+                            )
+                            if not url:
+                                break
+                            episode_urls.append((i, url))
+
+                    elif supplementProvider == "douban":
+                        # 豆瓣源: 一次性解析页面获取所有URL
+                        await progress_callback(12, "正在从豆瓣页面解析播放链接...")
+                        episode_urls = await supplement_source._get_episode_urls_from_douban_page(
+                            supplementMediaId, provider  # 目标平台
                         )
-                        if not url:
-                            break
-                        episode_urls.append((i, url))
+                        await progress_callback(18, f"豆瓣解析完成,获取到 {len(episode_urls)} 个播放链接")
+
+                    else:
+                        logger.warning(f"未知的补充源类型: {supplementProvider}")
 
                     logger.info(f"补充源获取到 {len(episode_urls)} 个分集URL")
 

@@ -108,6 +108,7 @@ class MetadataDetailsResponse(BaseModel):
     imageUrl: Optional[str] = None
     details: Optional[str] = None
     year: Optional[int] = None
+    supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
 
 class AnimeCreate(BaseModel):
     """Model for creating a new anime entry manually."""
