@@ -109,21 +109,21 @@ export const RateLimitPanel = () => {
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                       <span><strong>后备限制:</strong></span>
-                      <span>{status.fallback.totalCount} / {status.fallback.totalLimit}</span>
+                      <span>{status.fallback?.totalCount || 0} / {status.fallback?.totalLimit || 0}</span>
                     </div>
                     <Progress
-                      percent={status.fallback.totalLimit > 0 ? (status.fallback.totalCount / status.fallback.totalLimit) * 100 : 0}
+                      percent={status.fallback?.totalLimit > 0 ? (status.fallback.totalCount / status.fallback.totalLimit) * 100 : 0}
                       status={
-                        status.fallback.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 100
+                        status.fallback?.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 100
                           ? 'exception'
-                          : status.fallback.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 80
+                          : status.fallback?.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 80
                             ? 'normal'
                             : 'success'
                       }
                       strokeColor={
-                        status.fallback.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 100
+                        status.fallback?.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 100
                           ? '#ff4d4f'
-                          : status.fallback.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 80
+                          : status.fallback?.totalLimit > 0 && (status.fallback.totalCount / status.fallback.totalLimit) * 100 >= 80
                             ? '#faad14'
                             : '#52c41a'
                       }
@@ -134,8 +134,8 @@ export const RateLimitPanel = () => {
                       <strong>📊 调用统计:</strong>
                     </div>
                     <div style={{ paddingLeft: 16 }}>
-                      <div>• 匹配: {status.fallback.matchCount} 次</div>
-                      <div>• 搜索: {status.fallback.searchCount} 次</div>
+                      <div>• 匹配: {status.fallback?.matchCount || 0} 次</div>
+                      <div>• 搜索: {status.fallback?.searchCount || 0} 次</div>
                     </div>
                   </div>
                 </Card>

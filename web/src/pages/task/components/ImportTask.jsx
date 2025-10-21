@@ -433,18 +433,18 @@ export const ImportTask = () => {
         loading={loading}
         title="任务管理器"
         extra={
-         <Row gutter={[4, 12]} style={{
+         <Row gutter={[8, 12]} style={{
             padding: isMobile ? '16px 0' : '0',
           }}>
-            <Col md={13} xs={24}>
-              <div className='flex items-center justify-center gap-3 flex-wrap'>
+            <Col md={24} xs={24}>
+              <div className='flex items-center justify-end gap-2 flex-wrap'>
                 <Dropdown menu={statusMenu}>
-                  <Button icon={<FilterOutlined />}>
+                  <Button icon={<FilterOutlined />} size="small">
                     {getStatusLabel(status)}
                   </Button>
                 </Dropdown>
                 <Dropdown menu={queueMenu}>
-                  <Button icon={<FilterOutlined />}>
+                  <Button icon={<FilterOutlined />} size="small">
                     {getQueueLabel(queueFilter)}
                   </Button>
                 </Dropdown>
@@ -452,6 +452,7 @@ export const ImportTask = () => {
                   <Button
                     type="default"
                     shape="circle"
+                    size="small"
                     icon={
                       selectList.length === taskList.length &&
                       !!selectList.length ? (
@@ -477,6 +478,7 @@ export const ImportTask = () => {
                     disabled={!canPause}
                     type="default"
                     shape="circle"
+                    size="small"
                     icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
                     onClick={handlePause}
                   />
@@ -486,6 +488,7 @@ export const ImportTask = () => {
                     disabled={!canDelete}
                     type="default"
                     shape="circle"
+                    size="small"
                     icon={<DeleteOutlined />}
                     onClick={handleDelete}
                   />
@@ -495,24 +498,26 @@ export const ImportTask = () => {
                     disabled={!canStop}
                     type="default"
                     shape="circle"
+                    size="small"
                     icon={<StopOutlined />}
                     onClick={handleStop}
                   />
                 </Tooltip>
-
-                
               </div>
             </Col>
-            <Col md={11} xs={24}><Input.Search
-              placeholder="按任务标题搜索"
-              allowClear
-              enterButton
-              onSearch={value => {
-                navigate(`/task?search=${value}&status=${status}`, {
-                  replace: true,
-                })
-              }}
-            /></Col>
+            <Col md={24} xs={24} style={{ marginTop: isMobile ? '12px' : '0' }}>
+              <Input.Search
+                placeholder="按任务标题搜索"
+                allowClear
+                enterButton
+                size="small"
+                onSearch={value => {
+                  navigate(`/task?search=${value}&status=${status}`, {
+                    replace: true,
+                  })
+                }}
+              />
+            </Col>
           </Row>
         }
       >
