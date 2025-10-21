@@ -3002,16 +3002,20 @@ async def get_rate_limit_status(
     # 修正：将秒数转换为可读的字符串以匹配响应模型
     global_period_str = f"{period_seconds} 秒"
 
-    # 获取后备流控状态
-    fallback_state = states_map.get("__fallback__")
-    fallback_status = None
-    if fallback_state:
-        fallback_status = FallbackRateLimitStatus(
-            totalCount=fallback_state.requestCount,
-            totalLimit=rate_limiter.fallback_limit,
-            matchCount=fallback_state.matchCount if hasattr(fallback_state, 'matchCount') else 0,
-            searchCount=fallback_state.searchCount if hasattr(fallback_state, 'searchCount') else 0
-        )
+    # 获取后备流控状态 (合并match和search)
+    fallback_match_state = states_map.get("__fallback_match__")
+    fallback_search_state = states_map.get("__fallback_search__")
+
+    match_count = fallback_match_state.requestCount if fallback_match_state else 0
+    search_count = fallback_search_state.requestCount if fallback_search_state else 0
+    total_fallback_count = match_count + search_count
+
+    fallback_status = FallbackRateLimitStatus(
+        totalCount=total_fallback_count,
+        totalLimit=rate_limiter.fallback_limit,
+        matchCount=match_count,
+        searchCount=search_count
+    )
 
     return RateLimitStatusResponse(
         enabled=global_enabled,
