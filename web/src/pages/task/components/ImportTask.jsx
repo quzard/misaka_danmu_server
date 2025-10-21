@@ -433,12 +433,12 @@ export const ImportTask = () => {
         extra={
           <div className='flex items-center justify-end gap-2 flex-wrap' style={{ maxWidth: '100%' }}>
             <Dropdown menu={statusMenu}>
-              <Button icon={<FilterOutlined />} size="small">
+              <Button icon={<FilterOutlined />}>
                 {getStatusLabel(status)}
               </Button>
             </Dropdown>
             <Dropdown menu={queueMenu}>
-              <Button icon={<FilterOutlined />} size="small">
+              <Button icon={<FilterOutlined />}>
                 {getQueueLabel(queueFilter)}
               </Button>
             </Dropdown>
@@ -446,7 +446,6 @@ export const ImportTask = () => {
               <Button
                 type="default"
                 shape="circle"
-                size="small"
                 icon={
                   selectList.length === taskList.length &&
                   !!selectList.length ? (
@@ -472,7 +471,6 @@ export const ImportTask = () => {
                 disabled={!canPause}
                 type="default"
                 shape="circle"
-                size="small"
                 icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
                 onClick={handlePause}
               />
@@ -482,7 +480,6 @@ export const ImportTask = () => {
                 disabled={!canDelete}
                 type="default"
                 shape="circle"
-                size="small"
                 icon={<DeleteOutlined />}
                 onClick={handleDelete}
               />
@@ -492,7 +489,6 @@ export const ImportTask = () => {
                 disabled={!canStop}
                 type="default"
                 shape="circle"
-                size="small"
                 icon={<StopOutlined />}
                 onClick={handleStop}
               />
@@ -501,7 +497,6 @@ export const ImportTask = () => {
               placeholder="按任务标题搜索"
               allowClear
               enterButton
-              size="small"
               style={{ width: isMobile ? '100%' : '200px' }}
               onSearch={value => {
                 navigate(`/task?search=${value}&status=${status}`, {
@@ -570,44 +565,79 @@ export const ImportTask = () => {
                         />
                       )}
 
-                      <div className="text-base mb-2 font-semibold">
-                        <span style={{ marginRight: '8px', fontSize: '18px' }}>
-                          {getQueueIcon(item.queueType)}
-                        </span>
-                        {item.title}
+                      {/* 第一行: 标题 + 状态标签 + 队列标签 */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div className="text-base font-semibold" style={{ flex: 1 }}>
+                          <span style={{ marginRight: '8px', fontSize: '18px' }}>
+                            {getQueueIcon(item.queueType)}
+                          </span>
+                          {item.title}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <Tag
+                            color={
+                              item.status.includes('失败')
+                                ? 'red'
+                                : item.status.includes('运行中')
+                                  ? 'green'
+                                  : item.status.includes('已暂停')
+                                    ? 'orange'
+                                    : item.status.includes('已完成')
+                                      ? 'blue'
+                                      : 'default'
+                            }
+                          >
+                            {item.status}
+                          </Tag>
+                          <Tag
+                            color={item.queueType === 'management' ? 'cyan' : 'geekblue'}
+                          >
+                            <span style={{ marginRight: '4px' }}>
+                              {getQueueIcon(item.queueType)}
+                            </span>
+                            {item.queueType === 'management' ? '管理队列' : '下载队列'}
+                          </Tag>
+                        </div>
                       </div>
-                      <div className="mb-3 text-gray-600">{item.description}</div>
+
+                      {/* 第二行: 描述 + 时间 */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <Tooltip title={item.description}>
+                          <div
+                            className="text-gray-600"
+                            style={{
+                              flex: 1,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              marginRight: '16px'
+                            }}
+                          >
+                            {item.description}
+                          </div>
+                        </Tooltip>
+                        {item.createdAt && (
+                          <Tag style={{ flexShrink: 0 }}>
+                            {new Date(item.createdAt).toLocaleString('zh-CN', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                              hour12: false
+                            })}
+                          </Tag>
+                        )}
+                      </div>
+
+                      {/* 第三行: 进度条 */}
                       <Progress
                         percent={item.progress}
                         status={item.status.includes('失败') && 'exception'}
                         strokeWidth={10}
                         showInfo={true}
                       />
-                      <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <Tag
-                          color={
-                            item.status.includes('失败')
-                              ? 'red'
-                              : item.status.includes('运行中')
-                                ? 'green'
-                                : item.status.includes('已暂停')
-                                  ? 'orange'
-                                  : item.status.includes('已完成')
-                                    ? 'blue'
-                                    : 'default'
-                          }
-                        >
-                          {item.status}
-                        </Tag>
-                        <Tag
-                          color={item.queueType === 'management' ? 'cyan' : 'geekblue'}
-                        >
-                          <span style={{ marginRight: '4px' }}>
-                            {getQueueIcon(item.queueType)}
-                          </span>
-                          {item.queueType === 'management' ? '管理队列' : '下载队列'}
-                        </Tag>
-                      </div>
                     </div>
                   </List.Item>
                 )
