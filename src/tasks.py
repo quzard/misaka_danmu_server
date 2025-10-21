@@ -1518,11 +1518,12 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
         # 根据数据库方言，暂时禁用外键检查
         if is_mysql:
             await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+            # MySQL需要提交SET命令
+            await session.commit()
         elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
             await session.execute(text("SET session_replication_role = 'replica';"))
-        
-        # 在某些数据库/驱动中，执行此类命令后需要提交
-        await session.commit()
 
         try:
             # 1. 获取计算新ID所需的信息
@@ -1658,9 +1659,12 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         # Temporarily disable foreign key checks
         if is_mysql:
             await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+            # MySQL需要提交SET命令
+            await session.commit()
         elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
             await session.execute(text("SET session_replication_role = 'replica';"))
-        await session.commit()
 
         try:
             old_episodes_to_delete = []

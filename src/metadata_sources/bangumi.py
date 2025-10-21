@@ -119,16 +119,23 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     auth = await session.get(orm_models.BangumiAuth, user_id)
     if not auth:
         return {"isAuthenticated": False}
-    
+
     # 修正：由于所有时间都以 naive UTC-like 形式存储，直接与当前的 naive UTC-like 时间比较
-    if auth.expiresAt and auth.expiresAt < get_now():
+    now = get_now()
+    if auth.expiresAt and auth.expiresAt < now:
         return {"isAuthenticated": False, "isExpired": True}
+
+    # 计算剩余天数
+    days_left = 0
+    if auth.expiresAt:
+        time_diff = auth.expiresAt - now
+        days_left = time_diff.days
 
     return {
         "isAuthenticated": True, "bangumiUserId": auth.bangumiUserId,
         "nickname": auth.nickname, "avatarUrl": auth.avatarUrl,
         "authorizedAt": auth.authorizedAt, "expiresAt": auth.expiresAt,
-        "accessToken": auth.accessToken
+        "accessToken": auth.accessToken, "daysLeft": days_left
     }
 
 async def _save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict[str, Any]):
@@ -148,6 +155,55 @@ async def _delete_bangumi_auth(session: AsyncSession, user_id: int):
     """删除用户的Bangumi授权信息。"""
     stmt = delete(orm_models.BangumiAuth).where(orm_models.BangumiAuth.userId == user_id)
     await session.execute(stmt)
+
+async def _refresh_bangumi_token(session: AsyncSession, user_id: int, config: Dict[str, Any]) -> bool:
+    """刷新Bangumi access token。
+
+    参考ani-rss实现:
+    - 当剩余天数 <= 3天时自动刷新
+    - 使用refresh_token换取新的access_token
+
+    Returns:
+        bool: 刷新成功返回True,失败返回False
+    """
+    auth = await session.get(orm_models.BangumiAuth, user_id)
+    if not auth or not auth.refreshToken:
+        return False
+
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+    redirect_uri = config.get("redirect_uri")
+
+    if not all([client_id, client_secret, redirect_uri]):
+        logger.warning("Bangumi OAuth配置不完整,无法刷新token")
+        return False
+
+    try:
+        payload = {
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": auth.refreshToken,
+            "redirect_uri": redirect_uri
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post("https://bgm.tv/oauth/access_token", json=payload)
+            response.raise_for_status()
+            token_data = response.json()
+
+            # 更新token信息
+            auth.accessToken = token_data["access_token"]
+            auth.refreshToken = token_data.get("refresh_token", auth.refreshToken)
+            auth.expiresAt = get_now() + timedelta(seconds=token_data.get("expires_in", 604800))
+            await session.flush()
+
+            logger.info(f"Bangumi token已自动刷新 (用户ID: {user_id})")
+            return True
+
+    except Exception as e:
+        logger.error(f"刷新Bangumi token失败: {e}")
+        return False
 
 # ====================================================================
 # NEW: API Router for Bangumi specific web endpoints
@@ -400,16 +456,31 @@ class BangumiMetadataSource(BaseMetadataSource):
         if action_name == "get_auth_state":
             async with self._session_factory() as session:
                 auth_info = await _get_bangumi_auth(session, user.id)
+
+                # 自动刷新token (参考ani-rss: 剩余天数<=3天时刷新)
+                if auth_info.get("isAuthenticated") and auth_info.get("daysLeft", 999) <= 3:
+                    config = {
+                        "client_id": await self.config_manager.get("bangumiClientId", ""),
+                        "client_secret": await self.config_manager.get("bangumiClientSecret", ""),
+                        "redirect_uri": str(request.url_for('bangumi_auth_callback'))
+                    }
+                    refreshed = await _refresh_bangumi_token(session, user.id, config)
+                    if refreshed:
+                        await session.commit()
+                        # 重新获取授权信息
+                        auth_info = await _get_bangumi_auth(session, user.id)
+                        auth_info["refreshed"] = True
+
                 return auth_info
         elif action_name == "get_auth_url":
             async with self._session_factory() as session:
                 client_id = await self.config_manager.get("bangumiClientId", "")
                 if not client_id:
                     raise ValueError("Bangumi App ID 未在设置中配置。")
-                
+
                 # 修正：使用 FastAPI 的 url_for 来生成回调URL，以确保其在反向代理后也能正确工作。
                 redirect_uri = str(request.url_for('bangumi_auth_callback'))
-                
+
                 state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
                 auth_url = f"https://bgm.tv/oauth/authorize?{urlencode(params)}"

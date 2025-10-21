@@ -469,7 +469,16 @@ class YoukuScraper(BaseScraper):
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Episode Info Response (vid={vid}): {episode_info_resp.text}")
             episode_info_resp.raise_for_status()
-            episode_info = YoukuEpisodeInfo.model_validate(episode_info_resp.json())
+
+            # 检查API是否返回错误
+            resp_json = episode_info_resp.json()
+            if "error" in resp_json:
+                error_code = resp_json["error"].get("code")
+                error_msg = resp_json["error"].get("message", "Unknown error")
+                self.logger.warning(f"Youku API返回错误: code={error_code}, message={error_msg} (vid={vid})")
+                return []  # 返回空列表表示视频不存在或无法访问
+
+            episode_info = YoukuEpisodeInfo.model_validate(resp_json)
             total_mat = episode_info.total_mat
 
             if total_mat == 0:
