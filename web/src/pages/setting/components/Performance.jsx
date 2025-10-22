@@ -1,7 +1,7 @@
 import { Form, InputNumber, Button, Spin, Card, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { getConfig, setConfig } from '../../../apis'
-import { useMessage } from '../../../hooks/useMessage'
+import { useMessage } from '../../../MessageContext'
 
 const { Text } = Typography
 
