@@ -933,10 +933,13 @@ async def generic_import_task(
     bangumiId: Optional[str],
     progress_callback: Callable,
     session: AsyncSession,
-    manager: ScraperManager, 
+    manager: ScraperManager,
     task_manager: TaskManager,
     rate_limiter: RateLimiter,
-    title_recognition_manager: TitleRecognitionManager
+    title_recognition_manager: TitleRecognitionManager,
+    # 新增: 补充源信息
+    supplementProvider: Optional[str] = None,
+    supplementMediaId: Optional[str] = None
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -969,6 +972,58 @@ async def generic_import_task(
         target_episode_index=currentEpisodeIndex,
         db_media_type=mediaType
     )
+
+    # 如果主源无分集且有补充源,使用补充源获取分集URL
+    if not episodes and supplementProvider and supplementMediaId:
+        logger.info(f"主源无分集,尝试使用补充源 {supplementProvider} 获取分集列表")
+        await progress_callback(12, f"主源无分集,尝试使用补充源 {supplementProvider}...")
+
+        try:
+            # 获取补充源实例
+            supplement_source = metadata_manager.sources.get(supplementProvider)
+            if not supplement_source:
+                logger.warning(f"补充源 {supplementProvider} 不可用")
+            elif not getattr(supplement_source, 'supports_episode_urls', False):
+                logger.warning(f"补充源 {supplementProvider} 不支持分集URL获取")
+            else:
+                # 获取补充源详情
+                supplement_details = await supplement_source.get_details(supplementMediaId, None)
+                if not supplement_details:
+                    logger.warning(f"无法获取补充源详情 (mediaId={supplementMediaId})")
+                else:
+                    logger.info(f"补充源详情: {supplement_details.title}")
+
+                    # 使用补充源获取分集URL列表 (统一使用公开方法)
+                    await progress_callback(12, f"正在从{supplementProvider}获取分集URL...")
+                    episode_urls = await supplement_source.get_episode_urls(
+                        supplementMediaId, provider  # 目标平台
+                    )
+                    await progress_callback(18, f"{supplementProvider}解析完成,获取到 {len(episode_urls)} 个播放链接")
+
+                    logger.info(f"补充源获取到 {len(episode_urls)} 个分集URL")
+
+                    if episode_urls:
+                        # 解析URL获取分集信息
+                        episodes = []
+                        for i, url in episode_urls:
+                            try:
+                                # 从URL提取episode_id
+                                episode_id = await scraper.get_id_from_url(url)
+                                if episode_id:
+                                    episodes.append(models.ProviderEpisodeInfo(
+                                        provider=provider,
+                                        episodeId=episode_id,
+                                        title=f"第{i}集",
+                                        episodeIndex=i,
+                                        url=url
+                                    ))
+                            except Exception as e:
+                                logger.warning(f"解析URL失败 (第{i}集): {e}")
+
+                        logger.info(f"补充源成功解析 {len(episodes)} 个分集")
+                        await progress_callback(20, f"补充源成功获取 {len(episodes)} 个分集")
+        except Exception as e:
+            logger.error(f"使用补充源获取分集失败: {e}", exc_info=True)
 
     if not episodes:
         # 故障转移逻辑保持不变
@@ -1518,11 +1573,12 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
         # 根据数据库方言，暂时禁用外键检查
         if is_mysql:
             await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+            # MySQL需要提交SET命令
+            await session.commit()
         elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
             await session.execute(text("SET session_replication_role = 'replica';"))
-        
-        # 在某些数据库/驱动中，执行此类命令后需要提交
-        await session.commit()
 
         try:
             # 1. 获取计算新ID所需的信息
@@ -1658,9 +1714,12 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         # Temporarily disable foreign key checks
         if is_mysql:
             await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+            # MySQL需要提交SET命令
+            await session.commit()
         elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
             await session.execute(text("SET session_replication_role = 'replica';"))
-        await session.commit()
 
         try:
             old_episodes_to_delete = []

@@ -47,7 +47,14 @@ export const Bangumi = () => {
   }
   const getAuth = async () => {
     const res = await getBangumiAuth()
-    return res.data || {}
+    const authData = res.data || {}
+
+    // 如果token被自动刷新,显示提示
+    if (authData.refreshed) {
+      messageApi.success('授权已自动延长')
+    }
+
+    return authData
   }
 
   const getInfo = async () => {
@@ -147,8 +154,14 @@ export const Bangumi = () => {
   return (
     <div className="my-6">
       <Card loading={loading} title="Bangumi API 配置">
-        <div className="mb-4">
-          选择一种认证方式。优先推荐使用 Access Token，因为它更简单且不易过期。
+        <div className="mb-4 space-y-2">
+          <div className="text-sm">
+            <span className="font-medium">认证方式说明：</span>
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+            <div>• <span className="font-medium">Access Token</span>: 有效期最长1年，配置简单，推荐使用</div>
+            <div>• <span className="font-medium">OAuth 授权</span>: 有效期约7天，支持自动刷新（剩余≤3天时自动延长）</div>
+          </div>
         </div>
         <Form
           form={form}
@@ -183,6 +196,7 @@ export const Bangumi = () => {
                 }
                 rules={[{ required: true, message: '请输入App ID' }]}
                 className="mb-4"
+                tooltip="在 bgm.tv/dev/app 创建应用后获取"
               >
                 <Input placeholder="请输入App ID" />
               </Form.Item>
@@ -192,6 +206,7 @@ export const Bangumi = () => {
                 label="App Secret"
                 rules={[{ required: true, message: '请输入App Secret' }]}
                 className="mb-6"
+                tooltip="应用的密钥，请妥善保管"
               >
                 <Input.Password
                   prefix={<LockOutlined className="text-gray-400" />}
@@ -225,6 +240,7 @@ export const Bangumi = () => {
                 </span>
               }
               className="mb-6"
+              tooltip="有效期最长1年的访问令牌，在 next.bgm.tv/demo/access-token 获取"
             >
               <Input.Password
                 prefix={<KeyOutlined className="text-gray-400" />}
@@ -270,10 +286,57 @@ export const Bangumi = () => {
                 <div className="text-xs text-gray-400 dark:text-gray-500">
                   过期于: {dayjs(authInfo.expiresAt).format('YYYY-MM-DD HH:mm')}
                 </div>
+                {(() => {
+                  const now = dayjs()
+                  const expiresAt = dayjs(authInfo.expiresAt)
+                  const daysLeft = expiresAt.diff(now, 'day')
+                  const isExpiringSoon = daysLeft <= 7 && daysLeft > 0
+                  const isExpired = daysLeft < 0
+
+                  return (
+                    <div className={`text-xs mt-1 font-medium ${
+                      isExpired ? 'text-red-500' :
+                      isExpiringSoon ? 'text-orange-500' :
+                      'text-green-500'
+                    }`}>
+                      {isExpired ? (
+                        <>⚠️ 授权已过期</>
+                      ) : isExpiringSoon ? (
+                        <>⚠️ 剩余 {daysLeft} 天过期</>
+                      ) : (
+                        <>✓ 剩余 {daysLeft} 天</>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             </div>
-            <Button type="primary" danger onClick={handleLogout}>
-              注销
+            <div className="flex gap-2">
+              {(() => {
+                const now = dayjs()
+                const expiresAt = dayjs(authInfo.expiresAt)
+                const daysLeft = expiresAt.diff(now, 'day')
+                const showRenewButton = daysLeft <= 7
+
+                return showRenewButton && (
+                  <Tooltip title="重新授权以延长有效期">
+                    <Button type="primary" onClick={handleLogin}>
+                      延长授权
+                    </Button>
+                  </Tooltip>
+                )
+              })()}
+              <Button type="primary" danger onClick={handleLogout}>
+                注销
+              </Button>
+            </div>
+          </div>
+        ) : authInfo.isExpired ? (
+          <div className="text-center py-4">
+            <div className="mb-2 text-orange-500 font-medium">⚠️ 授权已过期</div>
+            <div className="mb-4 text-sm text-gray-500">请重新授权以继续使用Bangumi功能</div>
+            <Button type="primary" onClick={handleLogin}>
+              重新授权
             </Button>
           </div>
         ) : (

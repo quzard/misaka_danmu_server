@@ -99,6 +99,10 @@ export const SearchResult = () => {
   const [episodePageSize, setEpisodePageSize] = useState(10)
   const [episodeOrder, setEpisodeOrder] = useState('asc') // 新增：排序状态
 
+  // 补充源状态管理
+  const [supplementMap, setSupplementMap] = useState({})
+  // { 'bilibili_ss12345': { provider: '360', mediaId: 'xxx', title: 'xxx', enabled: true } }
+
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -197,6 +201,11 @@ export const SearchResult = () => {
     try {
       if (loading) return
       setLoading(true)
+
+      // 检查是否有补充源
+      const key = `${item.provider}_${item.mediaId}`
+      const supplement = supplementMap[key]
+
       const res = await importDanmu({
         provider: item.provider,
         mediaId: item.mediaId,
@@ -209,6 +218,9 @@ export const SearchResult = () => {
         imageUrl: item.imageUrl,
         doubanId: item.doubanId,
         currentEpisodeIndex: item.currentEpisodeIndex,
+        // 新增: 补充源信息
+        supplementProvider: supplement?.enabled ? supplement.provider : undefined,
+        supplementMediaId: supplement?.enabled ? supplement.mediaId : undefined,
       })
       messageApi.success(res.data.message || '导入成功')
     } catch (error) {
@@ -529,6 +541,20 @@ export const SearchResult = () => {
     })
   }
 
+  // 补充源复选框处理
+  const handleSupplementToggle = (mainItem, supplement, checked) => {
+    const key = `${mainItem.provider}_${mainItem.mediaId}`
+    setSupplementMap(prev => ({
+      ...prev,
+      [key]: checked ? {
+        provider: supplement.provider,
+        mediaId: supplement.mediaId,
+        title: supplement.title,
+        enabled: true
+      } : null
+    }))
+  }
+
   // 补充搜索
   const supplementDom = item => {
     if (item.episodeCount === 0) {
@@ -554,22 +580,40 @@ export const SearchResult = () => {
       )
 
       if (best_supplement) {
+        const key = `${item.provider}_${item.mediaId}`
+        const isChecked = supplementMap[key]?.enabled || false
+
+        // 从API响应中读取是否支持分集URL获取
+        const supports_episode_urls = best_supplement.supportsEpisodeUrls === true
+
+        // 调试日志
+        console.log('[补充源调试]', {
+          provider: best_supplement.provider,
+          title: best_supplement.title,
+          supportsEpisodeUrls: best_supplement.supportsEpisodeUrls,
+          supports_episode_urls,
+          best_supplement
+        })
+
         return (
           <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2 flex-wrap justify-start">
             <Tag color="purple">{best_supplement.provider}</Tag>
             <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
               找到补充源: {best_supplement.title}
             </span>
-            <Button
-              size="small"
-              type="link"
-              onClick={e => {
-                e.stopPropagation() // 防止触发外层的选择事件
-                handleImportDanmu(best_supplement)
-              }}
-            >
-              使用此源导入
-            </Button>
+            {supports_episode_urls && (
+              <>
+                <Checkbox
+                  checked={isChecked}
+                  onChange={e => {
+                    e.stopPropagation()
+                    handleSupplementToggle(item, best_supplement, e.target.checked)
+                  }}
+                >
+                  使用补充源分集列表
+                </Checkbox>
+              </>
+            )}
           </div>
         )
       }

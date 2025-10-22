@@ -225,7 +225,11 @@ class MetadataSourceManager:
                     if provider_name in ['douban', '360']:
                         supplemental_results.append(models.ProviderSearchInfo(
                             provider=provider_name, mediaId=item.id, title=item.title,
-                            type='unknown', season=1, year=None, imageUrl=item.imageUrl
+                            type=item.type if hasattr(item, 'type') and item.type else 'unknown',
+                            season=1,
+                            year=item.year if hasattr(item, 'year') else None,
+                            imageUrl=item.imageUrl,
+                            supportsEpisodeUrls=item.supportsEpisodeUrls  # 传递是否支持分集URL的标志
                         ))
             elif isinstance(res, Exception):
                 if isinstance(res, httpx.ConnectError):
@@ -448,10 +452,17 @@ class MetadataSourceManager:
         if source_class and getattr(source_class, 'has_force_aux_search_toggle', False):
             force_enabled_str = await self._config_manager.get(f"{providerName}_force_aux_search", "false")
             config_values['forceAuxSearchEnabled'] = force_enabled_str.lower() == 'true'
-        
+
         # 新增：告知前端此源是否为故障转移源，以决定是否显示“强制辅助”开关
         if source_class:
             config_values['isFailoverSource'] = getattr(source_class, 'is_failover_source', False)
+            # 新增：告知前端此源是否支持获取分集URL (补充源功能)
+            supports_episode_urls = getattr(source_class, 'supports_episode_urls', False)
+            config_values['supportsEpisodeUrls'] = supports_episode_urls
+            # 如果支持补充源，则读取其启用状态
+            if supports_episode_urls:
+                episode_urls_enabled_str = await self._config_manager.get(f"{providerName}_episode_urls_enabled", "false")
+                config_values['episodeUrlsEnabled'] = episode_urls_enabled_str.lower() == 'true'
 
 
         # 添加特殊逻辑
@@ -489,6 +500,12 @@ class MetadataSourceManager:
             force_enabled_value = str(payload.pop('forceAuxSearchEnabled', False)).lower()
             config_key = f"{providerName}_force_aux_search"
             config_fields_to_update[config_key] = force_enabled_value
+
+        # 新增：处理 episodeUrlsEnabled (补充源功能)，存储在 config 表中
+        if 'episodeUrlsEnabled' in payload:
+            episode_urls_enabled_value = str(payload.pop('episodeUrlsEnabled', False)).lower()
+            config_key = f"{providerName}_episode_urls_enabled"
+            config_fields_to_update[config_key] = episode_urls_enabled_value
 
         # 2b. 识别属于 config 表的字段
         allowed_keys_map = {

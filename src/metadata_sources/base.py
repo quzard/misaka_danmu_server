@@ -17,6 +17,8 @@ class BaseMetadataSource(ABC):
     provider_name: str
     # 新增：声明可配置字段 { "db_key": ("UI标签", "类型", "提示") }
     configurable_fields: Dict[str, Tuple[str, str, str]] = {}
+    # 新增：是否支持获取分集URL (用于补充源功能)
+    supports_episode_urls: bool = False
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
         self._session_factory = session_factory
@@ -58,6 +60,19 @@ class BaseMetadataSource(ABC):
         当主搜索源找不到分集时使用此方法。
         """
         return None # 默认实现不执行任何操作
+
+    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[tuple]:
+        """
+        获取分集URL列表 (补充源功能)。
+
+        Args:
+            metadata_id: 元数据源中的条目ID
+            target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv等), 如果为None则返回所有平台
+
+        Returns:
+            List[Tuple[int, str]]: (集数, 播放URL) 的列表
+        """
+        return [] # 默认实现返回空列表
 
     async def close(self):
         """关闭所有打开的资源，例如HTTP客户端。"""

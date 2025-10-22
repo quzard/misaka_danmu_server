@@ -61,6 +61,7 @@ class ProviderSearchInfo(BaseModel):
     episodeCount: Optional[int] = Field(None, description="总集数")
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索词指定了集数，则为当前集数")
     url: Optional[str] = Field(None, description="平台播放页面URL")
+    supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
 
 
 class ProviderSearchResponse(BaseModel):
@@ -88,11 +89,15 @@ class ImportRequest(BaseModel):
     doubanId: Optional[str] = None
     bangumiId: Optional[str] = None
     currentEpisodeIndex: Optional[int] = Field(None, description="如果搜索时指定了集数，则只导入此分集")
+    # 新增: 补充源信息
+    supplementProvider: Optional[str] = Field(None, description="补充源提供商 (如360), 用于获取分集列表")
+    supplementMediaId: Optional[str] = Field(None, description="补充源中的媒体ID")
 
 class MetadataDetailsResponse(BaseModel):
     """所有元数据源详情接口的统一响应模型。"""
     id: str
     title: str
+    type: Optional[str] = None
     tmdbId: Optional[str] = None
     imdbId: Optional[str] = None
     tvdbId: Optional[str] = None
@@ -105,6 +110,7 @@ class MetadataDetailsResponse(BaseModel):
     imageUrl: Optional[str] = None
     details: Optional[str] = None
     year: Optional[int] = None
+    supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
 
 class AnimeCreate(BaseModel):
     """Model for creating a new anime entry manually."""
@@ -234,6 +240,7 @@ class TaskInfo(BaseModel):
     description: str
     createdAt: datetime
     isSystemTask: bool = False
+    queueType: str = "download"  # 队列类型: "download"、"management" 或 "fallback"
 
 class PaginatedTasksResponse(BaseModel):
     """用于任务列表分页的响应模型"""
@@ -393,6 +400,44 @@ class ProxySettingsResponse(BaseModel):
 class ReassociationRequest(BaseModel):
     targetAnimeId: int
 
+class ConflictEpisode(BaseModel):
+    """冲突分集信息"""
+    episodeIndex: int
+    sourceEpisodeId: int
+    targetEpisodeId: int
+    sourceDanmakuCount: int
+    targetDanmakuCount: int
+    sourceLastFetchTime: Optional[datetime]
+    targetLastFetchTime: Optional[datetime]
+
+class ProviderConflict(BaseModel):
+    """提供商冲突信息"""
+    providerName: str
+    sourceSourceId: int
+    targetSourceId: int
+    conflictEpisodes: List[ConflictEpisode]
+
+class ReassociationConflictResponse(BaseModel):
+    """关联冲突检测响应"""
+    hasConflict: bool
+    conflicts: List[ProviderConflict]
+
+class EpisodeResolution(BaseModel):
+    """分集冲突解决方案"""
+    episodeIndex: int
+    keepSource: bool  # True=保留源分集, False=保留目标分集
+
+class ProviderResolution(BaseModel):
+    """提供商冲突解决方案"""
+    providerName: str
+    episodeResolutions: List[EpisodeResolution]
+    sourceOffset: int = 0  # 源番剧集数偏移
+
+class ReassociationResolveRequest(BaseModel):
+    """关联冲突解决请求"""
+    targetAnimeId: int
+    resolutions: List[ProviderResolution]
+
 class EpisodeOffsetRequest(BaseModel):
     episodeIds: List[int]
     offset: int
@@ -520,8 +565,17 @@ class RateLimitStatusResponse(BaseModel):
 class ControlRateLimitProviderStatus(BaseModel):
     """用于外部API的单个流控规则状态"""
     providerName: str
-    requestCount: int
+    directCount: int = Field(0, description="直接下载计数")
+    fallbackCount: int = Field(0, description="后备调用计数")
+    requestCount: int = Field(0, description="总计数 (directCount + fallbackCount)")
     quota: Union[int, str]
+
+class ControlRateLimitFallbackStatus(BaseModel):
+    """后备流控状态"""
+    totalCount: int = Field(0, description="后备调用总计数")
+    totalLimit: int = Field(50, description="后备调用总限制")
+    matchCount: int = Field(0, description="后备匹配计数")
+    searchCount: int = Field(0, description="后备搜索计数")
 
 class ControlRateLimitStatusResponse(BaseModel):
     """用于外部API的流控状态响应模型"""
@@ -531,3 +585,4 @@ class ControlRateLimitStatusResponse(BaseModel):
     globalPeriod: str
     secondsUntilReset: int
     providers: List[ControlRateLimitProviderStatus]
+    fallback: ControlRateLimitFallbackStatus

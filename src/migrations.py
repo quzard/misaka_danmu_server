@@ -317,6 +317,45 @@ async def _create_title_recognition_table_task(conn: AsyncConnection, db_type: s
     else:
         logger.info(f"识别词配置表 '{table_name}' 已存在，跳过创建")
 
+async def _add_queue_type_to_task_history_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 为task_history表添加queue_type字段"""
+    table_name = "task_history"
+    column_name = "queue_type"
+
+    # 检查列是否已存在
+    if db_type == "mysql":
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table_name}'
+            AND COLUMN_NAME = '{column_name}'
+        """)
+    else:  # postgresql
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = '{table_name}'
+            AND column_name = '{column_name}'
+        """)
+
+    column_exists = (await conn.execute(check_sql)).scalar() > 0
+
+    if not column_exists:
+        logger.info(f"为表 '{table_name}' 添加 '{column_name}' 列...")
+        if db_type == "mysql":
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} VARCHAR(20) NOT NULL DEFAULT 'download'
+            """)
+        else:  # postgresql
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} VARCHAR(20) NOT NULL DEFAULT 'download'
+            """)
+        await conn.execute(alter_sql)
+        logger.info(f"成功为表 '{table_name}' 添加 '{column_name}' 列")
+    else:
+        logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -338,6 +377,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_enable_metadata_source_proxy_by_default_v1", _enable_metadata_source_proxy_by_default_task, ()),
         ("migrate_create_task_state_cache_table_v1", _create_task_state_cache_table_task, (db_type,)),
         ("migrate_create_title_recognition_table_v1", _create_title_recognition_table_task, (db_type,)),
+        ("migrate_add_queue_type_to_task_history_v1", _add_queue_type_to_task_history_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

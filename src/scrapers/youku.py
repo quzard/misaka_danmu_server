@@ -469,7 +469,16 @@ class YoukuScraper(BaseScraper):
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Youku Episode Info Response (vid={vid}): {episode_info_resp.text}")
             episode_info_resp.raise_for_status()
-            episode_info = YoukuEpisodeInfo.model_validate(episode_info_resp.json())
+
+            # 检查API是否返回错误
+            resp_json = episode_info_resp.json()
+            if "error" in resp_json:
+                error_code = resp_json["error"].get("code")
+                error_msg = resp_json["error"].get("message", "Unknown error")
+                self.logger.warning(f"Youku API返回错误: code={error_code}, message={error_msg} (vid={vid})")
+                return []  # 返回空列表表示视频不存在或无法访问
+
+            episode_info = YoukuEpisodeInfo.model_validate(resp_json)
             total_mat = episode_info.total_mat
 
             if total_mat == 0:
@@ -518,19 +527,25 @@ class YoukuScraper(BaseScraper):
         # 修正：在函数开头就确保客户端已初始化，以防止在后续代码中对 NoneType 对象进行操作。
         client = await self._ensure_client()
 
-        # 步骤 1: 获取 'cna' cookie。
-        # 参考项目从 https://log.mmstat.com/eg.js 获取，这是优酷统计服务的标准做法。
-        cna_val = client.cookies.get("cna")
-        if not cna_val or force_refresh:
+        # 步骤 1: 获取 'cna' 值。
+        # 参考项目从 https://log.mmstat.com/eg.js 的 etag header 获取，而不是从cookie!
+        if not self._cna or force_refresh:
             try:
-                log_msg = "强制刷新 'cna' cookie..." if force_refresh else "'cna' cookie 未找到, 正在从 mmstat.com 获取..."
+                log_msg = "强制刷新 'cna' 值..." if force_refresh else "'cna' 值未找到, 正在从 mmstat.com 获取..."
                 self.logger.debug(f"Youku: {log_msg}")
-                # 修正：使用参考项目的方式获取CNA
-                await client.get("https://log.mmstat.com/eg.js")
-                cna_val = client.cookies.get("cna")
+                # 修正：从etag header获取cna (参考 danmu_api 项目)
+                response = await client.get("https://log.mmstat.com/eg.js")
+                etag = response.headers.get("etag") or response.headers.get("Etag")
+                if etag:
+                    # 移除etag两端的引号
+                    self._cna = etag.strip('"')
+                    self.logger.debug(f"Youku: 从etag header获取到 cna: {self._cna}")
+                else:
+                    self.logger.warning("Youku: etag header 未找到，无法获取 cna")
+                    self._cna = ""
             except httpx.ConnectError as e:
-                self.logger.warning(f"Youku: 无法连接到 mmstat.com 获取 'cna' cookie。错误: {e}")
-        self._cna = cna_val or ""
+                self.logger.warning(f"Youku: 无法连接到 mmstat.com 获取 'cna'。错误: {e}")
+                self._cna = ""
 
         # 步骤 2: 获取 '_m_h5_tk' 令牌, 此请求可能依赖于 'cna' cookie 的存在。
         token_val = client.cookies.get("_m_h5_tk")

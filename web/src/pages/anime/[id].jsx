@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   addSourceToAnime,
+  checkReassociationConflicts,
   deleteAnimeSource,
   deleteAnimeSourceSingle,
   fullSourceUpdate,
@@ -9,6 +10,7 @@ import {
   getAnimeLibrary,
   getAnimeSource,
   incrementalUpdate,
+  reassociateWithResolution,
   setAnimeSource,
   toggleSourceFavorite,
   toggleSourceIncremental,
@@ -39,6 +41,7 @@ import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
 import { useDebounce } from '../../hooks/useDebounce'
+import ReassociationConflictModal from './components/ReassociationConflictModal'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
@@ -48,6 +51,10 @@ export const AnimeDetail = () => {
   const [libraryList, setLibraryList] = useState([])
   const [editOpen, setEditOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
+  const [conflictModalOpen, setConflictModalOpen] = useState(false)
+  const [conflictData, setConflictData] = useState(null)
+  const [targetAnimeId, setTargetAnimeId] = useState(null)
+  const [targetAnimeTitle, setTargetAnimeTitle] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
   const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false)
 
@@ -131,34 +138,70 @@ export const AnimeDetail = () => {
     handleEditSource(false)
   }, [keyword, pagination.pageSize, pagination.current])
 
-  const handleConfirmSource = item => {
-    modalApi.confirm({
-      title: '关联数据源',
-      zIndex: 1002,
-      content: (
-        <div>
-          您确定要将当前作品的所有数据源关联到 "{item.title}" (ID:
-          {item.animeId}) 吗？
-          <br />
-          此操作不可撤销！
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await setAnimeSource({
-            sourceAnimeId: animeDetail.animeId,
-            targetAnimeId: item.animeId,
-          })
-          messageApi.success('关联成功')
-          setEditOpen(false)
-          navigate(RoutePaths.LIBRARY)
-        } catch (error) {
-          messageApi.error(`关联失败:${error.message}`)
-        }
-      },
-    })
+  const handleConfirmSource = async item => {
+    try {
+      // 1. 先检测冲突
+      const response = await checkReassociationConflicts({
+        sourceAnimeId: animeDetail.animeId,
+        targetAnimeId: item.animeId,
+      })
+
+      if (response.data.hasConflict) {
+        // 2. 有冲突,打开冲突解决对话框
+        setConflictData(response.data)
+        setTargetAnimeId(item.animeId)
+        setTargetAnimeTitle(item.title)
+        setConflictModalOpen(true)
+        setEditOpen(false)
+      } else {
+        // 3. 无冲突,直接关联
+        modalApi.confirm({
+          title: '关联数据源',
+          zIndex: 1002,
+          content: (
+            <div>
+              您确定要将当前作品的所有数据源关联到 "{item.title}" (ID:
+              {item.animeId}) 吗？
+              <br />
+              此操作不可撤销！
+            </div>
+          ),
+          okText: '确认',
+          cancelText: '取消',
+          onOk: async () => {
+            try {
+              await setAnimeSource({
+                sourceAnimeId: animeDetail.animeId,
+                targetAnimeId: item.animeId,
+              })
+              messageApi.success('关联成功')
+              setEditOpen(false)
+              navigate(RoutePaths.LIBRARY)
+            } catch (error) {
+              messageApi.error(`关联失败:${error.message}`)
+            }
+          },
+        })
+      }
+    } catch (error) {
+      messageApi.error(`检测冲突失败:${error.message}`)
+    }
+  }
+
+  // 处理冲突解决
+  const handleResolveConflict = async resolutions => {
+    try {
+      await reassociateWithResolution({
+        sourceAnimeId: animeDetail.animeId,
+        targetAnimeId: targetAnimeId,
+        resolutions: resolutions,
+      })
+      messageApi.success('关联成功')
+      setConflictModalOpen(false)
+      navigate(RoutePaths.LIBRARY)
+    } catch (error) {
+      messageApi.error(`关联失败:${error.message}`)
+    }
   }
 
   const handleBatchDelete = () => {
@@ -650,6 +693,14 @@ export const AnimeDetail = () => {
         animeId={id}
         onCancel={() => setIsAddSourceModalOpen(false)}
         onSuccess={handleAddSourceSuccess}
+      />
+
+      <ReassociationConflictModal
+        open={conflictModalOpen}
+        onCancel={() => setConflictModalOpen(false)}
+        onConfirm={handleResolveConflict}
+        conflictData={conflictData}
+        targetAnimeTitle={targetAnimeTitle}
       />
     </div>
   )

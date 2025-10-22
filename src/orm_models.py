@@ -257,6 +257,7 @@ class TaskHistory(Base):
     updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime)
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", NaiveDateTime)
     uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
+    queueType: Mapped[str] = mapped_column("queue_type", String(20), default="download", server_default="download")
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 

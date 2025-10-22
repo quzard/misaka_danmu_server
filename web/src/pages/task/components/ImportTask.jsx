@@ -22,8 +22,6 @@ import {
   Tag,
   Tooltip,
   Dropdown,
-  Row,
-  Col,
 } from 'antd'
 import {
   CheckOutlined,
@@ -33,6 +31,9 @@ import {
   StepBackwardOutlined,
   StopOutlined,
   FilterOutlined,
+  DownloadOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
@@ -87,6 +88,7 @@ export const ImportTask = () => {
   }, [selectList])
 
   const [searchParams] = useSearchParams()
+  const [queueFilter, setQueueFilter] = useState('all') // 队列类型过滤: all, download, management
 
   const [search, status] = useMemo(() => {
     return [
@@ -101,7 +103,7 @@ export const ImportTask = () => {
       pageSize: 100,
       current: 1,
     }))
-  }, [search, status])
+  }, [search, status, queueFilter])
 
 
 
@@ -113,6 +115,7 @@ export const ImportTask = () => {
       const res = await getTaskList({
         search,
         status,
+        queueType: queueFilter,  // 传递队列类型参数给后端
         page: pagination.current,
         pageSize: pagination.pageSize,
       })
@@ -120,11 +123,10 @@ export const ImportTask = () => {
       const newData = res.data?.list || []
       setTaskList(newData)
 
-
     } catch (error) {
       console.error('轮询获取数据失败:', error)
     }
-  }, [search, status, pagination.current, pagination.pageSize])
+  }, [search, status, pagination.current, pagination.pageSize, queueFilter])
 
   /**
    * 刷新任务列表
@@ -136,13 +138,13 @@ export const ImportTask = () => {
       const res = await getTaskList({
         search,
         status,
+        queueType: queueFilter,  // 传递队列类型参数给后端
         page: pagination.current,
         pageSize: pagination.pageSize,
       })
 
       const newData = res.data?.list || []
       setTaskList(newData)
-
 
       setLoading(false)
       setPagination(prev => ({
@@ -153,7 +155,7 @@ export const ImportTask = () => {
       console.error(error)
       setLoading(false)
     }
-  }, [search, status, pagination.current, pagination.pageSize])
+  }, [search, status, pagination.current, pagination.pageSize, queueFilter])
 
   /**
    * 处理暂停/恢复任务操作
@@ -392,88 +394,118 @@ export const ImportTask = () => {
     }
   }
 
+  // 队列类型筛选菜单
+  const queueMenu = {
+    items: [
+      { key: 'all', label: '全部队列' },
+      { key: 'download', label: '下载队列' },
+      { key: 'management', label: '管理队列' },
+      { key: 'fallback', label: '后备队列' },
+    ],
+    onClick: ({ key }) => {
+      setQueueFilter(key)
+      // 立即刷新任务列表，不等待轮询
+      setTimeout(() => refreshTasks(), 0)
+    },
+  }
+
+  const getQueueLabel = (queue) => {
+    switch (queue) {
+      case 'all': return '全部队列'
+      case 'download': return '下载队列'
+      case 'management': return '管理队列'
+      case 'fallback': return '后备队列'
+      default: return '全部队列'
+    }
+  }
+
+  // 获取队列类型图标
+  const getQueueIcon = (queueType) => {
+    if (queueType === 'management') return <SettingOutlined />
+    if (queueType === 'fallback') return <ThunderboltOutlined />
+    return <DownloadOutlined />
+  }
+
   return (
     <div className="my-6">
       <Card
         loading={loading}
         title="任务管理器"
         extra={
-         <Row gutter={[4, 12]} style={{
-            padding: isMobile ? '16px 0' : '0',
-          }}>
-            <Col md={13} xs={24}>
-              <div className='flex items-center justify-center gap-2'>
-                <Dropdown menu={statusMenu}>
-                  <Button icon={<FilterOutlined />}>
-                    {getStatusLabel(status)}
-                  </Button>
-                </Dropdown>
-                <Tooltip title="全选/取消全选">
-                  <Button
-                    type="default"
-                    shape="circle"
-                    icon={
-                      selectList.length === taskList.length &&
-                      !!selectList.length ? (
-                        <CheckOutlined />
-                      ) : (
-                        <MinusOutlined />
-                      )
-                    }
-                    onClick={() => {
-                      if (
-                        selectList.length === taskList.length &&
-                        !!selectList.length
-                      ) {
-                        setSelectList([])
-                      } else {
-                        setSelectList(taskList)
-                      }
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="启用/暂停任务">
-                  <Button
-                    disabled={!canPause}
-                    type="default"
-                    shape="circle"
-                    icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
-                    onClick={handlePause}
-                  />
-                </Tooltip>
-                <Tooltip title="删除任务">
-                  <Button
-                    disabled={!canDelete}
-                    type="default"
-                    shape="circle"
-                    icon={<DeleteOutlined />}
-                    onClick={handleDelete}
-                  />
-                </Tooltip>
-                <Tooltip title="中止任务">
-                  <Button
-                    disabled={!canStop}
-                    type="default"
-                    shape="circle"
-                    icon={<StopOutlined />}
-                    onClick={handleStop}
-                  />
-                </Tooltip>
-
-                
-              </div>
-            </Col>
-            <Col md={11} xs={24}><Input.Search
+          <div className='flex items-center justify-end gap-2 flex-wrap' style={{ maxWidth: '100%' }}>
+            <Dropdown menu={statusMenu}>
+              <Button icon={<FilterOutlined />}>
+                {getStatusLabel(status)}
+              </Button>
+            </Dropdown>
+            <Dropdown menu={queueMenu}>
+              <Button icon={<FilterOutlined />}>
+                {getQueueLabel(queueFilter)}
+              </Button>
+            </Dropdown>
+            <Tooltip title="全选/取消全选">
+              <Button
+                type="default"
+                shape="circle"
+                icon={
+                  selectList.length === taskList.length &&
+                  !!selectList.length ? (
+                    <CheckOutlined />
+                  ) : (
+                    <MinusOutlined />
+                  )
+                }
+                onClick={() => {
+                  if (
+                    selectList.length === taskList.length &&
+                    !!selectList.length
+                  ) {
+                    setSelectList([])
+                  } else {
+                    setSelectList(taskList)
+                  }
+                }}
+              />
+            </Tooltip>
+            <Tooltip title="启用/暂停任务">
+              <Button
+                disabled={!canPause}
+                type="default"
+                shape="circle"
+                icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
+                onClick={handlePause}
+              />
+            </Tooltip>
+            <Tooltip title="删除任务">
+              <Button
+                disabled={!canDelete}
+                type="default"
+                shape="circle"
+                icon={<DeleteOutlined />}
+                onClick={handleDelete}
+              />
+            </Tooltip>
+            <Tooltip title="中止任务">
+              <Button
+                disabled={!canStop}
+                type="default"
+                shape="circle"
+                icon={<StopOutlined />}
+                onClick={handleStop}
+              />
+            </Tooltip>
+            <Input.Search
               placeholder="按任务标题搜索"
               allowClear
               enterButton
+              style={{ width: isMobile ? '100%' : '200px' }}
               onSearch={value => {
                 navigate(`/task?search=${value}&status=${status}`, {
                   replace: true,
                 })
               }}
-            /></Col>
-          </Row>
+            />
+          </div>
         }
       >
         <div>
@@ -513,16 +545,6 @@ export const ImportTask = () => {
                 return (
                   <List.Item
                     key={index}
-                    extra={
-                      <>
-                        <Tag
-                          className="!mb-3"
-                          color={item.status.includes('失败') ? 'red' : 'green'}
-                        >
-                          {item.status}
-                        </Tag>
-                      </>
-                    }
                     onClick={() => {
                       setSelectList(list => {
                         return list.map(it => it.taskId).includes(item.taskId)
@@ -530,9 +552,10 @@ export const ImportTask = () => {
                           : [...list, item]
                       })
                     }}
+                    style={{ padding: '16px 24px' }}
                   >
                     <div
-                      className={classNames('relative', {
+                      className={classNames('relative w-full', {
                         'pl-9': isActive,
                       })}
                     >
@@ -543,13 +566,88 @@ export const ImportTask = () => {
                         />
                       )}
 
-                      <div className="text-base mb-1">
-                        {item.title}
+                      {/* 第一行: 标题 + 状态标签 + 队列标签 */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div className="text-base font-semibold" style={{ flex: 1 }}>
+                          <span style={{ marginRight: '8px', fontSize: '18px' }}>
+                            {getQueueIcon(item.queueType)}
+                          </span>
+                          {item.title}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <Tag
+                            color={
+                              item.status.includes('失败')
+                                ? 'red'
+                                : item.status.includes('运行中')
+                                  ? 'green'
+                                  : item.status.includes('已暂停')
+                                    ? 'orange'
+                                    : item.status.includes('已完成')
+                                      ? 'blue'
+                                      : 'default'
+                            }
+                          >
+                            {item.status}
+                          </Tag>
+                          <Tag
+                            color={
+                              item.queueType === 'management'
+                                ? 'cyan'
+                                : item.queueType === 'fallback'
+                                  ? 'orange'
+                                  : 'geekblue'
+                            }
+                          >
+                            <span style={{ marginRight: '4px' }}>
+                              {getQueueIcon(item.queueType)}
+                            </span>
+                            {item.queueType === 'management'
+                              ? '管理队列'
+                              : item.queueType === 'fallback'
+                                ? '后备队列'
+                                : '下载队列'}
+                          </Tag>
+                        </div>
                       </div>
-                      <div className="mb-2">{item.description}</div>
+
+                      {/* 第二行: 描述 + 时间 */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <Tooltip title={item.description}>
+                          <div
+                            className="text-gray-600"
+                            style={{
+                              flex: 1,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              marginRight: '16px'
+                            }}
+                          >
+                            {item.description}
+                          </div>
+                        </Tooltip>
+                        {item.createdAt && (
+                          <Tag style={{ flexShrink: 0 }}>
+                            {new Date(item.createdAt).toLocaleString('zh-CN', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                              hour12: false
+                            })}
+                          </Tag>
+                        )}
+                      </div>
+
+                      {/* 第三行: 进度条 */}
                       <Progress
                         percent={item.progress}
                         status={item.status.includes('失败') && 'exception'}
+                        strokeWidth={10}
+                        showInfo={true}
                       />
                     </div>
                   </List.Item>
