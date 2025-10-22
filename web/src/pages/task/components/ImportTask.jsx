@@ -33,6 +33,7 @@ import {
   FilterOutlined,
   DownloadOutlined,
   SettingOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import classNames from 'classnames'
 import { useModal } from '../../../ModalContext'
@@ -405,6 +406,7 @@ export const ImportTask = () => {
       { key: 'all', label: '全部队列' },
       { key: 'download', label: '下载队列' },
       { key: 'management', label: '管理队列' },
+      { key: 'fallback', label: '后备队列' },
     ],
     onClick: ({ key }) => {
       setQueueFilter(key)
@@ -416,13 +418,16 @@ export const ImportTask = () => {
       case 'all': return '全部队列'
       case 'download': return '下载队列'
       case 'management': return '管理队列'
+      case 'fallback': return '后备队列'
       default: return '全部队列'
     }
   }
 
   // 获取队列类型图标
   const getQueueIcon = (queueType) => {
-    return queueType === 'management' ? <SettingOutlined /> : <DownloadOutlined />
+    if (queueType === 'management') return <SettingOutlined />
+    if (queueType === 'fallback') return <ThunderboltOutlined />
+    return <DownloadOutlined />
   }
 
   return (
@@ -590,12 +595,22 @@ export const ImportTask = () => {
                             {item.status}
                           </Tag>
                           <Tag
-                            color={item.queueType === 'management' ? 'cyan' : 'geekblue'}
+                            color={
+                              item.queueType === 'management'
+                                ? 'cyan'
+                                : item.queueType === 'fallback'
+                                  ? 'orange'
+                                  : 'geekblue'
+                            }
                           >
                             <span style={{ marginRight: '4px' }}>
                               {getQueueIcon(item.queueType)}
                             </span>
-                            {item.queueType === 'management' ? '管理队列' : '下载队列'}
+                            {item.queueType === 'management'
+                              ? '管理队列'
+                              : item.queueType === 'fallback'
+                                ? '后备队列'
+                                : '下载队列'}
                           </Tag>
                         </div>
                       </div>

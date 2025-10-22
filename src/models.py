@@ -240,7 +240,7 @@ class TaskInfo(BaseModel):
     description: str
     createdAt: datetime
     isSystemTask: bool = False
-    queueType: str = "download"  # 队列类型: "download" 或 "management"
+    queueType: str = "download"  # 队列类型: "download"、"management" 或 "fallback"
 
 class PaginatedTasksResponse(BaseModel):
     """用于任务列表分页的响应模型"""

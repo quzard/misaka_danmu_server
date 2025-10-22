@@ -168,20 +168,6 @@ export const RateLimitPanel = () => {
                     width: 100,
                   },
                   {
-                    title: '直接下载',
-                    dataIndex: 'directCount',
-                    key: 'directCount',
-                    width: 80,
-                    align: 'center',
-                  },
-                  {
-                    title: '后备调用',
-                    dataIndex: 'fallbackCount',
-                    key: 'fallbackCount',
-                    width: 80,
-                    align: 'center',
-                  },
-                  {
                     title: '总计/配额',
                     key: 'usage',
                     width: 100,

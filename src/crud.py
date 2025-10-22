@@ -2609,7 +2609,7 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
             "description": row.description,
             "createdAt": row.createdAt,
             "isSystemTask": row.scheduledTaskId == "system_token_reset",
-            "queueType": row.queueType
+            "queueType": row.queueType or "download"  # 如果为NULL则默认为"download"
         }
         for row in result.mappings()
     ]

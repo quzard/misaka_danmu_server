@@ -46,13 +46,16 @@ class Task:
 class TaskManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         self._session_factory = session_factory
-        # 双队列架构: 下载队列和管理队列
+        # 三队列架构: 下载队列、管理队列、后备队列
         self._download_queue: asyncio.Queue = asyncio.Queue()
         self._management_queue: asyncio.Queue = asyncio.Queue()
+        self._fallback_queue: asyncio.Queue = asyncio.Queue()
         self._download_worker_task: asyncio.Task | None = None
         self._management_worker_task: asyncio.Task | None = None
+        self._fallback_worker_task: asyncio.Task | None = None
         self._current_download_task: Optional[Task] = None
         self._current_management_task: Optional[Task] = None
+        self._current_fallback_task: Optional[Task] = None
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
         self._lock = asyncio.Lock()
@@ -64,9 +67,10 @@ class TaskManager:
         if self._download_worker_task is None:
             self._download_worker_task = asyncio.create_task(self._download_worker())
             self._management_worker_task = asyncio.create_task(self._management_worker())
+            self._fallback_worker_task = asyncio.create_task(self._fallback_worker())
             # 启动时处理中断的任务
             asyncio.create_task(self._handle_interrupted_tasks())
-            self.logger.info("任务管理器已启动 (下载队列 + 管理队列)。")
+            self.logger.info("任务管理器已启动 (下载队列 + 管理队列 + 后备队列)。")
 
     async def _run_task_wrapper(self, task: Task, queue_type: str = "download"):
         """
@@ -152,6 +156,14 @@ class TaskManager:
                 pass
             self._management_worker_task = None
 
+        if self._fallback_worker_task:
+            self._fallback_worker_task.cancel()
+            try:
+                await self._fallback_worker_task
+            except asyncio.CancelledError:
+                pass
+            self._fallback_worker_task = None
+
         self.logger.info("任务管理器已停止。")
 
     async def _download_worker(self):
@@ -178,6 +190,18 @@ class TaskManager:
                 self._current_management_task = None
                 self._management_queue.task_done()
 
+    async def _fallback_worker(self):
+        """从后备队列中获取并执行任务。"""
+        while True:
+            task: Task = await self._fallback_queue.get()
+            try:
+                self._current_fallback_task = task
+                # The wrapper now handles removing the title from the pending set.
+                await self._run_task_wrapper(task, queue_type="fallback")
+            finally:
+                self._current_fallback_task = None
+                self._fallback_queue.task_done()
+
     async def submit_task(
         self,
         coro_factory: Callable[[AsyncSession, Callable], Coroutine],
@@ -192,7 +216,7 @@ class TaskManager:
         """提交一个新任务到队列，并在数据库中创建记录。返回任务ID和完成事件。
 
         Args:
-            queue_type: 队列类型，"download" (下载队列) 或 "management" (管理队列)
+            queue_type: 队列类型，"download" (下载队列)、"management" (管理队列) 或 "fallback" (后备队列)
         """
         async with self._lock:
             # 检查是否有同名任务正在排队或运行
@@ -201,9 +225,10 @@ class TaskManager:
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"任务 '{title}' 已在队列中，请勿重复提交。"
                 )
-            # 检查两个队列的当前任务
+            # 检查三个队列的当前任务
             if (self._current_download_task and self._current_download_task.title == title) or \
-               (self._current_management_task and self._current_management_task.title == title):
+               (self._current_management_task and self._current_management_task.title == title) or \
+               (self._current_fallback_task and self._current_fallback_task.title == title):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"任务 '{title}' 已在运行中，请勿重复提交。"
@@ -232,7 +257,15 @@ class TaskManager:
             asyncio.create_task(self._run_task_wrapper(task, queue_type=queue_type))
         else:
             # 根据队列类型选择队列
-            target_queue = self._download_queue if queue_type == "download" else self._management_queue
+            if queue_type == "download":
+                target_queue = self._download_queue
+            elif queue_type == "management":
+                target_queue = self._management_queue
+            elif queue_type == "fallback":
+                target_queue = self._fallback_queue
+            else:
+                raise ValueError(f"无效的队列类型: {queue_type}")
+
             await target_queue.put(task)
             self.logger.info(f"任务 '{title}' 已提交到 {queue_type} 队列，ID: {task_id}")
         return task_id, task.done_event
