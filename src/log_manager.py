@@ -26,6 +26,34 @@ class NoHttpxLogFilter(logging.Filter):
         # 不记录来自 'httpx' logger 的日志
         return not record.name.startswith('httpx')
 
+# 新增：一个过滤器，用于隐藏日志中的敏感信息（API密钥、Token等）
+class SensitiveInfoFilter(logging.Filter):
+    """过滤器，用于隐藏日志中的敏感信息"""
+
+    # 敏感信息的正则表达式模式
+    PATTERNS = [
+        (re.compile(r'(api_key=)([a-zA-Z0-9]{20,})'), r'\1****'),  # TMDB API key
+        (re.compile(r'(apikey=)([a-zA-Z0-9]{20,})'), r'\1****'),  # 其他API key
+        (re.compile(r'(token=)([a-zA-Z0-9_-]{20,})'), r'\1****'),  # Token
+        (re.compile(r'(Authorization:\s*Bearer\s+)([a-zA-Z0-9_-]{20,})'), r'\1****'),  # Bearer token
+        (re.compile(r'(Cookie:\s*[^;]*?)((?:SESSDATA|bili_jct|DedeUserID|buvid3|_m_h5_tk)=[^;]+)'), r'\1****'),  # Cookie中的敏感字段
+        (re.compile(r'(_m_h5_tk=)([a-zA-Z0-9_-]+)'), r'\1****'),  # Youku token
+    ]
+
+    def filter(self, record):
+        # 获取日志消息
+        msg = record.getMessage()
+
+        # 应用所有替换模式
+        for pattern, replacement in self.PATTERNS:
+            msg = pattern.sub(replacement, msg)
+
+        # 更新日志消息
+        record.msg = msg
+        record.args = ()  # 清空args，因为我们已经格式化了消息
+
+        return True
+
 # 新增：一个过滤器，用于从UI日志中排除B站特定的信息性日志
 class BilibiliInfoFilter(logging.Filter):
     def filter(self, record):
@@ -118,6 +146,7 @@ def setup_logging():
 
     # 添加新的过滤器到根日志记录器，以便翻译所有输出
     logger.addFilter(ApschedulerLogTranslatorFilter())
+    logger.addFilter(SensitiveInfoFilter())  # 添加敏感信息过滤器到所有处理器
 
     logger.addHandler(logging.StreamHandler()) # 控制台处理器
     logger.addHandler(logging.handlers.RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')) # 文件处理器

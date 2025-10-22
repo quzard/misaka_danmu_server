@@ -1740,7 +1740,7 @@ async def _get_match_for_item(
             logger.info(f"  - 分配虚拟animeId: {virtual_anime_id}")
 
             # 分配真实anime_id（用于生成episodeId）
-            from .orm_models import Anime
+            from .orm_models import Anime, AnimeSource
             stmt = select(Anime.id, Anime.title).where(
                 Anime.title == final_title,
                 Anime.season == final_season
@@ -1755,8 +1755,30 @@ async def _get_match_for_item(
                 real_anime_id = await _get_next_real_anime_id(session)
                 logger.info(f"  - 分配新的real_anime_id: {real_anime_id}")
 
-            # 生成真实episodeId（源顺序固定为1）
-            real_episode_id = _generate_episode_id(real_anime_id, 1, episode_number)
+            # 获取或创建source，以获取正确的source_order
+            from . import crud
+            # 检查是否已有该源
+            source_stmt = select(AnimeSource.id, AnimeSource.sourceOrder).where(
+                AnimeSource.animeId == real_anime_id,
+                AnimeSource.providerName == best_match.provider,
+                AnimeSource.mediaId == best_match.mediaId
+            )
+            source_result = await session.execute(source_stmt)
+            existing_source = source_result.mappings().first()
+
+            if existing_source:
+                source_order = existing_source['sourceOrder']
+                logger.info(f"  - 复用已存在的源: source_order={source_order}")
+            else:
+                # 查找当前最大的source_order
+                max_order_stmt = select(func.max(AnimeSource.sourceOrder)).where(AnimeSource.animeId == real_anime_id)
+                max_order_result = await session.execute(max_order_stmt)
+                current_max_order = max_order_result.scalar_one_or_none() or 0
+                source_order = current_max_order + 1
+                logger.info(f"  - 分配新的source_order: {source_order}")
+
+            # 生成真实episodeId
+            real_episode_id = _generate_episode_id(real_anime_id, source_order, episode_number)
             logger.info(f"  - 生成真实episodeId: {real_episode_id}")
 
             # 步骤6：存储映射关系到缓存
