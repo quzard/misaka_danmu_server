@@ -1722,21 +1722,21 @@ async def _get_match_for_item(
             # 步骤4：应用入库后处理规则
             logger.info(f"步骤4：应用入库后处理规则")
             final_title = best_match.title
-            final_season = season
+            final_season = season if season is not None else 1  # 默认为第1季
             if title_recognition_manager:
                 converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
                     best_match.title, season, best_match.provider
                 )
                 if was_converted:
                     final_title = converted_title
-                    final_season = converted_season
-                    logger.info(f"  - 应用入库后处理: '{best_match.title}' S{season:02d} -> '{final_title}' S{final_season:02d}")
+                    final_season = converted_season if converted_season is not None else 1
+                    logger.info(f"  - 应用入库后处理: '{best_match.title}' S{season or 1:02d} -> '{final_title}' S{final_season:02d}")
 
             # 步骤5：分配虚拟animeId和真实episodeId
             logger.info(f"步骤5：分配虚拟animeId和真实episodeId")
 
             # 分配虚拟animeId
-            virtual_anime_id = _get_next_virtual_anime_id()
+            virtual_anime_id = await _get_next_virtual_anime_id()
             logger.info(f"  - 分配虚拟animeId: {virtual_anime_id}")
 
             # 分配真实anime_id（用于生成episodeId）
@@ -1755,8 +1755,8 @@ async def _get_match_for_item(
                 real_anime_id = await _get_next_real_anime_id(session)
                 logger.info(f"  - 分配新的real_anime_id: {real_anime_id}")
 
-            # 生成真实episodeId
-            real_episode_id = _generate_episode_id(real_anime_id, final_season, episode_number)
+            # 生成真实episodeId（源顺序固定为1）
+            real_episode_id = _generate_episode_id(real_anime_id, 1, episode_number)
             logger.info(f"  - 生成真实episodeId: {real_episode_id}")
 
             # 步骤6：存储映射关系到缓存
