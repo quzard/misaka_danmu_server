@@ -27,6 +27,7 @@ from .task_manager import TaskManager
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
+from .search_utils import unified_search
 
 logger = logging.getLogger(__name__)
 
@@ -734,67 +735,18 @@ async def _execute_fallback_search_task(
         # 更新进度
         await progress_callback(10, "开始搜索...")
 
-        # 1. 使用与WebUI相同的搜索逻辑
-        from . import crud
-        import re
-
-        # 获取用户对象（系统用户）
-        from . import models
-        user = models.User(id=0, username="system")
-
-        # 2. 获取别名和补充搜索结果（与WebUI相同）
-        await progress_callback(20, "获取别名...")
-        try:
-            all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(search_term, user)
-        except Exception as e:
-            logger.warning(f"获取别名失败: {e}")
-            all_possible_aliases = set()
-
-        # 3. 验证别名相似度（与WebUI相同的逻辑）
-        validated_aliases = set()
-        for alias in all_possible_aliases:
-            similarity = fuzz.token_set_ratio(search_term, alias)
-            if similarity >= 75:  # 与WebUI相同的阈值
-                validated_aliases.add(alias)
-
-        filter_aliases = validated_aliases
-        filter_aliases.add(search_term)  # 确保原始搜索词总是在列表中
-        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
-
-        # 4. 执行全网搜索（与WebUI相同）
-        await progress_callback(40, "执行全网搜索...")
-        all_results = await scraper_manager.search_all([search_term])
-        logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
-
-        # 5. 使用与WebUI相同的过滤逻辑
-        def normalize_for_filtering(title: str) -> str:
-            if not title: return ""
-            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-            return title.lower().replace(" ", "").replace("：", ":").strip()
-
-        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
-        filtered_results = []
-        for item in all_results:
-            normalized_item_title = normalize_for_filtering(item.title)
-            if not normalized_item_title: continue
-
-            # 使用与WebUI相同的过滤条件
-            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
-                filtered_results.append(item)
-
-        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-
-        # 6. 使用与WebUI相同的排序逻辑
-        await progress_callback(70, "排序搜索结果...")
-        source_settings = await crud.get_all_scraper_settings(session)
-        source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
-
-        def sort_key(item):
-            provider_order = source_order_map.get(item.provider, 999)
-            similarity_score = fuzz.token_set_ratio(search_term, item.title)
-            return (provider_order, -similarity_score)
-
-        sorted_results = sorted(filtered_results, key=sort_key)
+        # 使用统一的搜索函数
+        sorted_results = await unified_search(
+            search_term=search_term,
+            session=session,
+            scraper_manager=scraper_manager,
+            metadata_manager=metadata_manager,
+            use_alias_expansion=True,
+            use_alias_filtering=True,
+            use_title_filtering=True,
+            use_source_priority_sorting=True,
+            progress_callback=progress_callback
+        )
 
         # 7. 转换为DandanSearchAnimeItem格式
         await progress_callback(80, "转换搜索结果...")
@@ -1683,7 +1635,6 @@ async def _get_match_for_item(
 
             # 统一使用后备搜索的虚拟ID逻辑
             from .utils import parse_search_keyword
-            from fuzzywuzzy import fuzz
 
             logger.info(f"开始匹配后备流程: {item.fileName}")
 
@@ -1693,37 +1644,30 @@ async def _get_match_for_item(
             season = parsed_info.get("season", 1)
             episode_number = parsed_info.get("episode", 1)
 
-            # 步骤1：全网搜索
+            # 步骤1：使用统一的搜索函数
             logger.info(f"步骤1：全网搜索 '{base_title}'")
-            all_results = []
 
-            # 调用各个scraper搜索
-            for provider_name in scraper_manager.get_available_scrapers():
-                try:
-                    scraper = scraper_manager.get_scraper(provider_name)
-                    if not scraper:
-                        continue
-
-                    search_results = await scraper.search(base_title)
-                    if search_results:
-                        all_results.extend(search_results)
-                        logger.info(f"  - {provider_name}: 找到 {len(search_results)} 个结果")
-                except Exception as e:
-                    logger.warning(f"  - {provider_name}: 搜索失败 - {e}")
+            # 使用统一的搜索函数（使用严格过滤模式）
+            all_results = await unified_search(
+                search_term=base_title,
+                session=session,
+                scraper_manager=scraper_manager,
+                metadata_manager=None,  # 不使用别名扩展
+                use_alias_expansion=False,
+                use_alias_filtering=False,
+                use_title_filtering=True,  # 启用标题过滤
+                use_source_priority_sorting=False,  # 仅按相似度排序
+                strict_filtering=True,  # 使用严格过滤模式
+                custom_aliases={base_title},  # 使用基础标题作为别名
+                progress_callback=None
+            )
 
             if not all_results:
                 logger.warning(f"匹配后备失败：没有找到任何搜索结果")
                 response = DandanMatchResponse(isMatched=False, matches=[])
                 return response
 
-            # 步骤2：按相似度排序
-            logger.info(f"步骤2：按相似度排序（共 {len(all_results)} 个结果）")
-
-            # 按相似度排序
-            all_results.sort(
-                key=lambda x: fuzz.token_set_ratio(base_title, x.title),
-                reverse=True
-            )
+            logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
             # 步骤3：自动选择最佳源
             logger.info(f"步骤3：自动选择最佳源")

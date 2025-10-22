@@ -38,6 +38,7 @@ from thefuzz import fuzz
 from ..config import settings
 from ..timezone import get_now
 from ..database import get_db_session
+from ..search_utils import unified_search
 
 router = APIRouter()
 auth_router = APIRouter()

@@ -23,6 +23,7 @@ from ..metadata_manager import MetadataSourceManager
 from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
+from ..search_utils import unified_search
 
 from ..timezone import get_now
 logger = logging.getLogger(__name__)
@@ -515,36 +516,20 @@ async def search_media(
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
             )
 
-        # Get aliases from metadata sources
-        all_possible_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, user)
-        
-        # Validate aliases
-        validated_aliases = set()
-        for alias in all_possible_aliases:
-            if fuzz.token_set_ratio(search_title, alias) > 70:
-                validated_aliases.add(alias)
-            else:
-                logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{search_title}' 相比)")
-        
-        filter_aliases = validated_aliases
-        filter_aliases.add(search_title)
-        logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
-        logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
+        # 使用统一的搜索函数（不进行排序，后面自己处理）
+        results = await unified_search(
+            search_term=search_title,
+            session=session,
+            scraper_manager=manager,
+            metadata_manager=metadata_manager,
+            use_alias_expansion=True,
+            use_alias_filtering=True,
+            use_title_filtering=True,
+            use_source_priority_sorting=False,  # 不排序，后面自己处理
+            progress_callback=None
+        )
 
-        # Search all scrapers using the main title
-        all_results = await manager.search_all([search_title], episode_info=episode_info)
-
-        # Filter with aliases
-        normalized_filter_aliases = {_normalize_for_filtering(alias) for alias in filter_aliases if alias}
-        filtered_results = []
-        for item in all_results:
-            normalized_item_title = _normalize_for_filtering(item.title)
-            if not normalized_item_title: continue
-            if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
-                filtered_results.append(item)
-        
-        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-        results = filtered_results
+        logger.info(f"搜索完成，共 {len(results)} 个结果")
 
         for item in results:
             if item.type == 'tv_series' and _is_movie_by_title(item.title):

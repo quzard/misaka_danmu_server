@@ -30,6 +30,7 @@ from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
+from .search_utils import unified_search
 
 logger = logging.getLogger(__name__)
 
@@ -2638,44 +2639,24 @@ async def auto_search_and_import_task(
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
         logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
-        all_results = await scraper_manager.search_all([search_title], episode_info=episode_info)
-        logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
-        # 使用所有别名进行过滤
-        def normalize_for_filtering(title: str) -> str:
-            if not title: return ""
-            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-            return title.lower().replace(" ", "").replace("：", ":").strip()
+        # 使用统一的搜索函数（不进行排序，后面自己处理）
+        # 使用严格过滤模式和自定义别名
+        all_results = await unified_search(
+            search_term=search_title,
+            session=session,
+            scraper_manager=scraper_manager,
+            metadata_manager=None,  # 不使用别名扩展，因为上面已经手动获取了别名
+            use_alias_expansion=False,
+            use_alias_filtering=False,
+            use_title_filtering=True,  # 启用标题过滤
+            use_source_priority_sorting=False,  # 不排序，后面自己处理
+            strict_filtering=True,  # 使用严格过滤模式
+            custom_aliases=aliases,  # 传入手动获取的别名
+            progress_callback=None
+        )
 
-        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in aliases if alias}
-        filtered_results = []
-        for item in all_results:
-            normalized_item_title = normalize_for_filtering(item.title)
-            if not normalized_item_title: continue
-
-            # 更严格的匹配逻辑：
-            # 1. 完全匹配或高相似度匹配
-            # 2. 标题长度差异不能太大（避免"复仇者"匹配"复仇者联盟2：奥创纪元"）
-            is_relevant = False
-            for alias in normalized_filter_aliases:
-                similarity = fuzz.partial_ratio(normalized_item_title, alias)
-                length_diff = abs(len(normalized_item_title) - len(alias))
-
-                # 完全匹配或非常高的相似度
-                if similarity >= 95:
-                    is_relevant = True
-                    break
-                # 高相似度但标题长度差异不大
-                elif similarity >= 85 and length_diff <= max(len(alias) * 0.3, 10):
-                    is_relevant = True
-                    break
-
-            if is_relevant:
-                filtered_results.append(item)
-
-        # 详细记录保留的结果
-        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-        all_results = filtered_results
+        logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
         # 添加WebUI的季度过滤逻辑
         if season and season > 0:
