@@ -2573,7 +2573,7 @@ async def update_task_status(session: AsyncSession, task_id: str, status: str):
     await session.execute(update(TaskHistory).where(TaskHistory.taskId == task_id).values(status=status, updatedAt=get_now().replace(tzinfo=None)))
     await session.commit()
 
-async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str, page: int, page_size: int) -> Dict[str, Any]:
+async def get_tasks_from_history(session: AsyncSession, search_term: Optional[str], status_filter: str, queue_type_filter: str, page: int, page_size: int) -> Dict[str, Any]:
     # 修正：显式选择需要的列，以避免在旧的数据库模式上查询不存在的列（如 scheduled_task_id）
     base_stmt = select(
         TaskHistory.taskId,
@@ -2592,6 +2592,10 @@ async def get_tasks_from_history(session: AsyncSession, search_term: Optional[st
         base_stmt = base_stmt.where(TaskHistory.status.in_(['排队中', '运行中', '已暂停']))
     elif status_filter == 'completed':
         base_stmt = base_stmt.where(TaskHistory.status == '已完成')
+
+    # 添加队列类型筛选
+    if queue_type_filter and queue_type_filter != 'all':
+        base_stmt = base_stmt.where(TaskHistory.queueType == queue_type_filter)
 
     count_stmt = select(func.count()).select_from(base_stmt.alias("count_subquery"))
     total_count = (await session.execute(count_stmt)).scalar_one()

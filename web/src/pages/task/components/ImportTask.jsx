@@ -115,19 +115,13 @@ export const ImportTask = () => {
       const res = await getTaskList({
         search,
         status,
+        queueType: queueFilter,  // 传递队列类型参数给后端
         page: pagination.current,
         pageSize: pagination.pageSize,
       })
 
-      let newData = res.data?.list || []
-
-      // 前端过滤队列类型
-      if (queueFilter !== 'all') {
-        newData = newData.filter(task => task.queueType === queueFilter)
-      }
-
+      const newData = res.data?.list || []
       setTaskList(newData)
-
 
     } catch (error) {
       console.error('轮询获取数据失败:', error)
@@ -144,13 +138,13 @@ export const ImportTask = () => {
       const res = await getTaskList({
         search,
         status,
+        queueType: queueFilter,  // 传递队列类型参数给后端
         page: pagination.current,
         pageSize: pagination.pageSize,
       })
 
       const newData = res.data?.list || []
       setTaskList(newData)
-
 
       setLoading(false)
       setPagination(prev => ({
@@ -161,7 +155,7 @@ export const ImportTask = () => {
       console.error(error)
       setLoading(false)
     }
-  }, [search, status, pagination.current, pagination.pageSize])
+  }, [search, status, pagination.current, pagination.pageSize, queueFilter])
 
   /**
    * 处理暂停/恢复任务操作

@@ -137,7 +137,8 @@ class SchedulerManager:
             task_id, done_event = await self.task_manager.submit_task(
                 task_coro_factory,
                 job_instance.job_name,
-                scheduled_task_id=scheduled_task_id
+                scheduled_task_id=scheduled_task_id,
+                queue_type="management"  # 定时任务使用管理队列
             )
             # The apscheduler job now waits for the actual task to complete.
             await done_event.wait()

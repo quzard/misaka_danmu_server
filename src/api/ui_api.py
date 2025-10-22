@@ -1509,11 +1509,12 @@ async def get_all_tasks(
     session: AsyncSession = Depends(get_db_session),
     search: Optional[str] = Query(None, description="按标题搜索"),
     status: Optional[str] = Query("all", description="按状态过滤: all, in_progress, completed"),
+    queueType: Optional[str] = Query("all", description="按队列类型过滤: all, download, management, fallback"),
     page: int = Query(1, ge=1, description="页码"),
     pageSize: int = Query(20, ge=1, description="每页数量")
 ):
     """获取后台任务的列表和状态，支持搜索和过滤。"""
-    paginated_result = await crud.get_tasks_from_history(session, search, status, page, pageSize)
+    paginated_result = await crud.get_tasks_from_history(session, search, status, queueType, page, pageSize)
     return models.PaginatedTasksResponse(
         total=paginated_result["total"],
         list=[models.TaskInfo.model_validate(t) for t in paginated_result["list"]]
