@@ -97,6 +97,7 @@ class MetadataDetailsResponse(BaseModel):
     """所有元数据源详情接口的统一响应模型。"""
     id: str
     title: str
+    type: Optional[str] = None
     tmdbId: Optional[str] = None
     imdbId: Optional[str] = None
     tvdbId: Optional[str] = None
