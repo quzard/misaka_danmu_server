@@ -287,6 +287,7 @@ class ControlAutoImportRequest(BaseModel):
     season: Optional[int] = None
     episode: Optional[int] = None
     mediaType: Optional[AutoImportMediaType] = None
+    preassignedAnimeId: Optional[int] = None  # 预分配的anime_id（用于匹配后备）
 
 class ControlMetadataSearchResponse(BaseModel):
     """用于外部API的元数据搜索响应模型"""

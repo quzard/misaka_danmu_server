@@ -982,7 +982,9 @@ async def generic_import_task(
     supplementMediaId: Optional[str] = None,
     # 新增: 后备任务标识
     is_fallback: bool = False,
-    fallback_type: Optional[str] = None
+    fallback_type: Optional[str] = None,
+    # 新增: 预分配的anime_id（用于匹配后备）
+    preassignedAnimeId: Optional[int] = None
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -1156,17 +1158,48 @@ async def generic_import_task(
 
             # 创建主条目
             # 修正：确保在创建时也使用年份进行重复检查
-            anime_id = await crud.get_or_create_anime(
-                session,
-                title_to_use,
-                mediaType,
-                season_to_use,
-                imageUrl,
-                local_image_path,
-                year,
-                title_recognition_manager,
-                provider
-            )
+            # 如果有预分配的anime_id（匹配后备），则直接使用
+            if preassignedAnimeId:
+                logger.info(f"使用预分配的anime_id: {preassignedAnimeId}")
+                anime_id = preassignedAnimeId
+
+                # 检查数据库中是否已有这个ID的条目
+                from .orm_models import Anime
+                from .timezone import get_now
+                stmt = select(Anime).where(Anime.id == anime_id)
+                result = await session.execute(stmt)
+                existing_anime = result.scalar_one_or_none()
+
+                if not existing_anime:
+                    # 如果不存在，创建新的anime条目
+                    new_anime = Anime(
+                        id=anime_id,
+                        title=title_to_use,
+                        type=mediaType,
+                        season=season_to_use,
+                        imageUrl=imageUrl,
+                        localImagePath=local_image_path,
+                        year=year,
+                        createdAt=get_now(),
+                        updatedAt=get_now()
+                    )
+                    session.add(new_anime)
+                    await session.flush()
+                    logger.info(f"创建新的anime条目: ID={anime_id}, 标题='{title_to_use}'")
+                else:
+                    logger.info(f"anime条目已存在: ID={anime_id}, 标题='{existing_anime.title}'")
+            else:
+                anime_id = await crud.get_or_create_anime(
+                    session,
+                    title_to_use,
+                    mediaType,
+                    season_to_use,
+                    imageUrl,
+                    local_image_path,
+                    year,
+                    title_recognition_manager,
+                    provider
+                )
 
             # 更新元数据
             await crud.update_metadata_if_empty(
@@ -2826,7 +2859,8 @@ async def auto_search_and_import_task(
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager,
             is_fallback=True,  # 标识为后备任务
-            fallback_type="match"  # 匹配后备类型
+            fallback_type="match",  # 匹配后备类型
+            preassignedAnimeId=payload.preassignedAnimeId  # 传递预分配的anime_id
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
