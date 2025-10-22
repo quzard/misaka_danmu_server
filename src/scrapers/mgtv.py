@@ -284,11 +284,11 @@ class MgtvScraper(BaseScraper):
 
                             if not item.id:
                                 continue
-                            
+
                             media_type = "movie" if item.type_name == "电影" else "tv_series"
-                            
-                            # For movies, episode count is always 1. For TV, it will be fetched later.
-                            episode_count = 1 if media_type == "movie" else None
+
+                            # 修复：直接使用搜索API返回的video_count，避免额外请求
+                            episode_count = item.video_count if item.video_count > 0 else None
 
                             provider_search_info = models.ProviderSearchInfo(
                                 provider=self.provider_name,
@@ -306,19 +306,7 @@ class MgtvScraper(BaseScraper):
                         except ValidationError:
                             # 安全地跳过不符合我们期望结构的项目（如广告、按钮等）
                             self.logger.debug(f"MGTV: 跳过一个不符合预期的搜索结果项: {item_dict}")
-                            continue            
-            
-            # Concurrently fetch episode counts for TV series
-            async def fetch_and_set_count(p_info: models.ProviderSearchInfo):
-                if p_info.type == "tv_series" and p_info.mediaId:
-                    count = await self._get_episode_count(p_info.mediaId)
-                    if count is not None:
-                        p_info.episodeCount = count
-            
-            tasks = [fetch_and_set_count(res) for res in results if res.type == 'tv_series']
-            if tasks:
-                self.logger.info(f"MGTV: 正在为 {len(tasks)} 个电视剧/动漫结果并发获取总集数...")
-                await asyncio.gather(*tasks)
+                            continue
 
             self.logger.info(f"MGTV: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
             if results:

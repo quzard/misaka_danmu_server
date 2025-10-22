@@ -404,6 +404,8 @@ export const ImportTask = () => {
     ],
     onClick: ({ key }) => {
       setQueueFilter(key)
+      // 立即刷新任务列表，不等待轮询
+      setTimeout(() => refreshTasks(), 0)
     },
   }
 
