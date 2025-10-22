@@ -249,6 +249,19 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
             provider_setting = next((s for s in settings if s['providerName'] == self.provider_name), None)
             return provider_setting or {}
 
+    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
+        """
+        获取分集URL列表 (补充源功能)。
+
+        Args:
+            metadata_id: 豆瓣条目ID
+            target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv), 如果为None则返回所有平台
+
+        Returns:
+            List[Tuple[int, str]]: (集数, 播放URL) 的列表
+        """
+        return await self._get_episode_urls_from_douban_page(metadata_id, target_provider)
+
     async def _get_episode_urls_from_douban_page(self, douban_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
         """
         从豆瓣电影页面解析播放链接

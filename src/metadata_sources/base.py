@@ -61,6 +61,19 @@ class BaseMetadataSource(ABC):
         """
         return None # 默认实现不执行任何操作
 
+    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[tuple]:
+        """
+        获取分集URL列表 (补充源功能)。
+
+        Args:
+            metadata_id: 元数据源中的条目ID
+            target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv等), 如果为None则返回所有平台
+
+        Returns:
+            List[Tuple[int, str]]: (集数, 播放URL) 的列表
+        """
+        return [] # 默认实现返回空列表
+
     async def close(self):
         """关闭所有打开的资源，例如HTTP客户端。"""
         pass

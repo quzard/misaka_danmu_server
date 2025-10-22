@@ -993,34 +993,12 @@ async def generic_import_task(
                 else:
                     logger.info(f"补充源详情: {supplement_details.title}")
 
-                    # 使用补充源获取分集URL列表
-                    episode_urls = []
-
-                    # 判断补充源类型,使用不同的获取方法
-                    if supplementProvider == "360":
-                        # 360源: 逐集尝试获取URL
-                        max_episodes = 200  # 最多尝试200集
-                        for i in range(1, max_episodes + 1):
-                            if i % 10 == 0:
-                                await progress_callback(12 + int((i / max_episodes) * 8), f"正在获取第{i}集URL...")
-
-                            url = await supplement_source._get_episode_url_from_360(
-                                supplement_details, i, provider  # 目标平台
-                            )
-                            if not url:
-                                break
-                            episode_urls.append((i, url))
-
-                    elif supplementProvider == "douban":
-                        # 豆瓣源: 一次性解析页面获取所有URL
-                        await progress_callback(12, "正在从豆瓣页面解析播放链接...")
-                        episode_urls = await supplement_source._get_episode_urls_from_douban_page(
-                            supplementMediaId, provider  # 目标平台
-                        )
-                        await progress_callback(18, f"豆瓣解析完成,获取到 {len(episode_urls)} 个播放链接")
-
-                    else:
-                        logger.warning(f"未知的补充源类型: {supplementProvider}")
+                    # 使用补充源获取分集URL列表 (统一使用公开方法)
+                    await progress_callback(12, f"正在从{supplementProvider}获取分集URL...")
+                    episode_urls = await supplement_source.get_episode_urls(
+                        supplementMediaId, provider  # 目标平台
+                    )
+                    await progress_callback(18, f"{supplementProvider}解析完成,获取到 {len(episode_urls)} 个播放链接")
 
                     logger.info(f"补充源获取到 {len(episode_urls)} 个分集URL")
 

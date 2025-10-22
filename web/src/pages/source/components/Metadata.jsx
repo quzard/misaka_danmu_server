@@ -400,6 +400,25 @@ export const Metadata = () => {
               </div>
             </div>
           )}
+          {/* 新增：根据后端返回的 supportsEpisodeUrls 标志来决定是否显示补充源开关 */}
+          {form.getFieldValue('supportsEpisodeUrls') && (
+            <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+              <Form.Item
+                name="episodeUrlsEnabled"
+                label="启用补充源"
+                valuePropName="checked"
+                className="min-w-[100px] shrink-0 !mb-0"
+              >
+                <Switch />
+              </Form.Item>
+              <div
+                className="w-full text-gray-500"
+                title="启用后，当弹幕源没有提供分集列表时，此元数据源可以提供分集URL作为补充。"
+              >
+                启用后，当弹幕源缺少分集列表时，此源可提供分集URL作为补充。
+              </div>
+            </div>
+          )}
         </Form>
       </Modal>
     </div>

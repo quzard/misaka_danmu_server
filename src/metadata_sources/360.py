@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import quote
 
 import httpx
@@ -332,6 +332,46 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.debug(f"Converted hunantv URL '{url}' to '{new_url}'")
             return new_url
         return url
+
+    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
+        """
+        获取分集URL列表 (补充源功能)。
+
+        Args:
+            metadata_id: 360影视条目ID
+            target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv), 如果为None则返回所有平台
+
+        Returns:
+            List[Tuple[int, str]]: (集数, 播放URL) 的列表
+        """
+        try:
+            # 1. 获取详情
+            user = models.User(id=0, username="system")
+            details = await self.get_details(metadata_id, user)
+            if not details:
+                self.logger.warning(f"360: 无法获取详情 (metadata_id={metadata_id})")
+                return []
+
+            # 2. 转换provider名称到360的site名称
+            provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
+            target_site = provider_map.get(target_provider) if target_provider else None
+
+            # 3. 逐集获取URL (最多尝试200集)
+            episode_urls: List[Tuple[int, str]] = []
+            max_episodes = 200
+
+            for i in range(1, max_episodes + 1):
+                url = await self._get_episode_url_from_360(details, i, target_site)
+                if not url:
+                    break
+                episode_urls.append((i, url))
+
+            self.logger.info(f"360: 成功获取 {len(episode_urls)} 个分集URL")
+            return episode_urls
+
+        except Exception as e:
+            self.logger.error(f"360: 获取分集URL列表失败: {e}", exc_info=True)
+            return []
 
     async def _get_episode_url_from_360(self, best_match: models.MetadataDetailsResponse, episode_index: int, target_site: Optional[str]) -> Optional[str]:
         """基于参考实现的简化分集获取方法"""
