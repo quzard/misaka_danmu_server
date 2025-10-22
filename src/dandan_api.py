@@ -1756,7 +1756,6 @@ async def _get_match_for_item(
                 logger.info(f"  - 分配新的real_anime_id: {real_anime_id}")
 
             # 获取或创建source，以获取正确的source_order
-            from . import crud
             # 检查是否已有该源
             source_stmt = select(AnimeSource.id, AnimeSource.sourceOrder).where(
                 AnimeSource.animeId == real_anime_id,
