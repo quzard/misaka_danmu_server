@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI):
         'mysqlBinlogRetentionDays': (3, '（仅MySQL）自动清理多少天前的二进制日志（binlog）。0为不清理。需要SUPER或BINLOG_ADMIN权限。'),
         # 顺延机制配置
         'webhookFallbackEnabled': ('false', '是否启用Webhook顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
-        'externalApiFallbackEnabled': ('false', '是否启用外部控制API顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
+        'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
     }
     await app.state.config_manager.register_defaults(default_configs)
 

@@ -516,15 +516,26 @@ async def _download_episode_comments_concurrent(
     episodes: List,
     rate_limiter: RateLimiter,
     progress_callback: Callable,
-    first_episode_comments: Optional[List] = None
+    first_episode_comments: Optional[List] = None,
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None
 ) -> List[Tuple[int, Optional[List]]]:
     """
     并发下载多个分集的弹幕（用于单集或少量分集的快速下载）
 
+    Args:
+        scraper: 弹幕源scraper
+        episodes: 分集列表
+        rate_limiter: 速率限制器
+        progress_callback: 进度回调函数
+        first_episode_comments: 第一集的预获取弹幕（可选）
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
+
     Returns:
         List[Tuple[episode_index, comments]]: 分集索引和对应的弹幕列表
     """
-    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）")
+    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）{'[后备任务]' if is_fallback else ''}")
 
     async def download_single_episode(episode_info):
         episode_index, episode = episode_info
@@ -534,8 +545,13 @@ async def _download_episode_comments_concurrent(
                 logger.info(f"使用预获取的第一集弹幕: {len(first_episode_comments)} 条")
                 return (episode.episodeIndex, first_episode_comments)
 
-            # 检查速率限制
-            await rate_limiter.check(scraper.provider_name)
+            # 检查速率限制（根据是否为后备任务选择不同的方法）
+            if is_fallback:
+                if not fallback_type:
+                    raise ValueError("后备任务必须指定fallback_type参数")
+                await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.check(scraper.provider_name)
 
             # 创建子进度回调（异步版本）
             async def sub_progress_callback(p, msg):
@@ -547,9 +563,12 @@ async def _download_episode_comments_concurrent(
             # 下载弹幕
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
-            # 增加速率限制计数
+            # 增加速率限制计数（根据是否为后备任务选择不同的方法）
             if comments is not None:
-                await rate_limiter.increment(scraper.provider_name)
+                if is_fallback:
+                    await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                else:
+                    await rate_limiter.increment(scraper.provider_name)
                 logger.info(f"[并发下载] 分集 '{episode.title}' 获取到 {len(comments)} 条弹幕")
             else:
                 logger.warning(f"[并发下载] 分集 '{episode.title}' 获取弹幕失败")
@@ -598,7 +617,9 @@ async def _import_episodes_iteratively(
     first_episode_comments: Optional[List] = None,
     config_manager = None,
     is_single_episode: bool = False,
-    smart_refresh: bool = False
+    smart_refresh: bool = False,
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None
 ) -> Tuple[int, List[int], int, Dict[int, str]]:
     """
     迭代地导入分集弹幕。
@@ -607,6 +628,8 @@ async def _import_episodes_iteratively(
         first_episode_comments: 第一集预获取的弹幕（可选）
         is_single_episode: 是否为单集下载模式（启用并发下载）
         smart_refresh: 是否为智能刷新模式（先下载比较，只有更多弹幕才覆盖）
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
 
     Returns:
         Tuple[int, List[int], int, Dict[int, str]]:
@@ -627,7 +650,8 @@ async def _import_episodes_iteratively(
     if use_concurrent_download:
         # 使用并发下载获取所有弹幕
         download_results = await _download_episode_comments_concurrent(
-            scraper, episodes, rate_limiter, progress_callback, first_episode_comments
+            scraper, episodes, rate_limiter, progress_callback, first_episode_comments,
+            is_fallback, fallback_type
         )
 
         # 处理下载结果，写入数据库
@@ -723,7 +747,13 @@ async def _import_episodes_iteratively(
                     logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
                 else:
                     # 其他分集正常获取
-                    await rate_limiter.check(scraper.provider_name)
+                    # 根据是否为后备任务选择不同的速率限制方法
+                    if is_fallback:
+                        if not fallback_type:
+                            raise ValueError("后备任务必须指定fallback_type参数")
+                        await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+                    else:
+                        await rate_limiter.check(scraper.provider_name)
 
                     async def sub_progress_callback(p, msg):
                         await progress_callback(
@@ -734,7 +764,10 @@ async def _import_episodes_iteratively(
 
                     # 只有在实际进行了网络请求时才增加计数
                     if comments is not None:
-                        await rate_limiter.increment(scraper.provider_name)
+                        if is_fallback:
+                            await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                        else:
+                            await rate_limiter.increment(scraper.provider_name)
 
                 # 修正：检查弹幕是否为空（None 或空列表）
                 if comments is not None and len(comments) > 0:
@@ -812,11 +845,18 @@ async def _import_episodes_iteratively(
                 await asyncio.sleep(e.retry_after_seconds)
                 # 重试当前分集
                 try:
-                    await rate_limiter.check(scraper.provider_name)
+                    # 根据是否为后备任务选择不同的速率限制方法
+                    if is_fallback:
+                        await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+                    else:
+                        await rate_limiter.check(scraper.provider_name)
                     comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
                     # 修正：检查弹幕是否为空（None 或空列表）
                     if comments is not None and len(comments) > 0:
-                        await rate_limiter.increment(scraper.provider_name)
+                        if is_fallback:
+                            await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                        else:
+                            await rate_limiter.increment(scraper.provider_name)
                         episode_db_id = await crud.create_episode_if_not_exists(
                             session, anime_id, source_id, episode.episodeIndex,
                             episode.title, episode.url, episode.episodeId
@@ -939,11 +979,18 @@ async def generic_import_task(
     title_recognition_manager: TitleRecognitionManager,
     # 新增: 补充源信息
     supplementProvider: Optional[str] = None,
-    supplementMediaId: Optional[str] = None
+    supplementMediaId: Optional[str] = None,
+    # 新增: 后备任务标识
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
     修改流程：先获取弹幕，成功后再创建数据库条目。
+
+    Args:
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
     """
     # 添加重复检查
     await progress_callback(5, "检查重复导入...")
@@ -1076,11 +1123,23 @@ async def generic_import_task(
     # 先尝试获取第一集弹幕来验证数据源有效性
     first_episode = episodes[0]
     await progress_callback(20, f"正在验证数据源有效性: {first_episode.title}")
-    
+
     try:
-        await rate_limiter.check(scraper.provider_name)
+        # 根据是否为后备任务选择不同的速率限制方法
+        if is_fallback:
+            if not fallback_type:
+                raise ValueError("后备任务必须指定fallback_type参数")
+            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+        else:
+            await rate_limiter.check(scraper.provider_name)
         first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-        await rate_limiter.increment(scraper.provider_name)
+
+        # 只有在实际获取到弹幕时才增加计数
+        if first_comments is not None:
+            if is_fallback:
+                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.increment(scraper.provider_name)
 
         if first_comments:
             first_episode_success = True
@@ -1135,9 +1194,18 @@ async def generic_import_task(
         await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
         await asyncio.sleep(e.retry_after_seconds)
         # 重试流控检查和第一集获取
-        await rate_limiter.check(scraper.provider_name)
+        if is_fallback:
+            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+        else:
+            await rate_limiter.check(scraper.provider_name)
         first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-        await rate_limiter.increment(scraper.provider_name)
+
+        # 只有在实际获取到弹幕时才增加计数
+        if first_comments is not None:
+            if is_fallback:
+                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.increment(scraper.provider_name)
 
         if first_comments:
             first_episode_success = True
@@ -1200,7 +1268,9 @@ async def generic_import_task(
         source_id=source_id,
         first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
         config_manager=config_manager,
-        is_single_episode=currentEpisodeIndex is not None  # 传递是否为单集下载模式
+        is_single_episode=currentEpisodeIndex is not None,  # 传递是否为单集下载模式
+        is_fallback=is_fallback,  # 传递后备任务标识
+        fallback_type=fallback_type  # 传递后备类型
     )
 
     if not successful_episodes_indices and failed_episodes_count > 0:
@@ -2754,7 +2824,9 @@ async def auto_search_and_import_task(
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
             rate_limiter=rate_limiter,
-            title_recognition_manager=title_recognition_manager
+            title_recognition_manager=title_recognition_manager,
+            is_fallback=True,  # 标识为后备任务
+            fallback_type="match"  # 匹配后备类型
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。

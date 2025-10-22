@@ -2084,7 +2084,9 @@ async def get_comments_for_dandan(
 
                                 download_results = await tasks._download_episode_comments_concurrent(
                                     scraper, [virtual_episode], current_rate_limiter,
-                                    dummy_progress_callback
+                                    dummy_progress_callback,
+                                    is_fallback=True,
+                                    fallback_type="search"
                                 )
 
                                 # 提取弹幕数据
