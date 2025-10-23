@@ -1675,10 +1675,40 @@ async def _get_match_for_item(
 
             logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
-            # 打印搜索结果列表
-            logger.info(f"搜索结果列表:")
-            for idx, result in enumerate(all_results, 1):
-                logger.info(f"  {idx}. {result.provider} - {result.title} (ID: {result.mediaId}, 类型: {result.type}, 年份: {result.year or 'N/A'})")
+            # 步骤2：智能排序 (类型匹配优先)
+            logger.info(f"步骤2：智能排序 (类型匹配优先)")
+
+            # 确定目标类型
+            target_type = "movie" if is_movie else "tv_series"
+
+            def calculate_match_score(result):
+                """计算匹配分数，分数越高越优先"""
+                score = 0
+
+                # 1. 类型匹配 (最高优先级，+1000分)
+                if result.type == target_type:
+                    score += 1000
+                    logger.debug(f"  - {result.provider} - {result.title}: 类型匹配 +1000")
+
+                # 2. 标题相似度 (0-100分)
+                similarity = fuzz.token_set_ratio(base_title, result.title)
+                score += similarity
+                logger.debug(f"  - {result.provider} - {result.title}: 相似度{similarity} +{similarity}")
+
+                # 3. 年份匹配 (如果有年份信息，+50分)
+                # TODO: 从parsed_info中获取年份信息
+
+                return score
+
+            # 按分数排序 (分数高的在前)
+            sorted_results = sorted(all_results, key=calculate_match_score, reverse=True)
+
+            # 打印排序后的结果列表
+            logger.info(f"排序后的搜索结果列表 (按匹配分数):")
+            for idx, result in enumerate(sorted_results, 1):
+                score = calculate_match_score(result)
+                type_match = "✓" if result.type == target_type else "✗"
+                logger.info(f"  {idx}. [{type_match}] {result.provider} - {result.title} (ID: {result.mediaId}, 类型: {result.type}, 年份: {result.year or 'N/A'}, 分数: {score:.0f})")
 
             # 步骤3：自动选择最佳源
             logger.info(f"步骤3：自动选择最佳源")
@@ -1688,13 +1718,13 @@ async def _get_match_for_item(
 
             best_match = None
             if not fallback_enabled:
-                # 顺延机制关闭，使用第一个结果
-                best_match = all_results[0]
+                # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                best_match = sorted_results[0]
                 logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
             else:
-                # 顺延机制启用：依次验证候选源
+                # 顺延机制启用：依次验证候选源 (按分数从高到低)
                 logger.info(f"  - 顺延机制启用，依次验证候选源")
-                for attempt, candidate in enumerate(all_results, 1):
+                for attempt, candidate in enumerate(sorted_results, 1):
                     logger.info(f"    {attempt}. 正在验证: {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}, 类型: {candidate.type})")
                     try:
                         scraper = scraper_manager.get_scraper(candidate.provider)
@@ -1708,8 +1738,11 @@ async def _get_match_for_item(
                             logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
                             continue
 
-                        # 如果是电影，只要有分集列表就通过
+                        # 如果用户搜索的是电影，只匹配电影类型的候选源
                         if is_movie:
+                            if candidate.type != "movie":
+                                logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
+                                continue
                             logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
                         # 如果指定了集数，检查是否有目标集数
                         elif episode_number is not None:
