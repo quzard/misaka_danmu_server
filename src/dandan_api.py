@@ -282,6 +282,10 @@ def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) 
     按照弹幕库标准，animeId补0到6位
     例如：animeId=136 → episodeId=25000136010001
     """
+    # 参数验证
+    if anime_id is None or source_order is None or episode_number is None:
+        raise ValueError(f"生成episodeId时参数不能为None: anime_id={anime_id}, source_order={source_order}, episode_number={episode_number}")
+
     # 按照弹幕库标准：animeId补0到6位
     # 格式化为：25 + 6位animeId + 2位源顺序 + 4位集编号
     episode_id = int(f"25{anime_id:06d}{source_order:02d}{episode_number:04d}")
@@ -1641,8 +1645,8 @@ async def _get_match_for_item(
             # 解析搜索关键词，提取纯标题
             search_parsed_info = parse_search_keyword(parsed_info["title"])
             base_title = search_parsed_info["title"]
-            season = parsed_info.get("season", 1)
-            episode_number = parsed_info.get("episode", 1)
+            season = parsed_info.get("season") or 1
+            episode_number = parsed_info.get("episode") or 1
 
             # 步骤1：使用统一的搜索函数
             logger.info(f"步骤1：全网搜索 '{base_title}'")
@@ -1772,8 +1776,9 @@ async def _get_match_for_item(
                 # 查找当前最大的source_order
                 max_order_stmt = select(func.max(AnimeSource.sourceOrder)).where(AnimeSource.animeId == real_anime_id)
                 max_order_result = await session.execute(max_order_stmt)
-                current_max_order = max_order_result.scalar_one_or_none() or 0
-                source_order = current_max_order + 1
+                current_max_order = max_order_result.scalar_one_or_none()
+                logger.debug(f"  - 查询到的最大source_order: {current_max_order}")
+                source_order = (current_max_order or 0) + 1
                 logger.info(f"  - 分配新的source_order: {source_order}")
 
             # 生成真实episodeId
