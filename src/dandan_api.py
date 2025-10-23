@@ -2035,25 +2035,8 @@ async def get_comments_for_dandan(
             source_id = await crud.link_source_to_anime(session, real_anime_id, provider, mediaId)
             logger.info(f"source_id={source_id}")
 
-            # 步骤3：创建或获取episode条目
-            stmt = select(Episode).where(Episode.id == episodeId)
-            result = await session.execute(stmt)
-            existing_episode = result.scalar_one_or_none()
-
-            if not existing_episode:
-                # 创建episode条目
-                logger.info(f"创建episode条目: episodeId={episodeId}")
-                episode_db_id = await crud.create_episode_entry(
-                    session, real_anime_id, source_id, episode_number,
-                    f"第{episode_number}集" if media_type != "movie" else final_title,
-                    episodeId
-                )
-                await session.flush()
-            else:
-                logger.info(f"episode条目已存在: episodeId={episodeId}")
-
-            # 步骤4：下载弹幕
-            logger.info(f"开始下载弹幕: provider={provider}, mediaId={mediaId}")
+            # 步骤3：获取分集信息
+            logger.info(f"开始获取分集信息: provider={provider}, mediaId={mediaId}, episode_number={episode_number}")
 
             # 获取scraper
             scraper = scraper_manager.get_scraper(provider)
@@ -2062,9 +2045,39 @@ async def get_comments_for_dandan(
                 await session.rollback()
                 return models.CommentResponse(count=0, comments=[])
 
-            # 下载弹幕
+            # 获取分集列表
             try:
-                comments = await scraper.get_comments(mediaId, progress_callback=lambda _p, _msg: None)
+                episodes_list = await scraper.get_episodes(mediaId, db_media_type=media_type)
+                if not episodes_list or len(episodes_list) < episode_number:
+                    logger.error(f"无法获取第{episode_number}集的信息")
+                    await session.rollback()
+                    return models.CommentResponse(count=0, comments=[])
+
+                # 获取目标分集信息
+                target_episode = episodes_list[episode_number - 1]
+                provider_episode_id = target_episode.episodeId
+                episode_title = target_episode.title
+                episode_url = target_episode.url
+
+                logger.info(f"获取到分集信息: title='{episode_title}', provider_episode_id='{provider_episode_id}'")
+
+                # 步骤4：创建Episode条目
+                episode_db_id = await crud.create_episode_if_not_exists(
+                    session, real_anime_id, source_id, episode_number,
+                    episode_title, episode_url, provider_episode_id
+                )
+                await session.flush()
+                logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
+
+            except Exception as e:
+                logger.error(f"获取分集信息失败: {e}", exc_info=True)
+                await session.rollback()
+                return models.CommentResponse(count=0, comments=[])
+
+            # 步骤5：下载弹幕
+            logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
+            try:
+                comments = await scraper.get_comments(provider_episode_id, progress_callback=lambda _p, _msg: None)
                 if comments:
                     logger.info(f"下载成功，共 {len(comments)} 条弹幕")
 
