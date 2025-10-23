@@ -2068,8 +2068,13 @@ async def get_comments_for_dandan(
 
             # 步骤4：下载弹幕
             logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
+
+            # 创建异步进度回调
+            async def dummy_progress(_p, _msg):
+                pass
+
             try:
-                comments = await scraper.get_comments(provider_episode_id, progress_callback=lambda _p, _msg: None)
+                comments = await scraper.get_comments(provider_episode_id, progress_callback=dummy_progress)
                 if not comments:
                     logger.warning(f"下载失败，未获取到弹幕")
                     await session.rollback()
