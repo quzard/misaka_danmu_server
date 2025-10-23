@@ -1645,8 +1645,10 @@ async def _get_match_for_item(
             # 解析搜索关键词，提取纯标题
             search_parsed_info = parse_search_keyword(parsed_info["title"])
             base_title = search_parsed_info["title"]
+            is_movie = parsed_info.get("is_movie", False)
             season = parsed_info.get("season") or 1
-            episode_number = parsed_info.get("episode") or 1
+            # 电影不设置episode_number,保持为None
+            episode_number = None if is_movie else (parsed_info.get("episode") or 1)
 
             # 步骤1：使用统一的搜索函数
             logger.info(f"步骤1：全网搜索 '{base_title}'")
@@ -1673,6 +1675,11 @@ async def _get_match_for_item(
 
             logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
+            # 打印搜索结果列表
+            logger.info(f"搜索结果列表:")
+            for idx, result in enumerate(all_results, 1):
+                logger.info(f"  {idx}. {result.provider} - {result.title} (ID: {result.mediaId}, 类型: {result.type}, 年份: {result.year or 'N/A'})")
+
             # 步骤3：自动选择最佳源
             logger.info(f"步骤3：自动选择最佳源")
 
@@ -1688,9 +1695,11 @@ async def _get_match_for_item(
                 # 顺延机制启用：依次验证候选源
                 logger.info(f"  - 顺延机制启用，依次验证候选源")
                 for attempt, candidate in enumerate(all_results, 1):
+                    logger.info(f"    {attempt}. 正在验证: {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}, 类型: {candidate.type})")
                     try:
                         scraper = scraper_manager.get_scraper(candidate.provider)
                         if not scraper:
+                            logger.warning(f"    {attempt}. {candidate.provider} - 无法获取scraper，跳过")
                             continue
 
                         # 获取分集列表进行验证
@@ -1699,8 +1708,11 @@ async def _get_match_for_item(
                             logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
                             continue
 
+                        # 如果是电影，只要有分集列表就通过
+                        if is_movie:
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
                         # 如果指定了集数，检查是否有目标集数
-                        if episode_number is not None:
+                        elif episode_number is not None:
                             target_episode = None
                             for ep in episodes:
                                 if ep.episodeIndex == episode_number:
@@ -1711,7 +1723,9 @@ async def _get_match_for_item(
                                 logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {episode_number} 集，跳过")
                                 continue
 
-                        logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
+                        else:
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
                         best_match = candidate
                         break
                     except Exception as e:
@@ -1781,8 +1795,9 @@ async def _get_match_for_item(
                 source_order = (current_max_order or 0) + 1
                 logger.info(f"  - 分配新的source_order: {source_order}")
 
-            # 生成真实episodeId
-            real_episode_id = _generate_episode_id(real_anime_id, source_order, episode_number)
+            # 生成真实episodeId (电影使用1作为episode_number)
+            final_episode_number = 1 if is_movie else episode_number
+            real_episode_id = _generate_episode_id(real_anime_id, source_order, final_episode_number)
             logger.info(f"  - 生成真实episodeId: {real_episode_id}")
 
             # 步骤6：存储映射关系到缓存
@@ -1806,7 +1821,7 @@ async def _get_match_for_item(
                 "real_anime_id": real_anime_id,
                 "provider": best_match.provider,
                 "mediaId": best_match.mediaId,
-                "episode_number": episode_number,
+                "episode_number": final_episode_number,  # 使用final_episode_number (电影为1)
                 "final_title": final_title,
                 "final_season": final_season,
                 "media_type": best_match.type,
