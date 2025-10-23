@@ -2036,7 +2036,7 @@ async def get_comments_for_dandan(
             logger.info(f"source_id={source_id}")
 
             # 步骤3：创建或获取episode条目
-            stmt = select(Episode).where(Episode.episodeId == episodeId)
+            stmt = select(Episode).where(Episode.id == episodeId)
             result = await session.execute(stmt)
             existing_episode = result.scalar_one_or_none()
 
