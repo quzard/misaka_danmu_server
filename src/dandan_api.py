@@ -2024,8 +2024,7 @@ async def get_comments_for_dandan(
                     season=final_season,
                     imageUrl=imageUrl,
                     year=year,
-                    createdAt=get_now(),
-                    updatedAt=get_now()
+                    createdAt=get_now()
                 )
                 session.add(new_anime)
                 await session.flush()
