@@ -2061,7 +2061,29 @@ async def get_comments_for_dandan(
 
                 logger.info(f"获取到分集信息: title='{episode_title}', provider_episode_id='{provider_episode_id}'")
 
-                # 步骤4：创建Episode条目
+            except Exception as e:
+                logger.error(f"获取分集信息失败: {e}", exc_info=True)
+                await session.rollback()
+                return models.CommentResponse(count=0, comments=[])
+
+            # 步骤4：下载弹幕
+            logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
+            try:
+                comments = await scraper.get_comments(provider_episode_id, progress_callback=lambda _p, _msg: None)
+                if not comments:
+                    logger.warning(f"下载失败，未获取到弹幕")
+                    await session.rollback()
+                    return models.CommentResponse(count=0, comments=[])
+
+                logger.info(f"下载成功，共 {len(comments)} 条弹幕")
+
+            except Exception as e:
+                logger.error(f"下载弹幕失败: {e}", exc_info=True)
+                await session.rollback()
+                return models.CommentResponse(count=0, comments=[])
+
+            # 步骤5：创建Episode条目
+            try:
                 episode_db_id = await crud.create_episode_if_not_exists(
                     session, real_anime_id, source_id, episode_number,
                     episode_title, episode_url, provider_episode_id
@@ -2070,35 +2092,26 @@ async def get_comments_for_dandan(
                 logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
 
             except Exception as e:
-                logger.error(f"获取分集信息失败: {e}", exc_info=True)
+                logger.error(f"创建Episode条目失败: {e}", exc_info=True)
                 await session.rollback()
                 return models.CommentResponse(count=0, comments=[])
 
-            # 步骤5：下载弹幕
-            logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
+            # 步骤6：保存弹幕
             try:
-                comments = await scraper.get_comments(provider_episode_id, progress_callback=lambda _p, _msg: None)
-                if comments:
-                    logger.info(f"下载成功，共 {len(comments)} 条弹幕")
+                added_count = await crud.save_danmaku_for_episode(
+                    session, episodeId, comments, None
+                )
+                await session.commit()
+                logger.info(f"保存成功，共 {added_count} 条弹幕")
 
-                    # 保存弹幕
-                    added_count = await crud.save_danmaku_for_episode(
-                        session, episodeId, comments, None
-                    )
-                    await session.commit()
-                    logger.info(f"保存成功，共 {added_count} 条弹幕")
+                # 清理缓存
+                del fallback_search_cache[fallback_episode_cache_key]
 
-                    # 清理缓存
-                    del fallback_search_cache[fallback_episode_cache_key]
+                # 重新获取弹幕
+                comments_data = await crud.fetch_comments(session, episodeId)
 
-                    # 重新获取弹幕
-                    comments_data = await crud.fetch_comments(session, episodeId)
-                else:
-                    logger.warning(f"下载失败，未获取到弹幕")
-                    await session.rollback()
-                    return models.CommentResponse(count=0, comments=[])
             except Exception as e:
-                logger.error(f"下载弹幕失败: {e}", exc_info=True)
+                logger.error(f"保存弹幕失败: {e}", exc_info=True)
                 await session.rollback()
                 return models.CommentResponse(count=0, comments=[])
 
