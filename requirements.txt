@@ -36,3 +36,6 @@ brotli
 requests
 # dandanplay scraper dependency
 aiohttp
+# AI匹配功能依赖
+openai>=1.0.0
+google-generativeai
