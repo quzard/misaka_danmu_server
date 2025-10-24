@@ -2129,24 +2129,28 @@ async def webhook_search_and_dispatch_task(
         for i, item in enumerate(all_search_results[:5]):
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
-        # 使用与WebUI相同的智能排序逻辑
+        # 使用与WebUI相同的智能排序逻辑，新增年份匹配优先级
         all_search_results.sort(
             key=lambda item: (
-                # 1. 季度匹配（仅对电视剧）
+                # 1. 年份匹配（最高优先级，避免下载错误年份的版本）
+                10000 if year is not None and item.year is not None and item.year == year else 0,
+                # 2. 季度匹配（仅对电视剧）
                 1 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
-                # 2. 最高优先级：完全匹配的标题
+                # 3. 最高优先级：完全匹配的标题
                 1000 if item.title.strip() == animeTitle.strip() else 0,
-                # 3. 次高优先级：去除标点符号后的完全匹配
+                # 4. 次高优先级：去除标点符号后的完全匹配
                 500 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
-                # 4. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                # 5. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
                 200 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
-                # 5. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                # 6. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
                 100 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
-                # 6. 第五优先级：一般相似度，但必须达到85%以上才考虑
+                # 7. 第五优先级：一般相似度，但必须达到85%以上才考虑
                 fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
-                # 7. 惩罚标题长度差异大的结果
+                # 8. 惩罚标题长度差异大的结果
                 -abs(len(item.title) - len(animeTitle)),
-                # 8. 最后考虑源优先级
+                # 9. 惩罚年份不匹配的结果（如果webhook提供了年份但搜索结果年份不匹配）
+                -1000 if year is not None and item.year is not None and item.year != year else 0,
+                # 10. 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
@@ -2156,8 +2160,10 @@ async def webhook_search_and_dispatch_task(
         logger.info(f"Webhook 任务: 排序后的前5个结果:")
         for i, item in enumerate(all_search_results[:5]):
             title_match = "✓" if item.title.strip() == animeTitle.strip() else "✗"
+            year_match = "✓" if year is not None and item.year is not None and item.year == year else ("✗" if year is not None and item.year is not None else "-")
             similarity = fuzz.token_set_ratio(animeTitle, item.title)
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+            year_info = f"年份: {item.year}" if item.year else "年份: 未知"
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%)")
 
         # 评估前3个最佳匹配项，设置最低相似度阈值
         max_candidates = min(3, len(all_search_results))
@@ -2703,13 +2709,18 @@ async def auto_search_and_import_task(
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
         # 简化排序逻辑：由于已经有季度过滤和标题映射，主要按源优先级排序
+        # 新增：年份匹配优先级
         all_results.sort(
             key=lambda item: (
-                # 优先级1：完全匹配的标题
+                # 优先级1：年份匹配（最高优先级，避免下载错误年份的版本）
+                10000 if year is not None and item.year is not None and item.year == year else 0,
+                # 优先级2：完全匹配的标题
                 1000 if item.title.strip() == main_title.strip() else 0,
-                # 优先级2：标题相似度
+                # 优先级3：标题相似度
                 fuzz.token_set_ratio(main_title, item.title),
-                # 优先级3：源优先级
+                # 优先级4：惩罚年份不匹配的结果
+                -1000 if year is not None and item.year is not None and item.year != year else 0,
+                # 优先级5：源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
@@ -2719,8 +2730,10 @@ async def auto_search_and_import_task(
         logger.info(f"排序后的前5个结果:")
         for i, item in enumerate(all_results[:5]):
             title_match = "✓" if item.title.strip() == main_title.strip() else "✗"
+            year_match = "✓" if year is not None and item.year is not None and item.year == year else ("✗" if year is not None and item.year is not None else "-")
             similarity = fuzz.token_set_ratio(main_title, item.title)
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+            year_info = f"年份: {item.year}" if item.year else "年份: 未知"
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%)")
         # 候选项选择：检查是否启用顺延机制
         if not all_results:
             raise ValueError("没有找到合适的搜索结果")
@@ -2752,7 +2765,7 @@ async def auto_search_and_import_task(
                         "title": main_title,
                         "season": payload.season,
                         "episode": payload.episode,
-                        "year": payload.year,
+                        "year": year,  # 修正：使用从元数据获取的year变量，而不是payload.year
                         "type": media_type
                     }
 

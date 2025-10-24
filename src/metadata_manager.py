@@ -400,7 +400,7 @@ class MetadataSourceManager:
                 return None
             except Exception as e:
                 # 捕获其他潜在错误
-                self.logger.error(f"从 '{provider}' 获取详情 (ID: {item_id}) 时发生未知错误: {e}", exc_info=True)
+                self.logger.error(f"从 '{provider}' 获取详情 (ID: {item_id}) 时发生未知错误: {e}")
                 return None
         raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 

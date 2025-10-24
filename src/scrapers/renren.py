@@ -608,11 +608,12 @@ class RenrenScraper(BaseScraper):
             'ignore': 'false'
         }
 
-        url = f"https://{APP_DRAMA_HOST}{path}"
+        # 修正：手动构建完整URL,不使用params参数,避免httpx重新编码导致签名不匹配
+        url = f"https://{APP_DRAMA_HOST}{path}?{query_string}"
 
         try:
             client = await self._ensure_client()
-            resp = await client.get(url, params=params, headers=headers, timeout=20.0)
+            resp = await client.get(url, headers=headers, timeout=20.0)
 
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Renren APP Drama Detail Response: status={resp.status_code}, text={resp.text}")

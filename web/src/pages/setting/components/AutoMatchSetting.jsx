@@ -58,14 +58,17 @@ const AutoMatchSetting = () => {
   const handleSave = async () => {
     try {
       setSaving(true)
-      const values = await form.validateFields()
+      // 如果AI匹配未启用,跳过必填字段验证
+      const values = aiEnabled
+        ? await form.validateFields()
+        : form.getFieldsValue()
 
       await Promise.all([
         setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
-        setConfig('aiMatchProvider', values.aiMatchProvider),
-        setConfig('aiMatchApiKey', values.aiMatchApiKey),
+        setConfig('aiMatchProvider', values.aiMatchProvider || ''),
+        setConfig('aiMatchApiKey', values.aiMatchApiKey || ''),
         setConfig('aiMatchBaseUrl', values.aiMatchBaseUrl || ''),
-        setConfig('aiMatchModel', values.aiMatchModel),
+        setConfig('aiMatchModel', values.aiMatchModel || ''),
         setConfig('aiMatchPrompt', values.aiMatchPrompt || '')
       ])
 
@@ -141,112 +144,111 @@ const AutoMatchSetting = () => {
             <Switch />
           </Form.Item>
 
-          {/* AI配置区域 - 仅在启用时显示 */}
-          {aiEnabled && (
-            <>
+          {/* AI配置区域 - 禁用时字段保持显示但不可编辑 */}
+          <Form.Item
+            name="aiMatchProvider"
+            label={
+              <Space>
+                <span>AI提供商</span>
+                <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            rules={[{ required: aiEnabled, message: '请选择AI提供商' }]}
+          >
+            <Select disabled={!aiEnabled}>
+              <Option value="deepseek">DeepSeek (推荐)</Option>
+              <Option value="openai">OpenAI (兼容接口)</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="aiMatchApiKey"
+            label={
+              <Space>
+                <span>API密钥</span>
+                <Tooltip title="从AI服务提供商获取的API密钥。必填项。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            rules={[{ required: aiEnabled, message: '请输入API密钥' }]}
+          >
+            <Input.Password placeholder="sk-..." disabled={!aiEnabled} />
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) =>
+              prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+            }
+          >
+            {({ getFieldValue }) => (
               <Form.Item
-                name="aiMatchProvider"
+                name="aiMatchBaseUrl"
                 label={
                   <Space>
-                    <span>AI提供商</span>
-                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
-                      <QuestionCircleOutlined />
-                    </Tooltip>
-                  </Space>
-                }
-                rules={[{ required: true, message: '请选择AI提供商' }]}
-              >
-                <Select>
-                  <Option value="deepseek">DeepSeek (推荐)</Option>
-                  <Option value="openai">OpenAI (兼容接口)</Option>
-                </Select>
-              </Form.Item>
-
-              <Form.Item
-                name="aiMatchApiKey"
-                label={
-                  <Space>
-                    <span>API密钥</span>
-                    <Tooltip title="从AI服务提供商获取的API密钥。必填项。">
-                      <QuestionCircleOutlined />
-                    </Tooltip>
-                  </Space>
-                }
-                rules={[{ required: true, message: '请输入API密钥' }]}
-              >
-                <Input.Password placeholder="sk-..." />
-              </Form.Item>
-
-              <Form.Item
-                noStyle
-                shouldUpdate={(prevValues, currentValues) =>
-                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
-                }
-              >
-                {({ getFieldValue }) => (
-                  <Form.Item
-                    name="aiMatchBaseUrl"
-                    label={
-                      <Space>
-                        <span>Base URL</span>
-                        <Tooltip title="自定义API接口地址。通常用于第三方兼容接口或代理服务。留空使用默认地址。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
-                    }
-                  >
-                    <Input
-                      placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
-                    />
-                  </Form.Item>
-                )}
-              </Form.Item>
-
-              <Form.Item
-                noStyle
-                shouldUpdate={(prevValues, currentValues) =>
-                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
-                }
-              >
-                {({ getFieldValue }) => (
-                  <Form.Item
-                    name="aiMatchModel"
-                    label={
-                      <Space>
-                        <span>模型名称</span>
-                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
-                    }
-                    rules={[{ required: true, message: '请输入模型名称' }]}
-                  >
-                    <Input
-                      placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
-                    />
-                  </Form.Item>
-                )}
-              </Form.Item>
-
-              <Form.Item
-                name="aiMatchPrompt"
-                label={
-                  <Space>
-                    <span>AI提示词</span>
-                    <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
+                    <span>Base URL</span>
+                    <Tooltip title="自定义API接口地址。通常用于第三方兼容接口或代理服务。留空使用默认地址。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
                 }
               >
-                <TextArea
-                  rows={12}
-                  placeholder="留空使用默认提示词..."
-                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                <Input
+                  placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
+                  disabled={!aiEnabled}
                 />
               </Form.Item>
-            </>
-          )}
+            )}
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) =>
+              prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+            }
+          >
+            {({ getFieldValue }) => (
+              <Form.Item
+                name="aiMatchModel"
+                label={
+                  <Space>
+                    <span>模型名称</span>
+                    <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+                rules={[{ required: aiEnabled, message: '请输入模型名称' }]}
+              >
+                <Input
+                  placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
+                  disabled={!aiEnabled}
+                />
+              </Form.Item>
+            )}
+          </Form.Item>
+
+          <Form.Item
+            name="aiMatchPrompt"
+            label={
+              <Space>
+                <span>AI提示词</span>
+                <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+          >
+            <TextArea
+              rows={12}
+              placeholder="留空使用默认提示词..."
+              style={{ fontFamily: 'monospace', fontSize: '12px' }}
+              disabled={!aiEnabled}
+            />
+          </Form.Item>
         </Form>
 
         {/* 说明文字 */}

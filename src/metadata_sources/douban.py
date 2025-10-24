@@ -181,7 +181,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                 raise HTTPException(status_code=403, detail="豆瓣请求被拒绝，请检查Cookie或网络环境。")
             raise HTTPException(status_code=500, detail=f"请求豆瓣详情时发生错误: {e}")
         except Exception as e:
-            self.logger.error(f"解析豆瓣详情页时发生错误: {e}", exc_info=True)
+            self.logger.error(f"解析豆瓣详情页时发生错误: {e}")
             raise HTTPException(status_code=500, detail="解析豆瓣详情页失败。")
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
