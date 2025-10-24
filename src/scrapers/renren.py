@@ -34,6 +34,13 @@ AES_KEY: bytes = b"3b744389882a4067"
 SIGN_SECRET: str = "ES513W0B1CsdUrR13Qk5EgDAKPeeKZY"
 BASE_API = "https://api.rrmj.plus"
 
+# APP API配置 (新增)
+APP_SECRET_KEY = "cf65GPholnICgyw1xbrpA79XVkizOdMq"
+APP_SEARCH_HOST = "api.qwdjapp.com"
+APP_DRAMA_HOST = "api.zhimeisj.top"
+APP_DANMU_HOST = "static-dm.qwdjapp.com"
+APP_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; PJC110 Build/AP3A.240617.008; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36 App/RRSPApp platform/android AppVersion/10.27.4'
+
 
 @dataclass(frozen=True)
 class ClientProfile:
@@ -121,6 +128,65 @@ def aes_ecb_pkcs7_decrypt_base64(cipher_b64: str) -> str:
     cipher = AES.new(AES_KEY, AES.MODE_ECB)
     plain = unpad(cipher.decrypt(raw), AES.block_size)
     return plain.decode("utf-8")
+
+
+# =====================
+#  APP API签名函数 (新增)
+# =====================
+
+def _generate_app_md5_sign(path: str, timestamp: int, params: Optional[Dict[str, Any]] = None) -> str:
+    """生成APP API的MD5签名"""
+    import hashlib
+    sign_str = path + "t" + str(timestamp)
+
+    if params:
+        sorted_keys = sorted(params.keys())
+        for key in sorted_keys:
+            sign_str += key + str(params[key])
+
+    sign_str += APP_SECRET_KEY
+    return hashlib.md5(sign_str.encode()).hexdigest()
+
+
+def _generate_app_x_ca_sign(path: str, timestamp: int, query_string: str = "") -> str:
+    """生成APP API的X-CA-Sign (HMAC-SHA256)"""
+    sign_str = f"GET\n*/*\ngzip\n\nx-ca-method:1\n{path}"
+    if query_string:
+        sign_str += f"?{query_string}"
+
+    signature = hmac.new(APP_SECRET_KEY.encode(), sign_str.encode(), digestmod="sha256").digest()
+    return base64.b64encode(signature).decode()
+
+
+def _build_app_headers(timestamp: int, sign: str, x_ca_sign: str, host: str) -> Dict[str, str]:
+    """构建APP API请求头"""
+    return {
+        'User-Agent': APP_USER_AGENT,
+        'Accept-Encoding': 'gzip',
+        'Connection': 'close',
+        'Host': host,
+        'clientVersion': '10.27.4',
+        'pkt': 'rrmj',
+        'p': 'Android',
+        'deviceId': 'fG1vO5jzBm22vJ5mfcCYGp2NrBii5SPysgiy%2FaUb63EOTrtXyXdxHm1cUajUR1zbszl62ApHyWc1GKZtH%2FbmF0UMZWgEetdDy9QVXd9WvPU%3D',
+        'token': '',
+        'aliId': 'aPuaf9shK3QDAL6WwVdhc7cC',
+        'umId': '380998657e22ed51b5a21f2b519aa5beod',
+        'st': '',
+        'clientType': 'android_rrsp_xb_RRSP',
+        'wcode': '1',
+        't': str(timestamp),
+        'sign': sign,
+        'folding-screen': '1',
+        'isAgree': '1',
+        'et': '2',
+        'oaid': '2EDEAF4BEDC24B22B4DE3A1CC01C2F735b8f2e4c1288c3768f73d6c7cae60ba1',
+        'uet': '1',
+        'ct': 'android_rrsp_xb_RRSP',
+        'cv': '10.27.4',
+        'x-ca-sign': x_ca_sign,
+        'x-ca-method': '1'
+    }
 
 
 def auto_decode(payload: str) -> Any:
@@ -285,8 +351,90 @@ class RenrenScraper(BaseScraper):
         self.logger.info(f"renren: 为 S{search_season} 过滤后，剩下 {len(final_results)} 个结果。")
         return final_results
 
+    async def _perform_app_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
+        """使用APP API进行搜索 (主方式)"""
+        timestamp = int(time.time() * 1000)
+        path = "/search/content"
+        params = {
+            "keywords": keyword,
+            "size": 20,
+            "search_after": "",
+            "order": "match",
+            "isAgeLimit": False
+        }
+
+        # 生成签名
+        sign = _generate_app_md5_sign(path, timestamp, params)
+        query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+        x_ca_sign = _generate_app_x_ca_sign(path, timestamp, query_string)
+
+        # 构建请求头
+        headers = _build_app_headers(timestamp, sign, x_ca_sign, APP_SEARCH_HOST)
+
+        url = f"https://{APP_SEARCH_HOST}{path}"
+        results: List[models.ProviderSearchInfo] = []
+
+        try:
+            async with self._api_lock:
+                now = time.time()
+                dt = now - self._last_request_time
+                if dt < self._min_interval:
+                    await asyncio.sleep(self._min_interval - dt)
+
+                client = await self._ensure_client()
+                resp = await client.get(url, params=params, headers=headers, timeout=20.0)
+                self._last_request_time = time.time()
+
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren APP Search Response: status={resp.status_code}, text={resp.text}")
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            # 解析APP API响应
+            if data.get("code") not in ["0000", 0]:
+                self.logger.warning(f"renren APP搜索失败: {data.get('msg', '未知错误')}")
+                return []
+
+            drama_list = data.get("data", {}).get("searchDramaList", [])
+            for item in drama_list:
+                drama_id = str(item.get("id") or item.get("dramaId", ""))
+                if not drama_id:
+                    continue
+
+                title_clean = re.sub(r"<[^>]+>", "", item.get("title", "")).replace(":", "：")
+                episode_count = item.get("episodeTotal")
+
+                results.append(models.ProviderSearchInfo(
+                    provider=self.provider_name,
+                    mediaId=drama_id,
+                    title=title_clean,
+                    type="tv_series",
+                    season=get_season_from_title(title_clean),
+                    year=item.get("year"),
+                    imageUrl=item.get("cover"),
+                    episodeCount=episode_count,
+                    currentEpisodeIndex=episode_info.get("episode") if episode_info else None,
+                    url=self.build_media_url(drama_id)
+                ))
+
+            self.logger.info(f"renren APP搜索 '{keyword}' 完成，找到 {len(results)} 个结果")
+            return results
+
+        except Exception as e:
+            self.logger.warning(f"renren APP搜索 '{keyword}' 失败: {e}")
+            return []
+
     async def _perform_network_search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
-        """Performs the actual network search for Renren."""
+        """Performs the actual network search for Renren. 优先使用APP API,失败时降级到Web API"""
+        # 1. 优先尝试APP API
+        self.logger.info(f"renren: 尝试使用APP API搜索 '{keyword}'")
+        results = await self._perform_app_search(keyword, episode_info)
+        if results:
+            return results
+
+        # 2. 降级到Web API
+        self.logger.info(f"renren: APP API搜索失败，降级到Web API")
         url = f"{BASE_API}/m-station/search/drama"
         params = {
             "keywords": keyword,
@@ -303,7 +451,7 @@ class RenrenScraper(BaseScraper):
                 dt = now - self._last_request_time
                 if dt < self._min_interval:
                     await asyncio.sleep(self._min_interval - dt)
-                
+
                 resp = await self._request("GET", url, params=params)
                 self._last_request_time = time.time()
 
@@ -407,7 +555,93 @@ class RenrenScraper(BaseScraper):
         """For Renren, the episode ID is a simple string (sid), so no formatting is needed."""
         return str(provider_episode_id)
 
+    async def _fetch_app_drama_detail(self, drama_id: str) -> Optional[RrspDramaDetailEnvelope]:
+        """使用APP API获取剧集详情 (主方式)"""
+        timestamp = int(time.time() * 1000)
+        path = "/app/drama/page"
+
+        # 生成随机episodeSid
+        import random
+        import string
+        episode_sid = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+
+        params = {
+            "isAgeLimit": False,
+            "dramaId": str(drama_id),
+            "episodeSid": episode_sid,
+            "quality": "SD",
+            "subtitle": 3,
+            "hsdrOpen": 1,
+            "hevcOpen": 1,
+            "tria4k": 1
+        }
+
+        # 生成签名
+        sign = _generate_app_md5_sign(path, timestamp, params)
+        query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+
+        # 构建请求头 (不需要x-ca-sign)
+        headers = {
+            'User-Agent': APP_USER_AGENT,
+            'Accept-Encoding': 'gzip',
+            'Connection': 'close',
+            'Host': APP_DRAMA_HOST,
+            'clientVersion': '10.27.4',
+            'pkt': 'rrmj',
+            'p': 'Android',
+            'deviceId': 'fG1vO5jzBm22vJ5mfcCYGp2NrBii5SPysgiy%2FaUb63EOTrtXyXdxHm1cUajUR1zbszl62ApHyWc1GKZtH%2FbmF0UMZWgEetdDy9QVXd9WvPU%3D',
+            'token': '',
+            'aliId': 'aPuaf9shK3QDAL6WwVdhc7cC',
+            'umId': '380998657e22ed51b5a21f2b519aa5beod',
+            'st': '',
+            'clientType': 'android_rrsp_xb_RRSP',
+            'wcode': '1',
+            't': str(timestamp),
+            'sign': sign,
+            'folding-screen': '1',
+            'isAgree': '1',
+            'et': '2',
+            'oaid': '2EDEAF4BEDC24B22B4DE3A1CC01C2F735b8f2e4c1288c3768f73d6c7cae60ba1',
+            'uet': '1',
+            'ct': 'android_rrsp_xb_RRSP',
+            'cv': '10.27.4',
+            'ignore': 'false'
+        }
+
+        url = f"https://{APP_DRAMA_HOST}{path}"
+
+        try:
+            client = await self._ensure_client()
+            resp = await client.get(url, params=params, headers=headers, timeout=20.0)
+
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren APP Drama Detail Response: status={resp.status_code}, text={resp.text}")
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            if data.get("code") not in ["0000", 0]:
+                self.logger.warning(f"renren APP获取剧集详情失败: {data.get('msg', '未知错误')}")
+                return None
+
+            if isinstance(data, dict) and 'data' in data:
+                return RrspDramaDetailEnvelope.model_validate(data)
+
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"renren APP获取剧集详情失败 drama_id={drama_id}: {e}")
+            return None
+
     async def _fetch_drama_detail(self, drama_id: str) -> Optional[RrspDramaDetailEnvelope]:
+        """获取剧集详情,优先使用APP API,失败时降级到Web API"""
+        # 1. 优先尝试APP API
+        result = await self._fetch_app_drama_detail(drama_id)
+        if result:
+            return result
+
+        # 2. 降级到Web API
+        self.logger.info(f"renren: APP API获取详情失败，降级到Web API")
         url = f"{BASE_API}/m-station/drama/page"
         params = {
             "hsdrOpen": 0,
@@ -503,7 +737,50 @@ class RenrenScraper(BaseScraper):
 
         return provider_eps
 
+    async def _fetch_app_episode_danmu(self, sid: str) -> List[Dict[str, Any]]:
+        """使用APP API获取弹幕 (主方式)"""
+        timestamp = int(time.time() * 1000)
+        path = f"/v1/produce/danmu/emo/EPISODE/{sid}"
+
+        # 生成签名
+        sign = _generate_app_md5_sign(path, timestamp, {})
+        x_ca_sign = _generate_app_x_ca_sign(path, timestamp, "")
+
+        # 构建请求头
+        headers = _build_app_headers(timestamp, sign, x_ca_sign, APP_DANMU_HOST)
+
+        url = f"https://{APP_DANMU_HOST}{path}"
+
+        try:
+            client = await self._ensure_client()
+            resp = await client.get(url, headers=headers, timeout=20.0)
+
+            if await self._should_log_responses():
+                scraper_responses_logger.debug(f"Renren APP Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}")
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict) and isinstance(data.get("data"), list):
+                return data["data"]
+
+            return []
+
+        except Exception as e:
+            self.logger.warning(f"renren APP获取弹幕失败 sid={sid}: {e}")
+            return []
+
     async def _fetch_episode_danmu(self, sid: str) -> List[Dict[str, Any]]:
+        """获取弹幕,优先使用APP API,失败时降级到Web API"""
+        # 1. 优先尝试APP API
+        result = await self._fetch_app_episode_danmu(sid)
+        if result:
+            return result
+
+        # 2. 降级到Web API
+        self.logger.info(f"renren: APP API获取弹幕失败，降级到Web API")
         url = f"https://static-dm.rrmj.plus/v1/produce/danmu/EPISODE/{sid}"
         try:
             # 此端点通常无需签名，但为提升成功率，带上基础头部（UA/Origin/Referer）
@@ -517,7 +794,7 @@ class RenrenScraper(BaseScraper):
             async with await self._create_client() as client:
                 resp = await client.get(url, timeout=20.0, headers=headers)
                 if await self._should_log_responses():
-                    scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}") 
+                    scraper_responses_logger.debug(f"Renren Danmaku Response (sid={sid}): status={resp.status_code}, text={resp.text}")
                 resp.raise_for_status()
                 data = auto_decode(resp.text)
             if isinstance(data, list):

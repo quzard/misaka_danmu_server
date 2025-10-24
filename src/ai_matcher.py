@@ -79,13 +79,6 @@ except ImportError:
     OPENAI_AVAILABLE = False
     logger.debug("OpenAI SDK 未安装")
 
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    logger.debug("Google Gemini SDK 未安装")
-
 
 class AIMatcher:
     """AI智能匹配器"""
@@ -93,10 +86,10 @@ class AIMatcher:
     def __init__(self, config: Dict[str, Any]):
         """
         初始化AI匹配器
-        
+
         Args:
             config: 配置字典,包含:
-                - ai_match_provider: AI提供商 (deepseek/openai/gemini)
+                - ai_match_provider: AI提供商 (deepseek/openai)
                 - ai_match_api_key: API密钥
                 - ai_match_base_url: Base URL (可选)
                 - ai_match_model: 模型名称
@@ -118,33 +111,24 @@ class AIMatcher:
         self._initialize_client()
     
     def _initialize_client(self):
-        """根据提供商初始化客户端"""
+        """根据提供商初始化客户端 (仅支持OpenAI兼容接口)"""
         try:
             if self.provider in ['deepseek', 'openai']:
                 if not OPENAI_AVAILABLE:
                     raise ImportError("OpenAI SDK 未安装,请运行: pip install openai")
-                
+
                 # DeepSeek使用OpenAI兼容接口
                 if self.provider == 'deepseek' and not self.base_url:
                     self.base_url = "https://api.deepseek.com"
-                
+
                 self.client = OpenAI(
                     api_key=self.api_key,
                     base_url=self.base_url if self.base_url else None
                 )
                 logger.info(f"AI匹配器初始化成功: {self.provider} ({self.model})")
-            
-            elif self.provider == 'gemini':
-                if not GEMINI_AVAILABLE:
-                    raise ImportError("Google Gemini SDK 未安装,请运行: pip install google-generativeai")
-                
-                genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel(self.model)
-                logger.info(f"AI匹配器初始化成功: Gemini ({self.model})")
-            
             else:
-                raise ValueError(f"不支持的AI提供商: {self.provider}")
-        
+                raise ValueError(f"不支持的AI提供商: {self.provider} (仅支持 deepseek, openai)")
+
         except Exception as e:
             logger.error(f"AI匹配器初始化失败: {e}")
             raise
@@ -198,13 +182,9 @@ class AIMatcher:
             logger.info(f"AI匹配: 开始分析 {len(results)} 个搜索结果")
             logger.debug(f"查询信息: {query}")
             
-            # 调用AI
-            response_data = None
-            if self.provider in ['deepseek', 'openai']:
-                response_data = await self._match_openai(input_data)
-            elif self.provider == 'gemini':
-                response_data = await self._match_gemini(input_data)
-            
+            # 调用AI (仅支持OpenAI兼容接口)
+            response_data = await self._match_openai(input_data)
+
             if not response_data:
                 logger.warning("AI匹配: 未能获取有效响应")
                 return None
@@ -253,29 +233,5 @@ class AIMatcher:
             logger.error(f"OpenAI匹配调用失败: {e}")
             return None
     
-    async def _match_gemini(self, input_data: Dict[str, Any]) -> Optional[Dict]:
-        """使用Gemini进行匹配"""
-        if not self.client:
-            return None
-        
-        try:
-            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
-            full_prompt = [self.prompt, user_prompt]
-            
-            generation_config = genai.types.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
-            
-            response = self.client.generate_content(
-                full_prompt,
-                generation_config=generation_config,
-                request_options={'timeout': 30}
-            )
-            
-            return _safe_json_loads(response.text)
-        
-        except Exception as e:
-            logger.error(f"Gemini匹配调用失败: {e}")
-            return None
+
 

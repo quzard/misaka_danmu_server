@@ -84,8 +84,6 @@ const AutoMatchSetting = () => {
         return 'deepseek-chat'
       case 'openai':
         return 'gpt-4, gpt-4-turbo, gpt-3.5-turbo'
-      case 'gemini':
-        return 'gemini-pro, gemini-1.5-pro'
       default:
         return '请输入模型名称'
     }
@@ -98,8 +96,6 @@ const AutoMatchSetting = () => {
         return 'https://api.deepseek.com (默认)'
       case 'openai':
         return 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
-      case 'gemini':
-        return '无需填写 (使用官方API)'
       default:
         return '可选,用于自定义接口地址'
     }
@@ -153,7 +149,7 @@ const AutoMatchSetting = () => {
                 label={
                   <Space>
                     <span>AI提供商</span>
-                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口,Gemini是Google的AI服务。">
+                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
@@ -163,7 +159,6 @@ const AutoMatchSetting = () => {
                 <Select>
                   <Option value="deepseek">DeepSeek (推荐)</Option>
                   <Option value="openai">OpenAI (兼容接口)</Option>
-                  <Option value="gemini">Google Gemini</Option>
                 </Select>
               </Form.Item>
 
