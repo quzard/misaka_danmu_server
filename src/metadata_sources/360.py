@@ -213,7 +213,7 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.error(f"360搜索JSON解析失败 '{keyword}': {e}")
             return []
         except Exception as e:
-            self.logger.error(f"360搜索失败 '{keyword}': {e}", exc_info=True)
+            self.logger.error(f"360搜索失败 '{keyword}': {e}")
             return []
 
     async def find_url_for_provider(self, keyword: str, target_provider: str, user: models.User, season: Optional[int] = None, episode_index: Optional[int] = None) -> Optional[str]:
@@ -285,7 +285,7 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.warning(f"无法通过任何已知路径找到 {item_id} 的详情页。")
             return None
         except Exception as e:
-            self.logger.error(f"获取360影视详情失败 (ID: {item_id}): {e}", exc_info=True)
+            self.logger.error(f"获取360影视详情失败 (ID: {item_id}): {e}")
             return None
 
     async def get_comments_by_failover(self, title: str, season: int, episode_index: int, user: models.User) -> Optional[List[dict]]:

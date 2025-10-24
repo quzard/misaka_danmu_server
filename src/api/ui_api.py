@@ -1876,7 +1876,7 @@ async def get_config_item(
 @router.put("/config/{config_key}", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定配置项的值")
 async def update_config_item(
     config_key: str,
-    payload: Dict[str, str],
+    payload: Dict[str, Any],  # 修正：允许任意类型的值,避免前端传递undefined时报错
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
@@ -1885,8 +1885,11 @@ async def update_config_item(
     value = payload.get("value")
     if value is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing 'value' in request body")
-    
-    await crud.update_config_value(session, config_key, value)
+
+    # 确保value是字符串类型
+    value_str = str(value) if value is not None else ""
+
+    await crud.update_config_value(session, config_key, value_str)
     config_manager.invalidate(config_key)
     logger.info(f"用户 '{current_user.username}' 更新了配置项 '{config_key}'。")
 
