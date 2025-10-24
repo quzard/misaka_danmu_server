@@ -121,7 +121,10 @@ class YoukuScraper(BaseScraper):
     handled_domains = ["v.youku.com"]
     referer = "https://v.youku.com"
     test_url = "https://v.youku.com"
-    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(抢先(版|篇)?|加更(版|篇)?|花絮|预告|特辑|彩蛋|专访|幕后(故事|花絮)?|直播|纯享|未播|衍生|番外|会员(专属|加长)?|片花|精华|看点|速览|解读|reaction|影评)(.*?)$"
+    # 参考 parserYouku.js 的 SKIP_KEYWORDS 优化黑名单
+    # 此默认值会在首次启动时由 scraper_manager.py 自动注册到数据库
+    # 后续使用时优先从数据库读取,如果数据库为空则使用此默认值
+    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT = r"^(.*?)(拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|预告片|先导预告|终极预告|正式预告|官方预告|彩蛋片段|删减片段|未播片段|番外彩蛋|特别篇|特别版|导演剪辑版|未删减版|加长版|导演版|制作特辑|幕后特辑|访谈特辑|纪录特辑|幕后纪录|制作纪录|拍摄纪录|片场纪录|专访|独家专访|导演专访|演员专访|主创专访|制作人专访|幕后故事|制作故事|拍摄故事|创作故事|片场故事|直播|首映直播|见面会直播|发布会直播|宣传直播|路演直播|纯享版|纯享|会员专属|会员加长|会员抢先|会员特权|片花|精华|看点|速览|解读|reaction|影评|抢先看|抢先版|加更版|特辑|彩蛋|未播|衍生|番外)(.*?)$"
 
     rate_limit_quota = -1
 
@@ -355,33 +358,45 @@ class YoukuScraper(BaseScraper):
             if cached_episodes is not None:
                 self.logger.info(f"Youku: 从缓存中命中原始分集列表 (media_id={media_id})")
                 raw_episodes = [YoukuEpisodeInfo.model_validate(e) for e in cached_episodes]
-        
+
         # 如果缓存未命中或不需要缓存，则从网络获取
         if not raw_episodes:
             self.logger.info(f"Youku: 缓存未命中或需要特定分集，正在为 media_id={media_id} 执行网络获取...")
-            network_episodes = []
-            page = 1
-            page_size = 100
-            
-            while True:
-                try:
-                    page_result = await self._get_episodes_page(media_id, page, page_size)
-                    if not page_result or not page_result.videos:
-                        break
-                    
-                    network_episodes.extend(page_result.videos)
 
-                    # 修正：使用 page_result.total 来判断是否已获取所有分集
-                    if len(network_episodes) >= page_result.total or len(page_result.videos) < page_size:
-                        break
-                    
-                    page += 1
-                    await asyncio.sleep(0.3)
-                except Exception as e:
-                    self.logger.error(f"Youku: 获取分集页面 {page} 失败 (media_id={media_id}): {e}", exc_info=True)
-                    break
-            
-            raw_episodes = network_episodes
+            # 优化1: 并发获取分集列表 (参考 parserYouku.js 的 Promise.allSettled)
+            # 首先获取第一页以确定总数
+            page_size = 100
+            first_page_result = await self._get_episodes_page(media_id, 1, page_size)
+            if not first_page_result or not first_page_result.videos:
+                raw_episodes = []
+            else:
+                network_episodes = list(first_page_result.videos)
+                total_count = first_page_result.total
+
+                # 如果总数大于第一页，计算需要的总页数并并发请求
+                if total_count > page_size:
+                    total_pages = (total_count + page_size - 1) // page_size  # 向上取整
+                    self.logger.info(f"Youku: 检测到 {total_count} 个分集，将并发请求 {total_pages} 页")
+
+                    # 并发请求剩余页面 (从第2页开始)
+                    tasks = [
+                        self._get_episodes_page(media_id, page, page_size)
+                        for page in range(2, total_pages + 1)
+                    ]
+
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # 处理结果
+                    for page_num, result in enumerate(results, start=2):
+                        if isinstance(result, Exception):
+                            self.logger.error(f"Youku: 获取分集页面 {page_num} 失败: {result}")
+                        elif result and result.videos:
+                            network_episodes.extend(result.videos)
+
+                    self.logger.info(f"Youku: 并发获取完成，共获取 {len(network_episodes)} 个分集")
+
+                raw_episodes = network_episodes
+
             # 仅当请求完整列表且成功获取到数据时，才缓存原始数据
             if raw_episodes and target_episode_index is None:
                 await self._set_to_cache(cache_key, [e.model_dump() for e in raw_episodes], 'episodes_ttl_seconds', 1800)
@@ -395,20 +410,21 @@ class YoukuScraper(BaseScraper):
     async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int], media_id: str) -> List[models.ProviderEpisodeInfo]:
         """
         一个集中的辅助函数，用于过滤、格式化和编号原始的优酷分集列表。
+        参考 parserYouku.js 的综艺处理逻辑。
         """
         # 获取媒体类型
         media_type_cache_key = f"media_type_{media_id}"
         media_type = await self._get_from_cache(media_type_cache_key) or 'variety'
-        
+
         # 计算真实期数映射
         stage_to_episode = self._calculate_episode_number_from_stage(raw_episodes)
-        
+
         # --- 关键修正：总是在获取数据后（无论来自缓存还是网络）应用过滤 ---
         provider_pattern_str = await self.config_manager.get(
             f"{self.provider_name}_episode_blacklist_regex", self._PROVIDER_SPECIFIC_BLACKLIST_DEFAULT
         )
         blacklist_pattern = re.compile(provider_pattern_str, re.IGNORECASE) if provider_pattern_str else None
-        
+
         filtered_episodes = []
         if blacklist_pattern:
             filtered_out_log: Dict[str, List[str]] = defaultdict(list)
@@ -419,12 +435,34 @@ class YoukuScraper(BaseScraper):
                     filtered_out_log[blacklist_pattern.pattern].append(title_to_check)
                 else:
                     filtered_episodes.append(ep)
-            
+
             if filtered_out_log:
                 for rule, titles in filtered_out_log.items():
                     self.logger.info(f"Youku: 根据黑名单规则 '{rule}' 过滤掉了 {len(titles)} 个分集: {', '.join(titles)}")
         else:
             filtered_episodes = raw_episodes
+
+        # 参考 parserYouku.js: 综艺节目需要倒序处理
+        if media_type == 'variety':
+            self.logger.info(f"Youku: 检测到综艺节目，进行倒序处理")
+            filtered_episodes = list(reversed(filtered_episodes))
+
+            # 检测特殊格式 "第N期：上/中/下"
+            special_format_pattern = re.compile(r'第\d+期\s*[：:]\s*[上中下]\s*[：:]')
+            has_special_format = any(special_format_pattern.search(ep.clean_display_name or ep.title) for ep in filtered_episodes)
+
+            if has_special_format:
+                self.logger.info(f"Youku: 检测到综艺特殊格式 '第N期：上/中/下'，进行智能过滤")
+                # 只保留"上"或没有标记的分集
+                final_filtered = []
+                for ep in filtered_episodes:
+                    title = ep.clean_display_name or ep.title
+                    match = re.search(r'第(\d+)期\s*[：:]\s*([上中下])', title)
+                    if not match or match.group(2) == '上':
+                        final_filtered.append(ep)
+                    else:
+                        self.logger.debug(f"Youku: 过滤掉综艺分段: {title}")
+                filtered_episodes = final_filtered
 
         # 在过滤后的列表上重新编号，使用媒体类型格式化标题
         final_episodes = [
@@ -436,7 +474,7 @@ class YoukuScraper(BaseScraper):
                 url=ep.link
             ) for i, ep in enumerate(filtered_episodes)
         ]
-        
+
         return final_episodes
 
     def _calculate_episode_number_from_stage(self, episodes: List[YoukuEpisodeInfo]) -> Dict[str, int]:
@@ -460,10 +498,10 @@ class YoukuScraper(BaseScraper):
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> Optional[List[dict]]:
         vid = episode_id.replace("_", "=")
-        
+
         try:
             await self._ensure_token_cookie() # 首次获取令牌
-            
+
             episode_info_url = f"https://openapi.youku.com/v2/videos/show_basic.json?client_id=53e6cc67237fc59a&package=com.huawei.hwvplayer.youku&video_id={vid}"
             episode_info_resp = await self._request("GET", episode_info_url)
             if await self._should_log_responses():
@@ -485,19 +523,27 @@ class YoukuScraper(BaseScraper):
                 self.logger.warning(f"Youku: Video {vid} has duration 0, no danmaku to fetch.")
                 return [] # 返回空列表表示成功但无内容
 
+            # 串行获取弹幕分段 (参考 tencent.py 的实现)
+            # 并发策略由上层 tasks.py 控制 (单集=三线程并发, 多集=串行)
             all_comments = []
+            self.logger.info(f"Youku: 开始获取 {total_mat} 个弹幕分段 (vid={vid})")
+
+            if progress_callback:
+                await progress_callback(5, f"找到 {total_mat} 个弹幕分段")
+
             # 修正：使用 while 循环以支持重试
             mat = 0
             while mat < total_mat:
                 try:
                     if progress_callback:
-                        progress = int((mat + 1) / total_mat * 100) if total_mat > 0 else 100
+                        # 5%用于初始化，90%用于下载，5%用于格式化
+                        progress = 5 + int((mat + 1) / total_mat * 90)
                         await progress_callback(progress, f"正在获取分段 {mat + 1}/{total_mat}")
 
                     comments_in_mat = await self._get_danmu_content_by_mat(vid, mat)
                     if comments_in_mat:
                         all_comments.extend(comments_in_mat)
-                    
+
                     mat += 1 # 成功，处理下一段
                     await asyncio.sleep(0.2)
                 except self.TokenExpiredError:
@@ -590,14 +636,14 @@ class YoukuScraper(BaseScraper):
         }
         msg_ordered_str = json.dumps(dict(sorted(msg.items())), separators=(',', ':'))
         msg_enc = base64.b64encode(msg_ordered_str.encode('utf-8')).decode('utf-8')
-        
+
         msg['msg'] = msg_enc
         msg['sign'] = self._generate_msg_sign(msg_enc)
-        
+
         app_key = "24679788"
         data_payload = json.dumps(msg, separators=(',', ':'))
         t = str(int(time.time() * 1000))
-        
+
         params = {
             "jsv": "2.7.0",
             "appKey": app_key,
@@ -610,9 +656,9 @@ class YoukuScraper(BaseScraper):
             "timeout": "20000",
             "jsonpIncPrefix": "utility"
         }
-        
+
         url = f"https://acs.youku.com/h5/mopen.youku.danmu.list/1.0/?{urlencode(params)}"
-        
+
         response = await self._request(
             "POST",
             url,
@@ -736,8 +782,32 @@ class YoukuScraper(BaseScraper):
         return 'variety'
 
     def _format_episode_title(self, ep: YoukuEpisodeInfo, episode_index: int, media_type: str, stage_to_episode: Dict[str, int]) -> str:
-        """直接使用API返回的原始标题"""
-        return (ep.clean_display_name or ep.title).strip()
+        """
+        根据媒体类型格式化分集标题
+        参考 parserYouku.js 的 formatEpisodeNumber() 逻辑
+        """
+        # 获取原始标题
+        original_title = (ep.clean_display_name or ep.title).strip()
+
+        # 电影：强制使用 "1" 作为集数
+        if media_type == 'movie':
+            return original_title
+
+        # 综艺：使用 "第N期" 格式
+        if media_type == 'variety':
+            # 尝试从原始标题中提取期数
+            period_match = re.search(r'第(\d+)期', original_title)
+            if period_match:
+                return f"第{period_match.group(1)}期"
+            else:
+                return f"第{episode_index}期"
+
+        # 电视剧/动漫：使用 "第N集" 格式 + 原始标题
+        # 但如果原始标题已经包含集数信息，则直接使用
+        if re.match(r'^第\d+集', original_title):
+            return original_title
+        else:
+            return f"第{episode_index}集 {original_title}"
 
 
 
