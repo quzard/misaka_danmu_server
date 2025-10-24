@@ -1264,7 +1264,7 @@ async def get_bangumi_details(
         if 900000 <= anime_id_int < 1000000:
             # 从所有搜索缓存中查找
             for search_key, search_info in fallback_search_cache.items():
-                if search_info["status"] == "completed" and "bangumi_mapping" in search_info:
+                if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                     if bangumiId in search_info["bangumi_mapping"]:
                         mapping_info = search_info["bangumi_mapping"][bangumiId]
                         provider = mapping_info["provider"]
