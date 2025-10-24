@@ -2725,10 +2725,84 @@ async def auto_search_and_import_task(
         if not all_results:
             raise ValueError("没有找到合适的搜索结果")
 
+        # 检查是否启用AI匹配
+        ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
+
+        # 如果启用AI匹配，尝试使用AI选择
+        ai_selected_index = None
+        if ai_match_enabled:
+            try:
+                from .ai_matcher import AIMatcher
+
+                # 获取AI配置
+                ai_config = {
+                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
+                    "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
+                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
+                    "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
+                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                }
+
+                # 检查必要配置
+                if not ai_config["ai_match_api_key"]:
+                    logger.warning("AI匹配已启用但未配置API密钥，降级到传统匹配")
+                else:
+                    # 构建查询信息
+                    query_info = {
+                        "title": main_title,
+                        "season": payload.season,
+                        "episode": payload.episode,
+                        "year": payload.year,
+                        "type": media_type
+                    }
+
+                    # 获取精确标记信息
+                    favorited_info = {}
+                    async with scraper_manager._session_factory() as ai_session:
+                        from .orm_models import AnimeSource
+                        from sqlalchemy import select
+
+                        for result in all_results:
+                            # 查找是否有相同provider和mediaId的源被标记
+                            stmt = (
+                                select(AnimeSource.isFavorited)
+                                .where(
+                                    AnimeSource.providerName == result.provider,
+                                    AnimeSource.mediaId == result.mediaId
+                                )
+                                .limit(1)
+                            )
+                            result_row = await ai_session.execute(stmt)
+                            is_favorited = result_row.scalar_one_or_none()
+                            if is_favorited:
+                                key = f"{result.provider}:{result.mediaId}"
+                                favorited_info[key] = True
+
+                    # 初始化AI匹配器并选择
+                    matcher = AIMatcher(ai_config)
+                    ai_selected_index = await matcher.select_best_match(
+                        query_info, all_results, favorited_info
+                    )
+
+                    if ai_selected_index is not None:
+                        logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                    else:
+                        logger.info("AI匹配未找到合适结果，降级到传统匹配")
+
+            except Exception as e:
+                logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                ai_selected_index = None
+
         # 检查是否启用外部控制API顺延机制
         fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == 'true'
 
-        if not fallback_enabled:
+        best_match = None
+
+        # 如果AI选择成功，使用AI选择的结果
+        if ai_selected_index is not None:
+            best_match = all_results[ai_selected_index]
+            logger.info(f"自动导入：使用AI选择的结果 '{best_match.title}' (Provider: {best_match.provider})")
+        elif not fallback_enabled:
             # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
             best_match = all_results[0]
             similarity = fuzz.token_set_ratio(main_title, best_match.title)
@@ -2737,7 +2811,6 @@ async def auto_search_and_import_task(
             # 顺延机制启用：依次验证候选源，直到找到有效的分集
             logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
 
-            best_match = None
             last_error = None
 
             for attempt, candidate in enumerate(all_results, 1):

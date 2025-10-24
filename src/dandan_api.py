@@ -1713,11 +1713,84 @@ async def _get_match_for_item(
             # 步骤3：自动选择最佳源
             logger.info(f"步骤3：自动选择最佳源")
 
+            # 检查是否启用AI匹配
+            ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
+
+            # 如果启用AI匹配，尝试使用AI选择
+            ai_selected_index = None
+            if ai_match_enabled:
+                try:
+                    from .ai_matcher import AIMatcher
+
+                    # 获取AI配置
+                    ai_config = {
+                        "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
+                        "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
+                        "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
+                        "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
+                        "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                    }
+
+                    # 检查必要配置
+                    if not ai_config["ai_match_api_key"]:
+                        logger.warning("AI匹配已启用但未配置API密钥，降级到传统匹配")
+                    else:
+                        # 构建查询信息
+                        query_info = {
+                            "title": base_title,
+                            "season": season,
+                            "episode": episode_number,
+                            "year": None,  # 匹配后备场景通常没有年份信息
+                            "type": "movie" if is_movie else "tv_series"
+                        }
+
+                        # 获取精确标记信息
+                        favorited_info = {}
+                        async with scraper_manager._session_factory() as ai_session:
+                            from .orm_models import AnimeSource
+                            from sqlalchemy import select
+
+                            for result in sorted_results:
+                                # 查找是否有相同provider和mediaId的源被标记
+                                stmt = (
+                                    select(AnimeSource.isFavorited)
+                                    .where(
+                                        AnimeSource.providerName == result.provider,
+                                        AnimeSource.mediaId == result.mediaId
+                                    )
+                                    .limit(1)
+                                )
+                                result_row = await ai_session.execute(stmt)
+                                is_favorited = result_row.scalar_one_or_none()
+                                if is_favorited:
+                                    key = f"{result.provider}:{result.mediaId}"
+                                    favorited_info[key] = True
+
+                        # 初始化AI匹配器并选择
+                        matcher = AIMatcher(ai_config)
+                        ai_selected_index = await matcher.select_best_match(
+                            query_info, sorted_results, favorited_info
+                        )
+
+                        if ai_selected_index is not None:
+                            logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                        else:
+                            logger.info("AI匹配未找到合适结果，降级到传统匹配")
+
+                except Exception as e:
+                    logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                    ai_selected_index = None
+
             # 检查是否启用顺延机制
             fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == 'true'
 
             best_match = None
-            if not fallback_enabled:
+
+            # 如果AI选择成功，使用AI选择的结果
+            if ai_selected_index is not None:
+                best_match = sorted_results[ai_selected_index]
+                logger.info(f"  - 使用AI选择的结果: {best_match.provider} - {best_match.title}")
+            elif not fallback_enabled:
                 # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
                 best_match = sorted_results[0]
                 logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
