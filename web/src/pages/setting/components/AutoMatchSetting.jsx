@@ -61,12 +61,12 @@ const AutoMatchSetting = () => {
       const values = await form.validateFields()
 
       await Promise.all([
-        setConfig({ key: 'aiMatchEnabled', value: values.aiMatchEnabled ? 'true' : 'false' }),
-        setConfig({ key: 'aiMatchProvider', value: values.aiMatchProvider }),
-        setConfig({ key: 'aiMatchApiKey', value: values.aiMatchApiKey }),
-        setConfig({ key: 'aiMatchBaseUrl', value: values.aiMatchBaseUrl }),
-        setConfig({ key: 'aiMatchModel', value: values.aiMatchModel }),
-        setConfig({ key: 'aiMatchPrompt', value: values.aiMatchPrompt })
+        setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
+        setConfig('aiMatchProvider', values.aiMatchProvider),
+        setConfig('aiMatchApiKey', values.aiMatchApiKey),
+        setConfig('aiMatchBaseUrl', values.aiMatchBaseUrl || ''),
+        setConfig('aiMatchModel', values.aiMatchModel),
+        setConfig('aiMatchPrompt', values.aiMatchPrompt || '')
       ])
 
       message.success('保存成功')
