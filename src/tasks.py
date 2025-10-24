@@ -2765,7 +2765,7 @@ async def auto_search_and_import_task(
                         "title": main_title,
                         "season": payload.season,
                         "episode": payload.episode,
-                        "year": payload.year,
+                        "year": year,  # 修正：使用从元数据获取的year变量，而不是payload.year
                         "type": media_type
                     }
 
