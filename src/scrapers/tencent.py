@@ -1330,7 +1330,7 @@ class TencentScraper(BaseScraper):
             # 格式: 时间,模式,字体大小,颜色,[来源]
             p_string = f"{timestamp:.2f},{mode},25,{color},[{self.provider_name}]"
             formatted_comments.append({"cid": c.id, "p": p_string, "m": c.content, "t": round(timestamp, 2)})
-
+            
         return formatted_comments
 
     async def get_id_from_url(self, url: str) -> Optional[str]:

@@ -147,13 +147,51 @@ async def lifespan(app: FastAPI):
         'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
+        # 搜索性能优化
+        'searchMaxResultsPerSource': ('30', '每个搜索源最多返回的结果数量。设置较小的值可以提高搜索速度。'),
         # 全局过滤
         'search_result_global_blacklist_cn': (r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇|纪录片|访谈|番外|短片|加更|走心|解忧|纯享|解读|揭秘|赏析', '用于过滤搜索结果标题的全局中文黑名单(正则表达式)。'),
         'search_result_global_blacklist_eng': (r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot', '用于过滤搜索结果标题的全局英文黑名单(正则表达式)。'),
         'mysqlBinlogRetentionDays': (3, '（仅MySQL）自动清理多少天前的二进制日志（binlog）。0为不清理。需要SUPER或BINLOG_ADMIN权限。'),
         # 顺延机制配置
         'webhookFallbackEnabled': ('false', '是否启用Webhook顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
-        'externalApiFallbackEnabled': ('false', '是否启用外部控制API顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
+        'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
+        # AI匹配配置
+        'aiMatchEnabled': ('false', '是否启用AI智能匹配。启用后，在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。'),
+        'aiMatchProvider': ('deepseek', 'AI提供商: deepseek, openai, gemini'),
+        'aiMatchApiKey': ('', 'AI服务的API密钥'),
+        'aiMatchBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
+        'aiMatchModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, gpt-4, gemini-pro'),
+        'aiMatchPrompt': (
+            """你是一个专业的影视内容匹配专家。你的任务是从搜索结果列表中选择最匹配用户查询的条目。
+
+**输入格式**:
+- query: 用户查询信息 (包含标题、季度、集数、年份等)
+- results: 搜索结果列表,每个结果包含:
+  - title: 标题
+  - type: 类型 (tv_series/movie)
+  - season: 季度
+  - year: 年份
+  - episodeCount: 集数
+  - isFavorited: 是否被用户标记为精确源 (重要!)
+
+**匹配规则** (按优先级排序):
+1. **精确标记优先**: 如果某个结果的 isFavorited=true,强烈优先选择它 (除非明显不匹配)
+2. **标题相似度**: 优先匹配标题相似度最高的条目
+3. **季度严格匹配**: 如果指定了季度,必须严格匹配
+4. **类型匹配**: 电视剧优先匹配 tv_series,电影优先匹配 movie
+5. **年份接近**: 优先选择年份接近的
+6. **集数完整**: 如果有多个高度相似的结果,选择集数最完整的
+
+**输出格式**:
+返回一个JSON对象,包含:
+- index: 最佳匹配结果在列表中的索引 (从0开始)
+- confidence: 匹配置信度 (0-100)
+- reason: 选择理由 (简短说明,需提及是否因为精确标记而选择)
+
+如果没有合适的匹配,返回 {"index": -1, "confidence": 0, "reason": "无合适匹配"}""",
+            'AI匹配的提示词,用于指导AI如何选择最佳匹配结果'
+        ),
     }
     await app.state.config_manager.register_defaults(default_configs)
 

@@ -196,9 +196,14 @@ class ScraperManager:
         """检查是否有任何已启用的搜索源。"""
         return any(s.get('isEnabled') for s in self.scraper_settings.values())
 
-    async def search_all(self, keywords: List[str], episode_info: Optional[Dict[str, Any]] = None) -> List[ProviderSearchInfo]:
+    async def search_all(self, keywords: List[str], episode_info: Optional[Dict[str, Any]] = None, max_results_per_source: Optional[int] = None) -> List[ProviderSearchInfo]:
         """
         在所有已启用的搜索源上并发搜索关键词列表。
+
+        Args:
+            keywords: 搜索关键词列表
+            episode_info: 分集信息
+            max_results_per_source: 每个源最多返回的结果数量（None表示不限制）
         """
         enabled_scrapers = [
             scraper for name, scraper in self.scrapers.items()
@@ -224,7 +229,10 @@ class ScraperManager:
                 provider_name = enabled_scrapers[i // len(keywords)].provider_name
                 logging.getLogger(__name__).error(f"搜索源 '{provider_name}' 的搜索子任务失败: {result}", exc_info=True)
             elif result:
-                for item in result:
+                # 优化5: 限制每个源的结果数量
+                limited_result = result[:max_results_per_source] if max_results_per_source else result
+
+                for item in limited_result:
                     # 使用 (provider, mediaId) 作为唯一标识符
                     unique_id = (item.provider, item.mediaId)
                     if unique_id not in seen_results:

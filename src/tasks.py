@@ -30,6 +30,7 @@ from .task_manager import TaskManager, TaskSuccess, TaskStatus
 from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
+from .search_utils import unified_search
 
 logger = logging.getLogger(__name__)
 
@@ -516,15 +517,26 @@ async def _download_episode_comments_concurrent(
     episodes: List,
     rate_limiter: RateLimiter,
     progress_callback: Callable,
-    first_episode_comments: Optional[List] = None
+    first_episode_comments: Optional[List] = None,
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None
 ) -> List[Tuple[int, Optional[List]]]:
     """
     并发下载多个分集的弹幕（用于单集或少量分集的快速下载）
 
+    Args:
+        scraper: 弹幕源scraper
+        episodes: 分集列表
+        rate_limiter: 速率限制器
+        progress_callback: 进度回调函数
+        first_episode_comments: 第一集的预获取弹幕（可选）
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
+
     Returns:
         List[Tuple[episode_index, comments]]: 分集索引和对应的弹幕列表
     """
-    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）")
+    logger.info(f"开始并发下载 {len(episodes)} 个分集的弹幕（三线程模式）{'[后备任务]' if is_fallback else ''}")
 
     async def download_single_episode(episode_info):
         episode_index, episode = episode_info
@@ -534,8 +546,13 @@ async def _download_episode_comments_concurrent(
                 logger.info(f"使用预获取的第一集弹幕: {len(first_episode_comments)} 条")
                 return (episode.episodeIndex, first_episode_comments)
 
-            # 检查速率限制
-            await rate_limiter.check(scraper.provider_name)
+            # 检查速率限制（根据是否为后备任务选择不同的方法）
+            if is_fallback:
+                if not fallback_type:
+                    raise ValueError("后备任务必须指定fallback_type参数")
+                await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.check(scraper.provider_name)
 
             # 创建子进度回调（异步版本）
             async def sub_progress_callback(p, msg):
@@ -547,9 +564,12 @@ async def _download_episode_comments_concurrent(
             # 下载弹幕
             comments = await scraper.get_comments(episode.episodeId, progress_callback=sub_progress_callback)
 
-            # 增加速率限制计数
+            # 增加速率限制计数（根据是否为后备任务选择不同的方法）
             if comments is not None:
-                await rate_limiter.increment(scraper.provider_name)
+                if is_fallback:
+                    await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                else:
+                    await rate_limiter.increment(scraper.provider_name)
                 logger.info(f"[并发下载] 分集 '{episode.title}' 获取到 {len(comments)} 条弹幕")
             else:
                 logger.warning(f"[并发下载] 分集 '{episode.title}' 获取弹幕失败")
@@ -598,7 +618,9 @@ async def _import_episodes_iteratively(
     first_episode_comments: Optional[List] = None,
     config_manager = None,
     is_single_episode: bool = False,
-    smart_refresh: bool = False
+    smart_refresh: bool = False,
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None
 ) -> Tuple[int, List[int], int, Dict[int, str]]:
     """
     迭代地导入分集弹幕。
@@ -607,6 +629,8 @@ async def _import_episodes_iteratively(
         first_episode_comments: 第一集预获取的弹幕（可选）
         is_single_episode: 是否为单集下载模式（启用并发下载）
         smart_refresh: 是否为智能刷新模式（先下载比较，只有更多弹幕才覆盖）
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
 
     Returns:
         Tuple[int, List[int], int, Dict[int, str]]:
@@ -627,7 +651,8 @@ async def _import_episodes_iteratively(
     if use_concurrent_download:
         # 使用并发下载获取所有弹幕
         download_results = await _download_episode_comments_concurrent(
-            scraper, episodes, rate_limiter, progress_callback, first_episode_comments
+            scraper, episodes, rate_limiter, progress_callback, first_episode_comments,
+            is_fallback, fallback_type
         )
 
         # 处理下载结果，写入数据库
@@ -723,7 +748,13 @@ async def _import_episodes_iteratively(
                     logger.info(f"使用预获取的第一集弹幕: {len(comments)} 条")
                 else:
                     # 其他分集正常获取
-                    await rate_limiter.check(scraper.provider_name)
+                    # 根据是否为后备任务选择不同的速率限制方法
+                    if is_fallback:
+                        if not fallback_type:
+                            raise ValueError("后备任务必须指定fallback_type参数")
+                        await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+                    else:
+                        await rate_limiter.check(scraper.provider_name)
 
                     async def sub_progress_callback(p, msg):
                         await progress_callback(
@@ -734,7 +765,10 @@ async def _import_episodes_iteratively(
 
                     # 只有在实际进行了网络请求时才增加计数
                     if comments is not None:
-                        await rate_limiter.increment(scraper.provider_name)
+                        if is_fallback:
+                            await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                        else:
+                            await rate_limiter.increment(scraper.provider_name)
 
                 # 修正：检查弹幕是否为空（None 或空列表）
                 if comments is not None and len(comments) > 0:
@@ -812,11 +846,18 @@ async def _import_episodes_iteratively(
                 await asyncio.sleep(e.retry_after_seconds)
                 # 重试当前分集
                 try:
-                    await rate_limiter.check(scraper.provider_name)
+                    # 根据是否为后备任务选择不同的速率限制方法
+                    if is_fallback:
+                        await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+                    else:
+                        await rate_limiter.check(scraper.provider_name)
                     comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
                     # 修正：检查弹幕是否为空（None 或空列表）
                     if comments is not None and len(comments) > 0:
-                        await rate_limiter.increment(scraper.provider_name)
+                        if is_fallback:
+                            await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+                        else:
+                            await rate_limiter.increment(scraper.provider_name)
                         episode_db_id = await crud.create_episode_if_not_exists(
                             session, anime_id, source_id, episode.episodeIndex,
                             episode.title, episode.url, episode.episodeId
@@ -939,11 +980,20 @@ async def generic_import_task(
     title_recognition_manager: TitleRecognitionManager,
     # 新增: 补充源信息
     supplementProvider: Optional[str] = None,
-    supplementMediaId: Optional[str] = None
+    supplementMediaId: Optional[str] = None,
+    # 新增: 后备任务标识
+    is_fallback: bool = False,
+    fallback_type: Optional[str] = None,
+    # 新增: 预分配的anime_id（用于匹配后备）
+    preassignedAnimeId: Optional[int] = None
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
     修改流程：先获取弹幕，成功后再创建数据库条目。
+
+    Args:
+        is_fallback: 是否为后备任务（默认False）
+        fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
     """
     # 添加重复检查
     await progress_callback(5, "检查重复导入...")
@@ -1076,11 +1126,23 @@ async def generic_import_task(
     # 先尝试获取第一集弹幕来验证数据源有效性
     first_episode = episodes[0]
     await progress_callback(20, f"正在验证数据源有效性: {first_episode.title}")
-    
+
     try:
-        await rate_limiter.check(scraper.provider_name)
+        # 根据是否为后备任务选择不同的速率限制方法
+        if is_fallback:
+            if not fallback_type:
+                raise ValueError("后备任务必须指定fallback_type参数")
+            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+        else:
+            await rate_limiter.check(scraper.provider_name)
         first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-        await rate_limiter.increment(scraper.provider_name)
+
+        # 只有在实际获取到弹幕时才增加计数
+        if first_comments is not None:
+            if is_fallback:
+                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.increment(scraper.provider_name)
 
         if first_comments:
             first_episode_success = True
@@ -1097,17 +1159,48 @@ async def generic_import_task(
 
             # 创建主条目
             # 修正：确保在创建时也使用年份进行重复检查
-            anime_id = await crud.get_or_create_anime(
-                session,
-                title_to_use,
-                mediaType,
-                season_to_use,
-                imageUrl,
-                local_image_path,
-                year,
-                title_recognition_manager,
-                provider
-            )
+            # 如果有预分配的anime_id（匹配后备），则直接使用
+            if preassignedAnimeId:
+                logger.info(f"使用预分配的anime_id: {preassignedAnimeId}")
+                anime_id = preassignedAnimeId
+
+                # 检查数据库中是否已有这个ID的条目
+                from .orm_models import Anime
+                from .timezone import get_now
+                stmt = select(Anime).where(Anime.id == anime_id)
+                result = await session.execute(stmt)
+                existing_anime = result.scalar_one_or_none()
+
+                if not existing_anime:
+                    # 如果不存在，创建新的anime条目
+                    new_anime = Anime(
+                        id=anime_id,
+                        title=title_to_use,
+                        type=mediaType,
+                        season=season_to_use,
+                        imageUrl=imageUrl,
+                        localImagePath=local_image_path,
+                        year=year,
+                        createdAt=get_now(),
+                        updatedAt=get_now()
+                    )
+                    session.add(new_anime)
+                    await session.flush()
+                    logger.info(f"创建新的anime条目: ID={anime_id}, 标题='{title_to_use}'")
+                else:
+                    logger.info(f"anime条目已存在: ID={anime_id}, 标题='{existing_anime.title}'")
+            else:
+                anime_id = await crud.get_or_create_anime(
+                    session,
+                    title_to_use,
+                    mediaType,
+                    season_to_use,
+                    imageUrl,
+                    local_image_path,
+                    year,
+                    title_recognition_manager,
+                    provider
+                )
 
             # 更新元数据
             await crud.update_metadata_if_empty(
@@ -1135,9 +1228,18 @@ async def generic_import_task(
         await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
         await asyncio.sleep(e.retry_after_seconds)
         # 重试流控检查和第一集获取
-        await rate_limiter.check(scraper.provider_name)
+        if is_fallback:
+            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
+        else:
+            await rate_limiter.check(scraper.provider_name)
         first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-        await rate_limiter.increment(scraper.provider_name)
+
+        # 只有在实际获取到弹幕时才增加计数
+        if first_comments is not None:
+            if is_fallback:
+                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
+            else:
+                await rate_limiter.increment(scraper.provider_name)
 
         if first_comments:
             first_episode_success = True
@@ -1200,7 +1302,9 @@ async def generic_import_task(
         source_id=source_id,
         first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
         config_manager=config_manager,
-        is_single_episode=currentEpisodeIndex is not None  # 传递是否为单集下载模式
+        is_single_episode=currentEpisodeIndex is not None,  # 传递是否为单集下载模式
+        is_fallback=is_fallback,  # 传递后备任务标识
+        fallback_type=fallback_type  # 传递后备类型
     )
 
     if not successful_episodes_indices and failed_episodes_count > 0:
@@ -2535,44 +2639,24 @@ async def auto_search_and_import_task(
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
         logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
-        all_results = await scraper_manager.search_all([search_title], episode_info=episode_info)
-        logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
 
-        # 使用所有别名进行过滤
-        def normalize_for_filtering(title: str) -> str:
-            if not title: return ""
-            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-            return title.lower().replace(" ", "").replace("：", ":").strip()
+        # 使用统一的搜索函数（不进行排序，后面自己处理）
+        # 使用严格过滤模式和自定义别名
+        all_results = await unified_search(
+            search_term=search_title,
+            session=session,
+            scraper_manager=scraper_manager,
+            metadata_manager=None,  # 不使用别名扩展，因为上面已经手动获取了别名
+            use_alias_expansion=False,
+            use_alias_filtering=False,
+            use_title_filtering=True,  # 启用标题过滤
+            use_source_priority_sorting=False,  # 不排序，后面自己处理
+            strict_filtering=True,  # 使用严格过滤模式
+            custom_aliases=aliases,  # 传入手动获取的别名
+            progress_callback=None
+        )
 
-        normalized_filter_aliases = {normalize_for_filtering(alias) for alias in aliases if alias}
-        filtered_results = []
-        for item in all_results:
-            normalized_item_title = normalize_for_filtering(item.title)
-            if not normalized_item_title: continue
-
-            # 更严格的匹配逻辑：
-            # 1. 完全匹配或高相似度匹配
-            # 2. 标题长度差异不能太大（避免"复仇者"匹配"复仇者联盟2：奥创纪元"）
-            is_relevant = False
-            for alias in normalized_filter_aliases:
-                similarity = fuzz.partial_ratio(normalized_item_title, alias)
-                length_diff = abs(len(normalized_item_title) - len(alias))
-
-                # 完全匹配或非常高的相似度
-                if similarity >= 95:
-                    is_relevant = True
-                    break
-                # 高相似度但标题长度差异不大
-                elif similarity >= 85 and length_diff <= max(len(alias) * 0.3, 10):
-                    is_relevant = True
-                    break
-
-            if is_relevant:
-                filtered_results.append(item)
-
-        # 详细记录保留的结果
-        logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-        all_results = filtered_results
+        logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
         # 添加WebUI的季度过滤逻辑
         if season and season > 0:
@@ -2590,7 +2674,7 @@ async def auto_search_and_import_task(
             logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。")
             all_results = filtered_by_season
 
-        if filtered_results:
+        if all_results:
             logger.info("保留的结果列表:")
             for i, item in enumerate(all_results, 1):  # 显示所有结果
                 logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type}, Season: {item.season})")
@@ -2641,10 +2725,84 @@ async def auto_search_and_import_task(
         if not all_results:
             raise ValueError("没有找到合适的搜索结果")
 
+        # 检查是否启用AI匹配
+        ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
+
+        # 如果启用AI匹配，尝试使用AI选择
+        ai_selected_index = None
+        if ai_match_enabled:
+            try:
+                from .ai_matcher import AIMatcher
+
+                # 获取AI配置
+                ai_config = {
+                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
+                    "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
+                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
+                    "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
+                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                }
+
+                # 检查必要配置
+                if not ai_config["ai_match_api_key"]:
+                    logger.warning("AI匹配已启用但未配置API密钥，降级到传统匹配")
+                else:
+                    # 构建查询信息
+                    query_info = {
+                        "title": main_title,
+                        "season": payload.season,
+                        "episode": payload.episode,
+                        "year": payload.year,
+                        "type": media_type
+                    }
+
+                    # 获取精确标记信息
+                    favorited_info = {}
+                    async with scraper_manager._session_factory() as ai_session:
+                        from .orm_models import AnimeSource
+                        from sqlalchemy import select
+
+                        for result in all_results:
+                            # 查找是否有相同provider和mediaId的源被标记
+                            stmt = (
+                                select(AnimeSource.isFavorited)
+                                .where(
+                                    AnimeSource.providerName == result.provider,
+                                    AnimeSource.mediaId == result.mediaId
+                                )
+                                .limit(1)
+                            )
+                            result_row = await ai_session.execute(stmt)
+                            is_favorited = result_row.scalar_one_or_none()
+                            if is_favorited:
+                                key = f"{result.provider}:{result.mediaId}"
+                                favorited_info[key] = True
+
+                    # 初始化AI匹配器并选择
+                    matcher = AIMatcher(ai_config)
+                    ai_selected_index = await matcher.select_best_match(
+                        query_info, all_results, favorited_info
+                    )
+
+                    if ai_selected_index is not None:
+                        logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                    else:
+                        logger.info("AI匹配未找到合适结果，降级到传统匹配")
+
+            except Exception as e:
+                logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                ai_selected_index = None
+
         # 检查是否启用外部控制API顺延机制
         fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == 'true'
 
-        if not fallback_enabled:
+        best_match = None
+
+        # 如果AI选择成功，使用AI选择的结果
+        if ai_selected_index is not None:
+            best_match = all_results[ai_selected_index]
+            logger.info(f"自动导入：使用AI选择的结果 '{best_match.title}' (Provider: {best_match.provider})")
+        elif not fallback_enabled:
             # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
             best_match = all_results[0]
             similarity = fuzz.token_set_ratio(main_title, best_match.title)
@@ -2653,7 +2811,6 @@ async def auto_search_and_import_task(
             # 顺延机制启用：依次验证候选源，直到找到有效的分集
             logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
 
-            best_match = None
             last_error = None
 
             for attempt, candidate in enumerate(all_results, 1):
@@ -2754,7 +2911,10 @@ async def auto_search_and_import_task(
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
             rate_limiter=rate_limiter,
-            title_recognition_manager=title_recognition_manager
+            title_recognition_manager=title_recognition_manager,
+            is_fallback=True,  # 标识为后备任务
+            fallback_type="match",  # 匹配后备类型
+            preassignedAnimeId=payload.preassignedAnimeId  # 传递预分配的anime_id
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。

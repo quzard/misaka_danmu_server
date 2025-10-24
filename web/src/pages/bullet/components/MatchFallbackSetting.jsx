@@ -1,6 +1,6 @@
 import { Card, Form, Switch, Input, Button, Space, Tooltip, Checkbox } from 'antd'
 import { useEffect, useState } from 'react'
-import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList, getSearchFallback, setSearchFallback } from '../../../apis'
+import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getCustomDanmakuPath, setCustomDanmakuPath, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList, getSearchFallback, setSearchFallback, getConfig, setConfig } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 
@@ -17,13 +17,14 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, pathRes, tokensRes, tokenListRes, searchFallbackRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, pathRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
         getCustomDanmakuPath(),
         getMatchFallbackTokens(),
         getTokenList(),
-        getSearchFallback()
+        getSearchFallback(),
+        getConfig('externalApiFallbackEnabled')
       ])
       const pathEnabled = pathRes.data.enabled === 'true'
       setCustomPathEnabled(pathEnabled)
@@ -43,7 +44,8 @@ export const MatchFallbackSetting = () => {
         matchFallbackTokens: selectedTokens,
         customDanmakuPathEnabled: pathEnabled,
         customDanmakuPathTemplate: pathRes.data.template,
-        searchFallbackEnabled: searchFallbackRes.data.value === 'true'
+        searchFallbackEnabled: searchFallbackRes.data.value === 'true',
+        externalApiFallbackEnabled: externalApiFallbackRes.data?.value === 'true'
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -77,6 +79,10 @@ export const MatchFallbackSetting = () => {
       if ('searchFallbackEnabled' in changedValues) {
         await setSearchFallback({ value: String(changedValues.searchFallbackEnabled) })
         messageApi.success('后备搜索开关已保存')
+      }
+      if ('externalApiFallbackEnabled' in changedValues) {
+        await setConfig('externalApiFallbackEnabled', String(changedValues.externalApiFallbackEnabled))
+        messageApi.success('顺延机制已保存')
       }
       if ('customDanmakuPathEnabled' in changedValues) {
         setCustomPathEnabled(changedValues.customDanmakuPathEnabled)
@@ -153,6 +159,7 @@ export const MatchFallbackSetting = () => {
         initialValues={{
           matchFallbackEnabled: false,
           searchFallbackEnabled: false,
+          externalApiFallbackEnabled: false,
           matchFallbackBlacklist: '',
           matchFallbackTokens: [],
           customDanmakuPathEnabled: false,
@@ -178,6 +185,38 @@ export const MatchFallbackSetting = () => {
             style={{ flex: 1 }}
           >
             <Switch />
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) =>
+              prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+              prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
+            }
+          >
+            {({ getFieldValue }) => {
+              const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
+              const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
+              const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
+
+              return (
+                <Form.Item
+                  name="externalApiFallbackEnabled"
+                  label={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span>启用顺延机制</span>
+                      <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </div>
+                  }
+                  valuePropName="checked"
+                  style={{ flex: 1 }}
+                >
+                  <Switch disabled={isFallbackDisabled} />
+                </Form.Item>
+              )
+            }}
           </Form.Item>
         </div>
 
