@@ -693,7 +693,6 @@ class MgtvScraper(BaseScraper):
             timestamp = c.time / 1000.0
             # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
             p_string = f"{timestamp:.3f},{mode},25,{color},[{self.provider_name}]"
-            
             formatted_comments.append({
                 "cid": str(c.id),
                 "p": p_string,

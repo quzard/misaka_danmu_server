@@ -556,7 +556,6 @@ class GamerScraper(BaseScraper):
                     
                     # 修正：直接在此处添加字体大小 '25'，确保数据源的正确性
                     p_string = f"{time_sec:.2f},{mode},25,{color},[{self.provider_name}]"
-                    
                     formatted_comments.append({
                         # 修正：使用 'sn' (弹幕流水号) 作为唯一的弹幕ID (cid)，而不是 'userid'，以避免同一用户发送多条弹幕时出现重复键错误。
                         "cid": str(comment.get("sn", "0")),
