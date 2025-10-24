@@ -2122,12 +2122,17 @@ async def get_comments_for_dandan(
                 pass
 
             try:
+                # 检查流控
+                await rate_limiter.check_fallback("match", provider)
+
                 comments = await scraper.get_comments(provider_episode_id, progress_callback=dummy_progress)
                 if not comments:
                     logger.warning(f"下载失败，未获取到弹幕")
                     await session.rollback()
                     return models.CommentResponse(count=0, comments=[])
 
+                # 增加流控计数
+                await rate_limiter.increment_fallback("match", provider)
                 logger.info(f"下载成功，共 {len(comments)} 条弹幕")
 
             except Exception as e:
