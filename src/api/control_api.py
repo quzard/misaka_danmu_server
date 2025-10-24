@@ -535,6 +535,11 @@ async def search_media(
             if item.type == 'tv_series' and _is_movie_by_title(item.title):
                 item.type = 'movie'
 
+            # 修正：如果用户指定了集数，则设置 currentEpisodeIndex
+            # 这样后续的导入逻辑会自动识别为单集导入
+            if final_episode is not None:
+                item.currentEpisodeIndex = final_episode
+
         if final_season:
             original_count = len(results)
             filtered_by_type = [item for item in results if item.type == 'tv_series']

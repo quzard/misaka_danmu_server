@@ -2674,7 +2674,7 @@ async def auto_search_and_import_task(
             logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。")
             all_results = filtered_by_season
 
-        if filtered_results:
+        if all_results:
             logger.info("保留的结果列表:")
             for i, item in enumerate(all_results, 1):  # 显示所有结果
                 logger.info(f"  - {item.title} (Provider: {item.provider}, Type: {item.type}, Season: {item.season})")
