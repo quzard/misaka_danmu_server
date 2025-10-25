@@ -2218,6 +2218,10 @@ async def get_comments_for_dandan(
             source_id = await crud.link_source_to_anime(session, real_anime_id, provider, mediaId)
             logger.info(f"source_id={source_id}")
 
+            # 提交anime和source创建，避免与后台任务产生锁冲突
+            await session.commit()
+            logger.info(f"已提交anime和source创建")
+
             # 步骤3：获取分集信息
             logger.info(f"开始获取分集信息: provider={provider}, mediaId={mediaId}, episode_number={episode_number}")
 
