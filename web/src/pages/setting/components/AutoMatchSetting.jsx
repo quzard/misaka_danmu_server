@@ -155,23 +155,21 @@ const AutoMatchSetting = () => {
             />
           </Form.Item>
 
-          {/* 传统匹配兜底开关 - 仅在AI模式下显示 */}
-          {matchMode === 'ai' && (
-            <Form.Item
-              name="aiMatchFallbackEnabled"
-              label={
-                <Space>
-                  <span>启用传统匹配兜底</span>
-                  <Tooltip title="当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性。">
-                    <QuestionCircleOutlined />
-                  </Tooltip>
-                </Space>
-              }
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-          )}
+          {/* 传统匹配兜底开关 - 始终显示,传统模式下禁用 */}
+          <Form.Item
+            name="aiMatchFallbackEnabled"
+            label={
+              <Space>
+                <span>启用传统匹配兜底</span>
+                <Tooltip title={matchMode === 'traditional' ? '传统匹配模式下无需兜底' : '当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性'}>
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            valuePropName="checked"
+          >
+            <Switch disabled={matchMode === 'traditional'} />
+          </Form.Item>
 
           {/* AI配置区域 - 禁用时字段保持显示但不可编辑 */}
           <Form.Item
