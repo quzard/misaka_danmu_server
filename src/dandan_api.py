@@ -2173,16 +2173,43 @@ async def get_comments_for_dandan(
         logger.info(f"弹幕库中未找到 episodeId={episodeId} 的弹幕，尝试直接从源站获取")
 
         # 检查是否是后备搜索/匹配后备的episodeId
-        fallback_episode_cache_key = f"fallback_episode_{episodeId}"
-        if fallback_episode_cache_key in fallback_search_cache:
-            fallback_info = fallback_search_cache[fallback_episode_cache_key]
-            logger.info(f"检测到后备搜索/匹配后备的episodeId: {episodeId}")
+        # 虚拟episodeId格式: 25000166010002 (166=anime_id, 01=source_order, 0002=episode_number)
+        # 缓存key格式: fallback_episode_25000166010000 (最后4位为0000表示整部剧)
+
+        fallback_info = None
+        episode_number = None
+
+        # 尝试解析虚拟episodeId
+        if episodeId >= 25000000000000:
+            # 提取anime_id, source_order, episode_number
+            temp_id = episodeId - 25000000000000
+            anime_id_part = temp_id // 1000000
+            temp_id = temp_id % 1000000
+            source_order_part = temp_id // 10000
+            episode_number = temp_id % 10000
+
+            # 构造整部剧的缓存key
+            virtual_anime_base = 25000000000000 + anime_id_part * 1000000 + source_order_part * 10000
+            fallback_series_key = f"fallback_episode_{virtual_anime_base}"
+
+            # 从数据库缓存中查找整部剧的信息
+            fallback_info = await crud.get_cache(session, fallback_series_key)
+            logger.debug(f"查找缓存: {fallback_series_key}, 找到: {fallback_info is not None}")
+
+        # 如果数据库缓存中没有,再从内存缓存中查找(兼容旧逻辑)
+        if not fallback_info:
+            fallback_episode_cache_key = f"fallback_episode_{episodeId}"
+            if fallback_episode_cache_key in fallback_search_cache:
+                fallback_info = fallback_search_cache[fallback_episode_cache_key]
+                episode_number = fallback_info.get("episode_number")
+
+        if fallback_info:
+            logger.info(f"检测到后备搜索/匹配后备的episodeId: {episodeId}, 集数: {episode_number}")
 
             # 从缓存中获取信息
             real_anime_id = fallback_info["real_anime_id"]
             provider = fallback_info["provider"]
             mediaId = fallback_info["mediaId"]
-            episode_number = fallback_info["episode_number"]
             final_title = fallback_info["final_title"]
             final_season = fallback_info["final_season"]
             media_type = fallback_info["media_type"]
@@ -2343,6 +2370,12 @@ async def get_comments_for_dandan(
                     source_id = await crud.link_source_to_anime(task_session, current_real_anime_id, current_provider, current_mediaId)
                     logger.info(f"source_id={source_id}")
 
+                    # 获取source_order用于生成虚拟episodeId
+                    from .orm_models import AnimeSource
+                    stmt_source = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
+                    result_source = await task_session.execute(stmt_source)
+                    source_order = result_source.scalar_one()
+
                     # 创建当前Episode条目
                     episode_db_id = await crud.create_episode_if_not_exists(
                         task_session, current_real_anime_id, source_id, current_episode_number,
@@ -2351,26 +2384,33 @@ async def get_comments_for_dandan(
                     await task_session.flush()
                     logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
 
-                    # 为整部剧的所有集创建Episode记录(不下载弹幕,只创建映射)
-                    # 这样播放器推理下一集时能找到Episode记录,触发弹幕下载
+                    # 为整部剧创建一条缓存记录(不下载弹幕,不创建数据库记录)
+                    # 这样播放器推理下一集时能通过缓存触发弹幕下载
+                    # 缓存条目保留3小时,支持连续播放
                     try:
-                        created_count = 0
-                        for ep_idx, ep_info in enumerate(current_episodes_list, start=1):
-                            if ep_idx == current_episode_number:
-                                # 跳过当前集,已经创建
-                                continue
-                            try:
-                                await crud.create_episode_if_not_exists(
-                                    task_session, current_real_anime_id, source_id, ep_idx,
-                                    ep_info.title, ep_info.url, ep_info.episodeId
-                                )
-                                created_count += 1
-                            except Exception as e:
-                                logger.warning(f"创建第{ep_idx}集Episode记录失败: {e}")
+                        # 使用虚拟anime_id作为缓存key的前缀
+                        # 格式: fallback_episode_25000166010000 (最后4位为0000表示整部剧)
+                        virtual_anime_base = 25000000000000 + current_real_anime_id * 1000000 + source_order * 10000
+                        fallback_series_key = f"fallback_episode_{virtual_anime_base}"
+
+                        cache_value = {
+                            "real_anime_id": current_real_anime_id,
+                            "provider": current_provider,
+                            "mediaId": current_mediaId,
+                            "final_title": current_final_title,
+                            "final_season": current_final_season,
+                            "media_type": current_media_type,
+                            "imageUrl": current_imageUrl,
+                            "year": current_year,
+                            "total_episodes": len(current_episodes_list)
+                        }
+
+                        # 存储到数据库缓存,3小时过期
+                        await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
                         await task_session.flush()
-                        logger.info(f"为整部剧创建了 {created_count} 个Episode映射记录")
+                        logger.info(f"为整部剧创建了缓存记录: {fallback_series_key} (共{len(current_episodes_list)}集)")
                     except Exception as e:
-                        logger.warning(f"批量创建Episode记录失败: {e}")
+                        logger.warning(f"创建缓存记录失败: {e}")
 
                     await progress_callback(80, "保存弹幕...")
 
@@ -2381,9 +2421,13 @@ async def get_comments_for_dandan(
                     await task_session.commit()
                     logger.info(f"保存成功，共 {added_count} 条弹幕")
 
-                    # 清理缓存
+                    # 清理内存缓存(兼容旧逻辑)
                     if current_fallback_episode_cache_key in fallback_search_cache:
                         del fallback_search_cache[current_fallback_episode_cache_key]
+                        logger.debug(f"清理内存缓存: {current_fallback_episode_cache_key}")
+
+                    # 注意:不删除数据库缓存中的整部剧记录,保留3小时以支持连续播放
+                    # 数据库缓存会自动过期
 
                     await progress_callback(100, "完成")
                     return comments
@@ -2599,6 +2643,7 @@ async def get_comments_for_dandan(
                 current_config_manager = config_manager
                 current_scraper_manager = scraper_manager
                 current_rate_limiter = rate_limiter
+                current_episodes_list_ref = None  # 用于保存整部剧的分集列表
 
                 async def download_comments_task(task_session, progress_callback):
                     try:
@@ -2626,6 +2671,9 @@ async def get_comments_for_dandan(
 
                             media_type = mapping_info.get("type", "movie")
                             episodes_list = await scraper.get_episodes(current_episode_url, db_media_type=media_type)
+                            # 保存到外层作用域，用于后续批量创建Episode记录
+                            nonlocal current_episodes_list_ref
+                            current_episodes_list_ref = episodes_list
 
                         if episodes_list and len(episodes_list) >= current_episode_number:
                             # 获取对应集数的分集信息（episode_number是从1开始的）
@@ -2746,11 +2794,46 @@ async def get_comments_for_dandan(
                                         task_session, anime_id, current_provider, current_episode_url
                                     )
 
+                                    # 获取source_order用于生成虚拟episodeId
+                                    from .orm_models import AnimeSource
+                                    stmt_source = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
+                                    result_source = await task_session.execute(stmt_source)
+                                    source_order = result_source.scalar_one()
+
                                     # 3. 创建分集条目（使用原生标题）
                                     episode_db_id = await crud.create_episode_if_not_exists(
                                         task_session, anime_id, source_id, current_episode_number,
                                         original_episode_title, "", provider_episode_id
                                     )
+
+                                    # 为整部剧创建一条缓存记录(不下载弹幕,不创建数据库记录)
+                                    # 这样播放器推理下一集时能通过缓存触发弹幕下载
+                                    # 缓存条目保留3小时,支持连续播放
+                                    if current_episodes_list_ref:
+                                        try:
+                                            # 使用虚拟anime_id作为缓存key的前缀
+                                            # 格式: fallback_episode_25000166010000 (最后4位为0000表示整部剧)
+                                            virtual_anime_base = 25000000000000 + anime_id * 1000000 + source_order * 10000
+                                            fallback_series_key = f"fallback_episode_{virtual_anime_base}"
+
+                                            cache_value = {
+                                                "real_anime_id": anime_id,
+                                                "provider": current_provider,
+                                                "mediaId": current_episode_url,
+                                                "final_title": base_title,
+                                                "final_season": 1,
+                                                "media_type": media_type,
+                                                "imageUrl": image_url,
+                                                "year": year,
+                                                "total_episodes": len(current_episodes_list_ref)
+                                            }
+
+                                            # 存储到数据库缓存,3小时过期
+                                            await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
+                                            await task_session.flush()
+                                            logger.info(f"为整部剧创建了缓存记录: {fallback_series_key} (共{len(current_episodes_list_ref)}集)")
+                                        except Exception as e:
+                                            logger.warning(f"创建缓存记录失败: {e}")
 
                                     # 4. 保存弹幕到数据库
                                     added_count = await crud.save_danmaku_for_episode(
