@@ -2272,6 +2272,11 @@ async def get_comments_for_dandan(
             current_episodeId = episodeId
             current_fallback_episode_cache_key = fallback_episode_cache_key
             current_rate_limiter = rate_limiter
+            current_final_title = final_title
+            current_final_season = final_season
+            current_media_type = media_type
+            current_imageUrl = imageUrl
+            current_year = year
 
             async def download_match_fallback_comments_task(task_session, progress_callback):
                 """匹配后备弹幕下载任务"""
@@ -2292,6 +2297,31 @@ async def get_comments_for_dandan(
                     logger.info(f"下载成功，共 {len(comments)} 条弹幕")
 
                     await progress_callback(60, "创建数据库条目...")
+
+                    # 在task_session中创建或获取anime条目
+                    from .orm_models import Anime
+                    from .timezone import get_now
+
+                    stmt = select(Anime).where(Anime.id == current_real_anime_id)
+                    result = await task_session.execute(stmt)
+                    existing_anime = result.scalar_one_or_none()
+
+                    if not existing_anime:
+                        # 创建anime条目
+                        logger.info(f"任务中创建anime条目: id={current_real_anime_id}, title='{current_final_title}'")
+                        new_anime = Anime(
+                            id=current_real_anime_id,
+                            title=current_final_title,
+                            type=current_media_type,
+                            season=current_final_season,
+                            imageUrl=current_imageUrl,
+                            year=current_year,
+                            createdAt=get_now()
+                        )
+                        task_session.add(new_anime)
+                        await task_session.flush()
+                    else:
+                        logger.info(f"任务中anime条目已存在: id={current_real_anime_id}, title='{existing_anime.title}'")
 
                     # 创建或获取source关联 (在task_session中)
                     source_id = await crud.link_source_to_anime(task_session, current_real_anime_id, current_provider, current_mediaId)
