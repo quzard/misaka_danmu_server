@@ -2296,6 +2296,11 @@ async def get_comments_for_dandan(
                     await current_rate_limiter.increment_fallback("match", current_provider)
                     logger.info(f"下载成功，共 {len(comments)} 条弹幕")
 
+                    # 立即存储到缓存中，让主接口能快速返回
+                    cache_key = f"comments_{current_episodeId}"
+                    comments_fetch_cache[cache_key] = comments
+                    logger.info(f"弹幕已存入缓存: {cache_key}")
+
                     await progress_callback(60, "创建数据库条目...")
 
                     # 在task_session中创建或获取anime条目
@@ -2348,10 +2353,6 @@ async def get_comments_for_dandan(
                     if current_fallback_episode_cache_key in fallback_search_cache:
                         del fallback_search_cache[current_fallback_episode_cache_key]
 
-                    # 存储到缓存中
-                    cache_key = f"comments_{current_episodeId}"
-                    comments_fetch_cache[cache_key] = comments
-
                     await progress_callback(100, "完成")
                     return comments
 
@@ -2377,8 +2378,8 @@ async def get_comments_for_dandan(
                     # 任务完成，检查缓存中是否有结果
                     cache_key = f"comments_{episodeId}"
                     if cache_key in comments_fetch_cache:
-                        comments_data = comments_fetch_cache[cache_key]
-                        logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(comments_data)} 条弹幕")
+                        logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(comments_fetch_cache[cache_key])} 条弹幕")
+                        # 不删除缓存，让后续逻辑继续处理
                     else:
                         logger.warning(f"任务完成但缓存中未找到弹幕数据")
                 except asyncio.TimeoutError:
