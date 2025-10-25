@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 
 from thefuzz import fuzz
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload
@@ -1669,7 +1669,32 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
     logger.info(f"开始重整源 ID: {sourceId} 的分集顺序。")
     await progress_callback(0, "正在获取分集列表...")
 
+    dialect_name = session.bind.dialect.name
+    is_mysql = dialect_name == 'mysql'
+    is_postgres = dialect_name == 'postgresql'
+
     try:
+        # 根据数据库方言，暂时禁用外键检查
+        if is_mysql:
+            try:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+                # MySQL需要提交SET命令
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"无法禁用MySQL外键检查: {e}")
+        elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
+            try:
+                await session.execute(text("SET session_replication_role = 'replica';"))
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL权限不足: 无法设置 session_replication_role")
+                logger.error(f"📝 解决方法:")
+                logger.error(f"   1. 授予数据库用户超级用户权限:")
+                logger.error(f"      ALTER USER your_username WITH SUPERUSER;")
+                logger.error(f"   2. 或者使用超级用户账户连接数据库")
+                logger.error(f"   3. 注意: 超级用户权限仅建议在开发/测试环境使用")
+                raise
 
         try:
             # 1. 获取计算新ID所需的信息
@@ -1737,6 +1762,20 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             await session.rollback()
             logger.error(f"重整分集任务 (源ID: {sourceId}) 事务中失败: {e}", exc_info=True)
             raise
+        finally:
+            # 务必重新启用外键检查/恢复会话角色
+            if is_mysql:
+                try:
+                    await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"无法恢复MySQL外键检查: {e}")
+            elif is_postgres:
+                try:
+                    await session.execute(text("SET session_replication_role = 'origin';"))
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
@@ -1749,9 +1788,33 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
     logger.info(f"开始集数偏移任务，偏移量: {offset}, 分集IDs: {episode_ids}")
     await progress_callback(0, "正在验证偏移操作...")
 
-
+    dialect_name = session.bind.dialect.name
+    is_mysql = dialect_name == 'mysql'
+    is_postgres = dialect_name == 'postgresql'
 
     try:
+        # --- Execution Phase ---
+        # Temporarily disable foreign key checks
+        if is_mysql:
+            try:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+                # MySQL需要提交SET命令
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"无法禁用MySQL外键检查: {e}")
+        elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
+            try:
+                await session.execute(text("SET session_replication_role = 'replica';"))
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL权限不足: 无法设置 session_replication_role")
+                logger.error(f"📝 解决方法:")
+                logger.error(f"   1. 授予数据库用户超级用户权限:")
+                logger.error(f"      ALTER USER your_username WITH SUPERUSER;")
+                logger.error(f"   2. 或者使用超级用户账户连接数据库")
+                logger.error(f"   3. 注意: 超级用户权限仅建议在开发/测试环境使用")
+                raise
         # --- Validation Phase ---
         # 1. Fetch all selected episodes and ensure they belong to the same source
         selected_episodes_res = await session.execute(
@@ -1846,6 +1909,18 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
             await session.rollback()
             logger.error(f"集数偏移任务 (源ID: {source_id}) 事务中失败: {e}", exc_info=True)
             raise
+        finally:
+            # Re-enable foreign key checks
+            if is_mysql:
+                try:
+                    await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                except Exception as e:
+                    logger.warning(f"无法恢复MySQL外键检查: {e}")
+            elif is_postgres:
+                try:
+                    await session.execute(text("SET session_replication_role = 'origin';"))
+                except Exception as e:
+                    logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
 
     except ValueError as e:
         # Catch validation errors and report them as task failures

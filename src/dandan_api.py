@@ -2260,9 +2260,15 @@ async def get_comments_for_dandan(
             task_unique_key = f"match_fallback_comments_{episodeId}"
             existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
             if existing_task:
-                logger.info(f"弹幕下载任务已存在: {task_unique_key}")
-                # 如果任务正在进行，返回空结果，让用户稍后再试
-                return models.CommentResponse(count=0, comments=[])
+                logger.info(f"弹幕下载任务已存在: {task_unique_key}，等待任务完成...")
+                # 等待最多30秒，检查缓存中是否有结果
+                cache_key = f"comments_{episodeId}"
+                for i in range(30):
+                    await asyncio.sleep(1)
+                    if cache_key in comments_fetch_cache:
+                        logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                        break
+                # 继续执行后续逻辑，从缓存中获取弹幕
 
             # 保存当前作用域的变量，避免闭包问题
             current_scraper = scraper
@@ -2391,6 +2397,22 @@ async def get_comments_for_dandan(
                     # 超时后返回空结果，让用户稍后再试
                     return models.CommentResponse(count=0, comments=[])
 
+            except HTTPException as e:
+                # 如果是409错误(任务已在运行中),等待一段时间后从缓存获取
+                if e.status_code == 409:
+                    logger.info(f"任务已在运行中，等待现有任务完成...")
+                    # 等待最多30秒，检查缓存中是否有结果
+                    cache_key = f"comments_{episodeId}"
+                    for i in range(30):
+                        await asyncio.sleep(1)
+                        if cache_key in comments_fetch_cache:
+                            logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                            break
+                    # 继续执行后续逻辑，从缓存中获取弹幕
+                else:
+                    logger.error(f"提交匹配后备弹幕下载任务失败: {e}", exc_info=True)
+                    await session.rollback()
+                    return models.CommentResponse(count=0, comments=[])
             except Exception as e:
                 logger.error(f"提交匹配后备弹幕下载任务失败: {e}", exc_info=True)
                 await session.rollback()
@@ -2536,9 +2558,15 @@ async def get_comments_for_dandan(
                 task_unique_key = f"fallback_comments_{episodeId}"
                 existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
                 if existing_task:
-                    logger.info(f"弹幕下载任务已存在: {task_unique_key}")
-                    # 如果任务正在进行，返回空结果，让用户稍后再试
-                    return models.CommentResponse(count=0, comments=[])
+                    logger.info(f"弹幕下载任务已存在: {task_unique_key}，等待任务完成...")
+                    # 等待最多30秒，检查缓存中是否有结果
+                    cache_key = f"comments_{episodeId}"
+                    for i in range(30):
+                        await asyncio.sleep(1)
+                        if cache_key in comments_fetch_cache:
+                            logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                            break
+                    # 继续执行后续逻辑，从缓存中获取弹幕
 
                 # 3. 将弹幕下载包装成任务管理器任务
                 # 保存当前作用域的变量，避免闭包问题
