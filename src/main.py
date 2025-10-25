@@ -158,6 +158,7 @@ async def lifespan(app: FastAPI):
         'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
         # AI匹配配置
         'aiMatchEnabled': ('false', '是否启用AI智能匹配。启用后，在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。'),
+        'aiMatchFallbackEnabled': ('true', '是否启用传统匹配兜底。当AI匹配失败时，自动降级到传统匹配算法。'),
         'aiMatchProvider': ('deepseek', 'AI提供商: deepseek, openai, gemini'),
         'aiMatchApiKey': ('', 'AI服务的API密钥'),
         'aiMatchBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
@@ -182,6 +183,7 @@ async def lifespan(app: FastAPI):
 4. **类型匹配**: 电视剧优先匹配 tv_series,电影优先匹配 movie
 5. **年份接近**: 优先选择年份接近的
 6. **集数完整**: 如果有多个高度相似的结果,选择集数最完整的
+7. **指定集数**: 如果指定了集数,该集数小于等于总集数,即可认为集数完整,集数置信度高
 
 **输出格式**:
 返回一个JSON对象,包含:

@@ -10,7 +10,8 @@ const AutoMatchSetting = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [aiEnabled, setAiEnabled] = useState(false)
+  const [matchMode, setMatchMode] = useState('traditional') // 'traditional' or 'ai'
+  const [fallbackEnabled, setFallbackEnabled] = useState(false)
 
   // 加载配置
   const loadSettings = async () => {
@@ -18,6 +19,7 @@ const AutoMatchSetting = () => {
       setLoading(true)
       const [
         enabledRes,
+        fallbackRes,
         providerRes,
         apiKeyRes,
         baseUrlRes,
@@ -25,6 +27,7 @@ const AutoMatchSetting = () => {
         promptRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
+        getConfig('aiMatchFallbackEnabled'),
         getConfig('aiMatchProvider'),
         getConfig('aiMatchApiKey'),
         getConfig('aiMatchBaseUrl'),
@@ -33,10 +36,13 @@ const AutoMatchSetting = () => {
       ])
 
       const enabled = enabledRes.data.value === 'true'
-      setAiEnabled(enabled)
+      const fallback = fallbackRes.data.value === 'true'
+      setMatchMode(enabled ? 'ai' : 'traditional')
+      setFallbackEnabled(fallback)
 
       form.setFieldsValue({
         aiMatchEnabled: enabled,
+        aiMatchFallbackEnabled: fallback,
         aiMatchProvider: providerRes.data.value || 'deepseek',
         aiMatchApiKey: apiKeyRes.data.value || '',
         aiMatchBaseUrl: baseUrlRes.data.value || '',
@@ -59,12 +65,13 @@ const AutoMatchSetting = () => {
     try {
       setSaving(true)
       // 如果AI匹配未启用,跳过必填字段验证
-      const values = aiEnabled
+      const values = matchMode === 'ai'
         ? await form.validateFields()
         : form.getFieldsValue()
 
       await Promise.all([
         setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
+        setConfig('aiMatchFallbackEnabled', values.aiMatchFallbackEnabled ? 'true' : 'false'),
         setConfig('aiMatchProvider', values.aiMatchProvider || ''),
         setConfig('aiMatchApiKey', values.aiMatchApiKey || ''),
         setConfig('aiMatchBaseUrl', values.aiMatchBaseUrl || ''),
@@ -124,24 +131,44 @@ const AutoMatchSetting = () => {
           layout="vertical"
           onValuesChange={(changedValues) => {
             if ('aiMatchEnabled' in changedValues) {
-              setAiEnabled(changedValues.aiMatchEnabled)
+              setMatchMode(changedValues.aiMatchEnabled ? 'ai' : 'traditional')
+            }
+            if ('aiMatchFallbackEnabled' in changedValues) {
+              setFallbackEnabled(changedValues.aiMatchFallbackEnabled)
             }
           }}
         >
-          {/* 主开关 */}
+          {/* 匹配模式开关 */}
           <Form.Item
             name="aiMatchEnabled"
+            label="匹配模式"
+            valuePropName="checked"
+          >
+            <Switch
+              checkedChildren="AI智能匹配"
+              unCheckedChildren="传统匹配"
+              checked={matchMode === 'ai'}
+              onChange={checked => {
+                setMatchMode(checked ? 'ai' : 'traditional')
+                form.setFieldValue('aiMatchEnabled', checked)
+              }}
+            />
+          </Form.Item>
+
+          {/* 传统匹配兜底开关 - 始终显示,传统模式下禁用 */}
+          <Form.Item
+            name="aiMatchFallbackEnabled"
             label={
               <Space>
-                <span>启用AI智能匹配</span>
-                <Tooltip title="启用后,在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。关闭时使用传统的相似度匹配算法。">
+                <span>启用传统匹配兜底</span>
+                <Tooltip title={matchMode === 'traditional' ? '传统匹配模式下无需兜底' : '当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性'}>
                   <QuestionCircleOutlined />
                 </Tooltip>
               </Space>
             }
             valuePropName="checked"
           >
-            <Switch />
+            <Switch disabled={matchMode === 'traditional'} />
           </Form.Item>
 
           {/* AI配置区域 - 禁用时字段保持显示但不可编辑 */}
@@ -155,9 +182,9 @@ const AutoMatchSetting = () => {
                 </Tooltip>
               </Space>
             }
-            rules={[{ required: aiEnabled, message: '请选择AI提供商' }]}
+            rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
           >
-            <Select disabled={!aiEnabled}>
+            <Select disabled={matchMode !== 'ai'}>
               <Option value="deepseek">DeepSeek (推荐)</Option>
               <Option value="openai">OpenAI (兼容接口)</Option>
             </Select>
@@ -173,9 +200,9 @@ const AutoMatchSetting = () => {
                 </Tooltip>
               </Space>
             }
-            rules={[{ required: aiEnabled, message: '请输入API密钥' }]}
+            rules={[{ required: matchMode === 'ai', message: '请输入API密钥' }]}
           >
-            <Input.Password placeholder="sk-..." disabled={!aiEnabled} />
+            <Input.Password placeholder="sk-..." disabled={matchMode !== 'ai'} />
           </Form.Item>
 
           <Form.Item
@@ -198,7 +225,7 @@ const AutoMatchSetting = () => {
               >
                 <Input
                   placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
-                  disabled={!aiEnabled}
+                  disabled={matchMode !== 'ai'}
                 />
               </Form.Item>
             )}
@@ -221,11 +248,11 @@ const AutoMatchSetting = () => {
                     </Tooltip>
                   </Space>
                 }
-                rules={[{ required: aiEnabled, message: '请输入模型名称' }]}
+                rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
               >
                 <Input
                   placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
-                  disabled={!aiEnabled}
+                  disabled={matchMode !== 'ai'}
                 />
               </Form.Item>
             )}
@@ -246,7 +273,7 @@ const AutoMatchSetting = () => {
               rows={12}
               placeholder="留空使用默认提示词..."
               style={{ fontFamily: 'monospace', fontSize: '12px' }}
-              disabled={!aiEnabled}
+              disabled={matchMode !== 'ai'}
             />
           </Form.Item>
         </Form>
@@ -259,13 +286,13 @@ const AutoMatchSetting = () => {
               <strong>传统匹配</strong>: 基于标题相似度和类型匹配的算法,快速但可能不够精准
             </li>
             <li>
-              <strong>AI匹配</strong>: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果
+              <strong>AI智能匹配</strong>: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果
+            </li>
+            <li>
+              <strong>传统匹配兜底</strong>: 当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性(仅AI模式下可用)
             </li>
             <li>
               <strong>应用场景</strong>: 外部控制API全自动导入、Webhook自动导入、匹配后备机制
-            </li>
-            <li>
-              <strong>降级策略</strong>: AI调用失败时自动降级到传统匹配,确保功能可用性
             </li>
             <li>
               <strong>精确标记优先</strong>: AI会优先选择被用户标记为"精确"的数据源

@@ -1676,13 +1676,25 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
     try:
         # 根据数据库方言，暂时禁用外键检查
         if is_mysql:
-            await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
-            # MySQL需要提交SET命令
-            await session.commit()
+            try:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+                # MySQL需要提交SET命令
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"无法禁用MySQL外键检查: {e}")
         elif is_postgres:
             # PostgreSQL的session_replication_role必须在同一事务中使用
             # 不要在这里提交,保持在同一事务中
-            await session.execute(text("SET session_replication_role = 'replica';"))
+            try:
+                await session.execute(text("SET session_replication_role = 'replica';"))
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL权限不足: 无法设置 session_replication_role")
+                logger.error(f"📝 解决方法:")
+                logger.error(f"   1. 授予数据库用户超级用户权限:")
+                logger.error(f"      ALTER USER your_username WITH SUPERUSER;")
+                logger.error(f"   2. 或者使用超级用户账户连接数据库")
+                logger.error(f"   3. 注意: 超级用户权限仅建议在开发/测试环境使用")
+                raise
 
         try:
             # 1. 获取计算新ID所需的信息
@@ -1743,6 +1755,9 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             
             await session.commit()
             raise TaskSuccess(f"重整完成，共迁移了 {len(new_episodes_to_add)} 个分集的记录。")
+        except TaskSuccess:
+            # TaskSuccess 不是错误，直接向上传递
+            raise
         except Exception as e:
             await session.rollback()
             logger.error(f"重整分集任务 (源ID: {sourceId}) 事务中失败: {e}", exc_info=True)
@@ -1750,10 +1765,17 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
         finally:
             # 务必重新启用外键检查/恢复会话角色
             if is_mysql:
-                await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                try:
+                    await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"无法恢复MySQL外键检查: {e}")
             elif is_postgres:
-                await session.execute(text("SET session_replication_role = 'origin';"))
-            await session.commit()
+                try:
+                    await session.execute(text("SET session_replication_role = 'origin';"))
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
@@ -1771,6 +1793,28 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
     is_postgres = dialect_name == 'postgresql'
 
     try:
+        # --- Execution Phase ---
+        # Temporarily disable foreign key checks
+        if is_mysql:
+            try:
+                await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+                # MySQL需要提交SET命令
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"无法禁用MySQL外键检查: {e}")
+        elif is_postgres:
+            # PostgreSQL的session_replication_role必须在同一事务中使用
+            # 不要在这里提交,保持在同一事务中
+            try:
+                await session.execute(text("SET session_replication_role = 'replica';"))
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL权限不足: 无法设置 session_replication_role")
+                logger.error(f"📝 解决方法:")
+                logger.error(f"   1. 授予数据库用户超级用户权限:")
+                logger.error(f"      ALTER USER your_username WITH SUPERUSER;")
+                logger.error(f"   2. 或者使用超级用户账户连接数据库")
+                logger.error(f"   3. 注意: 超级用户权限仅建议在开发/测试环境使用")
+                raise
         # --- Validation Phase ---
         # 1. Fetch all selected episodes and ensure they belong to the same source
         selected_episodes_res = await session.execute(
@@ -1815,16 +1859,6 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         await progress_callback(20, "验证通过，准备迁移数据...")
 
         # --- Execution Phase ---
-        # Temporarily disable foreign key checks
-        if is_mysql:
-            await session.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
-            # MySQL需要提交SET命令
-            await session.commit()
-        elif is_postgres:
-            # PostgreSQL的session_replication_role必须在同一事务中使用
-            # 不要在这里提交,保持在同一事务中
-            await session.execute(text("SET session_replication_role = 'replica';"))
-
         try:
             old_episodes_to_delete = []
             new_episodes_to_add = []
@@ -1868,6 +1902,9 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
 
             raise TaskSuccess(f"集数偏移完成，共迁移了 {len(new_episodes_to_add)} 个分集。")
 
+        except TaskSuccess:
+            # TaskSuccess 不是错误，直接向上传递
+            raise
         except Exception as e:
             await session.rollback()
             logger.error(f"集数偏移任务 (源ID: {source_id}) 事务中失败: {e}", exc_info=True)
@@ -1875,10 +1912,15 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         finally:
             # Re-enable foreign key checks
             if is_mysql:
-                await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                try:
+                    await session.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+                except Exception as e:
+                    logger.warning(f"无法恢复MySQL外键检查: {e}")
             elif is_postgres:
-                await session.execute(text("SET session_replication_role = 'origin';"))
-            await session.commit()
+                try:
+                    await session.execute(text("SET session_replication_role = 'origin';"))
+                except Exception as e:
+                    logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
 
     except ValueError as e:
         # Catch validation errors and report them as task failures
@@ -2800,10 +2842,20 @@ async def auto_search_and_import_task(
                     if ai_selected_index is not None:
                         logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                     else:
-                        logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                        # 检查是否启用传统匹配兜底
+                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        if ai_fallback_enabled:
+                            logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                        else:
+                            logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
 
             except Exception as e:
-                logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                # 检查是否启用传统匹配兜底
+                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                if ai_fallback_enabled:
+                    logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                else:
+                    logger.error(f"AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
                 ai_selected_index = None
 
         # 检查是否启用外部控制API顺延机制
@@ -2815,12 +2867,26 @@ async def auto_search_and_import_task(
         if ai_selected_index is not None:
             best_match = all_results[ai_selected_index]
             logger.info(f"自动导入：使用AI选择的结果 '{best_match.title}' (Provider: {best_match.provider})")
+        elif ai_match_enabled:
+            # AI匹配已启用但失败，检查是否允许降级到传统匹配
+            ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+            if not ai_fallback_enabled:
+                logger.warning("AI匹配失败且传统匹配兜底已禁用，自动导入失败")
+                raise ValueError("AI匹配失败且传统匹配兜底已禁用")
+            # 允许降级，继续使用传统匹配
+            logger.info("AI匹配失败，使用传统匹配兜底")
+            if not fallback_enabled:
+                # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+                best_match = all_results[0]
+                similarity = fuzz.token_set_ratio(main_title, best_match.title)
+                logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
         elif not fallback_enabled:
-            # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+            # AI未启用，顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
             best_match = all_results[0]
             similarity = fuzz.token_set_ratio(main_title, best_match.title)
             logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
-        else:
+
+        if best_match is None and fallback_enabled:
             # 顺延机制启用：依次验证候选源，直到找到有效的分集
             logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
 

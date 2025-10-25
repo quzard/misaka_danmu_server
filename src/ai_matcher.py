@@ -188,19 +188,24 @@ class AIMatcher:
             if not response_data:
                 logger.warning("AI匹配: 未能获取有效响应")
                 return None
-            
+
+            # 检查返回类型
+            if not isinstance(response_data, dict):
+                logger.error(f"AI匹配: 返回数据类型错误,期望dict,实际为{type(response_data).__name__}: {response_data}")
+                return None
+
             # 解析结果
             index = response_data.get("index", -1)
             confidence = response_data.get("confidence", 0)
             reason = response_data.get("reason", "")
-            
+
             if index < 0 or index >= len(results):
                 logger.info(f"AI匹配: 未找到合适的匹配 (reason: {reason})")
                 return None
-            
+
             selected = results[index]
             logger.info(f"AI匹配: 选择结果 #{index} - {selected.provider}:{selected.title} (置信度: {confidence}%, 理由: {reason})")
-            
+
             return index
         
         except Exception as e:
@@ -225,10 +230,16 @@ class AIMatcher:
                 response_format={"type": "json_object"},
                 timeout=30
             )
-            
+
             content = response.choices[0].message.content
-            return _safe_json_loads(content)
-        
+            logger.debug(f"AI原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            return parsed_data
+
         except Exception as e:
             logger.error(f"OpenAI匹配调用失败: {e}")
             return None

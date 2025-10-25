@@ -1355,8 +1355,8 @@ async def get_tasks(
     session: AsyncSession = Depends(get_db_session),
 ):
     """获取后台任务的列表和状态，支持按标题搜索和按状态过滤。"""
-    # 修正：为 get_tasks_from_history 提供分页参数，以匹配更新后的函数签名。
-    paginated_result = await crud.get_tasks_from_history(session, search, status, page=1, page_size=1000)
+    # 修正：为 get_tasks_from_history 提供所有必需参数，包括 queue_type_filter
+    paginated_result = await crud.get_tasks_from_history(session, search, status, queue_type_filter="all", page=1, page_size=1000)
     return [models.TaskInfo.model_validate(t) for t in paginated_result["list"]]
 
 @router.get("/tasks/{taskId}", response_model=models.TaskInfo, summary="获取单个任务状态")
