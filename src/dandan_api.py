@@ -2307,7 +2307,7 @@ async def get_comments_for_dandan(
             current_episode_title = episode_title
             current_episode_url = episode_url
             current_episodeId = episodeId
-            current_fallback_episode_cache_key = fallback_episode_cache_key
+            current_fallback_episode_cache_key = f"fallback_episode_{episodeId}"
             current_rate_limiter = rate_limiter
             current_final_title = final_title
             current_final_season = final_season
