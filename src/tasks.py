@@ -1743,6 +1743,9 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
             
             await session.commit()
             raise TaskSuccess(f"重整完成，共迁移了 {len(new_episodes_to_add)} 个分集的记录。")
+        except TaskSuccess:
+            # TaskSuccess 不是错误，直接向上传递
+            raise
         except Exception as e:
             await session.rollback()
             logger.error(f"重整分集任务 (源ID: {sourceId}) 事务中失败: {e}", exc_info=True)
@@ -1868,6 +1871,9 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
 
             raise TaskSuccess(f"集数偏移完成，共迁移了 {len(new_episodes_to_add)} 个分集。")
 
+        except TaskSuccess:
+            # TaskSuccess 不是错误，直接向上传递
+            raise
         except Exception as e:
             await session.rollback()
             logger.error(f"集数偏移任务 (源ID: {source_id}) 事务中失败: {e}", exc_info=True)
