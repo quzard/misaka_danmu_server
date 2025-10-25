@@ -2287,6 +2287,7 @@ async def get_comments_for_dandan(
             current_media_type = media_type
             current_imageUrl = imageUrl
             current_year = year
+            current_episodes_list = episodes_list  # 保存整部剧的分集列表
 
             async def download_match_fallback_comments_task(task_session, progress_callback):
                 """匹配后备弹幕下载任务"""
@@ -2342,13 +2343,34 @@ async def get_comments_for_dandan(
                     source_id = await crud.link_source_to_anime(task_session, current_real_anime_id, current_provider, current_mediaId)
                     logger.info(f"source_id={source_id}")
 
-                    # 创建Episode条目
+                    # 创建当前Episode条目
                     episode_db_id = await crud.create_episode_if_not_exists(
                         task_session, current_real_anime_id, source_id, current_episode_number,
                         current_episode_title, current_episode_url, current_provider_episode_id
                     )
                     await task_session.flush()
                     logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
+
+                    # 为整部剧的所有集创建Episode记录(不下载弹幕,只创建映射)
+                    # 这样播放器推理下一集时能找到Episode记录,触发弹幕下载
+                    try:
+                        created_count = 0
+                        for ep_idx, ep_info in enumerate(current_episodes_list, start=1):
+                            if ep_idx == current_episode_number:
+                                # 跳过当前集,已经创建
+                                continue
+                            try:
+                                await crud.create_episode_if_not_exists(
+                                    task_session, current_real_anime_id, source_id, ep_idx,
+                                    ep_info.title, ep_info.url, ep_info.episodeId
+                                )
+                                created_count += 1
+                            except Exception as e:
+                                logger.warning(f"创建第{ep_idx}集Episode记录失败: {e}")
+                        await task_session.flush()
+                        logger.info(f"为整部剧创建了 {created_count} 个Episode映射记录")
+                    except Exception as e:
+                        logger.warning(f"批量创建Episode记录失败: {e}")
 
                     await progress_callback(80, "保存弹幕...")
 
