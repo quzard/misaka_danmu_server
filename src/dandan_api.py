@@ -2226,62 +2226,111 @@ async def get_comments_for_dandan(
                 await session.rollback()
                 return models.CommentResponse(count=0, comments=[])
 
-            # 步骤4：下载弹幕
+            # 步骤4：下载弹幕 (使用task_manager提交到后备队列)
             logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
 
-            # 创建异步进度回调
-            async def dummy_progress(_p, _msg):
-                pass
+            # 检查是否已有相同的弹幕下载任务正在进行
+            task_unique_key = f"match_fallback_comments_{episodeId}"
+            existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
+            if existing_task:
+                logger.info(f"弹幕下载任务已存在: {task_unique_key}")
+                # 如果任务正在进行，返回空结果，让用户稍后再试
+                return models.CommentResponse(count=0, comments=[])
 
+            # 保存当前作用域的变量，避免闭包问题
+            current_scraper = scraper
+            current_provider_episode_id = provider_episode_id
+            current_provider = provider
+            current_real_anime_id = real_anime_id
+            current_source_id = source_id
+            current_episode_number = episode_number
+            current_episode_title = episode_title
+            current_episode_url = episode_url
+            current_episodeId = episodeId
+            current_fallback_episode_cache_key = fallback_episode_cache_key
+            current_rate_limiter = rate_limiter
+
+            async def download_match_fallback_comments_task(task_session, progress_callback):
+                """匹配后备弹幕下载任务"""
+                try:
+                    await progress_callback(10, "开始下载弹幕...")
+
+                    # 检查流控
+                    await current_rate_limiter.check_fallback("match", current_provider)
+
+                    # 下载弹幕
+                    comments = await current_scraper.get_comments(current_provider_episode_id, progress_callback=progress_callback)
+                    if not comments:
+                        logger.warning(f"下载失败，未获取到弹幕")
+                        return None
+
+                    # 增加流控计数
+                    await current_rate_limiter.increment_fallback("match", current_provider)
+                    logger.info(f"下载成功，共 {len(comments)} 条弹幕")
+
+                    await progress_callback(60, "创建数据库条目...")
+
+                    # 创建Episode条目
+                    episode_db_id = await crud.create_episode_if_not_exists(
+                        task_session, current_real_anime_id, current_source_id, current_episode_number,
+                        current_episode_title, current_episode_url, current_provider_episode_id
+                    )
+                    await task_session.flush()
+                    logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
+
+                    await progress_callback(80, "保存弹幕...")
+
+                    # 保存弹幕
+                    added_count = await crud.save_danmaku_for_episode(
+                        task_session, current_episodeId, comments, None
+                    )
+                    await task_session.commit()
+                    logger.info(f"保存成功，共 {added_count} 条弹幕")
+
+                    # 清理缓存
+                    if current_fallback_episode_cache_key in fallback_search_cache:
+                        del fallback_search_cache[current_fallback_episode_cache_key]
+
+                    # 存储到缓存中
+                    cache_key = f"comments_{current_episodeId}"
+                    comments_fetch_cache[cache_key] = comments
+
+                    await progress_callback(100, "完成")
+                    return comments
+
+                except Exception as e:
+                    logger.error(f"匹配后备弹幕下载任务执行失败: {e}", exc_info=True)
+                    await task_session.rollback()
+                    return None
+
+            # 提交弹幕下载任务到后备队列
             try:
-                # 检查流控
-                await rate_limiter.check_fallback("match", provider)
+                task_id, done_event = await task_manager.submit_task(
+                    download_match_fallback_comments_task,
+                    f"匹配后备弹幕下载: episodeId={episodeId}",
+                    unique_key=task_unique_key,
+                    task_type="download_comments",
+                    queue_type="fallback"  # 使用后备队列
+                )
+                logger.info(f"已提交匹配后备弹幕下载任务: {task_id}")
 
-                comments = await scraper.get_comments(provider_episode_id, progress_callback=dummy_progress)
-                if not comments:
-                    logger.warning(f"下载失败，未获取到弹幕")
-                    await session.rollback()
+                # 等待任务完成，但设置较短的超时时间（30秒）
+                try:
+                    await asyncio.wait_for(done_event.wait(), timeout=30.0)
+                    # 任务完成，检查缓存中是否有结果
+                    cache_key = f"comments_{episodeId}"
+                    if cache_key in comments_fetch_cache:
+                        comments_data = comments_fetch_cache[cache_key]
+                        logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(comments_data)} 条弹幕")
+                    else:
+                        logger.warning(f"任务完成但缓存中未找到弹幕数据")
+                except asyncio.TimeoutError:
+                    logger.warning(f"匹配后备弹幕下载任务超时，任务将在后台继续执行")
+                    # 超时后返回空结果，让用户稍后再试
                     return models.CommentResponse(count=0, comments=[])
 
-                # 增加流控计数
-                await rate_limiter.increment_fallback("match", provider)
-                logger.info(f"下载成功，共 {len(comments)} 条弹幕")
-
             except Exception as e:
-                logger.error(f"下载弹幕失败: {e}", exc_info=True)
-                await session.rollback()
-                return models.CommentResponse(count=0, comments=[])
-
-            # 步骤5：创建Episode条目
-            try:
-                episode_db_id = await crud.create_episode_if_not_exists(
-                    session, real_anime_id, source_id, episode_number,
-                    episode_title, episode_url, provider_episode_id
-                )
-                await session.flush()
-                logger.info(f"Episode条目已创建/存在: id={episode_db_id}")
-
-            except Exception as e:
-                logger.error(f"创建Episode条目失败: {e}", exc_info=True)
-                await session.rollback()
-                return models.CommentResponse(count=0, comments=[])
-
-            # 步骤6：保存弹幕
-            try:
-                added_count = await crud.save_danmaku_for_episode(
-                    session, episodeId, comments, None
-                )
-                await session.commit()
-                logger.info(f"保存成功，共 {added_count} 条弹幕")
-
-                # 清理缓存
-                del fallback_search_cache[fallback_episode_cache_key]
-
-                # 重新获取弹幕
-                comments_data = await crud.fetch_comments(session, episodeId)
-
-            except Exception as e:
-                logger.error(f"保存弹幕失败: {e}", exc_info=True)
+                logger.error(f"提交匹配后备弹幕下载任务失败: {e}", exc_info=True)
                 await session.rollback()
                 return models.CommentResponse(count=0, comments=[])
 
