@@ -158,6 +158,7 @@ async def lifespan(app: FastAPI):
         'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
         # AI匹配配置
         'aiMatchEnabled': ('false', '是否启用AI智能匹配。启用后，在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。'),
+        'aiMatchFallbackEnabled': ('true', '是否启用传统匹配兜底。当AI匹配失败时，自动降级到传统匹配算法。'),
         'aiMatchProvider': ('deepseek', 'AI提供商: deepseek, openai, gemini'),
         'aiMatchApiKey': ('', 'AI服务的API密钥'),
         'aiMatchBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),

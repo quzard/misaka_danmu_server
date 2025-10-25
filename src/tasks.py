@@ -2800,10 +2800,20 @@ async def auto_search_and_import_task(
                     if ai_selected_index is not None:
                         logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                     else:
-                        logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                        # 检查是否启用传统匹配兜底
+                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        if ai_fallback_enabled:
+                            logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                        else:
+                            logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
 
             except Exception as e:
-                logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                # 检查是否启用传统匹配兜底
+                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                if ai_fallback_enabled:
+                    logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                else:
+                    logger.error(f"AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
                 ai_selected_index = None
 
         # 检查是否启用外部控制API顺延机制
@@ -2815,12 +2825,26 @@ async def auto_search_and_import_task(
         if ai_selected_index is not None:
             best_match = all_results[ai_selected_index]
             logger.info(f"自动导入：使用AI选择的结果 '{best_match.title}' (Provider: {best_match.provider})")
+        elif ai_match_enabled:
+            # AI匹配已启用但失败，检查是否允许降级到传统匹配
+            ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+            if not ai_fallback_enabled:
+                logger.warning("AI匹配失败且传统匹配兜底已禁用，自动导入失败")
+                raise ValueError("AI匹配失败且传统匹配兜底已禁用")
+            # 允许降级，继续使用传统匹配
+            logger.info("AI匹配失败，使用传统匹配兜底")
+            if not fallback_enabled:
+                # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+                best_match = all_results[0]
+                similarity = fuzz.token_set_ratio(main_title, best_match.title)
+                logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
         elif not fallback_enabled:
-            # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+            # AI未启用，顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
             best_match = all_results[0]
             similarity = fuzz.token_set_ratio(main_title, best_match.title)
             logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
-        else:
+
+        if best_match is None and fallback_enabled:
             # 顺延机制启用：依次验证候选源，直到找到有效的分集
             logger.info(f"自动导入：顺延机制已启用，将依次验证 {len(all_results)} 个候选源")
 

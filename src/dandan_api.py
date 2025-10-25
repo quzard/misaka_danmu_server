@@ -1785,10 +1785,20 @@ async def _get_match_for_item(
                             if ai_selected_index is not None:
                                 logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                             else:
-                                logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                                # 检查是否启用传统匹配兜底
+                                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                                if ai_fallback_enabled:
+                                    logger.info("AI匹配未找到合适结果，降级到传统匹配")
+                                else:
+                                    logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
 
                     except Exception as e:
-                        logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                        # 检查是否启用传统匹配兜底
+                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        if ai_fallback_enabled:
+                            logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                        else:
+                            logger.error(f"AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
                         ai_selected_index = None
 
                 # 检查是否启用顺延机制
@@ -1800,11 +1810,24 @@ async def _get_match_for_item(
                 if ai_selected_index is not None:
                     best_match = sorted_results[ai_selected_index]
                     logger.info(f"  - 使用AI选择的结果: {best_match.provider} - {best_match.title}")
+                elif ai_match_enabled:
+                    # AI匹配已启用但失败，检查是否允许降级到传统匹配
+                    ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                    if not ai_fallback_enabled:
+                        logger.warning("AI匹配失败且传统匹配兜底已禁用，匹配后备失败")
+                        return DandanMatchResponse(isMatched=False, matches=[])
+                    # 允许降级，继续使用传统匹配
+                    logger.info("AI匹配失败，使用传统匹配兜底")
+                    if not fallback_enabled:
+                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                        best_match = sorted_results[0]
+                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
                 elif not fallback_enabled:
-                    # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                    # AI未启用，顺延机制关闭，使用第一个结果 (已经是分数最高的)
                     best_match = sorted_results[0]
                     logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
-                else:
+
+                if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
                     logger.info(f"  - 顺延机制启用，依次验证候选源")
                     for attempt, candidate in enumerate(sorted_results, 1):
@@ -2242,7 +2265,7 @@ async def get_comments_for_dandan(
             current_provider_episode_id = provider_episode_id
             current_provider = provider
             current_real_anime_id = real_anime_id
-            current_source_id = source_id
+            current_mediaId = mediaId
             current_episode_number = episode_number
             current_episode_title = episode_title
             current_episode_url = episode_url
@@ -2270,9 +2293,13 @@ async def get_comments_for_dandan(
 
                     await progress_callback(60, "创建数据库条目...")
 
+                    # 创建或获取source关联 (在task_session中)
+                    source_id = await crud.link_source_to_anime(task_session, current_real_anime_id, current_provider, current_mediaId)
+                    logger.info(f"source_id={source_id}")
+
                     # 创建Episode条目
                     episode_db_id = await crud.create_episode_if_not_exists(
-                        task_session, current_real_anime_id, current_source_id, current_episode_number,
+                        task_session, current_real_anime_id, source_id, current_episode_number,
                         current_episode_title, current_episode_url, current_provider_episode_id
                     )
                     await task_session.flush()
