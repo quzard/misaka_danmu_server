@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col } from 'antd'
-import { QuestionCircleOutlined, SaveOutlined } from '@ant-design/icons'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert } from 'antd'
+import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { getConfig, setConfig } from '@/apis'
+import request from '@/utils/request'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -14,6 +15,8 @@ const AutoMatchSetting = () => {
   const [matchMode, setMatchMode] = useState('traditional')
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
   const [recognitionEnabled, setRecognitionEnabled] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
 
   // 加载配置
   const loadSettings = async () => {
@@ -128,6 +131,45 @@ const AutoMatchSetting = () => {
         return 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
       default:
         return '可选,用于自定义接口地址'
+    }
+  }
+
+  // 测试AI连接
+  const handleTestConnection = async () => {
+    try {
+      setTesting(true)
+      setTestResult(null)
+
+      const values = form.getFieldsValue(['aiMatchProvider', 'aiMatchApiKey', 'aiMatchBaseUrl', 'aiMatchModel'])
+
+      if (!values.aiMatchProvider || !values.aiMatchApiKey || !values.aiMatchModel) {
+        message.warning('请先填写AI提供商、API密钥和模型名称')
+        return
+      }
+
+      const response = await request.post('/api/ui/config/ai/test', {
+        provider: values.aiMatchProvider,
+        apiKey: values.aiMatchApiKey,
+        baseUrl: values.aiMatchBaseUrl || null,
+        model: values.aiMatchModel
+      })
+
+      setTestResult(response.data)
+
+      if (response.data.success) {
+        message.success(`测试成功! 响应时间: ${response.data.latency}ms`)
+      } else {
+        message.error('测试失败,请查看详细信息')
+      }
+    } catch (error) {
+      setTestResult({
+        success: false,
+        message: '测试请求失败',
+        error: error.message || String(error)
+      })
+      message.error(`测试失败: ${error.message}`)
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -246,6 +288,36 @@ const AutoMatchSetting = () => {
                     />
                   </Form.Item>
                 )}
+              </Form.Item>
+
+              {/* AI连接测试 */}
+              <Form.Item label="连接测试">
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Button
+                    icon={<ThunderboltOutlined />}
+                    onClick={handleTestConnection}
+                    loading={testing}
+                  >
+                    测试AI连接
+                  </Button>
+
+                  {testResult && (
+                    <Alert
+                      type={testResult.success ? 'success' : 'error'}
+                      message={
+                        <Space>
+                          {testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                          <span>{testResult.message}</span>
+                          {testResult.latency && <span>({testResult.latency}ms)</span>}
+                        </Space>
+                      }
+                      description={testResult.error}
+                      showIcon={false}
+                      closable
+                      onClose={() => setTestResult(null)}
+                    />
+                  )}
+                </Space>
               </Form.Item>
             </TabPane>
 
