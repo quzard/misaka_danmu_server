@@ -2803,6 +2803,7 @@ async def auto_search_and_import_task(
                     "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
                     "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
                     "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                    "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                 }
 
                 # 检查必要配置

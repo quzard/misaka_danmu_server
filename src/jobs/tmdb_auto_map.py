@@ -81,7 +81,8 @@ class TmdbAutoMapJob(BaseJob):
                     "ai_match_model": await crud.get_config_value(session, "aiMatchModel", "deepseek-chat"),
                     "ai_match_prompt": ai_match_prompt,
                     "ai_recognition_prompt": ai_recognition_prompt,
-                    "ai_alias_validation_prompt": ai_alias_validation_prompt
+                    "ai_alias_validation_prompt": ai_alias_validation_prompt,
+                    "ai_log_raw_response": (await crud.get_config_value(session, "aiLogRawResponse", "false")).lower() == "true"
                 }
                 ai_matcher = AIMatcher(config)
         except Exception as e:
