@@ -221,6 +221,31 @@ def setup_logging():
     ))
     metadata_logger.addHandler(metadata_handler)
     logging.info("专用的元数据响应日志已初始化，将输出到 %s", metadata_log_file)
+
+    # --- 新增：为AI原始响应设置一个专用的日志记录器 ---
+    ai_log_file = log_dir / "ai_responses.log"
+
+    if ai_log_file.exists():
+        try:
+            with open(ai_log_file, 'w', encoding='utf-8') as f:
+                f.truncate(0)
+            logging.info(f"已清空旧的AI响应日志: {ai_log_file}")
+        except IOError as e:
+            logging.error(f"清空AI响应日志失败: {e}")
+
+    ai_logger = logging.getLogger("ai_responses")
+    ai_logger.setLevel(logging.DEBUG)
+    ai_logger.propagate = False
+
+    ai_handler = logging.handlers.RotatingFileHandler(
+        ai_log_file, maxBytes=10*1024*1024, backupCount=3, encoding='utf-8'
+    )
+    ai_handler.setFormatter(logging.Formatter(
+        '[%(asctime)s] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    ai_logger.addHandler(ai_handler)
+    logging.info("专用的AI响应日志已初始化，将输出到 %s", ai_log_file)
+
     # --- 新增：为 Webhook 原始请求设置一个专用的日志记录器 ---
     webhook_log_file = log_dir / "webhook_raw.log"
 

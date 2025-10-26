@@ -1732,12 +1732,13 @@ async def _get_match_for_item(
                     try:
                         from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 
-                        # 动态注册AI提示词配置(如果不存在)
+                        # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
                         await crud.initialize_configs(session_inner, {
                             "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
                         })
 
                         # 获取AI配置
+                        # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
                         ai_config = {
                             "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
                             "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),

@@ -33,7 +33,8 @@ const AutoMatchSetting = () => {
         recognitionEnabledRes,
         recognitionPromptRes,
         aliasValidationPromptRes,
-        aliasCorrectionEnabledRes
+        aliasCorrectionEnabledRes,
+        logRawResponseRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
         getConfig('aiMatchFallbackEnabled'),
@@ -45,13 +46,15 @@ const AutoMatchSetting = () => {
         getConfig('aiRecognitionEnabled'),
         getConfig('aiRecognitionPrompt'),
         getConfig('aiAliasValidationPrompt'),
-        getConfig('aiAliasCorrectionEnabled')
+        getConfig('aiAliasCorrectionEnabled'),
+        getConfig('aiLogRawResponse')
       ])
 
       const enabled = enabledRes.data.value === 'true'
       const fallback = fallbackRes.data.value === 'true'
       const recognition = recognitionEnabledRes.data.value === 'true'
       const aliasCorrection = aliasCorrectionEnabledRes.data.value === 'true'
+      const logRawResponse = logRawResponseRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
       setRecognitionEnabled(recognition)
@@ -67,7 +70,8 @@ const AutoMatchSetting = () => {
         aiRecognitionEnabled: recognition,
         aiRecognitionPrompt: recognitionPromptRes.data.value || '',
         aiAliasValidationPrompt: aliasValidationPromptRes.data.value || '',
-        aiAliasCorrectionEnabled: aliasCorrection
+        aiAliasCorrectionEnabled: aliasCorrection,
+        aiLogRawResponse: logRawResponse
       })
     } catch (error) {
       message.error(`加载配置失败: ${error.message}`)
@@ -99,7 +103,8 @@ const AutoMatchSetting = () => {
         setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
         setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
         setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
-        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false')
+        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
+        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
       ])
 
       message.success('保存成功')
@@ -290,16 +295,33 @@ const AutoMatchSetting = () => {
                 )}
               </Form.Item>
 
-              {/* AI连接测试 */}
-              <Form.Item label="连接测试">
+              {/* AI连接测试与调试 */}
+              <Form.Item label="连接测试与调试">
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <Button
-                    icon={<ThunderboltOutlined />}
-                    onClick={handleTestConnection}
-                    loading={testing}
-                  >
-                    测试AI连接
-                  </Button>
+                  <Space>
+                    <Button
+                      icon={<ThunderboltOutlined />}
+                      onClick={handleTestConnection}
+                      loading={testing}
+                    >
+                      测试AI连接
+                    </Button>
+
+                    <Form.Item
+                      name="aiLogRawResponse"
+                      valuePropName="checked"
+                      noStyle
+                    >
+                      <Switch
+                        checkedChildren="记录AI原始响应"
+                        unCheckedChildren="不记录AI原始响应"
+                      />
+                    </Form.Item>
+                  </Space>
+
+                  <div style={{ fontSize: '12px', color: '#666' }}>
+                    启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。
+                  </div>
 
                   {testResult && (
                     <Alert

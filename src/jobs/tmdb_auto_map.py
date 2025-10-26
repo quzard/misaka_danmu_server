@@ -59,7 +59,7 @@ class TmdbAutoMapJob(BaseJob):
                 if ai_alias_correction_enabled:
                     self.logger.info("AI别名修正已启用")
 
-                # 动态注册AI提示词配置(如果不存在)
+                # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
                 from ..ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
                 await crud.initialize_configs(session, {
                     "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词"),
@@ -67,7 +67,9 @@ class TmdbAutoMapJob(BaseJob):
                     "aiAliasValidationPrompt": (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, "AI别名验证提示词")
                 })
 
-                # 读取提示词配置(直接使用数据库值,即使为空)
+                # 读取提示词配置
+                # 注意: 此时数据库中一定存在这些键(上面已经初始化),直接读取即可
+                # 即使值为空字符串也会被读取,不会使用硬编码兜底
                 ai_match_prompt = await crud.get_config_value(session, "aiMatchPrompt", "")
                 ai_recognition_prompt = await crud.get_config_value(session, "aiRecognitionPrompt", "")
                 ai_alias_validation_prompt = await crud.get_config_value(session, "aiAliasValidationPrompt", "")

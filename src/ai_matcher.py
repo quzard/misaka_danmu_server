@@ -8,9 +8,12 @@ from typing import List, Dict, Any, Optional
 from .models import ProviderSearchInfo
 
 logger = logging.getLogger(__name__)
+ai_responses_logger = logging.getLogger("ai_responses")
 
 # 默认匹配提示词
 DEFAULT_AI_MATCH_PROMPT = """你是一个专业的影视内容匹配专家。你的任务是从搜索结果列表中选择最匹配用户查询的条目。
+
+**重要**: 你必须严格按照JSON格式返回结果,不要返回任何其他文本或解释。
 
 **输入格式**:
 - query: 用户查询信息 (包含标题、季度、集数、年份等)
@@ -30,18 +33,25 @@ DEFAULT_AI_MATCH_PROMPT = """你是一个专业的影视内容匹配专家。你
 5. **年份接近**: 优先选择年份接近的
 6. **集数完整**: 如果有多个高度相似的结果,选择集数最完整的
 
-**输出格式**:
-返回一个JSON对象,包含:
-- index: 最佳匹配结果在列表中的索引 (从0开始)
-- confidence: 匹配置信度 (0-100)
-- reason: 选择理由 (简短说明,需提及是否因为精确标记而选择)
+**输出格式** (必须是有效的JSON):
+{
+  "index": 最佳匹配结果在列表中的索引(整数,从0开始,无匹配则为-1),
+  "confidence": 匹配置信度(整数,0-100),
+  "reason": "选择理由(简短说明)"
+}
 
-如果没有合适的匹配,返回 {"index": -1, "confidence": 0, "reason": "无合适匹配"}"""
+**示例输出**:
+{"index": 0, "confidence": 95, "reason": "标题完全匹配且季度一致"}
+{"index": -1, "confidence": 0, "reason": "无合适匹配"}
+
+**禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。"""
 
 # 默认识别提示词
 DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正与匹配选择专家。你的任务是:
 1. 将数据库中的标题信息标准化,生成最适合TMDB搜索的查询关键词
 2. 识别作品的季度信息,用于后续的剧集组匹配选择
+
+**重要**: 你必须严格按照JSON格式返回结果,不要返回任何其他文本或解释。
 
 **背景说明**:
 - 输入来源: 数据库中的 Anime.title, Anime.year, Anime.type 字段
@@ -87,15 +97,18 @@ DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正
 - 如果识别到这类作品,设置 use_episode_group=true
 - 剧集组从第0季开始: 第0季=特别季(OVA/SP), 第1季=正片第一季, 第2季=正片第二季...
 
-**输出格式**:
-返回一个JSON对象,包含:
-- search_title: 标准化的搜索关键词 (字符串,用于TMDB搜索)
-- season: 季度 (整数,用于筛选搜索结果或剧集组,无法确定则为null)
-- type: 类型 ("tv_series" 或 "movie")
-- year: 年份 (整数,没有则为null)
-- use_episode_group: 是否需要使用剧集组 (布尔值,默认false)
-- episode_title_cn: 集标题(中文) (字符串,仅当season=0时需要,用于匹配第0季中的具体集)
-- episode_title_jp: 集标题(日文) (字符串,仅当season=0时需要,用于匹配第0季中的具体集)
+**输出格式** (必须是有效的JSON):
+{
+  "search_title": "标准化的搜索关键词",
+  "season": 季度(整数或null),
+  "type": "tv_series或movie",
+  "year": 年份(整数或null),
+  "use_episode_group": 是否使用剧集组(布尔值),
+  "episode_title_cn": "集标题中文(仅season=0时需要,否则为null)",
+  "episode_title_jp": "集标题日文(仅season=0时需要,否则为null)"
+}
+
+**禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。
 
 **示例**:
 输入: {"title": "魔法使的新娘 第二季", "year": 2023, "type": "tv_series"}
@@ -141,6 +154,8 @@ DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名�
 2. 识别每个别名的语言类型(英文/日文/罗马音/中文)
 3. 选择最官方的别名填入对应字段
 
+**重要**: 你必须严格按照JSON格式返回结果,不要返回任何其他文本或解释。
+
 **输入格式**:
 - title: 作品标题
 - year: 年份 (可能为null)
@@ -162,12 +177,15 @@ DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名�
    - 选择最官方或最常用的版本
    - 如果无法确定,优先级: 英文冒号(:) > 中文冒号(：) > 空格( )
 
-**输出格式**:
-返回一个JSON对象,包含:
-- nameEn: 英文名 (字符串,只选1个最官方的,没有则为null)
-- nameJp: 日文名 (字符串,只选1个最官方的,没有则为null)
-- nameRomaji: 罗马音 (字符串,只选1个,没有则为null)
-- aliasesCn: 中文别名数组 (最多3个,按官方程度排序,没有则为空数组)
+**输出格式** (必须是有效的JSON):
+{
+  "nameEn": "英文名(字符串或null)",
+  "nameJp": "日文名(字符串或null)",
+  "nameRomaji": "罗马音(字符串或null)",
+  "aliasesCn": ["中文别名1", "中文别名2", "中文别名3"]
+}
+
+**禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。
 
 **示例**:
 
@@ -239,35 +257,51 @@ DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名�
 (丢弃: "Weathering with You"是另一部作品)"""
 
 
-def _safe_json_loads(text: str) -> Optional[Dict]:
-    """安全的JSON解析函数,能处理AI返回的常见错误"""
+def _safe_json_loads(text: str, log_raw_response: bool = False) -> Optional[Dict]:
+    """安全的JSON解析函数,能处理AI返回的常见错误
+
+    Args:
+        text: AI返回的文本
+        log_raw_response: 是否记录原始响应到专用日志文件
+    """
     if not text:
         return None
-    
+
+    # 可选: 记录原始响应到专用日志文件
+    if log_raw_response:
+        ai_responses_logger.info(f"原始响应内容:\n{text}\n{'='*80}")
+
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        logger.warning(f"JSON直接解析失败: {e}。尝试智能修复...")
-        
+        if log_raw_response:
+            ai_responses_logger.warning(f"JSON直接解析失败: {e}。尝试智能修复...")
+
         # 尝试从markdown代码块中提取JSON
         import re
         match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
         if match:
             json_str = match.group(1)
+            if log_raw_response:
+                ai_responses_logger.info(f"从markdown代码块提取的JSON:\n{json_str}\n{'='*80}")
             try:
                 return json.loads(json_str)
             except json.JSONDecodeError:
                 pass
-        
+
         # 尝试直接提取第一个完整的JSON对象
         match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
         if match:
+            json_str = match.group(0)
+            if log_raw_response:
+                ai_responses_logger.info(f"提取的JSON对象:\n{json_str}\n{'='*80}")
             try:
-                return json.loads(match.group(0))
+                return json.loads(json_str)
             except json.JSONDecodeError:
                 pass
-        
-        logger.error("JSON修复失败")
+
+        if log_raw_response:
+            ai_responses_logger.error(f"JSON修复失败,原始文本前500字符:\n{text[:500]}\n{'='*80}")
         return None
 
 
@@ -296,24 +330,20 @@ class AIMatcher:
                 - ai_match_prompt: 自定义匹配提示词 (可选)
                 - ai_recognition_prompt: 自定义识别提示词 (可选)
                 - ai_alias_validation_prompt: 自定义别名验证提示词 (可选)
+                - ai_log_raw_response: 是否记录原始AI响应 (可选,默认False)
         """
         self.provider = config.get("ai_match_provider", "deepseek").lower()
         self.api_key = config.get("ai_match_api_key")
         self.base_url = config.get("ai_match_base_url")
         self.model = config.get("ai_match_model")
+        self.log_raw_response = config.get("ai_log_raw_response", False)
 
-        # 提示词配置: 优先使用传入的配置,如果为空则使用硬编码的默认值
-        self.match_prompt = config.get("ai_match_prompt")
-        if not self.match_prompt:
-            self.match_prompt = DEFAULT_AI_MATCH_PROMPT
-
-        self.recognition_prompt = config.get("ai_recognition_prompt")
-        if not self.recognition_prompt:
-            self.recognition_prompt = DEFAULT_AI_RECOGNITION_PROMPT
-
-        self.alias_validation_prompt = config.get("ai_alias_validation_prompt")
-        if not self.alias_validation_prompt:
-            self.alias_validation_prompt = DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+        # 提示词配置: 直接使用传入的配置,不做任何兜底处理
+        # 注意: 硬编码的DEFAULT_*_PROMPT只用于初始化数据库,不用于运行时兜底
+        # 调用方应该确保在调用AIMatcher之前已经通过initialize_configs创建了配置项
+        self.match_prompt = config.get("ai_match_prompt", "")
+        self.recognition_prompt = config.get("ai_recognition_prompt", "")
+        self.alias_validation_prompt = config.get("ai_alias_validation_prompt", "")
         
         if not self.api_key:
             raise ValueError("AI Matcher: API Key 未配置")
@@ -448,7 +478,7 @@ class AIMatcher:
             content = response.choices[0].message.content
             logger.debug(f"AI原始响应: {content}")
 
-            parsed_data = _safe_json_loads(content)
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
             if parsed_data:
                 logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
 
@@ -529,7 +559,7 @@ class AIMatcher:
             content = response.choices[0].message.content
             logger.debug(f"AI识别原始响应: {content}")
 
-            parsed_data = _safe_json_loads(content)
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
             if parsed_data:
                 logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
 
@@ -606,7 +636,7 @@ class AIMatcher:
             content = response.choices[0].message.content
             logger.debug(f"AI别名验证原始响应: {content}")
 
-            parsed_data = _safe_json_loads(content)
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
             if parsed_data:
                 logger.info(f"AI别名验证成功: nameEn={parsed_data.get('nameEn')}, nameJp={parsed_data.get('nameJp')}, nameRomaji={parsed_data.get('nameRomaji')}, aliasesCn={len(parsed_data.get('aliasesCn', []))}个")
                 logger.debug(f"解析后的数据: {parsed_data}")

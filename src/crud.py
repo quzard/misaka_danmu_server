@@ -1908,7 +1908,23 @@ async def get_enabled_failover_sources(session: AsyncSession) -> List[Dict[str, 
     ]
 # --- Config & Cache ---
 
-async def get_config_value(session: AsyncSession, key: str, default: str) -> str:
+async def get_config_value(session: AsyncSession, key: str, default: str = "") -> str:
+    """
+    从数据库获取配置值
+
+    Args:
+        session: 数据库会话
+        key: 配置键
+        default: 默认值,当数据库中不存在该键时返回此值(默认为空字符串)
+
+    Returns:
+        配置值,如果数据库中不存在则返回default
+
+    注意:
+        - 如果数据库中存在该键但值为空字符串,会返回空字符串(不会返回default)
+        - 只有当数据库中不存在该键时,才会返回default
+        - 对于AI提示词等配置,应该先调用initialize_configs确保键存在,再调用此函数读取
+    """
     stmt = select(Config.configValue).where(Config.configKey == key)
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
