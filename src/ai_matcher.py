@@ -135,6 +135,104 @@ DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正
 输出: {"search_title": "你的名字", "season": null, "type": "movie", "year": 2016, "use_episode_group": false}
 (纠错: 标题中年份2016覆盖错误的2020,根据常识判断为电影)"""
 
+# 默认别名验证提示词
+DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名验证与分类专家。你的任务是:
+1. 验证一组别名是否真正属于指定作品
+2. 识别每个别名的语言类型(英文/日文/罗马音/中文)
+3. 选择最官方的别名填入对应字段
+
+**输入格式**:
+- title: 作品标题
+- year: 年份 (可能为null)
+- type: 类型 (tv_series/movie)
+- aliases: 待验证的别名列表
+
+**验证规则**:
+1. **真实性验证**: 只保留真正属于这个作品的别名,丢弃不相关的
+2. **语言识别**: 识别每个别名的语言类型
+   - 英文: 英语标题
+   - 日文: 日语标题(包含假名或汉字)
+   - 罗马音: 日语的罗马字拼写
+   - 中文: 简体中文、繁体中文标题
+3. **官方性优先**: 每种语言只选1个最官方的别名
+4. **中文别名**: 最多保留3个,按官方程度排序
+
+**输出格式**:
+返回一个JSON对象,包含:
+- nameEn: 英文名 (字符串,只选1个最官方的,没有则为null)
+- nameJp: 日文名 (字符串,只选1个最官方的,没有则为null)
+- nameRomaji: 罗马音 (字符串,只选1个,没有则为null)
+- aliasesCn: 中文别名数组 (最多3个,按官方程度排序,没有则为空数组)
+
+**示例**:
+
+输入: {
+  "title": "葬送的芙莉莲",
+  "year": 2023,
+  "type": "tv_series",
+  "aliases": [
+    "Frieren: Beyond Journey's End",
+    "葬送のフリーレン",
+    "Sousou no Frieren",
+    "葬送的芙莉莲",
+    "芙莉莲",
+    "葬送",
+    "Frieren",
+    "进击的巨人"
+  ]
+}
+输出: {
+  "nameEn": "Frieren: Beyond Journey's End",
+  "nameJp": "葬送のフリーレン",
+  "nameRomaji": "Sousou no Frieren",
+  "aliasesCn": ["葬送的芙莉莲", "芙莉莲"]
+}
+(丢弃: "葬送"太短不完整, "Frieren"不完整, "进击的巨人"不相关)
+
+输入: {
+  "title": "Re:从零开始的异世界生活",
+  "year": 2016,
+  "type": "tv_series",
+  "aliases": [
+    "Re:Zero - Starting Life in Another World",
+    "Re:ゼロから始める異世界生活",
+    "Re:Zero kara Hajimeru Isekai Seikatsu",
+    "从零开始的异世界生活",
+    "Re:从零开始的异世界生活",
+    "Re0",
+    "リゼロ"
+  ]
+}
+输出: {
+  "nameEn": "Re:Zero - Starting Life in Another World",
+  "nameJp": "Re:ゼロから始める異世界生活",
+  "nameRomaji": "Re:Zero kara Hajimeru Isekai Seikatsu",
+  "aliasesCn": ["Re:从零开始的异世界生活", "从零开始的异世界生活"]
+}
+(丢弃: "Re0"和"リゼロ"是缩写,不够官方)
+
+输入: {
+  "title": "你的名字",
+  "year": 2016,
+  "type": "movie",
+  "aliases": [
+    "Your Name",
+    "君の名は。",
+    "Kimi no Na wa",
+    "你的名字",
+    "你的名字。",
+    "妳的名字",
+    "Weathering with You"
+  ]
+}
+输出: {
+  "nameEn": "Your Name",
+  "nameJp": "君の名は。",
+  "nameRomaji": "Kimi no Na wa",
+  "aliasesCn": ["你的名字。", "你的名字", "妳的名字"]
+}
+(丢弃: "Weathering with You"是另一部作品)"""
+
 
 def _safe_json_loads(text: str) -> Optional[Dict]:
     """安全的JSON解析函数,能处理AI返回的常见错误"""
@@ -422,6 +520,84 @@ class AIMatcher:
 
         except Exception as e:
             logger.error(f"OpenAI识别调用失败: {e}")
+            return None
+
+    def validate_aliases(
+        self,
+        title: str,
+        year: Optional[int],
+        anime_type: str,
+        aliases: List[str],
+        custom_prompt: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        使用AI验证并分类别名
+
+        Args:
+            title: 作品标题
+            year: 年份
+            anime_type: 类型 (tv_series/movie)
+            aliases: 待验证的别名列表
+            custom_prompt: 自定义提示词 (可选)
+
+        Returns:
+            {
+                "nameEn": "英文名",
+                "nameJp": "日文名",
+                "nameRomaji": "罗马音",
+                "aliasesCn": ["中文别名1", "中文别名2", "中文别名3"]
+            }
+            如果失败返回None
+        """
+        if not self.client:
+            logger.error("AI客户端未初始化")
+            return None
+
+        if not aliases:
+            logger.warning("别名列表为空,跳过验证")
+            return None
+
+        try:
+            # 使用自定义提示词或默认提示词
+            validation_prompt = custom_prompt or DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+
+            # 构建输入数据
+            input_data = {
+                "title": title,
+                "year": year,
+                "type": anime_type,
+                "aliases": aliases
+            }
+
+            logger.info(f"正在使用AI验证别名: title='{title}', aliases={len(aliases)}个")
+            logger.debug(f"AI别名验证输入: {input_data}")
+
+            import json
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": validation_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                timeout=30
+            )
+
+            content = response.choices[0].message.content
+            logger.debug(f"AI别名验证原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content)
+            if parsed_data:
+                logger.info(f"AI别名验证成功: nameEn={parsed_data.get('nameEn')}, nameJp={parsed_data.get('nameJp')}, nameRomaji={parsed_data.get('nameRomaji')}, aliasesCn={len(parsed_data.get('aliasesCn', []))}个")
+                logger.debug(f"解析后的数据: {parsed_data}")
+
+            return parsed_data
+
+        except Exception as e:
+            logger.error(f"AI别名验证失败: {e}")
             return None
 
 

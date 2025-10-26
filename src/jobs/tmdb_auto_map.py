@@ -43,6 +43,14 @@ class TmdbAutoMapJob(BaseJob):
         # 为元数据管理器调用创建一个虚拟用户对象
         user = models.User(id=0, username="scheduled_task")
 
+        # 注册默认配置(如果不存在)
+        from ..ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+        await crud.initialize_configs(session, {
+            "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词"),
+            "aiRecognitionPrompt": (DEFAULT_AI_RECOGNITION_PROMPT, "AI辅助识别提示词"),
+            "aiAliasValidationPrompt": (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, "AI别名验证提示词")
+        })
+
         # 初始化AI matcher (如果启用)
         ai_matcher = None
         ai_recognition_enabled = False
@@ -57,8 +65,8 @@ class TmdbAutoMapJob(BaseJob):
                     "ai_match_api_key": await crud.get_config_value(session, "aiMatchApiKey"),
                     "ai_match_base_url": await crud.get_config_value(session, "aiMatchBaseUrl"),
                     "ai_match_model": await crud.get_config_value(session, "aiMatchModel") or "deepseek-chat",
-                    "ai_match_prompt": await crud.get_config_value(session, "aiMatchPrompt"),
-                    "ai_recognition_prompt": await crud.get_config_value(session, "aiRecognitionPrompt")
+                    "ai_match_prompt": await crud.get_config_value(session, "aiMatchPrompt") or DEFAULT_AI_MATCH_PROMPT,
+                    "ai_recognition_prompt": await crud.get_config_value(session, "aiRecognitionPrompt") or DEFAULT_AI_RECOGNITION_PROMPT
                 }
                 ai_matcher = AIMatcher(config)
         except Exception as e:
@@ -174,16 +182,58 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.warning(f"未能从 TMDB 获取 '{title}' (ID: {tmdb_id}) 的详情。")
                     continue
 
-                # 步骤 3: 更新别名（如果本地为空）
-                aliases_to_update = {
-                    "name_en": details.nameEn,
-                    "name_jp": details.nameJp,
-                    "name_romaji": details.nameRomaji,
-                    "aliases_cn": details.aliasesCn
-                }
-                if any(aliases_to_update.values()):
-                    await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
-                    self.logger.info(f"为 '{title}' 更新了别名。")
+                # 步骤 3: 更新别名（使用AI验证和分类）
+                if ai_matcher and ai_recognition_enabled:
+                    # 收集所有别名
+                    all_aliases = []
+                    if details.nameEn: all_aliases.append(details.nameEn)
+                    if details.nameJp: all_aliases.append(details.nameJp)
+                    if details.nameRomaji: all_aliases.append(details.nameRomaji)
+                    if details.aliasesCn: all_aliases.extend(details.aliasesCn)
+
+                    if all_aliases:
+                        self.logger.info(f"正在使用AI验证 '{title}' 的 {len(all_aliases)} 个别名...")
+                        validated_aliases = ai_matcher.validate_aliases(
+                            title=title,
+                            year=year,
+                            anime_type=search_type,  # 使用search_type
+                            aliases=all_aliases
+                        )
+
+                        if validated_aliases:
+                            # 使用AI验证后的别名
+                            aliases_to_update = {
+                                "name_en": validated_aliases.get("nameEn"),
+                                "name_jp": validated_aliases.get("nameJp"),
+                                "name_romaji": validated_aliases.get("nameRomaji"),
+                                "aliases_cn": validated_aliases.get("aliasesCn", [])
+                            }
+                            if any(aliases_to_update.values()):
+                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
+                                self.logger.info(f"为 '{title}' 更新了AI验证后的别名。")
+                        else:
+                            self.logger.warning(f"AI别名验证失败,使用原始别名")
+                            # 降级到原始别名
+                            aliases_to_update = {
+                                "name_en": details.nameEn,
+                                "name_jp": details.nameJp,
+                                "name_romaji": details.nameRomaji,
+                                "aliases_cn": details.aliasesCn
+                            }
+                            if any(aliases_to_update.values()):
+                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
+                                self.logger.info(f"为 '{title}' 更新了原始别名。")
+                else:
+                    # 不使用AI,直接更新原始别名
+                    aliases_to_update = {
+                        "name_en": details.nameEn,
+                        "name_jp": details.nameJp,
+                        "name_romaji": details.nameRomaji,
+                        "aliases_cn": details.aliasesCn
+                    }
+                    if any(aliases_to_update.values()):
+                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
+                        self.logger.info(f"为 '{title}' 更新了别名。")
 
                 # 步骤 4: 获取所有剧集组
                 tmdb_source = self.metadata_manager.sources.get("tmdb")

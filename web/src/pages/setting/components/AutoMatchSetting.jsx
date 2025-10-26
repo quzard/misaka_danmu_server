@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Space, Tooltip } from 'antd'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col } from 'antd'
 import { QuestionCircleOutlined, SaveOutlined } from '@ant-design/icons'
 import { getConfig, setConfig } from '@/apis'
 
 const { TextArea } = Input
 const { Option } = Select
+const { TabPane } = Tabs
 
 const AutoMatchSetting = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [matchMode, setMatchMode] = useState('traditional') // 'traditional' or 'ai'
+  const [matchMode, setMatchMode] = useState('traditional')
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
   const [recognitionEnabled, setRecognitionEnabled] = useState(false)
 
@@ -73,7 +74,6 @@ const AutoMatchSetting = () => {
   const handleSave = async () => {
     try {
       setSaving(true)
-      // 如果AI匹配未启用,跳过必填字段验证
       const values = matchMode === 'ai'
         ? await form.validateFields()
         : form.getFieldsValue()
@@ -152,186 +152,196 @@ const AutoMatchSetting = () => {
             }
           }}
         >
-          {/* 匹配模式开关 */}
-          <Form.Item
-            name="aiMatchEnabled"
-            label={
-              <Space>
-                <span>匹配模式</span>
-                <Tooltip title="AI智能匹配: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果。传统匹配: 基于标题相似度和类型匹配的算法,快速但可能不够精准。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-            valuePropName="checked"
-          >
-            <Switch
-              checkedChildren="AI智能匹配"
-              unCheckedChildren="传统匹配"
-              checked={matchMode === 'ai'}
-              onChange={checked => {
-                setMatchMode(checked ? 'ai' : 'traditional')
-                form.setFieldValue('aiMatchEnabled', checked)
-              }}
-            />
-          </Form.Item>
-
-          {/* AI辅助识别开关 */}
-          <Form.Item
-            name="aiRecognitionEnabled"
-            label={
-              <Space>
-                <span>启用AI辅助识别</span>
-                <Tooltip title="使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-            valuePropName="checked"
-          >
-            <Switch disabled={matchMode !== 'ai'} />
-          </Form.Item>
-
-          {/* 传统匹配兜底开关 - 始终显示,传统模式下禁用 */}
-          <Form.Item
-            name="aiMatchFallbackEnabled"
-            label={
-              <Space>
-                <span>启用传统匹配兜底</span>
-                <Tooltip title={matchMode === 'traditional' ? '传统匹配模式下无需兜底' : '当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性'}>
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-            valuePropName="checked"
-          >
-            <Switch disabled={matchMode === 'traditional'} />
-          </Form.Item>
-
-          {/* AI配置区域 - 禁用时字段保持显示但不可编辑 */}
-          <Form.Item
-            name="aiMatchProvider"
-            label={
-              <Space>
-                <span>AI提供商</span>
-                <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-            rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
-          >
-            <Select disabled={matchMode !== 'ai'}>
-              <Option value="deepseek">DeepSeek (推荐)</Option>
-              <Option value="openai">OpenAI (兼容接口)</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="aiMatchApiKey"
-            label={
-              <Space>
-                <span>API密钥</span>
-                <Tooltip title="从AI服务提供商获取的API密钥。必填项。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-            rules={[{ required: matchMode === 'ai', message: '请输入API密钥' }]}
-          >
-            <Input.Password placeholder="sk-..." disabled={matchMode !== 'ai'} />
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) =>
-              prevValues.aiMatchProvider !== currentValues.aiMatchProvider
-            }
-          >
-            {({ getFieldValue }) => (
+          <Tabs defaultActiveKey="connection">
+            {/* 标签页1: AI连接配置 */}
+            <TabPane tab="AI连接配置" key="connection">
               <Form.Item
-                name="aiMatchBaseUrl"
+                name="aiMatchProvider"
                 label={
                   <Space>
-                    <span>Base URL</span>
-                    <Tooltip title="自定义API接口地址。通常用于第三方兼容接口或代理服务。留空使用默认地址。">
+                    <span>AI提供商</span>
+                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+                rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
+              >
+                <Select>
+                  <Option value="deepseek">DeepSeek (推荐)</Option>
+                  <Option value="openai">OpenAI (兼容接口)</Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                name="aiMatchApiKey"
+                label={
+                  <Space>
+                    <span>API密钥</span>
+                    <Tooltip title="从AI服务提供商获取的API密钥。必填项。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+                rules={[{ required: matchMode === 'ai', message: '请输入API密钥' }]}
+              >
+                <Input.Password placeholder="sk-..." />
+              </Form.Item>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+                }
+              >
+                {({ getFieldValue }) => (
+                  <Form.Item
+                    name="aiMatchBaseUrl"
+                    label={
+                      <Space>
+                        <span>Base URL</span>
+                        <Tooltip title="自定义API接口地址。通常用于第三方兼容接口或代理服务。留空使用默认地址。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                  >
+                    <Input
+                      placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
+                    />
+                  </Form.Item>
+                )}
+              </Form.Item>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+                }
+              >
+                {({ getFieldValue }) => (
+                  <Form.Item
+                    name="aiMatchModel"
+                    label={
+                      <Space>
+                        <span>模型名称</span>
+                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
+                  >
+                    <Input
+                      placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
+                    />
+                  </Form.Item>
+                )}
+              </Form.Item>
+            </TabPane>
+
+            {/* 标签页2: 自动匹配 */}
+            <TabPane tab="自动匹配" key="match">
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="aiMatchEnabled"
+                    label={
+                      <Space>
+                        <span>匹配模式</span>
+                        <Tooltip title="AI智能匹配: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果。传统匹配: 基于标题相似度和类型匹配的算法,快速但可能不够精准。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    valuePropName="checked"
+                  >
+                    <Switch
+                      checkedChildren="AI智能匹配"
+                      unCheckedChildren="传统匹配"
+                      checked={matchMode === 'ai'}
+                      onChange={checked => {
+                        setMatchMode(checked ? 'ai' : 'traditional')
+                        form.setFieldValue('aiMatchEnabled', checked)
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="aiMatchFallbackEnabled"
+                    label={
+                      <Space>
+                        <span>启用传统匹配兜底</span>
+                        <Tooltip title={matchMode === 'traditional' ? '传统匹配模式下无需兜底' : '当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性'}>
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    valuePropName="checked"
+                  >
+                    <Switch disabled={matchMode === 'traditional'} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item
+                name="aiMatchPrompt"
+                label={
+                  <Space>
+                    <span>AI匹配提示词</span>
+                    <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
                 }
               >
-                <Input
-                  placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
+                <TextArea
+                  rows={8}
+                  placeholder="留空使用默认提示词..."
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
                   disabled={matchMode !== 'ai'}
                 />
               </Form.Item>
-            )}
-          </Form.Item>
+            </TabPane>
 
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) =>
-              prevValues.aiMatchProvider !== currentValues.aiMatchProvider
-            }
-          >
-            {({ getFieldValue }) => (
+            {/* 标签页3: AI识别增强 */}
+            <TabPane tab="AI识别增强" key="recognition">
               <Form.Item
-                name="aiMatchModel"
+                name="aiRecognitionEnabled"
                 label={
                   <Space>
-                    <span>模型名称</span>
-                    <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
+                    <span>启用AI辅助识别</span>
+                    <Tooltip title="使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
                 }
-                rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
+                valuePropName="checked"
               >
-                <Input
-                  placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
-                  disabled={matchMode !== 'ai'}
+                <Switch disabled={matchMode !== 'ai'} />
+              </Form.Item>
+
+              <Form.Item
+                name="aiRecognitionPrompt"
+                label={
+                  <Space>
+                    <span>AI识别提示词</span>
+                    <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+              >
+                <TextArea
+                  rows={8}
+                  placeholder="留空使用默认提示词..."
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                  disabled={matchMode !== 'ai' || !recognitionEnabled}
                 />
               </Form.Item>
-            )}
-          </Form.Item>
-
-          <Form.Item
-            name="aiMatchPrompt"
-            label={
-              <Space>
-                <span>AI匹配提示词</span>
-                <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-          >
-            <TextArea
-              rows={8}
-              placeholder="留空使用默认提示词..."
-              style={{ fontFamily: 'monospace', fontSize: '12px' }}
-              disabled={matchMode !== 'ai'}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="aiRecognitionPrompt"
-            label={
-              <Space>
-                <span>AI识别提示词</span>
-                <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
-                  <QuestionCircleOutlined />
-                </Tooltip>
-              </Space>
-            }
-          >
-            <TextArea
-              rows={8}
-              placeholder="留空使用默认提示词..."
-              style={{ fontFamily: 'monospace', fontSize: '12px' }}
-              disabled={matchMode !== 'ai' || !recognitionEnabled}
-            />
-          </Form.Item>
+            </TabPane>
+          </Tabs>
         </Form>
 
         {/* 说明文字 */}
@@ -368,4 +378,3 @@ const AutoMatchSetting = () => {
 }
 
 export default AutoMatchSetting
-
