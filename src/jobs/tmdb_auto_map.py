@@ -214,10 +214,14 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.warning(f"未能从 TMDB 获取 '{title}' (ID: {tmdb_id}) 的详情 (mediaType={media_type_for_details})。")
                     continue
 
-                # 步骤 3: 更新别名
+                # 步骤 3: 准备别名（暂不更新到数据库，等待剧集组识别后可能需要追加季度后缀）
                 # 注意: 电影类型不使用AI验证别名,因为电影标题通常包含系列名+副标题
                 # 例如"名侦探柯南 绀碧之棺",AI可能无法正确识别属于该电影的别名
                 # TV系列可以使用AI验证,因为标题通常是系列名
+
+                # 用于保存别名的变量，后续可能会追加季度后缀
+                aliases_to_update = None
+                force_update = False
 
                 if ai_matcher and ai_recognition_enabled and search_type == "tv_series":
                     # 仅对TV系列使用AI验证别名
@@ -245,14 +249,9 @@ class TmdbAutoMapJob(BaseJob):
                                 "name_romaji": validated_aliases.get("nameRomaji"),
                                 "aliases_cn": validated_aliases.get("aliasesCn", [])
                             }
-                            if any(aliases_to_update.values()):
-                                # 如果启用了AI别名修正,则强制更新
-                                force_update = ai_alias_correction_enabled
-                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
-                                if force_update:
-                                    self.logger.info(f"为 '{title}' 强制更新了AI验证后的别名(AI修正模式)。")
-                                else:
-                                    self.logger.info(f"为 '{title}' 更新了AI验证后的别名。")
+                            # 如果启用了AI别名修正,则强制更新
+                            force_update = ai_alias_correction_enabled
+                            self.logger.info(f"AI别名验证成功，准备更新 '{title}' 的别名")
                         else:
                             self.logger.warning(f"AI别名验证失败,使用原始别名")
                             # 降级到原始别名
@@ -262,31 +261,29 @@ class TmdbAutoMapJob(BaseJob):
                                 "name_romaji": details.nameRomaji,
                                 "aliases_cn": details.aliasesCn
                             }
-                            if any(aliases_to_update.values()):
-                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
-                                self.logger.info(f"为 '{title}' 更新了原始别名。")
                 else:
-                    # 电影类型或未启用AI,直接更新原始别名
+                    # 电影类型或未启用AI,直接使用原始别名
                     aliases_to_update = {
                         "name_en": details.nameEn,
                         "name_jp": details.nameJp,
                         "name_romaji": details.nameRomaji,
                         "aliases_cn": details.aliasesCn
                     }
-                    if any(aliases_to_update.values()):
-                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
-                        if search_type == "movie":
-                            self.logger.info(f"为电影 '{title}' 更新了TMDB原始别名(跳过AI验证)。")
-                        else:
-                            self.logger.info(f"为 '{title}' 更新了别名。")
 
                 # 步骤 4: 智能季度匹配 - 两级查找逻辑 (仅适用于TV系列)
                 # 第一级: 使用seasons信息进行匹配(方案A)
                 # 第二级: 使用"Seasons"剧集组进行匹配(方案C)
 
-                # 电影类型跳过剧集组处理
+                # 电影类型跳过剧集组处理，直接更新别名
                 if show.get('type') == 'movie':
                     self.logger.info(f"'{title}' 是电影类型,跳过剧集组处理。")
+                    # 更新别名到数据库
+                    if aliases_to_update and any(aliases_to_update.values()):
+                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if force_update:
+                            self.logger.info(f"为电影 '{title}' 强制更新了别名(AI修正模式)。")
+                        else:
+                            self.logger.info(f"为电影 '{title}' 更新了别名。")
                     await session.commit()
                     processed_count += 1
                     continue
@@ -294,6 +291,15 @@ class TmdbAutoMapJob(BaseJob):
                 tmdb_source = self.metadata_manager.sources.get("tmdb")
                 if not tmdb_source or not hasattr(tmdb_source, 'get_all_episode_groups'):
                     self.logger.warning(f"TMDB源不支持 get_all_episode_groups 方法，跳过 '{title}' 的剧集组处理。")
+                    # 即使不支持剧集组，也要更新别名
+                    if aliases_to_update and any(aliases_to_update.values()):
+                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if force_update:
+                            self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
+                        else:
+                            self.logger.info(f"为 '{title}' 更新了别名。")
+                    await session.commit()
+                    processed_count += 1
                     continue
 
                 season_matched = False
@@ -376,6 +382,15 @@ class TmdbAutoMapJob(BaseJob):
 
                 if not groups_to_process:
                     self.logger.info(f"'{title}' 没有找到“原始播出顺序”(type=1)的剧集组，跳过映射更新。")
+                    # 即使没有剧集组，也要更新别名
+                    if aliases_to_update and any(aliases_to_update.values()):
+                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if force_update:
+                            self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
+                        else:
+                            self.logger.info(f"为 '{title}' 更新了别名。")
+                    await session.commit()
+                    processed_count += 1
                     continue
                 
                 self.logger.info(f"为 '{title}' 选择了 {len(groups_to_process)} 个剧集组进行映射更新。")
@@ -409,30 +424,26 @@ class TmdbAutoMapJob(BaseJob):
                             season_suffix = f" 第{season_num}季"
                             self.logger.info(f"检测到剧集组季度信息: {season_suffix}")
 
-                            # 获取当前别名
-                            from ..orm_models import AnimeAlias
-                            stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
-                            result = await session.execute(stmt)
-                            alias_record = result.scalar_one_or_none()
-
-                            if alias_record:
-                                # 为中文别名追加季度后缀
-                                updated = False
-                                if alias_record.aliasCn1 and not alias_record.aliasCn1.endswith(season_suffix):
-                                    alias_record.aliasCn1 = alias_record.aliasCn1 + season_suffix
-                                    updated = True
-                                if alias_record.aliasCn2 and not alias_record.aliasCn2.endswith(season_suffix):
-                                    alias_record.aliasCn2 = alias_record.aliasCn2 + season_suffix
-                                    updated = True
-                                if alias_record.aliasCn3 and not alias_record.aliasCn3.endswith(season_suffix):
-                                    alias_record.aliasCn3 = alias_record.aliasCn3 + season_suffix
-                                    updated = True
-
-                                if updated:
-                                    await session.commit()
-                                    self.logger.info(f"已为 '{title}' 的中文别名追加季度后缀: {season_suffix}")
+                            # 在AI验证后的别名上追加季度后缀
+                            if aliases_to_update and aliases_to_update.get("aliases_cn"):
+                                updated_cn_aliases = []
+                                for cn_alias in aliases_to_update["aliases_cn"]:
+                                    if cn_alias and not cn_alias.endswith(season_suffix):
+                                        updated_cn_aliases.append(cn_alias + season_suffix)
+                                    else:
+                                        updated_cn_aliases.append(cn_alias)
+                                aliases_to_update["aliases_cn"] = updated_cn_aliases
+                                self.logger.info(f"已为 '{title}' 的AI验证后的中文别名追加季度后缀: {season_suffix}")
                         else:
                             self.logger.info(f"检测到第{season_num}季,跳过追加季度后缀(仅第二季及以后追加)")
+
+                # 步骤 8: 更新别名到数据库（在剧集组处理完成后，可能已追加季度后缀）
+                if aliases_to_update and any(aliases_to_update.values()):
+                    await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                    if force_update:
+                        self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
+                    else:
+                        self.logger.info(f"为 '{title}' 更新了别名。")
 
                 await session.commit() # 提交本次节目的所有更改
                 processed_count += 1
