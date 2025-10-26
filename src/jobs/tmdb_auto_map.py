@@ -401,31 +401,35 @@ class TmdbAutoMapJob(BaseJob):
                     season_match = re.search(r'(?:season\s+|第|s)(\d+)(?:季)?', group_name, re.IGNORECASE)
                     if season_match:
                         season_num = int(season_match.group(1))
-                        season_suffix = f" 第{season_num}季"
-                        self.logger.info(f"检测到剧集组季度信息: {season_suffix}")
+                        # 只为第二季及以后追加季度后缀
+                        if season_num >= 2:
+                            season_suffix = f" 第{season_num}季"
+                            self.logger.info(f"检测到剧集组季度信息: {season_suffix}")
 
-                        # 获取当前别名
-                        from ..orm_models import AnimeAlias
-                        stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
-                        result = await session.execute(stmt)
-                        alias_record = result.scalar_one_or_none()
+                            # 获取当前别名
+                            from ..orm_models import AnimeAlias
+                            stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
+                            result = await session.execute(stmt)
+                            alias_record = result.scalar_one_or_none()
 
-                        if alias_record:
-                            # 为中文别名追加季度后缀
-                            updated = False
-                            if alias_record.aliasCn1 and not alias_record.aliasCn1.endswith(season_suffix):
-                                alias_record.aliasCn1 = alias_record.aliasCn1 + season_suffix
-                                updated = True
-                            if alias_record.aliasCn2 and not alias_record.aliasCn2.endswith(season_suffix):
-                                alias_record.aliasCn2 = alias_record.aliasCn2 + season_suffix
-                                updated = True
-                            if alias_record.aliasCn3 and not alias_record.aliasCn3.endswith(season_suffix):
-                                alias_record.aliasCn3 = alias_record.aliasCn3 + season_suffix
-                                updated = True
+                            if alias_record:
+                                # 为中文别名追加季度后缀
+                                updated = False
+                                if alias_record.aliasCn1 and not alias_record.aliasCn1.endswith(season_suffix):
+                                    alias_record.aliasCn1 = alias_record.aliasCn1 + season_suffix
+                                    updated = True
+                                if alias_record.aliasCn2 and not alias_record.aliasCn2.endswith(season_suffix):
+                                    alias_record.aliasCn2 = alias_record.aliasCn2 + season_suffix
+                                    updated = True
+                                if alias_record.aliasCn3 and not alias_record.aliasCn3.endswith(season_suffix):
+                                    alias_record.aliasCn3 = alias_record.aliasCn3 + season_suffix
+                                    updated = True
 
-                            if updated:
-                                await session.commit()
-                                self.logger.info(f"已为 '{title}' 的中文别名追加季度后缀: {season_suffix}")
+                                if updated:
+                                    await session.commit()
+                                    self.logger.info(f"已为 '{title}' 的中文别名追加季度后缀: {season_suffix}")
+                        else:
+                            self.logger.info(f"检测到第{season_num}季,跳过追加季度后缀(仅第二季及以后追加)")
 
                 await session.commit() # 提交本次节目的所有更改
                 processed_count += 1
