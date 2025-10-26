@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert } from 'antd'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { getConfig, setConfig } from '@/apis'
-import request from '@/utils/request'
+import api from '@/apis/fetch'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -147,7 +147,7 @@ const AutoMatchSetting = () => {
         return
       }
 
-      const response = await request.post('/api/ui/config/ai/test', {
+      const response = await api.post('/api/ui/config/ai/test', {
         provider: values.aiMatchProvider,
         apiKey: values.aiMatchApiKey,
         baseUrl: values.aiMatchBaseUrl || null,
@@ -165,9 +165,9 @@ const AutoMatchSetting = () => {
       setTestResult({
         success: false,
         message: '测试请求失败',
-        error: error.message || String(error)
+        error: error.message || error.detail || String(error)
       })
-      message.error(`测试失败: ${error.message}`)
+      message.error(`测试失败: ${error.message || error.detail}`)
     } finally {
       setTesting(false)
     }
