@@ -2491,43 +2491,60 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
 
     # 如果是强制更新(AI修正),则更新所有字段
     # 否则只在字段为空时更新
+    updated_fields = []
+
     if force_update:
         if aliases.get('name_en'):
             alias_record.nameEn = aliases['name_en']
+            updated_fields.append(f"nameEn='{aliases['name_en']}'")
         if aliases.get('name_jp'):
             alias_record.nameJp = aliases['name_jp']
+            updated_fields.append(f"nameJp='{aliases['name_jp']}'")
         if aliases.get('name_romaji'):
             alias_record.nameRomaji = aliases['name_romaji']
+            updated_fields.append(f"nameRomaji='{aliases['name_romaji']}'")
 
         cn_aliases = aliases.get('aliases_cn', [])
         if len(cn_aliases) > 0:
             alias_record.aliasCn1 = cn_aliases[0]
+            updated_fields.append(f"aliasCn1='{cn_aliases[0]}'")
         if len(cn_aliases) > 1:
             alias_record.aliasCn2 = cn_aliases[1]
+            updated_fields.append(f"aliasCn2='{cn_aliases[1]}'")
         if len(cn_aliases) > 2:
             alias_record.aliasCn3 = cn_aliases[2]
+            updated_fields.append(f"aliasCn3='{cn_aliases[2]}'")
 
-        logging.info(f"为作品 ID {anime_id} 强制更新了别名字段(AI修正)。")
+        if updated_fields:
+            logging.info(f"为作品 ID {anime_id} 强制更新了别名字段(AI修正): {', '.join(updated_fields)}")
     else:
         # 只在字段为空时更新
         if not alias_record.nameEn and aliases.get('name_en'):
             alias_record.nameEn = aliases['name_en']
+            updated_fields.append(f"nameEn='{aliases['name_en']}'")
         if not alias_record.nameJp and aliases.get('name_jp'):
             alias_record.nameJp = aliases['name_jp']
+            updated_fields.append(f"nameJp='{aliases['name_jp']}'")
         if not alias_record.nameRomaji and aliases.get('name_romaji'):
             alias_record.nameRomaji = aliases['name_romaji']
+            updated_fields.append(f"nameRomaji='{aliases['name_romaji']}'")
 
         cn_aliases = aliases.get('aliases_cn', [])
         if not alias_record.aliasCn1 and len(cn_aliases) > 0:
             alias_record.aliasCn1 = cn_aliases[0]
+            updated_fields.append(f"aliasCn1='{cn_aliases[0]}'")
         if not alias_record.aliasCn2 and len(cn_aliases) > 1:
             alias_record.aliasCn2 = cn_aliases[1]
+            updated_fields.append(f"aliasCn2='{cn_aliases[1]}'")
         if not alias_record.aliasCn3 and len(cn_aliases) > 2:
             alias_record.aliasCn3 = cn_aliases[2]
+            updated_fields.append(f"aliasCn3='{cn_aliases[2]}'")
 
-        logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
+        if updated_fields:
+            logging.info(f"为作品 ID {anime_id} 更新了别名字段: {', '.join(updated_fields)}")
 
     await session.flush()
+    return updated_fields  # 返回更新的字段列表
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(

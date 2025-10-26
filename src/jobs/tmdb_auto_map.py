@@ -326,11 +326,10 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.info(f"'{title}' 是电影类型,跳过剧集组处理。")
                     # 更新别名到数据库
                     if aliases_to_update and any(aliases_to_update.values()):
-                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
-                        if force_update:
-                            self.logger.info(f"为电影 '{title}' 强制更新了别名(AI修正模式)。")
-                        else:
-                            self.logger.info(f"为电影 '{title}' 更新了别名。")
+                        updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if updated_fields:
+                            mode_str = "(AI修正模式)" if force_update else ""
+                            self.logger.info(f"为电影 '{title}' 更新了别名{mode_str}: {', '.join(updated_fields)}")
                     await session.commit()
                     processed_count += 1
                     continue
@@ -340,11 +339,10 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.warning(f"TMDB源不支持 get_all_episode_groups 方法，跳过 '{title}' 的剧集组处理。")
                     # 即使不支持剧集组，也要更新别名
                     if aliases_to_update and any(aliases_to_update.values()):
-                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
-                        if force_update:
-                            self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
-                        else:
-                            self.logger.info(f"为 '{title}' 更新了别名。")
+                        updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if updated_fields:
+                            mode_str = "(AI修正模式)" if force_update else ""
+                            self.logger.info(f"为 '{title}' 更新了别名{mode_str}: {', '.join(updated_fields)}")
                     await session.commit()
                     processed_count += 1
                     continue
@@ -431,11 +429,10 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.info(f"'{title}' 没有找到“原始播出顺序”(type=1)的剧集组，跳过映射更新。")
                     # 即使没有剧集组，也要更新别名
                     if aliases_to_update and any(aliases_to_update.values()):
-                        await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
-                        if force_update:
-                            self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
-                        else:
-                            self.logger.info(f"为 '{title}' 更新了别名。")
+                        updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                        if updated_fields:
+                            mode_str = "(AI修正模式)" if force_update else ""
+                            self.logger.info(f"为 '{title}' 更新了别名{mode_str}: {', '.join(updated_fields)}")
                     await session.commit()
                     processed_count += 1
                     continue
@@ -486,11 +483,10 @@ class TmdbAutoMapJob(BaseJob):
 
                 # 步骤 8: 更新别名到数据库（在剧集组处理完成后，可能已追加季度后缀）
                 if aliases_to_update and any(aliases_to_update.values()):
-                    await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
-                    if force_update:
-                        self.logger.info(f"为 '{title}' 强制更新了别名(AI修正模式)。")
-                    else:
-                        self.logger.info(f"为 '{title}' 更新了别名。")
+                    updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                    if updated_fields:
+                        mode_str = "(AI修正模式)" if force_update else ""
+                        self.logger.info(f"为 '{title}' 更新了别名{mode_str}: {', '.join(updated_fields)}")
 
                 await session.commit() # 提交本次节目的所有更改
                 processed_count += 1
