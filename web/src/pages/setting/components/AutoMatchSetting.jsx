@@ -12,6 +12,7 @@ const AutoMatchSetting = () => {
   const [saving, setSaving] = useState(false)
   const [matchMode, setMatchMode] = useState('traditional') // 'traditional' or 'ai'
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
+  const [recognitionEnabled, setRecognitionEnabled] = useState(false)
 
   // 加载配置
   const loadSettings = async () => {
@@ -24,7 +25,9 @@ const AutoMatchSetting = () => {
         apiKeyRes,
         baseUrlRes,
         modelRes,
-        promptRes
+        promptRes,
+        recognitionEnabledRes,
+        recognitionPromptRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
         getConfig('aiMatchFallbackEnabled'),
@@ -32,13 +35,17 @@ const AutoMatchSetting = () => {
         getConfig('aiMatchApiKey'),
         getConfig('aiMatchBaseUrl'),
         getConfig('aiMatchModel'),
-        getConfig('aiMatchPrompt')
+        getConfig('aiMatchPrompt'),
+        getConfig('aiRecognitionEnabled'),
+        getConfig('aiRecognitionPrompt')
       ])
 
       const enabled = enabledRes.data.value === 'true'
       const fallback = fallbackRes.data.value === 'true'
+      const recognition = recognitionEnabledRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
+      setRecognitionEnabled(recognition)
 
       form.setFieldsValue({
         aiMatchEnabled: enabled,
@@ -47,7 +54,9 @@ const AutoMatchSetting = () => {
         aiMatchApiKey: apiKeyRes.data.value || '',
         aiMatchBaseUrl: baseUrlRes.data.value || '',
         aiMatchModel: modelRes.data.value || 'deepseek-chat',
-        aiMatchPrompt: promptRes.data.value || ''
+        aiMatchPrompt: promptRes.data.value || '',
+        aiRecognitionEnabled: recognition,
+        aiRecognitionPrompt: recognitionPromptRes.data.value || ''
       })
     } catch (error) {
       message.error(`加载配置失败: ${error.message}`)
@@ -76,7 +85,9 @@ const AutoMatchSetting = () => {
         setConfig('aiMatchApiKey', values.aiMatchApiKey || ''),
         setConfig('aiMatchBaseUrl', values.aiMatchBaseUrl || ''),
         setConfig('aiMatchModel', values.aiMatchModel || ''),
-        setConfig('aiMatchPrompt', values.aiMatchPrompt || '')
+        setConfig('aiMatchPrompt', values.aiMatchPrompt || ''),
+        setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
+        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || '')
       ])
 
       message.success('保存成功')
@@ -114,7 +125,7 @@ const AutoMatchSetting = () => {
   return (
     <Spin spinning={loading}>
       <Card
-        title="自动匹配设置"
+        title="AI辅助增强"
         extra={
           <Button
             type="primary"
@@ -136,12 +147,22 @@ const AutoMatchSetting = () => {
             if ('aiMatchFallbackEnabled' in changedValues) {
               setFallbackEnabled(changedValues.aiMatchFallbackEnabled)
             }
+            if ('aiRecognitionEnabled' in changedValues) {
+              setRecognitionEnabled(changedValues.aiRecognitionEnabled)
+            }
           }}
         >
           {/* 匹配模式开关 */}
           <Form.Item
             name="aiMatchEnabled"
-            label="匹配模式"
+            label={
+              <Space>
+                <span>匹配模式</span>
+                <Tooltip title="AI智能匹配: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果。传统匹配: 基于标题相似度和类型匹配的算法,快速但可能不够精准。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
             valuePropName="checked"
           >
             <Switch
@@ -153,6 +174,22 @@ const AutoMatchSetting = () => {
                 form.setFieldValue('aiMatchEnabled', checked)
               }}
             />
+          </Form.Item>
+
+          {/* AI辅助识别开关 */}
+          <Form.Item
+            name="aiRecognitionEnabled"
+            label={
+              <Space>
+                <span>启用AI辅助识别</span>
+                <Tooltip title="使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            valuePropName="checked"
+          >
+            <Switch disabled={matchMode !== 'ai'} />
           </Form.Item>
 
           {/* 传统匹配兜底开关 - 始终显示,传统模式下禁用 */}
@@ -262,7 +299,7 @@ const AutoMatchSetting = () => {
             name="aiMatchPrompt"
             label={
               <Space>
-                <span>AI提示词</span>
+                <span>AI匹配提示词</span>
                 <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
                   <QuestionCircleOutlined />
                 </Tooltip>
@@ -270,10 +307,29 @@ const AutoMatchSetting = () => {
             }
           >
             <TextArea
-              rows={12}
+              rows={8}
               placeholder="留空使用默认提示词..."
               style={{ fontFamily: 'monospace', fontSize: '12px' }}
               disabled={matchMode !== 'ai'}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="aiRecognitionPrompt"
+            label={
+              <Space>
+                <span>AI识别提示词</span>
+                <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+          >
+            <TextArea
+              rows={8}
+              placeholder="留空使用默认提示词..."
+              style={{ fontFamily: 'monospace', fontSize: '12px' }}
+              disabled={matchMode !== 'ai' || !recognitionEnabled}
             />
           </Form.Item>
         </Form>
@@ -289,10 +345,17 @@ const AutoMatchSetting = () => {
               <strong>AI智能匹配</strong>: 使用大语言模型理解上下文,综合考虑标题、类型、季度、年份、集数和精确标记等因素,选择最佳匹配结果
             </li>
             <li>
+              <strong>AI辅助识别</strong>: 使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务
+            </li>
+            <li>
               <strong>传统匹配兜底</strong>: 当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性(仅AI模式下可用)
             </li>
             <li>
-              <strong>应用场景</strong>: 外部控制API全自动导入、Webhook自动导入、匹配后备机制
+              <strong>应用场景</strong>:
+              <ul>
+                <li>AI智能匹配: 外部控制API全自动导入、Webhook自动导入、匹配后备机制</li>
+                <li>AI辅助识别: TMDB自动刮削与剧集组映射定时任务</li>
+              </ul>
             </li>
             <li>
               <strong>精确标记优先</strong>: AI会优先选择被用户标记为"精确"的数据源

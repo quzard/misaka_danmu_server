@@ -9,7 +9,7 @@ from .models import ProviderSearchInfo
 
 logger = logging.getLogger(__name__)
 
-# 默认提示词
+# 默认匹配提示词
 DEFAULT_AI_MATCH_PROMPT = """你是一个专业的影视内容匹配专家。你的任务是从搜索结果列表中选择最匹配用户查询的条目。
 
 **输入格式**:
@@ -37,6 +37,103 @@ DEFAULT_AI_MATCH_PROMPT = """你是一个专业的影视内容匹配专家。你
 - reason: 选择理由 (简短说明,需提及是否因为精确标记而选择)
 
 如果没有合适的匹配,返回 {"index": -1, "confidence": 0, "reason": "无合适匹配"}"""
+
+# 默认识别提示词
+DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正与匹配选择专家。你的任务是:
+1. 将数据库中的标题信息标准化,生成最适合TMDB搜索的查询关键词
+2. 识别作品的季度信息,用于后续的剧集组匹配选择
+
+**背景说明**:
+- 输入来源: 数据库中的 Anime.title, Anime.year, Anime.type 字段
+- 目标: 输出标准化的搜索关键词 + 季度信息,用于TMDB搜索和剧集组匹配
+- 应用场景: TMDB自动刮削定时任务,批量为库内作品获取TMDB ID并匹配剧集组
+
+**输入格式**:
+- title: 数据库中的标题 (可能格式不规范,包含季度信息等)
+- year: 年份 (整数或null)
+- type: 类型 ("tv_series" 或 "movie")
+
+**纠正规则**:
+1. **标题标准化** (最重要):
+   - 去除季度标记: "第X季", "Season X", "S0X", "Part X"等
+   - 去除年份信息 (年份已单独提供)
+   - 去除多余空格和标点符号
+   - 如果标题同时包含中文和英文/日文,优先保留**更完整、更官方**的版本
+   - 如果标题包含罗马音和中文,优先保留中文
+   - 输出的标题应该是**作品的核心名称**,适合TMDB搜索
+
+2. **季度提取** (重要,用于剧集组匹配):
+   - 从标题中识别季度: "第X季", "Season X", "S0X", "Part X"等
+   - 罗马数字: "II"=2, "III"=3, "IV"=4
+   - **特别季**: "OVA", "OAD", "SP", "特别篇" → season=0 (第0季)
+   - 如果无法确定,返回null
+
+3. **类型纠错** (重要):
+   - 如果标题包含"剧场版"、"Movie"、"电影"等关键词,**纠正为"movie"** (即使输入type为tv_series)
+   - 如果标题包含"OVA"、"OAD"、"SP"、"特别篇"等,保持"tv_series"
+   - 如果标题明显是电视剧但输入type为movie,**纠正为"tv_series"**
+   - 否则使用输入的type值
+
+4. **年份纠错** (重要):
+   - 如果标题中包含明确的年份信息,**优先使用标题中的年份** (即使与输入year不同)
+   - 如果输入的year明显错误 (如1900, 2099等异常值),尝试从标题或常识推断正确年份
+   - 如果无法确定,使用输入的year值
+
+**剧集组识别与匹配** (针对特殊作品):
+某些作品在TMDB中不分季,而是使用剧集组(Episode Groups)来组织不同季度。
+需要识别这类作品并标记:
+- 日本动画作品,标题包含"第X季"但在TMDB中通常只有一个TV系列
+- 例如: "Re:Zero"、"从零开始的异世界生活"、"某科学的超电磁炮"等
+- 如果识别到这类作品,设置 use_episode_group=true
+- 剧集组从第0季开始: 第0季=特别季(OVA/SP), 第1季=正片第一季, 第2季=正片第二季...
+
+**输出格式**:
+返回一个JSON对象,包含:
+- search_title: 标准化的搜索关键词 (字符串,用于TMDB搜索)
+- season: 季度 (整数,用于筛选搜索结果或剧集组,无法确定则为null)
+- type: 类型 ("tv_series" 或 "movie")
+- year: 年份 (整数,没有则为null)
+- use_episode_group: 是否需要使用剧集组 (布尔值,默认false)
+- episode_title_cn: 集标题(中文) (字符串,仅当season=0时需要,用于匹配第0季中的具体集)
+- episode_title_jp: 集标题(日文) (字符串,仅当season=0时需要,用于匹配第0季中的具体集)
+
+**示例**:
+输入: {"title": "魔法使的新娘 第二季", "year": 2023, "type": "tv_series"}
+输出: {"search_title": "魔法使的新娘", "season": 2, "type": "tv_series", "year": 2023, "use_episode_group": false}
+
+输入: {"title": "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season", "year": 2020, "type": "tv_series"}
+输出: {"search_title": "Re:Zero kara Hajimeru Isekai Seikatsu", "season": 2, "type": "tv_series", "year": 2020, "use_episode_group": true}
+(剧集组识别: Re:Zero在TMDB中不分季,需要使用剧集组)
+
+输入: {"title": "从零开始的异世界生活 第三季", "year": 2024, "type": "tv_series"}
+输出: {"search_title": "从零开始的异世界生活", "season": 3, "type": "tv_series", "year": 2024, "use_episode_group": true}
+(剧集组识别: 该作品在TMDB中使用剧集组组织)
+
+输入: {"title": "某科学的超电磁炮 OVA", "year": 2010, "type": "tv_series"}
+输出: {
+  "search_title": "某科学的超电磁炮",
+  "season": 0,
+  "type": "tv_series",
+  "year": 2010,
+  "use_episode_group": true,
+  "episode_title_cn": "OVA",
+  "episode_title_jp": null
+}
+(特别季识别: OVA对应第0季,提取集标题用于匹配Specials中的具体集)
+
+输入: {"title": "葬送的芙莉莲 剧场版", "year": null, "type": "tv_series"}
+输出: {"search_title": "葬送的芙莉莲", "season": null, "type": "movie", "year": null, "use_episode_group": false}
+(纠错: 标题包含"剧场版",type从tv_series纠正为movie)
+
+输入: {"title": "进击的巨人 最终季", "year": 2020, "type": "tv_series"}
+输出: {"search_title": "进击的巨人", "season": null, "type": "tv_series", "year": 2020, "use_episode_group": false}
+
+输入: {"title": "Frieren: Beyond Journey's End", "year": 2023, "type": "tv_series"}
+输出: {"search_title": "Frieren: Beyond Journey's End", "season": null, "type": "tv_series", "year": 2023, "use_episode_group": false}
+
+输入: {"title": "你的名字 (2016)", "year": 2020, "type": "tv_series"}
+输出: {"search_title": "你的名字", "season": null, "type": "movie", "year": 2016, "use_episode_group": false}
+(纠错: 标题中年份2016覆盖错误的2020,根据常识判断为电影)"""
 
 
 def _safe_json_loads(text: str) -> Optional[Dict]:
@@ -93,13 +190,15 @@ class AIMatcher:
                 - ai_match_api_key: API密钥
                 - ai_match_base_url: Base URL (可选)
                 - ai_match_model: 模型名称
-                - ai_match_prompt: 自定义提示词 (可选)
+                - ai_match_prompt: 自定义匹配提示词 (可选)
+                - ai_recognition_prompt: 自定义识别提示词 (可选)
         """
         self.provider = config.get("ai_match_provider", "deepseek").lower()
         self.api_key = config.get("ai_match_api_key")
         self.base_url = config.get("ai_match_base_url")
         self.model = config.get("ai_match_model")
-        self.prompt = config.get("ai_match_prompt") or DEFAULT_AI_MATCH_PROMPT
+        self.match_prompt = config.get("ai_match_prompt") or DEFAULT_AI_MATCH_PROMPT
+        self.recognition_prompt = config.get("ai_recognition_prompt") or DEFAULT_AI_RECOGNITION_PROMPT
         
         if not self.api_key:
             raise ValueError("AI Matcher: API Key 未配置")
@@ -216,14 +315,14 @@ class AIMatcher:
         """使用OpenAI兼容接口进行匹配"""
         if not self.client:
             return None
-        
+
         try:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
-            
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": self.prompt},
+                    {"role": "system", "content": self.match_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.0,
@@ -243,6 +342,86 @@ class AIMatcher:
         except Exception as e:
             logger.error(f"OpenAI匹配调用失败: {e}")
             return None
-    
+
+    async def recognize_title(self, title: str, year: Optional[int] = None, anime_type: str = "tv_series") -> Optional[Dict[str, Any]]:
+        """
+        使用AI将标题信息标准化,生成适合TMDB搜索的查询关键词
+
+        Args:
+            title: 标题字符串
+            year: 年份 (可选)
+            anime_type: 类型 ("tv_series" 或 "movie")
+
+        Returns:
+            标准化后的信息,包含 search_title, season, type, year 等字段
+            如果识别失败则返回None
+        """
+        if not title:
+            return None
+
+        try:
+            input_data = {
+                "title": title,
+                "year": year,
+                "type": anime_type
+            }
+            logger.info(f"AI识别: 开始标准化标题 - {input_data}")
+
+            # 调用AI
+            response_data = await self._recognize_openai(input_data)
+
+            if not response_data:
+                logger.warning("AI识别: 未能获取有效响应")
+                return None
+
+            # 检查返回类型
+            if not isinstance(response_data, dict):
+                logger.error(f"AI识别: 返回数据类型错误,期望dict,实际为{type(response_data).__name__}: {response_data}")
+                return None
+
+            # 验证必需字段
+            if "search_title" not in response_data:
+                logger.error(f"AI识别: 返回数据缺少search_title字段: {response_data}")
+                return None
+
+            logger.info(f"AI识别: 标准化成功 - {response_data}")
+            return response_data
+
+        except Exception as e:
+            logger.error(f"AI识别过程中发生错误: {e}", exc_info=True)
+            return None
+
+    async def _recognize_openai(self, input_data: Dict[str, Any]) -> Optional[Dict]:
+        """使用OpenAI兼容接口进行识别"""
+        if not self.client:
+            return None
+
+        try:
+            import json
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.recognition_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                timeout=30
+            )
+
+            content = response.choices[0].message.content
+            logger.debug(f"AI识别原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            return parsed_data
+
+        except Exception as e:
+            logger.error(f"OpenAI识别调用失败: {e}")
+            return None
 
 

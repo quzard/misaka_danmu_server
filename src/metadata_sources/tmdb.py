@@ -308,6 +308,34 @@ class TmdbMetadataSource(BaseMetadataSource):
             # 捕获 _create_client 中的 API Key 未配置错误
             raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
 
+    async def get_all_episode_groups(self, tmdb_id: int, user: models.User) -> List[Dict[str, Any]]:
+        """
+        获取指定TMDB TV ID的所有剧集组信息。
+        返回剧集组列表，每个剧集组包含id、name、type等信息。
+        """
+        try:
+            async with await self._create_client() as client:
+                response = await client.get(f"/tv/{tmdb_id}/episode_groups")
+                response.raise_for_status()
+                raw_results = response.json().get("results", [])
+
+                # 转换为驼峰命名格式
+                camel_case_results = []
+                for item in raw_results:
+                    camel_case_results.append({
+                        "description": item.get("description"),
+                        "episodeCount": item.get("episode_count"),
+                        "groupCount": item.get("group_count"),
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "network": item.get("network"),
+                        "type": item.get("type"),
+                    })
+                return camel_case_results
+        except Exception as e:
+            self.logger.error(f"获取剧集组失败 (TMDB ID: {tmdb_id}): {e}")
+            return []
+
     async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User):
         """
         Fetches episode group details from TMDB and saves the mappings to the database.
