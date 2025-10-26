@@ -151,6 +151,10 @@ def setup_logging():
     logger.addHandler(logging.StreamHandler()) # 控制台处理器
     logger.addHandler(logging.handlers.RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')) # 文件处理器
 
+    # 配置httpx logger,确保其日志也经过敏感信息过滤
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.addFilter(SensitiveInfoFilter())
+
     # 创建并配置 DequeHandler，以过滤掉不希望在UI上显示的内容
     deque_handler = DequeHandler(_logs_deque)
     deque_handler.addFilter(NoHttpxLogFilter())

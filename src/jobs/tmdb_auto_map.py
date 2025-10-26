@@ -113,6 +113,10 @@ class TmdbAutoMapJob(BaseJob):
             self.logger.info(f"正在处理: '{title}' (Anime ID: {anime_id}, TMDB ID: {tmdb_id or '无'})")
 
             try:
+                # 初始化变量
+                use_episode_group = False
+                recognized_season = None
+
                 # 步骤 1: 如果没有TMDB ID，尝试通过标题搜索获取
                 if not tmdb_id:
                     self.logger.info(f"'{title}' 没有TMDB ID，尝试搜索...")
@@ -121,9 +125,6 @@ class TmdbAutoMapJob(BaseJob):
                         search_title = title
                         search_year = year
                         search_type = show.get('type', 'tv_series')
-
-                        use_episode_group = False
-                        recognized_season = None
 
                         if ai_matcher and ai_recognition_enabled:
                             try:
