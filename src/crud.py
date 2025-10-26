@@ -1312,7 +1312,7 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
             Anime.episodeCount.label("episodeCount"), Anime.imageUrl.label("imageUrl"), AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.tmdbEpisodeGroupId.label("tmdbEpisodeGroupId"),
             AnimeMetadata.bangumiId.label("bangumiId"), AnimeMetadata.tvdbId.label("tvdbId"), AnimeMetadata.doubanId.label("doubanId"), AnimeMetadata.imdbId.label("imdbId"),
             AnimeAlias.nameEn.label("nameEn"), AnimeAlias.nameJp.label("nameJp"), AnimeAlias.nameRomaji.label("nameRomaji"), AnimeAlias.aliasCn1.label("aliasCn1"),
-            AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3")
+            AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3"), AnimeAlias.aliasLocked.label("aliasLocked")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)

@@ -357,7 +357,7 @@ async def _add_queue_type_to_task_history_task(conn: AsyncConnection, db_type: s
         logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
 
 async def _add_alias_locked_to_anime_aliases_task(conn: AsyncConnection, db_type: str):
-    """迁移任务: 为anime_aliases表添加alias_locked字段"""
+    """迁移任务: 为anime_aliases表添加alias_locked字段 + 移除旧的TMDB映射定时任务"""
     table_name = "anime_aliases"
     column_name = "alias_locked"
 
@@ -394,6 +394,16 @@ async def _add_alias_locked_to_anime_aliases_task(conn: AsyncConnection, db_type
         logger.info(f"成功为表 '{table_name}' 添加 '{column_name}' 列")
     else:
         logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
+
+    # 移除旧的TMDB映射定时任务(job_type='tmdbAutoMap')
+    delete_sql = text("DELETE FROM scheduled_tasks WHERE job_type = 'tmdbAutoMap'")
+    result = await conn.execute(delete_sql)
+    deleted_count = result.rowcount
+
+    if deleted_count > 0:
+        logger.info(f"成功删除 {deleted_count} 个旧的TMDB映射定时任务(job_type='tmdbAutoMap')")
+    else:
+        logger.info("未找到需要删除的旧TMDB映射定时任务")
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
