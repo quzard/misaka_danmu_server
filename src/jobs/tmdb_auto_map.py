@@ -54,12 +54,16 @@ class TmdbAutoMapJob(BaseJob):
         # 初始化AI matcher (如果启用)
         ai_matcher = None
         ai_recognition_enabled = False
+        ai_alias_correction_enabled = False
         try:
             ai_match_enabled = await crud.get_config_value(session, "aiMatchEnabled") == "true"
             ai_recognition_enabled = await crud.get_config_value(session, "aiRecognitionEnabled") == "true"
+            ai_alias_correction_enabled = await crud.get_config_value(session, "aiAliasCorrectionEnabled") == "true"
 
             if ai_match_enabled and ai_recognition_enabled:
                 self.logger.info("AI辅助识别已启用")
+                if ai_alias_correction_enabled:
+                    self.logger.info("AI别名修正已启用")
                 config = {
                     "ai_match_provider": await crud.get_config_value(session, "aiMatchProvider") or "deepseek",
                     "ai_match_api_key": await crud.get_config_value(session, "aiMatchApiKey"),
@@ -149,17 +153,31 @@ class TmdbAutoMapJob(BaseJob):
 
                         search_results = await self.metadata_manager.search("tmdb", search_title, user, mediaType=media_type)
                         if search_results:
-                            # 选择第一个结果（可以根据年份进一步筛选）
+                            # 智能选择最佳匹配结果
+                            # 优先级: 类型匹配 > 年份匹配 > 第一个结果
                             best_match = search_results[0]
+
+                            # 如果AI识别到季度信息,说明肯定是TV类型
+                            if recognized_season is not None and media_type == "tv":
+                                self.logger.info(f"检测到季度信息(season={recognized_season}),强制使用TV类型筛选")
+                                # 筛选TV类型的结果
+                                tv_results = [r for r in search_results if r.type == "tv" or not r.type]
+                                if tv_results:
+                                    search_results = tv_results
+                                    best_match = tv_results[0]
+                                    self.logger.info(f"筛选后剩余 {len(tv_results)} 个TV类型结果")
+
+                            # 年份匹配
                             if search_year:
                                 # 尝试找到年份匹配的结果
                                 for result in search_results:
                                     if result.year == search_year:
                                         best_match = result
+                                        self.logger.info(f"找到年份匹配的结果: {result.title} ({result.year})")
                                         break
 
                             tmdb_id = best_match.tmdbId
-                            self.logger.info(f"为 '{title}' 找到TMDB ID: {tmdb_id}")
+                            self.logger.info(f"为 '{title}' 找到TMDB ID: {tmdb_id} (类型: {best_match.type or 'unknown'})")
 
                             # 保存TMDB ID到数据库
                             await crud.update_metadata_if_empty(
@@ -209,8 +227,13 @@ class TmdbAutoMapJob(BaseJob):
                                 "aliases_cn": validated_aliases.get("aliasesCn", [])
                             }
                             if any(aliases_to_update.values()):
-                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
-                                self.logger.info(f"为 '{title}' 更新了AI验证后的别名。")
+                                # 如果启用了AI别名修正,则强制更新
+                                force_update = ai_alias_correction_enabled
+                                await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                                if force_update:
+                                    self.logger.info(f"为 '{title}' 强制更新了AI验证后的别名(AI修正模式)。")
+                                else:
+                                    self.logger.info(f"为 '{title}' 更新了AI验证后的别名。")
                         else:
                             self.logger.warning(f"AI别名验证失败,使用原始别名")
                             # 降级到原始别名
@@ -235,49 +258,93 @@ class TmdbAutoMapJob(BaseJob):
                         await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
                         self.logger.info(f"为 '{title}' 更新了别名。")
 
-                # 步骤 4: 获取所有剧集组
+                # 步骤 4: 智能季度匹配 - 两级查找逻辑
+                # 第一级: 使用seasons信息进行匹配(方案A)
+                # 第二级: 使用"Seasons"剧集组进行匹配(方案C)
+
                 tmdb_source = self.metadata_manager.sources.get("tmdb")
                 if not tmdb_source or not hasattr(tmdb_source, 'get_all_episode_groups'):
                     self.logger.warning(f"TMDB源不支持 get_all_episode_groups 方法，跳过 '{title}' 的剧集组处理。")
                     continue
 
-                all_groups = await tmdb_source.get_all_episode_groups(int(tmdb_id), user)
-                if not all_groups:
-                    self.logger.info(f"'{title}' (TMDB ID: {tmdb_id}) 没有找到任何剧集组。")
-                    continue
-                
-                self.logger.info(f"为 '{title}' 找到 {len(all_groups)} 个剧集组: {[g.get('name') for g in all_groups]}")
-
-                # 步骤 4: 自动选择最佳剧集组进行处理
-                # 如果AI识别到需要使用剧集组且有季度信息,尝试匹配对应季度的剧集组
+                season_matched = False
                 groups_to_process = []
-                if use_episode_group and recognized_season is not None:
-                    # 尝试找到匹配季度的剧集组
+                all_groups = []
+
+                # 第一级: 如果AI识别到季度信息,尝试使用seasons数据进行匹配
+                if recognized_season is not None and details.seasons:
+                    self.logger.info(f"第一级匹配: 使用seasons信息查找季度 {recognized_season}")
+
+                    # 查找对应季度的season信息
+                    target_season = None
+                    for season in details.seasons:
+                        if season.season_number == recognized_season:
+                            target_season = season
+                            break
+
+                    if target_season:
+                        self.logger.info(f"✓ 找到匹配的季度: {target_season.name} (ID: {target_season.id}, 集数: {target_season.episode_count})")
+                        season_matched = True
+
+                        # 获取所有剧集组,尝试找到匹配该季度的剧集组
+                        all_groups = await tmdb_source.get_all_episode_groups(int(tmdb_id), user)
+                        if all_groups:
+                            self.logger.info(f"为 '{title}' 找到 {len(all_groups)} 个剧集组: {[g.get('name') for g in all_groups]}")
+
+                            # 尝试找到匹配该季度的剧集组
+                            for g in all_groups:
+                                group_name = g.get('name', '').lower()
+
+                                # 特殊处理第0季(特别季)
+                                if recognized_season == 0:
+                                    if ("special" in group_name or
+                                        "season 0" in group_name or
+                                        "s00" in group_name or
+                                        "s0" in group_name or
+                                        "特别" in group_name):
+                                        groups_to_process.append(g)
+                                        self.logger.info(f"✓ 找到特别季剧集组: {g.get('name')}")
+                                else:
+                                    # 匹配 "season 2", "第2季", "s02" 等格式
+                                    if (f"season {recognized_season}" in group_name or
+                                        f"第{recognized_season}季" in group_name or
+                                        f"s{recognized_season:02d}" in group_name or
+                                        f"s{recognized_season}" in group_name):
+                                        groups_to_process.append(g)
+                                        self.logger.info(f"✓ 找到匹配季度{recognized_season}的剧集组: {g.get('name')}")
+                    else:
+                        self.logger.warning(f"✗ 未找到季度 {recognized_season} 的seasons信息")
+
+                # 第二级: 如果第一级没有找到,使用"Seasons"剧集组进行匹配
+                if not season_matched or not groups_to_process:
+                    self.logger.info(f"第二级匹配: 使用剧集组查找")
+
+                    if not all_groups:
+                        all_groups = await tmdb_source.get_all_episode_groups(int(tmdb_id), user)
+
+                    if not all_groups:
+                        self.logger.info(f"'{title}' (TMDB ID: {tmdb_id}) 没有找到任何剧集组。")
+                        continue
+
+                    self.logger.info(f"为 '{title}' 找到 {len(all_groups)} 个剧集组: {[g.get('name') for g in all_groups]}")
+
+                    # 优先选择"Seasons"剧集组
+                    seasons_group = None
                     for g in all_groups:
                         group_name = g.get('name', '').lower()
+                        if 'seasons' in group_name:
+                            seasons_group = g
+                            self.logger.info(f"✓ 找到'Seasons'剧集组: {g.get('name')}")
+                            break
 
-                        # 特殊处理第0季(特别季)
-                        if recognized_season == 0:
-                            # 匹配 "specials", "season 0", "s00", "特别篇" 等
-                            if ("special" in group_name or
-                                "season 0" in group_name or
-                                "s00" in group_name or
-                                "s0" in group_name or
-                                "特别" in group_name):
-                                groups_to_process.append(g)
-                                self.logger.info(f"AI识别: 找到特别季剧集组: {g.get('name')}")
-                        else:
-                            # 匹配 "season 2", "第2季", "s02" 等格式
-                            if (f"season {recognized_season}" in group_name or
-                                f"第{recognized_season}季" in group_name or
-                                f"s{recognized_season:02d}" in group_name or
-                                f"s{recognized_season}" in group_name):
-                                groups_to_process.append(g)
-                                self.logger.info(f"AI识别: 找到匹配季度{recognized_season}的剧集组: {g.get('name')}")
+                    if seasons_group:
+                        groups_to_process = [seasons_group]
+                    else:
+                        # 如果没有"Seasons"剧集组,使用默认逻辑(type=1的剧集组)
+                        groups_to_process = [g for g in all_groups if g.get('type') == 1]
+                        if groups_to_process:
+                            self.logger.info(f"未找到'Seasons'剧集组,使用默认逻辑(type=1)")
 
-                # 如果没有找到匹配的,或者不需要使用剧集组,则使用默认逻辑
-                if not groups_to_process:
-                    groups_to_process = [g for g in all_groups if g.get('type') == 1]
                 if not groups_to_process:
                     self.logger.info(f"'{title}' 没有找到“原始播出顺序”(type=1)的剧集组，跳过映射更新。")
                     continue

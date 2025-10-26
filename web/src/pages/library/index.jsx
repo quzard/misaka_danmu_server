@@ -11,9 +11,11 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
   Table,
   Tooltip,
 } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
@@ -970,6 +972,20 @@ export const Library = () => {
             fetchedValue={fetchedMetadata?.aliasesCn?.[2]}
             form={form}
           />
+          <Form.Item
+            name="aliasLocked"
+            label={
+              <Space>
+                <span>锁定别名</span>
+                <Tooltip title="锁定后,TMDB自动刮削任务将不会自动更新此作品的别名信息">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
           <Form.Item name="animeId" hidden>
             <Input />
           </Form.Item>

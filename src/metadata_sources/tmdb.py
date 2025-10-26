@@ -139,7 +139,25 @@ class TmdbMetadataSource(BaseMetadataSource):
                     except (ValueError, TypeError):
                         pass
 
-                # 4. Construct the response
+                # 4. 提取seasons信息(仅TV系列)
+                seasons_data = None
+                if mediaType == 'tv' and details.get('seasons'):
+                    seasons_data = []
+                    for season in details.get('seasons', []):
+                        try:
+                            seasons_data.append(models.TMDBSeasonInfo(
+                                airDate=season.get('air_date'),
+                                episodeCount=season.get('episode_count', 0),
+                                id=season.get('id'),
+                                name=season.get('name', ''),
+                                seasonNumber=season.get('season_number', 0),
+                                posterPath=season.get('poster_path')
+                            ))
+                        except Exception as e:
+                            self.logger.warning(f"解析season信息失败: {e}")
+                            continue
+
+                # 5. Construct the response
                 return models.MetadataDetailsResponse(
                     id=str(details['id']),
                     tmdbId=str(details['id']),
@@ -152,7 +170,8 @@ class TmdbMetadataSource(BaseMetadataSource):
                     details=details.get('overview'),
                     year=year,
                     imdbId=details.get('external_ids', {}).get('imdb_id'),
-                    tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None
+                    tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None,
+                    seasons=seasons_data
                 )
         except ValueError as e:
             # 捕获 _create_client 中的 API Key 未配置错误

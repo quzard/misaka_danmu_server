@@ -454,6 +454,8 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.aliases.aliasCn1 = update_data.aliasCn1
     anime.aliases.aliasCn2 = update_data.aliasCn2
     anime.aliases.aliasCn3 = update_data.aliasCn3
+    if update_data.aliasLocked is not None:
+        anime.aliases.aliasLocked = update_data.aliasLocked
 
     await session.commit()
     return True
@@ -2442,25 +2444,73 @@ async def update_anime_tmdb_group_id(session: AsyncSession, anime_id: int, group
     await session.execute(update(AnimeMetadata).where(AnimeMetadata.animeId == anime_id).values(tmdbEpisodeGroupId=group_id))
     await session.commit()
 
-async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any]):
+async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any], force_update: bool = False):
+    """
+    更新作品别名,如果字段为空则填充
+    如果别名记录不存在,则创建新记录
+
+    Args:
+        session: 数据库会话
+        anime_id: 作品ID
+        aliases: 别名数据字典
+        force_update: 是否强制更新(用于AI修正),默认False
+    """
     # 修正：使用 select().where() 而不是 session.get()，因为 anime_id 不是主键
     stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
     result = await session.execute(stmt)
     alias_record = result.scalar_one_or_none()
 
-    if not alias_record: return
+    # 如果记录不存在,创建新记录
+    if not alias_record:
+        from .orm_models import AnimeAlias
+        alias_record = AnimeAlias(animeId=anime_id, aliasLocked=False)
+        session.add(alias_record)
+        logging.info(f"为作品 ID {anime_id} 创建新的别名记录。")
 
-    if not alias_record.nameEn and aliases.get('nameEn'): alias_record.nameEn = aliases['nameEn']
-    if not alias_record.nameJp and aliases.get('nameJp'): alias_record.nameJp = aliases['nameJp']
-    if not alias_record.nameRomaji and aliases.get('nameRomaji'): alias_record.nameRomaji = aliases['nameRomaji']
-    
-    cn_aliases = aliases.get('aliases_cn', [])
-    if not alias_record.aliasCn1 and len(cn_aliases) > 0: alias_record.aliasCn1 = cn_aliases[0]
-    if not alias_record.aliasCn2 and len(cn_aliases) > 1: alias_record.aliasCn2 = cn_aliases[1]
-    if not alias_record.aliasCn3 and len(cn_aliases) > 2: alias_record.aliasCn3 = cn_aliases[2]
+    # 检查锁定状态
+    if alias_record.aliasLocked and not force_update:
+        logging.info(f"作品 ID {anime_id} 的别名已锁定,跳过更新。")
+        return
+
+    # 如果是强制更新(AI修正),则更新所有字段
+    # 否则只在字段为空时更新
+    if force_update:
+        if aliases.get('name_en'):
+            alias_record.nameEn = aliases['name_en']
+        if aliases.get('name_jp'):
+            alias_record.nameJp = aliases['name_jp']
+        if aliases.get('name_romaji'):
+            alias_record.nameRomaji = aliases['name_romaji']
+
+        cn_aliases = aliases.get('aliases_cn', [])
+        if len(cn_aliases) > 0:
+            alias_record.aliasCn1 = cn_aliases[0]
+        if len(cn_aliases) > 1:
+            alias_record.aliasCn2 = cn_aliases[1]
+        if len(cn_aliases) > 2:
+            alias_record.aliasCn3 = cn_aliases[2]
+
+        logging.info(f"为作品 ID {anime_id} 强制更新了别名字段(AI修正)。")
+    else:
+        # 只在字段为空时更新
+        if not alias_record.nameEn and aliases.get('name_en'):
+            alias_record.nameEn = aliases['name_en']
+        if not alias_record.nameJp and aliases.get('name_jp'):
+            alias_record.nameJp = aliases['name_jp']
+        if not alias_record.nameRomaji and aliases.get('name_romaji'):
+            alias_record.nameRomaji = aliases['name_romaji']
+
+        cn_aliases = aliases.get('aliases_cn', [])
+        if not alias_record.aliasCn1 and len(cn_aliases) > 0:
+            alias_record.aliasCn1 = cn_aliases[0]
+        if not alias_record.aliasCn2 and len(cn_aliases) > 1:
+            alias_record.aliasCn2 = cn_aliases[1]
+        if not alias_record.aliasCn3 and len(cn_aliases) > 2:
+            alias_record.aliasCn3 = cn_aliases[2]
+
+        logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
 
     await session.flush()
-    logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(

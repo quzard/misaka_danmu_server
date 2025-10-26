@@ -28,7 +28,9 @@ const AutoMatchSetting = () => {
         modelRes,
         promptRes,
         recognitionEnabledRes,
-        recognitionPromptRes
+        recognitionPromptRes,
+        aliasValidationPromptRes,
+        aliasCorrectionEnabledRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
         getConfig('aiMatchFallbackEnabled'),
@@ -38,12 +40,15 @@ const AutoMatchSetting = () => {
         getConfig('aiMatchModel'),
         getConfig('aiMatchPrompt'),
         getConfig('aiRecognitionEnabled'),
-        getConfig('aiRecognitionPrompt')
+        getConfig('aiRecognitionPrompt'),
+        getConfig('aiAliasValidationPrompt'),
+        getConfig('aiAliasCorrectionEnabled')
       ])
 
       const enabled = enabledRes.data.value === 'true'
       const fallback = fallbackRes.data.value === 'true'
       const recognition = recognitionEnabledRes.data.value === 'true'
+      const aliasCorrection = aliasCorrectionEnabledRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
       setRecognitionEnabled(recognition)
@@ -57,7 +62,9 @@ const AutoMatchSetting = () => {
         aiMatchModel: modelRes.data.value || 'deepseek-chat',
         aiMatchPrompt: promptRes.data.value || '',
         aiRecognitionEnabled: recognition,
-        aiRecognitionPrompt: recognitionPromptRes.data.value || ''
+        aiRecognitionPrompt: recognitionPromptRes.data.value || '',
+        aiAliasValidationPrompt: aliasValidationPromptRes.data.value || '',
+        aiAliasCorrectionEnabled: aliasCorrection
       })
     } catch (error) {
       message.error(`加载配置失败: ${error.message}`)
@@ -87,7 +94,9 @@ const AutoMatchSetting = () => {
         setConfig('aiMatchModel', values.aiMatchModel || ''),
         setConfig('aiMatchPrompt', values.aiMatchPrompt || ''),
         setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
-        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || '')
+        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
+        setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
+        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false')
       ])
 
       message.success('保存成功')
@@ -323,11 +332,45 @@ const AutoMatchSetting = () => {
               </Form.Item>
 
               <Form.Item
+                name="aiAliasCorrectionEnabled"
+                label={
+                  <Space>
+                    <span>启用AI别名修正</span>
+                    <Tooltip title="使用AI修正已有的错误别名(例如中文别名字段写入了非中文内容)。启用后,TMDB自动刮削任务会强制更新所有别名字段。注意:已锁定的别名不会被修正。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+                valuePropName="checked"
+              >
+                <Switch disabled={matchMode !== 'ai' || !recognitionEnabled} />
+              </Form.Item>
+
+              <Form.Item
                 name="aiRecognitionPrompt"
                 label={
                   <Space>
                     <span>AI识别提示词</span>
                     <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+              >
+                <TextArea
+                  rows={8}
+                  placeholder="留空使用默认提示词..."
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                  disabled={matchMode !== 'ai' || !recognitionEnabled}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="aiAliasValidationPrompt"
+                label={
+                  <Space>
+                    <span>AI别名验证提示词</span>
+                    <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
@@ -356,6 +399,9 @@ const AutoMatchSetting = () => {
             </li>
             <li>
               <strong>AI辅助识别</strong>: 使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务
+            </li>
+            <li>
+              <strong>AI别名修正</strong>: 使用AI修正已有的错误别名(例如中文别名字段写入了非中文内容)。启用后会强制更新所有别名字段,但已锁定的别名不会被修正
             </li>
             <li>
               <strong>传统匹配兜底</strong>: 当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性(仅AI模式下可用)
