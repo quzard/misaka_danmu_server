@@ -211,8 +211,13 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.warning(f"未能从 TMDB 获取 '{title}' (ID: {tmdb_id}) 的详情 (mediaType={media_type_for_details})。")
                     continue
 
-                # 步骤 3: 更新别名（使用AI验证和分类）
-                if ai_matcher and ai_recognition_enabled:
+                # 步骤 3: 更新别名
+                # 注意: 电影类型不使用AI验证别名,因为电影标题通常包含系列名+副标题
+                # 例如"名侦探柯南 绀碧之棺",AI可能无法正确识别属于该电影的别名
+                # TV系列可以使用AI验证,因为标题通常是系列名
+
+                if ai_matcher and ai_recognition_enabled and search_type == "tv_series":
+                    # 仅对TV系列使用AI验证别名
                     # 收集所有别名
                     all_aliases = []
                     if details.nameEn: all_aliases.append(details.nameEn)
@@ -225,7 +230,7 @@ class TmdbAutoMapJob(BaseJob):
                         validated_aliases = ai_matcher.validate_aliases(
                             title=title,
                             year=year,
-                            anime_type=search_type,  # 使用search_type
+                            anime_type=search_type,
                             aliases=all_aliases
                         )
 
@@ -258,7 +263,7 @@ class TmdbAutoMapJob(BaseJob):
                                 await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
                                 self.logger.info(f"为 '{title}' 更新了原始别名。")
                 else:
-                    # 不使用AI,直接更新原始别名
+                    # 电影类型或未启用AI,直接更新原始别名
                     aliases_to_update = {
                         "name_en": details.nameEn,
                         "name_jp": details.nameJp,
@@ -267,7 +272,10 @@ class TmdbAutoMapJob(BaseJob):
                     }
                     if any(aliases_to_update.values()):
                         await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
-                        self.logger.info(f"为 '{title}' 更新了别名。")
+                        if search_type == "movie":
+                            self.logger.info(f"为电影 '{title}' 更新了TMDB原始别名(跳过AI验证)。")
+                        else:
+                            self.logger.info(f"为 '{title}' 更新了别名。")
 
                 # 步骤 4: 智能季度匹配 - 两级查找逻辑 (仅适用于TV系列)
                 # 第一级: 使用seasons信息进行匹配(方案A)
