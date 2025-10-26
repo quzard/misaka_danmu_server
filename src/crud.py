@@ -2455,6 +2455,8 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
         aliases: 别名数据字典
         force_update: 是否强制更新(用于AI修正),默认False
     """
+    from .orm_models import AnimeAlias
+
     # 修正：使用 select().where() 而不是 session.get()，因为 anime_id 不是主键
     stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
     result = await session.execute(stmt)
@@ -2462,7 +2464,6 @@ async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, al
 
     # 如果记录不存在,创建新记录
     if not alias_record:
-        from .orm_models import AnimeAlias
         alias_record = AnimeAlias(animeId=anime_id, aliasLocked=False)
         session.add(alias_record)
         logging.info(f"为作品 ID {anime_id} 创建新的别名记录。")

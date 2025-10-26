@@ -66,7 +66,7 @@ export const Setting = () => {
           children: <Performance />,
         },
         {
-          label: '自动匹配设置',
+          label: 'AI辅助增强',
           key: 'automatch',
           children: <AutoMatchSetting />,
         },
