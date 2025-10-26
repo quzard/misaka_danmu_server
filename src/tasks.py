@@ -2787,7 +2787,13 @@ async def auto_search_and_import_task(
         ai_selected_index = None
         if ai_match_enabled:
             try:
-                from .ai_matcher import AIMatcher
+                from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
+
+                # 动态注册AI提示词配置(如果不存在)
+                async with scraper_manager._session_factory() as init_session:
+                    await crud.initialize_configs(init_session, {
+                        "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
+                    })
 
                 # 获取AI配置
                 ai_config = {

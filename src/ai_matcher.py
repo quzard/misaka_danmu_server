@@ -295,13 +295,25 @@ class AIMatcher:
                 - ai_match_model: 模型名称
                 - ai_match_prompt: 自定义匹配提示词 (可选)
                 - ai_recognition_prompt: 自定义识别提示词 (可选)
+                - ai_alias_validation_prompt: 自定义别名验证提示词 (可选)
         """
         self.provider = config.get("ai_match_provider", "deepseek").lower()
         self.api_key = config.get("ai_match_api_key")
         self.base_url = config.get("ai_match_base_url")
         self.model = config.get("ai_match_model")
-        self.match_prompt = config.get("ai_match_prompt") or DEFAULT_AI_MATCH_PROMPT
-        self.recognition_prompt = config.get("ai_recognition_prompt") or DEFAULT_AI_RECOGNITION_PROMPT
+
+        # 提示词配置: 优先使用传入的配置,如果为空则使用硬编码的默认值
+        self.match_prompt = config.get("ai_match_prompt")
+        if not self.match_prompt:
+            self.match_prompt = DEFAULT_AI_MATCH_PROMPT
+
+        self.recognition_prompt = config.get("ai_recognition_prompt")
+        if not self.recognition_prompt:
+            self.recognition_prompt = DEFAULT_AI_RECOGNITION_PROMPT
+
+        self.alias_validation_prompt = config.get("ai_alias_validation_prompt")
+        if not self.alias_validation_prompt:
+            self.alias_validation_prompt = DEFAULT_AI_ALIAS_VALIDATION_PROMPT
         
         if not self.api_key:
             raise ValueError("AI Matcher: API Key 未配置")
@@ -543,7 +555,7 @@ class AIMatcher:
             year: 年份
             anime_type: 类型 (tv_series/movie)
             aliases: 待验证的别名列表
-            custom_prompt: 自定义提示词 (可选)
+            custom_prompt: 自定义提示词 (可选,优先级高于实例配置)
 
         Returns:
             {
@@ -563,8 +575,8 @@ class AIMatcher:
             return None
 
         try:
-            # 使用自定义提示词或默认提示词
-            validation_prompt = custom_prompt or DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+            # 使用自定义提示词 > 实例配置 > 默认提示词
+            validation_prompt = custom_prompt or self.alias_validation_prompt
 
             # 构建输入数据
             input_data = {

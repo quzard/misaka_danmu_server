@@ -45,14 +45,6 @@ class TmdbAutoMapJob(BaseJob):
         # 为元数据管理器调用创建一个虚拟用户对象
         user = models.User(id=0, username="scheduled_task")
 
-        # 注册默认配置(如果不存在)
-        from ..ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
-        await crud.initialize_configs(session, {
-            "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词"),
-            "aiRecognitionPrompt": (DEFAULT_AI_RECOGNITION_PROMPT, "AI辅助识别提示词"),
-            "aiAliasValidationPrompt": (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, "AI别名验证提示词")
-        })
-
         # 初始化AI matcher (如果启用)
         ai_matcher = None
         ai_recognition_enabled = False
@@ -66,13 +58,28 @@ class TmdbAutoMapJob(BaseJob):
                 self.logger.info("AI辅助识别已启用")
                 if ai_alias_correction_enabled:
                     self.logger.info("AI别名修正已启用")
+
+                # 动态注册AI提示词配置(如果不存在)
+                from ..ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+                await crud.initialize_configs(session, {
+                    "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词"),
+                    "aiRecognitionPrompt": (DEFAULT_AI_RECOGNITION_PROMPT, "AI辅助识别提示词"),
+                    "aiAliasValidationPrompt": (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, "AI别名验证提示词")
+                })
+
+                # 读取提示词配置(直接使用数据库值,即使为空)
+                ai_match_prompt = await crud.get_config_value(session, "aiMatchPrompt", "")
+                ai_recognition_prompt = await crud.get_config_value(session, "aiRecognitionPrompt", "")
+                ai_alias_validation_prompt = await crud.get_config_value(session, "aiAliasValidationPrompt", "")
+
                 config = {
                     "ai_match_provider": await crud.get_config_value(session, "aiMatchProvider", "deepseek"),
                     "ai_match_api_key": await crud.get_config_value(session, "aiMatchApiKey", ""),
                     "ai_match_base_url": await crud.get_config_value(session, "aiMatchBaseUrl", ""),
                     "ai_match_model": await crud.get_config_value(session, "aiMatchModel", "deepseek-chat"),
-                    "ai_match_prompt": await crud.get_config_value(session, "aiMatchPrompt", DEFAULT_AI_MATCH_PROMPT),
-                    "ai_recognition_prompt": await crud.get_config_value(session, "aiRecognitionPrompt", DEFAULT_AI_RECOGNITION_PROMPT)
+                    "ai_match_prompt": ai_match_prompt,
+                    "ai_recognition_prompt": ai_recognition_prompt,
+                    "ai_alias_validation_prompt": ai_alias_validation_prompt
                 }
                 ai_matcher = AIMatcher(config)
         except Exception as e:
