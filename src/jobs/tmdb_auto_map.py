@@ -153,6 +153,14 @@ class TmdbAutoMapJob(BaseJob):
 
                                     if recognized_season:
                                         self.logger.info(f"AI识别到季度: {recognized_season}")
+                                        # 如果识别到季度信息，去除标题中的季度后缀
+                                        # 匹配 "第X季", "第X期", "Season X", "S X" 等格式
+                                        season_pattern = r'\s*(?:第[0-9一二三四五六七八九十百千万]+[季期]|Season\s*\d+|S\s*\d+)\s*$'
+                                        cleaned_title = re.sub(season_pattern, '', search_title, flags=re.IGNORECASE)
+                                        if cleaned_title != search_title:
+                                            self.logger.info(f"去除季度后缀: '{search_title}' → '{cleaned_title}'")
+                                            search_title = cleaned_title
+
                                     if use_episode_group:
                                         self.logger.info(f"AI识别: 该作品需要使用剧集组")
 
@@ -166,8 +174,7 @@ class TmdbAutoMapJob(BaseJob):
                         search_results = await self.metadata_manager.search("tmdb", search_title, user, mediaType=media_type)
                         if search_results:
                             # 智能选择最佳匹配结果
-                            # 优先级: 类型匹配 > 年份匹配 > 第一个结果
-                            best_match = search_results[0]
+                            best_match = None
 
                             # 如果AI识别到季度信息,说明肯定是TV类型
                             if recognized_season is not None and media_type == "tv":
@@ -176,19 +183,59 @@ class TmdbAutoMapJob(BaseJob):
                                 tv_results = [r for r in search_results if r.type == "tv" or not r.type]
                                 if tv_results:
                                     search_results = tv_results
-                                    best_match = tv_results[0]
                                     self.logger.info(f"筛选后剩余 {len(tv_results)} 个TV类型结果")
 
-                            # 年份匹配
-                            if search_year:
-                                # 尝试找到年份匹配的结果
-                                for result in search_results:
-                                    if result.year == search_year:
-                                        best_match = result
-                                        self.logger.info(f"找到年份匹配的结果: {result.title} ({result.year})")
-                                        break
+                            # 如果有多个结果且启用了AI匹配，使用AI智能选择
+                            if ai_matcher and ai_recognition_enabled and len(search_results) > 1:
+                                self.logger.info(f"TMDB搜索返回 {len(search_results)} 个结果，使用AI智能匹配...")
 
-                            tmdb_id = best_match.tmdbId
+                                # 转换MetadataDetailsResponse为ProviderSearchInfo格式供AI使用
+                                provider_results = []
+                                for r in search_results:
+                                    provider_results.append(models.ProviderSearchInfo(
+                                        provider="tmdb",
+                                        mediaId=r.tmdbId or r.id,
+                                        title=r.title,
+                                        type=r.type or "unknown",
+                                        season=1,
+                                        year=r.year,
+                                        imageUrl=r.imageUrl,
+                                        episodeCount=None
+                                    ))
+
+                                # 构建查询信息
+                                query_info = {
+                                    "title": title,  # 使用原始标题（包含季度信息）
+                                    "year": year,
+                                    "type": search_type
+                                }
+
+                                try:
+                                    # 调用AI匹配
+                                    best_index = await ai_matcher.select_best_match(query_info, provider_results, favorited_info={})
+                                    if best_index is not None:
+                                        best_match = search_results[best_index]
+                                        self.logger.info(f"AI选择了结果 #{best_index}: {best_match.title} ({best_match.year})")
+                                    else:
+                                        self.logger.warning("AI未能选择合适的匹配，使用第一个结果")
+                                        best_match = search_results[0]
+                                except Exception as e:
+                                    self.logger.warning(f"AI匹配失败: {e}，使用第一个结果")
+                                    best_match = search_results[0]
+                            else:
+                                # 没有AI或只有一个结果，使用传统匹配
+                                best_match = search_results[0]
+
+                                # 年份匹配
+                                if search_year and len(search_results) > 1:
+                                    # 尝试找到年份匹配的结果
+                                    for result in search_results:
+                                        if result.year == search_year:
+                                            best_match = result
+                                            self.logger.info(f"找到年份匹配的结果: {result.title} ({result.year})")
+                                            break
+
+                            tmdb_id = best_match.tmdbId or best_match.id
                             self.logger.info(f"为 '{title}' 找到TMDB ID: {tmdb_id} (类型: {best_match.type or 'unknown'})")
 
                             # 保存TMDB ID到数据库

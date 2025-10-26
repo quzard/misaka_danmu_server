@@ -100,10 +100,20 @@ class TmdbMetadataSource(BaseMetadataSource):
                     release_date = item.get('first_air_date') if mediaType == 'tv' else item.get('release_date')
                     details_str = f"{release_date or '未知年份'} / {item.get('original_language', 'N/A')}"
 
+                    # 提取年份
+                    year = None
+                    if release_date:
+                        try:
+                            year = int(release_date[:4])
+                        except (ValueError, TypeError):
+                            pass
+
                     results.append(models.MetadataDetailsResponse(
                         id=str(item['id']),
                         tmdbId=str(item['id']),
                         title=title,
+                        type=mediaType,  # 添加类型字段
+                        year=year,  # 添加年份字段
                         imageUrl=f"{image_base_url}{item.get('poster_path')}" if item.get('poster_path') else None,
                         details=details_str
                     ))

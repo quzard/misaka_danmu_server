@@ -184,7 +184,7 @@ class AnimeFullDetails(BaseModel):
     aliasCn1: Optional[str] = None
     aliasCn2: Optional[str] = None
     aliasCn3: Optional[str] = None
-    aliasLocked: bool = False
+    aliasLocked: Optional[bool] = False
 
 class SourceCreate(BaseModel):
     providerName: str = Field(..., description="数据源提供方名称")
