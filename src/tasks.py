@@ -2207,35 +2207,89 @@ async def webhook_search_and_dispatch_task(
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%)")
 
-        # 评估前3个最佳匹配项，设置最低相似度阈值
-        max_candidates = min(3, len(all_search_results))
-        min_similarity_threshold = 75  # 最低相似度阈值
+        # 评估所有候选项 (不限制数量)
+        logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
 
-        # 计算前3个候选项的相似度
-        candidates_with_similarity = []
-        for i in range(max_candidates):
-            candidate = all_search_results[i]
-            similarity = fuzz.token_set_ratio(animeTitle, candidate.title)
-            candidates_with_similarity.append({
-                'candidate': candidate,
-                'similarity': similarity,
-                'rank': i + 1
-            })
-            logger.info(f"Webhook 任务: 候选项 {i + 1}: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {similarity}%)")
+        # 检查是否启用AI匹配
+        ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
+        best_match = None
+        ai_selected_index = None
 
-        # 获取符合阈值的候选项
-        valid_candidates = [item for item in candidates_with_similarity if item['similarity'] >= min_similarity_threshold]
+        if ai_match_enabled:
+            logger.info("Webhook 任务: AI匹配已启用")
+            try:
+                # 获取AI配置
+                ai_config = {
+                    'provider': await config_manager.get("aiProvider", "deepseek"),
+                    'api_key': await config_manager.get("aiApiKey", ""),
+                    'base_url': await config_manager.get("aiBaseUrl", ""),
+                    'model': await config_manager.get("aiModel", ""),
+                    'match_prompt': await config_manager.get("aiMatchPrompt", ""),
+                    'log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
+                }
 
-        if not valid_candidates:
-            raise ValueError(f"未找到 '{animeTitle}' 的足够相似的匹配项（最低阈值: {min_similarity_threshold}%）。")
+                # 构建查询信息
+                query_info = {
+                    'title': animeTitle,
+                    'season': season if mediaType == 'tv_series' else None,
+                    'episode': currentEpisodeIndex,
+                    'year': year,
+                    'type': mediaType
+                }
 
-        # 检查是否启用顺延机制
-        fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
+                # 获取精确标记信息
+                favorited_info = {}
+                from .orm_models import AnimeSource as AS
+                from sqlalchemy import select as sql_select
 
-        if not fallback_enabled:
-            # 顺延机制关闭，使用原来的逻辑（只尝试第一个候选项）
-            best_match = valid_candidates[0]['candidate']
-            logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个候选项 '{best_match.title}' (Provider: {best_match.provider})")
+                for result in all_search_results:
+                    # 查找是否有相同provider和mediaId的源被标记
+                    stmt = (
+                        sql_select(AS.isFavorited)
+                        .where(
+                            AS.providerName == result.provider,
+                            AS.mediaId == result.mediaId
+                        )
+                        .limit(1)
+                    )
+                    result_row = await session.execute(stmt)
+                    is_favorited = result_row.scalar_one_or_none()
+                    if is_favorited:
+                        key = f"{result.provider}:{result.mediaId}"
+                        favorited_info[key] = True
+
+                # 初始化AI匹配器并选择
+                from .ai_matcher import AIMatcher
+                matcher = AIMatcher(ai_config)
+                ai_selected_index = await matcher.select_best_match(
+                    query_info, all_search_results, favorited_info
+                )
+
+                if ai_selected_index is not None:
+                    best_match = all_search_results[ai_selected_index]
+                    logger.info(f"Webhook 任务: AI匹配成功选择: {best_match.provider} - {best_match.title}")
+                else:
+                    # 检查是否启用传统匹配兜底
+                    ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                    if ai_fallback_enabled:
+                        logger.info("Webhook 任务: AI匹配未找到合适结果，降级到传统匹配")
+                    else:
+                        logger.warning("Webhook 任务: AI匹配未找到合适结果，且传统匹配兜底已禁用")
+                        raise ValueError("AI匹配失败且传统匹配兜底已禁用")
+
+            except Exception as e:
+                # 检查是否启用传统匹配兜底
+                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                if ai_fallback_enabled:
+                    logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                else:
+                    logger.error(f"Webhook 任务: AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
+                    raise ValueError(f"AI匹配失败且传统匹配兜底已禁用: {e}")
+                ai_selected_index = None
+
+        # 如果AI选择成功，使用AI选择的结果
+        if best_match is not None:
+            logger.info(f"Webhook 任务: 使用AI选择的结果: {best_match.provider} - {best_match.title}")
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
@@ -2256,59 +2310,126 @@ async def webhook_search_and_dispatch_task(
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
             raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
 
-        # 顺延机制：依次尝试每个候选源，直到有一个导入成功
-        logger.info(f"🔄 Webhook 顺延机制: 已启用，共有 {len(valid_candidates)} 个候选源待尝试")
-        last_error = None
-        for attempt, item in enumerate(valid_candidates, 1):
-            candidate = item['candidate']
-            logger.info(f"→ [{attempt}/{len(valid_candidates)}] 尝试候选源: '{candidate.title}' (Provider: {candidate.provider}, 相似度: {item['similarity']}%)")
-            await progress_callback(50 + attempt * 10, f"尝试源 {candidate.provider} ({attempt}/{len(valid_candidates)})")
+        # 传统匹配: 优先查找精确标记源
+        favorited_match = None
+        from .orm_models import AnimeSource as AS
+        from sqlalchemy import select as sql_select
+
+        for result in all_search_results:
+            # 查找是否有相同provider和mediaId的源被标记
+            stmt = (
+                sql_select(AS.isFavorited)
+                .where(
+                    AS.providerName == result.provider,
+                    AS.mediaId == result.mediaId
+                )
+                .limit(1)
+            )
+            result_row = await session.execute(stmt)
+            is_favorited = result_row.scalar_one_or_none()
+            if is_favorited:
+                favorited_match = result
+                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title}")
+                break
+
+        # 检查是否启用顺延机制
+        fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
+
+        if favorited_match:
+            best_match = favorited_match
+            logger.info(f"Webhook 任务: 使用精确标记源: {best_match.provider} - {best_match.title}")
+        elif not fallback_enabled:
+            # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+            best_match = all_search_results[0]
+            logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+
+        if best_match is not None:
+            await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
-            task_title = f"Webhook（{webhookSource}）自动导入：{candidate.title} - S{season:02d}E{currentEpisodeIndex:02d} ({candidate.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{candidate.title} ({candidate.provider}) [{current_time}]"
-            unique_key = f"import-{candidate.provider}-{candidate.mediaId}-ep{currentEpisodeIndex}"
+            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
-            # 直接尝试导入，不进行预验证
-            logger.info(f"⚡ 开始导入: 源='{candidate.provider}', 媒体ID={candidate.mediaId}, 集数={currentEpisodeIndex}")
+            # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
+            final_year = best_match.year if best_match.year is not None else year
+            task_coro = lambda session, cb: generic_import_task(
+                provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
+                animeTitle=best_match.title, mediaType=best_match.type,
+                season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+                progress_callback=cb, session=session, manager=manager,
+                task_manager=task_manager,
+                title_recognition_manager=title_recognition_manager
+            )
+            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
 
-            # 创建并立即执行导入任务
-            # 修正：优先使用候选源的年份，如果候选源没有年份则使用webhook传入的年份
-            final_year = candidate.year if candidate.year is not None else year
+        # 顺延机制启用：依次验证候选源 (按分数从高到低)
+        logger.info(f"🔄 Webhook 顺延机制: 已启用，共有 {len(all_search_results)} 个候选源待验证")
+        for attempt, candidate in enumerate(all_search_results, 1):
+            logger.info(f"→ [{attempt}/{len(all_search_results)}] 正在验证: {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}, 类型: {candidate.type})")
             try:
-                await generic_import_task(
-                    provider=candidate.provider, mediaId=candidate.mediaId, year=final_year,
-                    animeTitle=candidate.title, mediaType=candidate.type,
-                    season=candidate.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=candidate.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
-                    doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
-                    progress_callback=progress_callback, session=session, manager=manager,
-                    task_manager=task_manager,
-                    title_recognition_manager=title_recognition_manager
-                )
-                # 如果执行到这里没有抛出异常，说明导入成功但没有抛出TaskSuccess（不应该发生）
-                logger.warning(f"⚠️ 异常情况: 源 '{candidate.provider}' 导入完成但未抛出TaskSuccess异常")
-                raise TaskSuccess(f"Webhook: 源 '{candidate.provider}' 导入成功。")
-            except TaskSuccess as success:
-                # 导入成功，记录详细信息并结束顺延循环
-                success_msg = str(success)
-                logger.info(f"✓ Webhook 任务: 源 '{candidate.provider}' 导入成功 - {success_msg}")
-                raise
-            except Exception as import_error:
-                error_msg = str(import_error)
-                logger.warning(f"✗ Webhook 任务: 源 '{candidate.provider}' 导入失败 - {error_msg}")
-                if attempt < len(valid_candidates):
-                    logger.info(f"→ Webhook 任务: 继续尝试下一个候选源 ({attempt + 1}/{len(valid_candidates)})...")
-                    last_error = import_error
+                scraper = manager.get_scraper(candidate.provider)
+                if not scraper:
+                    logger.warning(f"    {attempt}. {candidate.provider} - 无法获取scraper，跳过")
                     continue
-                else:
-                    logger.error(f"✗ Webhook 任务: 所有 {len(valid_candidates)} 个候选源都导入失败")
-                    last_error = import_error
-                    break
 
-        # 如果所有候选源都失败了
-        if last_error:
-            raise last_error
-        else:
+                # 获取分集列表进行验证
+                episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                if not episodes:
+                    logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
+                    continue
+
+                # 如果是电影，只匹配电影类型的候选源
+                if mediaType == "movie":
+                    if candidate.type != "movie":
+                        logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
+                        continue
+                    logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
+                # 如果是电视剧，检查是否有目标集数
+                else:
+                    target_episode = None
+                    for ep in episodes:
+                        if ep.episodeIndex == currentEpisodeIndex:
+                            target_episode = ep
+                            break
+
+                    if not target_episode:
+                        logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {currentEpisodeIndex} 集，跳过")
+                        continue
+
+                    logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
+
+                best_match = candidate
+                break
+            except Exception as e:
+                logger.warning(f"    {attempt}. {candidate.provider} - 验证失败: {e}")
+                continue
+
+        if not best_match:
+            logger.warning(f"Webhook 任务: 所有候选源都无法提供有效分集")
             raise ValueError(f"所有候选源都无法提供第 {currentEpisodeIndex} 集")
+
+        # 提交导入任务
+        await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
+
+        current_time = get_now().strftime("%H:%M:%S")
+        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+
+        # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
+        final_year = best_match.year if best_match.year is not None else year
+        task_coro = lambda session, cb: generic_import_task(
+            provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
+            animeTitle=best_match.title, mediaType=best_match.type,
+            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+            doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
+            progress_callback=cb, session=session, manager=manager,
+            task_manager=task_manager,
+            title_recognition_manager=title_recognition_manager
+        )
+        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
     except TaskSuccess:
         raise
     except Exception as e:
@@ -2883,16 +3004,70 @@ async def auto_search_and_import_task(
                 raise ValueError("AI匹配失败且传统匹配兜底已禁用")
             # 允许降级，继续使用传统匹配
             logger.info("AI匹配失败，使用传统匹配兜底")
-            if not fallback_enabled:
-                # 顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
+            # 传统匹配: 优先查找精确标记源
+            favorited_match = None
+            async with scraper_manager._session_factory() as ai_session:
+                from .orm_models import AnimeSource
+                from sqlalchemy import select
+
+                for result in all_results:
+                    # 查找是否有相同provider和mediaId的源被标记
+                    stmt = (
+                        select(AnimeSource.isFavorited)
+                        .where(
+                            AnimeSource.providerName == result.provider,
+                            AnimeSource.mediaId == result.mediaId
+                        )
+                        .limit(1)
+                    )
+                    result_row = await ai_session.execute(stmt)
+                    is_favorited = result_row.scalar_one_or_none()
+                    if is_favorited:
+                        favorited_match = result
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
+                        break
+
+            if favorited_match:
+                best_match = favorited_match
+                logger.info(f"自动导入：使用精确标记源: {best_match.provider} - {best_match.title}")
+            elif not fallback_enabled:
+                # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
                 best_match = all_results[0]
                 similarity = fuzz.token_set_ratio(main_title, best_match.title)
                 logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
-        elif not fallback_enabled:
-            # AI未启用，顺延机制关闭，使用原来的逻辑（只尝试第一个结果）
-            best_match = all_results[0]
-            similarity = fuzz.token_set_ratio(main_title, best_match.title)
-            logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
+        else:
+            # AI未启用，使用传统匹配
+            # 传统匹配: 优先查找精确标记源
+            favorited_match = None
+            async with scraper_manager._session_factory() as ai_session:
+                from .orm_models import AnimeSource
+                from sqlalchemy import select
+
+                for result in all_results:
+                    # 查找是否有相同provider和mediaId的源被标记
+                    stmt = (
+                        select(AnimeSource.isFavorited)
+                        .where(
+                            AnimeSource.providerName == result.provider,
+                            AnimeSource.mediaId == result.mediaId
+                        )
+                        .limit(1)
+                    )
+                    result_row = await ai_session.execute(stmt)
+                    is_favorited = result_row.scalar_one_or_none()
+                    if is_favorited:
+                        favorited_match = result
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
+                        break
+
+            if favorited_match:
+                best_match = favorited_match
+                logger.info(f"自动导入：使用精确标记源: {best_match.provider} - {best_match.title}")
+            elif not fallback_enabled:
+                # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                best_match = all_results[0]
+                similarity = fuzz.token_set_ratio(main_title, best_match.title)
+                logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
 
         if best_match is None and fallback_enabled:
             # 顺延机制启用：依次验证候选源，直到找到有效的分集

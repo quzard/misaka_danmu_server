@@ -1731,6 +1731,28 @@ async def _get_match_for_item(
                 # 步骤3：自动选择最佳源
                 logger.info(f"步骤3：自动选择最佳源")
 
+                # 获取精确标记信息 (AI匹配和传统匹配都需要)
+                favorited_info = {}
+                async with scraper_manager._session_factory() as ai_session:
+                    from .orm_models import AnimeSource as AS
+                    from sqlalchemy import select as sql_select
+
+                    for result in sorted_results:
+                        # 查找是否有相同provider和mediaId的源被标记
+                        stmt = (
+                            sql_select(AS.isFavorited)
+                            .where(
+                                AS.providerName == result.provider,
+                                AS.mediaId == result.mediaId
+                            )
+                            .limit(1)
+                        )
+                        result_row = await ai_session.execute(stmt)
+                        is_favorited = result_row.scalar_one_or_none()
+                        if is_favorited:
+                            key = f"{result.provider}:{result.mediaId}"
+                            favorited_info[key] = True
+
                 # 检查是否启用AI匹配
                 ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
 
@@ -1768,28 +1790,6 @@ async def _get_match_for_item(
                                 "year": None,  # 匹配后备场景通常没有年份信息
                                 "type": "movie" if is_movie else "tv_series"
                             }
-
-                            # 获取精确标记信息
-                            favorited_info = {}
-                            async with scraper_manager._session_factory() as ai_session:
-                                from .orm_models import AnimeSource as AS
-                                from sqlalchemy import select as sql_select
-
-                                for result in sorted_results:
-                                    # 查找是否有相同provider和mediaId的源被标记
-                                    stmt = (
-                                        sql_select(AS.isFavorited)
-                                        .where(
-                                            AS.providerName == result.provider,
-                                            AS.mediaId == result.mediaId
-                                        )
-                                        .limit(1)
-                                    )
-                                    result_row = await ai_session.execute(stmt)
-                                    is_favorited = result_row.scalar_one_or_none()
-                                    if is_favorited:
-                                        key = f"{result.provider}:{result.mediaId}"
-                                        favorited_info[key] = True
 
                             # 初始化AI匹配器并选择
                             matcher = AIMatcher(ai_config)
@@ -1833,14 +1833,40 @@ async def _get_match_for_item(
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    if not fallback_enabled:
+                    # 传统匹配: 优先查找精确标记源
+                    favorited_match = None
+                    for result in sorted_results:
+                        key = f"{result.provider}:{result.mediaId}"
+                        if favorited_info.get(key):
+                            favorited_match = result
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
+                            break
+
+                    if favorited_match:
+                        best_match = favorited_match
+                        logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
+                    elif not fallback_enabled:
                         # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
                         best_match = sorted_results[0]
                         logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
-                elif not fallback_enabled:
-                    # AI未启用，顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                    best_match = sorted_results[0]
-                    logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                else:
+                    # AI未启用，使用传统匹配
+                    # 传统匹配: 优先查找精确标记源
+                    favorited_match = None
+                    for result in sorted_results:
+                        key = f"{result.provider}:{result.mediaId}"
+                        if favorited_info.get(key):
+                            favorited_match = result
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
+                            break
+
+                    if favorited_match:
+                        best_match = favorited_match
+                        logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
+                    elif not fallback_enabled:
+                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                        best_match = sorted_results[0]
+                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
 
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
