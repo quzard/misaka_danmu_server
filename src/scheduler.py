@@ -292,7 +292,7 @@ class SchedulerManager:
             task_info = await crud.get_scheduled_task(session, task_id)
             if not task_info:
                 raise ValueError(f"找不到ID为 '{task_id}' 的定时任务")
-            
+
             # 新增：防止手动运行系统任务
             if self._is_system_task(task_info['jobType']):
                 raise ValueError("系统内置任务不允许手动运行")
@@ -304,6 +304,13 @@ class SchedulerManager:
         # 修正：直接使用数据库中的 jobType，而不是从 job.func.keywords 获取
         runner = self._create_job_runner(task_info['jobType'], task_id)
         await runner()
+
+        # 手动运行后更新运行时间
+        last_run_time = datetime.now()
+        next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+        async with self._session_factory() as session:
+            await crud.update_scheduled_task_run_times(session, task_id, last_run_time, next_run_time)
+        logger.info(f"手动运行定时任务 '{task_info['name']}' (ID: {task_id}) 后已更新运行时间。")
 
     async def run_task_now_by_type(self, job_type: str):
         """根据任务类型查找任务并立即运行它。"""
