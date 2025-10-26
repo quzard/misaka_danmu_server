@@ -71,8 +71,20 @@ export const RateLimitPanel = () => {
                 <Col xs={24} sm={12}>
                   <Statistic
                     title="流控状态"
-                    value={status.enabled ? '已启用' : '已禁用'}
-                    valueStyle={{ color: status.enabled ? '#3f8600' : '#cf1322' }}
+                    value={
+                      status.verificationFailed
+                        ? '验证失败'
+                        : status.enabled
+                          ? '已启用'
+                          : '已禁用'
+                    }
+                    valueStyle={{
+                      color: status.verificationFailed
+                        ? '#cf1322'
+                        : status.enabled
+                          ? '#3f8600'
+                          : '#cf1322'
+                    }}
                   />
                 </Col>
                 <Col xs={24} sm={12}>
@@ -89,7 +101,7 @@ export const RateLimitPanel = () => {
             <Row gutter={16} className="!mb-6">
               {/* 左侧卡片 - 弹幕下载流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🌐 弹幕下载流控" style={{ height: '100%' }}>
+                <Card type="inner" title="🌐 弹幕下载流控" className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -122,7 +134,7 @@ export const RateLimitPanel = () => {
 
               {/* 右侧卡片 - 后备调用流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🔄 后备调用流控" style={{ height: '100%' }}>
+                <Card type="inner" title="🔄 后备调用流控" className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
