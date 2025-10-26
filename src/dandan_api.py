@@ -1691,6 +1691,10 @@ async def _get_match_for_item(
                 # 确定目标类型
                 target_type = "movie" if is_movie else "tv_series"
 
+                # 获取源的优先级顺序
+                source_settings = await crud.get_all_scraper_settings(session_inner)
+                source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
+
                 def calculate_match_score(result):
                     """计算匹配分数，分数越高越优先"""
                     score = 0
@@ -1710,8 +1714,12 @@ async def _get_match_for_item(
 
                     return score
 
-                # 按分数排序 (分数高的在前)
-                sorted_results = sorted(all_results, key=calculate_match_score, reverse=True)
+                # 按分数排序 (分数高的在前)，相同分数时按源优先级排序
+                sorted_results = sorted(
+                    all_results,
+                    key=lambda r: (calculate_match_score(r), -source_order_map.get(r.provider, 999)),
+                    reverse=True
+                )
 
                 # 打印排序后的结果列表
                 logger.info(f"排序后的搜索结果列表 (按匹配分数):")
