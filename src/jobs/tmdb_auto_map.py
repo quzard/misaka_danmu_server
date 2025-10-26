@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import select
 import httpx
 
 from .. import crud, models
@@ -76,9 +78,8 @@ class TmdbAutoMapJob(BaseJob):
         except Exception as e:
             self.logger.warning(f"初始化AI matcher失败: {e}, 将使用传统搜索")
 
-        # 获取所有TV系列作品
+        # 获取所有作品(TV系列和电影/剧场版)
         from ..orm_models import Anime, AnimeMetadata
-        from sqlalchemy import select
         stmt = (
             select(
                 Anime.id.label("animeId"),
@@ -89,13 +90,13 @@ class TmdbAutoMapJob(BaseJob):
                 AnimeMetadata.tmdbEpisodeGroupId
             )
             .outerjoin(AnimeMetadata, Anime.id == AnimeMetadata.animeId)
-            .where(Anime.type == 'tv_series')
+            .where(Anime.type.in_(['tv_series', 'movie']))
         )
         result = await session.execute(stmt)
         shows_to_update = [dict(row) for row in result.mappings()]
 
         total_shows = len(shows_to_update)
-        self.logger.info(f"找到 {total_shows} 个TV系列作品需要处理。")
+        self.logger.info(f"找到 {total_shows} 个作品需要处理(TV系列和电影)。")
         await progress_callback(5, f"找到 {total_shows} 个作品待处理")
 
         processed_count = 0
@@ -259,9 +260,16 @@ class TmdbAutoMapJob(BaseJob):
                         await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update)
                         self.logger.info(f"为 '{title}' 更新了别名。")
 
-                # 步骤 4: 智能季度匹配 - 两级查找逻辑
+                # 步骤 4: 智能季度匹配 - 两级查找逻辑 (仅适用于TV系列)
                 # 第一级: 使用seasons信息进行匹配(方案A)
                 # 第二级: 使用"Seasons"剧集组进行匹配(方案C)
+
+                # 电影类型跳过剧集组处理
+                if show.get('type') == 'movie':
+                    self.logger.info(f"'{title}' 是电影类型,跳过剧集组处理。")
+                    await session.commit()
+                    processed_count += 1
+                    continue
 
                 tmdb_source = self.metadata_manager.sources.get("tmdb")
                 if not tmdb_source or not hasattr(tmdb_source, 'get_all_episode_groups'):
@@ -357,7 +365,7 @@ class TmdbAutoMapJob(BaseJob):
                     group_id = group.get('id')
                     if not group_id:
                         continue
-                    
+
                     self.logger.info(f"正在为 '{title}' 更新剧集组 '{group.get('name')}' (ID: {group_id}) 的映射...")
                     await self.metadata_manager.update_tmdb_mappings(int(tmdb_id), group_id, user)
 
@@ -365,6 +373,42 @@ class TmdbAutoMapJob(BaseJob):
                     await crud.update_anime_tmdb_group_id(session, anime_id, group_id)
                     self.logger.info(f"已将 '{title}' 的主剧集组ID更新为: {group_id}")
                     mapped_count += 1
+
+                    # 步骤 7: 如果使用了剧集组匹配,在中文别名后追加季度信息
+                    # 从剧集组名称中提取季度信息
+                    group_name = group.get('name', '')
+                    season_suffix = None
+
+                    # 尝试从剧集组名称中提取季度
+                    # 匹配 "Season 2", "第2季", "S02", "S2" 等格式
+                    season_match = re.search(r'(?:season\s+|第|s)(\d+)(?:季)?', group_name, re.IGNORECASE)
+                    if season_match:
+                        season_num = int(season_match.group(1))
+                        season_suffix = f" 第{season_num}季"
+                        self.logger.info(f"检测到剧集组季度信息: {season_suffix}")
+
+                        # 获取当前别名
+                        from ..orm_models import AnimeAlias
+                        stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
+                        result = await session.execute(stmt)
+                        alias_record = result.scalar_one_or_none()
+
+                        if alias_record:
+                            # 为中文别名追加季度后缀
+                            updated = False
+                            if alias_record.aliasCn1 and not alias_record.aliasCn1.endswith(season_suffix):
+                                alias_record.aliasCn1 = alias_record.aliasCn1 + season_suffix
+                                updated = True
+                            if alias_record.aliasCn2 and not alias_record.aliasCn2.endswith(season_suffix):
+                                alias_record.aliasCn2 = alias_record.aliasCn2 + season_suffix
+                                updated = True
+                            if alias_record.aliasCn3 and not alias_record.aliasCn3.endswith(season_suffix):
+                                alias_record.aliasCn3 = alias_record.aliasCn3 + season_suffix
+                                updated = True
+
+                            if updated:
+                                await session.commit()
+                                self.logger.info(f"已为 '{title}' 的中文别名追加季度后缀: {season_suffix}")
 
                 await session.commit() # 提交本次节目的所有更改
                 processed_count += 1
