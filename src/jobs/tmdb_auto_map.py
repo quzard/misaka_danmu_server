@@ -204,9 +204,11 @@ class TmdbAutoMapJob(BaseJob):
                         continue
 
                 # 步骤 2: 获取媒体详情，包括别名
-                details = await self.metadata_manager.get_details("tmdb", tmdb_id, user, mediaType="tv")
+                # 根据作品类型决定mediaType参数
+                media_type_for_details = "movie" if search_type == "movie" else "tv"
+                details = await self.metadata_manager.get_details("tmdb", tmdb_id, user, mediaType=media_type_for_details)
                 if not details:
-                    self.logger.warning(f"未能从 TMDB 获取 '{title}' (ID: {tmdb_id}) 的详情。")
+                    self.logger.warning(f"未能从 TMDB 获取 '{title}' (ID: {tmdb_id}) 的详情 (mediaType={media_type_for_details})。")
                     continue
 
                 # 步骤 3: 更新别名（使用AI验证和分类）
