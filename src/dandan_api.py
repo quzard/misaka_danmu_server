@@ -824,21 +824,26 @@ async def _execute_fallback_search_task(
         # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
         try:
             from . import crud
+            from .utils import parse_search_keyword
             import json
 
-            # 构造缓存键，与WebUI搜索保持一致的格式
-            cache_key = f"fallback_search_{search_term}"
+            # 提取核心标题（去除季度和集数信息）
+            parsed = parse_search_keyword(search_term)
+            core_title = parsed["title"]
+
+            # 使用核心标题作为缓存键，这样同一剧的不同集数可以共享缓存
+            cache_key = f"fallback_search_{core_title}"
 
             # 将搜索结果转换为可缓存的格式
             cache_data = {
-                "search_term": search_term,
+                "search_term": core_title,
                 "results": [result.model_dump() for result in search_results],
                 "timestamp": time.time()
             }
 
             # 存储到数据库缓存（10分钟过期）
             await crud.set_cache(session, cache_key, json.dumps(cache_data), ttl_seconds=600)
-            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key}")
+            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key} (原始搜索词: {search_term})")
 
         except Exception as e:
             logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
