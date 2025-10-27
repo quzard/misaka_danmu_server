@@ -518,6 +518,7 @@ class DandanMatchInfo(BaseModel):
     type: str
     typeDescription: str
     shift: int = 0
+    imageUrl: Optional[str] = None
 
 class DandanMatchResponse(DandanResponseBase):
     isMatched: bool = False
@@ -1531,6 +1532,7 @@ async def _get_match_for_item(
                 match = DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match])
                 logger.info(f"发送匹配响应 (精确标记匹配): {response.model_dump_json(indent=2)}")
@@ -1547,6 +1549,7 @@ async def _get_match_for_item(
                 match = DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match])
                 logger.info(f"发送匹配响应 (单一作品匹配): {response.model_dump_json(indent=2)}")
@@ -1560,6 +1563,7 @@ async def _get_match_for_item(
                 matches.append(DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 ))
             response = DandanMatchResponse(isMatched=False, matches=matches)
             logger.info(f"发送匹配响应 (多个匹配): {response.model_dump_json(indent=2)}")
@@ -1590,6 +1594,7 @@ async def _get_match_for_item(
                     match = DandanMatchInfo(
                         episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                         episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                        imageUrl=res.get('imageUrl')
                     )
                     response = DandanMatchResponse(isMatched=True, matches=[match])
                     logger.info(f"发送匹配响应 (TMDB 映射匹配): {response.model_dump_json(indent=2)}")
@@ -2025,7 +2030,8 @@ async def _get_match_for_item(
                     animeTitle=final_title,
                     episodeTitle=f"第{episode_number}集" if not parsed_info.get("is_movie") else final_title,
                     type="tvseries" if not parsed_info.get("is_movie") else "movie",
-                    typeDescription="匹配成功"
+                    typeDescription="匹配成功",
+                    imageUrl=best_match.imageUrl
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match_result])
                 logger.info(f"发送匹配响应 (匹配后备): episodeId={real_episode_id}, animeId={virtual_anime_id}")
