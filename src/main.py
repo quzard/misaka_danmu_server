@@ -25,6 +25,7 @@ from . import crud, security, orm_models  # 添加 orm_models 导入
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
+from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
 
 print(f"当前环境: {settings.environment}")
 
@@ -163,8 +164,12 @@ async def lifespan(app: FastAPI):
         'aiMatchApiKey': ('', 'AI服务的API密钥'),
         'aiMatchBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
         'aiMatchModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, gpt-4, gemini-pro'),
-        # 注意: AI提示词配置(aiMatchPrompt, aiRecognitionPrompt, aiAliasValidationPrompt)
-        # 将在首次使用AI功能时动态注册,不在此处预注册
+        'aiMatchPrompt': (DEFAULT_AI_MATCH_PROMPT, 'AI智能匹配提示词'),
+        'aiRecognitionEnabled': ('false', '是否启用AI辅助识别。启用后，在TMDB自动刮削任务中使用AI识别标题和季度信息。'),
+        'aiRecognitionPrompt': (DEFAULT_AI_RECOGNITION_PROMPT, 'AI辅助识别提示词'),
+        'aiAliasCorrectionEnabled': ('false', '是否启用AI别名修正。启用后，在TMDB自动刮削任务中使用AI验证和修正别名。'),
+        'aiAliasValidationPrompt': (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, 'AI别名验证提示词'),
+        'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
     }
     await app.state.config_manager.register_defaults(default_configs)
 
