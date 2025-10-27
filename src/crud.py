@@ -809,12 +809,26 @@ async def find_episode_via_tmdb_mapping(
             )
         )
     elif custom_episode is not None:
-        # 增强：当只有集数时，也同时匹配绝对集数和两种S01EXX的情况
+        # 增强：当只有集数时，匹配正片（排除特别季）
+        # 使用absoluteEpisodeNumber（TMDB的episode_number）和季度条件
         stmt = stmt.where(
             or_(
-                MappingFromFile.absoluteEpisodeNumber == custom_episode,
-                and_(MappingFromFile.customSeasonNumber == 1, MappingFromFile.customEpisodeNumber == custom_episode),
-                and_(MappingFromFile.tmdbSeasonNumber == 1, MappingFromFile.tmdbEpisodeNumber == custom_episode)
+                # 匹配剧集组正片：customSeasonNumber >= 1
+                and_(
+                    MappingFromFile.customSeasonNumber >= 1,
+                    or_(
+                        MappingFromFile.absoluteEpisodeNumber == custom_episode,
+                        MappingFromFile.customEpisodeNumber == custom_episode
+                    )
+                ),
+                # 匹配TMDB官方正片：tmdbSeasonNumber >= 1
+                and_(
+                    MappingFromFile.tmdbSeasonNumber >= 1,
+                    or_(
+                        MappingFromFile.tmdbEpisodeNumber == custom_episode,
+                        MappingFromFile.absoluteEpisodeNumber == custom_episode
+                    )
+                )
             )
         )
     
@@ -1324,18 +1338,20 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
 
 async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: int, group_id: str, group_details: models.TMDBEpisodeGroupDetails):
     await session.execute(delete(TmdbEpisodeMapping).where(TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id))
-    
+
     mappings_to_insert = []
     sorted_groups = sorted(group_details.groups, key=lambda g: g.order)
+
     for custom_season_group in sorted_groups:
         if not custom_season_group.episodes: continue
         for custom_episode_index, episode in enumerate(custom_season_group.episodes):
+            # 使用TMDB的episode_number作为绝对集数
             mappings_to_insert.append(
                 TmdbEpisodeMapping(
                     tmdbTvId=tmdb_tv_id, tmdbEpisodeGroupId=group_id, tmdbEpisodeId=episode.id,
                     tmdbSeasonNumber=episode.seasonNumber, tmdbEpisodeNumber=episode.episodeNumber,
                     customSeasonNumber=custom_season_group.order, customEpisodeNumber=custom_episode_index + 1,
-                    absoluteEpisodeNumber=episode.order + 1
+                    absoluteEpisodeNumber=episode.episodeNumber
                 )
             )
     if mappings_to_insert:
