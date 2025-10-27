@@ -2162,7 +2162,41 @@ async def webhook_search_and_dispatch_task(
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 3. 使用与WebUI相同的智能匹配算法选择最佳匹配项
+        # 3. 相似度过滤（与WebUI相同的严格过滤逻辑）
+        logger.info(f"Webhook 任务: 开始相似度过滤，原始结果数: {len(all_search_results)}")
+
+        def normalize_for_filtering(title: str) -> str:
+            """标准化标题用于过滤"""
+            return title.lower().replace(" ", "").replace("：", ":").strip()
+
+        normalized_anime_title = normalize_for_filtering(animeTitle)
+        filtered_results = []
+
+        for item in all_search_results:
+            normalized_item_title = normalize_for_filtering(item.title)
+            if not normalized_item_title:
+                continue
+
+            # 计算相似度
+            similarity = fuzz.partial_ratio(normalized_anime_title, normalized_item_title)
+            length_diff = abs(len(normalized_item_title) - len(normalized_anime_title))
+
+            # 严格过滤：相似度>=95% 或 相似度>=85%且长度差异<=30%
+            if similarity >= 95:
+                filtered_results.append(item)
+            elif similarity >= 85 and length_diff <= max(len(normalized_anime_title) * 0.3, 10):
+                filtered_results.append(item)
+
+        logger.info(f"Webhook 任务: 相似度过滤完成，保留 {len(filtered_results)} 个结果（原始: {len(all_search_results)}）")
+
+        # 如果过滤后没有结果，使用原始结果
+        if not filtered_results:
+            logger.warning(f"Webhook 任务: 相似度过滤后无结果，使用原始结果")
+            filtered_results = all_search_results
+
+        all_search_results = filtered_results
+
+        # 4. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
 
@@ -2171,27 +2205,27 @@ async def webhook_search_and_dispatch_task(
         for i, item in enumerate(all_search_results[:5]):
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
-        # 使用与WebUI相同的智能排序逻辑，新增年份匹配优先级
+        # 使用与WebUI相同的智能排序逻辑，优化年份权重
         all_search_results.sort(
             key=lambda item: (
-                # 1. 年份匹配（最高优先级，避免下载错误年份的版本）
-                10000 if year is not None and item.year is not None and item.year == year else 0,
-                # 2. 季度匹配（仅对电视剧）
-                1 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
-                # 3. 最高优先级：完全匹配的标题
-                1000 if item.title.strip() == animeTitle.strip() else 0,
-                # 4. 次高优先级：去除标点符号后的完全匹配
-                500 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
-                # 5. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
-                200 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
-                # 6. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
-                100 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
-                # 7. 第五优先级：一般相似度，但必须达到85%以上才考虑
+                # 1. 最高优先级：完全匹配的标题
+                10000 if item.title.strip() == animeTitle.strip() else 0,
+                # 2. 次高优先级：去除标点符号后的完全匹配
+                5000 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
+                # 3. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
+                2000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
+                # 4. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
+                1000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
+                # 5. 年份匹配（降低权重，避免年份匹配但标题不匹配的结果排在前面）
+                500 if year is not None and item.year is not None and item.year == year else 0,
+                # 6. 季度匹配（仅对电视剧）
+                100 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
+                # 7. 一般相似度，但必须达到85%以上才考虑
                 fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
                 # 8. 惩罚标题长度差异大的结果
                 -abs(len(item.title) - len(animeTitle)),
                 # 9. 惩罚年份不匹配的结果（如果webhook提供了年份但搜索结果年份不匹配）
-                -1000 if year is not None and item.year is not None and item.year != year else 0,
+                -500 if year is not None and item.year is not None and item.year != year else 0,
                 # 10. 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
@@ -2811,12 +2845,13 @@ async def auto_search_and_import_task(
 
         # 使用统一的搜索函数（不进行排序，后面自己处理）
         # 使用严格过滤模式和自定义别名
+        # 外部控制API启用AI别名扩展（如果配置启用）
         all_results = await unified_search(
             search_term=search_title,
             session=session,
             scraper_manager=scraper_manager,
-            metadata_manager=None,  # 不使用别名扩展，因为上面已经手动获取了别名
-            use_alias_expansion=False,
+            metadata_manager=metadata_manager,  # 传入metadata_manager以支持AI别名扩展
+            use_alias_expansion=True,  # 启用AI别名扩展（外部控制API专用）
             use_alias_filtering=False,
             use_title_filtering=True,  # 启用标题过滤
             use_source_priority_sorting=False,  # 不排序，后面自己处理
