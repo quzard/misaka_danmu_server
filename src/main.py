@@ -25,7 +25,7 @@ from . import crud, security, orm_models  # 添加 orm_models 导入
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
-from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT
 
 print(f"当前环境: {settings.environment}")
 
@@ -169,6 +169,8 @@ async def lifespan(app: FastAPI):
         'aiRecognitionPrompt': (DEFAULT_AI_RECOGNITION_PROMPT, 'AI辅助识别提示词'),
         'aiAliasCorrectionEnabled': ('false', '是否启用AI别名修正。启用后，在TMDB自动刮削任务中使用AI验证和修正别名。'),
         'aiAliasValidationPrompt': (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, 'AI别名验证提示词'),
+        'aiAliasExpansionEnabled': ('false', '是否启用AI别名扩展。启用后，当元数据源返回非中文标题时，使用AI生成可能的别名用于搜索。'),
+        'aiAliasExpansionPrompt': (DEFAULT_AI_ALIAS_EXPANSION_PROMPT, 'AI别名扩展提示词'),
         'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
     }
     await app.state.config_manager.register_defaults(default_configs)

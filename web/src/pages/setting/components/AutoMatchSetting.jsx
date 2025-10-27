@@ -15,6 +15,7 @@ const AutoMatchSetting = () => {
   const [matchMode, setMatchMode] = useState('traditional')
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
   const [recognitionEnabled, setRecognitionEnabled] = useState(false)
+  const [aliasExpansionEnabled, setAliasExpansionEnabled] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
 
@@ -34,6 +35,8 @@ const AutoMatchSetting = () => {
         recognitionPromptRes,
         aliasValidationPromptRes,
         aliasCorrectionEnabledRes,
+        aliasExpansionEnabledRes,
+        aliasExpansionPromptRes,
         logRawResponseRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
@@ -47,6 +50,8 @@ const AutoMatchSetting = () => {
         getConfig('aiRecognitionPrompt'),
         getConfig('aiAliasValidationPrompt'),
         getConfig('aiAliasCorrectionEnabled'),
+        getConfig('aiAliasExpansionEnabled'),
+        getConfig('aiAliasExpansionPrompt'),
         getConfig('aiLogRawResponse')
       ])
 
@@ -54,10 +59,12 @@ const AutoMatchSetting = () => {
       const fallback = fallbackRes.data.value === 'true'
       const recognition = recognitionEnabledRes.data.value === 'true'
       const aliasCorrection = aliasCorrectionEnabledRes.data.value === 'true'
+      const aliasExpansion = aliasExpansionEnabledRes.data.value === 'true'
       const logRawResponse = logRawResponseRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
       setRecognitionEnabled(recognition)
+      setAliasExpansionEnabled(aliasExpansion)
 
       form.setFieldsValue({
         aiMatchEnabled: enabled,
@@ -71,6 +78,8 @@ const AutoMatchSetting = () => {
         aiRecognitionPrompt: recognitionPromptRes.data.value || '',
         aiAliasValidationPrompt: aliasValidationPromptRes.data.value || '',
         aiAliasCorrectionEnabled: aliasCorrection,
+        aiAliasExpansionEnabled: aliasExpansion,
+        aiAliasExpansionPrompt: aliasExpansionPromptRes.data.value || '',
         aiLogRawResponse: logRawResponse
       })
     } catch (error) {
@@ -104,6 +113,8 @@ const AutoMatchSetting = () => {
         setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
         setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
         setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || ''),
         setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
       ])
 
@@ -205,6 +216,9 @@ const AutoMatchSetting = () => {
             }
             if ('aiRecognitionEnabled' in changedValues) {
               setRecognitionEnabled(changedValues.aiRecognitionEnabled)
+            }
+            if ('aiAliasExpansionEnabled' in changedValues) {
+              setAliasExpansionEnabled(changedValues.aiAliasExpansionEnabled)
             }
           }}
         >
@@ -410,35 +424,56 @@ const AutoMatchSetting = () => {
 
             {/* 标签页3: AI识别增强 */}
             <TabPane tab="AI识别增强" key="recognition">
-              <Form.Item
-                name="aiRecognitionEnabled"
-                label={
-                  <Space>
-                    <span>启用AI辅助识别</span>
-                    <Tooltip title="使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务。">
-                      <QuestionCircleOutlined />
-                    </Tooltip>
-                  </Space>
-                }
-                valuePropName="checked"
-              >
-                <Switch disabled={matchMode !== 'ai'} />
-              </Form.Item>
-
-              <Form.Item
-                name="aiAliasCorrectionEnabled"
-                label={
-                  <Space>
-                    <span>启用AI别名修正</span>
-                    <Tooltip title="使用AI修正已有的错误别名(例如中文别名字段写入了非中文内容)。启用后,TMDB自动刮削任务会强制更新所有别名字段。注意:已锁定的别名不会被修正。">
-                      <QuestionCircleOutlined />
-                    </Tooltip>
-                  </Space>
-                }
-                valuePropName="checked"
-              >
-                <Switch disabled={matchMode !== 'ai' || !recognitionEnabled} />
-              </Form.Item>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item
+                    name="aiRecognitionEnabled"
+                    label={
+                      <Space>
+                        <span>启用AI辅助识别</span>
+                        <Tooltip title="使用AI从标题中提取结构化信息(作品名称、季度、类型等),提高TMDB搜索准确率。应用于TMDB自动刮削定时任务。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    valuePropName="checked"
+                  >
+                    <Switch disabled={matchMode !== 'ai'} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    name="aiAliasCorrectionEnabled"
+                    label={
+                      <Space>
+                        <span>启用AI别名修正</span>
+                        <Tooltip title="使用AI修正已有的错误别名(例如中文别名字段写入了非中文内容)。启用后,TMDB自动刮削任务会强制更新所有别名字段。注意:已锁定的别名不会被修正。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    valuePropName="checked"
+                  >
+                    <Switch disabled={matchMode !== 'ai' || !recognitionEnabled} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    name="aiAliasExpansionEnabled"
+                    label={
+                      <Space>
+                        <span>启用AI别名扩展</span>
+                        <Tooltip title="当元数据源返回非中文标题时，使用AI生成可能的别名（中文、罗马音、英文缩写等），然后在Bangumi/Douban中搜索以获取中文标题。应用于外部控制API全自动导入、Webhook自动导入等场景。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                    }
+                    valuePropName="checked"
+                  >
+                    <Switch disabled={matchMode !== 'ai'} />
+                  </Form.Item>
+                </Col>
+              </Row>
 
               <Form.Item
                 name="aiRecognitionPrompt"
@@ -477,6 +512,25 @@ const AutoMatchSetting = () => {
                   disabled={matchMode !== 'ai' || !recognitionEnabled}
                 />
               </Form.Item>
+
+              <Form.Item
+                name="aiAliasExpansionPrompt"
+                label={
+                  <Space>
+                    <span>AI别名扩展提示词</span>
+                    <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                }
+              >
+                <TextArea
+                  rows={8}
+                  placeholder="留空使用默认提示词..."
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                  disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
+                />
+              </Form.Item>
             </TabPane>
           </Tabs>
         </Form>
@@ -498,6 +552,9 @@ const AutoMatchSetting = () => {
               <strong>AI别名修正</strong>: 使用AI修正已有的错误别名(例如中文别名字段写入了非中文内容)。启用后会强制更新所有别名字段,但已锁定的别名不会被修正
             </li>
             <li>
+              <strong>AI别名扩展</strong>: 当元数据源返回非中文标题时,使用AI生成可能的别名(中文译名、罗马音、英文缩写等),然后在Bangumi/Douban中搜索以获取中文标题
+            </li>
+            <li>
               <strong>传统匹配兜底</strong>: 当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性(仅AI模式下可用)
             </li>
             <li>
@@ -505,6 +562,7 @@ const AutoMatchSetting = () => {
               <ul>
                 <li>AI智能匹配: 外部控制API全自动导入、Webhook自动导入、匹配后备机制</li>
                 <li>AI辅助识别: TMDB自动刮削与剧集组映射定时任务</li>
+                <li>AI别名扩展: 外部控制API全自动导入、Webhook自动导入等场景（当元数据源返回非中文标题时）</li>
               </ul>
             </li>
             <li>

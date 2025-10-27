@@ -148,6 +148,84 @@ DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正
 输出: {"search_title": "你的名字", "season": null, "type": "movie", "year": 2016, "use_episode_group": false}
 (纠错: 标题中年份2016覆盖错误的2020,根据常识判断为电影)"""
 
+# 默认别名扩展提示词
+DEFAULT_AI_ALIAS_EXPANSION_PROMPT = """你是一个专业的影视作品别名生成专家。你的任务是为指定作品生成可能的别名，用于在中文元数据源（Bangumi、豆瓣）中搜索。
+
+**重要**: 你必须严格按照JSON格式返回结果,不要返回任何其他文本或解释。
+
+**输入格式**:
+- title: 作品标题（可能是英文、日文、韩文等非中文标题）
+- year: 年份（可能为null）
+- type: 类型（tv_series/movie）
+- existing_aliases: 已有别名列表（请勿重复）
+
+**生成规则**:
+1. **不要编造译名**: 只生成可能真实存在的别名
+2. **多语言覆盖**: 可以包括中文译名、罗马音、英文缩写、日文原名等
+3. **置信度评估**: 为每个别名标注置信度（high/medium/low）
+4. **去重**: 不要重复已有别名
+5. **数量限制**: 最多返回5个别名
+6. **排序**: 按置信度从高到低排序
+7. **推荐元数据源**: 根据作品类型推荐最可能有该作品的元数据源
+
+**输出格式** (必须是有效的JSON):
+{
+  "aliases": [
+    {"name": "别名1", "confidence": "high"},
+    {"name": "别名2", "confidence": "medium"},
+    {"name": "别名3", "confidence": "low"}
+  ],
+  "recommendedSource": "bangumi"
+}
+
+**禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。
+
+**示例**:
+
+输入: {
+  "title": "Attack on Titan",
+  "year": 2013,
+  "type": "tv_series",
+  "existing_aliases": ["進撃の巨人"]
+}
+输出: {
+  "aliases": [
+    {"name": "进击的巨人", "confidence": "high"},
+    {"name": "Shingeki no Kyojin", "confidence": "high"},
+    {"name": "AOT", "confidence": "medium"}
+  ],
+  "recommendedSource": "bangumi"
+}
+
+输入: {
+  "title": "Demon Slayer",
+  "year": 2019,
+  "type": "tv_series",
+  "existing_aliases": []
+}
+输出: {
+  "aliases": [
+    {"name": "鬼灭之刃", "confidence": "high"},
+    {"name": "鬼滅の刃", "confidence": "high"},
+    {"name": "Kimetsu no Yaiba", "confidence": "high"}
+  ],
+  "recommendedSource": "bangumi"
+}
+
+输入: {
+  "title": "Tenet",
+  "year": 2020,
+  "type": "movie",
+  "existing_aliases": []
+}
+输出: {
+  "aliases": [
+    {"name": "信条", "confidence": "high"},
+    {"name": "天能", "confidence": "medium"}
+  ],
+  "recommendedSource": "douban"
+}"""
+
 # 默认别名验证提示词
 DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名验证与分类专家。你的任务是:
 1. 验证一组别名是否真正属于指定作品
@@ -567,6 +645,110 @@ class AIMatcher:
 
         except Exception as e:
             logger.error(f"OpenAI识别调用失败: {e}")
+            return None
+
+    async def expand_aliases(
+        self,
+        title: str,
+        year: Optional[int],
+        media_type: str,
+        existing_aliases: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        AI别名扩展 - 生成可能的别名用于搜索
+
+        Args:
+            title: 作品标题（可能是非中文）
+            year: 年份
+            media_type: 类型（tv_series/movie）
+            existing_aliases: 已有别名列表
+
+        Returns:
+            {
+                "aliases": [{"name": "别名", "confidence": "high/medium/low"}],
+                "recommendedSource": "bangumi/douban"
+            }
+        """
+        if not self.client:
+            logger.warning("AI别名扩展: AI客户端未初始化")
+            return None
+
+        try:
+            # 构建输入数据
+            input_data = {
+                "title": title,
+                "year": year,
+                "type": media_type,
+                "existing_aliases": existing_aliases
+            }
+
+            logger.info(f"AI别名扩展: 开始生成别名 - {input_data}")
+
+            # 根据提供商选择调用方法
+            if self.provider == 'openai':
+                response_data = await self._expand_aliases_openai(input_data)
+            else:
+                logger.error(f"AI别名扩展: 不支持的提供商 {self.provider}")
+                return None
+
+            if not response_data:
+                logger.warning("AI别名扩展: 未获取到有效响应")
+                return None
+
+            # 检查返回类型
+            if not isinstance(response_data, dict):
+                logger.error(f"AI别名扩展: 返回数据类型错误,期望dict,实际为{type(response_data).__name__}: {response_data}")
+                return None
+
+            # 验证必需字段
+            if "aliases" not in response_data or not isinstance(response_data["aliases"], list):
+                logger.error(f"AI别名扩展: 返回数据缺少aliases字段或类型错误: {response_data}")
+                return None
+
+            logger.info(f"AI别名扩展: 生成成功 - {response_data}")
+            return response_data
+
+        except Exception as e:
+            logger.error(f"AI别名扩展过程中发生错误: {e}", exc_info=True)
+            return None
+
+    async def _expand_aliases_openai(self, input_data: Dict[str, Any]) -> Optional[Dict]:
+        """使用OpenAI兼容接口进行别名扩展"""
+        if not self.client:
+            return None
+
+        try:
+            import json
+
+            # 获取别名扩展提示词
+            alias_expansion_prompt = self.config.get("ai_alias_expansion_prompt", "")
+            if not alias_expansion_prompt:
+                alias_expansion_prompt = DEFAULT_AI_ALIAS_EXPANSION_PROMPT
+
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": alias_expansion_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                timeout=30
+            )
+
+            content = response.choices[0].message.content
+            logger.debug(f"AI别名扩展原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            return parsed_data
+
+        except Exception as e:
+            logger.error(f"OpenAI别名扩展调用失败: {e}")
             return None
 
     def validate_aliases(
