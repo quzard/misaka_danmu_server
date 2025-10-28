@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Switch, Button, Space, message, Popconfirm, Card } from 'antd';
-import { getConfig, updateConfig } from '@/apis';
+import { getConfig, setConfig } from '@/apis';
 
 const DanmakuStorage = () => {
   const [form] = Form.useForm();
@@ -100,12 +100,12 @@ const DanmakuStorage = () => {
   const handleSave = async () => {
     try {
       setLoading(true);
-      
+
       // 保存配置
-      await updateConfig('customDanmakuPathEnabled', customDanmakuPathEnabled ? 'true' : 'false');
-      await updateConfig('danmakuDirectoryPath', danmakuDirectoryPath);
-      await updateConfig('danmakuFilenameTemplate', danmakuFilenameTemplate);
-      
+      await setConfig('customDanmakuPathEnabled', customDanmakuPathEnabled ? 'true' : 'false');
+      await setConfig('danmakuDirectoryPath', danmakuDirectoryPath);
+      await setConfig('danmakuFilenameTemplate', danmakuFilenameTemplate);
+
       message.success('配置保存成功');
     } catch (error) {
       message.error('配置保存失败');
