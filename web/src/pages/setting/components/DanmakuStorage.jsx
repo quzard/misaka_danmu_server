@@ -136,16 +136,27 @@ const DanmakuStorage = () => {
         style={{ maxWidth: 800 }}
       >
         {/* 启用自定义弹幕路径 */}
-        <Form.Item 
+        <Form.Item
           label="启用自定义弹幕路径"
           name="customDanmakuPathEnabled"
         >
           <div>
-            <Switch 
+            <Switch
               checked={customDanmakuPathEnabled}
-              onChange={(checked) => {
+              onChange={async (checked) => {
                 setCustomDanmakuPathEnabled(checked);
                 form.setFieldValue('customDanmakuPathEnabled', checked);
+                // 自动保存开关状态
+                try {
+                  await setConfig('customDanmakuPathEnabled', checked ? 'true' : 'false');
+                  message.success(checked ? '已启用自定义弹幕路径' : '已禁用自定义弹幕路径');
+                } catch (error) {
+                  message.error('保存失败');
+                  console.error(error);
+                  // 恢复原状态
+                  setCustomDanmakuPathEnabled(!checked);
+                  form.setFieldValue('customDanmakuPathEnabled', !checked);
+                }
               }}
             />
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
