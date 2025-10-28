@@ -1275,7 +1275,7 @@ async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> O
             AnimeSource.animeId,
             Episode.providerEpisodeId,
             Episode.danmakuFilePath,
-            Episode.episodeNumber
+            Episode.episodeIndex
         )
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episode_id)

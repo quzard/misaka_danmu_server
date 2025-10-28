@@ -1717,13 +1717,13 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 if not info or not info.get("providerName") or not info.get("providerEpisodeId"):
                     logger.warning(f"分集 ID {episode_id} 的源信息不完整，跳过")
                     # 如果没有集数信息，使用ID作为fallback
-                    episode_number = info.get("episodeNumber", episode_id) if info else episode_id
-                    failed_episodes.append((episode_number, episode_id))
+                    episode_index = info.get("episodeIndex", episode_id) if info else episode_id
+                    failed_episodes.append((episode_index, episode_id))
                     continue
 
                 provider_name = info["providerName"]
                 provider_episode_id = info["providerEpisodeId"]
-                episode_number = info.get("episodeNumber", episode_id)
+                episode_index = info.get("episodeIndex", episode_id)
 
                 scraper = manager.get_scraper(provider_name)
 
@@ -1733,7 +1733,7 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 except RateLimitExceededError as e:
                     if e.retry_after_seconds >= 3600:
                         logger.error(f"流控配置验证失败，跳过分集 {episode_id}: {str(e)}")
-                        failed_episodes.append((episode_number, episode_id))
+                        failed_episodes.append((episode_index, episode_id))
                         continue
 
                     logger.warning(f"批量刷新遇到速率限制，等待 {e.retry_after_seconds:.0f} 秒...")
@@ -1762,7 +1762,7 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 if not all_comments_from_source:
                     await crud.update_episode_fetch_time(session, episode_id)
                     logger.warning(f"分集 {episode_id} 未找到任何弹幕")
-                    failed_episodes.append((episode_number, episode_id))
+                    failed_episodes.append((episode_index, episode_id))
                     continue
 
                 await rate_limiter.increment(provider_name)
@@ -1770,7 +1770,7 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 # 4. 保存弹幕
                 added_count = await crud.save_danmaku_for_episode(session, episode_id, all_comments_from_source, None)
                 total_added_comments += added_count
-                success_episodes.append((episode_number, episode_id))
+                success_episodes.append((episode_index, episode_id))
 
                 # 提交事务，释放锁
                 await session.commit()
@@ -1783,10 +1783,10 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 # 尝试获取集数，如果失败则使用ID
                 try:
                     info = await crud.get_episode_provider_info(session, episode_id)
-                    ep_num = info.get("episodeNumber", episode_id) if info else episode_id
+                    ep_idx = info.get("episodeIndex", episode_id) if info else episode_id
                 except:
-                    ep_num = episode_id
-                failed_episodes.append((ep_num, episode_id))
+                    ep_idx = episode_id
+                failed_episodes.append((ep_idx, episode_id))
                 continue
 
         success_count = len(success_episodes)
