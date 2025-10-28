@@ -725,6 +725,33 @@ export const EpisodeDetail = () => {
             columns={columns}
             rowKey={'episodeId'}
             scroll={{ x: '100%' }}
+            onRow={record => ({
+              onClick: e => {
+                // 如果点击的是操作列的按钮或链接，不触发行选择
+                if (
+                  e.target.closest('.ant-btn') ||
+                  e.target.closest('a') ||
+                  e.target.closest('.cursor-pointer')
+                ) {
+                  return
+                }
+
+                // 切换选中状态
+                const isSelected = selectedRows.some(
+                  row => row.episodeId === record.episodeId
+                )
+                if (isSelected) {
+                  setSelectedRows(
+                    selectedRows.filter(
+                      row => row.episodeId !== record.episodeId
+                    )
+                  )
+                } else {
+                  setSelectedRows([...selectedRows, record])
+                }
+              },
+              style: { cursor: 'pointer' },
+            })}
           />
         ) : (
           <Empty />
