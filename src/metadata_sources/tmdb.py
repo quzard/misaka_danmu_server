@@ -100,10 +100,20 @@ class TmdbMetadataSource(BaseMetadataSource):
                     release_date = item.get('first_air_date') if mediaType == 'tv' else item.get('release_date')
                     details_str = f"{release_date or '未知年份'} / {item.get('original_language', 'N/A')}"
 
+                    # 提取年份
+                    year = None
+                    if release_date:
+                        try:
+                            year = int(release_date[:4])
+                        except (ValueError, TypeError):
+                            pass
+
                     results.append(models.MetadataDetailsResponse(
                         id=str(item['id']),
                         tmdbId=str(item['id']),
                         title=title,
+                        type=mediaType,  # 添加类型字段
+                        year=year,  # 添加年份字段
                         imageUrl=f"{image_base_url}{item.get('poster_path')}" if item.get('poster_path') else None,
                         details=details_str
                     ))
@@ -139,7 +149,25 @@ class TmdbMetadataSource(BaseMetadataSource):
                     except (ValueError, TypeError):
                         pass
 
-                # 4. Construct the response
+                # 4. 提取seasons信息(仅TV系列)
+                seasons_data = None
+                if mediaType == 'tv' and details.get('seasons'):
+                    seasons_data = []
+                    for season in details.get('seasons', []):
+                        try:
+                            seasons_data.append(models.TMDBSeasonInfo(
+                                airDate=season.get('air_date'),
+                                episodeCount=season.get('episode_count', 0),
+                                id=season.get('id'),
+                                name=season.get('name', ''),
+                                seasonNumber=season.get('season_number', 0),
+                                posterPath=season.get('poster_path')
+                            ))
+                        except Exception as e:
+                            self.logger.warning(f"解析season信息失败: {e}")
+                            continue
+
+                # 5. Construct the response
                 return models.MetadataDetailsResponse(
                     id=str(details['id']),
                     tmdbId=str(details['id']),
@@ -152,7 +180,8 @@ class TmdbMetadataSource(BaseMetadataSource):
                     details=details.get('overview'),
                     year=year,
                     imdbId=details.get('external_ids', {}).get('imdb_id'),
-                    tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None
+                    tvdbId=str(details.get('external_ids', {}).get('tvdb_id')) if details.get('external_ids', {}).get('tvdb_id') else None,
+                    seasons=seasons_data
                 )
         except ValueError as e:
             # 捕获 _create_client 中的 API Key 未配置错误
@@ -307,6 +336,34 @@ class TmdbMetadataSource(BaseMetadataSource):
         except ValueError as e:
             # 捕获 _create_client 中的 API Key 未配置错误
             raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail=str(e))
+
+    async def get_all_episode_groups(self, tmdb_id: int, user: models.User) -> List[Dict[str, Any]]:
+        """
+        获取指定TMDB TV ID的所有剧集组信息。
+        返回剧集组列表，每个剧集组包含id、name、type等信息。
+        """
+        try:
+            async with await self._create_client() as client:
+                response = await client.get(f"/tv/{tmdb_id}/episode_groups")
+                response.raise_for_status()
+                raw_results = response.json().get("results", [])
+
+                # 转换为驼峰命名格式
+                camel_case_results = []
+                for item in raw_results:
+                    camel_case_results.append({
+                        "description": item.get("description"),
+                        "episodeCount": item.get("episode_count"),
+                        "groupCount": item.get("group_count"),
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "network": item.get("network"),
+                        "type": item.get("type"),
+                    })
+                return camel_case_results
+        except Exception as e:
+            self.logger.error(f"获取剧集组失败 (TMDB ID: {tmdb_id}): {e}")
+            return []
 
     async def update_tmdb_mappings(self, tmdb_tv_id: int, group_id: str, user: models.User):
         """

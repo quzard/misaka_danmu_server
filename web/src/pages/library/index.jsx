@@ -11,9 +11,11 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
   Table,
   Tooltip,
 } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
@@ -970,6 +972,20 @@ export const Library = () => {
             fetchedValue={fetchedMetadata?.aliasesCn?.[2]}
             form={form}
           />
+          <Form.Item
+            name="aliasLocked"
+            label={
+              <Space>
+                <span>锁定别名</span>
+                <Tooltip title="锁定后,TMDB自动刮削任务将不会自动更新此作品的别名信息">
+                  <QuestionCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
           <Form.Item name="animeId" hidden>
             <Input />
           </Form.Item>
@@ -1223,11 +1239,16 @@ export const Library = () => {
                   {item.name} (Order: {item.order})
                 </div>
                 {item.episodes?.map((ep, i) => {
+                  // 计算绝对集数显示格式
+                  // 特别季(season_number=0): S00EXX
+                  // 正片(season_number=1): S01EXX (使用episode_number作为绝对序号)
+                  const seasonNum = ep.season_number || ep.seasonNumber || 0
+                  const episodeNum = ep.episode_number || ep.episodeNumber || (ep.order + 1)
+                  const absoluteDisplay = `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`
+
                   return (
                     <div key={i}>
-                      第{ep.order + 1}集（绝对：S
-                      {padStart(ep.seasonNumber, 2, '0')}E
-                      {padStart(ep.episodeNumber, 2, '0')}）|
+                      第{ep.order + 1}集（绝对：{absoluteDisplay}）|
                       {ep.name || '无标题'}
                     </div>
                   )

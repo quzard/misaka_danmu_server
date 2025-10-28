@@ -1621,6 +1621,10 @@ ALLOWED_CONFIG_KEYS = {
     "webhookFilterRegex": {"type": "string", "description": "用于过滤 Webhook 标题的正则表达式"},
     # 识别词配置
     "titleRecognition": {"type": "text", "description": "自定义识别词配置内容，支持屏蔽词、替换、集数偏移、季度偏移等规则"},
+    # AI配置
+    "aiMatchPrompt": {"type": "text", "description": "AI智能匹配提示词"},
+    "aiRecognitionPrompt": {"type": "text", "description": "AI辅助识别提示词"},
+    "aiAliasValidationPrompt": {"type": "text", "description": "AI别名验证提示词"},
 }
 
 class ConfigItem(BaseModel):

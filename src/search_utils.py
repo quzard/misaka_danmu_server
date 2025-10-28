@@ -70,18 +70,25 @@ async def unified_search(
 
         # 优化2: 检查别名缓存
         from . import crud
-        alias_cache_key = f"search_aliases_{search_term}"
+        from .utils import parse_search_keyword
+
+        # 提取核心标题（去除季度和集数信息）
+        parsed = parse_search_keyword(search_term)
+        core_title = parsed["title"]
+
+        # 使用核心标题作为缓存键，这样同一剧的不同集数可以共享别名缓存
+        alias_cache_key = f"search_aliases_{core_title}"
         cached_aliases = await crud.get_cache(session, alias_cache_key)
 
         if cached_aliases:
-            logger.info(f"从缓存中获取别名: {cached_aliases}")
+            logger.info(f"从缓存中获取'{core_title}'的别名: {cached_aliases}")
             try:
                 import json
                 cached_alias_list = json.loads(cached_aliases)
                 if use_alias_filtering:
-                    # 验证缓存的别名相似度
+                    # 验证缓存的别名相似度（使用核心标题进行比较）
                     for alias in cached_alias_list:
-                        similarity = fuzz.token_set_ratio(search_term, alias)
+                        similarity = fuzz.token_set_ratio(core_title, alias)
                         if similarity >= 75:
                             filter_aliases.add(alias)
                 else:
@@ -94,11 +101,13 @@ async def unified_search(
                 try:
                     from . import models
                     user = models.User(id=0, username="system")
-                    all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(search_term, user)
+                    # 使用核心标题获取别名
+                    all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(core_title, user)
 
                     # 缓存别名（1小时）
                     import json
                     await crud.set_cache(session, alias_cache_key, json.dumps(list(all_possible_aliases)), ttl_seconds=3600)
+                    logger.info(f"已缓存'{core_title}'的别名: {len(all_possible_aliases)}个")
 
                     return all_possible_aliases
                 except Exception as e:

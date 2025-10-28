@@ -39,7 +39,7 @@ APP_SECRET_KEY = "cf65GPholnICgyw1xbrpA79XVkizOdMq"
 APP_SEARCH_HOST = "api.qwdjapp.com"
 APP_DRAMA_HOST = "api.zhimeisj.top"
 APP_DANMU_HOST = "static-dm.qwdjapp.com"
-APP_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; PJC110 Build/AP3A.240617.008; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36 App/RRSPApp platform/android AppVersion/10.27.4'
+APP_USER_AGENT = 'Mozilla/5.0 (Linux; Android 11; M2007J3SC Build/RKQ1.200826.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/77.0.3865.120 MQQBrowser/6.2 TBS/045714 Mobile Safari/537.36'
 
 
 @dataclass(frozen=True)
@@ -158,31 +158,39 @@ def _generate_app_x_ca_sign(path: str, timestamp: int, query_string: str = "") -
     return base64.b64encode(signature).decode()
 
 
+def _generate_random_device_id() -> str:
+    """生成随机deviceId (base64编码)"""
+    import random
+    import string
+    chars = string.ascii_lowercase + string.digits
+    random_str = ''.join(random.choice(chars) for _ in range(24))
+    return base64.b64encode(random_str.encode()).decode()
+
+
+def _generate_random_md5() -> str:
+    """生成随机MD5字符串"""
+    import hashlib
+    import random
+    import string
+    random_str = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(16))
+    return hashlib.md5(random_str.encode()).hexdigest()[:24]
+
+
 def _build_app_headers(timestamp: int, sign: str, x_ca_sign: str, host: str) -> Dict[str, str]:
-    """构建APP API请求头"""
+    """构建APP API请求头（简化版，使用随机字符串）"""
+    device_id = _generate_random_device_id()
+    ali_id = _generate_random_md5()
+    um_id = _generate_random_md5()
+
     return {
         'User-Agent': APP_USER_AGENT,
-        'Accept-Encoding': 'gzip',
-        'Connection': 'close',
-        'Host': host,
-        'clientVersion': '10.27.4',
-        'pkt': 'rrmj',
-        'p': 'Android',
-        'deviceId': 'fG1vO5jzBm22vJ5mfcCYGp2NrBii5SPysgiy%2FaUb63EOTrtXyXdxHm1cUajUR1zbszl62ApHyWc1GKZtH%2FbmF0UMZWgEetdDy9QVXd9WvPU%3D',
-        'token': '',
-        'aliId': 'aPuaf9shK3QDAL6WwVdhc7cC',
-        'umId': '380998657e22ed51b5a21f2b519aa5beod',
-        'st': '',
+        'deviceId': device_id,
+        'aliId': ali_id,
+        'umId': um_id,
         'clientType': 'android_rrsp_xb_RRSP',
-        'wcode': '1',
         't': str(timestamp),
         'sign': sign,
-        'folding-screen': '1',
         'isAgree': '1',
-        'et': '2',
-        'oaid': '2EDEAF4BEDC24B22B4DE3A1CC01C2F735b8f2e4c1288c3768f73d6c7cae60ba1',
-        'uet': '1',
-        'ct': 'android_rrsp_xb_RRSP',
         'cv': '10.27.4',
         'x-ca-sign': x_ca_sign,
         'x-ca-method': '1'

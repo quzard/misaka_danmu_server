@@ -10,6 +10,7 @@ import {
   offsetEpisodes,
   manualImportEpisode,
   refreshEpisodeDanmaku,
+  refreshEpisodesBulk,
   resetEpisode,
 } from '../../apis'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -337,6 +338,36 @@ export const EpisodeDetail = () => {
     })
   }
 
+  const handleBatchRefresh = () => {
+    if (!selectedRows.length) {
+      messageApi.warning('请先选择要刷新的分集')
+      return
+    }
+
+    modalApi.confirm({
+      title: '批量刷新分集',
+      zIndex: 1002,
+      content: (
+        <div>
+          您确定要刷新选中的 {selectedRows.length} 个分集的弹幕吗？
+          <br />
+          此操作将在后台提交 {selectedRows.length} 个刷新任务。
+        </div>
+      ),
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const episodeIds = selectedRows.map(row => row.episodeId)
+          const res = await refreshEpisodesBulk({ episodeIds })
+          messageApi.success(res.message || '批量刷新任务已提交。')
+        } catch (error) {
+          messageApi.error(`提交批量刷新任务失败:${error.message}`)
+        }
+      },
+    })
+  }
+
   const goTask = res => {
     modalApi.confirm({
       title: '提示',
@@ -481,6 +512,7 @@ export const EpisodeDetail = () => {
   }
 
   const rowSelection = {
+    selectedRowKeys: selectedRows.map(row => row.episodeId),
     onChange: (_, selectedRows) => {
       console.log('selectedRows: ', selectedRows)
       setSelectedRows(selectedRows)
@@ -632,6 +664,16 @@ export const EpisodeDetail = () => {
             >
               重整集数
             </Button>
+            <Button
+              onClick={handleBatchRefresh}
+              disabled={!selectedRows.length || isXmlImport}
+              type="primary"
+            >
+              <Tooltip title="批量刷新选中分集的弹幕">
+                <MyIcon icon="refresh" size={16} />
+                <span className="ml-1">批量刷新</span>
+              </Tooltip>
+            </Button>
             {isXmlImport && (
               <Button
                 onClick={() => {
@@ -684,6 +726,33 @@ export const EpisodeDetail = () => {
             columns={columns}
             rowKey={'episodeId'}
             scroll={{ x: '100%' }}
+            onRow={record => ({
+              onClick: e => {
+                // 如果点击的是操作列的按钮或链接，不触发行选择
+                if (
+                  e.target.closest('.ant-btn') ||
+                  e.target.closest('a') ||
+                  e.target.closest('.cursor-pointer')
+                ) {
+                  return
+                }
+
+                // 切换选中状态
+                const isSelected = selectedRows.some(
+                  row => row.episodeId === record.episodeId
+                )
+                if (isSelected) {
+                  setSelectedRows(
+                    selectedRows.filter(
+                      row => row.episodeId !== record.episodeId
+                    )
+                  )
+                } else {
+                  setSelectedRows([...selectedRows, record])
+                }
+              },
+              style: { cursor: 'pointer' },
+            })}
           />
         ) : (
           <Empty />

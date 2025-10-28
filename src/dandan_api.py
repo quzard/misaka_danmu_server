@@ -518,6 +518,7 @@ class DandanMatchInfo(BaseModel):
     type: str
     typeDescription: str
     shift: int = 0
+    imageUrl: Optional[str] = None
 
 class DandanMatchResponse(DandanResponseBase):
     isMatched: bool = False
@@ -824,21 +825,26 @@ async def _execute_fallback_search_task(
         # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
         try:
             from . import crud
+            from .utils import parse_search_keyword
             import json
 
-            # 构造缓存键，与WebUI搜索保持一致的格式
-            cache_key = f"fallback_search_{search_term}"
+            # 提取核心标题（去除季度和集数信息）
+            parsed = parse_search_keyword(search_term)
+            core_title = parsed["title"]
+
+            # 使用核心标题作为缓存键，这样同一剧的不同集数可以共享缓存
+            cache_key = f"fallback_search_{core_title}"
 
             # 将搜索结果转换为可缓存的格式
             cache_data = {
-                "search_term": search_term,
+                "search_term": core_title,
                 "results": [result.model_dump() for result in search_results],
                 "timestamp": time.time()
             }
 
             # 存储到数据库缓存（10分钟过期）
             await crud.set_cache(session, cache_key, json.dumps(cache_data), ttl_seconds=600)
-            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key}")
+            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key} (原始搜索词: {search_term})")
 
         except Exception as e:
             logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
@@ -1526,6 +1532,7 @@ async def _get_match_for_item(
                 match = DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match])
                 logger.info(f"发送匹配响应 (精确标记匹配): {response.model_dump_json(indent=2)}")
@@ -1542,6 +1549,7 @@ async def _get_match_for_item(
                 match = DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match])
                 logger.info(f"发送匹配响应 (单一作品匹配): {response.model_dump_json(indent=2)}")
@@ -1555,6 +1563,7 @@ async def _get_match_for_item(
                 matches.append(DandanMatchInfo(
                     episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                     episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl')
                 ))
             response = DandanMatchResponse(isMatched=False, matches=matches)
             logger.info(f"发送匹配响应 (多个匹配): {response.model_dump_json(indent=2)}")
@@ -1585,6 +1594,7 @@ async def _get_match_for_item(
                     match = DandanMatchInfo(
                         episodeId=res['episodeId'], animeId=res['animeId'], animeTitle=res['animeTitle'],
                         episodeTitle=res['episodeTitle'], type=dandan_type, typeDescription=dandan_type_desc,
+                        imageUrl=res.get('imageUrl')
                     )
                     response = DandanMatchResponse(isMatched=True, matches=[match])
                     logger.info(f"发送匹配响应 (TMDB 映射匹配): {response.model_dump_json(indent=2)}")
@@ -1691,6 +1701,10 @@ async def _get_match_for_item(
                 # 确定目标类型
                 target_type = "movie" if is_movie else "tv_series"
 
+                # 获取源的优先级顺序
+                source_settings = await crud.get_all_scraper_settings(session_inner)
+                source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
+
                 def calculate_match_score(result):
                     """计算匹配分数，分数越高越优先"""
                     score = 0
@@ -1710,8 +1724,12 @@ async def _get_match_for_item(
 
                     return score
 
-                # 按分数排序 (分数高的在前)
-                sorted_results = sorted(all_results, key=calculate_match_score, reverse=True)
+                # 按分数排序 (分数高的在前)，相同分数时按源优先级排序
+                sorted_results = sorted(
+                    all_results,
+                    key=lambda r: (calculate_match_score(r), -source_order_map.get(r.provider, 999)),
+                    reverse=True
+                )
 
                 # 打印排序后的结果列表
                 logger.info(f"排序后的搜索结果列表 (按匹配分数):")
@@ -1723,6 +1741,28 @@ async def _get_match_for_item(
                 # 步骤3：自动选择最佳源
                 logger.info(f"步骤3：自动选择最佳源")
 
+                # 获取精确标记信息 (AI匹配和传统匹配都需要)
+                favorited_info = {}
+                async with scraper_manager._session_factory() as ai_session:
+                    from .orm_models import AnimeSource as AS
+                    from sqlalchemy import select as sql_select
+
+                    for result in sorted_results:
+                        # 查找是否有相同provider和mediaId的源被标记
+                        stmt = (
+                            sql_select(AS.isFavorited)
+                            .where(
+                                AS.providerName == result.provider,
+                                AS.mediaId == result.mediaId
+                            )
+                            .limit(1)
+                        )
+                        result_row = await ai_session.execute(stmt)
+                        is_favorited = result_row.scalar_one_or_none()
+                        if is_favorited:
+                            key = f"{result.provider}:{result.mediaId}"
+                            favorited_info[key] = True
+
                 # 检查是否启用AI匹配
                 ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
 
@@ -1730,15 +1770,22 @@ async def _get_match_for_item(
                 ai_selected_index = None
                 if ai_match_enabled:
                     try:
-                        from .ai_matcher import AIMatcher
+                        from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
+
+                        # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
+                        await crud.initialize_configs(session_inner, {
+                            "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
+                        })
 
                         # 获取AI配置
+                        # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
                         ai_config = {
                             "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
                             "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
                             "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
                             "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
                             "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                            "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                         }
 
                         # 检查必要配置
@@ -1753,28 +1800,6 @@ async def _get_match_for_item(
                                 "year": None,  # 匹配后备场景通常没有年份信息
                                 "type": "movie" if is_movie else "tv_series"
                             }
-
-                            # 获取精确标记信息
-                            favorited_info = {}
-                            async with scraper_manager._session_factory() as ai_session:
-                                from .orm_models import AnimeSource as AS
-                                from sqlalchemy import select as sql_select
-
-                                for result in sorted_results:
-                                    # 查找是否有相同provider和mediaId的源被标记
-                                    stmt = (
-                                        sql_select(AS.isFavorited)
-                                        .where(
-                                            AS.providerName == result.provider,
-                                            AS.mediaId == result.mediaId
-                                        )
-                                        .limit(1)
-                                    )
-                                    result_row = await ai_session.execute(stmt)
-                                    is_favorited = result_row.scalar_one_or_none()
-                                    if is_favorited:
-                                        key = f"{result.provider}:{result.mediaId}"
-                                        favorited_info[key] = True
 
                             # 初始化AI匹配器并选择
                             matcher = AIMatcher(ai_config)
@@ -1818,14 +1843,40 @@ async def _get_match_for_item(
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    if not fallback_enabled:
+                    # 传统匹配: 优先查找精确标记源
+                    favorited_match = None
+                    for result in sorted_results:
+                        key = f"{result.provider}:{result.mediaId}"
+                        if favorited_info.get(key):
+                            favorited_match = result
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
+                            break
+
+                    if favorited_match:
+                        best_match = favorited_match
+                        logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
+                    elif not fallback_enabled:
                         # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
                         best_match = sorted_results[0]
                         logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
-                elif not fallback_enabled:
-                    # AI未启用，顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                    best_match = sorted_results[0]
-                    logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                else:
+                    # AI未启用，使用传统匹配
+                    # 传统匹配: 优先查找精确标记源
+                    favorited_match = None
+                    for result in sorted_results:
+                        key = f"{result.provider}:{result.mediaId}"
+                        if favorited_info.get(key):
+                            favorited_match = result
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
+                            break
+
+                    if favorited_match:
+                        best_match = favorited_match
+                        logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
+                    elif not fallback_enabled:
+                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+                        best_match = sorted_results[0]
+                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
 
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
@@ -1979,7 +2030,8 @@ async def _get_match_for_item(
                     animeTitle=final_title,
                     episodeTitle=f"第{episode_number}集" if not parsed_info.get("is_movie") else final_title,
                     type="tvseries" if not parsed_info.get("is_movie") else "movie",
-                    typeDescription="匹配成功"
+                    typeDescription="匹配成功",
+                    imageUrl=best_match.imageUrl
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match_result])
                 logger.info(f"发送匹配响应 (匹配后备): episodeId={real_episode_id}, animeId={virtual_anime_id}")

@@ -93,6 +93,18 @@ class ImportRequest(BaseModel):
     supplementProvider: Optional[str] = Field(None, description="补充源提供商 (如360), 用于获取分集列表")
     supplementMediaId: Optional[str] = Field(None, description="补充源中的媒体ID")
 
+class TMDBSeasonInfo(BaseModel):
+    """TMDB季度信息模型"""
+    air_date: Optional[str] = Field(None, alias="airDate")
+    episode_count: int = Field(..., alias="episodeCount")
+    id: int
+    name: str
+    season_number: int = Field(..., alias="seasonNumber")
+    poster_path: Optional[str] = Field(None, alias="posterPath")
+
+    class Config:
+        populate_by_name = True
+
 class MetadataDetailsResponse(BaseModel):
     """所有元数据源详情接口的统一响应模型。"""
     id: str
@@ -111,6 +123,7 @@ class MetadataDetailsResponse(BaseModel):
     details: Optional[str] = None
     year: Optional[int] = None
     supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
+    seasons: Optional[List[TMDBSeasonInfo]] = Field(None, description="TMDB TV系列的季度信息列表")
 
 class AnimeCreate(BaseModel):
     """Model for creating a new anime entry manually."""
@@ -141,6 +154,7 @@ class AnimeDetailUpdate(BaseModel):
     aliasCn1: Optional[str] = None
     aliasCn2: Optional[str] = None
     aliasCn3: Optional[str] = None
+    aliasLocked: Optional[bool] = Field(None, description="别名是否锁定")
 
 class EpisodeInfoUpdate(BaseModel):
     """用于更新分集信息的模型"""
@@ -170,6 +184,7 @@ class AnimeFullDetails(BaseModel):
     aliasCn1: Optional[str] = None
     aliasCn2: Optional[str] = None
     aliasCn3: Optional[str] = None
+    aliasLocked: Optional[bool] = False
 
 class SourceCreate(BaseModel):
     providerName: str = Field(..., description="数据源提供方名称")

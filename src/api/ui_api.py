@@ -817,6 +817,29 @@ async def refresh_single_episode(
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
 
+@router.post("/library/episodes/refresh-bulk", status_code=status.HTTP_202_ACCEPTED, summary="批量刷新分集弹幕", response_model=UITaskResponse)
+async def refresh_episodes_bulk(
+    request: Request,
+    current_user: models.User = Depends(security.get_current_user),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """批量刷新多个分集的弹幕（整合为一个任务）"""
+    body = await request.json()
+    episode_ids = body.get("episodeIds", [])
+
+    if not episode_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未提供分集ID列表")
+
+    logger.info(f"用户 '{current_user.username}' 请求批量刷新 {len(episode_ids)} 个分集")
+
+    task_title = f"批量刷新 {len(episode_ids)} 个分集"
+    task_coro = lambda s, cb: tasks.refresh_bulk_episodes_task(episode_ids, s, scraper_manager, rate_limiter, cb)
+    task_id, _ = await task_manager.submit_task(task_coro, task_title)
+
+    return {"message": f"已提交批量刷新任务，共 {len(episode_ids)} 个分集", "taskId": task_id}
+
 @router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新指定数据源 (全量或增量)", response_model=UITaskResponse)
 async def refresh_anime(
     sourceId: int,
@@ -3185,4 +3208,104 @@ async def update_metadata_source_config(
         logger.error(f"更新元数据源 '{providerName}' 配置时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新配置时发生内部错误。")
 
+
+class AITestRequest(BaseModel):
+    provider: str
+    apiKey: str
+    baseUrl: Optional[str] = None
+    model: str
+
+class AITestResponse(BaseModel):
+    success: bool
+    message: str
+    latency: Optional[float] = None  # 响应时间(毫秒)
+    error: Optional[str] = None
+
+@router.post("/config/ai/test", response_model=AITestResponse, summary="测试AI连接可用性")
+async def test_ai_connection(
+    request: AITestRequest,
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """测试AI连接配置是否可用"""
+    try:
+        start_time = time.time()
+
+        # 根据provider确定base_url
+        if request.baseUrl:
+            base_url = request.baseUrl.rstrip('/')
+        else:
+            if request.provider == 'deepseek':
+                base_url = 'https://api.deepseek.com'
+            elif request.provider == 'openai':
+                base_url = 'https://api.openai.com/v1'
+            else:
+                return AITestResponse(
+                    success=False,
+                    message="不支持的AI提供商",
+                    error=f"未知的provider: {request.provider}"
+                )
+
+        # 构建API URL
+        api_url = f"{base_url}/chat/completions"
+
+        # 构建测试请求
+        headers = {
+            "Authorization": f"Bearer {request.apiKey}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": request.model,
+            "messages": [
+                {"role": "user", "content": "Hello"}
+            ],
+            "max_tokens": 10
+        }
+
+        # 发送测试请求
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(api_url, json=payload, headers=headers)
+
+            latency = (time.time() - start_time) * 1000  # 转换为毫秒
+
+            if response.status_code == 200:
+                return AITestResponse(
+                    success=True,
+                    message="AI连接测试成功",
+                    latency=round(latency, 2)
+                )
+            else:
+                error_detail = response.text
+                try:
+                    error_json = response.json()
+                    error_detail = error_json.get('error', {}).get('message', error_detail)
+                except:
+                    pass
+
+                return AITestResponse(
+                    success=False,
+                    message=f"AI API返回错误 (HTTP {response.status_code})",
+                    error=error_detail,
+                    latency=round(latency, 2)
+                )
+
+    except httpx.TimeoutException:
+        return AITestResponse(
+            success=False,
+            message="连接超时",
+            error="请求超过30秒未响应,请检查网络连接或Base URL配置"
+        )
+    except httpx.ConnectError as e:
+        return AITestResponse(
+            success=False,
+            message="无法连接到AI服务",
+            error=f"连接失败: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"AI连接测试失败: {e}", exc_info=True)
+        return AITestResponse(
+            success=False,
+            message="测试过程中发生错误",
+            error=str(e)
+        )
 

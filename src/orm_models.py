@@ -199,6 +199,7 @@ class AnimeAlias(Base):
     aliasCn1: Mapped[Optional[str]] = mapped_column("alias_cn_1", String(255))
     aliasCn2: Mapped[Optional[str]] = mapped_column("alias_cn_2", String(255))
     aliasCn3: Mapped[Optional[str]] = mapped_column("alias_cn_3", String(255))
+    aliasLocked: Mapped[bool] = mapped_column("alias_locked", Boolean, default=False, server_default="0")
 
     anime: Mapped["Anime"] = relationship(back_populates="aliases")
 

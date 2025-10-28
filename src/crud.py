@@ -454,6 +454,8 @@ async def update_anime_details(session: AsyncSession, anime_id: int, update_data
     anime.aliases.aliasCn1 = update_data.aliasCn1
     anime.aliases.aliasCn2 = update_data.aliasCn2
     anime.aliases.aliasCn3 = update_data.aliasCn3
+    if update_data.aliasLocked is not None:
+        anime.aliases.aliasLocked = update_data.aliasLocked
 
     await session.commit()
     return True
@@ -807,12 +809,26 @@ async def find_episode_via_tmdb_mapping(
             )
         )
     elif custom_episode is not None:
-        # 增强：当只有集数时，也同时匹配绝对集数和两种S01EXX的情况
+        # 增强：当只有集数时，匹配正片（排除特别季）
+        # 使用absoluteEpisodeNumber（TMDB的episode_number）和季度条件
         stmt = stmt.where(
             or_(
-                MappingFromFile.absoluteEpisodeNumber == custom_episode,
-                and_(MappingFromFile.customSeasonNumber == 1, MappingFromFile.customEpisodeNumber == custom_episode),
-                and_(MappingFromFile.tmdbSeasonNumber == 1, MappingFromFile.tmdbEpisodeNumber == custom_episode)
+                # 匹配剧集组正片：customSeasonNumber >= 1
+                and_(
+                    MappingFromFile.customSeasonNumber >= 1,
+                    or_(
+                        MappingFromFile.absoluteEpisodeNumber == custom_episode,
+                        MappingFromFile.customEpisodeNumber == custom_episode
+                    )
+                ),
+                # 匹配TMDB官方正片：tmdbSeasonNumber >= 1
+                and_(
+                    MappingFromFile.tmdbSeasonNumber >= 1,
+                    or_(
+                        MappingFromFile.tmdbEpisodeNumber == custom_episode,
+                        MappingFromFile.absoluteEpisodeNumber == custom_episode
+                    )
+                )
             )
         )
     
@@ -1258,7 +1274,8 @@ async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> O
             AnimeSource.providerName,
             AnimeSource.animeId,
             Episode.providerEpisodeId,
-            Episode.danmakuFilePath
+            Episode.danmakuFilePath,
+            Episode.episodeIndex
         )
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episode_id)
@@ -1310,7 +1327,7 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
             Anime.episodeCount.label("episodeCount"), Anime.imageUrl.label("imageUrl"), AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.tmdbEpisodeGroupId.label("tmdbEpisodeGroupId"),
             AnimeMetadata.bangumiId.label("bangumiId"), AnimeMetadata.tvdbId.label("tvdbId"), AnimeMetadata.doubanId.label("doubanId"), AnimeMetadata.imdbId.label("imdbId"),
             AnimeAlias.nameEn.label("nameEn"), AnimeAlias.nameJp.label("nameJp"), AnimeAlias.nameRomaji.label("nameRomaji"), AnimeAlias.aliasCn1.label("aliasCn1"),
-            AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3")
+            AnimeAlias.aliasCn2.label("aliasCn2"), AnimeAlias.aliasCn3.label("aliasCn3"), AnimeAlias.aliasLocked.label("aliasLocked")
         )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)
         .join(AnimeAlias, Anime.id == AnimeAlias.animeId, isouter=True)
@@ -1322,18 +1339,20 @@ async def get_anime_full_details(session: AsyncSession, anime_id: int) -> Option
 
 async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: int, group_id: str, group_details: models.TMDBEpisodeGroupDetails):
     await session.execute(delete(TmdbEpisodeMapping).where(TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id))
-    
+
     mappings_to_insert = []
     sorted_groups = sorted(group_details.groups, key=lambda g: g.order)
+
     for custom_season_group in sorted_groups:
         if not custom_season_group.episodes: continue
         for custom_episode_index, episode in enumerate(custom_season_group.episodes):
+            # 使用TMDB的episode_number作为绝对集数
             mappings_to_insert.append(
                 TmdbEpisodeMapping(
                     tmdbTvId=tmdb_tv_id, tmdbEpisodeGroupId=group_id, tmdbEpisodeId=episode.id,
                     tmdbSeasonNumber=episode.seasonNumber, tmdbEpisodeNumber=episode.episodeNumber,
                     customSeasonNumber=custom_season_group.order, customEpisodeNumber=custom_episode_index + 1,
-                    absoluteEpisodeNumber=episode.order + 1
+                    absoluteEpisodeNumber=episode.episodeNumber
                 )
             )
     if mappings_to_insert:
@@ -1906,7 +1925,23 @@ async def get_enabled_failover_sources(session: AsyncSession) -> List[Dict[str, 
     ]
 # --- Config & Cache ---
 
-async def get_config_value(session: AsyncSession, key: str, default: str) -> str:
+async def get_config_value(session: AsyncSession, key: str, default: str = "") -> str:
+    """
+    从数据库获取配置值
+
+    Args:
+        session: 数据库会话
+        key: 配置键
+        default: 默认值,当数据库中不存在该键时返回此值(默认为空字符串)
+
+    Returns:
+        配置值,如果数据库中不存在则返回default
+
+    注意:
+        - 如果数据库中存在该键但值为空字符串,会返回空字符串(不会返回default)
+        - 只有当数据库中不存在该键时,才会返回default
+        - 对于AI提示词等配置,应该先调用initialize_configs确保键存在,再调用此函数读取
+    """
     stmt = select(Config.configValue).where(Config.configKey == key)
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
@@ -2442,25 +2477,91 @@ async def update_anime_tmdb_group_id(session: AsyncSession, anime_id: int, group
     await session.execute(update(AnimeMetadata).where(AnimeMetadata.animeId == anime_id).values(tmdbEpisodeGroupId=group_id))
     await session.commit()
 
-async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any]):
+async def update_anime_aliases_if_empty(session: AsyncSession, anime_id: int, aliases: Dict[str, Any], force_update: bool = False):
+    """
+    更新作品别名,如果字段为空则填充
+    如果别名记录不存在,则创建新记录
+
+    Args:
+        session: 数据库会话
+        anime_id: 作品ID
+        aliases: 别名数据字典
+        force_update: 是否强制更新(用于AI修正),默认False
+    """
+    from .orm_models import AnimeAlias
+
     # 修正：使用 select().where() 而不是 session.get()，因为 anime_id 不是主键
     stmt = select(AnimeAlias).where(AnimeAlias.animeId == anime_id)
     result = await session.execute(stmt)
     alias_record = result.scalar_one_or_none()
 
-    if not alias_record: return
+    # 如果记录不存在,创建新记录
+    if not alias_record:
+        alias_record = AnimeAlias(animeId=anime_id, aliasLocked=False)
+        session.add(alias_record)
+        logging.info(f"为作品 ID {anime_id} 创建新的别名记录。")
 
-    if not alias_record.nameEn and aliases.get('nameEn'): alias_record.nameEn = aliases['nameEn']
-    if not alias_record.nameJp and aliases.get('nameJp'): alias_record.nameJp = aliases['nameJp']
-    if not alias_record.nameRomaji and aliases.get('nameRomaji'): alias_record.nameRomaji = aliases['nameRomaji']
-    
-    cn_aliases = aliases.get('aliases_cn', [])
-    if not alias_record.aliasCn1 and len(cn_aliases) > 0: alias_record.aliasCn1 = cn_aliases[0]
-    if not alias_record.aliasCn2 and len(cn_aliases) > 1: alias_record.aliasCn2 = cn_aliases[1]
-    if not alias_record.aliasCn3 and len(cn_aliases) > 2: alias_record.aliasCn3 = cn_aliases[2]
+    # 检查锁定状态
+    if alias_record.aliasLocked and not force_update:
+        logging.info(f"作品 ID {anime_id} 的别名已锁定,跳过更新。")
+        return
+
+    # 如果是强制更新(AI修正),则更新所有字段
+    # 否则只在字段为空时更新
+    updated_fields = []
+
+    if force_update:
+        if aliases.get('name_en'):
+            alias_record.nameEn = aliases['name_en']
+            updated_fields.append(f"nameEn='{aliases['name_en']}'")
+        if aliases.get('name_jp'):
+            alias_record.nameJp = aliases['name_jp']
+            updated_fields.append(f"nameJp='{aliases['name_jp']}'")
+        if aliases.get('name_romaji'):
+            alias_record.nameRomaji = aliases['name_romaji']
+            updated_fields.append(f"nameRomaji='{aliases['name_romaji']}'")
+
+        cn_aliases = aliases.get('aliases_cn', [])
+        if len(cn_aliases) > 0:
+            alias_record.aliasCn1 = cn_aliases[0]
+            updated_fields.append(f"aliasCn1='{cn_aliases[0]}'")
+        if len(cn_aliases) > 1:
+            alias_record.aliasCn2 = cn_aliases[1]
+            updated_fields.append(f"aliasCn2='{cn_aliases[1]}'")
+        if len(cn_aliases) > 2:
+            alias_record.aliasCn3 = cn_aliases[2]
+            updated_fields.append(f"aliasCn3='{cn_aliases[2]}'")
+
+        if updated_fields:
+            logging.info(f"为作品 ID {anime_id} 强制更新了别名字段(AI修正): {', '.join(updated_fields)}")
+    else:
+        # 只在字段为空时更新
+        if not alias_record.nameEn and aliases.get('name_en'):
+            alias_record.nameEn = aliases['name_en']
+            updated_fields.append(f"nameEn='{aliases['name_en']}'")
+        if not alias_record.nameJp and aliases.get('name_jp'):
+            alias_record.nameJp = aliases['name_jp']
+            updated_fields.append(f"nameJp='{aliases['name_jp']}'")
+        if not alias_record.nameRomaji and aliases.get('name_romaji'):
+            alias_record.nameRomaji = aliases['name_romaji']
+            updated_fields.append(f"nameRomaji='{aliases['name_romaji']}'")
+
+        cn_aliases = aliases.get('aliases_cn', [])
+        if not alias_record.aliasCn1 and len(cn_aliases) > 0:
+            alias_record.aliasCn1 = cn_aliases[0]
+            updated_fields.append(f"aliasCn1='{cn_aliases[0]}'")
+        if not alias_record.aliasCn2 and len(cn_aliases) > 1:
+            alias_record.aliasCn2 = cn_aliases[1]
+            updated_fields.append(f"aliasCn2='{cn_aliases[1]}'")
+        if not alias_record.aliasCn3 and len(cn_aliases) > 2:
+            alias_record.aliasCn3 = cn_aliases[2]
+            updated_fields.append(f"aliasCn3='{cn_aliases[2]}'")
+
+        if updated_fields:
+            logging.info(f"为作品 ID {anime_id} 更新了别名字段: {', '.join(updated_fields)}")
 
     await session.flush()
-    logging.info(f"为作品 ID {anime_id} 更新了别名字段。")
+    return updated_fields  # 返回更新的字段列表
 
 async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
     stmt = select(
