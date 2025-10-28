@@ -22,7 +22,7 @@ from .orm_models import ( # noqa: F401
 from .config import settings
 from .timezone import get_now
 from .danmaku_parser import parse_dandan_xml_to_comments
-from .path_template import DanmakuPathTemplate, create_danmaku_context
+from .path_template import DanmakuPathTemplate, create_danmaku_context, generate_danmaku_path
 from fastapi import Request
 
 logger = logging.getLogger(__name__)
@@ -108,58 +108,13 @@ async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=
     """
     生成弹幕文件的Web路径和文件系统路径
 
+    [已重构] 此函数现在调用 path_template.generate_danmaku_path
+    保留此函数以保持向后兼容性
+
     Returns:
         tuple: (web_path, absolute_path)
     """
-    anime_id = episode.source.anime.id
-    episode_id = episode.id
-
-    # 检查是否启用自定义路径
-    custom_path_enabled = False
-    custom_template = None
-
-    if config_manager:
-        try:
-            custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
-            custom_path_enabled = custom_path_enabled_str.lower() == 'true'
-            if custom_path_enabled:
-                custom_template = await config_manager.get('customDanmakuPathTemplate', '')
-        except Exception as e:
-            logger.warning(f"获取自定义路径配置失败: {e}")
-
-    if custom_path_enabled and custom_template:
-        try:
-            # 创建路径模板上下文
-            context = create_danmaku_context(
-                anime_title=episode.source.anime.title,
-                season=episode.source.anime.season or 1,
-                episode_index=episode.episodeIndex,
-                year=episode.source.anime.year,
-                provider=episode.source.providerName,
-                anime_id=anime_id,
-                episode_id=episode_id,
-                source_id=episode.source.id
-            )
-
-            # 生成自定义路径
-            path_template = DanmakuPathTemplate(custom_template)
-            custom_path = path_template.generate_path(context)
-
-            # 自定义路径使用绝对路径存储
-            web_path = str(custom_path)  # 绝对路径用于数据库存储
-            absolute_path = Path(custom_path)  # 直接使用生成的路径
-
-            logger.info(f"使用自定义路径模板生成弹幕路径: {absolute_path}")
-            return web_path, absolute_path
-
-        except Exception as e:
-            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
-
-    # 默认路径逻辑 - 使用相对路径
-    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"  # 保持数据库中的格式一致性
-    absolute_path = DANMAKU_BASE_DIR / str(anime_id) / f"{episode_id}.xml"
-
-    return web_path, absolute_path
+    return await generate_danmaku_path(episode, config_manager)
 # --- Anime & Library ---
 
 async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:

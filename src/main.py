@@ -145,7 +145,9 @@ async def lifespan(app: FastAPI):
         'searchFallbackEnabled': ('false', '是否为搜索接口启用后备搜索功能（全网搜索）。'),
         # 弹幕文件路径配置
         'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
-        'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
+        'danmakuDirectoryPath': ('/app/config/danmaku', '弹幕文件存储的根目录。'),
+        'danmakuFilenameTemplate': ('${animeId}/${episodeId}', '弹幕文件命名模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}, ${sourceId}。支持子目录。.xml后缀会自动添加。'),
+        # 'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '[已弃用] 自定义弹幕文件路径模板。请使用 danmakuDirectoryPath 和 danmakuFilenameTemplate 代替。'),
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
         # 搜索性能优化

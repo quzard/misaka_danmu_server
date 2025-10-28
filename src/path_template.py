@@ -220,3 +220,85 @@ TEMPLATE_EXAMPLES = {
     'windows_absolute': 'D:/弹幕/${title}/${title} - S${season:02d}E${episode:02d}',
     'windows_downloads': 'C:/Users/${username}/Downloads/弹幕/${title}/${episode:03d}'
 }
+
+
+# ==================== 路径生成函数 ====================
+
+async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path]:
+    """
+    生成弹幕文件的完整路径
+
+    Args:
+        episode: Episode 对象
+        config_manager: ConfigManager 实例
+
+    Returns:
+        tuple: (web_path, absolute_path)
+    """
+    anime_id = episode.source.anime.id
+    episode_id = episode.id
+
+    # 检查是否启用自定义路径
+    custom_path_enabled = False
+
+    if config_manager:
+        try:
+            custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
+            custom_path_enabled = custom_path_enabled_str.lower() == 'true'
+        except Exception as e:
+            logger.warning(f"获取自定义路径配置失败: {e}")
+
+    if custom_path_enabled and config_manager:
+        try:
+            # 使用新的配置方式: 根目录 + 文件名模板
+            root_directory = await config_manager.get('danmakuDirectoryPath', '/app/config/danmaku')
+            filename_template = await config_manager.get('danmakuFilenameTemplate', '${animeId}/${episodeId}')
+
+            # 创建路径模板上下文
+            context = create_danmaku_context(
+                anime_title=episode.source.anime.title,
+                season=episode.source.anime.season or 1,
+                episode_index=episode.episodeIndex,
+                year=episode.source.anime.year,
+                provider=episode.source.providerName,
+                anime_id=anime_id,
+                episode_id=episode_id,
+                source_id=episode.source.id
+            )
+
+            # 生成相对路径(不包含.xml后缀)
+            path_template = DanmakuPathTemplate(filename_template)
+            relative_path_obj = path_template.generate_path(context)
+            relative_path = str(relative_path_obj)
+
+            # 移除自动添加的.xml后缀(因为我们要手动控制)
+            if relative_path.endswith('.xml'):
+                relative_path = relative_path[:-4]
+
+            # 手动拼接.xml后缀
+            relative_path += '.xml'
+
+            # 拼接完整路径: 根目录 + 相对路径
+            # 确保路径分隔符正确
+            root_directory = root_directory.rstrip('/').rstrip('\\')
+            relative_path = relative_path.lstrip('/').lstrip('\\')
+
+            full_path = f"{root_directory}/{relative_path}"
+
+            # 规范化路径
+            full_path = str(Path(full_path))
+
+            web_path = full_path
+            absolute_path = Path(full_path)
+
+            logger.info(f"使用自定义路径模板生成弹幕路径: {absolute_path}")
+            return web_path, absolute_path
+
+        except Exception as e:
+            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
+
+    # 默认路径逻辑
+    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
+    absolute_path = Path(f"/app/config/danmaku/{anime_id}/{episode_id}.xml")
+
+    return web_path, absolute_path
