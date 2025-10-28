@@ -817,6 +817,52 @@ async def refresh_single_episode(
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
 
+@router.post("/library/episodes/refresh-bulk", status_code=status.HTTP_202_ACCEPTED, summary="批量刷新分集弹幕", response_model=UITaskResponse)
+async def refresh_episodes_bulk(
+    request: Request,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    task_manager: TaskManager = Depends(get_task_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """批量刷新多个分集的弹幕"""
+    body = await request.json()
+    episode_ids = body.get("episodeIds", [])
+
+    if not episode_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未提供分集ID列表")
+
+    logger.info(f"用户 '{current_user.username}' 请求批量刷新 {len(episode_ids)} 个分集")
+
+    task_ids = []
+    failed_count = 0
+
+    for episode_id in episode_ids:
+        try:
+            # 检查分集是否存在
+            episode = await crud.get_episode_for_refresh(session, episode_id)
+            if not episode:
+                logger.warning(f"分集 ID {episode_id} 不存在，跳过")
+                failed_count += 1
+                continue
+
+            provider_name = episode.get('providerName', '未知源')
+            task_title = f"批量刷新分集: {episode['title']} - [{provider_name}]"
+            task_coro = lambda s, cb, eid=episode_id: tasks.refresh_episode_task(eid, s, scraper_manager, rate_limiter, cb)
+            task_id, _ = await task_manager.submit_task(task_coro, task_title)
+            task_ids.append(task_id)
+        except Exception as e:
+            logger.error(f"为分集 ID {episode_id} 提交刷新任务失败: {e}")
+            failed_count += 1
+
+    success_count = len(task_ids)
+    message = f"已提交 {success_count} 个刷新任务"
+    if failed_count > 0:
+        message += f"，{failed_count} 个失败"
+
+    return {"message": message, "taskId": task_ids[0] if task_ids else None}
+
 @router.post("/library/source/{sourceId}/refresh", status_code=status.HTTP_202_ACCEPTED, summary="刷新指定数据源 (全量或增量)", response_model=UITaskResponse)
 async def refresh_anime(
     sourceId: int,

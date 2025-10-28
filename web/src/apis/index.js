@@ -445,6 +445,10 @@ export const deleteAnimeEpisode = data =>
 export const refreshEpisodeDanmaku = data =>
   api.post(`/api/ui/library/episode/${data.id}/refresh`)
 
+/** 批量刷新集弹幕 */
+export const refreshEpisodesBulk = data =>
+  api.post('/api/ui/library/episodes/refresh-bulk', data)
+
 /** 删除集 */
 export const deleteAnimeEpisodeSingle = data =>
   api.delete(`/api/ui/library/episode/${data.id}`)
