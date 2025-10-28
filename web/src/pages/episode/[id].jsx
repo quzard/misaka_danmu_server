@@ -512,6 +512,7 @@ export const EpisodeDetail = () => {
   }
 
   const rowSelection = {
+    selectedRowKeys: selectedRows.map(row => row.episodeId),
     onChange: (_, selectedRows) => {
       console.log('selectedRows: ', selectedRows)
       setSelectedRows(selectedRows)
