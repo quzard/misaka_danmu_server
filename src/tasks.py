@@ -1664,6 +1664,134 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         logger.error(f"刷新分集 ID: {episodeId} 时发生严重错误: {e}", exc_info=True)
         raise # Re-raise so the task manager catches it and marks as FAILED
 
+async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter, progress_callback: Callable):
+    """后台任务：批量刷新多个分集的弹幕"""
+    total = len(episodeIds)
+    logger.info(f"开始批量刷新 {total} 个分集")
+    await progress_callback(5, f"准备刷新 {total} 个分集...")
+
+    success_ids = []
+    failed_ids = []
+    total_added_comments = 0
+
+    def format_id_ranges(ids: List[int]) -> str:
+        """将ID列表格式化为区间字符串，如 <1,3,5,7-9>"""
+        if not ids:
+            return "<无>"
+
+        sorted_ids = sorted(ids)
+        ranges = []
+        start = sorted_ids[0]
+        end = sorted_ids[0]
+
+        for i in range(1, len(sorted_ids)):
+            if sorted_ids[i] == end + 1:
+                end = sorted_ids[i]
+            else:
+                if start == end:
+                    ranges.append(str(start))
+                else:
+                    ranges.append(f"{start}-{end}")
+                start = sorted_ids[i]
+                end = sorted_ids[i]
+
+        # 添加最后一个区间
+        if start == end:
+            ranges.append(str(start))
+        else:
+            ranges.append(f"{start}-{end}")
+
+        return "<" + ",".join(ranges) + ">"
+
+    try:
+        for i, episode_id in enumerate(episodeIds):
+            progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
+            await progress_callback(progress, f"正在刷新分集 {i+1}/{total} (ID: {episode_id})...")
+
+            try:
+                # 1. 获取分集的源信息
+                info = await crud.get_episode_provider_info(session, episode_id)
+                if not info or not info.get("providerName") or not info.get("providerEpisodeId"):
+                    logger.warning(f"分集 ID {episode_id} 的源信息不完整，跳过")
+                    failed_ids.append(episode_id)
+                    continue
+
+                provider_name = info["providerName"]
+                provider_episode_id = info["providerEpisodeId"]
+
+                scraper = manager.get_scraper(provider_name)
+
+                # 2. 检查流控
+                try:
+                    await rate_limiter.check(provider_name)
+                except RateLimitExceededError as e:
+                    if e.retry_after_seconds >= 3600:
+                        logger.error(f"流控配置验证失败，跳过分集 {episode_id}: {str(e)}")
+                        failed_ids.append(episode_id)
+                        continue
+
+                    logger.warning(f"批量刷新遇到速率限制，等待 {e.retry_after_seconds:.0f} 秒...")
+                    await asyncio.sleep(e.retry_after_seconds)
+                    await rate_limiter.check(provider_name)
+
+                # 3. 下载弹幕
+                from .models import ProviderEpisodeInfo
+                virtual_episode = ProviderEpisodeInfo(
+                    provider=provider_name,
+                    episodeIndex=1,
+                    title=f"批量刷新分集 {episode_id}",
+                    episodeId=provider_episode_id,
+                    url=""
+                )
+
+                download_results = await _download_episode_comments_concurrent(
+                    scraper, [virtual_episode], rate_limiter, lambda p, d: asyncio.sleep(0)
+                )
+
+                all_comments_from_source = None
+                if download_results and len(download_results) > 0:
+                    _, comments = download_results[0]
+                    all_comments_from_source = comments
+
+                if not all_comments_from_source:
+                    await crud.update_episode_fetch_time(session, episode_id)
+                    logger.warning(f"分集 {episode_id} 未找到任何弹幕")
+                    failed_ids.append(episode_id)
+                    continue
+
+                await rate_limiter.increment(provider_name)
+
+                # 4. 保存弹幕
+                added_count = await crud.save_danmaku_for_episode(session, episode_id, all_comments_from_source, None)
+                total_added_comments += added_count
+                success_ids.append(episode_id)
+
+                # 提交事务，释放锁
+                await session.commit()
+
+                # 短暂休眠，允许其他操作执行
+                await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.error(f"刷新分集 ID {episode_id} 时发生错误: {e}", exc_info=True)
+                failed_ids.append(episode_id)
+                continue
+
+        success_count = len(success_ids)
+        failed_count = len(failed_ids)
+
+        success_ranges = format_id_ranges(success_ids)
+        failed_ranges = format_id_ranges(failed_ids)
+
+        message = f"批量刷新完成，共处理 {total} 个，成功 {success_count} 个 {success_ranges}，失败 {failed_count} 个 {failed_ranges}，新增 {total_added_comments} 条弹幕。"
+        raise TaskSuccess(message)
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"批量刷新分集任务失败: {e}", exc_info=True)
+        raise
+
 async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_callback: Callable):
     """后台任务：重新编号一个源的所有分集，并同步更新其ID和物理文件。"""
     logger.info(f"开始重整源 ID: {sourceId} 的分集顺序。")
