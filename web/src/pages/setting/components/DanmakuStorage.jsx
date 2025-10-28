@@ -23,20 +23,20 @@ const DanmakuStorage = () => {
   const loadConfig = async () => {
     try {
       setLoading(true);
-      
+
       // 加载配置
       const enabledRes = await getConfig('customDanmakuPathEnabled');
       const directoryRes = await getConfig('danmakuDirectoryPath');
       const templateRes = await getConfig('danmakuFilenameTemplate');
-      
-      const enabled = enabledRes?.data?.configValue === 'true';
-      const directory = directoryRes?.data?.configValue || '/app/config/danmaku';
-      const template = templateRes?.data?.configValue || '${animeId}/${episodeId}';
-      
+
+      const enabled = enabledRes?.data?.value === 'true';
+      const directory = directoryRes?.data?.value || '/app/config/danmaku';
+      const template = templateRes?.data?.value || '${animeId}/${episodeId}';
+
       setCustomDanmakuPathEnabled(enabled);
       setDanmakuDirectoryPath(directory);
       setDanmakuFilenameTemplate(template);
-      
+
       form.setFieldsValue({
         customDanmakuPathEnabled: enabled,
         danmakuDirectoryPath: directory,
