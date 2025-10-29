@@ -237,6 +237,7 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
     """
     anime_id = episode.source.anime.id
     episode_id = episode.id
+    anime_type = episode.source.anime.type  # 获取类型: tv_series, movie, ova, other
 
     # 检查是否启用自定义路径
     custom_path_enabled = False
@@ -250,9 +251,16 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
 
     if custom_path_enabled and config_manager:
         try:
-            # 使用新的配置方式: 根目录 + 文件名模板
-            root_directory = await config_manager.get('danmakuDirectoryPath', '/app/config/danmaku')
-            filename_template = await config_manager.get('danmakuFilenameTemplate', '${animeId}/${episodeId}')
+            # 根据类型选择不同的配置
+            # movie 类型使用电影配置,其他类型使用电视配置
+            if anime_type == 'movie':
+                root_directory = await config_manager.get('movieDanmakuDirectoryPath', '/app/config/danmaku/movies')
+                filename_template = await config_manager.get('movieDanmakuFilenameTemplate', '${title}/${episodeId}')
+                logger.info(f"使用电影/剧场版路径配置")
+            else:
+                root_directory = await config_manager.get('tvDanmakuDirectoryPath', '/app/config/danmaku/tv')
+                filename_template = await config_manager.get('tvDanmakuFilenameTemplate', '${animeId}/${episodeId}')
+                logger.info(f"使用电视节目路径配置")
 
             # 创建路径模板上下文
             context = create_danmaku_context(
