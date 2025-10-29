@@ -197,7 +197,6 @@ async def search_anime_provider(
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
             # 1. 获取所有可能的别名
-            all_possible_aliases = await metadata_manager.search_aliases_from_enabled_sources(search_title, current_user)
             all_possible_aliases, supplemental_results = await metadata_manager.search_supplemental_sources(search_title, current_user)
             # 2. 验证每个别名与原始搜索词的相似度
             validated_aliases = set()

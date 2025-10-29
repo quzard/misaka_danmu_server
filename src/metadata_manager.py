@@ -188,10 +188,9 @@ class MetadataSourceManager:
         for source_setting in enabled_sources_settings:
             provider = source_setting['providerName']
             if source_instance := self.sources.get(provider):
-                # 关键修复：为 TMDB 特殊处理，同时搜索 'tv' 和 'movie'
+                # 优化：为 TMDB 使用 multi 搜索，一次性搜索 tv 和 movie
                 if provider == 'tmdb':
-                    tasks.append(source_instance.search(keyword, user, mediaType='tv'))
-                    tasks.append(source_instance.search(keyword, user, mediaType='movie'))
+                    tasks.append(source_instance.search(keyword, user, mediaType='multi'))
                 else:
                     # 对于其他源，正常调用
                     tasks.append(source_instance.search(keyword, user))
@@ -202,17 +201,13 @@ class MetadataSourceManager:
             return set(), []
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         all_aliases: Set[str] = set()
         supplemental_results: List[models.ProviderSearchInfo] = []
 
         for i, res in enumerate(results):
-            # 修正：由于 TMDB 会产生两个任务，我们需要一个更健壮的方式来获取 provider_name
-            # 这是一个简化的逻辑，假设任务顺序与 settings 顺序大致对应
-            # 注意：这个逻辑在 TMDB 不是第一个或最后一个源时可能不完美，但对于当前场景是有效的
-            provider_name = "tmdb"
-            if i < len(enabled_sources_settings):
-                provider_name = enabled_sources_settings[i]['providerName']
+            # 优化：现在每个源只产生一个任务，直接使用索引获取 provider_name
+            provider_name = enabled_sources_settings[i]['providerName'] if i < len(enabled_sources_settings) else 'unknown'
 
             if isinstance(res, list):
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")

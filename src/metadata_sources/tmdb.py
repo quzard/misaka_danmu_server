@@ -84,7 +84,7 @@ class TmdbMetadataSource(BaseMetadataSource):
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         if not mediaType:
-            raise ValueError("TMDB search requires a mediaType ('tv' or 'movie').")
+            raise ValueError("TMDB search requires a mediaType ('tv', 'movie', or 'multi').")
 
         try:
             async with await self._create_client() as client:
@@ -96,8 +96,15 @@ class TmdbMetadataSource(BaseMetadataSource):
 
                 results = []
                 for item in data:
-                    title = item.get('name') if mediaType == 'tv' else item.get('title')
-                    release_date = item.get('first_air_date') if mediaType == 'tv' else item.get('release_date')
+                    # 对于 multi 搜索，需要从 media_type 字段获取类型
+                    item_media_type = item.get('media_type') if mediaType == 'multi' else mediaType
+
+                    # 跳过非 tv/movie 类型的结果（如 person）
+                    if item_media_type not in ['tv', 'movie']:
+                        continue
+
+                    title = item.get('name') if item_media_type == 'tv' else item.get('title')
+                    release_date = item.get('first_air_date') if item_media_type == 'tv' else item.get('release_date')
                     details_str = f"{release_date or '未知年份'} / {item.get('original_language', 'N/A')}"
 
                     # 提取年份
@@ -112,7 +119,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                         id=str(item['id']),
                         tmdbId=str(item['id']),
                         title=title,
-                        type=mediaType,  # 添加类型字段
+                        type=item_media_type,  # 使用实际的媒体类型
                         year=year,  # 添加年份字段
                         imageUrl=f"{image_base_url}{item.get('poster_path')}" if item.get('poster_path') else None,
                         details=details_str
