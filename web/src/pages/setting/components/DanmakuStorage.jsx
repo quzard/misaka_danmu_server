@@ -1,8 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography } from 'antd';
+import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio } from 'antd';
 import { getConfig, setConfig } from '@/apis';
 
 const { Text } = Typography;
+const { Option } = Select;
+
+// 模板定义
+const TEMPLATES = {
+  movie: [
+    { label: '按标题分组', value: '${title}/${episodeId}', desc: '${title}/${episodeId}' },
+    { label: '标题+年份', value: '${title} (${year})/${episodeId}', desc: '${title} (${year})/${episodeId}' },
+    { label: '扁平结构', value: '${episodeId}', desc: '${episodeId}' },
+  ],
+  tv: [
+    { label: '按番剧ID分组', value: '${animeId}/${episodeId}', desc: '${animeId}/${episodeId}' },
+    { label: '按标题+季度分组', value: '${title}/Season ${season}/${episodeId}', desc: '${title}/Season ${season}/${episodeId}' },
+    { label: 'Plex风格', value: '${title}/${title} - S${season:02d}E${episode:02d}', desc: '${title}/${title} - S${season:02d}E${episode:02d}' },
+    { label: '扁平结构', value: '${episodeId}', desc: '${episodeId}' },
+  ]
+};
 
 const DanmakuStorage = () => {
   const [form] = Form.useForm();
@@ -18,6 +34,10 @@ const DanmakuStorage = () => {
   const [tvDanmakuDirectoryPath, setTvDanmakuDirectoryPath] = useState('/app/config/danmaku/tv');
   const [tvDanmakuFilenameTemplate, setTvDanmakuFilenameTemplate] = useState('${animeId}/${episodeId}');
   const [tvPreviewPath, setTvPreviewPath] = useState('');
+
+  // 模板选择器状态
+  const [selectedType, setSelectedType] = useState('movie');
+  const [selectedTemplate, setSelectedTemplate] = useState('');
 
   // 加载配置
   useEffect(() => {
@@ -165,14 +185,22 @@ const DanmakuStorage = () => {
     message.info('迁移弹幕目录功能开发中...');
   };
 
-  const setMovieTemplate = (template) => {
-    setMovieDanmakuFilenameTemplate(template);
-    form.setFieldValue('movieDanmakuFilenameTemplate', template);
-  };
+  // 应用模板
+  const applyTemplate = () => {
+    if (!selectedTemplate) {
+      message.warning('请选择一个模板');
+      return;
+    }
 
-  const setTvTemplate = (template) => {
-    setTvDanmakuFilenameTemplate(template);
-    form.setFieldValue('tvDanmakuFilenameTemplate', template);
+    if (selectedType === 'movie') {
+      setMovieDanmakuFilenameTemplate(selectedTemplate);
+      form.setFieldValue('movieDanmakuFilenameTemplate', selectedTemplate);
+      message.success('已应用电影模板');
+    } else {
+      setTvDanmakuFilenameTemplate(selectedTemplate);
+      form.setFieldValue('tvDanmakuFilenameTemplate', selectedTemplate);
+      message.success('已应用电视模板');
+    }
   };
 
   return (
@@ -210,6 +238,46 @@ const DanmakuStorage = () => {
               启用后将使用下方配置的自定义路径和命名模板
             </div>
           </div>
+        </Form.Item>
+
+        {/* 快速模板选择器 */}
+        <Form.Item label="快速应用模板">
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space>
+              <Select
+                style={{ width: 150 }}
+                value={selectedType}
+                onChange={setSelectedType}
+                disabled={!customDanmakuPathEnabled}
+              >
+                <Option value="movie">电影/剧场版</Option>
+                <Option value="tv">电视节目</Option>
+              </Select>
+              <Select
+                style={{ width: 400 }}
+                value={selectedTemplate}
+                onChange={setSelectedTemplate}
+                placeholder="选择一个模板"
+                disabled={!customDanmakuPathEnabled}
+              >
+                {TEMPLATES[selectedType].map((tpl) => (
+                  <Option key={tpl.value} value={tpl.value}>
+                    {tpl.label} - {tpl.desc}
+                  </Option>
+                ))}
+              </Select>
+              <Button
+                type="primary"
+                onClick={applyTemplate}
+                disabled={!customDanmakuPathEnabled || !selectedTemplate}
+              >
+                应用模板
+              </Button>
+            </Space>
+            <div style={{ color: '#999', fontSize: '12px' }}>
+              选择类型和模板后,点击"应用模板"将自动填充到对应的命名模板字段
+            </div>
+          </Space>
         </Form.Item>
 
         <Divider orientation="left">电影/剧场版配置</Divider>
@@ -258,33 +326,6 @@ const DanmakuStorage = () => {
             </div>
             <div style={{ color: '#999', fontSize: '12px' }}>
               .xml后缀会自动拼接,无需在模板中添加
-            </div>
-
-            <div style={{ marginTop: '12px' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>常用模板示例:</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <Button
-                  size="small"
-                  onClick={() => setMovieTemplate('${title}/${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  按标题分组: {'${title}'}/<wbr/>{'${episodeId}'}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setMovieTemplate('${title} (${year})/${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  标题+年份: {'${title}'} ({'${year}'})/<wbr/>{'${episodeId}'}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setMovieTemplate('${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  扁平结构: {'${episodeId}'}
-                </Button>
-              </div>
             </div>
           </div>
         </Form.Item>
@@ -351,40 +392,6 @@ const DanmakuStorage = () => {
             </div>
             <div style={{ color: '#999', fontSize: '12px' }}>
               .xml后缀会自动拼接,无需在模板中添加
-            </div>
-
-            <div style={{ marginTop: '12px' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>常用模板示例:</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <Button
-                  size="small"
-                  onClick={() => setTvTemplate('${animeId}/${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  按番剧ID分组: {'${animeId}'}/<wbr/>{'${episodeId}'}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setTvTemplate('${title}/Season ${season}/${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  按标题+季度分组: {'${title}'}/Season {'${season}'}/<wbr/>{'${episodeId}'}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setTvTemplate('${title}/${title} - S${season:02d}E${episode:02d}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  Plex风格: {'${title}'}/<wbr/>{'${title}'} - S{'${season:02d}'}E{'${episode:02d}'}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setTvTemplate('${episodeId}')}
-                  disabled={!customDanmakuPathEnabled}
-                >
-                  扁平结构: {'${episodeId}'}
-                </Button>
-              </div>
             </div>
           </div>
         </Form.Item>
