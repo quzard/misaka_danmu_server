@@ -41,7 +41,8 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
   const loadLibraries = async (serverId) => {
     setLoadingLibraries(true);
     try {
-      const data = await getMediaServerLibraries(serverId);
+      const res = await getMediaServerLibraries(serverId);
+      const data = res.data;
       setLibraries(data);
     } catch (error) {
       console.error('加载媒体库列表失败:', error);
@@ -54,12 +55,13 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
     try {
       await form.validateFields(['url', 'apiToken', 'providerName']);
       const values = form.getFieldsValue(['url', 'apiToken', 'providerName']);
-      
+
       setTesting(true);
-      
+
       // 如果是编辑模式,使用server.id测试
       if (server && server.id) {
-        const result = await testMediaServerConnection(server.id);
+        const res = await testMediaServerConnection(server.id);
+        const result = res.data;
         if (result.success) {
           message.success('连接成功!');
           // 重新加载媒体库列表

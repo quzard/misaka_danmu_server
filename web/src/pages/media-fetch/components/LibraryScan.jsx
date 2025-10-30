@@ -19,9 +19,10 @@ const LibraryScan = () => {
   const loadServers = async () => {
     setLoading(true);
     try {
-      const data = await getMediaServers();
+      const res = await getMediaServers();
+      const data = res.data;
       setServers(data);
-      
+
       // 如果有启用的服务器且没有选中,自动选中第一个
       if (!selectedServerId && data.length > 0) {
         const enabledServer = data.find(s => s.isEnabled);
@@ -50,7 +51,8 @@ const LibraryScan = () => {
 
     setLoading(true);
     try {
-      const result = await scanMediaServer(selectedServerId);
+      const res = await scanMediaServer(selectedServerId);
+      const result = res.data;
       message.success(result.message || '扫描任务已提交');
       // 触发列表刷新
       setRefreshTrigger(prev => prev + 1);

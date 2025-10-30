@@ -19,12 +19,13 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
   const loadItems = async (page = 1, pageSize = 100) => {
     setLoading(true);
     try {
-      const data = await getMediaItems({
+      const res = await getMediaItems({
         server_id: serverId,
         page,
         page_size: pageSize,
       });
-      
+      const data = res.data;
+
       // 构建树形结构
       const treeData = buildTreeData(data.list);
       setItems(treeData);
@@ -187,7 +188,8 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
     }
 
     try {
-      const result = await importMediaItems({ itemIds });
+      const res = await importMediaItems({ itemIds });
+      const result = res.data;
       message.success(result.message || '导入任务已提交');
       setSelectedRowKeys([]);
       loadItems(pagination.current, pagination.pageSize);
