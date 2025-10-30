@@ -196,9 +196,24 @@ async def search_anime_provider(
         else:
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
-            # 1. 获取所有可能的别名
-            all_possible_aliases, supplemental_results = await metadata_manager.search_supplemental_sources(search_title, current_user)
-            # 2. 验证每个别名与原始搜索词的相似度
+            # 优化：并行执行辅助搜索和主搜索
+            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+
+            # 1. 并行启动两个任务
+            main_task = asyncio.create_task(
+                manager.search_all([search_title], episode_info=episode_info)
+            )
+
+            supp_task = asyncio.create_task(
+                metadata_manager.search_supplemental_sources(search_title, current_user)
+            )
+
+            # 2. 等待两个任务都完成
+            all_results, (all_possible_aliases, supplemental_results) = await asyncio.gather(
+                main_task, supp_task
+            )
+
+            # 3. 验证每个别名与原始搜索词的相似度
             validated_aliases = set()
             for alias in all_possible_aliases:
                 # 使用 token_set_ratio 并设置一个合理的阈值（例如70），以允许小的差异但过滤掉完全不相关的结果。
@@ -207,17 +222,13 @@ async def search_anime_provider(
                 else:
                     logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{search_title}' 相比)")
             
-            # 3. 使用经过验证的别名列表进行后续操作
+            # 4. 使用经过验证的别名列表进行后续操作
             filter_aliases = validated_aliases
             filter_aliases.add(search_title) # 确保原始搜索词总是在列表中
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
             # 新增：根据您的要求，打印最终的别名列表以供调试
             logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
-
-            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
-            # 2. 并行执行主搜索和补充搜索
-            all_results = await manager.search_all([search_title], episode_info=episode_info)
 
             def normalize_for_filtering(title: str) -> str:
                 if not title: return ""
