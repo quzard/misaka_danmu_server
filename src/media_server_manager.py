@@ -103,9 +103,17 @@ class MediaServerManager:
         try:
             server_class = self.SERVER_CLASSES[provider_name]
             instance = server_class(url=config['url'], api_token=config['apiToken'])
-            result = await instance.test_connection()
+            is_connected = await instance.test_connection()
             await instance.close()
-            return result
+
+            if is_connected:
+                return {
+                    "serverName": config['name'],
+                    "providerName": provider_name,
+                    "url": config['url']
+                }
+            else:
+                raise Exception("连接测试失败")
         except Exception as e:
             self.logger.error(f"测试连接失败: {e}", exc_info=True)
             raise

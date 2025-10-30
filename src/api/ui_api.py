@@ -3547,7 +3547,7 @@ async def scan_media_server_library(
     library_ids: Optional[List[str]] = None,
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user),
-    task_manager: TaskManager = Depends(lambda: TaskManager())
+    task_manager: TaskManager = Depends(get_task_manager)
 ):
     """扫描媒体服务器的媒体库"""
     from ..media_server_manager import get_media_server_manager
@@ -3668,7 +3668,7 @@ async def import_media_items(
     payload: MediaItemsImportRequest,
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user),
-    task_manager: TaskManager = Depends(lambda: TaskManager())
+    task_manager: TaskManager = Depends(get_task_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
     # 提交导入任务
