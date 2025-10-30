@@ -3398,3 +3398,199 @@ async def auto_search_and_import_task(
         if api_key:
             await scraper_manager.release_search_lock(api_key)
             logger.info(f"自动导入任务已为 API key 释放搜索锁。")
+
+
+# --- Media Server Tasks ---
+
+async def scan_media_server_library(
+    server_id: int,
+    library_ids: Optional[List[str]],
+    session: AsyncSession,
+    progress_callback: Callable
+):
+    """扫描媒体服务器的媒体库"""
+    from .media_server_manager import get_media_server_manager
+
+    await progress_callback(0, "开始扫描媒体库...")
+
+    manager = get_media_server_manager()
+    server = manager.servers.get(server_id)
+    if not server:
+        raise ValueError(f"媒体服务器 {server_id} 不存在或未启用")
+
+    # 获取服务器配置
+    server_config = await crud.get_media_server_by_id(session, server_id)
+    if not server_config:
+        raise ValueError(f"媒体服务器配置 {server_id} 不存在")
+
+    # 确定要扫描的媒体库
+    selected_libraries = server_config.get("selectedLibraries", [])
+    if library_ids:
+        # 使用指定的媒体库
+        scan_libraries = library_ids
+    elif selected_libraries:
+        # 使用配置中选中的媒体库
+        scan_libraries = selected_libraries
+    else:
+        # 扫描所有媒体库
+        all_libraries = await server.get_libraries()
+        scan_libraries = [lib.id for lib in all_libraries]
+
+    logger.info(f"开始扫描 {len(scan_libraries)} 个媒体库")
+
+    total_items = 0
+    for idx, library_id in enumerate(scan_libraries):
+        await progress_callback(
+            int((idx / len(scan_libraries)) * 100),
+            f"正在扫描媒体库 {idx + 1}/{len(scan_libraries)}..."
+        )
+
+        try:
+            # 获取媒体库中的所有项目
+            items = await server.get_library_items(library_id)
+
+            # 保存到数据库
+            for item in items:
+                await crud.create_media_item(
+                    session,
+                    server_id=server_id,
+                    media_id=item.id,
+                    library_id=library_id,
+                    title=item.title,
+                    media_type=item.type,
+                    season=item.season,
+                    episode=item.episode,
+                    year=item.year,
+                    tmdb_id=item.tmdb_id,
+                    tvdb_id=item.tvdb_id,
+                    imdb_id=item.imdb_id,
+                    poster_url=item.poster_url
+                )
+                total_items += 1
+
+            await session.commit()
+            logger.info(f"媒体库 {library_id} 扫描完成,共 {len(items)} 个项目")
+
+        except Exception as e:
+            logger.error(f"扫描媒体库 {library_id} 失败: {e}", exc_info=True)
+            await session.rollback()
+            continue
+
+    await progress_callback(100, f"扫描完成,共 {total_items} 个媒体项")
+    raise TaskSuccess(f"媒体库扫描完成,共扫描到 {total_items} 个媒体项")
+
+
+async def import_media_items(
+    item_ids: List[int],
+    session: AsyncSession,
+    task_manager: TaskManager,
+    progress_callback: Callable
+):
+    """导入媒体项(按季度导入电视剧,电影直接导入)"""
+    from .orm_models import MediaItem
+
+    await progress_callback(0, "开始导入媒体项...")
+
+    # 获取所有媒体项
+    items_stmt = select(MediaItem).where(MediaItem.id.in_(item_ids))
+    result = await session.execute(items_stmt)
+    items = result.scalars().all()
+
+    if not items:
+        raise ValueError("未找到要导入的媒体项")
+
+    # 按类型分组
+    movies = []
+    tv_shows = {}  # {(title, season): [items]}
+
+    for item in items:
+        if item.mediaType == 'movie':
+            movies.append(item)
+        elif item.mediaType == 'tv_series':
+            key = (item.title, item.season)
+            if key not in tv_shows:
+                tv_shows[key] = []
+            tv_shows[key].append(item)
+
+    total_tasks = len(movies) + len(tv_shows)
+    completed = 0
+
+    logger.info(f"准备导入: {len(movies)} 部电影, {len(tv_shows)} 个电视剧季度")
+
+    # 导入电影
+    for movie in movies:
+        await progress_callback(
+            int((completed / total_tasks) * 100),
+            f"导入电影: {movie.title}..."
+        )
+
+        try:
+            # 触发webhook式搜索
+            task_id = await task_manager.submit_task(
+                webhook_search_and_dispatch_task,
+                f"媒体库导入: {movie.title}",
+                queue="webhook",
+                animeTitle=movie.title,
+                mediaType="movie",
+                season=None,
+                episodeNumber=None,
+                year=movie.year,
+                tmdbId=movie.tmdbId,
+                tvdbId=movie.tvdbId,
+                imdbId=movie.imdbId
+            )
+            logger.info(f"电影 {movie.title} 导入任务已提交: {task_id}")
+
+            # 标记为已导入
+            await crud.mark_media_items_imported(session, [movie.id])
+            await session.commit()
+
+        except Exception as e:
+            logger.error(f"导入电影 {movie.title} 失败: {e}", exc_info=True)
+            await session.rollback()
+
+        completed += 1
+
+    # 导入电视剧(按季度)
+    for (title, season), season_items in tv_shows.items():
+        await progress_callback(
+            int((completed / total_tasks) * 100),
+            f"导入电视剧: {title} S{season:02d}..."
+        )
+
+        try:
+            # 获取该季度的所有集数
+            episodes = sorted([item.episode for item in season_items if item.episode])
+
+            # 获取元数据ID(优先使用第一个项目的)
+            first_item = season_items[0]
+
+            # 为该季度创建一个导入任务
+            task_id = await task_manager.submit_task(
+                webhook_search_and_dispatch_task,
+                f"媒体库导入: {title} S{season:02d}",
+                queue="webhook",
+                animeTitle=title,
+                mediaType="tv",
+                season=season,
+                episodeNumber=None,  # 不指定集数,导入整季
+                year=first_item.year,
+                tmdbId=first_item.tmdbId,
+                tvdbId=first_item.tvdbId,
+                imdbId=first_item.imdbId
+            )
+            logger.info(f"电视剧 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
+
+            # 标记该季度的所有项为已导入
+            item_ids_to_mark = [item.id for item in season_items]
+            await crud.mark_media_items_imported(session, item_ids_to_mark)
+            await session.commit()
+
+        except Exception as e:
+            logger.error(f"导入电视剧 {title} S{season:02d} 失败: {e}", exc_info=True)
+            await session.rollback()
+
+        completed += 1
+
+    await progress_callback(100, f"导入完成,共提交 {total_tasks} 个任务")
+    raise TaskSuccess(f"媒体项导入完成,共提交 {total_tasks} 个任务")

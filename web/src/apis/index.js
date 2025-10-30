@@ -512,3 +512,41 @@ export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tm
 /** 通用配置管理 */
 export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
 export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
+
+/** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
+/** 获取所有媒体服务器 */
+export const getMediaServers = () => api.get('/api/ui/media-servers')
+
+/** 创建媒体服务器 */
+export const createMediaServer = (data) => api.post('/api/ui/media-servers', data)
+
+/** 更新媒体服务器 */
+export const updateMediaServer = (serverId, data) => api.put(`/api/ui/media-servers/${serverId}`, data)
+
+/** 删除媒体服务器 */
+export const deleteMediaServer = (serverId) => api.delete(`/api/ui/media-servers/${serverId}`)
+
+/** 测试媒体服务器连接 */
+export const testMediaServerConnection = (serverId) => api.post(`/api/ui/media-servers/${serverId}/test`)
+
+/** 获取媒体服务器的媒体库列表 */
+export const getMediaServerLibraries = (serverId) => api.get(`/api/ui/media-servers/${serverId}/libraries`)
+
+/** 扫描媒体服务器 */
+export const scanMediaServer = (serverId, libraryIds = null) =>
+  api.post(`/api/ui/media-servers/${serverId}/scan`, { library_ids: libraryIds })
+
+/** 获取媒体项列表 */
+export const getMediaItems = (params) => api.get('/api/ui/media-items', params)
+
+/** 更新媒体项 */
+export const updateMediaItem = (itemId, data) => api.put(`/api/ui/media-items/${itemId}`, data)
+
+/** 删除媒体项 */
+export const deleteMediaItem = (itemId) => api.delete(`/api/ui/media-items/${itemId}`)
+
+/** 批量删除媒体项 */
+export const batchDeleteMediaItems = (itemIds) => api.post('/api/ui/media-items/batch-delete', itemIds)
+
+/** 导入媒体项 */
+export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)

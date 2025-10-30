@@ -15,6 +15,7 @@ const navItems = [
   { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary' },
   { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu' },
   { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmu' },
+  { key: RoutePaths.MEDIA_FETCH, label: '媒体获取', icon: 'yuan' },
   { key: RoutePaths.SOURCE, label: '搜索源', icon: 'yuan' },
   { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi' },
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
