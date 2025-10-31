@@ -6,11 +6,12 @@ import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func, distinct, case, or_, and_, update, delete, String
+from sqlalchemy.orm import selectinload, DeclarativeBase
+from sqlalchemy.sql.elements import ColumnElement
 from datetime import datetime, timedelta
 
-from ..orm_models import Anime, Episode, TitleRecognition
+from ..orm_models import Anime, Episode, TitleRecognition, OauthState, TaskHistory, TaskStateCache, WebhookTask, ScheduledTask
 from .. import models, orm_models
 from ..timezone import get_now
 
