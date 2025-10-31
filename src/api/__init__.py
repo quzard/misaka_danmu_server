@@ -16,8 +16,7 @@ api_router = APIRouter()
 api_router.include_router(ui_router, prefix="/ui", tags=["Web UI API"], include_in_schema=False)
 api_router.include_router(auth_router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 
-# 基础端点: Config, Auth, Scraper, Metadata Source, Media Server
-api_router.include_router(config.router, prefix="/ui", tags=["Config"], include_in_schema=False)
+# 基础端点: Auth, Scraper, Metadata Source, Media Server
 api_router.include_router(auth.router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 api_router.include_router(scraper.router, prefix="/ui", tags=["Scraper"], include_in_schema=False)
 api_router.include_router(metadata_source.router, prefix="/ui", tags=["Metadata Source"], include_in_schema=False)
@@ -33,14 +32,17 @@ api_router.include_router(search.router, prefix="/ui", tags=["Search"], include_
 api_router.include_router(import_api.router, prefix="/ui", tags=["Import"], include_in_schema=False)
 api_router.include_router(task.router, prefix="/ui", tags=["Task"], include_in_schema=False)
 
-# 新增的模块化端点 - 第3批: Token, Config, Settings, ScheduledTask, Webhook, System, Auth
+# 新增的模块化端点 - 第3批: Token, Settings, ScheduledTask, Webhook, System, Auth
 api_router.include_router(token.router, prefix="/ui", tags=["Token"], include_in_schema=False)
-api_router.include_router(config_extra.router, prefix="/ui", tags=["Config"], include_in_schema=False)
 api_router.include_router(settings.router, prefix="/ui", tags=["Settings"], include_in_schema=False)
 api_router.include_router(scheduled_task.router, prefix="/ui", tags=["ScheduledTask"], include_in_schema=False)
 api_router.include_router(webhook.router, prefix="/ui", tags=["Webhook"], include_in_schema=False)
 api_router.include_router(system.router, prefix="/ui", tags=["System"], include_in_schema=False)
 api_router.include_router(auth_extra.auth_router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
+
+# Config端点 - 必须放在最后,因为它有通配符路由 /{config_key}
+api_router.include_router(config.router, prefix="/ui", tags=["Config"], include_in_schema=False)
+api_router.include_router(config_extra.router, prefix="/ui", tags=["Config"], include_in_schema=False)
 
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"], include_in_schema=False)
 
