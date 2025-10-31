@@ -12,21 +12,10 @@ from ... import crud, models, security
 from ...database import get_db_session
 from ...scraper_manager import ScraperManager
 from ...config_manager import ConfigManager
+from ..dependencies import get_scraper_manager, get_config_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def get_scraper_manager() -> ScraperManager:
-    """依赖注入: 获取ScraperManager实例"""
-    from ...main import scraper_manager
-    return scraper_manager
-
-
-def get_config_manager() -> ConfigManager:
-    """依赖注入: 获取ConfigManager实例"""
-    from ...main import config_manager
-    return config_manager
 
 
 @router.get("/scrapers", response_model=List[models.ScraperSettingWithConfig], summary="获取所有搜索源的设置")

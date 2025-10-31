@@ -9,15 +9,10 @@ from pydantic import BaseModel
 
 from ... import models, security
 from ...metadata_manager import MetadataSourceManager
+from ..dependencies import get_metadata_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def get_metadata_manager() -> MetadataSourceManager:
-    """依赖注入: 获取MetadataSourceManager实例"""
-    from ...main import metadata_manager
-    return metadata_manager
 
 
 @router.get("/metadata-sources", response_model=List[models.MetadataSourceStatusResponse], summary="获取所有元数据源的设置")

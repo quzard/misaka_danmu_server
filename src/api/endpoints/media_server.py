@@ -13,15 +13,10 @@ from ... import crud, models, security
 from ...database import get_db_session
 from ...task_manager import TaskManager
 from ... import tasks
+from ..dependencies import get_task_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def get_task_manager() -> TaskManager:
-    """依赖注入: 获取TaskManager实例"""
-    from ...main import task_manager
-    return task_manager
 
 
 # ==================== Pydantic Models ====================
