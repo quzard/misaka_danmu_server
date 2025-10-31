@@ -2,6 +2,7 @@
 Episode相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +12,11 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
 from ..danmaku_parser import parse_dandan_xml_to_comments
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 # 弹幕基础目录
 DANMAKU_BASE_DIR = Path(settings.config_dir) / "danmaku"

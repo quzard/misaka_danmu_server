@@ -2,6 +2,7 @@
 Danmaku相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -12,10 +13,11 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, Episode
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
 from ..path_template import generate_danmaku_path
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 # 弹幕基础目录
 DANMAKU_BASE_DIR = Path(settings.config_dir) / "danmaku"

@@ -2,6 +2,7 @@
 Anime相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
@@ -15,7 +16,8 @@ from ..orm_models import (
     WebhookTask, TaskHistory, ScheduledTask, MetadataSource
 )
 from .. import models
-from ..log_manager import logger
+
+logger = logging.getLogger(__name__)
 from ..timezone import get_now
 
 

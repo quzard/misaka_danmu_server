@@ -2,6 +2,7 @@
 Tmdb相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
@@ -10,8 +11,9 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, TmdbEpisodeMapping
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
+
+logger = logging.getLogger(__name__)
 
 
 async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: int, group_id: str, group_details: models.TMDBEpisodeGroupDetails):

@@ -2,6 +2,7 @@
 Token Log相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
@@ -10,8 +11,9 @@ from datetime import datetime, timedelta
 
 from ..orm_models import TokenAccessLog
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
+
+logger = logging.getLogger(__name__)
 
 
 async def create_token_access_log(session: AsyncSession, token_id: int, ip_address: str, user_agent: Optional[str], log_status: str, path: Optional[str] = None):

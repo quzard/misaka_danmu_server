@@ -2,6 +2,7 @@
 Source相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
@@ -10,8 +11,9 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, Scraper
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
+
+logger = logging.getLogger(__name__)
 
 
 async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:

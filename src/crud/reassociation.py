@@ -2,6 +2,7 @@
 Reassociation相关的CRUD操作
 """
 
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
@@ -10,9 +11,10 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode
 from .. import models
-from ..log_manager import logger
 from ..timezone import get_now
 from .danmaku import _get_fs_path_from_web_path
+
+logger = logging.getLogger(__name__)
 
 
 async def check_reassociation_conflicts(
