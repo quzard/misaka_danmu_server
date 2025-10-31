@@ -8,12 +8,7 @@ from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 
-from ..orm_models import (
-    Anime, AnimeSource, Episode, AnimeAlias, AnimeMetadata,
-    Scraper, Comment, Cache, ApiToken, TokenAccessLog, UaRule,
-    TMDBEpisodeGroupMapping, RateLimitState, ExternalApiLog,
-    WebhookTask, TaskHistory, ScheduledTask
-)
+from ..orm_models import TokenAccessLog
 from .. import models
 from ..log_manager import logger
 from ..timezone import get_now

@@ -10,9 +10,9 @@ from datetime import datetime, timedelta
 
 from ..orm_models import (
     Anime, AnimeSource, Episode, AnimeAlias, AnimeMetadata,
-    Scraper, Comment, Cache, ApiToken, TokenAccessLog, UaRule,
-    TMDBEpisodeGroupMapping, RateLimitState, ExternalApiLog,
-    WebhookTask, TaskHistory, ScheduledTask
+    Scraper, CacheData, ApiToken, TokenAccessLog, UaRule,
+    TmdbEpisodeMapping, RateLimitState, ExternalApiLog,
+    WebhookTask, TaskHistory, ScheduledTask, MetadataSource
 )
 from .. import models
 from ..log_manager import logger
