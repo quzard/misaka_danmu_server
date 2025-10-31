@@ -14,12 +14,36 @@ from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
 from .. import models
 from ..timezone import get_now
 from ..danmaku_parser import parse_dandan_xml_to_comments
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# 弹幕基础目录
-DANMAKU_BASE_DIR = Path(settings.config_dir) / "danmaku"
+
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+
+def _get_base_dir():
+    """获取基础目录，根据运行环境自动调整"""
+    if _is_docker_environment():
+        return Path("/app")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path(".")
+
+
+BASE_DIR = _get_base_dir()
+DANMAKU_BASE_DIR = BASE_DIR / "config/danmaku"
 
 
 async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> Optional[Dict[str, Any]]:

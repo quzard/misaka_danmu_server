@@ -242,6 +242,7 @@ from .external_log import (
 from .utility import (
     _is_docker_environment,
     _get_base_dir,
+    DANMAKU_BASE_DIR,
     prune_logs,
     clear_expired_oauth_states,
     find_recent_task_by_unique_key,
