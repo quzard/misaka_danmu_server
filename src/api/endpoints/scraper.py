@@ -1,0 +1,177 @@
+"""
+搜索源(Scraper)相关的API端点
+"""
+
+import logging
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+
+from ... import crud, models, security
+from ...database import get_db_session
+from ...scraper_manager import ScraperManager
+from ...config_manager import ConfigManager
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def get_scraper_manager() -> ScraperManager:
+    """依赖注入: 获取ScraperManager实例"""
+    from ...main import scraper_manager
+    return scraper_manager
+
+
+def get_config_manager() -> ConfigManager:
+    """依赖注入: 获取ConfigManager实例"""
+    from ...main import config_manager
+    return config_manager
+
+
+@router.get("/scrapers", response_model=List[models.ScraperSettingWithConfig], summary="获取所有搜索源的设置")
+async def get_scraper_settings(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """获取所有可用搜索源的列表及其配置(启用状态、顺序、可配置字段)"""
+    all_settings = await crud.get_all_scraper_settings(session)
+
+    # 不应在UI中显示 'custom' 源,因为它不是一个真正的刮削器
+    settings = [s for s in all_settings if s.get('providerName') != 'custom']
+    
+    # 获取验证开关的全局状态
+    verification_enabled_str = await config_manager.get("scraper_verification_enabled", "false")
+    verification_enabled = verification_enabled_str.lower() == 'true'
+
+    result = []
+    for s in settings:
+        provider_name = s['providerName']
+        scraper_class = manager.get_scraper_class(provider_name)
+        
+        config_fields = []
+        actions = []
+        if scraper_class:
+            config_fields = getattr(scraper_class, 'config_fields', [])
+            actions = getattr(scraper_class, 'actions', [])
+
+        result.append({
+            **s,
+            "configFields": config_fields,
+            "actions": actions,
+            "verificationEnabled": verification_enabled
+        })
+    
+    return result
+
+
+@router.put("/scrapers", status_code=status.HTTP_204_NO_CONTENT, summary="更新搜索源的设置")
+async def update_scraper_settings(
+    settings: List[models.ScraperSetting],
+    current_user: models.User = Depends(security.get_current_user),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """批量更新搜索源的启用状态和显示顺序"""
+    await manager.update_settings(settings)
+    logger.info(f"用户 '{current_user.username}' 更新了搜索源设置,已重新加载。")
+    return
+
+
+@router.get("/scrapers/{providerName}/config", response_model=Dict[str, Any], summary="获取指定搜索源的配置")
+async def get_scraper_config(
+    providerName: str,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """
+    获取单个搜索源的详细配置,包括其在 `scrapers` 表中的设置(如 useProxy)
+    和在 `config` 表中的键值对(如 cookie)
+    """
+    scraper_class = manager.get_scraper_class(providerName)
+    if not scraper_class:
+        raise HTTPException(status_code=404, detail="该搜索源不存在。")
+
+    response_data = {}
+
+    # 1. 从 scrapers 表获取 useProxy
+    scraper_setting = await crud.get_scraper_setting_by_name(session, providerName)
+    if scraper_setting:
+        response_data['useProxy'] = scraper_setting.get('useProxy', False)
+
+    # 2. 从 config 表获取其他配置字段
+    config_fields = getattr(scraper_class, 'config_fields', [])
+    for field in config_fields:
+        field_name = field.get('name')
+        if field_name:
+            config_key = f"scraper_{providerName}_{field_name}"
+            from ...main import config_manager
+            value = await config_manager.get(config_key, "")
+            response_data[field_name] = value
+
+    return response_data
+
+
+@router.put("/scrapers/{providerName}/config", status_code=status.HTTP_204_NO_CONTENT, summary="更新指定搜索源的配置")
+async def update_scraper_config(
+    providerName: str,
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """更新指定搜索源的配置,包括代理设置和其他可配置字段"""
+    try:
+        scraper_class = manager.get_scraper_class(providerName)
+        if not scraper_class:
+            raise HTTPException(status_code=404, detail="该搜索源不存在。")
+
+        # 1. 单独处理 useProxy 字段,它更新的是 scrapers 表
+        if 'useProxy' in payload:
+            use_proxy = payload.pop('useProxy')
+            await crud.update_scraper_proxy(session, providerName, use_proxy)
+            await session.commit()
+
+        # 2. 处理其他配置字段,它们更新的是 config 表
+        config_fields = getattr(scraper_class, 'config_fields', [])
+        for field in config_fields:
+            field_name = field.get('name')
+            if field_name and field_name in payload:
+                config_key = f"scraper_{providerName}_{field_name}"
+                await config_manager.set(config_key, payload[field_name])
+
+        # 3. 重新加载该搜索源
+        manager.reload_scraper(providerName)
+        logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置,已重新加载。")
+        return
+
+    except Exception as e:
+        logger.error(f"更新搜索源 '{providerName}' 配置时出错: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新配置失败: {str(e)}")
+
+
+@router.post("/scrapers/{providerName}/actions/{actionName}", summary="执行搜索源的自定义操作")
+async def execute_scraper_action(
+    providerName: str,
+    actionName: str,
+    payload: Dict[str, Any] = None,
+    current_user: models.User = Depends(security.get_current_user),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """
+    执行指定搜索源的特定操作
+    例如,Bilibili的登录流程可以通过调用 'get_login_info', 'generate_qrcode', 'poll_login' 等操作来驱动
+    """
+    try:
+        scraper = manager.get_scraper(providerName)
+        result = await scraper.execute_action(actionName, payload or {})
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时出错: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"操作执行失败: {str(e)}")
+
