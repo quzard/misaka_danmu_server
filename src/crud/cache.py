@@ -2,6 +2,7 @@
 Cache相关的CRUD操作
 """
 
+import json
 import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession

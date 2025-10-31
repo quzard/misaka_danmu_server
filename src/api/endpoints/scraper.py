@@ -85,7 +85,8 @@ async def get_scraper_config(
     providerName: str,
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(get_scraper_manager)
+    manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     获取单个搜索源的详细配置,包括其在 `scrapers` 表中的设置(如 useProxy)
@@ -103,14 +104,12 @@ async def get_scraper_config(
         response_data['useProxy'] = scraper_setting.get('useProxy', False)
 
     # 2. 从 config 表获取其他配置字段
-    config_fields = getattr(scraper_class, 'config_fields', [])
-    for field in config_fields:
-        field_name = field.get('name')
-        if field_name:
-            config_key = f"scraper_{providerName}_{field_name}"
-            from ...main import config_manager
-            value = await config_manager.get(config_key, "")
-            response_data[field_name] = value
+    # 注意: scraper 类中定义的是 configurable_fields,不是 config_fields
+    configurable_fields = getattr(scraper_class, 'configurable_fields', {})
+    for field_key in configurable_fields.keys():
+        # field_key 就是配置键,例如 "gamerCookie"
+        value = await config_manager.get(field_key, "")
+        response_data[field_key] = value
 
     return response_data
 
@@ -137,12 +136,12 @@ async def update_scraper_config(
             await session.commit()
 
         # 2. 处理其他配置字段,它们更新的是 config 表
-        config_fields = getattr(scraper_class, 'config_fields', [])
-        for field in config_fields:
-            field_name = field.get('name')
-            if field_name and field_name in payload:
-                config_key = f"scraper_{providerName}_{field_name}"
-                await config_manager.set(config_key, payload[field_name])
+        # 注意: scraper 类中定义的是 configurable_fields,不是 config_fields
+        configurable_fields = getattr(scraper_class, 'configurable_fields', {})
+        for field_key in configurable_fields.keys():
+            # field_key 就是配置键,例如 "gamerCookie"
+            if field_key in payload:
+                await config_manager.set(field_key, payload[field_key])
 
         # 3. 重新加载该搜索源
         manager.reload_scraper(providerName)
