@@ -39,20 +39,32 @@ async def get_scraper_settings(
     for s in settings:
         provider_name = s['providerName']
         scraper_class = manager.get_scraper_class(provider_name)
-        
-        config_fields = []
-        actions = []
-        if scraper_class:
-            config_fields = getattr(scraper_class, 'config_fields', [])
-            actions = getattr(scraper_class, 'actions', [])
 
-        result.append({
-            **s,
-            "configFields": config_fields,
-            "actions": actions,
-            "verificationEnabled": verification_enabled
-        })
-    
+        # Create a new dictionary with all required fields before validation
+        full_setting_data = s.copy()
+
+        if scraper_class:
+            full_setting_data['isLoggable'] = getattr(scraper_class, "is_loggable", False)
+            # 关键修复：复制类属性以避免修改共享的可变字典
+            base_fields = getattr(scraper_class, "configurable_fields", None)
+            configurable_fields = base_fields.copy() if base_fields is not None else {}
+
+            # 为当前源动态添加其专属的黑名单配置字段
+            blacklist_key = f"{provider_name}_episode_blacklist_regex"
+            configurable_fields[blacklist_key] = ("分集标题黑名单 (正则)", "string", "使用正则表达式过滤不想要的分集标题。")
+            full_setting_data['configurableFields'] = configurable_fields
+            full_setting_data['actions'] = getattr(scraper_class, 'actions', [])
+        else:
+            # Provide defaults if scraper_class is not found to prevent validation errors
+            full_setting_data['isLoggable'] = False
+            full_setting_data['configurableFields'] = {}
+            full_setting_data['actions'] = []
+
+        full_setting_data['verificationEnabled'] = verification_enabled
+
+        s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
+        result.append(s_with_config)
+
     return result
 
 
