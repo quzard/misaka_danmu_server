@@ -12,9 +12,9 @@ from sqlalchemy import select, update
 from .. import models, orm_models, crud
 from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
-from ..scheduler_manager import SchedulerManager
+from ..scheduler import SchedulerManager
 from ..webhook_manager import WebhookManager
-from ..metadata_manager import MetadataManager
+from ..metadata_manager import MetadataSourceManager as MetadataManager
 from ..config_manager import ConfigManager
 from ..rate_limiter import RateLimiter
 from ..title_recognition import TitleRecognitionManager
