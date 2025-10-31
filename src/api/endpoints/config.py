@@ -11,9 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ... import models
+from ... import models, security
 from ...database import get_db_session
-from ...auth import security
 from ...config_manager import ConfigManager, get_config_manager
 from ...crud import config as config_crud
 
