@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import models, security
 from ...database import get_db_session
-from ...config_manager import ConfigManager, get_config_manager
+from ...config_manager import ConfigManager
 from ...crud import config as config_crud
+from ..dependencies import get_config_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
