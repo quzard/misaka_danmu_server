@@ -633,28 +633,3 @@ async def test_ai_connection(
 
 
 
-# --- 包含模块化的API端点 ---
-from . import (
-    config as config_endpoints,
-    auth as auth_endpoints,
-    scraper as scraper_endpoints,
-    metadata_source as metadata_source_endpoints,
-    media_server as media_server_endpoints
-)
-
-# 注册配置相关的路由
-router.include_router(config_endpoints.router, prefix="/config", tags=["配置"])
-
-# 注册认证相关的路由
-auth_router.include_router(auth_endpoints.router, tags=["认证"])
-
-# 注册搜索源相关的路由
-router.include_router(scraper_endpoints.router, tags=["搜索源"])
-
-# 注册元数据源相关的路由
-router.include_router(metadata_source_endpoints.router, tags=["元数据源"])
-
-# 注册媒体服务器相关的路由
-router.include_router(media_server_endpoints.router, tags=["媒体服务器"])
-
-
