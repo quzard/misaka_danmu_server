@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 
 
 from ..dependencies import (
+    get_scraper_manager, get_task_manager, get_scheduler_manager,
+    get_webhook_manager, get_metadata_manager, get_config_manager,
+    get_rate_limiter, get_title_recognition_manager
+)
 
 from ..ui_models import (
     UITaskResponse, UIProviderSearchResponse, RefreshPosterRequest,
@@ -61,10 +65,6 @@ from ..ui_models import (
     RateLimitProviderStatus, FallbackRateLimitStatus, RateLimitStatusResponse,
     WebhookSettings, WebhookTaskItem, PaginatedWebhookTasksResponse,
     AITestRequest, AITestResponse
-)
-    get_scraper_manager, get_task_manager, get_scheduler_manager,
-    get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
 )
 router = APIRouter()
 
