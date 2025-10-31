@@ -634,7 +634,7 @@ async def test_ai_connection(
 
 
 # --- 包含模块化的API端点 ---
-from .endpoints import (
+from . import (
     config as config_endpoints,
     auth as auth_endpoints,
     scraper as scraper_endpoints,
