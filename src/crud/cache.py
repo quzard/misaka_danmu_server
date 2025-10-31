@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 
 from ..orm_models import CacheData
-from .. import models
+from .. import models, orm_models
 from ..timezone import get_now
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
-from .. import models
+from .. import models, orm_models
 from ..timezone import get_now
 from ..danmaku_parser import parse_dandan_xml_to_comments
 
