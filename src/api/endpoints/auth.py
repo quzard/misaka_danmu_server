@@ -7,9 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ... import models
+from ... import models, security
 from ...database import get_db_session
-from ...auth import security
 from ...crud import user as user_crud
 
 logger = logging.getLogger(__name__)
