@@ -3503,10 +3503,10 @@ async def scan_media_server_library(
                 await crud.create_media_item(
                     session,
                     server_id=server_id,
-                    media_id=item.id,
+                    media_id=item.media_id,
                     library_id=library_id,
                     title=item.title,
-                    media_type=item.type,
+                    media_type=item.media_type,
                     season=item.season,
                     episode=item.episode,
                     year=item.year,
