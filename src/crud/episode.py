@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
