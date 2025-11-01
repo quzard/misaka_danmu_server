@@ -266,14 +266,16 @@ export const Metadata = () => {
       const providerName = selectedSource.providerName
       if (providerName === 'bangumi') {
         await setBangumiConfig({
-          bangumiAccessToken: values.bangumiAccessToken,
-          bangumiUseProxy: values.bangumiUseProxy,
+          bangumiToken: values.bangumiToken,
+          bangumiClientId: values.bangumiClientId,
+          bangumiClientSecret: values.bangumiClientSecret,
+          authMode: values.authMode || 'token', // 保存认证模式
         })
       } else if (providerName === 'tmdb') {
         await setTmdbConfig({
           tmdbApiKey: values.tmdbApiKey,
-          tmdbApiDomain: values.tmdbApiDomain,
-          tmdbImageDomain: values.tmdbImageDomain,
+          tmdbApiBaseUrl: values.tmdbApiBaseUrl,
+          tmdbImageBaseUrl: values.tmdbImageBaseUrl,
         })
       } else if (providerName === 'tvdb') {
         await setTvdbConfig({
