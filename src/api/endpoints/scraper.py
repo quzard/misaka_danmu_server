@@ -111,6 +111,11 @@ async def get_scraper_config(
         value = await config_manager.get(field_key, "")
         response_data[field_key] = value
 
+    # 3. 添加分集黑名单字段(动态添加,每个源都有)
+    blacklist_key = f"{providerName}_episode_blacklist_regex"
+    blacklist_value = await config_manager.get(blacklist_key, "")
+    response_data[blacklist_key] = blacklist_value
+
     return response_data
 
 
@@ -143,7 +148,12 @@ async def update_scraper_config(
             if field_key in payload:
                 await config_manager.set(field_key, payload[field_key])
 
-        # 3. 重新加载该搜索源
+        # 3. 处理分集黑名单字段(动态字段,每个源都有)
+        blacklist_key = f"{providerName}_episode_blacklist_regex"
+        if blacklist_key in payload:
+            await config_manager.set(blacklist_key, payload[blacklist_key])
+
+        # 4. 重新加载该搜索源
         manager.reload_scraper(providerName)
         logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置,已重新加载。")
         return
