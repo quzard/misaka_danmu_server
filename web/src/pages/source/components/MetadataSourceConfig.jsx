@@ -13,22 +13,16 @@ import {
 } from '@ant-design/icons'
 import {
   getBangumiConfig,
-  setBangumiConfig,
   getBangumiAuth,
   getBangumiAuthUrl,
   logoutBangumiAuth,
   getTmdbConfig,
-  setTmdbConfig,
   getTvdbConfig,
-  setTvdbConfig,
   getDoubanConfig,
-  setDoubanConfig,
 } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { useModal } from '../../../ModalContext'
 import dayjs from 'dayjs'
-
-const { Text, Link } = Typography
 
 /**
  * Bangumi 配置组件
