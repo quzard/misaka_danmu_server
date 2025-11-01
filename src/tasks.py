@@ -833,6 +833,18 @@ async def _import_episodes_iteratively(
                         failed_episodes_details[episode.episodeIndex] = "获取弹幕为空"
                         logger.warning(f"分集 '{episode.title}' 获取弹幕为空（0条），不创建分集记录。")
 
+            except RuntimeError as e:
+                # 配置错误（如速率限制配置验证失败），跳过当前分集
+                if "配置验证失败" in str(e):
+                    failed_episodes_count += 1
+                    failed_episodes_details[episode.episodeIndex] = f"配置错误: {str(e)}"
+                    logger.error(f"分集 '{episode.title}' 因配置错误而跳过: {str(e)}")
+                    continue
+                # 其他 RuntimeError 也应该跳过
+                failed_episodes_count += 1
+                failed_episodes_details[episode.episodeIndex] = f"运行时错误: {str(e)}"
+                logger.error(f"分集 '{episode.title}' 因运行时错误而跳过: {str(e)}")
+                continue
             except RateLimitExceededError as e:
                 # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
                 if e.retry_after_seconds >= 3600:
@@ -1604,6 +1616,12 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         scraper = manager.get_scraper(provider_name)
         try:
             await rate_limiter.check(provider_name)
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），直接失败
+            if "配置验证失败" in str(e):
+                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
+            # 其他 RuntimeError 也应该失败
+            raise
         except RateLimitExceededError as e:
             # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
             if e.retry_after_seconds >= 3600:
@@ -1731,6 +1749,16 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 # 2. 检查流控
                 try:
                     await rate_limiter.check(provider_name)
+                except RuntimeError as e:
+                    # 配置错误（如速率限制配置验证失败），跳过当前分集
+                    if "配置验证失败" in str(e):
+                        logger.error(f"配置错误，跳过分集 {episode_id}: {str(e)}")
+                        failed_episodes.append((episode_index, episode_id))
+                        continue
+                    # 其他 RuntimeError 也应该跳过
+                    logger.error(f"运行时错误，跳过分集 {episode_id}: {str(e)}")
+                    failed_episodes.append((episode_index, episode_id))
+                    continue
                 except RateLimitExceededError as e:
                     if e.retry_after_seconds >= 3600:
                         logger.error(f"流控配置验证失败，跳过分集 {episode_id}: {str(e)}")
@@ -2158,6 +2186,12 @@ async def manual_import_task(
 
         try:
             await rate_limiter.check(providerName)
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），直接失败
+            if "配置验证失败" in str(e):
+                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
+            # 其他 RuntimeError 也应该失败
+            raise
         except RateLimitExceededError as e:
             # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
             if e.retry_after_seconds >= 3600:
@@ -2683,6 +2717,20 @@ async def batch_manual_import_task(
             
             await session.commit()
             i += 1 # 成功处理，移动到下一个
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），跳过当前条目
+            if "配置验证失败" in str(e):
+                logger.error(f"配置错误，跳过条目 '{item_desc}': {str(e)}")
+                failed_items += 1
+                await session.rollback()
+                i += 1
+                continue
+            # 其他 RuntimeError 也应该跳过
+            logger.error(f"运行时错误，跳过条目 '{item_desc}': {str(e)}")
+            failed_items += 1
+            await session.rollback()
+            i += 1
+            continue
         except RateLimitExceededError as e:
             logger.warning(f"批量导入任务因达到速率限制而暂停: {e}")
             await progress_callback(progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
