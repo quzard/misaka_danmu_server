@@ -3,7 +3,7 @@
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -256,12 +256,19 @@ async def scan_media_server_library(
     server_config = await media_crud.get_media_server_by_id(session, server_id)
     server_name = server_config.get('name', f'服务器{server_id}') if server_config else f'服务器{server_id}'
 
+    # 创建协程工厂函数
+    def create_scan_task(s: AsyncSession, cb: Callable):
+        return tasks.scan_media_server_library(
+            server_id=server_id,
+            library_ids=payload.library_ids,
+            session=s,
+            progress_callback=cb
+        )
+
     # 提交扫描任务
-    task_id = await task_manager.submit_task(
-        tasks.scan_media_server_library,
-        server_id=server_id,
-        library_ids=payload.library_ids,
-        task_name=f"扫描媒体服务器: {server_name}"
+    task_id, _ = await task_manager.submit_task(
+        create_scan_task,
+        title=f"扫描媒体服务器: {server_name}"
     )
 
     return {"message": "扫描任务已提交", "taskId": task_id}
