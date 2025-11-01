@@ -100,6 +100,11 @@ class MediaItemsImportRequest(BaseModel):
     itemIds: List[int]
 
 
+class MediaServerScanRequest(BaseModel):
+    """媒体服务器扫描请求"""
+    library_ids: Optional[List[str]] = None
+
+
 # ==================== Media Server Endpoints ====================
 
 @router.get("/media-servers", response_model=List[MediaServerResponse], summary="获取所有媒体服务器")
@@ -232,7 +237,7 @@ async def get_media_server_libraries(
 @router.post("/media-servers/{server_id}/scan", status_code=202, summary="扫描媒体库")
 async def scan_media_server_library(
     server_id: int,
-    library_ids: Optional[List[str]] = None,
+    payload: MediaServerScanRequest,
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -249,7 +254,7 @@ async def scan_media_server_library(
     task_id = await task_manager.submit_task(
         tasks.scan_media_server,
         server_id=server_id,
-        library_ids=library_ids,
+        library_ids=payload.library_ids,
         task_name=f"扫描媒体服务器: {server.name}"
     )
 

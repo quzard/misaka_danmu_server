@@ -9,7 +9,7 @@ from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 
-from ..orm_models import TokenAccessLog
+from ..orm_models import TokenAccessLog, UaRule
 from .. import models
 from ..timezone import get_now
 

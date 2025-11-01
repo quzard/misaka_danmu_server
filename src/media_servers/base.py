@@ -77,8 +77,13 @@ class BaseMediaServer(ABC):
         await self.client.aclose()
     
     @abstractmethod
-    async def test_connection(self) -> bool:
-        """测试连接是否正常"""
+    async def test_connection(self) -> Dict[str, Any]:
+        """
+        测试连接是否正常
+
+        Returns:
+            服务器信息字典,例如: {"ServerName": "My Server", "Version": "4.7.0.0"}
+        """
         pass
     
     @abstractmethod

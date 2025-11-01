@@ -9,14 +9,20 @@ from .base import BaseMediaServer, MediaLibrary, MediaItem
 class EmbyMediaServer(BaseMediaServer):
     """Emby媒体服务器"""
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self) -> Dict[str, Any]:
         """测试连接"""
         try:
             data = await self._request('GET', '/System/Info')
-            return data is not None and 'ServerName' in data
+            if data and 'ServerName' in data:
+                return {
+                    "ServerName": data.get('ServerName'),
+                    "Version": data.get('Version'),
+                    "Id": data.get('Id')
+                }
+            raise Exception("无法获取服务器信息")
         except Exception as e:
             self.logger.error(f"Emby连接测试失败: {e}")
-            return False
+            raise
     
     async def get_libraries(self) -> List[MediaLibrary]:
         """获取所有媒体库"""

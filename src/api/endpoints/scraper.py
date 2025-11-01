@@ -119,6 +119,19 @@ async def get_scraper_config(
     blacklist_value = await config_manager.get(blacklist_key_db, "")
     response_data[blacklist_key_camel] = blacklist_value
 
+    # 4. 添加"记录原始响应"字段(动态添加,每个源都有)
+    # 数据库中使用下划线命名: scraper_gamer_log_responses
+    # 前端期望驼峰命名: scraperGamerLogResponses
+    provider_name_capitalized = providerName[0].upper() + providerName[1:]
+    log_responses_key_db = f"scraper_{providerName}_log_responses"
+    log_responses_key_camel = f"scraper{provider_name_capitalized}LogResponses"
+    log_responses_value = await config_manager.get(log_responses_key_db, "false")
+    # 转换为布尔值
+    if isinstance(log_responses_value, bool):
+        response_data[log_responses_key_camel] = log_responses_value
+    else:
+        response_data[log_responses_key_camel] = str(log_responses_value).lower() == 'true'
+
     return response_data
 
 
@@ -159,7 +172,18 @@ async def update_scraper_config(
         if blacklist_key_camel in payload:
             await config_manager.set(blacklist_key_db, payload[blacklist_key_camel])
 
-        # 4. 重新加载该搜索源
+        # 4. 处理"记录原始响应"字段(动态字段,每个源都有)
+        # 前端发送驼峰命名: scraperGamerLogResponses
+        # 数据库存储下划线命名: scraper_gamer_log_responses
+        provider_name_capitalized = providerName[0].upper() + providerName[1:]
+        log_responses_key_camel = f"scraper{provider_name_capitalized}LogResponses"
+        log_responses_key_db = f"scraper_{providerName}_log_responses"
+        if log_responses_key_camel in payload:
+            # 转换布尔值为字符串存储
+            value = payload[log_responses_key_camel]
+            await config_manager.set(log_responses_key_db, str(value).lower())
+
+        # 5. 重新加载该搜索源
         manager.reload_scraper(providerName)
         logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置,已重新加载。")
         return

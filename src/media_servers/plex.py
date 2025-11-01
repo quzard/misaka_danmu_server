@@ -17,14 +17,21 @@ class PlexMediaServer(BaseMediaServer):
             'Accept': 'application/json',
         }
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self) -> Dict[str, Any]:
         """测试连接"""
         try:
             data = await self._request('GET', '/')
-            return data is not None and 'MediaContainer' in data
+            if data and 'MediaContainer' in data:
+                container = data['MediaContainer']
+                return {
+                    "ServerName": container.get('friendlyName', 'Plex Server'),
+                    "Version": container.get('version'),
+                    "Id": container.get('machineIdentifier')
+                }
+            raise Exception("无法获取服务器信息")
         except Exception as e:
             self.logger.error(f"Plex连接测试失败: {e}")
-            return False
+            raise
     
     async def get_libraries(self) -> List[MediaLibrary]:
         """获取所有媒体库"""
