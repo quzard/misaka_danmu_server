@@ -239,23 +239,42 @@ export function BangumiConfig({ form }) {
       {/* OAuth 授权状态 */}
       {authMode === 'oauth' && (
         <div className="border rounded p-4">
-          <div className="font-medium mb-2">授权状态</div>
+          <div className="font-medium mb-3">授权状态</div>
           {authInfo.isAuthenticated ? (
-            <div className="space-y-2">
-              <div className="text-sm">
-                <span className="text-gray-500">用户ID:</span> {authInfo.bangumiUserId}
+            <div className="space-y-3">
+              {/* 用户信息卡片 */}
+              <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                {/* 头像 */}
+                {authInfo.avatarUrl && (
+                  <img
+                    src={authInfo.avatarUrl}
+                    alt={authInfo.nickname}
+                    className="w-12 h-12 rounded-full object-cover border-2 border-gray-200 dark:border-gray-600"
+                    onError={(e) => {
+                      e.target.style.display = 'none'
+                    }}
+                  />
+                )}
+                {/* 用户信息 */}
+                <div className="flex-1">
+                  <div className="font-medium text-base">{authInfo.nickname}</div>
+                  <div className="text-xs text-gray-500">ID: {authInfo.bangumiUserId}</div>
+                </div>
               </div>
-              <div className="text-sm">
-                <span className="text-gray-500">昵称:</span> {authInfo.nickname}
+
+              {/* 授权信息 */}
+              <div className="space-y-1.5">
+                <div className="text-sm flex justify-between">
+                  <span className="text-gray-500">授权于:</span>
+                  <span>{dayjs(authInfo.authorizedAt).format('YYYY-MM-DD HH:mm')}</span>
+                </div>
+                <div className="text-sm flex justify-between">
+                  <span className="text-gray-500">过期于:</span>
+                  <span>{dayjs(authInfo.expiresAt).format('YYYY-MM-DD HH:mm')}</span>
+                </div>
               </div>
-              <div className="text-sm">
-                <span className="text-gray-500">授权于:</span>{' '}
-                {dayjs(authInfo.authorizedAt).format('YYYY-MM-DD HH:mm')}
-              </div>
-              <div className="text-sm">
-                <span className="text-gray-500">过期于:</span>{' '}
-                {dayjs(authInfo.expiresAt).format('YYYY-MM-DD HH:mm')}
-              </div>
+
+              {/* 过期状态 */}
               {(() => {
                 const now = dayjs()
                 const expiresAt = dayjs(authInfo.expiresAt)
@@ -265,12 +284,12 @@ export function BangumiConfig({ form }) {
 
                 return (
                   <div
-                    className={`text-xs font-medium ${
+                    className={`text-sm font-medium px-3 py-2 rounded ${
                       isExpired
-                        ? 'text-red-500'
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
                         : isExpiringSoon
-                        ? 'text-orange-500'
-                        : 'text-green-500'
+                        ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400'
+                        : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
                     }`}
                   >
                     {isExpired ? (
@@ -283,7 +302,9 @@ export function BangumiConfig({ form }) {
                   </div>
                 )
               })()}
-              <div className="mt-2 space-x-2">
+
+              {/* 操作按钮 */}
+              <div className="flex gap-2 pt-1">
                 {(() => {
                   const now = dayjs()
                   const expiresAt = dayjs(authInfo.expiresAt)
@@ -304,16 +325,16 @@ export function BangumiConfig({ form }) {
               </div>
             </div>
           ) : authInfo.isExpired ? (
-            <div className="text-center py-2">
+            <div className="text-center py-4">
               <div className="mb-2 text-orange-500 font-medium">⚠️ 授权已过期</div>
-              <div className="mb-2 text-sm text-gray-500">请重新授权以继续使用 Bangumi 功能</div>
+              <div className="mb-3 text-sm text-gray-500">请重新授权以继续使用 Bangumi 功能</div>
               <Button type="primary" onClick={handleOAuthLogin}>
                 重新授权
               </Button>
             </div>
           ) : (
-            <div className="text-center py-2">
-              <div className="mb-2 text-sm">当前未授权。授权后可使用更多功能。</div>
+            <div className="text-center py-4">
+              <div className="mb-3 text-sm text-gray-500">当前未授权。授权后可使用更多功能。</div>
               <Button type="primary" onClick={handleOAuthLogin}>
                 通过 Bangumi 登录
               </Button>
