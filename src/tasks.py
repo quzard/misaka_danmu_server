@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from xml.sax.saxutils import escape as xml_escape
 
 from . import crud, models, orm_models
+from .orm_models import Anime
 from .rate_limiter import RateLimiter, RateLimitExceededError
 from .config_manager import ConfigManager
 from .image_utils import download_image

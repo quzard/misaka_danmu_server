@@ -317,6 +317,8 @@ class TaskManager:
                     found_and_removed = True
                     task_to_remove = task
                     task.done_event.set()
+                    # 重要：调用 task_done() 以保持队列计数器正确
+                    self._download_queue.task_done()
                     self.logger.info(f"已从下载队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                 else:
                     temp_list.append(task)
@@ -336,6 +338,8 @@ class TaskManager:
                         found_and_removed = True
                         task_to_remove = task
                         task.done_event.set()
+                        # 重要：调用 task_done() 以保持队列计数器正确
+                        self._management_queue.task_done()
                         self.logger.info(f"已从管理队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                     else:
                         temp_list.append(task)
@@ -344,6 +348,27 @@ class TaskManager:
 
             for task in temp_list:
                 await self._management_queue.put(task)
+
+        # 如果在管理队列中也没找到，检查后备队列
+        if not found_and_removed:
+            temp_list = []
+            while not self._fallback_queue.empty():
+                try:
+                    task = self._fallback_queue.get_nowait()
+                    if task.task_id == task_id:
+                        found_and_removed = True
+                        task_to_remove = task
+                        task.done_event.set()
+                        # 重要：调用 task_done() 以保持队列计数器正确
+                        self._fallback_queue.task_done()
+                        self.logger.info(f"已从后备队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
+                    else:
+                        temp_list.append(task)
+                except asyncio.QueueEmpty:
+                    break
+
+            for task in temp_list:
+                await self._fallback_queue.put(task)
 
         # 修正：如果一个待处理任务被取消，必须同时清理其在管理器中的状态（任务标题和唯一键），
         # 以允许用户重新提交该任务。
@@ -376,6 +401,15 @@ class TaskManager:
             self._current_management_task.running_coro_task.cancel()
             return True
 
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id and self._current_fallback_task.running_coro_task:
+            self.logger.info(f"正在中止后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})")
+            # 解除暂停，以便任务可以接收到取消异常
+            self._current_fallback_task.pause_event.set()
+            # 取消底层的协程
+            self._current_fallback_task.running_coro_task.cancel()
+            return True
+
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
@@ -397,6 +431,14 @@ class TaskManager:
                 self.logger.info(f"已暂停管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
                 return True
 
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_fallback_task.pause_event.clear()
+                await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
@@ -416,6 +458,14 @@ class TaskManager:
                 self._current_management_task.pause_event.set()
                 await crud.update_task_status(session, self._current_management_task.task_id, TaskStatus.RUNNING)
                 self.logger.info(f"已恢复管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
+                return True
+
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_fallback_task.pause_event.set()
+                await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
                 return True
 
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")

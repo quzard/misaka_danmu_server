@@ -176,6 +176,7 @@ async def refresh_single_episode(
 async def refresh_episodes_bulk(
     request: Request,
     current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter)

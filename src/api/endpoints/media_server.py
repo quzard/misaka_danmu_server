@@ -265,10 +265,11 @@ async def scan_media_server_library(
             progress_callback=cb
         )
 
-    # 提交扫描任务
+    # 提交扫描任务到管理队列
     task_id, _ = await task_manager.submit_task(
         create_scan_task,
-        title=f"扫描媒体服务器: {server_name}"
+        title=f"扫描媒体服务器: {server_name}",
+        queue_type="management"
     )
 
     return {"message": "扫描任务已提交", "taskId": task_id}
