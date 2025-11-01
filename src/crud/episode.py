@@ -14,6 +14,7 @@ from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
 from .. import models, orm_models
 from ..timezone import get_now
 from ..danmaku_parser import parse_dandan_xml_to_comments
+from .source import check_source_exists_by_media_id, get_anime_id_by_source_media_id, _assign_source_order_if_missing
 
 logger = logging.getLogger(__name__)
 
