@@ -347,6 +347,11 @@ class BilibiliScraper(BaseScraper):
             return await self.poll_login_status(qrcodeKey)
         elif action_name == "logout":
             await self.config_manager.setValue("bilibiliCookie", "")
+            # 清除客户端缓存，强制下次请求重新创建客户端
+            if self.client:
+                await self.client.aclose()
+                self.client = None
+            self.logger.info("Bilibili: 已注销登录并清除客户端缓存。")
             return {"message": "注销成功"}
         else:
             return await super().execute_action(action_name, payload)
