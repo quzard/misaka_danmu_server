@@ -252,7 +252,7 @@ async def scan_media_server_library(
 
     # 提交扫描任务
     task_id = await task_manager.submit_task(
-        tasks.scan_media_server,
+        tasks.scan_media_server_library,
         server_id=server_id,
         library_ids=payload.library_ids,
         task_name=f"扫描媒体服务器: {server.name}"
