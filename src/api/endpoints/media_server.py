@@ -244,18 +244,24 @@ async def scan_media_server_library(
 ):
     """扫描媒体服务器的媒体库"""
     from ...media_server_manager import get_media_server_manager
+    from ... import crud as media_crud
+
     manager = get_media_server_manager()
 
-    server = manager.servers.get(server_id)
-    if not server:
+    server_instance = manager.servers.get(server_id)
+    if not server_instance:
         raise HTTPException(status_code=404, detail="媒体服务器不存在")
+
+    # 从数据库获取服务器配置以获取名称
+    server_config = await media_crud.get_media_server_by_id(session, server_id)
+    server_name = server_config.get('name', f'服务器{server_id}') if server_config else f'服务器{server_id}'
 
     # 提交扫描任务
     task_id = await task_manager.submit_task(
         tasks.scan_media_server_library,
         server_id=server_id,
         library_ids=payload.library_ids,
-        task_name=f"扫描媒体服务器: {server.name}"
+        task_name=f"扫描媒体服务器: {server_name}"
     )
 
     return {"message": "扫描任务已提交", "taskId": task_id}
