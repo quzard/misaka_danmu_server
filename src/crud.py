@@ -192,7 +192,6 @@ from .crud.cache import (
     clear_all_cache,
     delete_cache,
     get_cache_keys_by_pattern,
-    clear_task_state_cache,
 )
 from .crud.api_token import (
     get_all_api_tokens,

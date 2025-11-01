@@ -87,11 +87,3 @@ async def get_cache_keys_by_pattern(session: AsyncSession, pattern: str) -> List
     result = await session.execute(stmt)
     return [row[0] for row in result.fetchall()]
 
-
-async def clear_task_state_cache(session: AsyncSession, task_id: str):
-    """清理任务状态缓存"""
-    await session.execute(
-        delete(orm_models.TaskStateCache).where(orm_models.TaskStateCache.taskId == task_id)
-    )
-    await session.commit()
-
