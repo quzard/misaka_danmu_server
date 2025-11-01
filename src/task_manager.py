@@ -111,6 +111,7 @@ class TaskManager:
                 )
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成 [队列: {queue_type}]。")
         except TaskSuccess as e:
+            self.logger.debug(f"捕获到 TaskSuccess 异常: {e}")
             final_message = str(e) if str(e) else "任务成功完成"
             async with self._session_factory() as final_session:
                 await crud.finalize_task_in_history(
@@ -174,6 +175,9 @@ class TaskManager:
                 self._current_download_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="download")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Download Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_download_task = None
                 self._download_queue.task_done()
@@ -186,6 +190,9 @@ class TaskManager:
                 self._current_management_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="management")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Management Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_management_task = None
                 self._management_queue.task_done()
@@ -198,6 +205,9 @@ class TaskManager:
                 self._current_fallback_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="fallback")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Fallback Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_fallback_task = None
                 self._fallback_queue.task_done()
@@ -317,8 +327,6 @@ class TaskManager:
                     found_and_removed = True
                     task_to_remove = task
                     task.done_event.set()
-                    # 重要：调用 task_done() 以保持队列计数器正确
-                    self._download_queue.task_done()
                     self.logger.info(f"已从下载队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                 else:
                     temp_list.append(task)
@@ -338,8 +346,6 @@ class TaskManager:
                         found_and_removed = True
                         task_to_remove = task
                         task.done_event.set()
-                        # 重要：调用 task_done() 以保持队列计数器正确
-                        self._management_queue.task_done()
                         self.logger.info(f"已从管理队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                     else:
                         temp_list.append(task)
@@ -359,8 +365,6 @@ class TaskManager:
                         found_and_removed = True
                         task_to_remove = task
                         task.done_event.set()
-                        # 重要：调用 task_done() 以保持队列计数器正确
-                        self._fallback_queue.task_done()
                         self.logger.info(f"已从后备队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
                     else:
                         temp_list.append(task)
