@@ -1503,8 +1503,13 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
         # 步骤 1: 获取新分集列表的元数据
         await progress_callback(10, "正在获取新分集列表...")
         current_media_id = source_info["mediaId"]
-        new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"))
-        
+
+        # 对于优酷源,传入 is_full_refresh 参数
+        if source_info["providerName"] == "youku":
+            new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"), is_full_refresh=True)
+        else:
+            new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"))
+
         # --- 故障转移逻辑 ---
         if not new_episodes_meta:
             logger.info(f"主源 '{source_info['providerName']}' 未能找到分集，尝试故障转移...")
@@ -1515,7 +1520,12 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
                 await progress_callback(18, f"找到新的媒体ID，正在重试...")
                 await crud.update_source_media_id(session, sourceId, new_media_id)
                 await session.commit() # 提交 mediaId 的更新
-                new_episodes_meta = await scraper.get_episodes(new_media_id)
+
+                # 对于优酷源,传入 is_full_refresh 参数
+                if source_info["providerName"] == "youku":
+                    new_episodes_meta = await scraper.get_episodes(new_media_id, is_full_refresh=True)
+                else:
+                    new_episodes_meta = await scraper.get_episodes(new_media_id)
 
         if not new_episodes_meta:
             raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
@@ -2427,14 +2437,14 @@ async def webhook_search_and_dispatch_task(
         if ai_match_enabled:
             logger.info("Webhook 任务: AI匹配已启用")
             try:
-                # 获取AI配置
+                # 获取AI配置 - 使用 AIMatcher 期望的键名
                 ai_config = {
-                    'provider': await config_manager.get("aiProvider", "deepseek"),
-                    'api_key': await config_manager.get("aiApiKey", ""),
-                    'base_url': await config_manager.get("aiBaseUrl", ""),
-                    'model': await config_manager.get("aiModel", ""),
-                    'match_prompt': await config_manager.get("aiMatchPrompt", ""),
-                    'log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
+                    'ai_match_provider': await config_manager.get("aiProvider", "deepseek"),
+                    'ai_match_api_key': await config_manager.get("aiApiKey", ""),
+                    'ai_match_base_url': await config_manager.get("aiBaseUrl", ""),
+                    'ai_match_model': await config_manager.get("aiModel", ""),
+                    'ai_match_prompt': await config_manager.get("aiMatchPrompt", ""),
+                    'ai_log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
                 }
 
                 # 构建查询信息
@@ -2490,9 +2500,9 @@ async def webhook_search_and_dispatch_task(
                 # 检查是否启用传统匹配兜底
                 ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
                 if ai_fallback_enabled:
-                    logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                    logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}")
                 else:
-                    logger.error(f"Webhook 任务: AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
+                    logger.error(f"Webhook 任务: AI匹配失败，且传统匹配兜底已禁用: {e}")
                     raise ValueError(f"AI匹配失败且传统匹配兜底已禁用: {e}")
                 ai_selected_index = None
 

@@ -304,7 +304,7 @@ async def search_anime_provider(
 
     return UIProviderSearchResponse(
         results=sorted_results,
-        supplemental_results=supplemental_results,
+        supplemental_results=[item.model_dump() for item in supplemental_results] if supplemental_results else [],
         search_season=season_to_filter,
         search_episode=episode_to_filter
     )

@@ -346,11 +346,13 @@ class YoukuScraper(BaseScraper):
             self.logger.error(f"Youku: 从URL '{url}' 提取信息失败: {e}", exc_info=True)
             return None
 
-    async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
+    async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None, is_full_refresh: bool = False) -> List[models.ProviderEpisodeInfo]:
         # 优酷的逻辑不区分电影和电视剧，都是从一个show_id获取列表，
         # 所以db_media_type在这里用不上，但为了接口统一还是保留参数。
+        # is_full_refresh: 是否是全量刷新操作（全量刷新时不对综艺倒序）
 
         raw_episodes: List[YoukuEpisodeInfo] = []
+
         # 仅当请求完整列表时才尝试从缓存获取
         cache_key = f"episodes_raw_{media_id}"
         if target_episode_index is None:
@@ -401,16 +403,22 @@ class YoukuScraper(BaseScraper):
             if raw_episodes and target_episode_index is None:
                 await self._set_to_cache(cache_key, [e.model_dump() for e in raw_episodes], 'episodes_ttl_seconds', 1800)
 
-        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index, media_id)
+        final_episodes = await self._process_and_format_episodes(raw_episodes, target_episode_index, media_id, is_full_refresh)
 
         if target_episode_index:
             return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index]
         return final_episodes
 
-    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int], media_id: str) -> List[models.ProviderEpisodeInfo]:
+    async def _process_and_format_episodes(self, raw_episodes: List[YoukuEpisodeInfo], target_episode_index: Optional[int], media_id: str, is_full_refresh: bool = False) -> List[models.ProviderEpisodeInfo]:
         """
         一个集中的辅助函数，用于过滤、格式化和编号原始的优酷分集列表。
         参考 parserYouku.js 的综艺处理逻辑。
+
+        Args:
+            raw_episodes: 原始分集列表
+            target_episode_index: 目标分集索引
+            media_id: 媒体ID
+            is_full_refresh: 是否是全量刷新操作（全量刷新时不对综艺倒序）
         """
         # 获取媒体类型
         media_type_cache_key = f"media_type_{media_id}"
@@ -442,8 +450,8 @@ class YoukuScraper(BaseScraper):
         else:
             filtered_episodes = raw_episodes
 
-        # 参考 parserYouku.js: 综艺节目需要倒序处理
-        if media_type == 'variety':
+        # 参考 parserYouku.js: 综艺节目需要倒序处理，但全量刷新时不倒序
+        if media_type == 'variety' and not is_full_refresh:
             self.logger.info(f"Youku: 检测到综艺节目，进行倒序处理")
             filtered_episodes = list(reversed(filtered_episodes))
 
@@ -463,8 +471,11 @@ class YoukuScraper(BaseScraper):
                     else:
                         self.logger.debug(f"Youku: 过滤掉综艺分段: {title}")
                 filtered_episodes = final_filtered
+        elif media_type == 'variety' and is_full_refresh:
+            self.logger.info(f"Youku: 检测到综艺节目全量刷新操作，保持原始顺序")
 
         # 在过滤后的列表上重新编号，使用媒体类型格式化标题
+        # 最终输出统一为 tv_series 类型
         final_episodes = [
             models.ProviderEpisodeInfo(
                 provider=self.provider_name,
@@ -481,10 +492,10 @@ class YoukuScraper(BaseScraper):
         """根据stage字段计算真实的期数"""
         stage_to_episode = {}
         unique_stages = sorted(set(ep.stage for ep in episodes if ep.stage))
-        
+
         for i, stage in enumerate(unique_stages, 1):
             stage_to_episode[stage] = i
-        
+
         return stage_to_episode
 
     async def _get_episodes_page(self, show_id: str, page: int, page_size: int) -> Optional[YoukuVideoResult]:
@@ -766,7 +777,7 @@ class YoukuScraper(BaseScraper):
                 return 'anime'
             elif '电视剧' in cats or 'drama' in cats:
                 return 'drama'
-        
+
         # 备用：从 feature 字段提取
         feature = common_data.feature.lower()
         if '综艺' in feature:
@@ -777,7 +788,7 @@ class YoukuScraper(BaseScraper):
             return 'anime'
         elif '电视剧' in feature:
             return 'drama'
-        
+
         # 默认返回综艺
         return 'variety'
 
