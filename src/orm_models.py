@@ -335,6 +335,7 @@ class MediaItem(Base):
     posterUrl: Mapped[Optional[str]] = mapped_column("poster_url", String(1024))
     isImported: Mapped[bool] = mapped_column("is_imported", Boolean, default=False)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
 
     server: Mapped["MediaServer"] = relationship(back_populates="mediaItems")
 

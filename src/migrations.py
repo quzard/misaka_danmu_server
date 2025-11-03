@@ -405,6 +405,45 @@ async def _add_alias_locked_to_anime_aliases_task(conn: AsyncConnection, db_type
     else:
         logger.info("未找到需要删除的旧TMDB映射定时任务")
 
+async def _add_updated_at_to_media_items_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 为media_items表添加updated_at字段"""
+    table_name = "media_items"
+    column_name = "updated_at"
+
+    # 检查列是否已存在
+    if db_type == "mysql":
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table_name}'
+            AND COLUMN_NAME = '{column_name}'
+        """)
+    else:  # postgresql
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = '{table_name}'
+            AND column_name = '{column_name}'
+        """)
+
+    column_exists = (await conn.execute(check_sql)).scalar() > 0
+
+    if not column_exists:
+        logger.info(f"为表 '{table_name}' 添加 '{column_name}' 列...")
+        if db_type == "mysql":
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            """)
+        else:  # postgresql
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+            """)
+        await conn.execute(alter_sql)
+        logger.info(f"成功为表 '{table_name}' 添加 '{column_name}' 列")
+    else:
+        logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -428,6 +467,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_create_title_recognition_table_v1", _create_title_recognition_table_task, (db_type,)),
         ("migrate_add_queue_type_to_task_history_v1", _add_queue_type_to_task_history_task, (db_type,)),
         ("migrate_add_alias_locked_to_anime_aliases_v1", _add_alias_locked_to_anime_aliases_task, (db_type,)),
+        ("migrate_add_updated_at_to_media_items_v1", _add_updated_at_to_media_items_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

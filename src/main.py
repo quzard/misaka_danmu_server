@@ -1,3 +1,4 @@
+import time
 import uvicorn
 import asyncio
 import secrets
@@ -118,23 +119,26 @@ async def lifespan(app: FastAPI):
 
     await app.state.config_manager.register_defaults(default_configs)
 
-    # --- 新的初始化顺序以解决循环依赖 ---
-    # 1. 初始化元数据管理器，但暂时不传入 scraper_manager
-    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None) # type: ignore
+    # --- 并行优化的初始化顺序 ---
+    startup_start = time.time()
 
-    # 2. 初始化搜索源管理器，并传入元数据管理器
+    # 1-3. 创建管理器实例（不阻塞）
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None)
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager)
-
-    # 3. 将 scraper_manager 实例回填到 metadata_manager 中
     app.state.metadata_manager.scraper_manager = app.state.scraper_manager
 
-    # 4. 现在可以安全地初始化所有管理器
-    await app.state.scraper_manager.initialize()
-    await app.state.metadata_manager.initialize()
+    # 4. 【并行优化】同时初始化 + 预热
+    logger.info("开始并行初始化...")
+    init_start = time.time()
 
-    # 5. 初始化其他依赖于上述管理器的组件
+    # 先并行初始化两个管理器
+    await asyncio.gather(
+        app.state.scraper_manager.initialize(),
+        app.state.metadata_manager.initialize()
+    )
+
+    # 初始化关键组件（同步执行，确保启动正常）
     app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
-
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
 
@@ -149,28 +153,68 @@ async def lifespan(app: FastAPI):
     await app.state.media_server_manager.initialize()
     
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager,
+        app.state.rate_limiter, app.state.metadata_manager,
+        app.state.config_manager, app.state.title_recognition_manager
     )
+
+    # 后台预热搜索源连接池（不阻塞启动）
+    async def background_warmup():
+        """后台预热搜索源连接池"""
+        try:
+            await asyncio.sleep(1)  # 等待1秒后开始预热，确保启动流程完成
+            enabled_scrapers = [
+                scraper for name, scraper in app.state.scraper_manager.scrapers.items()
+                if app.state.scraper_manager.scraper_settings.get(name, {}).get('isEnabled')
+            ]
+
+            async def warmup_single(scraper):
+                try:
+                    if hasattr(scraper, '_ensure_client'):
+                        await scraper._ensure_client()
+                    elif hasattr(scraper, '_create_client'):
+                        await scraper._create_client()
+                except Exception as e:
+                    logger.debug(f"预热 '{scraper.provider_name}' 失败: {e}")
+
+            warmup_start = time.time()
+            await asyncio.gather(*[warmup_single(s) for s in enabled_scrapers], return_exceptions=True)
+            warmup_time = time.time() - warmup_start
+            logger.info(f"后台预热完成: {len(enabled_scrapers)} 个搜索源，耗时 {warmup_time:.2f} 秒")
+        except Exception as e:
+            logger.warning(f"后台预热出错: {e}")
+
+    # 启动后台预热任务（不等待完成）
+    app.state.warmup_task = asyncio.create_task(background_warmup())
+
+    init_time = time.time() - init_start
+    logger.info(f"并行初始化完成，耗时 {init_time:.2f} 秒")
+    # 5. 启动服务（必须在上面完成后）
     app.state.task_manager.start()
     await create_initial_admin_user(app)
     
-    # 新增：创建系统内置定时任务
     async with session_factory() as session:
         existing_task = await session.get(orm_models.ScheduledTask, "system_token_reset")
         if not existing_task:
             await crud.create_scheduled_task(
-                session, 
+                session,
                 task_id="system_token_reset",
                 name="系统内置：Token每日重置",
-                job_type="tokenReset", 
+                job_type="tokenReset",
                 cron="0 0 * * *",
                 is_enabled=True
             )
-            logger.info("已创建系统内置定时任务：重置API Token每日调用次数")
-    
+
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager)
+    app.state.scheduler_manager = SchedulerManager(
+        session_factory, app.state.task_manager, app.state.scraper_manager,
+        app.state.rate_limiter, app.state.metadata_manager,
+        app.state.config_manager, app.state.title_recognition_manager
+    )
     await app.state.scheduler_manager.start()
+
+    total_time = time.time() - startup_start
+    logger.info(f"应用启动完成，总耗时 {total_time:.2f} 秒")
     
     # --- 前端服务 (生产环境) ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
@@ -197,12 +241,18 @@ async def lifespan(app: FastAPI):
             return FileResponse("web/dist/index.html")
     
     yield
-    
+
     # --- Shutdown Logic ---
     if hasattr(app.state, "cleanup_task"):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
+        except asyncio.CancelledError:
+            pass
+    if hasattr(app.state, "warmup_task"):
+        app.state.warmup_task.cancel()
+        try:
+            await app.state.warmup_task
         except asyncio.CancelledError:
             pass
     await close_db_engine(app)
