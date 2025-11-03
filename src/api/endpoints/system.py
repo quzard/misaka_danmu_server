@@ -27,8 +27,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from ... import crud, models, orm_models, security, scraper_manager
 from src import models as api_models
-from ...log_manager import get_logs
+from ...log_manager import get_logs, subscribe_to_logs, unsubscribe_from_logs
 from ...task_manager import TaskManager, TaskSuccess, TaskStatus
+from fastapi.responses import StreamingResponse
 from ...metadata_manager import MetadataSourceManager
 from ...scraper_manager import ScraperManager
 from ... import tasks
@@ -109,6 +110,47 @@ async def get_server_logs(current_user: models.User = Depends(security.get_curre
     return get_logs()
 
 
+@router.get("/logs/stream", summary="SSE实时日志推送")
+async def stream_server_logs(current_user: models.User = Depends(security.get_current_user)):
+    """使用Server-Sent Events实时推送服务器日志。"""
+
+    async def event_generator():
+        # 创建一个队列用于接收新日志
+        queue = asyncio.Queue()
+
+        # 订阅日志更新
+        subscribe_to_logs(queue)
+
+        try:
+            # 首先发送当前所有日志
+            current_logs = get_logs()
+            for log in reversed(current_logs):  # 反转以保持时间顺序
+                yield f"data: {log}\n\n"
+
+            # 然后持续推送新日志
+            while True:
+                try:
+                    # 等待新日志,设置超时以便定期发送心跳
+                    log = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {log}\n\n"
+                except asyncio.TimeoutError:
+                    # 发送心跳注释以保持连接
+                    yield ": heartbeat\n\n"
+        except asyncio.CancelledError:
+            logger.info("SSE日志流连接被客户端关闭")
+        finally:
+            # 取消订阅
+            unsubscribe_from_logs(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用nginx缓冲
+        }
+    )
 
 
 

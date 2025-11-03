@@ -3,12 +3,16 @@ import logging
 import logging.handlers
 from pathlib import Path
 import re
-from typing import List
+from typing import List, Set
+import asyncio
 
 from .config import settings
 
 # 这个双端队列将用于在内存中存储最新的日志，以供Web界面展示
 _logs_deque = collections.deque(maxlen=200)
+
+# 用于存储所有订阅日志的队列
+_log_subscribers: Set[asyncio.Queue] = set()
 
 # 自定义一个日志处理器，它会将日志记录发送到我们的双端队列中
 class DequeHandler(logging.Handler):
@@ -18,7 +22,16 @@ class DequeHandler(logging.Handler):
 
     def emit(self, record):
         # 我们只存储格式化后的消息字符串
-        self.deque.appendleft(self.format(record))
+        log_message = self.format(record)
+        self.deque.appendleft(log_message)
+
+        # 通知所有订阅者
+        for queue in _log_subscribers:
+            try:
+                queue.put_nowait(log_message)
+            except asyncio.QueueFull:
+                # 如果队列满了,跳过这条日志
+                pass
 
 # 新增：一个过滤器，用于从UI日志中排除 httpx 的日志
 class NoHttpxLogFilter(logging.Filter):
@@ -272,3 +285,13 @@ def setup_logging():
 def get_logs() -> List[str]:
     """返回为API存储的所有日志条目列表。"""
     return list(_logs_deque)
+
+
+def subscribe_to_logs(queue: asyncio.Queue) -> None:
+    """订阅日志更新。"""
+    _log_subscribers.add(queue)
+
+
+def unsubscribe_from_logs(queue: asyncio.Queue) -> None:
+    """取消订阅日志更新。"""
+    _log_subscribers.discard(queue)
