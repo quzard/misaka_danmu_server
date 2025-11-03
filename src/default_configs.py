@@ -50,6 +50,8 @@ def get_default_configs(settings=None, ai_prompts=None):
         'bangumiClientId': ('', '用于Bangumi OAuth的App ID。'),
         'bangumiClientSecret': ('', '用于Bangumi OAuth的App Secret。'),
         'doubanCookie': ('', '用于访问豆瓣API的Cookie。'),
+        'imdbUseApi': ('true', 'IMDb是否使用第三方API (api.imdbapi.dev) 而不是官方网站HTML解析。'),
+        'imdbEnableFallback': ('true', 'IMDb是否启用兜底机制。当主方式失败时,自动尝试另一种方式。'),
 
         # 弹幕源
         'danmakuOutputLimitPerSource': ('-1', '弹幕输出上限。-1为无限制。超出限制时按时间段均匀采样。'),

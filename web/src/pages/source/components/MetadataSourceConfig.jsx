@@ -260,48 +260,42 @@ export function BangumiConfig({ form }) {
                   <div className="font-medium text-base">{authInfo.nickname}</div>
                   <div className="text-xs text-gray-500">ID: {authInfo.bangumiUserId}</div>
                 </div>
-              </div>
+                {/* 授权状态和时间 */}
+                <div className="flex flex-col items-end gap-1">
+                  {/* 过期状态 */}
+                  {(() => {
+                    const now = dayjs()
+                    const expiresAt = dayjs(authInfo.expiresAt)
+                    const daysLeft = expiresAt.diff(now, 'day')
+                    const isExpiringSoon = daysLeft <= 7 && daysLeft > 0
+                    const isExpired = daysLeft < 0
 
-              {/* 授权信息 */}
-              <div className="space-y-1.5">
-                <div className="text-sm flex justify-between">
-                  <span className="text-gray-500">授权于:</span>
-                  <span>{dayjs(authInfo.authorizedAt).format('YYYY-MM-DD HH:mm')}</span>
-                </div>
-                <div className="text-sm flex justify-between">
-                  <span className="text-gray-500">过期于:</span>
-                  <span>{dayjs(authInfo.expiresAt).format('YYYY-MM-DD HH:mm')}</span>
-                </div>
-              </div>
-
-              {/* 过期状态 */}
-              {(() => {
-                const now = dayjs()
-                const expiresAt = dayjs(authInfo.expiresAt)
-                const daysLeft = expiresAt.diff(now, 'day')
-                const isExpiringSoon = daysLeft <= 7 && daysLeft > 0
-                const isExpired = daysLeft < 0
-
-                return (
-                  <div
-                    className={`text-sm font-medium px-3 py-2 rounded ${
-                      isExpired
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                        : isExpiringSoon
-                        ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400'
-                        : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                    }`}
-                  >
-                    {isExpired ? (
-                      <>⚠️ 授权已过期</>
-                    ) : isExpiringSoon ? (
-                      <>⚠️ 剩余 {daysLeft} 天过期</>
-                    ) : (
-                      <>✓ 剩余 {daysLeft} 天</>
-                    )}
+                    return (
+                      <div
+                        className={`text-xs font-medium px-2 py-1 rounded ${
+                          isExpired
+                            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                            : isExpiringSoon
+                            ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400'
+                            : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                        }`}
+                      >
+                        {isExpired ? (
+                          <>⚠️ 已过期</>
+                        ) : isExpiringSoon ? (
+                          <>⚠️ {daysLeft}天</>
+                        ) : (
+                          <>✓ {daysLeft}天</>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  {/* 授权时间 */}
+                  <div className="text-xs text-gray-500">
+                    {dayjs(authInfo.authorizedAt).format('YYYY-MM-DD')}
                   </div>
-                )
-              })()}
+                </div>
+              </div>
 
               {/* 操作按钮 */}
               <div className="flex gap-2 pt-1">
@@ -537,6 +531,66 @@ export function DoubanConfig({ form }) {
       <div className="text-gray-500 text-sm -mt-2">
         <div>在浏览器中登录豆瓣后，打开开发者工具 (F12)，在 Network 标签页中找到任意请求，复制 Cookie 值</div>
         <div className="mt-1">Cookie 格式示例: bid=xxx; dbcl2=xxx; ...</div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * IMDb配置组件
+ */
+export function ImdbConfig({ form }) {
+  const [useApi, setUseApi] = useState(true)
+
+  useEffect(() => {
+    // 从表单获取初始值
+    const initialValue = form.getFieldValue('imdbUseApi')
+    setUseApi(initialValue ?? true)
+  }, [form])
+
+  return (
+    <div className="space-y-4">
+      <Alert
+        message="IMDb 配置"
+        description={
+          <div className="space-y-1">
+            <div>IMDb 是全球最大的电影数据库，提供电影、电视节目等作品的元数据信息。</div>
+            <div className="text-xs space-y-1 mt-2">
+              <div>• <span className="font-medium">第三方API</span>: 使用 api.imdbapi.dev，速度快，推荐使用</div>
+              <div>• <span className="font-medium">官方网站</span>: HTML解析官方网站，更稳定但速度较慢</div>
+            </div>
+          </div>
+        }
+        type="info"
+        showIcon
+      />
+
+      {/* 数据源选择 */}
+      <Form.Item label="数据源">
+        <Switch
+          checkedChildren="第三方API"
+          unCheckedChildren="官方网站"
+          checked={useApi}
+          onChange={(checked) => {
+            setUseApi(checked)
+            form.setFieldValue('imdbUseApi', checked)
+          }}
+        />
+      </Form.Item>
+
+      {/* 启用兜底 */}
+      <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+        <Form.Item
+          name="imdbEnableFallback"
+          label="启用兜底"
+          valuePropName="checked"
+          className="min-w-[100px] shrink-0 !mb-0"
+        >
+          <Switch />
+        </Form.Item>
+        <div className="w-full text-gray-500">
+          当主方式失败时,自动尝试另一种方式。默认开启。
+        </div>
       </div>
     </div>
   )

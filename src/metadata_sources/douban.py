@@ -24,8 +24,8 @@ class DoubanJsonSearchSubject(BaseModel):
     url: str
     cover: str
     rate: str
-    cover_x: int
-    cover_y: int
+    cover_x: Optional[int] = None
+    cover_y: Optional[int] = None
 
 class DoubanJsonSearchResponse(BaseModel):
     subjects: List[DoubanJsonSearchSubject]

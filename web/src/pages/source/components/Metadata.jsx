@@ -41,7 +41,8 @@ import {
   BangumiConfig,
   TMDBConfig,
   TVDBConfig,
-  DoubanConfig
+  DoubanConfig,
+  ImdbConfig
 } from './MetadataSourceConfig'
 
 const SortableItem = ({ item, index, handleChangeStatus, onConfig }) => {
@@ -163,11 +164,19 @@ export const Metadata = () => {
       form.resetFields()
       getProviderConfig({ providerName: selectedSource.providerName })
         .then(res => {
-          form.setFieldsValue({
+          const formValues = {
             ...res.data,
             useProxy: res.data.useProxy ?? true,
             logRawResponses: res.data.logRawResponses ?? false,
-          })
+          }
+
+          // IMDB特定配置
+          if (selectedSource.providerName === 'imdb') {
+            formValues.imdbUseApi = res.data.imdbUseApi ?? true
+            formValues.imdbEnableFallback = res.data.imdbEnableFallback ?? true
+          }
+
+          form.setFieldsValue(formValues)
         })
         .catch(() => {
           messageApi.error('获取配置失败')
@@ -284,6 +293,11 @@ export const Metadata = () => {
       } else if (providerName === 'douban') {
         await setDoubanConfig({
           doubanCookie: values.doubanCookie,
+        })
+      } else if (providerName === 'imdb') {
+        await setProviderConfig(providerName, {
+          imdbUseApi: values.imdbUseApi ?? true,
+          imdbEnableFallback: values.imdbEnableFallback ?? true,
         })
       }
 
@@ -484,7 +498,8 @@ export const Metadata = () => {
                     {selectedSource?.providerName === 'tmdb' && <TMDBConfig form={form} />}
                     {selectedSource?.providerName === 'tvdb' && <TVDBConfig form={form} />}
                     {selectedSource?.providerName === 'douban' && <DoubanConfig form={form} />}
-                    {!['bangumi', 'tmdb', 'tvdb', 'douban'].includes(selectedSource?.providerName) && (
+                    {selectedSource?.providerName === 'imdb' && <ImdbConfig form={form} />}
+                    {!['bangumi', 'tmdb', 'tvdb', 'douban', 'imdb'].includes(selectedSource?.providerName) && (
                       <div className="text-gray-500 text-center py-8">
                         此源暂无特定配置项
                       </div>

@@ -417,7 +417,7 @@ class MetadataSourceManager:
             "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
-            "imdb": [],  # IMDb 目前没有特定配置
+            "imdb": ["imdbUseApi", "imdbEnableFallback"],  # IMDb 配置
             # Scrapers
             "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
         }
@@ -433,7 +433,14 @@ class MetadataSourceManager:
             else:
                 raise ValueError(f"未找到提供商: {providerName}")
         else:
-            config_values = {key: await self._config_manager.get(key, "") for key in keys_to_fetch}
+            config_values = {}
+            for key in keys_to_fetch:
+                value_str = await self._config_manager.get(key, "")
+                # 对于IMDB的布尔值配置,转换为布尔类型
+                if key in ['imdbUseApi', 'imdbEnableFallback']:
+                    config_values[key] = value_str.lower() == 'true' if value_str else True
+                else:
+                    config_values[key] = value_str
 
         # 新增：从数据库获取 useProxy 和 logRawResponses 并添加到配置中
         # 修正：将此逻辑移到更前面，确保所有源都能执行
@@ -508,12 +515,17 @@ class MetadataSourceManager:
             "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
+            "imdb": ["imdbUseApi", "imdbEnableFallback"],
         }
         allowed_keys = allowed_keys_map.get(providerName)
         if allowed_keys:
             for key, value in payload.items():
                 if key in allowed_keys:
-                    config_fields_to_update[key] = str(value if value is not None else "")
+                    # 对于布尔值,转换为字符串 "true" 或 "false"
+                    if isinstance(value, bool):
+                        config_fields_to_update[key] = str(value).lower()
+                    else:
+                        config_fields_to_update[key] = str(value if value is not None else "")
 
         # 3. 检查是否有任何需要更新的内容
         if not db_fields_to_update and not config_fields_to_update:
