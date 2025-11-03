@@ -138,8 +138,8 @@ async def search_anime_provider(
                 item.currentEpisodeIndex = episode_to_filter
             
             return UIProviderSearchResponse(
-                results=results,
-                supplemental_results=[models.ProviderSearchInfo.model_validate(item) for item in cached_supplemental_results],
+                results=[item.model_dump() for item in results],
+                supplemental_results=[models.ProviderSearchInfo.model_validate(item).model_dump() for item in cached_supplemental_results],
                 search_season=season_to_filter,
                 search_episode=episode_to_filter
             )
@@ -303,7 +303,7 @@ async def search_anime_provider(
     # --- 缓存逻辑结束 ---
 
     return UIProviderSearchResponse(
-        results=sorted_results,
+        results=[item.model_dump() for item in sorted_results],
         supplemental_results=[item.model_dump() for item in supplemental_results] if supplemental_results else [],
         search_season=season_to_filter,
         search_episode=episode_to_filter

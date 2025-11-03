@@ -16,10 +16,10 @@ class UITaskResponse(BaseModel):
 
 class UIProviderSearchResponse(BaseModel):
     """扩展了 ProviderSearchResponse 以包含原始搜索的上下文"""
-    results: List[Dict] = Field([], description="主搜索结果列表")
+    results: List[Dict] = Field(default_factory=list, description="主搜索结果列表")
     search_season: Optional[int] = None
     search_episode: Optional[int] = None
-    supplemental_results: List[Dict] = Field([], description="来自补充源（如360, Douban）的搜索结果")
+    supplemental_results: List[Dict] = Field(default_factory=list, description="来自补充源（如360, Douban）的搜索结果")
 
 
 class RefreshPosterRequest(BaseModel):
