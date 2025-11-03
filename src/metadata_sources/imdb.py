@@ -488,14 +488,29 @@ class ImdbMetadataSource(BaseMetadataSource):
         use_api = await self._get_config("useApi", True)
         enable_fallback = await self._get_config("enableFallback", True)
 
+        self.logger.info(f"IMDb搜索配置: useApi={use_api}, enableFallback={enable_fallback}")
+
         primary_method = self._search_via_api if use_api else self._search_via_html
         fallback_method = self._search_via_html if use_api else self._search_via_api
 
+        method_name = "第三方API" if use_api else "官方HTML"
+        self.logger.info(f"IMDb使用主方式: {method_name}")
+
         try:
-            return await primary_method(keyword, mediaType)
+            results = await primary_method(keyword, mediaType)
+            if not results and enable_fallback:
+                # 如果主方式没有结果,尝试兜底方式
+                fallback_name = "官方HTML" if use_api else "第三方API"
+                self.logger.info(f"主方式无结果,尝试兜底方式: {fallback_name}")
+                try:
+                    results = await fallback_method(keyword, mediaType)
+                except Exception as fallback_e:
+                    self.logger.warning(f"兜底方式也失败: {fallback_e}")
+            return results
         except Exception as e:
             if enable_fallback:
-                self.logger.warning(f"主搜索方式失败,尝试兜底方式: {e}")
+                fallback_name = "官方HTML" if use_api else "第三方API"
+                self.logger.warning(f"主搜索方式失败,尝试兜底方式 {fallback_name}: {e}")
                 try:
                     return await fallback_method(keyword, mediaType)
                 except Exception as fallback_e:

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 from .. import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
@@ -26,6 +26,14 @@ class DoubanJsonSearchSubject(BaseModel):
     rate: str
     cover_x: Optional[int] = None
     cover_y: Optional[int] = None
+
+    @field_validator('cover_x', 'cover_y', mode='before')
+    @classmethod
+    def convert_empty_to_none(cls, v):
+        """将空字符串转换为None"""
+        if v == '' or v is None:
+            return None
+        return v
 
 class DoubanJsonSearchResponse(BaseModel):
     subjects: List[DoubanJsonSearchSubject]
