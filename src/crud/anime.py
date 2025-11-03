@@ -16,9 +16,10 @@ from ..orm_models import (
     WebhookTask, TaskHistory, ScheduledTask, MetadataSource
 )
 from .. import models
+from ..timezone import get_now
+from .source import link_source_to_anime
 
 logger = logging.getLogger(__name__)
-from ..timezone import get_now
 
 
 async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
