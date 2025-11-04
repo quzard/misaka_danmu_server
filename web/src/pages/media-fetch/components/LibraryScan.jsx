@@ -3,7 +3,7 @@ import { Card, Select, Button, message, Space, Checkbox } from 'antd';
 import { ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
-import { getMediaServers, scanMediaServer, getMediaServerLibraries } from '../../../apis';
+import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer } from '../../../apis';
 
 const { Option } = Select;
 
@@ -14,6 +14,7 @@ const LibraryScan = () => {
   const [selectedLibraryIds, setSelectedLibraryIds] = useState([]);
   const [loadingLibraries, setLoadingLibraries] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [savingLibraries, setSavingLibraries] = useState(false);
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -65,8 +66,14 @@ const LibraryScan = () => {
       const data = res.data;
       setLibraries(data);
 
-      // 自动选中所有媒体库
-      setSelectedLibraryIds(data.map(lib => lib.id));
+      // 从服务器配置中读取已选择的媒体库
+      const currentServer = servers.find(s => s.id === selectedServerId);
+      if (currentServer && currentServer.selectedLibraries && currentServer.selectedLibraries.length > 0) {
+        setSelectedLibraryIds(currentServer.selectedLibraries);
+      } else {
+        // 如果没有配置,默认选中所有媒体库
+        setSelectedLibraryIds(data.map(lib => lib.id));
+      }
     } catch (error) {
       message.error('加载媒体库列表失败');
       console.error(error);
@@ -74,6 +81,29 @@ const LibraryScan = () => {
       setSelectedLibraryIds([]);
     } finally {
       setLoadingLibraries(false);
+    }
+  };
+
+  // 保存媒体库选择
+  const handleSaveLibraries = async () => {
+    if (!selectedServerId) {
+      message.warning('请先选择媒体服务器');
+      return;
+    }
+
+    setSavingLibraries(true);
+    try {
+      await updateMediaServer(selectedServerId, {
+        selectedLibraries: selectedLibraryIds
+      });
+      message.success('媒体库选择已保存');
+      // 重新加载服务器列表以更新配置
+      await loadServers();
+    } catch (error) {
+      message.error('保存失败: ' + (error.message || '未知错误'));
+      console.error(error);
+    } finally {
+      setSavingLibraries(false);
     }
   };
 
@@ -159,7 +189,7 @@ const LibraryScan = () => {
               loading={loading}
             >
               {servers.map(server => (
-                <Option key={server.id} value={server.id} disabled={!server.isEnabled}>
+                <Option key={server.id} value={server.id}>
                   {server.name} ({server.providerName}) {!server.isEnabled && '(已禁用)'}
                 </Option>
               ))}
@@ -202,44 +232,55 @@ const LibraryScan = () => {
                     暂无可用媒体库
                   </div>
                 ) : (
-                  <Checkbox.Group
-                    style={{ width: '100%' }}
-                    value={selectedLibraryIds}
-                    onChange={setSelectedLibraryIds}
-                  >
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      gap: '8px'
-                    }}>
-                      {libraries.map(library => (
-                        <Checkbox
-                          key={library.id}
-                          value={library.id}
-                          style={{
-                            padding: '6px 12px',
-                            border: '1px solid #e8e8e8',
-                            borderRadius: '4px',
-                            backgroundColor: '#fff',
-                            margin: 0,
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          <span style={{ fontWeight: 'normal' }}>
-                            {library.name}
-                            <span style={{
-                              marginLeft: '8px',
-                              fontSize: '12px',
-                              color: '#666'
-                            }}>
-                              ({library.type})
+                  <>
+                    <Checkbox.Group
+                      style={{ width: '100%' }}
+                      value={selectedLibraryIds}
+                      onChange={setSelectedLibraryIds}
+                    >
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        flexWrap: 'wrap',
+                        gap: '8px'
+                      }}>
+                        {libraries.map(library => (
+                          <Checkbox
+                            key={library.id}
+                            value={library.id}
+                            style={{
+                              padding: '6px 12px',
+                              border: '1px solid #e8e8e8',
+                              borderRadius: '4px',
+                              backgroundColor: '#fff',
+                              margin: 0,
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            <span style={{ fontWeight: 'normal' }}>
+                              {library.name}
+                              <span style={{
+                                marginLeft: '8px',
+                                fontSize: '12px',
+                                color: '#666'
+                              }}>
+                                ({library.type})
+                              </span>
                             </span>
-                          </span>
-                        </Checkbox>
-                      ))}
+                          </Checkbox>
+                        ))}
+                      </div>
+                    </Checkbox.Group>
+                    <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                      <Button
+                        type="primary"
+                        loading={savingLibraries}
+                        onClick={handleSaveLibraries}
+                      >
+                        保存
+                      </Button>
                     </div>
-                  </Checkbox.Group>
+                  </>
                 )}
               </div>
             </div>

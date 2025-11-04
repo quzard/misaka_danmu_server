@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Select, Switch, Button, message, Checkbox, Space } from 'antd';
-import { createMediaServer, updateMediaServer, testMediaServerConnection, getMediaServerLibraries } from '../../../apis';
+import { Modal, Form, Input, Select, Switch, Button, message } from 'antd';
+import { createMediaServer, updateMediaServer, testMediaServerConnection } from '../../../apis';
 
 const { Option } = Select;
 
@@ -8,8 +8,6 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [libraries, setLibraries] = useState([]);
-  const [loadingLibraries, setLoadingLibraries] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -21,12 +19,7 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
           url: server.url,
           apiToken: server.apiToken,
           isEnabled: server.isEnabled,
-          selectedLibraries: server.selectedLibraries || [],
         });
-        // 加载媒体库列表
-        if (server.id) {
-          loadLibraries(server.id);
-        }
       } else {
         // 新增模式
         form.resetFields();
@@ -38,23 +31,9 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
     }
   }, [visible, server, form]);
 
-  const loadLibraries = async (serverId) => {
-    setLoadingLibraries(true);
-    try {
-      const res = await getMediaServerLibraries(serverId);
-      const data = res.data;
-      setLibraries(data);
-    } catch (error) {
-      console.error('加载媒体库列表失败:', error);
-    } finally {
-      setLoadingLibraries(false);
-    }
-  };
-
   const handleTest = async () => {
     try {
       await form.validateFields(['url', 'apiToken', 'providerName']);
-      const values = form.getFieldsValue(['url', 'apiToken', 'providerName']);
 
       setTesting(true);
 
@@ -64,8 +43,6 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
         const result = res.data;
         if (result.success) {
           message.success('连接成功!');
-          // 重新加载媒体库列表
-          await loadLibraries(server.id);
         } else {
           message.error('连接失败: ' + (result.message || '未知错误'));
         }
@@ -178,24 +155,6 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
         >
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>
-
-        {libraries.length > 0 && (
-          <Form.Item
-            label="选择媒体库"
-            name="selectedLibraries"
-            tooltip="留空则扫描所有媒体库"
-          >
-            <Checkbox.Group style={{ width: '100%' }}>
-              <Space direction="vertical">
-                {libraries.map(lib => (
-                  <Checkbox key={lib.id} value={lib.id}>
-                    {lib.name} ({lib.type})
-                  </Checkbox>
-                ))}
-              </Space>
-            </Checkbox.Group>
-          </Form.Item>
-        )}
       </Form>
     </Modal>
   );
