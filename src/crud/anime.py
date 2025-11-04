@@ -180,7 +180,6 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     if was_converted:
         logger.info(f"✓ 使用识别词转换后的标题和季数创建新条目")
 
-    from .timezone import get_now
     created_time = get_now()
     logger.info(f"设置创建时间: {created_time}")
     new_anime = Anime(

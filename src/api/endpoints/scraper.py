@@ -162,7 +162,7 @@ async def update_scraper_config(
         for field_key in configurable_fields.keys():
             # field_key 就是配置键,例如 "gamerCookie"
             if field_key in payload:
-                await config_manager.set(field_key, payload[field_key])
+                await config_manager.setValue(field_key, payload[field_key])
 
         # 3. 处理分集黑名单字段(动态字段,每个源都有)
         # 前端发送驼峰命名: gamerEpisodeBlacklistRegex
@@ -170,7 +170,7 @@ async def update_scraper_config(
         blacklist_key_camel = f"{providerName}EpisodeBlacklistRegex"
         blacklist_key_db = f"{providerName}_episode_blacklist_regex"
         if blacklist_key_camel in payload:
-            await config_manager.set(blacklist_key_db, payload[blacklist_key_camel])
+            await config_manager.setValue(blacklist_key_db, payload[blacklist_key_camel])
 
         # 4. 处理"记录原始响应"字段(动态字段,每个源都有)
         # 前端发送驼峰命名: scraperGamerLogResponses
@@ -181,7 +181,7 @@ async def update_scraper_config(
         if log_responses_key_camel in payload:
             # 转换布尔值为字符串存储
             value = payload[log_responses_key_camel]
-            await config_manager.set(log_responses_key_db, str(value).lower())
+            await config_manager.setValue(log_responses_key_db, str(value).lower())
 
         # 5. 重新加载该搜索源
         manager.reload_scraper(providerName)

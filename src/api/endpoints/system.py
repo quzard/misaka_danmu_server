@@ -137,7 +137,7 @@ async def stream_server_logs(current_user: models.User = Depends(security.get_cu
                     # 发送心跳注释以保持连接
                     yield ": heartbeat\n\n"
         except asyncio.CancelledError:
-            logger.info("SSE日志流连接被客户端关闭")
+            logger.debug("SSE日志流连接被客户端关闭")
         finally:
             # 取消订阅
             unsubscribe_from_logs(queue)
