@@ -3499,8 +3499,11 @@ async def scan_media_server_library(
 
     total_items = 0
     for idx, library_id in enumerate(scan_libraries):
+        library_progress_base = int((idx / len(scan_libraries)) * 100)
+        library_progress_range = int(100 / len(scan_libraries))
+
         await progress_callback(
-            int((idx / len(scan_libraries)) * 100),
+            library_progress_base,
             f"正在扫描媒体库 {idx + 1}/{len(scan_libraries)}..."
         )
 
@@ -3508,8 +3511,18 @@ async def scan_media_server_library(
             # 获取媒体库中的所有项目
             items = await server.get_library_items(library_id)
 
-            # 保存到数据库
-            for item in items:
+            logger.info(f"媒体库 {library_id} 获取到 {len(items)} 个项目,开始保存...")
+
+            # 保存到数据库,并显示进度
+            for item_idx, item in enumerate(items):
+                # 每10个项目更新一次进度
+                if item_idx % 10 == 0:
+                    item_progress = int((item_idx / len(items)) * library_progress_range)
+                    await progress_callback(
+                        library_progress_base + item_progress,
+                        f"正在保存媒体库 {idx + 1}/{len(scan_libraries)} 的项目 {item_idx}/{len(items)}..."
+                    )
+
                 await crud.create_media_item(
                     session,
                     server_id=server_id,

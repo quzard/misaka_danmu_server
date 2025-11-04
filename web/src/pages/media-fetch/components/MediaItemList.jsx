@@ -134,13 +134,29 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       return;
     }
 
-    // 过滤出实际的item id(排除分组)
-    const itemIds = selectedRowKeys
-      .filter(key => key.startsWith('movie-') || key.startsWith('episode-'))
-      .map(key => parseInt(key.split('-')[1]));
+    // 收集所有要删除的item id
+    const itemIds = [];
+    const collectItemIds = (keys) => {
+      keys.forEach(key => {
+        if (key.startsWith('movie-') || key.startsWith('episode-')) {
+          itemIds.push(parseInt(key.split('-')[1]));
+        } else {
+          // 如果是季度,收集该季度下的所有集
+          const seasonItem = findItemByKey(items, key);
+          if (seasonItem && seasonItem.children) {
+            seasonItem.children.forEach(ep => {
+              if (ep.key.startsWith('episode-')) {
+                itemIds.push(parseInt(ep.key.split('-')[1]));
+              }
+            });
+          }
+        }
+      });
+    };
+    collectItemIds(selectedRowKeys);
 
     if (itemIds.length === 0) {
-      message.warning('请选择具体的项目,不能删除分组');
+      message.warning('没有可删除的项目');
       return;
     }
 
@@ -153,6 +169,18 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       message.error('批量删除失败');
       console.error(error);
     }
+  };
+
+  // 辅助函数:根据key查找item
+  const findItemByKey = (list, key) => {
+    for (const item of list) {
+      if (item.key === key) return item;
+      if (item.children) {
+        const found = findItemByKey(item.children, key);
+        if (found) return found;
+      }
+    }
+    return null;
   };
 
   // 处理编辑
@@ -177,13 +205,29 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       return;
     }
 
-    // 过滤出实际的item id
-    const itemIds = selectedRowKeys
-      .filter(key => key.startsWith('movie-') || key.startsWith('episode-'))
-      .map(key => parseInt(key.split('-')[1]));
+    // 收集所有要导入的item id
+    const itemIds = [];
+    const collectItemIds = (keys) => {
+      keys.forEach(key => {
+        if (key.startsWith('movie-') || key.startsWith('episode-')) {
+          itemIds.push(parseInt(key.split('-')[1]));
+        } else {
+          // 如果是季度,收集该季度下的所有集
+          const seasonItem = findItemByKey(items, key);
+          if (seasonItem && seasonItem.children) {
+            seasonItem.children.forEach(ep => {
+              if (ep.key.startsWith('episode-')) {
+                itemIds.push(parseInt(ep.key.split('-')[1]));
+              }
+            });
+          }
+        }
+      });
+    };
+    collectItemIds(selectedRowKeys);
 
     if (itemIds.length === 0) {
-      message.warning('请选择具体的项目');
+      message.warning('没有可导入的项目');
       return;
     }
 
@@ -247,8 +291,125 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       key: 'action',
       width: '20%',
       render: (_, record) => {
-        if (record.isGroup) return null;
-        
+        // 剧集组显示删除和导入整部按钮
+        if (record.isGroup && record.mediaType === 'tv_show') {
+          return (
+            <Space size="small">
+              <Popconfirm
+                title={`确定要删除《${record.title}》的所有集吗?`}
+                onConfirm={() => {
+                  // 收集所有季度下的所有集
+                  const episodeIds = [];
+                  record.children.forEach(season => {
+                    if (season.children) {
+                      season.children.forEach(ep => {
+                        if (ep.key.startsWith('episode-')) {
+                          episodeIds.push(parseInt(ep.key.split('-')[1]));
+                        }
+                      });
+                    }
+                  });
+                  if (episodeIds.length > 0) {
+                    batchDeleteMediaItems(episodeIds)
+                      .then(() => {
+                        message.success(`成功删除《${record.title}》的 ${episodeIds.length} 集`);
+                        loadItems(pagination.current, pagination.pageSize);
+                      })
+                      .catch(() => message.error('删除失败'));
+                  }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除整部
+                </Button>
+              </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 收集所有季度下的所有集
+                  const episodeIds = [];
+                  record.children.forEach(season => {
+                    if (season.children) {
+                      season.children.forEach(ep => {
+                        if (ep.key.startsWith('episode-')) {
+                          episodeIds.push(parseInt(ep.key.split('-')[1]));
+                        }
+                      });
+                    }
+                  });
+                  if (episodeIds.length > 0) {
+                    importMediaItems({ itemIds: episodeIds })
+                      .then((res) => {
+                        message.success(res.data.message || '导入任务已提交');
+                        loadItems(pagination.current, pagination.pageSize);
+                      })
+                      .catch(() => message.error('导入失败'));
+                  }
+                }}
+              >
+                导入整部
+              </Button>
+            </Space>
+          );
+        }
+
+        // 季度显示删除和导入按钮
+        if (record.mediaType === 'tv_season') {
+          return (
+            <Space size="small">
+              <Popconfirm
+                title={`确定要删除第${record.season}季的所有集吗?`}
+                onConfirm={() => {
+                  // 删除该季度下的所有集
+                  const episodeIds = record.children
+                    .filter(ep => ep.key.startsWith('episode-'))
+                    .map(ep => parseInt(ep.key.split('-')[1]));
+                  if (episodeIds.length > 0) {
+                    batchDeleteMediaItems(episodeIds)
+                      .then(() => {
+                        message.success(`成功删除第${record.season}季的 ${episodeIds.length} 集`);
+                        loadItems(pagination.current, pagination.pageSize);
+                      })
+                      .catch(() => message.error('删除失败'));
+                  }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除整季
+                </Button>
+              </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 导入该季度下的所有集
+                  const episodeIds = record.children
+                    .filter(ep => ep.key.startsWith('episode-'))
+                    .map(ep => parseInt(ep.key.split('-')[1]));
+                  if (episodeIds.length > 0) {
+                    importMediaItems({ itemIds: episodeIds })
+                      .then((res) => {
+                        message.success(res.data.message || '导入任务已提交');
+                        loadItems(pagination.current, pagination.pageSize);
+                      })
+                      .catch(() => message.error('导入失败'));
+                  }
+                }}
+              >
+                导入整季
+              </Button>
+            </Space>
+          );
+        }
+
+        // 单集和电影显示编辑和删除按钮
         return (
           <Space size="small">
             <Button
@@ -284,7 +445,7 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
     selectedRowKeys,
     onChange: setSelectedRowKeys,
     getCheckboxProps: (record) => ({
-      disabled: record.isGroup && record.mediaType === 'tv_show', // 禁用剧集组的选择
+      disabled: record.isGroup && record.mediaType === 'tv_show', // 只禁用剧集组的选择,季度可以选择
     }),
   };
 

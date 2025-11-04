@@ -79,30 +79,31 @@ class EmbyMediaServer(BaseMediaServer):
                 if item_type == 'Movie':
                     items.append(self._parse_movie(item, library_id))
                 elif item_type == 'Series':
-                    # 添加剧集本身
-                    series_item = self._parse_series(item, library_id)
-                    items.append(series_item)
+                    # 只获取剧集的所有集,不添加剧集本身和季度
+                    # 因为前端会自动根据集来构建树形结构
+                    series_id = item.get('Id')
+                    series_name = item.get('Name')
+                    series_year = item.get('ProductionYear')
+                    series_tmdb_id = item.get('ProviderIds', {}).get('Tmdb')
+                    series_tvdb_id = item.get('ProviderIds', {}).get('Tvdb')
+                    series_imdb_id = item.get('ProviderIds', {}).get('Imdb')
+                    series_poster = self._get_image_url(series_id, 'Primary')
 
                     # 获取所有季度
-                    seasons = await self.get_tv_seasons(item.get('Id'))
+                    seasons = await self.get_tv_seasons(series_id)
                     for season in seasons:
-                        # 添加季度项
-                        season_item = MediaItem(
-                            media_id=season['season_id'],
-                            title=f"{item.get('Name')} - 第{season['season_number']}季",
-                            media_type='tv_series',
-                            season=season['season_number'],
-                            year=item.get('ProductionYear'),
-                            tmdb_id=item.get('ProviderIds', {}).get('Tmdb'),
-                            tvdb_id=item.get('ProviderIds', {}).get('Tvdb'),
-                            imdb_id=item.get('ProviderIds', {}).get('Imdb'),
-                            poster_url=self._get_image_url(item.get('Id'), 'Primary'),
-                            library_id=library_id,
-                        )
-                        items.append(season_item)
-
                         # 获取该季度的所有集
-                        episodes = await self.get_season_episodes(item.get('Id'), season['season_number'], library_id)
+                        episodes = await self.get_season_episodes(
+                            series_id,
+                            season['season_number'],
+                            library_id,
+                            series_name,
+                            series_year,
+                            series_tmdb_id,
+                            series_tvdb_id,
+                            series_imdb_id,
+                            series_poster
+                        )
                         items.extend(episodes)
 
             return items
@@ -157,7 +158,13 @@ class EmbyMediaServer(BaseMediaServer):
         self,
         series_id: str,
         season_number: int,
-        library_id: Optional[str] = None
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
     ) -> List[MediaItem]:
         """获取某一季的所有集"""
         try:
@@ -181,7 +188,16 @@ class EmbyMediaServer(BaseMediaServer):
             episodes = []
             for item in data.get('Items', []):
                 if item.get('Type') == 'Episode':
-                    episodes.append(self._parse_episode(item, library_id))
+                    episodes.append(self._parse_episode(
+                        item,
+                        library_id,
+                        series_name,
+                        series_year,
+                        series_tmdb_id,
+                        series_tvdb_id,
+                        series_imdb_id,
+                        series_poster
+                    ))
 
             return sorted(episodes, key=lambda x: x.episode or 0)
         except Exception as e:
@@ -220,21 +236,31 @@ class EmbyMediaServer(BaseMediaServer):
             library_id=library_id,
         )
     
-    def _parse_episode(self, data: Dict[str, Any], library_id: Optional[str] = None) -> MediaItem:
+    def _parse_episode(
+        self,
+        data: Dict[str, Any],
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
+    ) -> MediaItem:
         """解析集数据"""
-        provider_ids = data.get('ProviderIds', {})
-
+        # 注意: Emby的集ProviderIds中的Tmdb字段是集ID(已废弃),不是剧集ID
+        # 我们使用传入的剧集TMDB ID
         return MediaItem(
             media_id=data.get('Id'),
-            title=data.get('SeriesName', data.get('Name')),
+            title=series_name or data.get('SeriesName', data.get('Name')),
             media_type='tv_series',
-            year=data.get('ProductionYear'),
+            year=series_year or data.get('ProductionYear'),
             season=data.get('ParentIndexNumber'),
             episode=data.get('IndexNumber'),
-            tmdb_id=provider_ids.get('Tmdb'),
-            tvdb_id=provider_ids.get('Tvdb'),
-            imdb_id=provider_ids.get('Imdb'),
-            poster_url=self._get_image_url(data.get('SeriesId'), 'Primary'),
+            tmdb_id=series_tmdb_id,  # 使用剧集的TMDB ID,而不是集的ID
+            tvdb_id=series_tvdb_id or data.get('ProviderIds', {}).get('Tvdb'),
+            imdb_id=series_imdb_id or data.get('ProviderIds', {}).get('Imdb'),
+            poster_url=series_poster or self._get_image_url(data.get('SeriesId'), 'Primary'),
             library_id=library_id,
         )
     
