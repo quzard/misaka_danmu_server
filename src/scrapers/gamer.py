@@ -26,7 +26,8 @@ class GamerScraper(BaseScraper):
     configurable_fields: Dict[str, Tuple[str, str, str]] = {
         "gamerCookie": ("巴哈姆特动画疯 Cookie", "string", "用于访问动画疯的Cookie。"),
         "gamerUserAgent": ("巴哈姆特动画疯 User-Agent", "string", "用于访问动画疯的User-Agent。"),
-        "gamerFlareSolverrUrl": ("FlareSolverr 服务地址", "string", "用于绕过Cloudflare盾的FlareSolverr服务地址，例如: http://localhost:8191")
+        "gamerFlareSolverrUrl": ("FlareSolverr 服务地址", "string", "用于绕过Cloudflare盾的FlareSolverr服务地址，例如: http://localhost:8191"),
+        "gamerProxyDomain": ("URL反代域名", "string", "用于替换ani.gamer.com.tw的反代域名，支持带协议或不带协议，例如: https://www.my.top 或 www.my.top")
     }
 
     rate_limit_quota = -1
@@ -86,6 +87,17 @@ class GamerScraper(BaseScraper):
         
         # 4. 如果规则为空或未配置，则不进行过滤
         return None
+
+    async def _apply_proxy_domain(self, url: str) -> str:
+        """应用反代域名替换"""
+        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
+        if proxy_domain and proxy_domain.strip():
+            proxy_domain = proxy_domain.strip()
+            # 移除可能的协议前缀
+            proxy_domain = proxy_domain.replace("https://", "").replace("http://", "")
+            # 替换域名,保持原URL的协议
+            url = url.replace("ani.gamer.com.tw", proxy_domain)
+        return url
 
     async def _request_with_flaresolverr(self, method: str, url: str, **kwargs) -> httpx.Response:
         """使用FlareSolverr发送请求以绕过Cloudflare盾。"""
@@ -164,6 +176,9 @@ class GamerScraper(BaseScraper):
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """请求包装器，支持自动检测Cloudflare盾并使用FlareSolverr绕过。"""
+        # 应用反代域名
+        url = await self._apply_proxy_domain(url)
+
         client = await self._ensure_client()
 
         try:
@@ -475,14 +490,16 @@ class GamerScraper(BaseScraper):
                     href = raw_ep['link'].get("href")
                     sn_match = re.search(r"\?sn=(\d+)", href)
                     if not sn_match: continue
+                    episode_url = await self._apply_proxy_domain(f"https://ani.gamer.com.tw{href}")
                     episodes.append(models.ProviderEpisodeInfo(
                         provider=self.provider_name, episodeId=sn_match.group(1), title=self.cc_t2s.convert(raw_ep['title']),
-                        episodeIndex=i + 1, url=f"https://ani.gamer.com.tw{href}"
+                        episodeIndex=i + 1, url=episode_url
                     ))
                 else: # 单集视频
+                    episode_url = await self._apply_proxy_domain(f"https://ani.gamer.com.tw/animeVideo.php?sn={raw_ep['sn']}")
                     episodes.append(models.ProviderEpisodeInfo(
                         provider=self.provider_name, episodeId=raw_ep['sn'], title=self.cc_t2s.convert(raw_ep['title']),
-                        episodeIndex=1, url=f"https://ani.gamer.com.tw/animeVideo.php?sn={raw_ep['sn']}"
+                        episodeIndex=1, url=episode_url
                     ))
 
             if target_episode_index:
