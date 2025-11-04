@@ -49,12 +49,19 @@ const LibraryScan = () => {
   // 当选中的服务器变化时,加载媒体库列表
   useEffect(() => {
     if (selectedServerId) {
-      loadLibraries();
+      // 检查服务器是否启用
+      const currentServer = servers.find(s => s.id === selectedServerId);
+      if (currentServer && currentServer.isEnabled) {
+        loadLibraries();
+      } else {
+        setLibraries([]);
+        setSelectedLibraryIds([]);
+      }
     } else {
       setLibraries([]);
       setSelectedLibraryIds([]);
     }
-  }, [selectedServerId]);
+  }, [selectedServerId, servers]);
 
   // 加载媒体库列表
   const loadLibraries = async () => {
@@ -200,7 +207,10 @@ const LibraryScan = () => {
             <Button
               type="primary"
               onClick={handleScan}
-              disabled={!selectedServerId}
+              disabled={!selectedServerId || (() => {
+                const currentServer = servers.find(s => s.id === selectedServerId);
+                return currentServer && !currentServer.isEnabled;
+              })()}
               loading={loading}
             >
               扫描媒体库
@@ -213,25 +223,34 @@ const LibraryScan = () => {
             </Button>
           </Space>
 
-          {selectedServerId && (
-            <div>
-              <label style={{ marginBottom: '8px', display: 'block' }}>选择媒体库:</label>
-              <div style={{
-                border: '1px solid #d9d9d9',
-                borderRadius: '6px',
-                padding: '12px',
-                minHeight: '120px',
-                backgroundColor: loadingLibraries ? '#f5f5f5' : '#fafafa'
-              }}>
-                {loadingLibraries ? (
-                  <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
-                    加载中...
-                  </div>
-                ) : libraries.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
-                    暂无可用媒体库
-                  </div>
-                ) : (
+          {selectedServerId && (() => {
+            const currentServer = servers.find(s => s.id === selectedServerId);
+            const isServerDisabled = currentServer && !currentServer.isEnabled;
+
+            return (
+              <div>
+                <label style={{ marginBottom: '8px', display: 'block' }}>选择媒体库:</label>
+                <div style={{
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  padding: '12px',
+                  minHeight: '120px',
+                  backgroundColor: loadingLibraries || isServerDisabled ? '#f5f5f5' : '#fafafa',
+                  opacity: isServerDisabled ? 0.6 : 1
+                }}>
+                  {isServerDisabled ? (
+                    <div style={{ textAlign: 'center', color: '#ff4d4f', padding: '20px' }}>
+                      该服务器已禁用,请先启用后再选择媒体库
+                    </div>
+                  ) : loadingLibraries ? (
+                    <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                      加载中...
+                    </div>
+                  ) : libraries.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                      暂无可用媒体库
+                    </div>
+                  ) : (
                   <>
                     <Checkbox.Group
                       style={{ width: '100%' }}
@@ -284,7 +303,8 @@ const LibraryScan = () => {
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
         </Space>
       </Card>
 

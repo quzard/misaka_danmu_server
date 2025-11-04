@@ -198,17 +198,44 @@ async def test_media_server_connection(
 ):
     """测试媒体服务器连接"""
     from ...media_server_manager import get_media_server_manager
+    from ...media_servers import EmbyMediaServer, JellyfinMediaServer, PlexMediaServer
+
     manager = get_media_server_manager()
 
     try:
+        # 先尝试从manager中获取已加载的服务器实例
         server = manager.servers.get(server_id)
+
+        # 如果没有找到(可能是禁用的服务器),从数据库读取配置并临时创建实例
         if not server:
-            raise HTTPException(status_code=404, detail="媒体服务器不存在")
-        
+            from ...crud.media_server import get_media_server_by_id
+            config = await get_media_server_by_id(session, server_id)
+            if not config:
+                raise HTTPException(status_code=404, detail="媒体服务器不存在")
+
+            # 根据类型创建临时实例
+            SERVER_CLASSES = {
+                'emby': EmbyMediaServer,
+                'jellyfin': JellyfinMediaServer,
+                'plex': PlexMediaServer,
+            }
+
+            provider_name = config['providerName']
+            if provider_name not in SERVER_CLASSES:
+                raise HTTPException(status_code=400, detail=f"不支持的服务器类型: {provider_name}")
+
+            server_class = SERVER_CLASSES[provider_name]
+            server = server_class(
+                url=config['url'],
+                api_token=config['apiToken']
+            )
+
         server_info = await server.test_connection()
         return MediaServerTestResponse(success=True, message="连接成功", serverInfo=server_info)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"测试媒体服务器连接失败: {e}", exc_info=True)
+        logger.error(f"测试媒体服务器连接失败: {e}")
         return MediaServerTestResponse(success=False, message=str(e))
 
 
