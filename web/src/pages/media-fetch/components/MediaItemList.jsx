@@ -470,11 +470,12 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
             checked={selectedRowKeys.length === items.length && items.length > 0}
             onChange={(e) => {
               if (e.target.checked) {
-                // 全选所有非分组项
+                // 全选所有可选项(电影、季度、单集)
                 const allKeys = [];
                 const collectKeys = (list) => {
                   list.forEach(item => {
-                    if (!item.isGroup || item.mediaType === 'tv_season') {
+                    // 只排除剧集组(tv_show),季度和单集都可以选择
+                    if (!(item.isGroup && item.mediaType === 'tv_show')) {
                       allKeys.push(item.key);
                     }
                     if (item.children) {
