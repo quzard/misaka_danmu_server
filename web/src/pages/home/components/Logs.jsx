@@ -5,50 +5,62 @@ import { useRef } from 'react'
 import { Card, Tooltip, message } from 'antd'
 import { ExportOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import Cookies from 'js-cookie'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 export const Logs = () => {
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState([])
-  const eventSourceRef = useRef(null)
+  const abortControllerRef = useRef(null)
   const [messageApi, contextHolder] = message.useMessage()
 
   useEffect(() => {
     // 获取token
-    const token = localStorage.getItem('token')
+    const token = Cookies.get('danmu_token')
     if (!token) {
       messageApi.error('未登录,无法连接日志流')
       setLoading(false)
       return
     }
 
-    // 创建SSE连接
-    const eventSource = new EventSource(`/api/ui/logs/stream`, {
-      withCredentials: true,
-    })
-    eventSourceRef.current = eventSource
+    // 创建AbortController用于取消连接
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
 
-    eventSource.onopen = () => {
-      console.log('SSE日志流已连接')
-      setLoading(false)
-    }
-
-    eventSource.onmessage = event => {
-      const newLog = event.data
-      setLogs(prevLogs => [newLog, ...prevLogs].slice(0, 200)) // 保持最多200条
-    }
-
-    eventSource.onerror = error => {
-      console.error('SSE连接错误:', error)
-      if (eventSource.readyState === EventSource.CLOSED) {
-        messageApi.warning('日志流连接已断开')
+    // 使用fetch-event-source建立SSE连接
+    fetchEventSource('/api/ui/logs/stream', {
+      signal: abortController.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      onopen: async response => {
+        if (response.ok) {
+          console.log('SSE日志流已连接')
+          setLoading(false)
+        } else {
+          throw new Error(`连接失败: ${response.status}`)
+        }
+      },
+      onmessage: event => {
+        const newLog = event.data
+        setLogs(prevLogs => [newLog, ...prevLogs].slice(0, 200)) // 保持最多200条
+      },
+      onerror: error => {
+        console.error('SSE连接错误:', error)
+        messageApi.warning('日志流连接出错')
+        setLoading(false)
+        throw error // 抛出错误以停止重连
+      },
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('SSE流错误:', error)
       }
-      setLoading(false)
-    }
+    })
 
     // 清理函数
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
         console.log('SSE日志流已关闭')
       }
     }
