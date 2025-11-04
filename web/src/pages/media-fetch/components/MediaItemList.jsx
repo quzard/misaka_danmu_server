@@ -141,14 +141,20 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
         if (key.startsWith('movie-') || key.startsWith('episode-')) {
           itemIds.push(parseInt(key.split('-')[1]));
         } else {
-          // 如果是季度,收集该季度下的所有集
-          const seasonItem = findItemByKey(items, key);
-          if (seasonItem && seasonItem.children) {
-            seasonItem.children.forEach(ep => {
-              if (ep.key.startsWith('episode-')) {
-                itemIds.push(parseInt(ep.key.split('-')[1]));
-              }
-            });
+          // 如果是季度或剧集组,收集所有子项
+          const item = findItemByKey(items, key);
+          if (item && item.children) {
+            // 递归收集所有集
+            const collectEpisodes = (children) => {
+              children.forEach(child => {
+                if (child.key.startsWith('episode-')) {
+                  itemIds.push(parseInt(child.key.split('-')[1]));
+                } else if (child.children) {
+                  collectEpisodes(child.children);
+                }
+              });
+            };
+            collectEpisodes(item.children);
           }
         }
       });
@@ -212,14 +218,20 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
         if (key.startsWith('movie-') || key.startsWith('episode-')) {
           itemIds.push(parseInt(key.split('-')[1]));
         } else {
-          // 如果是季度,收集该季度下的所有集
-          const seasonItem = findItemByKey(items, key);
-          if (seasonItem && seasonItem.children) {
-            seasonItem.children.forEach(ep => {
-              if (ep.key.startsWith('episode-')) {
-                itemIds.push(parseInt(ep.key.split('-')[1]));
-              }
-            });
+          // 如果是季度或剧集组,收集所有子项
+          const item = findItemByKey(items, key);
+          if (item && item.children) {
+            // 递归收集所有集
+            const collectEpisodes = (children) => {
+              children.forEach(child => {
+                if (child.key.startsWith('episode-')) {
+                  itemIds.push(parseInt(child.key.split('-')[1]));
+                } else if (child.children) {
+                  collectEpisodes(child.children);
+                }
+              });
+            };
+            collectEpisodes(item.children);
           }
         }
       });
@@ -444,9 +456,7 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
   const rowSelection = {
     selectedRowKeys,
     onChange: setSelectedRowKeys,
-    getCheckboxProps: (record) => ({
-      disabled: record.isGroup && record.mediaType === 'tv_show', // 只禁用剧集组的选择,季度可以选择
-    }),
+    // 所有项都可以选择
   };
 
   return (
@@ -470,14 +480,11 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
             checked={selectedRowKeys.length === items.length && items.length > 0}
             onChange={(e) => {
               if (e.target.checked) {
-                // 全选所有可选项(电影、季度、单集)
+                // 全选所有项(包括剧集组、季度、单集、电影)
                 const allKeys = [];
                 const collectKeys = (list) => {
                   list.forEach(item => {
-                    // 只排除剧集组(tv_show),季度和单集都可以选择
-                    if (!(item.isGroup && item.mediaType === 'tv_show')) {
-                      allKeys.push(item.key);
-                    }
+                    allKeys.push(item.key);
                     if (item.children) {
                       collectKeys(item.children);
                     }
