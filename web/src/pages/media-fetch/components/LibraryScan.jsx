@@ -3,13 +3,16 @@ import { Card, Select, Button, message, Space, Spin } from 'antd';
 import { ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
-import { getMediaServers, scanMediaServer } from '../../../apis';
+import { getMediaServers, scanMediaServer, getMediaServerLibraries } from '../../../apis';
 
 const { Option } = Select;
 
 const LibraryScan = () => {
   const [servers, setServers] = useState([]);
   const [selectedServerId, setSelectedServerId] = useState(null);
+  const [libraries, setLibraries] = useState([]);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState([]);
+  const [loadingLibraries, setLoadingLibraries] = useState(false);
   const [loading, setLoading] = useState(false);
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState(null);
@@ -42,6 +45,38 @@ const LibraryScan = () => {
     loadServers();
   }, []);
 
+  // 当选中的服务器变化时,加载媒体库列表
+  useEffect(() => {
+    if (selectedServerId) {
+      loadLibraries();
+    } else {
+      setLibraries([]);
+      setSelectedLibraryIds([]);
+    }
+  }, [selectedServerId]);
+
+  // 加载媒体库列表
+  const loadLibraries = async () => {
+    if (!selectedServerId) return;
+
+    setLoadingLibraries(true);
+    try {
+      const res = await getMediaServerLibraries(selectedServerId);
+      const data = res.data;
+      setLibraries(data);
+
+      // 自动选中所有媒体库
+      setSelectedLibraryIds(data.map(lib => lib.id));
+    } catch (error) {
+      message.error('加载媒体库列表失败');
+      console.error(error);
+      setLibraries([]);
+      setSelectedLibraryIds([]);
+    } finally {
+      setLoadingLibraries(false);
+    }
+  };
+
   // 扫描媒体库
   const handleScan = async () => {
     if (!selectedServerId) {
@@ -49,9 +84,14 @@ const LibraryScan = () => {
       return;
     }
 
+    if (selectedLibraryIds.length === 0) {
+      message.warning('请至少选择一个媒体库');
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await scanMediaServer(selectedServerId);
+      const res = await scanMediaServer(selectedServerId, selectedLibraryIds);
       const result = res.data;
       message.success(result.message || '扫描任务已提交');
       // 触发列表刷新
@@ -125,23 +165,44 @@ const LibraryScan = () => {
               ))}
             </Select>
           </div>
-          
+
           <Space>
-            <Button 
-              type="primary" 
+            <Button
+              type="primary"
               onClick={handleScan}
               disabled={!selectedServerId}
               loading={loading}
             >
               扫描媒体库
             </Button>
-            <Button 
+            <Button
               onClick={handleEditServer}
               disabled={!selectedServerId}
             >
               编辑配置
             </Button>
           </Space>
+
+          {selectedServerId && libraries.length > 0 && (
+            <div>
+              <label style={{ marginRight: '8px' }}>选择媒体库:</label>
+              <Select
+                mode="multiple"
+                style={{ width: '100%', maxWidth: 600 }}
+                placeholder="请选择要扫描的媒体库"
+                value={selectedLibraryIds}
+                onChange={setSelectedLibraryIds}
+                loading={loadingLibraries}
+                maxTagCount="responsive"
+              >
+                {libraries.map(library => (
+                  <Option key={library.id} value={library.id}>
+                    {library.name} ({library.type})
+                  </Option>
+                ))}
+              </Select>
+            </div>
+          )}
         </Space>
       </Card>
 
