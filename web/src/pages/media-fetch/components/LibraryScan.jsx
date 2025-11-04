@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Spin } from 'antd';
+import { Card, Select, Button, message, Space, Checkbox } from 'antd';
 import { ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
@@ -183,24 +183,65 @@ const LibraryScan = () => {
             </Button>
           </Space>
 
-          {selectedServerId && libraries.length > 0 && (
+          {selectedServerId && (
             <div>
-              <label style={{ marginRight: '8px' }}>选择媒体库:</label>
-              <Select
-                mode="multiple"
-                style={{ width: '100%', maxWidth: 600 }}
-                placeholder="请选择要扫描的媒体库"
-                value={selectedLibraryIds}
-                onChange={setSelectedLibraryIds}
-                loading={loadingLibraries}
-                maxTagCount="responsive"
-              >
-                {libraries.map(library => (
-                  <Option key={library.id} value={library.id}>
-                    {library.name} ({library.type})
-                  </Option>
-                ))}
-              </Select>
+              <label style={{ marginBottom: '8px', display: 'block' }}>选择媒体库:</label>
+              <div style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: '6px',
+                padding: '12px',
+                minHeight: '120px',
+                backgroundColor: loadingLibraries ? '#f5f5f5' : '#fafafa'
+              }}>
+                {loadingLibraries ? (
+                  <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                    加载中...
+                  </div>
+                ) : libraries.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+                    暂无可用媒体库
+                  </div>
+                ) : (
+                  <Checkbox.Group
+                    style={{ width: '100%' }}
+                    value={selectedLibraryIds}
+                    onChange={setSelectedLibraryIds}
+                  >
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'row',
+                      flexWrap: 'wrap',
+                      gap: '8px'
+                    }}>
+                      {libraries.map(library => (
+                        <Checkbox
+                          key={library.id}
+                          value={library.id}
+                          style={{
+                            padding: '6px 12px',
+                            border: '1px solid #e8e8e8',
+                            borderRadius: '4px',
+                            backgroundColor: '#fff',
+                            margin: 0,
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <span style={{ fontWeight: 'normal' }}>
+                            {library.name}
+                            <span style={{
+                              marginLeft: '8px',
+                              fontSize: '12px',
+                              color: '#666'
+                            }}>
+                              ({library.type})
+                            </span>
+                          </span>
+                        </Checkbox>
+                      ))}
+                    </div>
+                  </Checkbox.Group>
+                )}
+              </div>
             </div>
           )}
         </Space>
