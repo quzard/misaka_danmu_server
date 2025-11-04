@@ -184,12 +184,32 @@ class ScraperManager:
         async with self._session_factory() as session:
             # CRUD函数负责处理更新逻辑并提交事务。
             await crud.update_scrapers_settings(session, settings)
-        
+
         # 更新数据库后，重新加载所有搜索源以应用新设置。
         # 这能确保启用/禁用、代理设置等立即生效。
         await self.load_and_sync_scrapers()
         # 使用标准日志记录器
         logging.getLogger(__name__).info("搜索源设置已更新并重新加载。")
+
+    async def reload_scraper(self, provider_name: str):
+        """
+        重新加载单个搜索源实例。
+        当配置更新时调用此方法以使更改生效。
+        """
+        # 关闭现有实例
+        if provider_name in self.scrapers:
+            try:
+                await self.scrapers[provider_name].close()
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"关闭搜索源 '{provider_name}' 时出错: {e}")
+
+        # 重新创建实例
+        if provider_name in self._scraper_classes:
+            scraper_class = self._scraper_classes[provider_name]
+            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager)
+            logging.getLogger(__name__).info(f"搜索源 '{provider_name}' 已重新加载。")
+        else:
+            logging.getLogger(__name__).warning(f"未找到搜索源类 '{provider_name}'，无法重新加载。")
 
     @property
     def has_enabled_scrapers(self) -> bool:
