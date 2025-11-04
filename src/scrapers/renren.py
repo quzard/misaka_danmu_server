@@ -284,7 +284,7 @@ class RenrenScraper(BaseScraper):
 
     def build_media_url(self, media_id: str) -> Optional[str]:
         """构造人人影视播放页面URL"""
-        return f"https://www.rrys2024.com/resource/{media_id}"
+        return f"https://rrsp.com.cn/pc/drama/{media_id}"
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
         super().__init__(session_factory, config_manager)
@@ -726,9 +726,8 @@ class RenrenScraper(BaseScraper):
         for i, ep in enumerate(raw_episodes):
             ep_title = str(ep.get("title") or f"第{i+1:02d}集")
             sid = str(ep.get("sid"))
-            # 修正：生成人人影视的官方链接
-            # 格式: https://rrys2024.com/v/{media_id}/{sid}
-            episode_url = f"https://rrys2024.com/v/{media_id}/{sid}" if sid else None
+            # 分集URL格式: https://rrsp.com.cn/pc/drama/{dramaId}?episodeNo={episodeNo}
+            episode_url = f"https://rrsp.com.cn/pc/drama/{media_id}?episodeNo={i+1}"
             provider_eps.append(models.ProviderEpisodeInfo(
                 provider=self.provider_name,
                 episodeId=sid,
