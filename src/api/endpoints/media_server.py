@@ -297,7 +297,7 @@ async def scan_media_server_library(
         raise HTTPException(status_code=404, detail="媒体服务器不存在")
 
     # 从数据库获取服务器配置以获取名称
-    server_config = await media_crud.get_media_server_by_id(session, server_id)
+    server_config = await get_media_server_by_id(session, server_id)
     server_name = server_config.get('name', f'服务器{server_id}') if server_config else f'服务器{server_id}'
 
     # 创建协程工厂函数
