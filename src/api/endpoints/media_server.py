@@ -14,6 +14,9 @@ from ...database import get_db_session
 from ...task_manager import TaskManager
 from ... import tasks
 from ..dependencies import get_task_manager
+from ...media_servers import EmbyMediaServer, JellyfinMediaServer, PlexMediaServer
+from ...crud.media_server import get_media_server_by_id
+from ...media_server_manager import get_media_server_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -197,9 +200,6 @@ async def test_media_server_connection(
     current_user: models.User = Depends(security.get_current_user)
 ):
     """测试媒体服务器连接"""
-    from ...media_server_manager import get_media_server_manager
-    from ...media_servers import EmbyMediaServer, JellyfinMediaServer, PlexMediaServer
-
     manager = get_media_server_manager()
 
     try:
@@ -208,7 +208,6 @@ async def test_media_server_connection(
 
         # 如果没有找到(可能是禁用的服务器),从数据库读取配置并临时创建实例
         if not server:
-            from ...crud.media_server import get_media_server_by_id
             config = await get_media_server_by_id(session, server_id)
             if not config:
                 raise HTTPException(status_code=404, detail="媒体服务器不存在")
@@ -246,12 +245,33 @@ async def get_media_server_libraries(
     current_user: models.User = Depends(security.get_current_user)
 ):
     """获取媒体服务器的媒体库列表"""
-    from ...media_server_manager import get_media_server_manager
     manager = get_media_server_manager()
 
+    # 先尝试从manager中获取已加载的服务器实例
     server = manager.servers.get(server_id)
+
+    # 如果没有找到,从数据库读取配置并临时创建实例
     if not server:
-        raise HTTPException(status_code=404, detail="媒体服务器不存在")
+        config = await get_media_server_by_id(session, server_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="媒体服务器不存在")
+
+        # 根据类型创建临时实例
+        SERVER_CLASSES = {
+            'emby': EmbyMediaServer,
+            'jellyfin': JellyfinMediaServer,
+            'plex': PlexMediaServer,
+        }
+
+        provider_name = config['providerName']
+        if provider_name not in SERVER_CLASSES:
+            raise HTTPException(status_code=400, detail=f"不支持的服务器类型: {provider_name}")
+
+        server_class = SERVER_CLASSES[provider_name]
+        server = server_class(
+            url=config['url'],
+            api_token=config['apiToken']
+        )
 
     try:
         libraries = await server.get_libraries()
@@ -270,9 +290,6 @@ async def scan_media_server_library(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """扫描媒体服务器的媒体库"""
-    from ...media_server_manager import get_media_server_manager
-    from ... import crud as media_crud
-
     manager = get_media_server_manager()
 
     server_instance = manager.servers.get(server_id)
