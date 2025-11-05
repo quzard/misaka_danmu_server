@@ -230,12 +230,19 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown Logic ---
+    logger.info("应用正在关闭...")
+    
     if hasattr(app.state, "cleanup_task"):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
         except asyncio.CancelledError:
             pass
+    
+    # 关闭共享的 HTTP 传输层（连接池）
+    from .scrapers.base import close_all_shared_transports
+    await close_all_shared_transports()
+    
     await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
@@ -248,6 +255,8 @@ async def lifespan(app: FastAPI):
         await app.state.media_server_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
+    
+    logger.info("应用已完全关闭")
 
 app = FastAPI(
     title="Misaka Danmaku External Control API",
