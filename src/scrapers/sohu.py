@@ -535,7 +535,7 @@ class SohuScraper(BaseScraper):
 
                     # 调试：打印弹幕数量
                     if comments:
-                        self.logger.info(f"搜狐视频: 获取到 {len(comments)} 条弹幕 (vid={vid}, {start}-{end}s)")
+                        self.logger.debug(f"搜狐视频: 获取到 {len(comments)} 条弹幕 (vid={vid}, {start}-{end}s)")
 
                     return comments
                 except (json.JSONDecodeError, Exception) as e:
