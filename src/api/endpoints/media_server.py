@@ -343,6 +343,62 @@ async def get_media_items(
     return result
 
 
+@router.get("/media-works", response_model=Dict[str, Any], summary="获取作品列表(按作品分组)")
+async def get_media_works(
+    server_id: Optional[int] = Query(None),
+    is_imported: Optional[bool] = Query(None),
+    media_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取作品列表(电影+电视剧组),按作品计数"""
+    result = await crud.get_media_works(
+        session,
+        server_id=server_id,
+        is_imported=is_imported,
+        media_type=media_type,
+        page=page,
+        page_size=page_size
+    )
+    return result
+
+
+@router.get("/shows/{title}/seasons", response_model=List[Dict[str, Any]], summary="获取剧集的季度信息")
+async def get_show_seasons(
+    title: str,
+    server_id: int = Query(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取某部剧集的所有季度信息"""
+    result = await crud.get_show_seasons(session, server_id, title)
+    return result
+
+
+@router.get("/shows/{title}/seasons/{season}/episodes", response_model=Dict[str, Any], summary="获取某一季的分集列表")
+async def get_season_episodes(
+    title: str,
+    season: int,
+    server_id: int = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取某一季的所有集"""
+    result = await crud.get_season_episodes(
+        session,
+        server_id,
+        title,
+        season,
+        page,
+        page_size
+    )
+    return result
+
+
 @router.put("/media-items/{item_id}", response_model=MediaItemResponse, summary="更新媒体项")
 async def update_media_item(
     item_id: int,

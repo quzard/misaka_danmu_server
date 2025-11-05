@@ -186,6 +186,189 @@ async def get_media_items(
     }
 
 
+async def get_media_works(
+    session: AsyncSession,
+    server_id: Optional[int] = None,
+    is_imported: Optional[bool] = None,
+    media_type: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 100
+) -> Dict[str, Any]:
+    """
+    获取作品列表(电影+电视剧组),按作品计数
+    - 电影: 直接返回
+    - 电视剧: 按title分组,返回剧集组信息
+    """
+    works = []
+
+    # 1. 获取电影
+    if media_type is None or media_type == 'movie':
+        movie_stmt = select(orm_models.MediaItem).where(orm_models.MediaItem.mediaType == 'movie')
+        if server_id is not None:
+            movie_stmt = movie_stmt.where(orm_models.MediaItem.serverId == server_id)
+        if is_imported is not None:
+            movie_stmt = movie_stmt.where(orm_models.MediaItem.isImported == is_imported)
+
+        movie_stmt = movie_stmt.order_by(orm_models.MediaItem.createdAt.desc())
+        movie_result = await session.execute(movie_stmt)
+        movies = movie_result.scalars().all()
+
+        for movie in movies:
+            works.append({
+                "type": "movie",
+                "id": movie.id,
+                "serverId": movie.serverId,
+                "mediaId": movie.mediaId,
+                "libraryId": movie.libraryId,
+                "title": movie.title,
+                "mediaType": "movie",
+                "year": movie.year,
+                "tmdbId": movie.tmdbId,
+                "tvdbId": movie.tvdbId,
+                "imdbId": movie.imdbId,
+                "posterUrl": movie.posterUrl,
+                "isImported": movie.isImported,
+                "createdAt": movie.createdAt,
+                "updatedAt": movie.updatedAt
+            })
+
+    # 2. 获取电视剧组(按title分组)
+    if media_type is None or media_type == 'tv_series':
+        tv_stmt = select(
+            orm_models.MediaItem.title,
+            orm_models.MediaItem.serverId,
+            func.min(orm_models.MediaItem.year).label('year'),
+            func.min(orm_models.MediaItem.tmdbId).label('tmdbId'),
+            func.min(orm_models.MediaItem.tvdbId).label('tvdbId'),
+            func.min(orm_models.MediaItem.imdbId).label('imdbId'),
+            func.min(orm_models.MediaItem.posterUrl).label('posterUrl'),
+            func.max(orm_models.MediaItem.createdAt).label('createdAt'),
+            func.count(func.distinct(orm_models.MediaItem.season)).label('seasonCount'),
+            func.count(orm_models.MediaItem.id).label('episodeCount')
+        ).where(orm_models.MediaItem.mediaType == 'tv_series')
+
+        if server_id is not None:
+            tv_stmt = tv_stmt.where(orm_models.MediaItem.serverId == server_id)
+        if is_imported is not None:
+            tv_stmt = tv_stmt.where(orm_models.MediaItem.isImported == is_imported)
+
+        tv_stmt = tv_stmt.group_by(orm_models.MediaItem.title, orm_models.MediaItem.serverId)
+        tv_stmt = tv_stmt.order_by(func.max(orm_models.MediaItem.createdAt).desc())
+
+        tv_result = await session.execute(tv_stmt)
+        tv_shows = tv_result.all()
+
+        for show in tv_shows:
+            works.append({
+                "type": "tv_show",
+                "serverId": show.serverId,
+                "title": show.title,
+                "mediaType": "tv_show",
+                "year": show.year,
+                "tmdbId": show.tmdbId,
+                "tvdbId": show.tvdbId,
+                "imdbId": show.imdbId,
+                "posterUrl": show.posterUrl,
+                "createdAt": show.createdAt,
+                "seasonCount": show.seasonCount,
+                "episodeCount": show.episodeCount
+            })
+
+    # 3. 排序和分页
+    works.sort(key=lambda x: x['createdAt'], reverse=True)
+    total = len(works)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_works = works[start:end]
+
+    return {
+        "total": total,
+        "list": paginated_works
+    }
+
+
+async def get_show_seasons(
+    session: AsyncSession,
+    server_id: int,
+    title: str
+) -> List[Dict[str, Any]]:
+    """获取某部剧集的所有季度信息"""
+    stmt = select(
+        orm_models.MediaItem.season,
+        func.count(orm_models.MediaItem.id).label('episodeCount'),
+        func.min(orm_models.MediaItem.year).label('year'),
+        func.min(orm_models.MediaItem.posterUrl).label('posterUrl')
+    ).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.title == title,
+        orm_models.MediaItem.mediaType == 'tv_series'
+    ).group_by(orm_models.MediaItem.season).order_by(orm_models.MediaItem.season)
+
+    result = await session.execute(stmt)
+    seasons = result.all()
+
+    return [
+        {
+            "season": s.season,
+            "episodeCount": s.episodeCount,
+            "year": s.year,
+            "posterUrl": s.posterUrl
+        }
+        for s in seasons
+    ]
+
+
+async def get_season_episodes(
+    session: AsyncSession,
+    server_id: int,
+    title: str,
+    season: int,
+    page: int = 1,
+    page_size: int = 100
+) -> Dict[str, Any]:
+    """获取某一季的所有集"""
+    stmt = select(orm_models.MediaItem).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.title == title,
+        orm_models.MediaItem.season == season,
+        orm_models.MediaItem.mediaType == 'tv_series'
+    )
+
+    # 计算总数
+    count_stmt = select(func.count()).select_from(stmt.alias("count_subquery"))
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    # 分页查询
+    stmt = stmt.order_by(orm_models.MediaItem.episode).offset((page - 1) * page_size).limit(page_size)
+    result = await session.execute(stmt)
+    episodes = result.scalars().all()
+
+    return {
+        "total": total,
+        "list": [
+            {
+                "id": ep.id,
+                "serverId": ep.serverId,
+                "mediaId": ep.mediaId,
+                "libraryId": ep.libraryId,
+                "title": ep.title,
+                "mediaType": ep.mediaType,
+                "season": ep.season,
+                "episode": ep.episode,
+                "year": ep.year,
+                "tmdbId": ep.tmdbId,
+                "tvdbId": ep.tvdbId,
+                "imdbId": ep.imdbId,
+                "posterUrl": ep.posterUrl,
+                "isImported": ep.isImported,
+                "createdAt": ep.createdAt,
+                "updatedAt": ep.updatedAt
+            }
+            for ep in episodes
+        ]
+    }
+
+
 async def create_media_item(
     session: AsyncSession,
     server_id: int,

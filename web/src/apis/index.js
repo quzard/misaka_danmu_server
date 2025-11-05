@@ -539,6 +539,20 @@ export const scanMediaServer = (serverId, libraryIds = null) =>
 /** 获取媒体项列表 */
 export const getMediaItems = (params) => api.get('/api/ui/media-items', params)
 
+/** 获取作品列表(按作品分组) */
+export const getMediaWorks = (params) => api.get('/api/ui/media-works', params)
+
+/** 获取剧集的季度信息 */
+export const getShowSeasons = (title, serverId) => api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons`, { server_id: serverId })
+
+/** 获取某一季的分集列表 */
+export const getSeasonEpisodes = (title, season, serverId, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    server_id: serverId,
+    page,
+    page_size: pageSize
+  })
+
 /** 更新媒体项 */
 export const updateMediaItem = (itemId, data) => api.put(`/api/ui/media-items/${itemId}`, data)
 

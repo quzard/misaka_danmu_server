@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag } from 'antd';
-import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons';
-import { getMediaItems, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
+import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
+import EpisodeListModal from './EpisodeListModal';
 
 const { Search } = Input;
 
@@ -14,20 +15,22 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 100, total: 0 });
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
+  const [selectedShow, setSelectedShow] = useState(null);
 
-  // 加载媒体项列表
+  // 加载作品列表
   const loadItems = async (page = 1, pageSize = 100) => {
     setLoading(true);
     try {
-      const res = await getMediaItems({
+      const res = await getMediaWorks({
         server_id: serverId,
         page,
         page_size: pageSize,
       });
       const data = res.data;
 
-      // 构建树形结构
-      const treeData = buildTreeData(data.list);
+      // 构建树形结构(只包含作品和季度,不包含集)
+      const treeData = await buildTreeData(data.list);
       setItems(treeData);
       setPagination({
         current: page,
@@ -35,66 +38,72 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
         total: data.total,
       });
     } catch (error) {
-      message.error('加载媒体项失败');
+      message.error('加载作品列表失败');
       console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  // 构建树形数据结构
-  const buildTreeData = (flatList) => {
-    const movies = [];
-    const tvShows = {};
+  // 构建树形数据结构(作品 > 季度)
+  const buildTreeData = async (worksList) => {
+    const result = [];
 
-    flatList.forEach(item => {
-      if (item.mediaType === 'movie') {
-        movies.push({
-          ...item,
-          key: `movie-${item.id}`,
+    for (const work of worksList) {
+      if (work.type === 'movie') {
+        // 电影节点
+        result.push({
+          ...work,
+          key: `movie-${work.id}`,
+          isGroup: false,
         });
-      } else if (item.mediaType === 'tv_series') {
-        const showKey = `${item.title}`;
-        if (!tvShows[showKey]) {
-          tvShows[showKey] = {
-            key: showKey,
-            title: item.title,
-            mediaType: 'tv_show',
-            year: item.year,
-            isGroup: true,
-            children: {},
-          };
-        }
+      } else if (work.type === 'tv_show') {
+        // 电视剧组节点
+        try {
+          const seasonsRes = await getShowSeasons(work.title, work.serverId);
+          const seasons = seasonsRes.data || [];
 
-        const seasonKey = `${showKey}-S${item.season}`;
-        if (!tvShows[showKey].children[seasonKey]) {
-          tvShows[showKey].children[seasonKey] = {
-            key: seasonKey,
-            title: `第 ${item.season} 季`,
-            season: item.season,
-            mediaType: 'tv_season',
+          result.push({
+            key: `show-${work.title}`,
+            title: work.title,
+            mediaType: 'tv_show',
+            year: work.year,
+            tmdbId: work.tmdbId,
+            tvdbId: work.tvdbId,
+            imdbId: work.imdbId,
+            posterUrl: work.posterUrl,
+            serverId: work.serverId,
+            isGroup: true,
+            seasonCount: work.seasonCount,
+            episodeCount: work.episodeCount,
+            children: seasons.map(s => ({
+              key: `season-${work.title}-S${s.season}`,
+              title: `第 ${s.season} 季 (${s.episodeCount}集)`,
+              season: s.season,
+              episodeCount: s.episodeCount,
+              year: s.year,
+              posterUrl: s.posterUrl,
+              mediaType: 'tv_season',
+              serverId: work.serverId,
+              showTitle: work.title,
+              isGroup: true,
+            })),
+          });
+        } catch (error) {
+          console.error(`加载《${work.title}》季度信息失败:`, error);
+          // 即使加载季度失败,也添加剧集组节点
+          result.push({
+            key: `show-${work.title}`,
+            title: work.title,
+            mediaType: 'tv_show',
+            year: work.year,
+            serverId: work.serverId,
             isGroup: true,
             children: [],
-          };
+          });
         }
-
-        tvShows[showKey].children[seasonKey].children.push({
-          ...item,
-          key: `episode-${item.id}`,
-          title: `第 ${item.episode} 集`,
-        });
       }
-    });
-
-    // 转换为数组
-    const result = [...movies];
-    Object.values(tvShows).forEach(show => {
-      show.children = Object.values(show.children).map(season => ({
-        ...season,
-        children: season.children.sort((a, b) => a.episode - b.episode),
-      }));
-      result.push(show);
-    });
+    }
 
     return result;
   };
@@ -283,6 +292,16 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
     }
   };
 
+  // 打开分集列表弹窗
+  const handleOpenEpisodes = (record) => {
+    setSelectedShow({
+      serverId: record.serverId,
+      title: record.showTitle,
+      season: record.season,
+    });
+    setEpisodeModalVisible(true);
+  };
+
   // 表格列定义
   const columns = [
     {
@@ -290,6 +309,22 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       dataIndex: 'title',
       key: 'title',
       width: '30%',
+      render: (title, record) => {
+        // 季度节点显示为可点击链接
+        if (record.mediaType === 'tv_season') {
+          return (
+            <Button
+              type="link"
+              icon={<FolderOpenOutlined />}
+              onClick={() => handleOpenEpisodes(record)}
+              style={{ padding: 0 }}
+            >
+              {title}
+            </Button>
+          );
+        }
+        return title;
+      },
     },
     {
       title: '类型',
@@ -569,6 +604,18 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
         item={editingItem}
         onClose={() => setEditorVisible(false)}
         onSaved={handleEditorSaved}
+      />
+
+      <EpisodeListModal
+        visible={episodeModalVisible}
+        onClose={() => {
+          setEpisodeModalVisible(false);
+          setSelectedShow(null);
+        }}
+        serverId={selectedShow?.serverId}
+        title={selectedShow?.title}
+        season={selectedShow?.season}
+        onRefresh={() => loadItems(pagination.current, pagination.pageSize)}
       />
     </>
   );
