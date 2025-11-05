@@ -545,10 +545,13 @@ async def import_media_items(
         return {"message": "没有要导入的项目"}
 
     # 提交导入任务
-    task_id = await task_manager.submit_task(
-        tasks.import_media_items,
-        item_ids=list(all_item_ids),
-        task_name=f"导入媒体项: {len(all_item_ids)}个"
+    item_ids_list = list(all_item_ids)
+    task_id, _ = await task_manager.submit_task(
+        lambda session, progress_callback: tasks.import_media_items(
+            item_ids_list, session, task_manager, progress_callback
+        ),
+        title=f"导入媒体项: {len(item_ids_list)}个",
+        queue_type="download"
     )
 
     return {"message": "媒体项导入任务已提交", "taskId": task_id}
