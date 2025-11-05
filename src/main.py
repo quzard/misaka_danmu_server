@@ -137,6 +137,22 @@ async def lifespan(app: FastAPI):
         app.state.metadata_manager.initialize()
     )
 
+    # 【优化】预加载所有配置到缓存
+    logger.info("预加载配置缓存...")
+    async with session_factory() as session:
+        # 预加载代理相关配置
+        proxy_url = await crud.get_config_value(session, "proxyUrl", "")
+        proxy_enabled = await crud.get_config_value(session, "proxyEnabled", "false")
+        app.state.config_manager._cache["proxyUrl"] = proxy_url
+        app.state.config_manager._cache["proxyEnabled"] = proxy_enabled
+        
+        # 一次性查询所有 scraper 设置并缓存
+        scraper_settings = await crud.get_all_scraper_settings(session)
+        # 存储到 scraper_manager 中供后续使用,避免重复查询
+        app.state.scraper_manager._cached_scraper_settings = {
+            s['providerName']: s for s in scraper_settings
+        }
+
     # 初始化关键组件（同步执行，确保启动正常）
     app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
@@ -157,35 +173,6 @@ async def lifespan(app: FastAPI):
         app.state.rate_limiter, app.state.metadata_manager,
         app.state.config_manager, app.state.title_recognition_manager
     )
-
-    # 后台预热搜索源连接池（不阻塞启动）
-    async def background_warmup():
-        """后台预热搜索源连接池"""
-        try:
-            await asyncio.sleep(1)  # 等待1秒后开始预热，确保启动流程完成
-            enabled_scrapers = [
-                scraper for name, scraper in app.state.scraper_manager.scrapers.items()
-                if app.state.scraper_manager.scraper_settings.get(name, {}).get('isEnabled')
-            ]
-
-            async def warmup_single(scraper):
-                try:
-                    if hasattr(scraper, '_ensure_client'):
-                        await scraper._ensure_client()
-                    elif hasattr(scraper, '_create_client'):
-                        await scraper._create_client()
-                except Exception as e:
-                    logger.debug(f"预热 '{scraper.provider_name}' 失败: {e}")
-
-            warmup_start = time.time()
-            await asyncio.gather(*[warmup_single(s) for s in enabled_scrapers], return_exceptions=True)
-            warmup_time = time.time() - warmup_start
-            logger.info(f"后台预热完成: {len(enabled_scrapers)} 个搜索源，耗时 {warmup_time:.2f} 秒")
-        except Exception as e:
-            logger.warning(f"后台预热出错: {e}")
-
-    # 启动后台预热任务（不等待完成）
-    app.state.warmup_task = asyncio.create_task(background_warmup())
 
     init_time = time.time() - init_start
     logger.info(f"并行初始化完成，耗时 {init_time:.2f} 秒")
@@ -247,12 +234,6 @@ async def lifespan(app: FastAPI):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
-        except asyncio.CancelledError:
-            pass
-    if hasattr(app.state, "warmup_task"):
-        app.state.warmup_task.cancel()
-        try:
-            await app.state.warmup_task
         except asyncio.CancelledError:
             pass
     await close_db_engine(app)

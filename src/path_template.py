@@ -87,31 +87,8 @@ class DanmakuPathTemplate:
             
         except Exception as e:
             logger.error(f"生成弹幕路径失败: {e}, 模板: {self.template}, 上下文: {context}")
-            # 回退到默认路径
-            def _is_docker_environment():
-                """检测是否在Docker容器中运行"""
-                import os
-                # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-                if Path("/.dockerenv").exists():
-                    return True
-                # 方法2: 检查环境变量
-                if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-                    return True
-                # 方法3: 检查当前工作目录是否为 /app
-                if Path.cwd() == Path("/app"):
-                    return True
-                return False
-
-            def _get_default_path():
-                """根据运行环境获取默认路径"""
-                if _is_docker_environment():
-                    # 容器环境
-                    return f"/app/config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
-                else:
-                    # 源码运行环境
-                    return f"config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
-
-            return Path(_get_default_path())
+            # 回退到默认路径 - 使用相对路径确保源码运行时也能正常工作
+            return Path(f"config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml")
     
     def _prepare_context(self, context: Dict[str, Any]) -> Dict[str, str]:
         """准备和清理上下文变量"""
@@ -305,8 +282,28 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
         except Exception as e:
             logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
 
-    # 默认路径逻辑
-    web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
-    absolute_path = Path(f"/app/config/danmaku/{anime_id}/{episode_id}.xml")
+    # 默认路径逻辑 - 根据运行环境自动调整
+    def _is_docker_environment():
+        """检测是否在Docker容器中运行"""
+        import os
+        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+        if Path("/.dockerenv").exists():
+            return True
+        # 方法2: 检查环境变量
+        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+            return True
+        # 方法3: 检查当前工作目录是否为 /app
+        if Path.cwd() == Path("/app"):
+            return True
+        return False
+
+    if _is_docker_environment():
+        # Docker容器环境
+        web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
+        absolute_path = Path(f"/app/config/danmaku/{anime_id}/{episode_id}.xml")
+    else:
+        # 源码运行环境 - 使用相对路径
+        web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
+        absolute_path = Path(f"config/danmaku/{anime_id}/{episode_id}.xml")
 
     return web_path, absolute_path

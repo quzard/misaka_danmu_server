@@ -14,6 +14,27 @@ from .. import models
 if TYPE_CHECKING:
     from ..config_manager import ConfigManager
 
+# 全局共享的 HTTP 传输层（用于无代理的连接池复用）
+_shared_transport: Optional[httpx.AsyncHTTPTransport] = None
+_transport_lock = asyncio.Lock()
+
+async def get_shared_transport() -> httpx.AsyncHTTPTransport:
+    """获取或创建共享的 HTTP 传输层（线程安全）"""
+    global _shared_transport
+    if _shared_transport is None:
+        async with _transport_lock:
+            if _shared_transport is None:
+                _shared_transport = httpx.AsyncHTTPTransport(
+                    retries=3,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=50,
+                        max_connections=200,
+                        keepalive_expiry=30.0
+                    )
+                )
+                logging.getLogger(__name__).info("已创建共享 HTTP 传输层")
+    return _shared_transport
+
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -97,21 +118,34 @@ class BaseScraper(ABC):
         self._session_factory = session_factory
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        # 新增：用于跟踪当前客户端实例所使用的代理配置
+        # 用于跟踪当前客户端实例所使用的代理配置
         self._current_proxy_config: Optional[str] = None
+        # 缓存 scraper_manager 引用,用于访问预加载的 scraper 设置
+        self._scraper_manager_ref: Optional[Any] = None
 
     async def _get_proxy_for_provider(self) -> Optional[str]:
-        """Helper to get the configured proxy URL for the current provider, if any."""
+        """
+        获取当前 provider 的代理配置。
+        优先使用预加载的缓存,避免重复数据库查询。
+        """
+        # config_manager 自带缓存,已预加载的配置会直接从内存返回
         proxy_url = await self.config_manager.get("proxyUrl", "")
         proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
 
         if not proxy_enabled_globally or not proxy_url:
             return None
 
-        async with self._session_factory() as session:
-            scraper_settings = await crud.get_all_scraper_settings(session)
+        # 获取当前 provider 的代理设置
+        provider_setting = None
+        if self._scraper_manager_ref and hasattr(self._scraper_manager_ref, '_cached_scraper_settings'):
+            # 使用预加载的缓存（快速路径）
+            provider_setting = self._scraper_manager_ref._cached_scraper_settings.get(self.provider_name)
+        else:
+            # 降级到数据库查询（仅在缓存未初始化时，如测试环境）
+            async with self._session_factory() as session:
+                scraper_settings = await crud.get_all_scraper_settings(session)
+            provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
         
-        provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
@@ -123,6 +157,7 @@ class BaseScraper(ABC):
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
         子类可以传递额外的 httpx.AsyncClient 参数。
+        使用共享传输层以提高性能和连接复用。
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
@@ -131,6 +166,12 @@ class BaseScraper(ABC):
         self._current_proxy_config = proxy_to_use
         
         client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
+        
+        # 【优化】如果没有代理且没有自定义传输层，使用共享传输层
+        if not proxy_to_use and 'transport' not in kwargs:
+            shared_transport = await get_shared_transport()
+            client_kwargs['transport'] = shared_transport
+        
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
