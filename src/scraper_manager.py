@@ -158,7 +158,10 @@ class ScraperManager:
 
         # Instantiate all discovered scrapers
         for provider_name, scraper_class in self._scraper_classes.items():
-            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager)
+            scraper_instance = scraper_class(self._session_factory, self.config_manager)
+            # 【优化】设置 scraper_manager 引用,以便使用缓存的配置
+            scraper_instance._scraper_manager_ref = self
+            self.scrapers[provider_name] = scraper_instance
             setting = self.scraper_settings.get(provider_name, {})
             
             is_enabled_by_user = setting.get('isEnabled', True)
