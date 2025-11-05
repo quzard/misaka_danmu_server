@@ -268,6 +268,7 @@ class SohuScraper(BaseScraper):
     async def get_episodes(
         self,
         media_id: str,
+        target_episode_index: Optional[int] = None,
         db_media_type: str = "anime",
         season: int = 1
     ) -> List[models.ProviderEpisodeInfo]:
