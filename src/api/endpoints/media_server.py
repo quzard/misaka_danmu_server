@@ -15,8 +15,9 @@ from ...task_manager import TaskManager
 from ... import tasks
 from ..dependencies import get_task_manager
 from ...media_servers import EmbyMediaServer, JellyfinMediaServer, PlexMediaServer
-from ...crud.media_server import get_media_server_by_id
+from ...crud.media_server import get_media_server_by_id, get_episode_ids_by_show, get_episode_ids_by_season
 from ...media_server_manager import get_media_server_manager
+from ...main import scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -512,7 +513,6 @@ async def import_media_items(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
-    from ...crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
 
     all_item_ids = set()
 
@@ -548,7 +548,15 @@ async def import_media_items(
     item_ids_list = list(all_item_ids)
     task_id, _ = await task_manager.submit_task(
         lambda session, progress_callback: tasks.import_media_items(
-            item_ids_list, session, task_manager, progress_callback
+            item_ids_list,
+            session,
+            task_manager,
+            progress_callback,
+            scraper_manager=scraper_manager,
+            metadata_manager=metadata_manager,
+            config_manager=config_manager,
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager
         ),
         title=f"导入媒体项: {len(item_ids_list)}个",
         queue_type="download"

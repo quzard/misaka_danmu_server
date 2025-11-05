@@ -3556,10 +3556,32 @@ async def import_media_items(
     item_ids: List[int],
     session: AsyncSession,
     task_manager: TaskManager,
-    progress_callback: Callable
+    progress_callback: Callable,
+    scraper_manager=None,
+    metadata_manager=None,
+    config_manager=None,
+    rate_limiter=None,
+    title_recognition_manager=None
 ):
     """导入媒体项(按季度导入电视剧,电影直接导入)"""
     from .orm_models import MediaItem
+
+    # 如果没有传入manager,从全局获取
+    if scraper_manager is None:
+        from .main import scraper_manager as global_scraper_manager
+        scraper_manager = global_scraper_manager
+    if metadata_manager is None:
+        from .main import metadata_manager as global_metadata_manager
+        metadata_manager = global_metadata_manager
+    if config_manager is None:
+        from .main import config_manager as global_config_manager
+        config_manager = global_config_manager
+    if rate_limiter is None:
+        from .main import rate_limiter as global_rate_limiter
+        rate_limiter = global_rate_limiter
+    if title_recognition_manager is None:
+        from .main import title_recognition_manager as global_title_recognition_manager
+        title_recognition_manager = global_title_recognition_manager
 
     await progress_callback(0, "开始导入媒体项...")
 
@@ -3598,18 +3620,31 @@ async def import_media_items(
 
         try:
             # 触发webhook式搜索
-            task_id = await task_manager.submit_task(
-                webhook_search_and_dispatch_task,
-                f"媒体库导入: {movie.title}",
-                queue="webhook",
-                animeTitle=movie.title,
-                mediaType="movie",
-                season=None,
-                episodeNumber=None,
-                year=movie.year,
-                tmdbId=movie.tmdbId,
-                tvdbId=movie.tvdbId,
-                imdbId=movie.imdbId
+            task_id, _ = await task_manager.submit_task(
+                lambda session, progress_callback: webhook_search_and_dispatch_task(
+                    animeTitle=movie.title,
+                    mediaType="movie",
+                    season=1,
+                    currentEpisodeIndex=1,
+                    searchKeyword=movie.title,
+                    year=movie.year,
+                    tmdbId=movie.tmdbId,
+                    tvdbId=movie.tvdbId,
+                    imdbId=movie.imdbId,
+                    doubanId=None,
+                    bangumiId=None,
+                    webhookSource="media_server",
+                    session=session,
+                    progress_callback=progress_callback,
+                    manager=scraper_manager,
+                    task_manager=task_manager,
+                    metadata_manager=metadata_manager,
+                    config_manager=config_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager
+                ),
+                title=f"媒体库导入: {movie.title}",
+                queue_type="download"
             )
             logger.info(f"电影 {movie.title} 导入任务已提交: {task_id}")
 
@@ -3638,18 +3673,31 @@ async def import_media_items(
             first_item = season_items[0]
 
             # 为该季度创建一个导入任务
-            task_id = await task_manager.submit_task(
-                webhook_search_and_dispatch_task,
-                f"媒体库导入: {title} S{season:02d}",
-                queue="webhook",
-                animeTitle=title,
-                mediaType="tv",
-                season=season,
-                episodeNumber=None,  # 不指定集数,导入整季
-                year=first_item.year,
-                tmdbId=first_item.tmdbId,
-                tvdbId=first_item.tvdbId,
-                imdbId=first_item.imdbId
+            task_id, _ = await task_manager.submit_task(
+                lambda session, progress_callback: webhook_search_and_dispatch_task(
+                    animeTitle=title,
+                    mediaType="tv_series",
+                    season=season,
+                    currentEpisodeIndex=None,  # 不指定集数,导入整季
+                    searchKeyword=f"{title} S{season:02d}",
+                    year=first_item.year,
+                    tmdbId=first_item.tmdbId,
+                    tvdbId=first_item.tvdbId,
+                    imdbId=first_item.imdbId,
+                    doubanId=None,
+                    bangumiId=None,
+                    webhookSource="media_server",
+                    session=session,
+                    progress_callback=progress_callback,
+                    manager=scraper_manager,
+                    task_manager=task_manager,
+                    metadata_manager=metadata_manager,
+                    config_manager=config_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager
+                ),
+                title=f"媒体库导入: {title} S{season:02d}",
+                queue_type="download"
             )
             logger.info(f"电视剧 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
 
