@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 _shared_transport: Optional[httpx.AsyncHTTPTransport] = None
 _transport_lock = asyncio.Lock()
 
+# 全局共享的代理传输层缓存（按代理URL缓存不同的传输层）
+_proxy_transports: Dict[str, httpx.AsyncHTTPTransport] = {}
+_proxy_transport_lock = asyncio.Lock()
+
 async def get_shared_transport() -> httpx.AsyncHTTPTransport:
     """获取或创建共享的 HTTP 传输层（线程安全）"""
     global _shared_transport
@@ -32,8 +36,26 @@ async def get_shared_transport() -> httpx.AsyncHTTPTransport:
                         keepalive_expiry=30.0
                     )
                 )
-                logging.getLogger(__name__).info("已创建共享 HTTP 传输层")
+                logging.getLogger(__name__).info("已创建共享 HTTP 传输层（无代理）")
     return _shared_transport
+
+async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
+    """获取或创建指定代理的共享 HTTP 传输层（线程安全）"""
+    global _proxy_transports
+    if proxy_url not in _proxy_transports:
+        async with _proxy_transport_lock:
+            if proxy_url not in _proxy_transports:
+                _proxy_transports[proxy_url] = httpx.AsyncHTTPTransport(
+                    proxy=proxy_url,
+                    retries=3,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=50,
+                        max_connections=200,
+                        keepalive_expiry=30.0
+                    )
+                )
+                logging.getLogger(__name__).info(f"已创建共享 HTTP 传输层（代理: {proxy_url}）")
+    return _proxy_transports[proxy_url]
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
@@ -157,21 +179,31 @@ class BaseScraper(ABC):
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
         子类可以传递额外的 httpx.AsyncClient 参数。
-        使用共享传输层以提高性能和连接复用。
+        使用共享传输层以提高性能和连接复用（支持有代理和无代理两种情况）。
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
-        
+
         # 关键：在创建客户端后，记录下当前使用的代理配置
         self._current_proxy_config = proxy_to_use
-        
-        client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
-        
-        # 【优化】如果没有代理且没有自定义传输层，使用共享传输层
-        if not proxy_to_use and 'transport' not in kwargs:
-            shared_transport = await get_shared_transport()
-            client_kwargs['transport'] = shared_transport
-        
+
+        client_kwargs = {"timeout": 20.0, "follow_redirects": True, **kwargs}
+
+        # 【优化】如果没有自定义传输层，使用共享传输层（支持代理和非代理）
+        if 'transport' not in kwargs:
+            if proxy_to_use:
+                # 有代理：使用代理专用的共享传输层
+                shared_transport = await get_proxy_transport(proxy_to_use)
+                client_kwargs['transport'] = shared_transport
+            else:
+                # 无代理：使用无代理的共享传输层
+                shared_transport = await get_shared_transport()
+                client_kwargs['transport'] = shared_transport
+        else:
+            # 如果有自定义传输层，仍需设置代理参数（向后兼容）
+            if proxy_to_use:
+                client_kwargs['proxy'] = proxy_to_use
+
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
