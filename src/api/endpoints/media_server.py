@@ -13,11 +13,21 @@ from ... import crud, models, security
 from ...database import get_db_session
 from ...task_manager import TaskManager
 from ... import tasks
-from ..dependencies import get_task_manager
+from ..dependencies import (
+    get_task_manager,
+    get_scraper_manager,
+    get_metadata_manager,
+    get_config_manager,
+    get_rate_limiter,
+    get_title_recognition_manager
+)
 from ...media_servers import EmbyMediaServer, JellyfinMediaServer, PlexMediaServer
 from ...crud.media_server import get_media_server_by_id, get_episode_ids_by_show, get_episode_ids_by_season
 from ...media_server_manager import get_media_server_manager
-from ...main import scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager
+from ...scraper_manager import ScraperManager
+from ...metadata_manager import MetadataSourceManager
+from ...config_manager import ConfigManager
+from ...rate_limiter import RateLimiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -510,7 +520,12 @@ async def import_media_items(
     payload: MediaItemsImportRequest,
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user),
-    task_manager: TaskManager = Depends(get_task_manager)
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
 
