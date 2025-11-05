@@ -1,5 +1,4 @@
 import logging
-import time
 import asyncio
 import re
 from abc import ABC, abstractmethod
@@ -56,6 +55,32 @@ async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
                 )
                 logging.getLogger(__name__).info(f"已创建共享 HTTP 传输层（代理: {proxy_url}）")
     return _proxy_transports[proxy_url]
+
+async def close_all_shared_transports():
+    """关闭所有全局共享传输层（应在应用关闭时调用）"""
+    global _shared_transport, _proxy_transports
+    
+    logger = logging.getLogger(__name__)
+    
+    # 关闭无代理的共享传输层
+    if _shared_transport is not None:
+        async with _transport_lock:
+            if _shared_transport is not None:
+                await _shared_transport.aclose()
+                _shared_transport = None
+                logger.info("已关闭共享 HTTP 传输层（无代理）")
+    
+    # 关闭所有代理的共享传输层
+    if _proxy_transports:
+        async with _proxy_transport_lock:
+            close_tasks = []
+            for proxy_url, transport in _proxy_transports.items():
+                logger.info(f"正在关闭代理传输层: {proxy_url}")
+                close_tasks.append(transport.aclose())
+            
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+            _proxy_transports.clear()
+            logger.info("已关闭所有代理传输层")
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
@@ -171,6 +196,7 @@ class BaseScraper(ABC):
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
+    
     async def _log_proxy_usage(self, proxy_url: Optional[str]):
         if proxy_url:
             self.logger.debug(f"通过代理 '{proxy_url}' 发起请求...")
@@ -183,12 +209,12 @@ class BaseScraper(ABC):
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
-
+        
         # 关键：在创建客户端后，记录下当前使用的代理配置
         self._current_proxy_config = proxy_to_use
-
+        
         client_kwargs = {"timeout": 20.0, "follow_redirects": True, **kwargs}
-
+        
         # 【优化】如果没有自定义传输层，使用共享传输层（支持代理和非代理）
         if 'transport' not in kwargs:
             if proxy_to_use:
@@ -203,7 +229,7 @@ class BaseScraper(ABC):
             # 如果有自定义传输层，仍需设置代理参数（向后兼容）
             if proxy_to_use:
                 client_kwargs['proxy'] = proxy_to_use
-
+        
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
