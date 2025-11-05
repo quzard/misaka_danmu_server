@@ -134,41 +134,55 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       return;
     }
 
-    // 收集所有要删除的item id
+    // 分类收集要删除的项目
     const itemIds = [];
-    const collectItemIds = (keys) => {
-      keys.forEach(key => {
-        if (key.startsWith('movie-') || key.startsWith('episode-')) {
-          itemIds.push(parseInt(key.split('-')[1]));
-        } else {
-          // 如果是季度或剧集组,收集所有子项
-          const item = findItemByKey(items, key);
-          if (item && item.children) {
-            // 递归收集所有集
-            const collectEpisodes = (children) => {
-              children.forEach(child => {
-                if (child.key.startsWith('episode-')) {
-                  itemIds.push(parseInt(child.key.split('-')[1]));
-                } else if (child.children) {
-                  collectEpisodes(child.children);
-                }
-              });
-            };
-            collectEpisodes(item.children);
+    const shows = [];
+    const seasons = [];
+
+    selectedRowKeys.forEach(key => {
+      if (key.startsWith('movie-') || key.startsWith('episode-')) {
+        // 直接删除的电影或剧集
+        itemIds.push(parseInt(key.split('-')[1]));
+      } else {
+        // 查找对应的item
+        const item = findItemByKey(items, key);
+        if (!item) return;
+
+        if (item.mediaType === 'tv_show') {
+          // 整个剧集组
+          shows.push({
+            serverId: serverId,
+            title: item.title
+          });
+        } else if (item.mediaType === 'tv_season') {
+          // 某一季
+          // 需要找到父级的title
+          const parentKey = key.substring(0, key.lastIndexOf('-'));
+          const parent = findItemByKey(items, parentKey);
+          if (parent) {
+            seasons.push({
+              serverId: serverId,
+              title: parent.title,
+              season: item.season
+            });
           }
         }
-      });
-    };
-    collectItemIds(selectedRowKeys);
+      }
+    });
 
-    if (itemIds.length === 0) {
+    if (itemIds.length === 0 && shows.length === 0 && seasons.length === 0) {
       message.warning('没有可删除的项目');
       return;
     }
 
     try {
-      await batchDeleteMediaItems(itemIds);
-      message.success(`成功删除 ${itemIds.length} 个项目`);
+      const payload = {};
+      if (itemIds.length > 0) payload.itemIds = itemIds;
+      if (shows.length > 0) payload.shows = shows;
+      if (seasons.length > 0) payload.seasons = seasons;
+
+      await batchDeleteMediaItems(payload);
+      message.success('删除成功');
       setSelectedRowKeys([]);
       loadItems(pagination.current, pagination.pageSize);
     } catch (error) {
@@ -211,40 +225,54 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       return;
     }
 
-    // 收集所有要导入的item id
+    // 分类收集要导入的项目
     const itemIds = [];
-    const collectItemIds = (keys) => {
-      keys.forEach(key => {
-        if (key.startsWith('movie-') || key.startsWith('episode-')) {
-          itemIds.push(parseInt(key.split('-')[1]));
-        } else {
-          // 如果是季度或剧集组,收集所有子项
-          const item = findItemByKey(items, key);
-          if (item && item.children) {
-            // 递归收集所有集
-            const collectEpisodes = (children) => {
-              children.forEach(child => {
-                if (child.key.startsWith('episode-')) {
-                  itemIds.push(parseInt(child.key.split('-')[1]));
-                } else if (child.children) {
-                  collectEpisodes(child.children);
-                }
-              });
-            };
-            collectEpisodes(item.children);
+    const shows = [];
+    const seasons = [];
+
+    selectedRowKeys.forEach(key => {
+      if (key.startsWith('movie-') || key.startsWith('episode-')) {
+        // 直接导入的电影或剧集
+        itemIds.push(parseInt(key.split('-')[1]));
+      } else {
+        // 查找对应的item
+        const item = findItemByKey(items, key);
+        if (!item) return;
+
+        if (item.mediaType === 'tv_show') {
+          // 整个剧集组
+          shows.push({
+            serverId: serverId,
+            title: item.title
+          });
+        } else if (item.mediaType === 'tv_season') {
+          // 某一季
+          // 需要找到父级的title
+          const parentKey = key.substring(0, key.lastIndexOf('-'));
+          const parent = findItemByKey(items, parentKey);
+          if (parent) {
+            seasons.push({
+              serverId: serverId,
+              title: parent.title,
+              season: item.season
+            });
           }
         }
-      });
-    };
-    collectItemIds(selectedRowKeys);
+      }
+    });
 
-    if (itemIds.length === 0) {
+    if (itemIds.length === 0 && shows.length === 0 && seasons.length === 0) {
       message.warning('没有可导入的项目');
       return;
     }
 
     try {
-      const res = await importMediaItems({ itemIds });
+      const payload = {};
+      if (itemIds.length > 0) payload.itemIds = itemIds;
+      if (shows.length > 0) payload.shows = shows;
+      if (seasons.length > 0) payload.seasons = seasons;
+
+      const res = await importMediaItems(payload);
       const result = res.data;
       message.success(result.message || '导入任务已提交');
       setSelectedRowKeys([]);
@@ -268,11 +296,12 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       dataIndex: 'mediaType',
       key: 'mediaType',
       width: '10%',
-      render: (type, record) => {
-        if (record.isGroup) return '-';
+      render: (type) => {
         const typeMap = {
           movie: '电影',
           tv_series: '电视剧',
+          tv_show: '电视剧',
+          tv_season: '-',
         };
         return typeMap[type] || type;
       },

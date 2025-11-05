@@ -392,16 +392,60 @@ async def delete_media_item(
     await session.commit()
 
 
+class BatchDeleteRequest(BaseModel):
+    itemIds: Optional[List[int]] = None
+    shows: Optional[List[Dict[str, Any]]] = None  # [{"serverId": 1, "title": "剧名"}]
+    seasons: Optional[List[Dict[str, Any]]] = None  # [{"serverId": 1, "title": "剧名", "season": 1}]
+
+
 @router.post("/media-items/batch-delete", status_code=200, summary="批量删除媒体项")
 async def batch_delete_media_items(
-    item_ids: List[int],
+    payload: BatchDeleteRequest,
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user)
 ):
     """批量删除媒体项"""
-    count = await crud.delete_media_items_batch(session, item_ids)
+    from ...crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
+
+    all_item_ids = set()
+
+    # 收集直接指定的item IDs
+    if payload.itemIds:
+        all_item_ids.update(payload.itemIds)
+
+    # 收集剧集组的所有episode IDs
+    if payload.shows:
+        for show in payload.shows:
+            episode_ids = await get_episode_ids_by_show(
+                session,
+                show['serverId'],
+                show['title']
+            )
+            all_item_ids.update(episode_ids)
+
+    # 收集季度的所有episode IDs
+    if payload.seasons:
+        for season in payload.seasons:
+            episode_ids = await get_episode_ids_by_season(
+                session,
+                season['serverId'],
+                season['title'],
+                season['season']
+            )
+            all_item_ids.update(episode_ids)
+
+    if not all_item_ids:
+        return {"message": "没有要删除的项目"}
+
+    count = await crud.delete_media_items_batch(session, list(all_item_ids))
     await session.commit()
     return {"message": f"成功删除 {count} 个媒体项"}
+
+
+class MediaItemsImportRequest(BaseModel):
+    itemIds: Optional[List[int]] = None
+    shows: Optional[List[Dict[str, Any]]] = None
+    seasons: Optional[List[Dict[str, Any]]] = None
 
 
 @router.post("/media-items/import", status_code=202, summary="导入选中的媒体项")
@@ -412,11 +456,43 @@ async def import_media_items(
     task_manager: TaskManager = Depends(get_task_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
+    from ...crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
+
+    all_item_ids = set()
+
+    # 收集直接指定的item IDs
+    if payload.itemIds:
+        all_item_ids.update(payload.itemIds)
+
+    # 收集剧集组的所有episode IDs
+    if payload.shows:
+        for show in payload.shows:
+            episode_ids = await get_episode_ids_by_show(
+                session,
+                show['serverId'],
+                show['title']
+            )
+            all_item_ids.update(episode_ids)
+
+    # 收集季度的所有episode IDs
+    if payload.seasons:
+        for season in payload.seasons:
+            episode_ids = await get_episode_ids_by_season(
+                session,
+                season['serverId'],
+                season['title'],
+                season['season']
+            )
+            all_item_ids.update(episode_ids)
+
+    if not all_item_ids:
+        return {"message": "没有要导入的项目"}
+
     # 提交导入任务
     task_id = await task_manager.submit_task(
         tasks.import_media_items,
-        item_ids=payload.itemIds,
-        task_name=f"导入媒体项: {len(payload.itemIds)}个"
+        item_ids=list(all_item_ids),
+        task_name=f"导入媒体项: {len(all_item_ids)}个"
     )
 
     return {"message": "媒体项导入任务已提交", "taskId": task_id}

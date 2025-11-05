@@ -308,6 +308,29 @@ async def delete_media_items_batch(session: AsyncSession, item_ids: List[int]) -
     return result.rowcount
 
 
+async def get_episode_ids_by_show(session: AsyncSession, server_id: int, title: str) -> List[int]:
+    """根据剧集名称获取所有集的ID"""
+    stmt = select(orm_models.MediaItem.id).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.title == title,
+        orm_models.MediaItem.mediaType == 'tv_series'
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]
+
+
+async def get_episode_ids_by_season(session: AsyncSession, server_id: int, title: str, season: int) -> List[int]:
+    """根据剧集名称和季度获取所有集的ID"""
+    stmt = select(orm_models.MediaItem.id).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.title == title,
+        orm_models.MediaItem.season == season,
+        orm_models.MediaItem.mediaType == 'tv_series'
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]
+
+
 async def mark_media_items_imported(session: AsyncSession, item_ids: List[int]) -> int:
     """标记媒体项为已导入"""
     stmt = update(orm_models.MediaItem).where(
