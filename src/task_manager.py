@@ -259,7 +259,7 @@ class TaskManager:
 
         async with self._session_factory() as session:
             await crud.create_task_in_history(
-                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, queue_type=queue_type
+                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type
             )
 
         if run_immediately:

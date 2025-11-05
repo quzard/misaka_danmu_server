@@ -339,25 +339,18 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
               <Popconfirm
                 title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
-                  // 收集所有季度下的所有集
-                  const episodeIds = [];
-                  record.children.forEach(season => {
-                    if (season.children) {
-                      season.children.forEach(ep => {
-                        if (ep.key.startsWith('episode-')) {
-                          episodeIds.push(parseInt(ep.key.split('-')[1]));
-                        }
-                      });
-                    }
-                  });
-                  if (episodeIds.length > 0) {
-                    batchDeleteMediaItems(episodeIds)
-                      .then(() => {
-                        message.success(`成功删除《${record.title}》的 ${episodeIds.length} 集`);
-                        loadItems(pagination.current, pagination.pageSize);
-                      })
-                      .catch(() => message.error('删除失败'));
-                  }
+                  // 删除整部剧集
+                  batchDeleteMediaItems({
+                    shows: [{
+                      serverId: serverId,
+                      title: record.title
+                    }]
+                  })
+                    .then(() => {
+                      message.success(`成功删除《${record.title}》`);
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('删除失败'));
                 }}
                 okText="确定"
                 cancelText="取消"
@@ -371,25 +364,18 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
                 size="small"
                 icon={<ImportOutlined />}
                 onClick={() => {
-                  // 收集所有季度下的所有集
-                  const episodeIds = [];
-                  record.children.forEach(season => {
-                    if (season.children) {
-                      season.children.forEach(ep => {
-                        if (ep.key.startsWith('episode-')) {
-                          episodeIds.push(parseInt(ep.key.split('-')[1]));
-                        }
-                      });
-                    }
-                  });
-                  if (episodeIds.length > 0) {
-                    importMediaItems({ itemIds: episodeIds })
-                      .then((res) => {
-                        message.success(res.data.message || '导入任务已提交');
-                        loadItems(pagination.current, pagination.pageSize);
-                      })
-                      .catch(() => message.error('导入失败'));
-                  }
+                  // 导入整部剧集
+                  importMediaItems({
+                    shows: [{
+                      serverId: serverId,
+                      title: record.title
+                    }]
+                  })
+                    .then((res) => {
+                      message.success(res.data.message || '导入任务已提交');
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('导入失败'));
                 }}
               >
                 导入整部
@@ -405,14 +391,20 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
               <Popconfirm
                 title={`确定要删除第${record.season}季的所有集吗?`}
                 onConfirm={() => {
-                  // 删除该季度下的所有集
-                  const episodeIds = record.children
-                    .filter(ep => ep.key.startsWith('episode-'))
-                    .map(ep => parseInt(ep.key.split('-')[1]));
-                  if (episodeIds.length > 0) {
-                    batchDeleteMediaItems(episodeIds)
+                  // 删除该季度
+                  // 需要找到父级的title
+                  const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+                  const parent = findItemByKey(items, parentKey);
+                  if (parent) {
+                    batchDeleteMediaItems({
+                      seasons: [{
+                        serverId: serverId,
+                        title: parent.title,
+                        season: record.season
+                      }]
+                    })
                       .then(() => {
-                        message.success(`成功删除第${record.season}季的 ${episodeIds.length} 集`);
+                        message.success(`成功删除第${record.season}季`);
                         loadItems(pagination.current, pagination.pageSize);
                       })
                       .catch(() => message.error('删除失败'));
@@ -430,12 +422,18 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
                 size="small"
                 icon={<ImportOutlined />}
                 onClick={() => {
-                  // 导入该季度下的所有集
-                  const episodeIds = record.children
-                    .filter(ep => ep.key.startsWith('episode-'))
-                    .map(ep => parseInt(ep.key.split('-')[1]));
-                  if (episodeIds.length > 0) {
-                    importMediaItems({ itemIds: episodeIds })
+                  // 导入该季度
+                  // 需要找到父级的title
+                  const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+                  const parent = findItemByKey(items, parentKey);
+                  if (parent) {
+                    importMediaItems({
+                      seasons: [{
+                        serverId: serverId,
+                        title: parent.title,
+                        season: record.season
+                      }]
+                    })
                       .then((res) => {
                         message.success(res.data.message || '导入任务已提交');
                         loadItems(pagination.current, pagination.pageSize);
@@ -528,14 +526,21 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
           >
             全选
           </Checkbox>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            onClick={handleBatchDelete}
+          <Popconfirm
+            title="确定要删除选中的项目吗?"
+            onConfirm={handleBatchDelete}
+            okText="确定"
+            cancelText="取消"
             disabled={selectedRowKeys.length === 0}
           >
-            删除选中
-          </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={selectedRowKeys.length === 0}
+            >
+              删除选中
+            </Button>
+          </Popconfirm>
           <Button
             type="primary"
             icon={<ImportOutlined />}

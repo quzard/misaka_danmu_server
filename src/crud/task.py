@@ -195,6 +195,7 @@ async def create_task_in_history(
         description=description,
         scheduledTaskId=scheduled_task_id,
         createdAt=now,  # type: ignore
+        updatedAt=now,  # type: ignore
         uniqueKey=unique_key,
         queueType=queue_type
     )
