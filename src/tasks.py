@@ -3606,10 +3606,18 @@ async def import_media_items(
                 tv_shows[key] = []
             tv_shows[key].append(item)
 
-    total_tasks = len(movies) + len(tv_shows)
+    # 计算任务数: 电影数 + 电视剧季度数(如果某季只有1集则按单集计,否则按整季计)
+    tv_task_count = 0
+    for season_items in tv_shows.values():
+        if len(season_items) == 1:
+            tv_task_count += 1  # 单集导入
+        else:
+            tv_task_count += 1  # 整季导入
+
+    total_tasks = len(movies) + tv_task_count
     completed = 0
 
-    logger.info(f"准备导入: {len(movies)} 部电影, {len(tv_shows)} 个电视剧季度")
+    logger.info(f"准备导入: {len(movies)} 部电影, {len(tv_shows)} 个电视节目季度")
 
     # 导入电影
     for movie in movies:
@@ -3658,57 +3666,102 @@ async def import_media_items(
 
         completed += 1
 
-    # 导入电视剧(按季度)
+    # 导入电视节目(支持单集和整季)
     for (title, season), season_items in tv_shows.items():
-        await progress_callback(
-            int((completed / total_tasks) * 100),
-            f"导入电视剧: {title} S{season:02d}..."
-        )
-
-        try:
-            # 获取该季度的所有集数
-            episodes = sorted([item.episode for item in season_items if item.episode])
-
-            # 获取元数据ID(优先使用第一个项目的)
-            first_item = season_items[0]
-
-            # 为该季度创建一个导入任务
-            task_id, _ = await task_manager.submit_task(
-                lambda session, progress_callback: webhook_search_and_dispatch_task(
-                    animeTitle=title,
-                    mediaType="tv_series",
-                    season=season,
-                    currentEpisodeIndex=None,  # 不指定集数,导入整季
-                    searchKeyword=f"{title} S{season:02d}",
-                    year=first_item.year,
-                    tmdbId=first_item.tmdbId,
-                    tvdbId=first_item.tvdbId,
-                    imdbId=first_item.imdbId,
-                    doubanId=None,
-                    bangumiId=None,
-                    webhookSource="media_server",
-                    session=session,
-                    progress_callback=progress_callback,
-                    manager=scraper_manager,
-                    task_manager=task_manager,
-                    metadata_manager=metadata_manager,
-                    config_manager=config_manager,
-                    rate_limiter=rate_limiter,
-                    title_recognition_manager=title_recognition_manager
-                ),
-                title=f"媒体库导入: {title} S{season:02d}",
-                queue_type="download"
+        # 判断是单集还是整季
+        if len(season_items) == 1:
+            # 单集导入
+            episode_item = season_items[0]
+            await progress_callback(
+                int((completed / total_tasks) * 100),
+                f"导入电视节目: {title} S{season:02d}E{episode_item.episode:02d}..."
             )
-            logger.info(f"电视剧 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
 
-            # 标记该季度的所有项为已导入
-            item_ids_to_mark = [item.id for item in season_items]
-            await crud.mark_media_items_imported(session, item_ids_to_mark)
-            await session.commit()
+            try:
+                task_id, _ = await task_manager.submit_task(
+                    lambda session, progress_callback, item=episode_item: webhook_search_and_dispatch_task(
+                        animeTitle=item.title,
+                        mediaType="tv_series",
+                        season=item.season,
+                        currentEpisodeIndex=item.episode,
+                        searchKeyword=f"{item.title} S{item.season:02d}E{item.episode:02d}",
+                        year=item.year,
+                        tmdbId=item.tmdbId,
+                        tvdbId=item.tvdbId,
+                        imdbId=item.imdbId,
+                        doubanId=None,
+                        bangumiId=None,
+                        webhookSource="media_server",
+                        session=session,
+                        progress_callback=progress_callback,
+                        manager=scraper_manager,
+                        task_manager=task_manager,
+                        metadata_manager=metadata_manager,
+                        config_manager=config_manager,
+                        rate_limiter=rate_limiter,
+                        title_recognition_manager=title_recognition_manager
+                    ),
+                    title=f"媒体库导入: {title} S{season:02d}E{episode_item.episode:02d}",
+                    queue_type="download"
+                )
+                logger.info(f"电视节目 {title} S{season:02d}E{episode_item.episode:02d} 导入任务已提交: {task_id}")
 
-        except Exception as e:
-            logger.error(f"导入电视剧 {title} S{season:02d} 失败: {e}", exc_info=True)
-            await session.rollback()
+                # 标记为已导入
+                await crud.mark_media_items_imported(session, [episode_item.id])
+                await session.commit()
+
+            except Exception as e:
+                logger.error(f"导入电视节目 {title} S{season:02d}E{episode_item.episode:02d} 失败: {e}", exc_info=True)
+                await session.rollback()
+        else:
+            # 整季导入
+            await progress_callback(
+                int((completed / total_tasks) * 100),
+                f"导入电视节目: {title} S{season:02d} (共{len(season_items)}集)..."
+            )
+
+            try:
+                # 获取该季度的所有集数
+                episodes = sorted([item.episode for item in season_items if item.episode])
+                first_item = season_items[0]
+
+                # 为整季创建一个导入任务(使用第一集的集数)
+                task_id, _ = await task_manager.submit_task(
+                    lambda session, progress_callback, item=first_item: webhook_search_and_dispatch_task(
+                        animeTitle=item.title,
+                        mediaType="tv_series",
+                        season=item.season,
+                        currentEpisodeIndex=1,  # 整季导入从第一集开始
+                        searchKeyword=f"{item.title} S{item.season:02d}",
+                        year=item.year,
+                        tmdbId=item.tmdbId,
+                        tvdbId=item.tvdbId,
+                        imdbId=item.imdbId,
+                        doubanId=None,
+                        bangumiId=None,
+                        webhookSource="media_server",
+                        session=session,
+                        progress_callback=progress_callback,
+                        manager=scraper_manager,
+                        task_manager=task_manager,
+                        metadata_manager=metadata_manager,
+                        config_manager=config_manager,
+                        rate_limiter=rate_limiter,
+                        title_recognition_manager=title_recognition_manager
+                    ),
+                    title=f"媒体库导入: {title} S{season:02d} (共{len(episodes)}集)",
+                    queue_type="download"
+                )
+                logger.info(f"电视节目 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
+
+                # 标记该季度的所有项为已导入
+                item_ids_to_mark = [item.id for item in season_items]
+                await crud.mark_media_items_imported(session, item_ids_to_mark)
+                await session.commit()
+
+            except Exception as e:
+                logger.error(f"导入电视节目 {title} S{season:02d} 失败: {e}", exc_info=True)
+                await session.rollback()
 
         completed += 1
 
