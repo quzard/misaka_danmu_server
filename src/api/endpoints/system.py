@@ -125,14 +125,32 @@ async def stream_server_logs(current_user: models.User = Depends(security.get_cu
             # 首先发送当前所有日志
             current_logs = get_logs()
             for log in reversed(current_logs):  # 反转以保持时间顺序
-                yield f"data: {log}\n\n"
+                # SSE支持多行: 每行前加 "data: " 前缀,最后加 "\n\n" 表示消息结束
+                if '\n' in log:
+                    # 多行日志,每行都加 data: 前缀
+                    lines = log.split('\n')
+                    for line in lines:
+                        yield f"data: {line}\n"
+                    yield "\n"  # 消息结束标记
+                else:
+                    # 单行日志
+                    yield f"data: {log}\n\n"
 
             # 然后持续推送新日志
             while True:
                 try:
                     # 等待新日志,设置超时以便定期发送心跳
                     log = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"data: {log}\n\n"
+                    # SSE支持多行: 每行前加 "data: " 前缀,最后加 "\n\n" 表示消息结束
+                    if '\n' in log:
+                        # 多行日志,每行都加 data: 前缀
+                        lines = log.split('\n')
+                        for line in lines:
+                            yield f"data: {line}\n"
+                        yield "\n"  # 消息结束标记
+                    else:
+                        # 单行日志
+                        yield f"data: {log}\n\n"
                 except asyncio.TimeoutError:
                     # 发送心跳注释以保持连接
                     yield ": heartbeat\n\n"
