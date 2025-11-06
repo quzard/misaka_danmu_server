@@ -233,7 +233,24 @@ class BaseScraper(ABC):
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
-        """从数据库缓存中获取数据。"""
+        """
+        从缓存中获取数据。
+        优先使用预取的缓存（批量查询优化），否则单独查询数据库。
+        """
+        # 【优化】优先使用预取的缓存
+        if hasattr(self, '_prefetched_cache'):
+            if key in self._prefetched_cache:
+                cached_value = self._prefetched_cache[key]
+                if cached_value is not None:
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (命中) - {key}")
+                    return cached_value
+                else:
+                    # 批量查询已执行，但缓存不存在
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (未命中) - {key}")
+                    return None
+        
+        # 降级到单独数据库查询（仅在批量查询未执行时）
+        self.logger.debug(f"{self.provider_name}: 缓存未预取，进行单独查询 - {key}")
         async with self._session_factory() as session:
             try:
                 return await crud.get_cache(session, key)
