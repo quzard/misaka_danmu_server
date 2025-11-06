@@ -2637,7 +2637,18 @@ async def webhook_search_and_dispatch_task(
         await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
         current_time = get_now().strftime("%H:%M:%S")
-        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+        # 根据来源动态生成任务标题前缀
+        if webhookSource == "media_server":
+            source_prefix = "媒体库读取导入"
+        elif webhookSource in ["emby", "jellyfin", "plex"]:
+            source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+        else:
+            source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+        if mediaType == "tv_series":
+            task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+        else:
+            task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
         unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
         # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -3655,7 +3666,7 @@ async def import_media_items(
                     rate_limiter=rate_limiter,
                     title_recognition_manager=title_recognition_manager
                 ),
-                title=f"媒体库导入: {movie.title}",
+                title=f"自动导入 (库内): {movie.title}",
                 queue_type="download"
             )
             logger.info(f"电影 {movie.title} 导入任务已提交: {task_id}")
@@ -3705,7 +3716,7 @@ async def import_media_items(
                         rate_limiter=rate_limiter,
                         title_recognition_manager=title_recognition_manager
                     ),
-                    title=f"媒体库导入: {title} S{season:02d}E{episode_item.episode:02d}",
+                    title=f"自动导入 (库内): {title} S{season:02d}E{episode_item.episode:02d}",
                     queue_type="download"
                 )
                 logger.info(f"电视节目 {title} S{season:02d}E{episode_item.episode:02d} 导入任务已提交: {task_id}")
@@ -3753,7 +3764,7 @@ async def import_media_items(
                         rate_limiter=rate_limiter,
                         title_recognition_manager=title_recognition_manager
                     ),
-                    title=f"媒体库导入: {title} S{season:02d} (共{len(episodes)}集)",
+                    title=f"自动导入 (库内): {title} S{season:02d} (共{len(episodes)}集)",
                     queue_type="download"
                 )
                 logger.info(f"电视节目 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
