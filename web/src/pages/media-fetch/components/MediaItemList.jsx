@@ -494,7 +494,7 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
                 onClick={() => {
                   // 导入电影
                   importMediaItems({
-                    item_ids: [record.id]
+                    itemIds: [record.id]
                   })
                     .then((res) => {
                       message.success(res.data.message || '导入任务已提交');
