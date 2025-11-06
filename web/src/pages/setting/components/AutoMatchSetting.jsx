@@ -40,12 +40,12 @@ const AutoMatchSetting = () => {
         logRawResponseRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
-        getConfig('aiMatchFallbackEnabled'),
-        getConfig('aiMatchProvider'),
-        getConfig('aiMatchApiKey'),
-        getConfig('aiMatchBaseUrl'),
-        getConfig('aiMatchModel'),
-        getConfig('aiMatchPrompt'),
+        getConfig('aiFallbackEnabled'),
+        getConfig('aiProvider'),
+        getConfig('aiApiKey'),
+        getConfig('aiBaseUrl'),
+        getConfig('aiModel'),
+        getConfig('aiPrompt'),
         getConfig('aiRecognitionEnabled'),
         getConfig('aiRecognitionPrompt'),
         getConfig('aiAliasValidationPrompt'),
@@ -68,12 +68,12 @@ const AutoMatchSetting = () => {
 
       form.setFieldsValue({
         aiMatchEnabled: enabled,
-        aiMatchFallbackEnabled: fallback,
-        aiMatchProvider: providerRes.data.value || 'deepseek',
-        aiMatchApiKey: apiKeyRes.data.value || '',
-        aiMatchBaseUrl: baseUrlRes.data.value || '',
-        aiMatchModel: modelRes.data.value || 'deepseek-chat',
-        aiMatchPrompt: promptRes.data.value || '',
+        aiFallbackEnabled: fallback,
+        aiProvider: providerRes.data.value || 'deepseek',
+        aiApiKey: apiKeyRes.data.value || '',
+        aiBaseUrl: baseUrlRes.data.value || '',
+        aiModel: modelRes.data.value || 'deepseek-chat',
+        aiPrompt: promptRes.data.value || '',
         aiRecognitionEnabled: recognition,
         aiRecognitionPrompt: recognitionPromptRes.data.value || '',
         aiAliasValidationPrompt: aliasValidationPromptRes.data.value || '',
@@ -103,12 +103,12 @@ const AutoMatchSetting = () => {
 
       await Promise.all([
         setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
-        setConfig('aiMatchFallbackEnabled', values.aiMatchFallbackEnabled ? 'true' : 'false'),
-        setConfig('aiMatchProvider', values.aiMatchProvider || ''),
-        setConfig('aiMatchApiKey', values.aiMatchApiKey || ''),
-        setConfig('aiMatchBaseUrl', values.aiMatchBaseUrl || ''),
-        setConfig('aiMatchModel', values.aiMatchModel || ''),
-        setConfig('aiMatchPrompt', values.aiMatchPrompt || ''),
+        setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
+        setConfig('aiProvider', values.aiProvider || ''),
+        setConfig('aiApiKey', values.aiApiKey || ''),
+        setConfig('aiBaseUrl', values.aiBaseUrl || ''),
+        setConfig('aiModel', values.aiModel || ''),
+        setConfig('aiPrompt', values.aiPrompt || ''),
         setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
         setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
         setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
@@ -211,8 +211,8 @@ const AutoMatchSetting = () => {
             if ('aiMatchEnabled' in changedValues) {
               setMatchMode(changedValues.aiMatchEnabled ? 'ai' : 'traditional')
             }
-            if ('aiMatchFallbackEnabled' in changedValues) {
-              setFallbackEnabled(changedValues.aiMatchFallbackEnabled)
+            if ('aiFallbackEnabled' in changedValues) {
+              setFallbackEnabled(changedValues.aiFallbackEnabled)
             }
             if ('aiRecognitionEnabled' in changedValues) {
               setRecognitionEnabled(changedValues.aiRecognitionEnabled)
@@ -226,7 +226,7 @@ const AutoMatchSetting = () => {
             {/* 标签页1: AI连接配置 */}
             <TabPane tab="AI连接配置" key="connection">
               <Form.Item
-                name="aiMatchProvider"
+                name="aiProvider"
                 label={
                   <Space>
                     <span>AI提供商</span>
@@ -244,7 +244,7 @@ const AutoMatchSetting = () => {
               </Form.Item>
 
               <Form.Item
-                name="aiMatchApiKey"
+                name="aiApiKey"
                 label={
                   <Space>
                     <span>API密钥</span>
@@ -261,12 +261,12 @@ const AutoMatchSetting = () => {
               <Form.Item
                 noStyle
                 shouldUpdate={(prevValues, currentValues) =>
-                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+                  prevValues.aiProvider !== currentValues.aiProvider
                 }
               >
                 {({ getFieldValue }) => (
                   <Form.Item
-                    name="aiMatchBaseUrl"
+                    name="aiBaseUrl"
                     label={
                       <Space>
                         <span>Base URL</span>
@@ -277,7 +277,7 @@ const AutoMatchSetting = () => {
                     }
                   >
                     <Input
-                      placeholder={getBaseUrlPlaceholder(getFieldValue('aiMatchProvider'))}
+                      placeholder={getBaseUrlPlaceholder(getFieldValue('aiProvider'))}
                     />
                   </Form.Item>
                 )}
@@ -286,12 +286,12 @@ const AutoMatchSetting = () => {
               <Form.Item
                 noStyle
                 shouldUpdate={(prevValues, currentValues) =>
-                  prevValues.aiMatchProvider !== currentValues.aiMatchProvider
+                  prevValues.aiProvider !== currentValues.aiProvider
                 }
               >
                 {({ getFieldValue }) => (
                   <Form.Item
-                    name="aiMatchModel"
+                    name="aiModel"
                     label={
                       <Space>
                         <span>模型名称</span>
@@ -303,7 +303,7 @@ const AutoMatchSetting = () => {
                     rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
                   >
                     <Input
-                      placeholder={getModelPlaceholder(getFieldValue('aiMatchProvider'))}
+                      placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
                     />
                   </Form.Item>
                 )}
@@ -386,7 +386,7 @@ const AutoMatchSetting = () => {
                 </Col>
                 <Col span={12}>
                   <Form.Item
-                    name="aiMatchFallbackEnabled"
+                    name="aiFallbackEnabled"
                     label={
                       <Space>
                         <span>启用传统匹配兜底</span>
@@ -403,7 +403,7 @@ const AutoMatchSetting = () => {
               </Row>
 
               <Form.Item
-                name="aiMatchPrompt"
+                name="aiPrompt"
                 label={
                   <Space>
                     <span>AI匹配提示词</span>

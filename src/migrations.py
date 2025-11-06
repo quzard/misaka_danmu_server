@@ -444,6 +444,47 @@ async def _add_updated_at_to_media_items_task(conn: AsyncConnection, db_type: st
     else:
         logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
 
+async def _rename_ai_config_keys_task(conn: AsyncConnection):
+    """迁移任务: 重命名AI配置键,统一使用不带Match的键名"""
+    # 定义需要重命名的配置键映射 (旧键名 -> 新键名)
+    key_mappings = {
+        'aiMatchProvider': 'aiProvider',
+        'aiMatchApiKey': 'aiApiKey',
+        'aiMatchBaseUrl': 'aiBaseUrl',
+        'aiMatchModel': 'aiModel',
+        'aiMatchPrompt': 'aiPrompt',
+        'aiMatchFallbackEnabled': 'aiFallbackEnabled',
+    }
+
+    for old_key, new_key in key_mappings.items():
+        # 检查旧键是否存在
+        check_old_sql = text("SELECT config_value, description FROM config WHERE config_key = :old_key")
+        result = await conn.execute(check_old_sql, {"old_key": old_key})
+        old_row = result.fetchone()
+
+        if old_row:
+            old_value, old_desc = old_row
+            logger.info(f"正在重命名配置键: '{old_key}' -> '{new_key}'")
+
+            # 检查新键是否已存在
+            check_new_sql = text("SELECT 1 FROM config WHERE config_key = :new_key")
+            new_exists = (await conn.execute(check_new_sql, {"new_key": new_key})).scalar_one_or_none()
+
+            if new_exists:
+                # 新键已存在,只删除旧键
+                logger.info(f"新键 '{new_key}' 已存在,删除旧键 '{old_key}'")
+                delete_sql = text("DELETE FROM config WHERE config_key = :old_key")
+                await conn.execute(delete_sql, {"old_key": old_key})
+            else:
+                # 新键不存在,重命名旧键
+                update_sql = text("UPDATE config SET config_key = :new_key WHERE config_key = :old_key")
+                await conn.execute(update_sql, {"new_key": new_key, "old_key": old_key})
+                logger.info(f"成功重命名配置键: '{old_key}' -> '{new_key}'")
+        else:
+            logger.info(f"旧键 '{old_key}' 不存在,跳过重命名")
+
+    logger.info("AI配置键重命名完成")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -468,6 +509,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_queue_type_to_task_history_v1", _add_queue_type_to_task_history_task, (db_type,)),
         ("migrate_add_alias_locked_to_anime_aliases_v1", _add_alias_locked_to_anime_aliases_task, (db_type,)),
         ("migrate_add_updated_at_to_media_items_v1", _add_updated_at_to_media_items_task, (db_type,)),
+        ("migrate_rename_ai_config_keys_v1", _rename_ai_config_keys_task, ()),
     ]
 
     for migration_id, migration_func, args in migrations:

@@ -75,10 +75,10 @@ class TmdbAutoMapJob(BaseJob):
                 ai_alias_validation_prompt = await crud.get_config_value(session, "aiAliasValidationPrompt", "")
 
                 config = {
-                    "ai_match_provider": await crud.get_config_value(session, "aiMatchProvider", "deepseek"),
-                    "ai_match_api_key": await crud.get_config_value(session, "aiMatchApiKey", ""),
-                    "ai_match_base_url": await crud.get_config_value(session, "aiMatchBaseUrl", ""),
-                    "ai_match_model": await crud.get_config_value(session, "aiMatchModel", "deepseek-chat"),
+                    "ai_match_provider": await crud.get_config_value(session, "aiProvider", "deepseek"),
+                    "ai_match_api_key": await crud.get_config_value(session, "aiApiKey", ""),
+                    "ai_match_base_url": await crud.get_config_value(session, "aiBaseUrl", ""),
+                    "ai_match_model": await crud.get_config_value(session, "aiModel", "deepseek-chat"),
                     "ai_match_prompt": ai_match_prompt,
                     "ai_recognition_prompt": ai_recognition_prompt,
                     "ai_alias_validation_prompt": ai_alias_validation_prompt,

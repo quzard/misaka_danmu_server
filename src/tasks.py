@@ -2443,7 +2443,7 @@ async def webhook_search_and_dispatch_task(
                     'ai_match_api_key': await config_manager.get("aiApiKey", ""),
                     'ai_match_base_url': await config_manager.get("aiBaseUrl", ""),
                     'ai_match_model': await config_manager.get("aiModel", ""),
-                    'ai_match_prompt': await config_manager.get("aiMatchPrompt", ""),
+                    'ai_match_prompt': await config_manager.get("aiPrompt", ""),
                     'ai_log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
                 }
 
@@ -2493,7 +2493,7 @@ async def webhook_search_and_dispatch_task(
                     logger.info(f"Webhook 任务: AI匹配成功选择: {best_match.provider} - {best_match.title}")
                 else:
                     # 检查是否启用传统匹配兜底
-                    ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                    ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                     if ai_fallback_enabled:
                         logger.info("Webhook 任务: AI匹配未找到合适结果，降级到传统匹配")
                     else:
@@ -2502,7 +2502,7 @@ async def webhook_search_and_dispatch_task(
 
             except Exception as e:
                 # 检查是否启用传统匹配兜底
-                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                 if ai_fallback_enabled:
                     logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}")
                 else:
@@ -3157,11 +3157,11 @@ async def auto_search_and_import_task(
                 # 获取AI配置
                 # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
                 ai_config = {
-                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
-                    "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
-                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
-                    "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
-                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                    "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                    "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                    "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                    "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                    "ai_match_prompt": await config_manager.get("aiPrompt", ""),
                     "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                 }
 
@@ -3210,7 +3210,7 @@ async def auto_search_and_import_task(
                         logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                     else:
                         # 检查是否启用传统匹配兜底
-                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                         if ai_fallback_enabled:
                             logger.info("AI匹配未找到合适结果，降级到传统匹配")
                         else:
@@ -3218,7 +3218,7 @@ async def auto_search_and_import_task(
 
             except Exception as e:
                 # 检查是否启用传统匹配兜底
-                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                 if ai_fallback_enabled:
                     logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
                 else:
