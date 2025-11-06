@@ -247,9 +247,14 @@ class TaskManager:
             # 新增：检查唯一键，防止同一资源的多个任务同时进行
             if unique_key:
                 if unique_key in self._active_unique_keys:
+                    # 根据unique_key的前缀提供更友好的错误消息
+                    if unique_key.startswith("scan-media-server-"):
+                        error_msg = "该媒体服务器的扫描任务正在进行中，请等待当前任务完成后再试。"
+                    else:
+                        error_msg = "一个针对此资源的相似任务已在队列中或正在运行，请勿重复提交。"
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail=f"一个针对此媒体的相似任务已在队列中或正在运行，请勿重复提交。"
+                        detail=error_msg
                     )
                 self._active_unique_keys.add(unique_key)
             self._pending_titles.add(title)

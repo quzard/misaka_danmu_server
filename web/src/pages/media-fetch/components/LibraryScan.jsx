@@ -134,6 +134,7 @@ const LibraryScan = () => {
       // 触发列表刷新
       setRefreshTrigger(prev => prev + 1);
     } catch (error) {
+      // axios拦截器已统一转换为message字段
       message.error('扫描失败: ' + (error.message || '未知错误'));
       console.error(error);
     } finally {

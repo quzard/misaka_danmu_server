@@ -56,11 +56,13 @@ class JellyfinMediaServer(BaseMediaServer):
         library_id: str,
         media_type: Optional[str] = None
     ) -> List[MediaItem]:
-        """获取媒体库中的所有项"""
+        """获取媒体库中的所有项(包括季度和集数)"""
         try:
+            # 对于电影库,需要使用Recursive=true来获取所有电影
+            # 对于电视剧库,使用Recursive=true获取所有剧集,然后手动获取季度和集数
             params = {
                 'ParentId': library_id,
-                'Recursive': 'true',
+                'Recursive': 'true',  # 使用递归获取所有项
                 'Fields': 'ProviderIds,ProductionYear,Overview',
             }
 
@@ -79,7 +81,32 @@ class JellyfinMediaServer(BaseMediaServer):
                 if item_type == 'Movie':
                     items.append(self._parse_movie(item, library_id))
                 elif item_type == 'Series':
-                    items.append(self._parse_series(item, library_id))
+                    # 只获取剧集的所有集,不添加剧集本身和季度
+                    # 因为前端会自动根据集来构建树形结构
+                    series_id = item.get('Id')
+                    series_name = item.get('Name')
+                    series_year = item.get('ProductionYear')
+                    series_tmdb_id = item.get('ProviderIds', {}).get('Tmdb')
+                    series_tvdb_id = item.get('ProviderIds', {}).get('Tvdb')
+                    series_imdb_id = item.get('ProviderIds', {}).get('Imdb')
+                    series_poster = self._get_image_url(series_id, 'Primary')
+
+                    # 获取所有季度
+                    seasons = await self.get_tv_seasons(series_id)
+                    for season in seasons:
+                        # 获取该季度的所有集
+                        episodes = await self.get_season_episodes(
+                            series_id,
+                            season['season_number'],
+                            library_id,
+                            series_name,
+                            series_year,
+                            series_tmdb_id,
+                            series_tvdb_id,
+                            series_imdb_id,
+                            series_poster
+                        )
+                        items.extend(episodes)
 
             return items
         except Exception as e:

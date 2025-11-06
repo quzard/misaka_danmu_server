@@ -320,11 +320,13 @@ async def scan_media_server_library(
             progress_callback=cb
         )
 
-    # 提交扫描任务到管理队列
+    # 提交扫描任务到管理队列,使用unique_key确保同一时间只能执行一个扫描任务
+    unique_key = f"scan-media-server-{server_id}"
     task_id, _ = await task_manager.submit_task(
         create_scan_task,
         title=f"扫描媒体服务器: {server_name}",
-        queue_type="management"
+        queue_type="management",
+        unique_key=unique_key
     )
 
     return {"message": "扫描任务已提交", "taskId": task_id}

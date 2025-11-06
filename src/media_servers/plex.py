@@ -65,19 +65,55 @@ class PlexMediaServer(BaseMediaServer):
         library_id: str,
         media_type: Optional[str] = None
     ) -> List[MediaItem]:
-        """获取媒体库中的所有项"""
+        """获取媒体库中的所有项(包括季度和集数)"""
         try:
             data = await self._request('GET', f'/library/sections/{library_id}/all')
             items = []
-            
+
             for item in data.get('MediaContainer', {}).get('Metadata', []):
                 item_type = item.get('type')
-                
+
                 if item_type == 'movie' and (not media_type or media_type == 'movie'):
                     items.append(self._parse_movie(item, library_id))
                 elif item_type == 'show' and (not media_type or media_type == 'tv_series'):
-                    items.append(self._parse_series(item, library_id))
-            
+                    # 只获取剧集的所有集,不添加剧集本身和季度
+                    # 因为前端会自动根据集来构建树形结构
+                    series_id = item.get('ratingKey')
+                    series_name = item.get('title')
+                    series_year = item.get('year')
+                    series_tmdb_id = None
+                    series_tvdb_id = None
+                    series_imdb_id = None
+
+                    # 解析Plex的GUID来获取外部ID
+                    for guid in item.get('Guid', []):
+                        guid_id = guid.get('id', '')
+                        if 'tmdb://' in guid_id:
+                            series_tmdb_id = guid_id.replace('tmdb://', '')
+                        elif 'tvdb://' in guid_id:
+                            series_tvdb_id = guid_id.replace('tvdb://', '')
+                        elif 'imdb://' in guid_id:
+                            series_imdb_id = guid_id.replace('imdb://', '')
+
+                    series_poster = self._get_image_url(item.get('thumb'))
+
+                    # 获取所有季度
+                    seasons = await self.get_tv_seasons(series_id)
+                    for season in seasons:
+                        # 获取该季度的所有集
+                        episodes = await self.get_season_episodes(
+                            series_id,
+                            season['season_number'],
+                            library_id,
+                            series_name,
+                            series_year,
+                            series_tmdb_id,
+                            series_tvdb_id,
+                            series_imdb_id,
+                            series_poster
+                        )
+                        items.extend(episodes)
+
             return items
         except Exception as e:
             self.logger.error(f"获取Plex媒体库项失败: {e}")

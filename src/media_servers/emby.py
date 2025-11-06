@@ -58,9 +58,11 @@ class EmbyMediaServer(BaseMediaServer):
     ) -> List[MediaItem]:
         """获取媒体库中的所有项(包括季度和集数)"""
         try:
+            # 对于电影库,需要使用Recursive=true来获取所有电影
+            # 对于电视剧库,使用Recursive=false手动获取季度和集数
             params = {
                 'ParentId': library_id,
-                'Recursive': 'false',  # 不递归,手动获取季度和集数
+                'Recursive': 'true',  # 使用递归获取所有项
                 'Fields': 'ProviderIds,ProductionYear,Overview',
             }
 

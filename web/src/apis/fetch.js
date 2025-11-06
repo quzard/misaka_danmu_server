@@ -27,7 +27,14 @@ instance.interceptors.response.use(
   res => res,
   error => {
     console.log('resError', error.response?.data, error.response?.config.url)
-    return Promise.reject(error.response?.data || {})
+    const errorData = error.response?.data || {}
+    // 统一转换为message字段,兼容FastAPI的detail字段和自定义的message字段
+    const errorObj = {
+      ...errorData,
+      message: errorData.detail || errorData.message || '未知错误',
+      code: error.response?.status
+    }
+    return Promise.reject(errorObj)
   }
 )
 
