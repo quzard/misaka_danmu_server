@@ -1,9 +1,11 @@
 import logging
 import asyncio
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, Tuple, TYPE_CHECKING
 from typing import Union
+from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -136,6 +138,28 @@ def get_season_from_title(title: str) -> int:
                 continue
     return 1 # Default to season 1
 
+
+def track_performance(func):
+    """
+    装饰器: 跟踪异步方法的执行时间,不影响并发性能。
+    记录到 INFO 级别,方便查看性能统计。
+    """
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        start_time = time.perf_counter()
+        try:
+            result = await func(self, *args, **kwargs)
+            elapsed = time.perf_counter() - start_time
+            # 记录到 INFO 级别,显示搜索源名称和耗时
+            self.logger.info(f"[{self.provider_name}] {func.__name__} 耗时: {elapsed:.3f}s")
+            return result
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            self.logger.warning(f"[{self.provider_name}] {func.__name__} 失败耗时: {elapsed:.3f}s")
+            raise
+    return wrapper
+
+
 class BaseScraper(ABC):
     """
     所有搜索源的抽象基类。
@@ -233,7 +257,24 @@ class BaseScraper(ABC):
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
-        """从数据库缓存中获取数据。"""
+        """
+        从缓存中获取数据。
+        优先使用预取的缓存（批量查询优化），否则单独查询数据库。
+        """
+        # 【优化】优先使用预取的缓存
+        if hasattr(self, '_prefetched_cache'):
+            if key in self._prefetched_cache:
+                cached_value = self._prefetched_cache[key]
+                if cached_value is not None:
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (命中) - {key}")
+                    return cached_value
+                else:
+                    # 批量查询已执行，但缓存不存在
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (未命中) - {key}")
+                    return None
+        
+        # 降级到单独数据库查询（仅在批量查询未执行时）
+        self.logger.debug(f"{self.provider_name}: 缓存未预取，进行单独查询 - {key}")
         async with self._session_factory() as session:
             try:
                 return await crud.get_cache(session, key)

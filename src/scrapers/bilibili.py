@@ -83,7 +83,7 @@ DmSegMobileReply = factory.GetPrototype(dm_seg_reply_descriptor)
 from ..config_manager import ConfigManager
 
 from .. import models
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 
 # --- Pydantic Models for Bilibili API ---
 
@@ -472,6 +472,7 @@ class BilibiliScraper(BaseScraper):
         params['w_rid'] = w_rid
         return params
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         Performs a cached search for Bilibili content.

@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..config_manager import ConfigManager
 from .. import models
 from ..utils import parse_search_keyword
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
 
@@ -330,6 +330,7 @@ class RenrenScraper(BaseScraper):
             scraper_responses_logger.debug(f"Renren Response ({method} {url}): status={resp.status_code}, text={resp.text}")
         return resp
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         Performs a cached search for Renren content.

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from datetime import datetime, timezone
 from ..config_manager import ConfigManager
 from ..utils import parse_search_keyword
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 from .. import models, crud
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
@@ -459,17 +459,26 @@ class TencentScraper(BaseScraper):
         request_model = TencentMultiTerminalSearchRequest(query=keyword)
         payload = request_model.model_dump(by_alias=False)
         
-        headers = self.multiterminal_headers.copy()
+        # 合并 MultiTerminal 特定的 headers
+        headers = self.base_headers.copy()
+        headers.update(self.multiterminal_headers)
         encoded_keyword = quote(keyword)
         headers['Referer'] = f"https://v.qq.com/x/search/?q={encoded_keyword}&stag=&smartbox_ab="
 
         results = []
         try:
             self.logger.info(f"Tencent (MultiTerminal API): 正在搜索 '{keyword}'...")
-            # 修正：为这个特殊的API调用也应用代理设置
-            proxy_to_use = await self._get_proxy_for_provider()
-            async with httpx.AsyncClient(headers=headers, cookies=self.multiterminal_cookies, timeout=20.0, proxy=proxy_to_use) as client:
-                response = await client.post(url, json=payload)
+            
+            # 【关键优化】使用 _request_with_rate_limit 方法，自动复用共享传输层
+            # 通过参数传递特定的 headers 和 cookies，不修改共享客户端
+            response = await self._request_with_rate_limit(
+                "POST", 
+                url, 
+                json=payload,
+                headers=headers,
+                cookies=self.multiterminal_cookies,
+                timeout=5.0  # 降低超时到5秒
+            )
 
             if await self._should_log_responses():
                 scraper_responses_logger.debug(f"Tencent MultiTerminal Search Response (keyword='{keyword}'): {response.text}")
@@ -501,8 +510,11 @@ class TencentScraper(BaseScraper):
                     results.append(filtered_item)
         except (httpx.HTTPStatusError, ValidationError, KeyError, json.JSONDecodeError) as e:
             self.logger.error(f"Tencent (MultiTerminal API): 解析或请求失败: {e}", exc_info=True)
+        except httpx.TimeoutException:
+            self.logger.warning(f"Tencent (MultiTerminal API): 请求超时（5秒）")
         return results
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """使用 MultiTerminal API 作为主API进行搜索，并在失败时回退到其他API。"""
         # 智能缓存逻辑
