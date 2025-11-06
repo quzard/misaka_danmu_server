@@ -107,9 +107,21 @@ async def get_scraper_config(
     # 注意: scraper 类中定义的是 configurable_fields,不是 config_fields
     configurable_fields = getattr(scraper_class, 'configurable_fields', {})
     for field_key in configurable_fields.keys():
-        # field_key 就是配置键,例如 "gamerCookie"
+        # field_key 就是配置键,例如 "gamerCookie" 或 "dandanplay_app_id"
         value = await config_manager.get(field_key, "")
-        response_data[field_key] = value
+
+        # 对于dandanplay的下划线命名字段,转换为驼峰命名返回给前端
+        if providerName == 'dandanplay' and '_' in field_key:
+            # dandanplay_app_id -> dandanplayAppId
+            # dandanplay_app_secret -> dandanplayAppSecret
+            # dandanplay_app_secret_alt -> dandanplayAppSecretAlt
+            # dandanplay_base_url -> dandanplayBaseUrl
+            # dandanplay_proxy_config -> dandanplayProxyConfig
+            parts = field_key.split('_')
+            camel_key = parts[0] + ''.join(word.capitalize() for word in parts[1:])
+            response_data[camel_key] = value
+        else:
+            response_data[field_key] = value
 
     # 3. 添加分集黑名单字段(动态添加,每个源都有)
     # 数据库中使用下划线命名: gamer_episode_blacklist_regex
@@ -160,8 +172,19 @@ async def update_scraper_config(
         # 注意: scraper 类中定义的是 configurable_fields,不是 config_fields
         configurable_fields = getattr(scraper_class, 'configurable_fields', {})
         for field_key in configurable_fields.keys():
-            # field_key 就是配置键,例如 "gamerCookie"
-            if field_key in payload:
+            # field_key 就是配置键,例如 "gamerCookie" 或 "dandanplay_app_id"
+
+            # 对于dandanplay的下划线命名字段,前端可能发送驼峰命名
+            if providerName == 'dandanplay' and '_' in field_key:
+                # 生成对应的驼峰命名键
+                parts = field_key.split('_')
+                camel_key = parts[0] + ''.join(word.capitalize() for word in parts[1:])
+                # 检查payload中是否有驼峰命名的键
+                if camel_key in payload:
+                    await config_manager.setValue(field_key, payload[camel_key])
+                elif field_key in payload:
+                    await config_manager.setValue(field_key, payload[field_key])
+            elif field_key in payload:
                 await config_manager.setValue(field_key, payload[field_key])
 
         # 3. 处理分集黑名单字段(动态字段,每个源都有)
