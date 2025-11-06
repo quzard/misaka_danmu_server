@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from ..config_manager import ConfigManager
 from .. import models
 from ..utils import parse_search_keyword
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
 
@@ -195,6 +195,7 @@ class YoukuScraper(BaseScraper):
         client = await self._ensure_client()
         return await client.request(method, url, **kwargs)
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         Performs a cached search for Youku content.

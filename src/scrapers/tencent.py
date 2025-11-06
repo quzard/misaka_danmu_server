@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from datetime import datetime, timezone
 from ..config_manager import ConfigManager
 from ..utils import parse_search_keyword
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 from .. import models, crud
 
 scraper_responses_logger = logging.getLogger("scraper_responses")
@@ -514,6 +514,7 @@ class TencentScraper(BaseScraper):
             self.logger.warning(f"Tencent (MultiTerminal API): 请求超时（5秒）")
         return results
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """使用 MultiTerminal API 作为主API进行搜索，并在失败时回退到其他API。"""
         # 智能缓存逻辑

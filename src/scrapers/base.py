@@ -1,9 +1,11 @@
 import logging
 import asyncio
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, Tuple, TYPE_CHECKING
 from typing import Union
+from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -135,6 +137,28 @@ def get_season_from_title(title: str) -> int:
             except (ValueError, KeyError, IndexError):
                 continue
     return 1 # Default to season 1
+
+
+def track_performance(func):
+    """
+    装饰器: 跟踪异步方法的执行时间,不影响并发性能。
+    记录到 INFO 级别,方便查看性能统计。
+    """
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        start_time = time.perf_counter()
+        try:
+            result = await func(self, *args, **kwargs)
+            elapsed = time.perf_counter() - start_time
+            # 记录到 INFO 级别,显示搜索源名称和耗时
+            self.logger.info(f"[{self.provider_name}] {func.__name__} 耗时: {elapsed:.3f}s")
+            return result
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            self.logger.warning(f"[{self.provider_name}] {func.__name__} 失败耗时: {elapsed:.3f}s")
+            raise
+    return wrapper
+
 
 class BaseScraper(ABC):
     """

@@ -24,7 +24,7 @@ from lxml import etree
 from ..config_manager import ConfigManager
 from .. import models
 from ..utils import parse_search_keyword
-from .base import BaseScraper, get_season_from_title
+from .base import BaseScraper, get_season_from_title, track_performance
 
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
@@ -586,6 +586,7 @@ class IqiyiScraper(BaseScraper):
         
         return results
 
+    @track_performance
     async def search(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
         """
         Performs a cached search for iQiyi content.
