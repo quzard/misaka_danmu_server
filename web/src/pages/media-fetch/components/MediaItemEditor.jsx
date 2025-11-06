@@ -7,6 +7,7 @@ const { Option } = Select;
 const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
+  const [mediaType, setMediaType] = React.useState('tv_series');
 
   useEffect(() => {
     if (visible && item) {
@@ -21,6 +22,7 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
         imdbId: item.imdbId,
         posterUrl: item.posterUrl,
       });
+      setMediaType(item.mediaType);
     }
   }, [visible, item, form]);
 
@@ -69,7 +71,13 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
           name="mediaType"
           rules={[{ required: true, message: '请选择类型' }]}
         >
-          <Select>
+          <Select onChange={(value) => {
+            setMediaType(value);
+            // 切换到电影类型时清空季度和集数
+            if (value === 'movie') {
+              form.setFieldsValue({ season: null, episode: null });
+            }
+          }}>
             <Option value="movie">电影</Option>
             <Option value="tv_series">电视剧</Option>
           </Select>
@@ -79,14 +87,24 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
           label="季度"
           name="season"
         >
-          <InputNumber min={1} style={{ width: '100%' }} />
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            disabled={mediaType === 'movie'}
+            placeholder={mediaType === 'movie' ? '电影无需填写季度' : ''}
+          />
         </Form.Item>
 
         <Form.Item
           label="集数"
           name="episode"
         >
-          <InputNumber min={1} style={{ width: '100%' }} />
+          <InputNumber
+            min={1}
+            style={{ width: '100%' }}
+            disabled={mediaType === 'movie'}
+            placeholder={mediaType === 'movie' ? '电影无需填写集数' : ''}
+          />
         </Form.Item>
 
         <Form.Item

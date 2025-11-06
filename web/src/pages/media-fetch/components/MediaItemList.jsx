@@ -483,7 +483,56 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
           );
         }
 
-        // 单集和电影显示编辑和删除按钮
+        // 电影显示导入、编辑和删除按钮
+        if (record.mediaType === 'movie') {
+          return (
+            <Space size="small">
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 导入电影
+                  importMediaItems({
+                    item_ids: [record.id]
+                  })
+                    .then((res) => {
+                      message.success(res.data.message || '导入任务已提交');
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch((error) => message.error('导入失败: ' + (error.message || '未知错误')));
+                }}
+              >
+                导入
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+              >
+                编辑
+              </Button>
+              <Popconfirm
+                title="确定要删除吗?"
+                onConfirm={() => handleDelete(record)}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          );
+        }
+
+        // 单集显示编辑和删除按钮
         return (
           <Space size="small">
             <Button
