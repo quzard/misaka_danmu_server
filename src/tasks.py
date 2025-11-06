@@ -2318,7 +2318,15 @@ async def webhook_search_and_dispatch_task(
                 logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
                 await progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
-                task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
+                # 根据来源动态生成任务标题前缀
+                if webhookSource == "media_server":
+                    source_prefix = "媒体库读取导入"
+                elif webhookSource in ["emby", "jellyfin", "plex"]:
+                    source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+                else:
+                    source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+                task_title = f"{source_prefix}: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
                 unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
                 task_coro = lambda session, cb: generic_import_task(
                     provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
@@ -2330,7 +2338,13 @@ async def webhook_search_and_dispatch_task(
                     title_recognition_manager=title_recognition_manager
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-                raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
+
+                # 根据来源动态生成成功消息
+                if webhookSource == "media_server":
+                    success_message = f"已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
+                else:
+                    success_message = f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
+                raise TaskSuccess(success_message)
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
@@ -2516,7 +2530,18 @@ async def webhook_search_and_dispatch_task(
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            # 根据来源动态生成任务标题前缀
+            if webhookSource == "media_server":
+                source_prefix = "媒体库读取导入"
+            elif webhookSource in ["emby", "jellyfin", "plex"]:
+                source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+            else:
+                source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+            if mediaType == "tv_series":
+                task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+            else:
+                task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
             unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -2531,7 +2556,13 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+            # 根据来源动态生成成功消息
+            if webhookSource == "media_server":
+                success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+            else:
+                success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+            raise TaskSuccess(success_message)
 
         # 传统匹配: 优先查找精确标记源
         favorited_match = None
@@ -2570,7 +2601,18 @@ async def webhook_search_and_dispatch_task(
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            # 根据来源动态生成任务标题前缀
+            if webhookSource == "media_server":
+                source_prefix = "媒体库读取导入"
+            elif webhookSource in ["emby", "jellyfin", "plex"]:
+                source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+            else:
+                source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+            if mediaType == "tv_series":
+                task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+            else:
+                task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
             unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -2585,7 +2627,13 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+            # 根据来源动态生成成功消息
+            if webhookSource == "media_server":
+                success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+            else:
+                success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+            raise TaskSuccess(success_message)
 
         # 顺延机制启用：依次验证候选源 (按分数从高到低)
         logger.info(f"🔄 Webhook 顺延机制: 已启用，共有 {len(all_search_results)} 个候选源待验证")
@@ -2663,7 +2711,13 @@ async def webhook_search_and_dispatch_task(
             title_recognition_manager=title_recognition_manager
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+        # 根据来源动态生成成功消息
+        if webhookSource == "media_server":
+            success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+        else:
+            success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+        raise TaskSuccess(success_message)
     except TaskSuccess:
         raise
     except Exception as e:
