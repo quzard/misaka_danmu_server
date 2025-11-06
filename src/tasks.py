@@ -2447,42 +2447,46 @@ async def webhook_search_and_dispatch_task(
                     'ai_log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
                 }
 
-                # 构建查询信息
-                query_info = {
-                    'title': animeTitle,
-                    'season': season if mediaType == 'tv_series' else None,
-                    'episode': currentEpisodeIndex,
-                    'year': year,
-                    'type': mediaType
-                }
+                # 检查必要配置
+                if not ai_config['ai_match_api_key']:
+                    logger.warning("Webhook 任务: AI匹配已启用但未配置API密钥，降级到传统匹配")
+                else:
+                    # 构建查询信息
+                    query_info = {
+                        'title': animeTitle,
+                        'season': season if mediaType == 'tv_series' else None,
+                        'episode': currentEpisodeIndex,
+                        'year': year,
+                        'type': mediaType
+                    }
 
-                # 获取精确标记信息
-                favorited_info = {}
-                from .orm_models import AnimeSource as AS
-                from sqlalchemy import select as sql_select
+                    # 获取精确标记信息
+                    favorited_info = {}
+                    from .orm_models import AnimeSource as AS
+                    from sqlalchemy import select as sql_select
 
-                for result in all_search_results:
-                    # 查找是否有相同provider和mediaId的源被标记
-                    stmt = (
-                        sql_select(AS.isFavorited)
-                        .where(
-                            AS.providerName == result.provider,
-                            AS.mediaId == result.mediaId
+                    for result in all_search_results:
+                        # 查找是否有相同provider和mediaId的源被标记
+                        stmt = (
+                            sql_select(AS.isFavorited)
+                            .where(
+                                AS.providerName == result.provider,
+                                AS.mediaId == result.mediaId
+                            )
+                            .limit(1)
                         )
-                        .limit(1)
-                    )
-                    result_row = await session.execute(stmt)
-                    is_favorited = result_row.scalar_one_or_none()
-                    if is_favorited:
-                        key = f"{result.provider}:{result.mediaId}"
-                        favorited_info[key] = True
+                        result_row = await session.execute(stmt)
+                        is_favorited = result_row.scalar_one_or_none()
+                        if is_favorited:
+                            key = f"{result.provider}:{result.mediaId}"
+                            favorited_info[key] = True
 
-                # 初始化AI匹配器并选择
-                from .ai_matcher import AIMatcher
-                matcher = AIMatcher(ai_config)
-                ai_selected_index = await matcher.select_best_match(
-                    query_info, all_search_results, favorited_info
-                )
+                    # 初始化AI匹配器并选择
+                    from .ai_matcher import AIMatcher
+                    matcher = AIMatcher(ai_config)
+                    ai_selected_index = await matcher.select_best_match(
+                        query_info, all_search_results, favorited_info
+                    )
 
                 if ai_selected_index is not None:
                     best_match = all_search_results[ai_selected_index]
