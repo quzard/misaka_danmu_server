@@ -116,7 +116,7 @@ async def get_local_works(
     if media_type:
         conditions.append(LocalDanmakuItem.mediaType == media_type)
 
-    # 查询作品列表(按title分组)
+    # 查询作品列表(按title分组,同时获取每组的ID列表)
     stmt = select(
         LocalDanmakuItem.title,
         LocalDanmakuItem.mediaType,
@@ -127,7 +127,8 @@ async def get_local_works(
         LocalDanmakuItem.posterUrl,
         func.count(LocalDanmakuItem.id).label('itemCount'),
         func.max(LocalDanmakuItem.season).label('seasonCount'),
-        func.max(LocalDanmakuItem.episode).label('episodeCount')
+        func.max(LocalDanmakuItem.episode).label('episodeCount'),
+        func.array_agg(LocalDanmakuItem.id).label('ids')  # 收集所有ID
     )
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -165,6 +166,7 @@ async def get_local_works(
                 "itemCount": work.itemCount,
                 "seasonCount": work.seasonCount if work.mediaType == "tv_series" else None,
                 "episodeCount": work.episodeCount if work.mediaType == "tv_series" else None,
+                "ids": work.ids,  # 返回ID列表
             }
             for work in works
         ],
@@ -183,7 +185,8 @@ async def get_show_seasons(
         LocalDanmakuItem.season,
         LocalDanmakuItem.year,
         LocalDanmakuItem.posterUrl,
-        func.count(LocalDanmakuItem.id).label('episodeCount')
+        func.count(LocalDanmakuItem.id).label('episodeCount'),
+        func.array_agg(LocalDanmakuItem.id).label('ids')  # 收集所有ID
     ).where(
         and_(
             LocalDanmakuItem.title == title,
@@ -204,7 +207,8 @@ async def get_show_seasons(
             "season": s.season,
             "year": s.year,
             "posterUrl": s.posterUrl,
-            "episodeCount": s.episodeCount
+            "episodeCount": s.episodeCount,
+            "ids": s.ids  # 返回ID列表
         }
         for s in seasons
     ]
@@ -300,8 +304,42 @@ async def batch_delete_local_items(
     session: AsyncSession,
     item_ids: List[int]
 ) -> int:
-    """批量删除本地弹幕项"""
+    """批量删除本地弹幕项(根据ID)"""
     stmt = delete(LocalDanmakuItem).where(LocalDanmakuItem.id.in_(item_ids))
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
+
+async def delete_local_items_by_title(
+    session: AsyncSession,
+    title: str,
+    media_type: str
+) -> int:
+    """根据标题和类型删除本地弹幕项"""
+    stmt = delete(LocalDanmakuItem).where(
+        and_(
+            LocalDanmakuItem.title == title,
+            LocalDanmakuItem.mediaType == media_type
+        )
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
+
+async def delete_local_items_by_season(
+    session: AsyncSession,
+    title: str,
+    season: int
+) -> int:
+    """根据标题和季度删除本地弹幕项"""
+    stmt = delete(LocalDanmakuItem).where(
+        and_(
+            LocalDanmakuItem.title == title,
+            LocalDanmakuItem.season == season
+        )
+    )
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount

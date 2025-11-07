@@ -61,10 +61,10 @@ const LocalItemList = ({ refreshTrigger }) => {
 
     for (const work of worksList) {
       if (work.type === 'movie') {
-        // 电影节点
+        // 电影节点 - 使用ids作为key
         result.push({
           ...work,
-          key: `movie-${work.title}`,
+          key: JSON.stringify(work.ids),  // 使用JSON序列化的ids数组作为key
           isGroup: false,
         });
       } else if (work.type === 'tv_show') {
@@ -74,7 +74,7 @@ const LocalItemList = ({ refreshTrigger }) => {
           const seasons = seasonsRes.data || [];
 
           result.push({
-            key: `show-${work.title}`,
+            key: JSON.stringify(work.ids),  // 使用JSON序列化的ids数组作为key
             title: work.title,
             mediaType: 'tv_show',
             year: work.year,
@@ -86,7 +86,7 @@ const LocalItemList = ({ refreshTrigger }) => {
             seasonCount: work.seasonCount,
             episodeCount: work.episodeCount,
             children: seasons.map(s => ({
-              key: `season-${work.title}-S${s.season}`,
+              key: JSON.stringify(s.ids),  // 使用JSON序列化的ids数组作为key
               title: `第 ${s.season} 季 (${s.episodeCount}集)`,
               season: s.season,
               episodeCount: s.episodeCount,
@@ -140,7 +140,9 @@ const LocalItemList = ({ refreshTrigger }) => {
     }
 
     try {
-      await batchDeleteLocalItems(selectedRowKeys);
+      // 将JSON字符串解析回ID数组
+      const itemIds = selectedRowKeys.map(key => JSON.parse(key));
+      await batchDeleteLocalItems(itemIds);
       message.success(`已删除 ${selectedRowKeys.length} 个项目`);
       setSelectedRowKeys([]);
       loadItems(pagination.current, pagination.pageSize);
@@ -288,10 +290,9 @@ const LocalItemList = ({ refreshTrigger }) => {
               <Popconfirm
                 title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
-                  // 删除整部剧集
-                  batchDeleteLocalItems({
-                    shows: [{ title: record.title }]
-                  })
+                  // 删除整部剧集 - 使用record.key中的ids
+                  const ids = JSON.parse(record.key);
+                  batchDeleteLocalItems([ids])
                     .then(() => {
                       message.success(`成功删除《${record.title}》`);
                       loadItems(pagination.current, pagination.pageSize);
@@ -334,13 +335,9 @@ const LocalItemList = ({ refreshTrigger }) => {
               <Popconfirm
                 title={`确定要删除第${record.season}季的所有集吗?`}
                 onConfirm={() => {
-                  // 删除该季度
-                  batchDeleteLocalItems({
-                    seasons: [{
-                      title: record.showTitle,
-                      season: record.season
-                    }]
-                  })
+                  // 删除该季度 - 使用record.key中的ids
+                  const ids = JSON.parse(record.key);
+                  batchDeleteLocalItems([ids])
                     .then(() => {
                       message.success(`成功删除第${record.season}季`);
                       loadItems(pagination.current, pagination.pageSize);

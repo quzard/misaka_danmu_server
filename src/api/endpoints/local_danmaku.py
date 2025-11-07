@@ -308,12 +308,31 @@ async def delete_local_item(
 
 @router.post("/local-items/batch-delete", status_code=status.HTTP_204_NO_CONTENT, summary="批量删除本地弹幕项")
 async def batch_delete_local_items(
-    payload: Dict[str, List[int]],
+    payload: Dict[str, Any],
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    """批量删除本地弹幕项"""
-    item_ids = payload.get("itemIds", [])
+    """
+    批量删除本地弹幕项
+
+    支持两种格式:
+    1. itemIds: List[int] - 直接传递数据库ID列表
+    2. itemIds: List[List[int]] - 传递ID数组的数组(前端从ids字段获取)
+    """
+    item_ids_raw = payload.get("itemIds", [])
+    if not item_ids_raw:
+        raise HTTPException(status_code=400, detail="没有要删除的项目")
+
+    # 展平ID列表
+    item_ids = []
+    for item in item_ids_raw:
+        if isinstance(item, list):
+            # 如果是数组,展开它
+            item_ids.extend(item)
+        else:
+            # 如果是单个ID,直接添加
+            item_ids.append(item)
+
     if not item_ids:
         raise HTTPException(status_code=400, detail="没有要删除的项目")
 
