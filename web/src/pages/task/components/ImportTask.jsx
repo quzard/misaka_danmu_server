@@ -603,19 +603,17 @@ export const ImportTask = () => {
                   onClick={handleStop}
                 />
               </Tooltip>
-              <div style={{ display: 'inline-flex', alignItems: 'center', height: '32px' }}>
-                <Input.Search
-                  placeholder="搜索任务"
-                  allowClear
-                  enterButton
-                  style={{ width: 200 }}
-                  onSearch={value => {
-                    navigate(`/task?search=${value}&status=${status}`, {
-                      replace: true,
-                    })
-                  }}
-                />
-              </div>
+              <Input.Search
+                placeholder="按任务标题搜索"
+                allowClear
+                enterButton
+                style={{ width: isMobile ? '100%' : '200px' }}
+                onSearch={value => {
+                  navigate(`/task?search=${value}&status=${status}`, {
+                    replace: true,
+                  })
+                }}
+              />
             </div>
           )
         }
@@ -807,86 +805,79 @@ export const ImportTask = () => {
                     >
                       <div
                         className={classNames('relative w-full', {
-                          'pl-9': !isMobile && isActive,
+                          'pl-9': isActive,
                         })}
                       >
-                        {!isMobile && isActive && (
+                        {isActive && (
                           <Checkbox
                             checked={isActive}
-                            onChange={() => {
-                              setSelectList(list => {
-                                return list.map(it => it.taskId).includes(item.taskId)
-                                  ? list.filter(i => i.taskId !== item.taskId)
-                                  : [...list, item]
-                              })
-                            }}
-                            onClick={e => e.stopPropagation()}
                             className="absolute top-1/2 left-0 transform -translate-y-1/2"
                           />
                         )}
 
-                        {/* 第一行: 标题 + 图标 */}
-                        <div className="mb-2">
-                          <div className="text-base font-semibold flex items-start gap-2">
-                            <span className="text-lg flex-shrink-0 mt-0.5">
+                        {/* 第一行: 标题 + 状态标签 + 队列标签 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div className="text-base font-semibold" style={{ flex: 1 }}>
+                            <span style={{ marginRight: '8px', fontSize: '18px' }}>
                               {getQueueIcon(item.queueType)}
                             </span>
-                            <span className="flex-1 break-words">{item.title}</span>
+                            {item.title}
                           </div>
-                        </div>
-
-                        {/* 第二行: 标签行 */}
-                        <div className="flex flex-wrap gap-2 mb-3">
-                          <Tag
-                            color={
-                              item.status.includes('失败')
-                                ? 'red'
-                                : item.status.includes('运行中')
-                                  ? 'green'
-                                  : item.status.includes('已暂停')
+                          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                            <Tag
+                              color={
+                                item.status.includes('失败')
+                                  ? 'red'
+                                  : item.status.includes('运行中')
+                                    ? 'green'
+                                    : item.status.includes('已暂停')
+                                      ? 'orange'
+                                      : item.status.includes('已完成')
+                                        ? 'blue'
+                                        : 'default'
+                              }
+                            >
+                              {item.status}
+                            </Tag>
+                            <Tag
+                              color={
+                                item.queueType === 'management'
+                                  ? 'cyan'
+                                  : item.queueType === 'fallback'
                                     ? 'orange'
-                                    : item.status.includes('已完成')
-                                      ? 'blue'
-                                      : 'default'
-                            }
-                          >
-                            {item.status}
-                          </Tag>
-                          <Tag
-                            color={
-                              item.queueType === 'management'
-                                ? 'cyan'
+                                    : 'geekblue'
+                              }
+                            >
+                              <span style={{ marginRight: '4px' }}>
+                                {getQueueIcon(item.queueType)}
+                              </span>
+                              {item.queueType === 'management'
+                                ? '管理队列'
                                 : item.queueType === 'fallback'
-                                  ? 'orange'
-                                : 'geekblue'
-                            }
-                          >
-                            <span className="mr-1">
-                              {getQueueIcon(item.queueType)}
-                            </span>
-                            {item.queueType === 'management'
-                              ? '管理队列'
-                              : item.queueType === 'fallback'
-                                ? '后备队列'
-                                : '下载队列'}
-                          </Tag>
+                                  ? '后备队列'
+                                  : '下载队列'}
+                            </Tag>
+                          </div>
                         </div>
 
-                        {/* 第三行: 描述 */}
-                        {item.description && (
-                          <div className="mb-2">
-                            <Tooltip title={item.description}>
-                              <div className="text-gray-600 dark:text-gray-400 text-sm line-clamp-2">
-                                {item.description}
-                              </div>
-                            </Tooltip>
-                          </div>
-                        )}
-
-                        {/* 第四行: 时间 */}
-                        {item.createdAt && (
-                          <div className="mb-3">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {/* 第二行: 描述 + 时间 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <Tooltip title={item.description}>
+                            <div
+                              className="text-gray-600"
+                              style={{
+                                flex: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginRight: '16px'
+                              }}
+                            >
+                              {item.description}
+                            </div>
+                          </Tooltip>
+                          {item.createdAt && (
+                            <Tag style={{ flexShrink: 0 }}>
                               {new Date(item.createdAt).toLocaleString('zh-CN', {
                                 year: 'numeric',
                                 month: '2-digit',
@@ -896,15 +887,15 @@ export const ImportTask = () => {
                                 second: '2-digit',
                                 hour12: false
                               })}
-                            </span>
-                          </div>
-                        )}
+                            </Tag>
+                          )}
+                        </div>
 
-                        {/* 第五行: 进度条 */}
+                        {/* 第三行: 进度条 */}
                         <Progress
                           percent={item.progress}
                           status={item.status.includes('失败') && 'exception'}
-                          strokeWidth={isMobile ? 8 : 10}
+                          strokeWidth={10}
                           showInfo={true}
                         />
                       </div>
