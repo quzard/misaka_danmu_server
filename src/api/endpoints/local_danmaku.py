@@ -3,12 +3,12 @@
 """
 import logging
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from ... import models, security
-from ...database import get_db_session, get_session_factory
+from ...database import get_db_session
 from ...crud import local_danmaku as crud
 from ...local_danmaku_scanner import LocalDanmakuScanner
 from ...task_manager import TaskManager
@@ -47,11 +47,12 @@ class LocalItemsImportRequest(BaseModel):
 @router.post("/local-scan", status_code=202, summary="扫描本地弹幕文件")
 async def scan_local_danmaku(
     payload: LocalScanRequest,
+    request: Request,
     current_user: models.User = Depends(security.get_current_user)
 ):
     """
     扫描指定目录下的所有.xml弹幕文件
-    
+
     扫描逻辑:
     1. 递归查找所有.xml文件
     2. 尝试从nfo文件读取元数据(TMDB ID等)
@@ -59,14 +60,15 @@ async def scan_local_danmaku(
     4. 存入local_danmaku_items表
     """
     try:
-        session_factory = get_session_factory()
+        # 从app.state获取session_factory
+        session_factory = request.app.state.db_session_factory
         scanner = LocalDanmakuScanner(session_factory)
-        
+
         # 执行扫描(同步执行,因为通常不会太慢)
         result = await scanner.scan_directory(payload.scanPath)
-        
+
         logger.info(f"用户 '{current_user.username}' 扫描了本地目录: {payload.scanPath}, 结果: {result}")
-        
+
         return {
             "message": f"扫描完成: 找到 {result['total']} 个文件, 成功 {result['success']} 个",
             "result": result
