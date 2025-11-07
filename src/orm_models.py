@@ -344,3 +344,30 @@ class MediaItem(Base):
         Index('idx_media_type', 'media_type'),
         Index('idx_is_imported', 'is_imported'),
     )
+
+
+class LocalDanmakuItem(Base):
+    """本地扫描的弹幕文件"""
+    __tablename__ = "local_danmaku_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    filePath: Mapped[str] = mapped_column("file_path", String(1024))  # .xml文件路径
+    title: Mapped[str] = mapped_column(String(512))  # 标题
+    mediaType: Mapped[str] = mapped_column("media_type", Enum('movie', 'tv_series', name="local_media_type"))
+    season: Mapped[Optional[int]] = mapped_column(Integer)  # 季度
+    episode: Mapped[Optional[int]] = mapped_column(Integer)  # 集数
+    year: Mapped[Optional[int]] = mapped_column(Integer)  # 年份
+    tmdbId: Mapped[Optional[str]] = mapped_column("tmdb_id", String(50))
+    tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(50))
+    imdbId: Mapped[Optional[str]] = mapped_column("imdb_id", String(50))
+    posterUrl: Mapped[Optional[str]] = mapped_column("poster_url", String(1024))
+    nfoPath: Mapped[Optional[str]] = mapped_column("nfo_path", String(1024))  # nfo文件路径
+    isImported: Mapped[bool] = mapped_column("is_imported", Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
+
+    __table_args__ = (
+        Index('idx_local_file_path', 'file_path'),
+        Index('idx_local_media_type', 'media_type'),
+        Index('idx_local_is_imported', 'is_imported'),
+    )

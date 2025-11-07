@@ -485,6 +485,80 @@ async def _rename_ai_config_keys_task(conn: AsyncConnection):
 
     logger.info("AI配置键重命名完成")
 
+async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type: str):
+    """创建本地弹幕扫描表"""
+    logger.info("开始创建 local_danmaku_items 表...")
+
+    if db_type == 'mysql':
+        create_table_sql = text("""
+            CREATE TABLE IF NOT EXISTS local_danmaku_items (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                file_path VARCHAR(1024) NOT NULL,
+                title VARCHAR(512) NOT NULL,
+                media_type ENUM('movie', 'tv_series') NOT NULL,
+                season INT NULL,
+                episode INT NULL,
+                year INT NULL,
+                tmdb_id VARCHAR(50) NULL,
+                tvdb_id VARCHAR(50) NULL,
+                imdb_id VARCHAR(50) NULL,
+                poster_url VARCHAR(1024) NULL,
+                nfo_path VARCHAR(1024) NULL,
+                is_imported BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_local_file_path (file_path(255)),
+                INDEX idx_local_media_type (media_type),
+                INDEX idx_local_is_imported (is_imported)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+    else:  # postgresql
+        # 先创建枚举类型
+        create_enum_sql = text("""
+            DO $$ BEGIN
+                CREATE TYPE local_media_type AS ENUM ('movie', 'tv_series');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """)
+        await conn.execute(create_enum_sql)
+
+        create_table_sql = text("""
+            CREATE TABLE IF NOT EXISTS local_danmaku_items (
+                id BIGSERIAL PRIMARY KEY,
+                file_path VARCHAR(1024) NOT NULL,
+                title VARCHAR(512) NOT NULL,
+                media_type local_media_type NOT NULL,
+                season INTEGER NULL,
+                episode INTEGER NULL,
+                year INTEGER NULL,
+                tmdb_id VARCHAR(50) NULL,
+                tvdb_id VARCHAR(50) NULL,
+                imdb_id VARCHAR(50) NULL,
+                poster_url VARCHAR(1024) NULL,
+                nfo_path VARCHAR(1024) NULL,
+                is_imported BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute(create_table_sql)
+
+        # 创建索引
+        index_sqls = [
+            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items (file_path)"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
+        ]
+        for index_sql in index_sqls:
+            await conn.execute(index_sql)
+
+        logger.info("local_danmaku_items 表创建完成(PostgreSQL)")
+        return
+
+    await conn.execute(create_table_sql)
+    logger.info("local_danmaku_items 表创建完成(MySQL)")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -510,6 +584,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_alias_locked_to_anime_aliases_v1", _add_alias_locked_to_anime_aliases_task, (db_type,)),
         ("migrate_add_updated_at_to_media_items_v1", _add_updated_at_to_media_items_task, (db_type,)),
         ("migrate_rename_ai_config_keys_v1", _rename_ai_config_keys_task, ()),
+        ("migrate_create_local_danmaku_items_table_v1", _create_local_danmaku_items_table_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

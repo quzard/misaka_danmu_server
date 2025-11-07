@@ -564,3 +564,36 @@ export const batchDeleteMediaItems = (itemIds) => api.post('/api/ui/media-items/
 
 /** 导入媒体项 */
 export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)
+
+// ==================== 本地弹幕扫描 ====================
+
+/** 扫描本地弹幕文件 */
+export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
+
+/** 获取本地弹幕项列表 */
+export const getLocalItems = (params) => api.get('/api/ui/local-items', params)
+
+/** 获取本地作品列表(按作品分组) */
+export const getLocalWorks = (params) => api.get('/api/ui/local-works', params)
+
+/** 获取本地剧集的季度信息 */
+export const getLocalShowSeasons = (title) => api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons`)
+
+/** 获取本地某一季的分集列表 */
+export const getLocalSeasonEpisodes = (title, season, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    page,
+    page_size: pageSize
+  })
+
+/** 更新本地弹幕项 */
+export const updateLocalItem = (itemId, data) => api.put(`/api/ui/local-items/${itemId}`, data)
+
+/** 删除本地弹幕项 */
+export const deleteLocalItem = (itemId) => api.delete(`/api/ui/local-items/${itemId}`)
+
+/** 批量删除本地弹幕项 */
+export const batchDeleteLocalItems = (itemIds) => api.post('/api/ui/local-items/batch-delete', { itemIds })
+
+/** 导入本地弹幕项 */
+export const importLocalItems = (data) => api.post('/api/ui/local-items/import', data)

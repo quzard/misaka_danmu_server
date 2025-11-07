@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
 import { Modal, Form, Input, InputNumber, Select, message } from 'antd';
-import { updateMediaItem } from '../../../apis';
+import { updateMediaItem, updateLocalItem } from '../../../apis';
 
 const { Option } = Select;
 
-const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
+const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
   const [mediaType, setMediaType] = React.useState('tv_series');
@@ -31,7 +31,12 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved }) => {
       const values = await form.validateFields();
       setLoading(true);
 
-      await updateMediaItem(item.id, values);
+      // 根据isLocal选择不同的API
+      if (isLocal) {
+        await updateLocalItem(item.id, values);
+      } else {
+        await updateMediaItem(item.id, values);
+      }
       message.success('更新成功');
       onSaved();
     } catch (error) {
