@@ -22,6 +22,7 @@ import {
   Dropdown,
   Space,
   Checkbox,
+  Popover,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -34,6 +35,8 @@ import {
   CalendarOutlined,
   CloudServerOutlined,
   LinkOutlined,
+  ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
@@ -623,15 +626,16 @@ export const SearchResult = () => {
   }
 
   return (
-    <div className="my-4">
-      <Card title="搜索结果" loading={searchLoading}>
-        <div>
-          <Row gutter={[12, 12]} className="mb-6">
-            <Col md={20} xs={24}>
-              <Space wrap align="center">
+    <>
+      {lastSearchResultData && (
+        <div className="border-t border-base-border mt-6 pt-6">
+          <div className="text-lg font-semibold mb-4">搜索结果</div>
+          <div>
+            <div className="mb-6">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   type="primary"
-                  className="w-32"
+                  className={isMobile ? 'flex-1' : ''}
                   onClick={() => {
                     setSelectList(list =>
                       list.length === renderData.length ? [] : renderData
@@ -644,63 +648,79 @@ export const SearchResult = () => {
                     : '全选'}
                 </Button>
                 <Dropdown menu={typeMenu}>
-                  <Button>
+                  <Button className={isMobile ? 'flex-1' : ''}>
                     {typeFilter === 'all' ? (
                       <>
                         <MyIcon icon="tvlibrary" size={16} className="mr-1" />
-                        按类型
+                        {isMobile ? '类型' : '按类型'}
                       </>
                     ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
                       <>
                         <MyIcon icon="movie" size={16} className="mr-1" />
-                        电影/剧场版
+                        {isMobile ? '电影' : '电影/剧场版'}
                       </>
                     ) : (
                       <>
                         <MyIcon icon="tv" size={16} className="mr-1" />
-                        电视节目
+                        {isMobile ? 'TV' : '电视节目'}
                       </>
                     )}
                   </Button>
                 </Dropdown>
                 <Dropdown menu={yearMenu} disabled={!years.length}>
-                  <Button icon={<CalendarOutlined />}>
-                    {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
+                  <Button icon={<CalendarOutlined />} className={isMobile ? 'flex-1' : ''}>
+                    {yearFilter === 'all' ? (isMobile ? '年份' : '按年份') : `${yearFilter}年`}
                   </Button>
                 </Dropdown>
                 <Dropdown menu={providerMenu} disabled={!providers.length}>
-                  <Button icon={<CloudServerOutlined />}>
+                  <Button icon={<CloudServerOutlined />} className={isMobile ? 'flex-1' : ''}>
                     {providerFilter === 'all'
-                      ? '按来源'
+                      ? (isMobile ? '来源' : '按来源')
                       : providerFilter.charAt(0).toUpperCase() +
                         providerFilter.slice(1)}
                   </Button>
                 </Dropdown>
-                <div className="w-full">
-                  <Input
-                    placeholder="在结果中过滤标题"
-                    onChange={e => setKeyword(e.target.value)}
-                  />
-                </div>
-              </Space>
-            </Col>
-            <Col md={4} xs={24}>
-              <Button
-                block
-                type="primary"
-                onClick={() => {
-                  if (selectList.length === 0) {
-                    messageApi.error('请选择要导入的媒体')
-                    return
+                
+                <Popover
+                  content={
+                    <div style={{ width: 250 }}>
+                      <Input
+                        placeholder="输入标题关键词过滤"
+                        allowClear
+                        value={keyword}
+                        onChange={e => setKeyword(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
                   }
-
-                  setBatchOpen(true)
-                }}
-              >
-                批量导入
-              </Button>
-            </Col>
-          </Row>
+                  title="过滤结果"
+                  trigger="click"
+                  placement={isMobile ? 'bottom' : 'bottomRight'}
+                >
+                  <Button 
+                    icon={<SearchOutlined />}
+                    className={isMobile ? 'flex-1' : ''}
+                  >
+                    {keyword ? `过滤: ${keyword.length > 5 ? keyword.slice(0, 5) + '...' : keyword}` : '过滤'}
+                  </Button>
+                </Popover>
+                
+                <Button
+                  className={isMobile ? 'flex-1' : 'ml-auto'}
+                  type="primary"
+                  onClick={() => {
+                    if (selectList.length === 0) {
+                      messageApi.error('请选择要导入的媒体')
+                      return
+                    }
+                    setBatchOpen(true)
+                  }}
+                  disabled={!renderData.length}
+                >
+                  批量导入
+                </Button>
+              </div>
+            </div>
           {!!renderData?.length ? (
             <List
               itemLayout="vertical"
@@ -832,7 +852,8 @@ export const SearchResult = () => {
             <Empty description="暂无搜索结果" />
           )}
         </div>
-      </Card>
+        </div>
+      )}
       <Modal
         title="批量导入确认"
         open={batchOpen}
@@ -990,21 +1011,22 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-          <div className="shrink-0">作品标题:</div>
-          <div className="w-full">
-            <Input
-              value={editAnimeTitle || editItem.title}
-              placeholder="请输入作品标题"
-              onChange={e => {
-                setEditAnimeTitle(e.target.value)
-              }}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div>
+        {isMobile ? (
+          <div className="space-y-4 my-6">
+            <div>
+              <div className="font-medium text-sm mb-2">作品标题</div>
+              <Input
+                value={editAnimeTitle || editItem.title}
+                placeholder="请输入作品标题"
+                onChange={e => {
+                  setEditAnimeTitle(e.target.value)
+                }}
+              />
+            </div>
             <Button
-              type="default"
+              type="primary"
+              icon={<ReloadOutlined />}
+              block
               onClick={async () => {
                 try {
                   const res = await getInLibraryEpisodes({
@@ -1039,51 +1061,143 @@ export const SearchResult = () => {
             >
               重整分集导入
             </Button>
-          </div>
-        </div>
-        <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-          <div className="shrink-0">集数区间:</div>
-          <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
-            <div className="flex items-center justify-start gap-2">
-              <span>从</span>
-              <InputNumber
-                value={range[0]}
-                onChange={value => setRange(r => [value, r[1]])}
-                min={1}
-                max={range[1]}
-                step={1}
-                style={{
-                  width: '100%',
+            
+            <div>
+              <div className="font-medium text-sm mb-2">集数区间</div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm">从</span>
+                <InputNumber
+                  className="flex-1"
+                  value={range[0]}
+                  onChange={value => setRange(r => [value, r[1]])}
+                  min={1}
+                  max={range[1]}
+                  step={1}
+                />
+                <span className="text-sm">到</span>
+                <InputNumber
+                  className="flex-1"
+                  value={range[1]}
+                  onChange={value => setRange(r => [r[0], value])}
+                  min={range[0]}
+                  step={1}
+                />
+              </div>
+              <Button
+                type="primary"
+                block
+                onClick={() => {
+                  console.log(range)
+                  setEditEpisodeList(list => {
+                    return list.filter(
+                      it =>
+                        it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                    )
+                  })
                 }}
-              />
-              <span>到</span>
-              <InputNumber
-                value={range[1]}
-                onChange={value => setRange(r => [r[0], value])}
-                min={range[0]}
-                step={1}
-                style={{
-                  width: '100%',
-                }}
-              />
+              >
+                确认区间
+              </Button>
             </div>
-            <Button
-              type="primary"
-              block
-              onClick={() => {
-                console.log(range)
-                setEditEpisodeList(list => {
-                  return list.filter(
-                    it =>
-                      it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
-                  )
-                })
-              }}
-            >
-              确认区间
-            </Button>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="shrink-0">作品标题:</div>
+              <div className="w-full">
+                <Input
+                  value={editAnimeTitle || editItem.title}
+                  placeholder="请输入作品标题"
+                  onChange={e => {
+                    setEditAnimeTitle(e.target.value)
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div>
+                <Button
+                  type="default"
+                  onClick={async () => {
+                    try {
+                      const res = await getInLibraryEpisodes({
+                        title: editAnimeTitle || editItem.title,
+                        season: editItem.season ?? 1,
+                      })
+                      if (!res.data?.length) {
+                        messageApi.error(
+                          `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+                        )
+                        return
+                      }
+                      setEditEpisodeList(list => {
+                        return list.filter(
+                          it => !(res.data ?? []).includes(it.episodeIndex)
+                        )
+                      })
+                      const removedCount = editEpisodeList.reduce((total, item) => {
+                        return (
+                          total +
+                          (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                        )
+                      }, 0)
+
+                      messageApi.success(
+                        `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+                      )
+                    } catch (error) {
+                      messageApi.error(`查询已存在分集失败: ${error.message}`)
+                    }
+                  }}
+                >
+                  重整分集导入
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="shrink-0">集数区间:</div>
+              <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
+                <div className="flex items-center justify-start gap-2">
+                  <span>从</span>
+                  <InputNumber
+                    value={range[0]}
+                    onChange={value => setRange(r => [value, r[1]])}
+                    min={1}
+                    max={range[1]}
+                    step={1}
+                    style={{
+                      width: '100%',
+                    }}
+                  />
+                  <span>到</span>
+                  <InputNumber
+                    value={range[1]}
+                    onChange={value => setRange(r => [r[0], value])}
+                    min={range[0]}
+                    step={1}
+                    style={{
+                      width: '100%',
+                    }}
+                  />
+                </div>
+                <Button
+                  type="primary"
+                  block
+                  onClick={() => {
+                    console.log(range)
+                    setEditEpisodeList(list => {
+                      return list.filter(
+                        it =>
+                          it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                      )
+                    })
+                  }}
+                >
+                  确认区间
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
         <div>
           <DndContext
             sensors={sensors}
@@ -1125,7 +1239,7 @@ export const SearchResult = () => {
           </DndContext>
         </div>
       </Modal>
-    </div>
+    </>
   )
 }
 

@@ -1,12 +1,69 @@
-import { useState, useEffect } from 'react';
-import { Modal, Table, Breadcrumb, message, Spin, Button, Space } from 'antd';
-import { FolderOutlined, FileOutlined, HomeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useState, useEffect, useMemo } from 'react';
+import { Modal, Button, Space, Typography, message } from 'antd';
+import { FolderOpenOutlined } from '@ant-design/icons';
+import {
+  FullFileBrowser,
+  setChonkyDefaults,
+  ChonkyActions,
+  FileHelper
+} from 'chonky';
+import { ChonkyIconFA } from 'chonky-icon-fontawesome';
 import { browseDirectory } from '../../../apis';
+import './DirectoryBrowser.css';
+
+// 设置Chonky默认配置
+setChonkyDefaults({
+  iconComponent: ChonkyIconFA,
+  defaultFileViewActionId: ChonkyActions.EnableListView.id, // 默认列表视图
+  disableDefaultFileActions: [
+    ChonkyActions.UploadFiles.id,
+    ChonkyActions.DownloadFiles.id,
+    ChonkyActions.DeleteFiles.id,
+    ChonkyActions.CreateFolder.id,
+    ChonkyActions.CopyFiles.id,
+    ChonkyActions.MoveFiles.id,
+    ChonkyActions.OpenFiles.id, // 禁用双击打开
+  ]
+});
+
+const { Text } = Typography;
+
+// 将API返回的数据转换为Chonky格式
+const convertToChonkyFiles = (apiFiles) => {
+  return apiFiles.map(item => ({
+    id: item.path,
+    name: item.name,
+    isDir: item.type === 'dir',
+    modDate: item.modify_time ? new Date(item.modify_time) : new Date(),
+    size: item.size || 0,
+  }));
+};
+
+// 创建文件夹链
+const createFolderChain = (currentPath) => {
+  if (!currentPath || currentPath === '/') {
+    return [{ id: '/', name: '根目录', isDir: true }];
+  }
+
+  const parts = currentPath.split('/').filter(p => p);
+  const chain = [{ id: '/', name: '根目录', isDir: true }];
+
+  let currentId = '/';
+  for (const part of parts) {
+    currentId = currentId === '/' ? `/${part}` : `${currentId}/${part}`;
+    chain.push({
+      id: currentId,
+      name: part,
+      isDir: true,
+    });
+  }
+
+  return chain;
+};
 
 const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   const [loading, setLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
-  const [pathHistory, setPathHistory] = useState(['/']);
   const [files, setFiles] = useState([]);
 
   useEffect(() => {
@@ -24,10 +81,11 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
         path: path,
         name: ''
       }, 'name');
-      
+
       // 只显示目录,不显示文件
       const dirs = response.data.filter(item => item.type === 'dir');
-      setFiles(dirs);
+      const chonkyFiles = convertToChonkyFiles(dirs);
+      setFiles(chonkyFiles);
     } catch (error) {
       message.error('加载目录失败: ' + (error.message || '未知错误'));
       console.error(error);
@@ -36,110 +94,84 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
     }
   };
 
-  const handleRowClick = (record) => {
-    if (record.type === 'dir') {
-      const newPath = record.path;
-      setCurrentPath(newPath);
-      setPathHistory([...pathHistory, newPath]);
-    }
-  };
+  // 创建文件夹链
+  const folderChain = useMemo(() => createFolderChain(currentPath), [currentPath]);
 
-  const handleBreadcrumbClick = (index) => {
-    const newPath = pathHistory[index];
-    setCurrentPath(newPath);
-    setPathHistory(pathHistory.slice(0, index + 1));
-  };
-
-  const handleGoHome = () => {
-    setCurrentPath('/');
-    setPathHistory(['/']);
-  };
-
-  const handleRefresh = () => {
-    loadDirectory(currentPath);
-  };
-
-  const handleSelect = () => {
+  // 选择当前目录
+  const handleSelectCurrent = () => {
     onSelect(currentPath);
     onClose();
   };
 
-  const columns = [
-    {
-      title: '名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (text, record) => (
-        <Space>
-          {record.type === 'dir' ? <FolderOutlined /> : <FileOutlined />}
-          <span>{text}</span>
-        </Space>
-      ),
-    },
-    {
-      title: '修改时间',
-      dataIndex: 'modify_time',
-      key: 'modify_time',
-      width: 200,
-      render: (time) => time ? new Date(time).toLocaleString() : '-',
-    },
-  ];
-
-  // 生成面包屑
-  const breadcrumbItems = pathHistory.map((path, index) => ({
-    title: index === 0 ? <HomeOutlined /> : path.split('/').pop() || path,
-    onClick: () => handleBreadcrumbClick(index),
-    style: { cursor: 'pointer' }
-  }));
-
   return (
     <Modal
-      title="选择目录"
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <FolderOpenOutlined style={{ color: '#1890ff' }} />
+          <span>选择目录</span>
+        </div>
+      }
       open={visible}
       onCancel={onClose}
-      width={800}
-      footer={[
-        <Button key="cancel" onClick={onClose}>
-          取消
-        </Button>,
-        <Button key="select" type="primary" onClick={handleSelect}>
-          选择当前目录
-        </Button>,
-      ]}
-    >
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        <Space>
-          <Button icon={<HomeOutlined />} onClick={handleGoHome}>
-            根目录
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-            刷新
-          </Button>
-        </Space>
-
-        <Breadcrumb items={breadcrumbItems} />
-
-        <div style={{ padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
-          当前路径: {currentPath}
+      width="95vw"
+      style={{
+        margin: 0,
+        height: '90vh',
+        maxWidth: 'none'
+      }}
+      bodyStyle={{
+        padding: 0,
+        height: 'calc(90vh - 120px)',
+        overflow: 'hidden'
+      }}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            当前目录: <Text strong>{currentPath || '/'}</Text>
+          </Text>
+          <Space>
+            <Button onClick={onClose}>
+              取消
+            </Button>
+            <Button onClick={handleSelectCurrent}>
+              选择当前目录
+            </Button>
+          </Space>
         </div>
-
-        <Spin spinning={loading}>
-          <Table
-            columns={columns}
-            dataSource={files}
-            rowKey="path"
-            pagination={false}
-            onRow={(record) => ({
-              onClick: () => handleRowClick(record),
-              style: { cursor: 'pointer' },
-            })}
-            locale={{
-              emptyText: '该目录下没有子目录'
-            }}
-            scroll={{ y: 400 }}
-          />
-        </Spin>
-      </Space>
+      }
+    >
+      <div style={{
+        height: '100%',
+        position: 'relative'
+      }}>
+        <FullFileBrowser
+          files={files}
+          folderChain={folderChain}
+          onFileAction={(data) => {
+            // 处理双击进入文件夹
+            if (data.id === ChonkyActions.OpenFiles.id) {
+              const { targetFile } = data.payload;
+              if (targetFile && FileHelper.isDirectory(targetFile)) {
+                setCurrentPath(targetFile.id);
+              }
+            }
+          }}
+          defaultFileViewActionId={ChonkyActions.EnableListView.id}
+          disableSelection={true}
+          disableDragAndDrop={true}
+          darkMode={false}
+          disableDefaultFileActions={[
+            ChonkyActions.UploadFiles.id,
+            ChonkyActions.DownloadFiles.id,
+            ChonkyActions.DeleteFiles.id,
+            ChonkyActions.CreateFolder.id,
+            ChonkyActions.CopyFiles.id,
+            ChonkyActions.MoveFiles.id,
+            ChonkyActions.ToggleHiddenFiles.id,
+            ChonkyActions.EnableGridView.id,
+          ]}
+        />
+      </div>
     </Modal>
   );
 };

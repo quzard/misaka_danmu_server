@@ -29,6 +29,7 @@ import {
   Space,
   Table,
   Tooltip,
+  Tag,
 } from 'antd'
 import { DANDAN_TYPE_DESC_MAPPING } from '../../configs'
 import { RoutePaths } from '../../general/RoutePaths'
@@ -42,6 +43,9 @@ import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
 import { useDebounce } from '../../hooks/useDebounce'
 import ReassociationConflictModal from './components/ReassociationConflictModal'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../store'
+import { ResponsiveTable } from '@/components/ResponsiveTable'
 
 export const AnimeDetail = () => {
   const { id } = useParams()
@@ -57,6 +61,7 @@ export const AnimeDetail = () => {
   const [targetAnimeTitle, setTargetAnimeTitle] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
   const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false)
+  const isMobile = useAtomValue(isMobileAtom)
 
   const [pagination, setPagination] = useState({
     current: 1,
@@ -79,6 +84,13 @@ export const AnimeDetail = () => {
   const getDetail = async () => {
     setLoading(true)
     try {
+      // 如果 animeId 为 0 或无效，直接返回到库页面
+      if (!id || Number(id) === 0) {
+        messageApi.error('无效的作品ID')
+        navigate('/library')
+        return
+      }
+
       const [detailRes, sourceRes] = await Promise.all([
         getAnimeDetail({
           animeId: Number(id),
@@ -91,6 +103,7 @@ export const AnimeDetail = () => {
       setSourceList(sourceRes.data)
       setLoading(false)
     } catch (error) {
+      messageApi.error('获取作品详情失败')
       navigate('/library')
     }
   }
@@ -331,6 +344,34 @@ export const AnimeDetail = () => {
     ? 90
     : 180
   const columns = [
+    {
+      title: '',
+      key: 'selection',
+      width: 50,
+      render: (_, record) => {
+        const isSelected = selectedRows.some(row => row.sourceId === record.sourceId)
+        return (
+          <div
+            className="cursor-pointer flex items-center justify-center"
+            onClick={() => {
+              if (isSelected) {
+                setSelectedRows(selectedRows.filter(row => row.sourceId !== record.sourceId))
+              } else {
+                setSelectedRows([...selectedRows, record])
+              }
+            }}
+          >
+            {isSelected ? (
+              <div className="w-4 h-4 bg-primary rounded flex items-center justify-center">
+                <span className="text-white text-xs">✓</span>
+              </div>
+            ) : (
+              <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
+            )}
+          </div>
+        )
+      },
+    },
     {
       title: '源提供方',
       dataIndex: 'providerName',
@@ -573,6 +614,9 @@ export const AnimeDetail = () => {
           </Col>
         </Row>
         <div className="mt-6">
+          <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+            💡 点击卡片或前面的方框可选中/取消选中数据源，用于批量操作
+          </div>
           <div className="flex items-center gap-4 mb-4">
             <Button
               onClick={() => {
@@ -592,14 +636,297 @@ export const AnimeDetail = () => {
             </Button>
           </div>
           {!!sourceList?.length ? (
-            <Table
-              rowSelection={{ type: 'checkbox', ...rowSelection }}
+            <ResponsiveTable
               pagination={false}
               size="small"
               dataSource={sourceList}
               columns={columns}
               rowKey={'sourceId'}
               scroll={{ x: '100%' }}
+              renderCard={(record) => {
+                const isSelected = selectedRows.some(row => row.sourceId === record.sourceId);
+                return (
+                  <div
+                    className={`p-3 rounded-lg transition-all relative cursor-pointer ${isSelected ? 'shadow-lg ring-2 ring-pink-400/50 bg-pink-50/30 dark:bg-pink-900/10' : 'hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/30'}`}
+                    onClick={(e) => {
+                      // 如果点击的是按钮或链接，不触发选择
+                      if (
+                        e.target.closest('.ant-btn') ||
+                        e.target.closest('a')
+                      ) {
+                        return
+                      }
+
+                      // 切换选中状态
+                      if (isSelected) {
+                        setSelectedRows(selectedRows.filter(row => row.sourceId !== record.sourceId))
+                      } else {
+                        setSelectedRows([...selectedRows, record])
+                      }
+                    }}
+                  >
+                    <div className="space-y-3 relative">
+                      {isSelected && (
+                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-400 rounded-full border-2 border-white dark:border-gray-800 z-10"></div>
+                      )}
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Tag color="blue" className="text-xs">
+                                {record.providerName}
+                              </Tag>
+                              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                ID: {record.sourceId}
+                              </span>
+                            </div>
+                            <Button
+                              size="small"
+                              type="text"
+                              danger
+                              className="flex-shrink-0"
+                              icon={<MyIcon icon="delete" size={16} />}
+                              title="删除数据源"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeleteSingle(record)
+                              }}
+                            />
+                          </div>
+                          <div className="font-semibold text-base mb-2 break-words">
+                            媒体库ID: {record.mediaId}
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-4 text-sm">
+                              <span className="flex items-center gap-1">
+                                <MyIcon icon="clock" size={14} className="text-gray-500" />
+                                <span className="text-gray-600 dark:text-gray-400">
+                                  {dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                                </span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1">
+                                {record.isFavorited && (
+                                  <MyIcon icon="favorites-fill" size={16} className="text-yellow-300" />
+                                )}
+                                {record.incrementalRefreshEnabled && (
+                                  <MyIcon icon="clock" size={16} className="text-red-400" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="pt-1 border-t border-gray-200 dark:border-gray-700">
+                        <div className="flex justify-end gap-2 flex-wrap">
+                          {isMobile ? (
+                            <Tooltip title="分集列表">
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<MyIcon icon="book" size={16} />}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  navigate(`/episode/${record.sourceId}?animeId=${id}`)
+                                }}
+                              />
+                            </Tooltip>
+                          ) : (
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<MyIcon icon="book" size={16} />}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                navigate(`/episode/${record.sourceId}?animeId=${id}`)
+                              }}
+                            >
+                              分集列表
+                            </Button>
+                          )}
+                          {record.providerName !== 'custom' && (
+                            <>
+                              {isMobile ? (
+                                <Tooltip title={record.isFavorited ? '取消精确标记' : '精确标记源，请求弹幕时优先使用该源'}>
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<MyIcon icon={record.isFavorited ? 'favorites-fill' : 'favorites'} size={16} />}
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        await toggleSourceFavorite({
+                                          sourceId: record.sourceId,
+                                        })
+                                        setSourceList(list => {
+                                          return list.map(it => {
+                                            if (it.sourceId === record.sourceId) {
+                                              return {
+                                                ...it,
+                                                isFavorited: !it.isFavorited,
+                                              }
+                                            } else {
+                                              return it
+                                            }
+                                          })
+                                        })
+                                      } catch (error) {
+                                        messageApi.error(`操作失败: ${error.message}`)
+                                      }
+                                    }}
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<MyIcon icon={record.isFavorited ? 'favorites-fill' : 'favorites'} size={16} />}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await toggleSourceFavorite({
+                                        sourceId: record.sourceId,
+                                      })
+                                      setSourceList(list => {
+                                        return list.map(it => {
+                                          if (it.sourceId === record.sourceId) {
+                                            return {
+                                              ...it,
+                                              isFavorited: !it.isFavorited,
+                                            }
+                                          } else {
+                                            return it
+                                          }
+                                        })
+                                      })
+                                    } catch (error) {
+                                      messageApi.error(`操作失败: ${error.message}`)
+                                    }
+                                  }}
+                                >
+                                  {record.isFavorited ? '取消标记' : '精确标记'}
+                                </Button>
+                              )}
+                              {isMobile ? (
+                                <Tooltip title={record.incrementalRefreshEnabled ? '关闭定时增量刷新' : '开启定时增量刷新'}>
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<MyIcon icon="clock" size={16} />}
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        await toggleSourceIncremental({
+                                          sourceId: record.sourceId,
+                                        })
+                                        setSourceList(list => {
+                                          return list.map(it => {
+                                            if (it.sourceId === record.sourceId) {
+                                              return {
+                                                ...it,
+                                                incrementalRefreshEnabled: !it.incrementalRefreshEnabled,
+                                              }
+                                            } else {
+                                              return it
+                                            }
+                                          })
+                                        })
+                                      } catch (error) {
+                                        messageApi.error(`操作失败: ${error.message}`)
+                                      }
+                                    }}
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<MyIcon icon="clock" size={16} />}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await toggleSourceIncremental({
+                                        sourceId: record.sourceId,
+                                      })
+                                      setSourceList(list => {
+                                        return list.map(it => {
+                                          if (it.sourceId === record.sourceId) {
+                                            return {
+                                              ...it,
+                                              incrementalRefreshEnabled: !it.incrementalRefreshEnabled,
+                                            }
+                                          } else {
+                                            return it
+                                          }
+                                        })
+                                      })
+                                    } catch (error) {
+                                      messageApi.error(`操作失败: ${error.message}`)
+                                    }
+                                  }}
+                                >
+                                  {record.incrementalRefreshEnabled ? '关闭定时' : '开启定时'}
+                                </Button>
+                              )}
+                              {isMobile ? (
+                                <Tooltip title="增量获取下一集">
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<MyIcon icon="zengliang" size={16} />}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleIncrementalUpdate(record)
+                                    }}
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<MyIcon icon="zengliang" size={16} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleIncrementalUpdate(record)
+                                  }}
+                                >
+                                  增量获取
+                                </Button>
+                              )}
+                              {isMobile ? (
+                                <Tooltip title="执行全量更新(此操作会删除旧数据)">
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<MyIcon icon="refresh" size={16} />}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleFullSourceUpdate(record)
+                                    }}
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<MyIcon icon="refresh" size={16} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleFullSourceUpdate(record)
+                                  }}
+                                >
+                                  全量更新
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }}
             />
           ) : (
             <Empty />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, Switch, Button, message } from 'antd';
-import { createMediaServer, updateMediaServer, testMediaServerConnection } from '../../../apis';
+import { createMediaServer, updateMediaServer, testMediaServerConnection, deleteMediaServer } from '../../../apis';
 
 const { Option } = Select;
 
@@ -33,7 +33,7 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
 
   const handleTest = async () => {
     try {
-      await form.validateFields(['url', 'apiToken', 'providerName']);
+      const values = await form.validateFields(['url', 'apiToken', 'providerName']);
 
       setTesting(true);
 
@@ -47,7 +47,21 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
           message.error('连接失败: ' + (result.message || '未知错误'));
         }
       } else {
-        message.info('请先保存服务器配置后再测试连接');
+        // 新增模式: 先临时保存然后测试
+        try {
+          const tempServer = await createMediaServer({ ...values, isEnabled: false });
+          const res = await testMediaServerConnection(tempServer.data.id);
+          const result = res.data;
+          if (result.success) {
+            message.success('连接成功!');
+          } else {
+            message.error('连接失败: ' + (result.message || '未知错误'));
+          }
+          // 删除临时服务器
+          await deleteMediaServer(tempServer.data.id);
+        } catch (tempError) {
+          message.error('测试失败: ' + (tempError.message || '未知错误'));
+        }
       }
     } catch (error) {
       if (error.errorFields) {
@@ -97,7 +111,7 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
         <Button key="cancel" onClick={onClose}>
           取消
         </Button>,
-        <Button key="test" onClick={handleTest} loading={testing} disabled={!server}>
+        <Button key="test" onClick={handleTest} loading={testing}>
           测试连接
         </Button>,
         <Button key="submit" type="primary" onClick={handleSubmit} loading={loading}>

@@ -546,7 +546,7 @@ async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type:
 
         # 创建索引
         index_sqls = [
-            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items (file_path)"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items (file_path(255))"),
             text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
             text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
         ]

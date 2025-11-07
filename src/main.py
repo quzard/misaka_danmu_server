@@ -202,11 +202,16 @@ async def lifespan(app: FastAPI):
 
     total_time = time.time() - startup_start
     logger.info(f"应用启动完成，总耗时 {total_time:.2f} 秒")
-    
-    # --- 前端服务 (生产环境) ---
+
+    # --- 前端服务 ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
+    
+    # 无论开发还是生产环境，都需要挂载用户缓存的图片
+    # 这样开发环境下前端通过代理也能访问到这些资源
+    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
+    
     # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-    # 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
+    # 并且需要一个"捕获所有"的路由来始终提供 index.html，以支持前端路由。
     if settings.environment == "development":
         # 开发环境：所有非API请求都重定向到Vite开发服务器
         @app.get("/{full_path:path}", include_in_schema=False)
@@ -220,8 +225,6 @@ async def lifespan(app: FastAPI):
         app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
         # dist挂载
         app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
-        # 挂载用户缓存的图片 (如海报)
-        app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
         # 然后，为所有其他路径提供 index.html 以支持前端路由
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(request: Request, full_path: str):
