@@ -5,38 +5,71 @@ import {
   FullFileBrowser,
   setChonkyDefaults,
   ChonkyActions,
-  FileHelper
+  FileHelper,
+  defineFileAction
 } from 'chonky';
 import { ChonkyIconFA } from 'chonky-icon-fontawesome';
 import { browseDirectory } from '../../../apis';
 import './DirectoryBrowser.css';
 
+// 定义中文文件操作
+const ChineseActions = {
+  EnableListView: defineFileAction({
+    id: 'enable_list_view',
+    button: {
+      name: '列表视图',
+      toolbar: true,
+      icon: ChonkyActions.EnableListView.button.icon,
+    },
+  }),
+  SortFilesByName: defineFileAction({
+    id: 'sort_by_name',
+    sortKeySelector: (file) => file.name.toLowerCase(),
+    button: {
+      name: '按名称排序',
+      toolbar: true,
+      icon: ChonkyActions.SortFilesByName.button.icon,
+    },
+  }),
+  SortFilesByDate: defineFileAction({
+    id: 'sort_by_date',
+    sortKeySelector: (file) => file.modDate,
+    button: {
+      name: '按日期排序',
+      toolbar: true,
+      icon: ChonkyActions.SortFilesByDate.button.icon,
+    },
+  }),
+};
+
 // 设置Chonky默认配置
 setChonkyDefaults({
   iconComponent: ChonkyIconFA,
-  defaultFileViewActionId: ChonkyActions.EnableListView.id, // 默认列表视图
-  disableDefaultFileActions: [
-    ChonkyActions.UploadFiles.id,
-    ChonkyActions.DownloadFiles.id,
-    ChonkyActions.DeleteFiles.id,
-    ChonkyActions.CreateFolder.id,
-    ChonkyActions.CopyFiles.id,
-    ChonkyActions.MoveFiles.id,
-    ChonkyActions.OpenFiles.id, // 禁用双击打开
-  ]
 });
 
 const { Text } = Typography;
 
 // 将API返回的数据转换为Chonky格式
 const convertToChonkyFiles = (apiFiles) => {
-  return apiFiles.map(item => ({
-    id: item.path,
-    name: item.name,
-    isDir: item.type === 'dir',
-    modDate: item.modify_time ? new Date(item.modify_time) : new Date(),
-    size: item.size || 0,
-  }));
+  return apiFiles.map(item => {
+    const modDate = item.modify_time ? new Date(item.modify_time) : new Date();
+    const year = modDate.getFullYear();
+    const month = String(modDate.getMonth() + 1).padStart(2, '0');
+    const day = String(modDate.getDate()).padStart(2, '0');
+    const hour = String(modDate.getHours()).padStart(2, '0');
+    const minute = String(modDate.getMinutes()).padStart(2, '0');
+    const second = String(modDate.getSeconds()).padStart(2, '0');
+    const formattedDate = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+
+    return {
+      id: item.path,
+      name: item.name,
+      isDir: item.type === 'dir',
+      modDate: modDate,
+      modDateFormatted: formattedDate,
+      size: item.size || 0,
+    };
+  });
 };
 
 // 创建文件夹链
@@ -147,6 +180,12 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
         <FullFileBrowser
           files={files}
           folderChain={folderChain}
+          fileActions={[
+            ChineseActions.EnableListView,
+            ChineseActions.SortFilesByName,
+            ChineseActions.SortFilesByDate,
+            ChonkyActions.OpenFiles,
+          ]}
           onFileAction={(data) => {
             // 处理双击进入文件夹
             if (data.id === ChonkyActions.OpenFiles.id) {
@@ -155,21 +194,15 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
                 setCurrentPath(targetFile.id);
               }
             }
+            // 处理中文操作
+            if (data.id === 'enable_list_view') {
+              // 列表视图已经是默认的
+            }
           }}
-          defaultFileViewActionId={ChonkyActions.EnableListView.id}
+          defaultFileViewActionId={ChineseActions.EnableListView.id}
           disableSelection={true}
           disableDragAndDrop={true}
           darkMode={false}
-          disableDefaultFileActions={[
-            ChonkyActions.UploadFiles.id,
-            ChonkyActions.DownloadFiles.id,
-            ChonkyActions.DeleteFiles.id,
-            ChonkyActions.CreateFolder.id,
-            ChonkyActions.CopyFiles.id,
-            ChonkyActions.MoveFiles.id,
-            ChonkyActions.ToggleHiddenFiles.id,
-            ChonkyActions.EnableGridView.id,
-          ]}
         />
       </div>
     </Modal>
