@@ -211,3 +211,20 @@ class AITestResponse(BaseModel):
     latency: Optional[float] = None  # 响应时间(毫秒)
     error: Optional[str] = None
 
+
+class FileItem(BaseModel):
+    """文件/目录项"""
+    storage: str = "local"  # 存储类型
+    type: str  # 文件类型: dir/file
+    path: str  # 完整路径
+    name: str  # 文件/目录名
+    basename: Optional[str] = None  # 基础名称(不含扩展名)
+    extension: Optional[str] = None  # 扩展名
+    size: Optional[int] = 0  # 文件大小(字节)
+    modify_time: Optional[datetime] = None  # 修改时间
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+

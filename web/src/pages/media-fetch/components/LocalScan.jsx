@@ -1,46 +1,20 @@
-import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Spin } from 'antd';
-import { ScanOutlined, FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { Card, Input, Button, message, Space } from 'antd';
+import { ScanOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import LocalItemList from './LocalItemList';
-import { scanLocalDanmaku, getAvailableDirectories } from '../../../apis';
+import DirectoryBrowser from './DirectoryBrowser';
+import { scanLocalDanmaku } from '../../../apis';
 
 const LocalScan = () => {
   const [scanPath, setScanPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [loadingDirs, setLoadingDirs] = useState(false);
-  const [directories, setDirectories] = useState([]);
-
-  // 加载可用目录列表
-  const loadDirectories = async () => {
-    try {
-      setLoadingDirs(true);
-      const response = await getAvailableDirectories();
-      const dirs = response.data.directories || [];
-
-      // 转换为Select需要的格式,并添加存在性标识
-      setDirectories(dirs.map(dir => ({
-        label: dir.exists ? dir.label : `${dir.label} (不存在)`,
-        value: dir.value,
-        disabled: !dir.exists
-      })));
-    } catch (error) {
-      message.error('加载目录列表失败: ' + (error.message || '未知错误'));
-      console.error(error);
-    } finally {
-      setLoadingDirs(false);
-    }
-  };
-
-  // 组件加载时获取目录列表
-  useEffect(() => {
-    loadDirectories();
-  }, []);
+  const [browserVisible, setBrowserVisible] = useState(false);
 
   // 扫描本地弹幕
   const handleScan = async () => {
     if (!scanPath) {
-      message.warning('请选择扫描路径');
+      message.warning('请选择或输入扫描路径');
       return;
     }
 
@@ -58,6 +32,17 @@ const LocalScan = () => {
     }
   };
 
+  // 打开目录浏览器
+  const handleBrowse = () => {
+    setBrowserVisible(true);
+  };
+
+  // 选择目录
+  const handleSelectDirectory = (path) => {
+    setScanPath(path);
+    message.success(`已选择目录: ${path}`);
+  };
+
   return (
     <div>
       <Card title="本地弹幕扫描" style={{ marginBottom: '24px' }}>
@@ -67,31 +52,17 @@ const LocalScan = () => {
               扫描路径 (支持标准媒体服务器结构和纯弹幕文件结构)
             </div>
             <Space.Compact style={{ width: '100%' }}>
-              <Select
-                style={{ width: '100%' }}
-                placeholder="请选择扫描路径"
-                value={scanPath || undefined}
-                onChange={setScanPath}
-                options={directories}
-                loading={loadingDirs}
-                suffixIcon={loadingDirs ? <Spin size="small" /> : <FolderOpenOutlined />}
-                dropdownRender={(menu) => (
-                  <>
-                    {menu}
-                    <div style={{ padding: '8px', borderTop: '1px solid #f0f0f0' }}>
-                      <Button
-                        type="link"
-                        icon={<ReloadOutlined />}
-                        onClick={loadDirectories}
-                        size="small"
-                        block
-                      >
-                        刷新目录列表
-                      </Button>
-                    </div>
-                  </>
-                )}
+              <Input
+                placeholder="请选择或输入扫描路径"
+                value={scanPath}
+                onChange={(e) => setScanPath(e.target.value)}
               />
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={handleBrowse}
+              >
+                浏览
+              </Button>
               <Button
                 type="primary"
                 icon={<ScanOutlined />}
@@ -112,6 +83,12 @@ const LocalScan = () => {
       </Card>
 
       <LocalItemList refreshTrigger={refreshTrigger} />
+
+      <DirectoryBrowser
+        visible={browserVisible}
+        onClose={() => setBrowserVisible(false)}
+        onSelect={handleSelectDirectory}
+      />
     </div>
   );
 };

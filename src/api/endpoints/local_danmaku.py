@@ -2,7 +2,7 @@
 本地弹幕扫描相关API端点
 """
 import logging
-import os
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from ...local_danmaku_scanner import LocalDanmakuScanner
 from ...task_manager import TaskManager
 from ...config_manager import ConfigManager
 from ..dependencies import get_config_manager
+from ..ui_models import FileItem
 
 
 router = APIRouter()
@@ -47,47 +48,85 @@ class LocalItemsImportRequest(BaseModel):
 
 # ==================== API Endpoints ====================
 
-@router.get("/local-scan/directories", summary="获取可用的扫描目录列表")
-async def get_available_directories(
-    config_manager: ConfigManager = Depends(get_config_manager),
+@router.post("/local-scan/browse", summary="浏览本地目录")
+async def browse_directory(
+    fileitem: FileItem,
+    sort: Optional[str] = "name",
     current_user: models.User = Depends(security.get_current_user)
-):
+) -> List[FileItem]:
     """
-    获取可用的本地弹幕扫描目录列表
+    浏览本地文件系统目录
 
-    从配置中读取预设的目录列表,并检查目录是否存在
+    参数:
+    - fileitem: 文件项,包含要浏览的路径
+    - sort: 排序方式, name:按名称排序, time:按修改时间排序
+
+    返回:
+    - 目录下的子目录和文件列表
     """
     try:
-        # 从配置中获取预设目录列表
-        directories_config = await config_manager.get("local_scan_directories", "[]")
-        import json
-        directories = json.loads(directories_config) if isinstance(directories_config, str) else directories_config
+        from pathlib import Path
+        import stat
 
-        # 如果配置为空,返回一些默认示例
-        if not directories:
-            directories = [
-                "/mnt/media/danmaku",
-                "/mnt/media/anime",
-                "D:\\Media\\Danmaku",
-                "D:\\Media\\Anime"
-            ]
+        # 获取路径
+        path = fileitem.path if fileitem.path else "/"
 
-        # 检查目录是否存在并构建返回列表
+        # 安全检查:防止路径遍历攻击
+        try:
+            path_obj = Path(path).resolve()
+        except Exception as e:
+            logger.error(f"路径解析失败: {path}, 错误: {e}")
+            raise HTTPException(status_code=400, detail="无效的路径")
+
+        # 检查路径是否存在
+        if not path_obj.exists():
+            raise HTTPException(status_code=404, detail="路径不存在")
+
+        # 检查是否为目录
+        if not path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="路径不是目录")
+
+        # 列出目录内容
         result = []
-        for dir_path in directories:
-            exists = os.path.exists(dir_path) and os.path.isdir(dir_path)
-            result.append({
-                "label": dir_path,
-                "value": dir_path,
-                "exists": exists
-            })
+        try:
+            for item in path_obj.iterdir():
+                try:
+                    item_stat = item.stat()
+                    is_dir = item.is_dir()
 
-        return {
-            "directories": result
-        }
+                    file_item = FileItem(
+                        storage="local",
+                        type="dir" if is_dir else "file",
+                        path=str(item),
+                        name=item.name,
+                        basename=item.stem if not is_dir else item.name,
+                        extension=item.suffix[1:] if item.suffix else None,
+                        size=item_stat.st_size if not is_dir else 0,
+                        modify_time=datetime.fromtimestamp(item_stat.st_mtime)
+                    )
+                    result.append(file_item)
+                except (PermissionError, OSError) as e:
+                    # 跳过无权限访问的文件/目录
+                    logger.debug(f"跳过无权限访问的项: {item}, 错误: {e}")
+                    continue
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="没有权限访问该目录")
+
+        # 排序
+        if sort == "name":
+            # 目录在前,文件在后,同类型按名称排序
+            result.sort(key=lambda x: (x.type != "dir", x.name.lower()))
+        else:
+            # 按修改时间排序,最新的在前
+            result.sort(key=lambda x: x.modify_time or datetime.min, reverse=True)
+
+        return result
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取目录列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取目录列表失败: {str(e)}")
+        logger.error(f"浏览目录失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"浏览目录失败: {str(e)}")
 
 
 @router.post("/local-scan", status_code=202, summary="扫描本地弹幕文件")
