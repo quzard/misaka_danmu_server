@@ -128,7 +128,7 @@ async def get_local_works(
         func.count(LocalDanmakuItem.id).label('itemCount'),
         func.max(LocalDanmakuItem.season).label('seasonCount'),
         func.max(LocalDanmakuItem.episode).label('episodeCount'),
-        func.array_agg(LocalDanmakuItem.id).label('ids')  # 收集所有ID
+        func.group_concat(LocalDanmakuItem.id).label('ids')  # 收集所有ID(MySQL使用GROUP_CONCAT)
     )
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -166,7 +166,7 @@ async def get_local_works(
                 "itemCount": work.itemCount,
                 "seasonCount": work.seasonCount if work.mediaType == "tv_series" else None,
                 "episodeCount": work.episodeCount if work.mediaType == "tv_series" else None,
-                "ids": work.ids,  # 返回ID列表
+                "ids": [int(id_str) for id_str in work.ids.split(',')] if work.ids else [],  # 将逗号分隔的字符串转为整数数组
             }
             for work in works
         ],
@@ -186,7 +186,7 @@ async def get_show_seasons(
         LocalDanmakuItem.year,
         LocalDanmakuItem.posterUrl,
         func.count(LocalDanmakuItem.id).label('episodeCount'),
-        func.array_agg(LocalDanmakuItem.id).label('ids')  # 收集所有ID
+        func.group_concat(LocalDanmakuItem.id).label('ids')  # 收集所有ID(MySQL使用GROUP_CONCAT)
     ).where(
         and_(
             LocalDanmakuItem.title == title,
@@ -208,7 +208,7 @@ async def get_show_seasons(
             "year": s.year,
             "posterUrl": s.posterUrl,
             "episodeCount": s.episodeCount,
-            "ids": s.ids  # 返回ID列表
+            "ids": [int(id_str) for id_str in s.ids.split(',')] if s.ids else []  # 将逗号分隔的字符串转为整数数组
         }
         for s in seasons
     ]
