@@ -980,12 +980,6 @@ export const SearchResult = () => {
       <Modal
         title={`编辑导入: ${editItem.title}`}
         open={editImportOpen}
-        onOk={() => {
-          handleImportEdit()
-        }}
-        confirmLoading={editConfirmLoading}
-        cancelText="取消"
-        okText="确认导入"
         onCancel={() => setEditImportOpen(false)}
         footer={[
           <Button
@@ -1011,172 +1005,77 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        {isMobile ? (
-          <div className="space-y-4 my-6">
-            <div>
-              <div className="font-medium text-sm mb-2">作品标题</div>
-              <Input
-                value={editAnimeTitle || editItem.title}
-                placeholder="请输入作品标题"
-                onChange={e => {
-                  setEditAnimeTitle(e.target.value)
-                }}
-              />
-            </div>
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              block
-              onClick={async () => {
-                try {
-                  const res = await getInLibraryEpisodes({
-                    title: editAnimeTitle || editItem.title,
-                    season: editItem.season ?? 1,
-                  })
-                  if (!res.data?.length) {
-                    messageApi.error(
-                      `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
-                    )
-                    return
-                  }
-                  setEditEpisodeList(list => {
-                    return list.filter(
-                      it => !(res.data ?? []).includes(it.episodeIndex)
-                    )
-                  })
-                  const removedCount = editEpisodeList.reduce((total, item) => {
-                    return (
-                      total +
-                      (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
-                    )
-                  }, 0)
-
-                  messageApi.success(
-                    `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
-                  )
-                } catch (error) {
-                  messageApi.error(`查询已存在分集失败: ${error.message}`)
-                }
-              }}
-            >
-              重整分集导入
-            </Button>
-            
-            <div>
-              <div className="font-medium text-sm mb-2">集数区间</div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-sm">从</span>
-                <InputNumber
-                  className="flex-1"
-                  value={range[0]}
-                  onChange={value => setRange(r => [value, r[1]])}
-                  min={1}
-                  max={range[1]}
-                  step={1}
-                />
-                <span className="text-sm">到</span>
-                <InputNumber
-                  className="flex-1"
-                  value={range[1]}
-                  onChange={value => setRange(r => [r[0], value])}
-                  min={range[0]}
-                  step={1}
-                />
-              </div>
-              <Button
-                type="primary"
-                block
-                onClick={() => {
-                  console.log(range)
-                  setEditEpisodeList(list => {
-                    return list.filter(
-                      it =>
-                        it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
-                    )
-                  })
-                }}
-              >
-                确认区间
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-              <div className="shrink-0">作品标题:</div>
-              <div className="w-full">
+        <div className="max-h-[70vh] overflow-y-auto">
+          {isMobile ? (
+            <div className="space-y-4 my-6">
+              <div>
+                <div className="font-medium text-sm mb-2">作品标题</div>
                 <Input
                   value={editAnimeTitle || editItem.title}
                   placeholder="请输入作品标题"
                   onChange={e => {
                     setEditAnimeTitle(e.target.value)
                   }}
-                  style={{ width: '100%' }}
                 />
               </div>
-              <div>
-                <Button
-                  type="default"
-                  onClick={async () => {
-                    try {
-                      const res = await getInLibraryEpisodes({
-                        title: editAnimeTitle || editItem.title,
-                        season: editItem.season ?? 1,
-                      })
-                      if (!res.data?.length) {
-                        messageApi.error(
-                          `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
-                        )
-                        return
-                      }
-                      setEditEpisodeList(list => {
-                        return list.filter(
-                          it => !(res.data ?? []).includes(it.episodeIndex)
-                        )
-                      })
-                      const removedCount = editEpisodeList.reduce((total, item) => {
-                        return (
-                          total +
-                          (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
-                        )
-                      }, 0)
-
-                      messageApi.success(
-                        `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                block
+                onClick={async () => {
+                  try {
+                    const res = await getInLibraryEpisodes({
+                      title: editAnimeTitle || editItem.title,
+                      season: editItem.season ?? 1,
+                    })
+                    if (!res.data?.length) {
+                      messageApi.error(
+                        `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
                       )
-                    } catch (error) {
-                      messageApi.error(`查询已存在分集失败: ${error.message}`)
+                      return
                     }
-                  }}
-                >
-                  重整分集导入
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-              <div className="shrink-0">集数区间:</div>
-              <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
-                <div className="flex items-center justify-start gap-2">
-                  <span>从</span>
+                    setEditEpisodeList(list => {
+                      return list.filter(
+                        it => !(res.data ?? []).includes(it.episodeIndex)
+                      )
+                    })
+                    const removedCount = editEpisodeList.reduce((total, item) => {
+                      return (
+                        total +
+                        (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                      )
+                    }, 0)
+
+                    messageApi.success(
+                      `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+                    )
+                  } catch (error) {
+                    messageApi.error(`查询已存在分集失败: ${error.message}`)
+                  }
+                }}
+              >
+                重整分集导入
+              </Button>
+              
+              <div>
+                <div className="font-medium text-sm mb-2">集数区间</div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm">从</span>
                   <InputNumber
+                    className="flex-1"
                     value={range[0]}
                     onChange={value => setRange(r => [value, r[1]])}
                     min={1}
                     max={range[1]}
                     step={1}
-                    style={{
-                      width: '100%',
-                    }}
                   />
-                  <span>到</span>
+                  <span className="text-sm">到</span>
                   <InputNumber
+                    className="flex-1"
                     value={range[1]}
                     onChange={value => setRange(r => [r[0], value])}
                     min={range[0]}
                     step={1}
-                    style={{
-                      width: '100%',
-                    }}
                   />
                 </div>
                 <Button
@@ -1196,47 +1095,144 @@ export const SearchResult = () => {
                 </Button>
               </div>
             </div>
-          </>
-        )}
-        <div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={editEpisodeList.map(item => item.episodeId)}
-              strategy={verticalListSortingStrategy}
-            >
-              <List
-                itemLayout="vertical"
-                size="large"
-                pagination={{
-                  pageSize: episodePageSize,
-                  onShowSizeChange: (_, size) => {
-                    setEpisodePageSize(size)
-                  },
-                  hideOnSinglePage: true,
-                  showLessItems: true,
-                }}
-                dataSource={editEpisodeList}
-                renderItem={(item, index) => (
-                  <SortableItem
-                    key={item.episodeId}
-                    item={item}
-                    index={index}
-                    handleDelete={() => handleDelete(item)}
-                    handleEditTitle={value => handleEditTitle(item, value)}
-                    handleEditIndex={value => handleEditIndex(item, value)}
+          ) : (
+            <>
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+                <div className="shrink-0">作品标题:</div>
+                <div className="w-full">
+                  <Input
+                    value={editAnimeTitle || editItem.title}
+                    placeholder="请输入作品标题"
+                    onChange={e => {
+                      setEditAnimeTitle(e.target.value)
+                    }}
+                    style={{ width: '100%' }}
                   />
-                )}
-              />
-            </SortableContext>
+                </div>
+                <div>
+                  <Button
+                    type="default"
+                    onClick={async () => {
+                      try {
+                        const res = await getInLibraryEpisodes({
+                          title: editAnimeTitle || editItem.title,
+                          season: editItem.season ?? 1,
+                        })
+                        if (!res.data?.length) {
+                          messageApi.error(
+                            `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+                          )
+                          return
+                        }
+                        setEditEpisodeList(list => {
+                          return list.filter(
+                            it => !(res.data ?? []).includes(it.episodeIndex)
+                          )
+                        })
+                        const removedCount = editEpisodeList.reduce((total, item) => {
+                          return (
+                            total +
+                            (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                          )
+                        }, 0)
 
-            {/* 拖拽覆盖层 */}
-            <DragOverlay>{renderDragOverlay()}</DragOverlay>
-          </DndContext>
+                        messageApi.success(
+                          `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+                        )
+                      } catch (error) {
+                        messageApi.error(`查询已存在分集失败: ${error.message}`)
+                      }
+                    }}
+                  >
+                    重整分集导入
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+                <div className="shrink-0">集数区间:</div>
+                <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
+                  <div className="flex items-center justify-start gap-2">
+                    <span>从</span>
+                    <InputNumber
+                      value={range[0]}
+                      onChange={value => setRange(r => [value, r[1]])}
+                      min={1}
+                      max={range[1]}
+                      step={1}
+                      style={{
+                        width: '100%',
+                      }}
+                    />
+                    <span>到</span>
+                    <InputNumber
+                      value={range[1]}
+                      onChange={value => setRange(r => [r[0], value])}
+                      min={range[0]}
+                      step={1}
+                      style={{
+                        width: '100%',
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type="primary"
+                    block
+                    onClick={() => {
+                      console.log(range)
+                      setEditEpisodeList(list => {
+                        return list.filter(
+                          it =>
+                            it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                        )
+                      })
+                    }}
+                  >
+                    确认区间
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+          <div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={editEpisodeList.map(item => item.episodeId)}
+                strategy={verticalListSortingStrategy}
+              >
+                <List
+                  itemLayout="vertical"
+                  size="large"
+                  pagination={{
+                    pageSize: episodePageSize,
+                    onShowSizeChange: (_, size) => {
+                      setEpisodePageSize(size)
+                    },
+                    hideOnSinglePage: true,
+                    showLessItems: true,
+                  }}
+                  dataSource={editEpisodeList}
+                  renderItem={(item, index) => (
+                    <SortableItem
+                      key={item.episodeId}
+                      item={item}
+                      index={index}
+                      handleDelete={() => handleDelete(item)}
+                      handleEditTitle={value => handleEditTitle(item, value)}
+                      handleEditIndex={value => handleEditIndex(item, value)}
+                    />
+                  )}
+                />
+              </SortableContext>
+
+              {/* 拖拽覆盖层 */}
+              <DragOverlay>{renderDragOverlay()}</DragOverlay>
+            </DndContext>
+          </div>
         </div>
       </Modal>
     </>
