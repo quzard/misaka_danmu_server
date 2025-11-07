@@ -48,6 +48,24 @@ const ChineseActions = {
       icon: ChonkyActions.SortFilesByDate.button.icon,
     },
   }),
+  SortFilesBySize: defineFileAction({
+    id: ChonkyActions.SortFilesBySize.id,
+    sortKeySelector: (file) => file.size || 0,
+    button: {
+      name: '按大小排序',
+      toolbar: true,
+      icon: ChonkyActions.SortFilesBySize.button.icon,
+    },
+  }),
+  OpenFiles: defineFileAction({
+    id: ChonkyActions.OpenFiles.id,
+    requiresSelection: true,
+    button: {
+      name: '打开',
+      contextMenu: true,
+      icon: ChonkyActions.OpenFiles.button.icon,
+    },
+  }),
 };
 
 // 设置Chonky默认配置
@@ -250,7 +268,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
             ChineseActions.EnableGridView,
             ChineseActions.SortFilesByName,
             ChineseActions.SortFilesByDate,
-            ChonkyActions.OpenFiles,
+            ChineseActions.SortFilesBySize,
+            ChineseActions.OpenFiles,
           ]}
           onFileAction={(data) => {
             // 处理双击进入文件夹
@@ -261,7 +280,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               }
             }
           }}
-          defaultFileViewActionId={ChonkyActions.EnableListView.id}
+          defaultFileViewActionId={ChineseActions.EnableListView.id}
           disableSelection={true}
           disableDragAndDrop={true}
           darkMode={false}
