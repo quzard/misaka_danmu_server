@@ -59,6 +59,18 @@ const ChineseActions = {
 // 设置Chonky默认配置
 setChonkyDefaults({
   iconComponent: ChonkyIconFA,
+  formatters: {
+    formatFileModDate: (modDate) => {
+      if (!modDate) return '';
+      const year = modDate.getFullYear();
+      const month = String(modDate.getMonth() + 1).padStart(2, '0');
+      const day = String(modDate.getDate()).padStart(2, '0');
+      const hour = String(modDate.getHours()).padStart(2, '0');
+      const minute = String(modDate.getMinutes()).padStart(2, '0');
+      const second = String(modDate.getSeconds()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    },
+  },
 });
 
 const { Text } = Typography;
