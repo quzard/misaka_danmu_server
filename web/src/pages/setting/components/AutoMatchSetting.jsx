@@ -170,18 +170,18 @@ const AutoMatchSetting = () => {
       setTesting(true)
       setTestResult(null)
 
-      const values = form.getFieldsValue(['aiMatchProvider', 'aiMatchApiKey', 'aiMatchBaseUrl', 'aiMatchModel'])
+      const values = form.getFieldsValue(['aiProvider', 'aiApiKey', 'aiBaseUrl', 'aiModel'])
 
-      if (!values.aiMatchProvider || !values.aiMatchApiKey || !values.aiMatchModel) {
+      if (!values.aiProvider || !values.aiApiKey || !values.aiModel) {
         message.warning('请先填写AI提供商、API密钥和模型名称')
         return
       }
 
       const response = await api.post('/api/ui/config/ai/test', {
-        provider: values.aiMatchProvider,
-        apiKey: values.aiMatchApiKey,
-        baseUrl: values.aiMatchBaseUrl || null,
-        model: values.aiMatchModel
+        provider: values.aiProvider,
+        apiKey: values.aiApiKey,
+        baseUrl: values.aiBaseUrl || null,
+        model: values.aiModel
       })
 
       setTestResult(response.data)

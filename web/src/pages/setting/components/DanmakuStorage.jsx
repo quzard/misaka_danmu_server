@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio } from 'antd';
+import { FolderOpenOutlined } from '@ant-design/icons';
 import { getConfig, setConfig } from '@/apis';
+import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -38,6 +40,10 @@ const DanmakuStorage = () => {
   // 模板选择器状态
   const [selectedType, setSelectedType] = useState('movie');
   const [selectedTemplate, setSelectedTemplate] = useState('');
+
+  // 目录浏览器状态
+  const [browserVisible, setBrowserVisible] = useState(false);
+  const [browserTarget, setBrowserTarget] = useState(''); // 'movie' or 'tv'
 
   // 加载配置
   useEffect(() => {
@@ -203,6 +209,26 @@ const DanmakuStorage = () => {
     }
   };
 
+  // 打开目录浏览器
+  const handleBrowseDirectory = (target) => {
+    setBrowserTarget(target);
+    setBrowserVisible(true);
+  };
+
+  // 选择目录
+  const handleSelectDirectory = (path) => {
+    if (browserTarget === 'movie') {
+      setMovieDanmakuDirectoryPath(path);
+      form.setFieldValue('movieDanmakuDirectoryPath', path);
+      message.success(`已选择电影存储目录: ${path}`);
+    } else if (browserTarget === 'tv') {
+      setTvDanmakuDirectoryPath(path);
+      form.setFieldValue('tvDanmakuDirectoryPath', path);
+      message.success(`已选择电视存储目录: ${path}`);
+    }
+    setBrowserVisible(false);
+  };
+
   return (
     <Card title="弹幕存储配置" loading={loading}>
       <Form
@@ -245,7 +271,7 @@ const DanmakuStorage = () => {
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row gap-2">
               <Select
-                className="w-full sm:w-40"
+                style={{ width: 140 }}
                 value={selectedType}
                 onChange={setSelectedType}
                 disabled={!customDanmakuPathEnabled}
@@ -254,7 +280,7 @@ const DanmakuStorage = () => {
                 <Option value="tv">电视节目</Option>
               </Select>
               <Select
-                className="flex-1 min-w-0"
+                style={{ flex: 1, minWidth: 200 }}
                 value={selectedTemplate}
                 onChange={setSelectedTemplate}
                 placeholder="选择一个模板"
@@ -262,7 +288,7 @@ const DanmakuStorage = () => {
               >
                 {TEMPLATES[selectedType].map((tpl) => (
                   <Option key={tpl.value} value={tpl.value}>
-                    {tpl.label} - {tpl.desc}
+                    {tpl.label}
                   </Option>
                 ))}
               </Select>
@@ -270,13 +296,12 @@ const DanmakuStorage = () => {
                 type="primary"
                 onClick={applyTemplate}
                 disabled={!customDanmakuPathEnabled || !selectedTemplate}
-                className="w-full sm:w-auto"
               >
-                应用模板
+                应用
               </Button>
             </div>
             <div style={{ color: '#999', fontSize: '12px' }}>
-              选择类型和模板后,点击"应用模板"将自动填充到对应的命名模板字段
+              选择类型和模板后,点击"应用"将自动填充到对应的命名模板字段
             </div>
           </div>
         </Form.Item>
@@ -289,15 +314,25 @@ const DanmakuStorage = () => {
           name="movieDanmakuDirectoryPath"
         >
           <div>
-            <Input
-              value={movieDanmakuDirectoryPath}
-              onChange={(e) => {
-                setMovieDanmakuDirectoryPath(e.target.value);
-                form.setFieldValue('movieDanmakuDirectoryPath', e.target.value);
-              }}
-              placeholder="/app/config/danmaku/movies"
-              disabled={!customDanmakuPathEnabled}
-            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Input
+                value={movieDanmakuDirectoryPath}
+                onChange={(e) => {
+                  setMovieDanmakuDirectoryPath(e.target.value);
+                  form.setFieldValue('movieDanmakuDirectoryPath', e.target.value);
+                }}
+                placeholder="/app/config/danmaku/movies"
+                disabled={!customDanmakuPathEnabled}
+                style={{ flex: 1 }}
+              />
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={() => handleBrowseDirectory('movie')}
+                disabled={!customDanmakuPathEnabled}
+              >
+                浏览
+              </Button>
+            </div>
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
               电影/剧场版弹幕文件的根目录
             </div>
@@ -355,15 +390,25 @@ const DanmakuStorage = () => {
           name="tvDanmakuDirectoryPath"
         >
           <div>
-            <Input
-              value={tvDanmakuDirectoryPath}
-              onChange={(e) => {
-                setTvDanmakuDirectoryPath(e.target.value);
-                form.setFieldValue('tvDanmakuDirectoryPath', e.target.value);
-              }}
-              placeholder="/app/config/danmaku/tv"
-              disabled={!customDanmakuPathEnabled}
-            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Input
+                value={tvDanmakuDirectoryPath}
+                onChange={(e) => {
+                  setTvDanmakuDirectoryPath(e.target.value);
+                  form.setFieldValue('tvDanmakuDirectoryPath', e.target.value);
+                }}
+                placeholder="/app/config/danmaku/tv"
+                disabled={!customDanmakuPathEnabled}
+                style={{ flex: 1 }}
+              />
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={() => handleBrowseDirectory('tv')}
+                disabled={!customDanmakuPathEnabled}
+              >
+                浏览
+              </Button>
+            </div>
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
               电视节目弹幕文件的根目录
             </div>
@@ -435,6 +480,13 @@ const DanmakuStorage = () => {
           </div>
         </Form.Item>
       </Form>
+
+      {/* 目录浏览器 */}
+      <DirectoryBrowser
+        visible={browserVisible}
+        onClose={() => setBrowserVisible(false)}
+        onSelect={handleSelectDirectory}
+      />
     </Card>
   );
 };
