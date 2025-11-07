@@ -507,15 +507,16 @@ export const ImportTask = () => {
           {/* 时间 */}
           {item.createdAt && (
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              {new Date(item.createdAt).toLocaleString('zh-CN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-              })}
+              {(() => {
+                const date = new Date(item.createdAt)
+                const year = date.getFullYear()
+                const month = String(date.getMonth() + 1).padStart(2, '0')
+                const day = String(date.getDate()).padStart(2, '0')
+                const hour = String(date.getHours()).padStart(2, '0')
+                const minute = String(date.getMinutes()).padStart(2, '0')
+                const second = String(date.getSeconds()).padStart(2, '0')
+                return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+              })()}
             </div>
           )}
 
@@ -785,6 +786,20 @@ export const ImportTask = () => {
                     })
                   },
                   hideOnSinglePage: true,
+                  showSizeChanger: true,
+                  showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
+                  locale: {
+                    items_per_page: '条/页',
+                    jump_to: '跳至',
+                    jump_to_confirm: '确定',
+                    page: '页',
+                    prev_page: '上一页',
+                    next_page: '下一页',
+                    prev_5: '向前 5 页',
+                    next_5: '向后 5 页',
+                    prev_3: '向前 3 页',
+                    next_3: '向后 3 页',
+                  },
                 }}
                 renderItem={(item, index) => {
                   const isActive = selectList.some(
@@ -878,15 +893,16 @@ export const ImportTask = () => {
                           </Tooltip>
                           {item.createdAt && (
                             <Tag style={{ flexShrink: 0 }}>
-                              {new Date(item.createdAt).toLocaleString('zh-CN', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: false
-                              })}
+                              {(() => {
+                                const date = new Date(item.createdAt)
+                                const year = date.getFullYear()
+                                const month = String(date.getMonth() + 1).padStart(2, '0')
+                                const day = String(date.getDate()).padStart(2, '0')
+                                const hour = String(date.getHours()).padStart(2, '0')
+                                const minute = String(date.getMinutes()).padStart(2, '0')
+                                const second = String(date.getSeconds()).padStart(2, '0')
+                                return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+                              })()}
                             </Tag>
                           )}
                         </div>
