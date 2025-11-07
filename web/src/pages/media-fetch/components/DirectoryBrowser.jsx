@@ -147,6 +147,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
 
   return (
     <Modal
+      className="DirectoryBrowser-modal"
       title={
         <div style={{
           display: 'flex',

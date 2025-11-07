@@ -82,8 +82,8 @@
   border-radius: 0 !important;
 }
 
-/* 防止Modal自身滚动 */
-.ant-modal-body {
+/* 防止Modal自身滚动 - 只在DirectoryBrowser中使用 */
+.DirectoryBrowser-modal .ant-modal-body {
   overflow: hidden !important;
   background: var(--color-bg) !important;
 }
