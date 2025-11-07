@@ -153,7 +153,7 @@ async def save_scan_path(
 ):
     """保存扫描路径以便下次使用"""
     try:
-        await config_manager.set("local_scan_last_path", payload.scanPath)
+        await config_manager.setValue("local_scan_last_path", payload.scanPath)
         return {"message": "路径已保存"}
     except Exception as e:
         logger.error(f"保存扫描路径失败: {e}", exc_info=True)
@@ -178,7 +178,7 @@ async def scan_local_danmaku(
     """
     try:
         # 保存路径以便下次使用
-        await config_manager.set("local_scan_last_path", payload.scanPath)
+        await config_manager.setValue("local_scan_last_path", payload.scanPath)
 
         # 从app.state获取session_factory
         session_factory = request.app.state.db_session_factory
