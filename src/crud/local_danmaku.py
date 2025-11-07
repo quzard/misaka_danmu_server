@@ -117,14 +117,15 @@ async def get_local_works(
         conditions.append(LocalDanmakuItem.mediaType == media_type)
 
     # 查询作品列表(按title分组,同时获取每组的ID列表)
+    # 只按 title, mediaType, year 分组,其他字段取第一个非空值
     stmt = select(
         LocalDanmakuItem.title,
         LocalDanmakuItem.mediaType,
         LocalDanmakuItem.year,
-        LocalDanmakuItem.tmdbId,
-        LocalDanmakuItem.tvdbId,
-        LocalDanmakuItem.imdbId,
-        LocalDanmakuItem.posterUrl,
+        func.max(LocalDanmakuItem.tmdbId).label('tmdbId'),  # 取第一个非空值
+        func.max(LocalDanmakuItem.tvdbId).label('tvdbId'),
+        func.max(LocalDanmakuItem.imdbId).label('imdbId'),
+        func.max(LocalDanmakuItem.posterUrl).label('posterUrl'),
         func.count(LocalDanmakuItem.id).label('itemCount'),
         func.max(LocalDanmakuItem.season).label('seasonCount'),
         func.max(LocalDanmakuItem.episode).label('episodeCount'),
@@ -135,11 +136,7 @@ async def get_local_works(
     stmt = stmt.group_by(
         LocalDanmakuItem.title,
         LocalDanmakuItem.mediaType,
-        LocalDanmakuItem.year,
-        LocalDanmakuItem.tmdbId,
-        LocalDanmakuItem.tvdbId,
-        LocalDanmakuItem.imdbId,
-        LocalDanmakuItem.posterUrl
+        LocalDanmakuItem.year
     )
     stmt = stmt.order_by(LocalDanmakuItem.title)
 

@@ -3,7 +3,7 @@ import { Card, Input, Button, message, Space } from 'antd';
 import { ScanOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import LocalItemList from './LocalItemList';
 import DirectoryBrowser from './DirectoryBrowser';
-import { scanLocalDanmaku, getLastScanPath } from '../../../apis';
+import { scanLocalDanmaku, getLastScanPath, saveScanPath } from '../../../apis';
 
 const LocalScan = () => {
   const [scanPath, setScanPath] = useState('');
@@ -54,9 +54,16 @@ const LocalScan = () => {
   };
 
   // 选择目录
-  const handleSelectDirectory = (path) => {
+  const handleSelectDirectory = async (path) => {
     setScanPath(path);
-    message.success(`已选择目录: ${path}`);
+    // 自动保存路径
+    try {
+      await saveScanPath(path);
+      message.success(`已选择目录: ${path}`);
+    } catch (error) {
+      console.error('保存路径失败:', error);
+      message.success(`已选择目录: ${path}`);  // 即使保存失败也显示选择成功
+    }
   };
 
   return (

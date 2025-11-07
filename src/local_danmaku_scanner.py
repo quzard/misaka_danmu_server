@@ -94,25 +94,9 @@ class LocalDanmakuScanner:
         tmdb_id = nfo_data.get('tmdbid') if nfo_data else None
         tvdb_id = nfo_data.get('tvdbid') if nfo_data else None
         imdb_id = nfo_data.get('imdbid') if nfo_data else None
-        poster_url = nfo_data.get('thumb') if nfo_data else None
 
-        # 如果poster_url是本地路径,转换为相对路径
-        if poster_url and os.path.isabs(poster_url):
-            poster_url = os.path.relpath(poster_url, scan_root)
-
-        # 对于电影,检测版本标识(如果文件名包含语言/版本信息)
-        # 例如: movie.zh.xml, movie.en.xml, movie.4k.xml
-        version_suffix = None
-        if media_type == "movie" and '.' in file_name:
-            parts = file_name.split('.')
-            if len(parts) > 1:
-                # 最后一部分可能是版本标识
-                potential_version = parts[-1]
-                # 常见的版本标识: zh, en, ja, 4k, 1080p, bluray等
-                if potential_version.lower() in ['zh', 'en', 'ja', 'ko', 'cht', 'chs', '4k', '1080p', '720p', 'bluray', 'web-dl', 'webrip']:
-                    version_suffix = potential_version
-                    # 如果有版本标识,在标题后添加
-                    title = f"{title} [{version_suffix.upper()}]"
+        # 查找海报文件(从nfo所在目录)
+        poster_url = self._find_poster(file_path, nfo_path, media_type, season, scan_root)
 
         # 存入数据库
         async with self.session_factory() as session:
@@ -133,6 +117,52 @@ class LocalDanmakuScanner:
 
         self.logger.debug(f"已添加: {title} (S{season}E{episode})" if season and episode else f"已添加: {title}")
 
+    def _find_poster(
+        self,
+        xml_file: Path,
+        nfo_path: Optional[str],
+        media_type: str,
+        season: Optional[int],
+        scan_root: str
+    ) -> Optional[str]:
+        """
+        查找海报文件
+
+        Args:
+            xml_file: xml文件路径
+            nfo_path: nfo文件路径
+            media_type: 媒体类型(movie/tv_series)
+            season: 季度(仅电视剧)
+            scan_root: 扫描根目录
+
+        Returns:
+            海报相对路径(相对于scan_root)
+        """
+        if not nfo_path:
+            return None
+
+        nfo_dir = Path(nfo_path).parent
+
+        if media_type == "movie":
+            # 电影: 查找nfo同目录下的poster.jpg
+            poster_file = nfo_dir / 'poster.jpg'
+            if poster_file.exists():
+                return os.path.relpath(str(poster_file), scan_root)
+        else:
+            # 电视剧: 查找季度海报或剧集海报
+            if season is not None:
+                # 优先查找季度海报: season01-poster.jpg
+                season_poster = nfo_dir / f'season{season:02d}-poster.jpg'
+                if season_poster.exists():
+                    return os.path.relpath(str(season_poster), scan_root)
+
+            # 查找剧集海报: poster.jpg
+            poster_file = nfo_dir / 'poster.jpg'
+            if poster_file.exists():
+                return os.path.relpath(str(poster_file), scan_root)
+
+        return None
+
     def _find_and_parse_nfo(self, xml_file: Path) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """
         查找并解析nfo文件
@@ -140,35 +170,21 @@ class LocalDanmakuScanner:
         Returns:
             (nfo文件路径, nfo数据字典)
         """
-        # 策略1: 查找同名nfo文件(电影)
-        # 例如: movie.zh.xml -> movie.nfo 或 movie.zh.nfo
-        nfo_file = xml_file.with_suffix('.nfo')
-        if nfo_file.exists():
-            return str(nfo_file), self._parse_nfo(nfo_file)
-
-        # 策略1.1: 尝试去除语言后缀后查找nfo
-        # 例如: movie.zh.xml -> movie.nfo
-        stem = xml_file.stem  # 例如: movie.zh
-        if '.' in stem:
-            base_name = stem.rsplit('.', 1)[0]  # 例如: movie
-            base_nfo = xml_file.parent / f"{base_name}.nfo"
-            if base_nfo.exists():
-                return str(base_nfo), self._parse_nfo(base_nfo)
-
-        # 策略2: 查找父目录下的tvshow.nfo(电视剧)
+        # 策略1: 查找父目录下的tvshow.nfo(电视剧)
         tvshow_nfo = xml_file.parent / 'tvshow.nfo'
         if tvshow_nfo.exists():
             return str(tvshow_nfo), self._parse_nfo(tvshow_nfo)
 
-        # 策略3: 查找上级目录的tvshow.nfo(季度文件夹)
+        # 策略2: 查找上级目录的tvshow.nfo(季度文件夹)
         parent_tvshow_nfo = xml_file.parent.parent / 'tvshow.nfo'
         if parent_tvshow_nfo.exists():
             return str(parent_tvshow_nfo), self._parse_nfo(parent_tvshow_nfo)
 
-        # 策略4: 查找父目录下的movie.nfo(电影文件夹)
-        movie_nfo = xml_file.parent / 'movie.nfo'
-        if movie_nfo.exists():
-            return str(movie_nfo), self._parse_nfo(movie_nfo)
+        # 策略3: 查找父目录下唯一的nfo文件(电影)
+        # 电影文件夹通常只有一个nfo文件,可能是任意名称
+        parent_nfo_files = list(xml_file.parent.glob('*.nfo'))
+        if len(parent_nfo_files) == 1:
+            return str(parent_nfo_files[0]), self._parse_nfo(parent_nfo_files[0])
 
         return None, None
 
@@ -180,8 +196,8 @@ class LocalDanmakuScanner:
 
             data = {}
 
-            # 提取常见字段
-            for tag in ['title', 'year', 'tmdbid', 'tvdbid', 'imdbid', 'thumb']:
+            # 提取常见字段(不包括thumb,海报从文件系统查找)
+            for tag in ['title', 'year', 'tmdbid', 'tvdbid', 'imdbid']:
                 elem = root.find(tag)
                 if elem is not None and elem.text:
                     data[tag] = elem.text.strip()
@@ -226,19 +242,23 @@ class LocalDanmakuScanner:
 
         # 确定标题
         if nfo_data and 'title' in nfo_data:
+            # 优先从nfo读取标题
             title = nfo_data['title']
         else:
             # 从目录结构推断标题
             if media_type == "tv_series":
-                # 电视剧: 使用父目录或上级目录名
+                # 电视剧: 使用剧集根目录名称
+                # 文件结构: 越狱/Season 1/S01E01.xml
                 if parent_dir.name.lower().startswith('season'):
-                    # 在季度文件夹内,使用上级目录名
+                    # 在季度文件夹内,使用上级目录名(剧集根目录)
                     title = parent_dir.parent.name
                 else:
+                    # 不在季度文件夹内,使用父目录名
                     title = parent_dir.name
             else:
-                # 电影: 使用文件名(去除年份)
-                title = re.sub(r'\s*\(\d{4}\)\s*$', '', file_name)
+                # 电影: 使用文件夹名称(不是文件名)
+                # 文件结构: 阿凡达 (2009)/阿凡达.bilibili.xml
+                title = parent_dir.name
 
         # 清理标题
         title = self._clean_title(title)
@@ -278,8 +298,17 @@ class LocalDanmakuScanner:
 
     def _clean_title(self, title: str) -> str:
         """清理标题"""
-        # 移除常见的无用字符
-        title = re.sub(r'[\[\]()【】]', ' ', title)
+        # 移除TMDB ID等元数据标识
+        # 例如: 越狱（TMDBID=12345） → 越狱
+        title = re.sub(r'[（(]TMDBID=\d+[）)]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'[（(]TVDBID=\d+[）)]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'[（(]IMDBID=tt\d+[）)]', '', title, flags=re.IGNORECASE)
+
+        # 移除年份
+        # 例如: 阿凡达 (2009) → 阿凡达
+        # 例如: 越狱（2005） → 越狱
+        title = re.sub(r'\s*[（(]\d{4}[）)]\s*', ' ', title)
+
         # 移除多余空格
         title = re.sub(r'\s+', ' ', title).strip()
         return title
