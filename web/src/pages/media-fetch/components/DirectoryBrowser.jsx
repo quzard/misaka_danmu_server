@@ -15,7 +15,7 @@ import './DirectoryBrowser.css';
 // 定义中文文件操作
 const ChineseActions = {
   EnableListView: defineFileAction({
-    id: ChonkyActions.EnableListView.id,
+    ...ChonkyActions.EnableListView,
     button: {
       name: '列表视图',
       toolbar: true,
@@ -23,7 +23,7 @@ const ChineseActions = {
     },
   }),
   EnableGridView: defineFileAction({
-    id: ChonkyActions.EnableGridView.id,
+    ...ChonkyActions.EnableGridView,
     button: {
       name: '网格视图',
       toolbar: true,
@@ -31,8 +31,7 @@ const ChineseActions = {
     },
   }),
   SortFilesByName: defineFileAction({
-    id: ChonkyActions.SortFilesByName.id,
-    sortKeySelector: (file) => file.name.toLowerCase(),
+    ...ChonkyActions.SortFilesByName,
     button: {
       name: '按名称排序',
       toolbar: true,
@@ -40,8 +39,7 @@ const ChineseActions = {
     },
   }),
   SortFilesByDate: defineFileAction({
-    id: ChonkyActions.SortFilesByDate.id,
-    sortKeySelector: (file) => file.modDate,
+    ...ChonkyActions.SortFilesByDate,
     button: {
       name: '按日期排序',
       toolbar: true,
@@ -49,8 +47,7 @@ const ChineseActions = {
     },
   }),
   SortFilesBySize: defineFileAction({
-    id: ChonkyActions.SortFilesBySize.id,
-    sortKeySelector: (file) => file.size || 0,
+    ...ChonkyActions.SortFilesBySize,
     button: {
       name: '按大小排序',
       toolbar: true,
@@ -271,7 +268,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               }
             }
           }}
-          defaultFileViewActionId={ChineseActions.EnableListView.id}
+          defaultFileViewActionId={ChonkyActions.EnableListView.id}
           disableSelection={true}
           disableDragAndDrop={true}
           darkMode={false}
