@@ -242,10 +242,10 @@ const DanmakuStorage = () => {
 
         {/* 快速模板选择器 */}
         <Form.Item label="快速应用模板">
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Space>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row gap-2">
               <Select
-                style={{ width: 150 }}
+                className="w-full sm:w-40"
                 value={selectedType}
                 onChange={setSelectedType}
                 disabled={!customDanmakuPathEnabled}
@@ -254,7 +254,7 @@ const DanmakuStorage = () => {
                 <Option value="tv">电视节目</Option>
               </Select>
               <Select
-                style={{ width: 400 }}
+                className="flex-1 min-w-0"
                 value={selectedTemplate}
                 onChange={setSelectedTemplate}
                 placeholder="选择一个模板"
@@ -270,14 +270,15 @@ const DanmakuStorage = () => {
                 type="primary"
                 onClick={applyTemplate}
                 disabled={!customDanmakuPathEnabled || !selectedTemplate}
+                className="w-full sm:w-auto"
               >
                 应用模板
               </Button>
-            </Space>
+            </div>
             <div style={{ color: '#999', fontSize: '12px' }}>
               选择类型和模板后,点击"应用模板"将自动填充到对应的命名模板字段
             </div>
-          </Space>
+          </div>
         </Form.Item>
 
         <Divider orientation="left">电影/剧场版配置</Divider>
@@ -414,11 +415,11 @@ const DanmakuStorage = () => {
 
         {/* 操作按钮 */}
         <Form.Item>
-          <Space>
-            <Button type="primary" onClick={handleSave} loading={loading}>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button type="primary" onClick={handleSave} loading={loading} className="flex-1 sm:flex-none">
               保存配置
             </Button>
-            <Button onClick={handleBatchRename} disabled={!customDanmakuPathEnabled || loading}>
+            <Button onClick={handleBatchRename} disabled={!customDanmakuPathEnabled || loading} className="flex-1 sm:flex-none">
               批量重命名现有文件
             </Button>
             <Popconfirm
@@ -427,11 +428,11 @@ const DanmakuStorage = () => {
               onConfirm={handleMigrateDirectory}
               disabled={!customDanmakuPathEnabled || loading}
             >
-              <Button danger disabled={!customDanmakuPathEnabled || loading}>
+              <Button danger disabled={!customDanmakuPathEnabled || loading} className="flex-1 sm:flex-none">
                 迁移弹幕目录
               </Button>
             </Popconfirm>
-          </Space>
+          </div>
         </Form.Item>
       </Form>
     </Card>

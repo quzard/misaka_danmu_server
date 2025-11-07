@@ -367,7 +367,7 @@ class LocalDanmakuItem(Base):
     updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
 
     __table_args__ = (
-        Index('idx_local_file_path', 'file_path'),
+        Index('idx_local_file_path', 'file_path', mysql_length=255),
         Index('idx_local_media_type', 'media_type'),
         Index('idx_local_is_imported', 'is_imported'),
     )

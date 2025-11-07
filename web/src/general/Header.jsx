@@ -6,9 +6,20 @@ import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
-import { Dropdown, Tag } from 'antd';
+import { Tag, Dropdown } from 'antd';
 import { logout } from '../apis/index.js'
 import Cookies from 'js-cookie'
+import {
+  useFloating,
+  autoUpdate,
+  offset,
+  flip,
+  shift,
+  useInteractions,
+  useClick,
+  useDismiss,
+  FloatingPortal,
+} from '@floating-ui/react'
 
 const navItems = [
   { key: RoutePaths.HOME, label: '首页', icon: 'home' },
@@ -21,6 +32,73 @@ const navItems = [
   { key: RoutePaths.SETTING, label: '设置', icon: 'setting' },
 ]
 import { getVersion } from '../apis/index.js';
+
+const FloatingMenu = ({ trigger, items, onItemClick, activeKey }) => {
+  const [isOpen, setIsOpen] = useState(false)
+
+  const { refs, floatingStyles, context } = useFloating({
+    open: isOpen,
+    onOpenChange: setIsOpen,
+    placement: 'top', // 强制向上展开
+    middleware: [
+      offset(8),
+      shift({ padding: 8 }),
+    ],
+    whileElementsMounted: autoUpdate,
+  })
+
+  const click = useClick(context)
+  const dismiss = useDismiss(context)
+  const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss])
+
+  return (
+    <>
+      <div
+        ref={refs.setReference}
+        {...getReferenceProps()}
+        className="flex-1"
+      >
+        {trigger}
+      </div>
+      <FloatingPortal>
+        {isOpen && (
+          <div
+            ref={refs.setFloating}
+            style={floatingStyles}
+            {...getFloatingProps()}
+            className="z-[1000]"
+          >
+            <div className="space-y-2 bg-base-card backdrop-blur-sm rounded-lg shadow-xl border border-gray-200/50 dark:border-gray-800/30 p-2">
+              {items.map((item, index) => (
+                <button
+                  key={item.key}
+                  onClick={() => {
+                    onItemClick?.(item)
+                    setIsOpen(false)
+                  }}
+                  className={classNames(
+                    'block w-full px-4 py-2 rounded-md transition-all duration-200 text-sm font-medium text-left',
+                    activeKey === item.key
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'text-base-text hover:bg-base-hover'
+                  )}
+                  style={{
+                    animationDelay: `${index * 50}ms`
+                  }}
+                >
+                  <div className="flex items-center justify-start gap-2">
+                    <MyIcon icon={item.icon} size={20} />
+                    <div>{item.label}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </FloatingPortal>
+    </>
+  )
+}
 
 export const Header = () => {
   const [isMobile, setIsMobile] = useAtom(isMobileAtom)
@@ -82,8 +160,8 @@ export const Header = () => {
 
 const MobileHeader = ({ activeKey }) => {
   const mobileNavItems = [
-    ...navItems.slice(0, 3),
-    { key: 'user', label: '我的', icon: 'user', children: navItems.slice(3) },
+    ...navItems.slice(0, 3), // 首页、弹幕库、任务管理器直接显示
+    { key: 'user', label: '我的', icon: 'user', children: navItems.slice(3) }, // 其余的放在"我的"菜单下
   ]
   const navigate = useNavigate()
 
@@ -93,16 +171,29 @@ const MobileHeader = ({ activeKey }) => {
     navigate(RoutePaths.LOGIN)
   }
 
+  const handleMenuItemClick = (item) => {
+    if (item.key === 'logout') {
+      onLogout()
+    } else {
+      navigate(item.key)
+    }
+  }
+
+  // 计算"我的"菜单的显示标签
+  const userMenuItem = mobileNavItems.find(it => it.key === 'user')
+  const activeChildItem = userMenuItem?.children?.find(child => child.key === activeKey)
+  const userMenuLabel = activeChildItem ? activeChildItem.label : '我的'
+
   return (
     <div className="fixed bottom-0 left-0 w-full shadow-box z-50 py-2 overflow-hidden bg-base-bg">
-      <div className="flex justify-around items-center">
+      <div className="flex justify-evenly items-center">
         {mobileNavItems.map(it => (
           <>
             {!it.children?.length ? (
               <div
                 key={it.key}
                 className={classNames(
-                  'text-center',
+                  'text-center flex-1',
                   it.key === activeKey && 'text-primary'
                 )}
                 onClick={() => {
@@ -112,59 +203,40 @@ const MobileHeader = ({ activeKey }) => {
                 <div>
                   <MyIcon icon={it.icon} size={26} />
                 </div>
-                <div>{it.label}</div>
+                <div className="text-xs">{it.label}</div>
               </div>
             ) : (
-              <Dropdown
-                menu={{
-                  items: [
-                    ...it.children.map(o => ({
-                      key: o.key,
-                      label: (
-                        <div
-                          key={o.key}
-                          className="flex items-center justify-start text-nowrap gap-2 py-2"
-                          onClick={() => {
-                            navigate(o.key)
-                          }}
-                        >
-                          <MyIcon icon={o.icon} size={24} />
-                          <div className="text-base">{o.label}</div>
-                        </div>
-                      ),
-                    })),
-                    {
-                      key: 'logout',
-                      label: (
-                        <div
-                          key="logout"
-                          className="flex items-center justify-start text-nowrap gap-2 py-2"
-                          onClick={onLogout}
-                        >
-                          <MyIcon icon="user" size={24} />
-                          <div className="text-base">退出登录</div>
-                        </div>
-                      ),
-                    },
-                  ],
-                }}
+              <FloatingMenu
                 key={it.key}
-                placement="topLeft"
-                trigger={['click']}
-              >
-                <div
-                  className={classNames(
-                    'text-center',
-                    it.children.map(o => o.key).includes(activeKey) &&
-                      'text-primary'
-                  )}
-                >
-                  <div>
-                    <MyIcon icon={it.icon} size={32} />
+                trigger={
+                  <div
+                    className={classNames(
+                      'text-center flex-1',
+                      it.children.map(o => o.key).includes(activeKey) &&
+                        'text-primary'
+                    )}
+                  >
+                    <div>
+                      <MyIcon icon={it.icon} size={26} />
+                    </div>
+                    <div className="text-xs">{userMenuLabel}</div>
                   </div>
-                  <div>{it.label}</div>
-                </div>
-              </Dropdown>
+                }
+                items={[
+                  ...it.children.map(o => ({
+                    key: o.key,
+                    label: o.label,
+                    icon: o.icon,
+                  })),
+                  {
+                    key: 'logout',
+                    label: '退出登录',
+                    icon: 'user',
+                  },
+                ]}
+                onItemClick={handleMenuItemClick}
+                activeKey={activeKey}
+              />
             )}
           </>
         ))}

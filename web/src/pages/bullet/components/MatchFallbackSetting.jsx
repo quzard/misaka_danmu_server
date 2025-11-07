@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList, getSearchFallback, setSearchFallback, getConfig, setConfig } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { QuestionCircleOutlined } from '@ant-design/icons'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 
 export const MatchFallbackSetting = () => {
   const [form] = Form.useForm()
@@ -11,6 +13,7 @@ export const MatchFallbackSetting = () => {
   const [tokensSaving, setTokensSaving] = useState(false)
   const [tokenList, setTokenList] = useState([])
   const messageApi = useMessage()
+  const isMobile = useAtomValue(isMobileAtom)
 
   const fetchSettings = async () => {
     try {
@@ -125,58 +128,117 @@ export const MatchFallbackSetting = () => {
           matchFallbackTokens: []
         }}
       >
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-          <Form.Item
-            name="matchFallbackEnabled"
-            label="启用匹配后备"
-            valuePropName="checked"
-            tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
-            style={{ flex: 1 }}
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
-            name="searchFallbackEnabled"
-            label="启用后备搜索"
-            valuePropName="checked"
-            tooltip="启用后，当使用search/anime接口搜索时，如果本地库中没有结果，系统将自动触发全网搜索并返回搜索结果。用户可以直接选择搜索结果进行下载。"
-            style={{ flex: 1 }}
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) =>
-              prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
-              prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
-            }
-          >
-            {({ getFieldValue }) => {
-              const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
-              const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
-              const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
-
-              return (
+        <div className={isMobile ? "space-y-4" : ""} style={isMobile ? {} : { display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+          {isMobile ? (
+            <>
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <Form.Item
-                  name="externalApiFallbackEnabled"
-                  label={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span>启用顺延机制</span>
-                      <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </div>
-                  }
+                  name="matchFallbackEnabled"
+                  label="启用匹配后备"
                   valuePropName="checked"
+                  tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
                   style={{ flex: 1 }}
                 >
-                  <Switch disabled={isFallbackDisabled} />
+                  <Switch />
                 </Form.Item>
-              )
-            }}
-          </Form.Item>
+
+                <Form.Item
+                  name="searchFallbackEnabled"
+                  label="启用后备搜索"
+                  valuePropName="checked"
+                  tooltip="启用后，当使用search/anime接口搜索时，如果本地库中没有结果，系统将自动触发全网搜索并返回搜索结果。用户可以直接选择搜索结果进行下载。"
+                  style={{ flex: 1 }}
+                >
+                  <Switch />
+                </Form.Item>
+              </div>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+                  prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
+                }
+              >
+                {({ getFieldValue }) => {
+                  const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
+                  const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
+                  const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
+
+                  return (
+                    <Form.Item
+                      name="externalApiFallbackEnabled"
+                      label={
+                        <div className="flex items-center gap-2">
+                          <span>启用顺延机制</span>
+                          <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                      }
+                      valuePropName="checked"
+                    >
+                      <Switch disabled={isFallbackDisabled} />
+                    </Form.Item>
+                  )
+                }}
+              </Form.Item>
+            </>
+          ) : (
+            <>
+              <Form.Item
+                name="matchFallbackEnabled"
+                label="启用匹配后备"
+                valuePropName="checked"
+                tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
+                style={isMobile ? {} : { flex: 1 }}
+              >
+                <Switch />
+              </Form.Item>
+
+              <Form.Item
+                name="searchFallbackEnabled"
+                label="启用后备搜索"
+                valuePropName="checked"
+                tooltip="启用后，当使用search/anime接口搜索时，如果本地库中没有结果，系统将自动触发全网搜索并返回搜索结果。用户可以直接选择搜索结果进行下载。"
+                style={isMobile ? {} : { flex: 1 }}
+              >
+                <Switch />
+              </Form.Item>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+                  prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
+                }
+              >
+                {({ getFieldValue }) => {
+                  const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
+                  const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
+                  const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
+
+                  return (
+                    <Form.Item
+                      name="externalApiFallbackEnabled"
+                      label={
+                        <div className="flex items-center gap-2">
+                          <span>启用顺延机制</span>
+                          <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                      }
+                      valuePropName="checked"
+                      style={isMobile ? {} : { flex: 1 }}
+                    >
+                      <Switch disabled={isFallbackDisabled} />
+                    </Form.Item>
+                  )
+                }}
+              </Form.Item>
+            </>
+          )}
         </div>
 
         <Form.Item
@@ -200,74 +262,84 @@ export const MatchFallbackSetting = () => {
                   </Space>
                 }
               >
-                <div style={{
-                  border: '1px solid #d9d9d9',
-                  borderRadius: '6px',
-                  padding: '12px',
-                  minHeight: '120px',
-                  backgroundColor: isTokenSelectionDisabled ? '#f5f5f5' : '#fafafa',
-                  opacity: isTokenSelectionDisabled ? 0.6 : 1
-                }}>
+                <Card
+                  size="small"
+                  className={`transition-all duration-200 ${
+                    isTokenSelectionDisabled
+                      ? 'bg-gray-50 border-gray-200 opacity-60'
+                      : 'bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-sm hover:shadow-md'
+                  }`}
+                  bodyStyle={{ padding: '16px' }}
+                >
                   {tokenList.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
-                      暂无可用Token
+                    <div className="text-center py-8 text-gray-500">
+                      <div className="text-lg mb-2">📝</div>
+                      <div>暂无可用Token</div>
+                      <div className="text-sm mt-1">请先创建API Token</div>
                     </div>
                   ) : (
-                    <Form.Item
-                      name="matchFallbackTokens"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Checkbox.Group
-                        style={{ width: '100%' }}
-                        disabled={isTokenSelectionDisabled}
+                    <>
+                      <Form.Item
+                        name="matchFallbackTokens"
+                        style={{ marginBottom: 0 }}
                       >
-                        <div style={{
-                          display: 'flex',
-                          flexDirection: 'row',
-                          flexWrap: 'wrap',
-                          gap: '8px'
-                        }}>
-                          {tokenList.map(token => (
-                            <Checkbox
-                              key={token.id}
-                              value={token.id}
-                              disabled={isTokenSelectionDisabled}
-                              style={{
-                                padding: '6px 12px',
-                                border: '1px solid #e8e8e8',
-                                borderRadius: '4px',
-                                backgroundColor: '#fff',
-                                margin: 0,
-                                whiteSpace: 'nowrap'
-                              }}
-                            >
-                              <span style={{ fontWeight: 'normal' }}>
-                                {token.name}
-                                <span style={{
-                                  marginLeft: '8px',
-                                  fontSize: '12px',
-                                  color: token.isEnabled ? '#52c41a' : '#ff4d4f'
-                                }}>
-                                  ({token.isEnabled ? '启用' : '禁用'})
-                                </span>
-                              </span>
-                            </Checkbox>
-                          ))}
-                        </div>
-                      </Checkbox.Group>
-                    </Form.Item>
+                        <Checkbox.Group
+                          style={{ width: '100%' }}
+                          disabled={isTokenSelectionDisabled}
+                        >
+                          <div className={`grid gap-3 ${
+                            isMobile ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'
+                          }`}>
+                            {tokenList.map(token => (
+                              <div
+                                key={token.id}
+                                className={`
+                                  relative p-3 rounded-lg border transition-all duration-200 cursor-pointer
+                                  ${isTokenSelectionDisabled
+                                    ? 'bg-gray-100 border-gray-200 cursor-not-allowed'
+                                    : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                                  }
+                                `}
+                              >
+                                <Checkbox
+                                  value={token.id}
+                                  disabled={isTokenSelectionDisabled}
+                                  className="absolute top-2 right-2"
+                                />
+                                <div className="pr-6">
+                                  <div className="font-medium text-gray-900 mb-1">
+                                    {token.name}
+                                  </div>
+                                  <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    token.isEnabled
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                                      token.isEnabled ? 'bg-green-500' : 'bg-red-500'
+                                    }`}></span>
+                                    {token.isEnabled ? '启用' : '禁用'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </Checkbox.Group>
+                      </Form.Item>
+                      <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
+                        <Button
+                          type="primary"
+                          loading={tokensSaving}
+                          onClick={handleTokensSave}
+                          disabled={isTokenSelectionDisabled}
+                          className="min-w-[100px]"
+                        >
+                          保存配置
+                        </Button>
+                      </div>
+                    </>
                   )}
-                  <div style={{ marginTop: '12px', textAlign: 'right' }}>
-                    <Button
-                      type="primary"
-                      loading={tokensSaving}
-                      onClick={handleTokensSave}
-                      disabled={isTokenSelectionDisabled}
-                    >
-                      保存
-                    </Button>
-                  </div>
-                </div>
+                </Card>
               </Form.Item>
             )
           }}
@@ -283,21 +355,27 @@ export const MatchFallbackSetting = () => {
             </Space>
           }
         >
-          <Space.Compact style={{ width: '100%' }}>
+          <div className={isMobile ? "space-y-3" : "flex gap-3"}>
             <Form.Item
               name="matchFallbackBlacklist"
-              style={{ flex: 1, marginBottom: 0 }}
+              className={isMobile ? "mb-0" : "flex-1 mb-0"}
             >
               <Input.TextArea
                 placeholder="输入正则表达式，例如：预告|广告|花絮"
-                rows={2}
-                showCount
+                rows={isMobile ? 3 : 1}
+                className="resize-none"
               />
             </Form.Item>
-            <Button type="primary" loading={blacklistSaving} onClick={handleBlacklistSave}>
-              保存
+            <Button
+              type="primary"
+              loading={blacklistSaving}
+              onClick={handleBlacklistSave}
+              className={isMobile ? "w-full" : ""}
+              style={isMobile ? {} : { height: '32px', minHeight: '32px', minWidth: '100px' }}
+            >
+              保存黑名单
             </Button>
-          </Space.Compact>
+          </div>
         </Form.Item>
       </Form>
     </Card>

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag } from 'antd';
-import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown } from 'antd';
+import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined } from '@ant-design/icons';
 import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import EpisodeListModal from './EpisodeListModal';
 
 const { Search } = Input;
 
-const MediaItemList = ({ serverId, refreshTrigger }) => {
+const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -17,6 +17,7 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
   const [editingItem, setEditingItem] = useState(null);
   const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
   const [selectedShow, setSelectedShow] = useState(null);
+  const [viewMode, setViewMode] = useState('table'); // 'table' or 'card'
 
   // 加载作品列表
   const loadItems = async (page = 1, pageSize = 100) => {
@@ -113,6 +114,19 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
       loadItems();
     }
   }, [serverId, refreshTrigger]);
+
+  // 同步外部选中的项目
+  useEffect(() => {
+    setSelectedRowKeys(selectedItems);
+  }, [selectedItems]);
+
+  // 当选中状态改变时，通知外部组件
+  const handleSelectionChange = (keys) => {
+    setSelectedRowKeys(keys);
+    if (onSelectionChange) {
+      onSelectionChange(keys);
+    }
+  };
 
   // 处理表格变化
   const handleTableChange = (newPagination) => {
@@ -566,86 +580,659 @@ const MediaItemList = ({ serverId, refreshTrigger }) => {
 
   const rowSelection = {
     selectedRowKeys,
-    onChange: setSelectedRowKeys,
+    onChange: handleSelectionChange,
     // 所有项都可以选择
+  };
+
+  // 渲染项目操作按钮 - 桌面端
+  const renderItemActions = (record) => {
+    // 剧集组显示删除和导入整部按钮
+    if (record.isGroup && record.mediaType === 'tv_show') {
+      return [
+        <Popconfirm
+          key="delete-show"
+          title={`确定要删除《${record.title}》的所有集吗?`}
+          onConfirm={() => {
+            // 删除整部剧集
+            batchDeleteMediaItems({
+              shows: [{
+                serverId: serverId,
+                title: record.title
+              }]
+            })
+              .then(() => {
+                message.success(`成功删除《${record.title}》`);
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('删除失败'));
+          }}
+          okText="确定"
+          cancelText="取消"
+        >
+          <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+            删除整部
+          </Button>
+        </Popconfirm>,
+        <Button
+          key="import-show"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            // 导入整部剧集
+            importMediaItems({
+              shows: [{
+                serverId: serverId,
+                title: record.title
+              }]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('导入失败'));
+          }}
+        >
+          导入整部
+        </Button>
+      ];
+    }
+
+    // 季度显示删除和导入按钮
+    if (record.mediaType === 'tv_season') {
+      return [
+        <Popconfirm
+          key="delete-season"
+          title={`确定要删除第${record.season}季的所有集吗?`}
+          onConfirm={() => {
+            // 删除该季度
+            // 需要找到父级的title
+            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+            const parent = findItemByKey(items, parentKey);
+            if (parent) {
+              batchDeleteMediaItems({
+                seasons: [{
+                  serverId: serverId,
+                  title: parent.title,
+                  season: record.season
+                }]
+              })
+                .then(() => {
+                  message.success(`成功删除第${record.season}季`);
+                  loadItems(pagination.current, pagination.pageSize);
+                })
+                .catch(() => message.error('删除失败'));
+            }
+          }}
+          okText="确定"
+          cancelText="取消"
+        >
+          <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+            删除整季
+          </Button>
+        </Popconfirm>,
+        <Button
+          key="import-season"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            // 导入该季度
+            // 需要找到父级的title
+            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+            const parent = findItemByKey(items, parentKey);
+            if (parent) {
+              importMediaItems({
+                seasons: [{
+                  serverId: serverId,
+                  title: parent.title,
+                  season: record.season
+                }]
+              })
+                .then((res) => {
+                  message.success(res.data.message || '导入任务已提交');
+                  loadItems(pagination.current, pagination.pageSize);
+                })
+                .catch(() => message.error('导入失败'));
+            }
+          }}
+        >
+          导入整季
+        </Button>
+      ];
+    }
+
+    // 电影显示导入、编辑和删除按钮
+    if (record.mediaType === 'movie') {
+      return [
+        <Button
+          key="import-movie"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            // 导入电影
+            importMediaItems({
+              itemIds: [record.id]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch((error) => message.error('导入失败: ' + (error.message || '未知错误')));
+          }}
+        >
+          导入
+        </Button>,
+        <Button
+          key="edit-movie"
+          type="link"
+          size="small"
+          icon={<EditOutlined />}
+          onClick={() => handleEdit(record)}
+        >
+          编辑
+        </Button>,
+        <Popconfirm
+          key="delete-movie"
+          title="确定要删除吗?"
+          onConfirm={() => handleDelete(record)}
+          okText="确定"
+          cancelText="取消"
+        >
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+          >
+            删除
+          </Button>
+        </Popconfirm>
+      ];
+    }
+
+    // 单集显示编辑和删除按钮
+    return [
+      <Button
+        key="edit-episode"
+        type="link"
+        size="small"
+        icon={<EditOutlined />}
+        onClick={() => handleEdit(record)}
+      >
+        编辑
+      </Button>,
+      <Popconfirm
+        key="delete-episode"
+        title="确定要删除吗?"
+        onConfirm={() => handleDelete(record)}
+        okText="确定"
+        cancelText="取消"
+      >
+        <Button
+          type="link"
+          size="small"
+          danger
+          icon={<DeleteOutlined />}
+        >
+          删除
+        </Button>
+      </Popconfirm>
+    ];
+  };
+
+  // 渲染移动端操作菜单
+  const renderMobileActions = (record) => {
+    const items = [];
+
+    if (record.isGroup && record.mediaType === 'tv_show') {
+      items.push(
+        {
+          key: 'import-show',
+          icon: <ImportOutlined />,
+          label: '导入整部',
+          onClick: () => {
+            importMediaItems({
+              shows: [{
+                serverId: serverId,
+                title: record.title
+              }]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('导入失败'));
+          }
+        },
+        {
+          key: 'delete-show',
+          icon: <DeleteOutlined />,
+          label: '删除整部',
+          danger: true,
+          onClick: () => {
+            // 这里会触发Popconfirm，但为了简化，我们直接执行
+            batchDeleteMediaItems({
+              shows: [{
+                serverId: serverId,
+                title: record.title
+              }]
+            })
+              .then(() => {
+                message.success(`成功删除《${record.title}》`);
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('删除失败'));
+          }
+        }
+      );
+    } else if (record.mediaType === 'tv_season') {
+      items.push(
+        {
+          key: 'import-season',
+          icon: <ImportOutlined />,
+          label: '导入整季',
+          onClick: () => {
+            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+            const parent = findItemByKey(items, parentKey);
+            if (parent) {
+              importMediaItems({
+                seasons: [{
+                  serverId: serverId,
+                  title: parent.title,
+                  season: record.season
+                }]
+              })
+                .then((res) => {
+                  message.success(res.data.message || '导入任务已提交');
+                  loadItems(pagination.current, pagination.pageSize);
+                })
+                .catch(() => message.error('导入失败'));
+            }
+          }
+        },
+        {
+          key: 'delete-season',
+          icon: <DeleteOutlined />,
+          label: '删除整季',
+          danger: true,
+          onClick: () => {
+            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+            const parent = findItemByKey(items, parentKey);
+            if (parent) {
+              batchDeleteMediaItems({
+                seasons: [{
+                  serverId: serverId,
+                  title: parent.title,
+                  season: record.season
+                }]
+              })
+                .then(() => {
+                  message.success(`成功删除第${record.season}季`);
+                  loadItems(pagination.current, pagination.pageSize);
+                })
+                .catch(() => message.error('删除失败'));
+            }
+          }
+        }
+      );
+    } else if (record.mediaType === 'movie') {
+      items.push(
+        {
+          key: 'import-movie',
+          icon: <ImportOutlined />,
+          label: '导入',
+          onClick: () => {
+            importMediaItems({
+              itemIds: [record.id]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch((error) => message.error('导入失败: ' + (error.message || '未知错误')));
+          }
+        },
+        {
+          key: 'edit-movie',
+          icon: <EditOutlined />,
+          label: '编辑',
+          onClick: () => handleEdit(record)
+        },
+        {
+          key: 'delete-movie',
+          icon: <DeleteOutlined />,
+          label: '删除',
+          danger: true,
+          onClick: () => handleDelete(record)
+        }
+      );
+    } else {
+      // 单集
+      items.push(
+        {
+          key: 'edit-episode',
+          icon: <EditOutlined />,
+          label: '编辑',
+          onClick: () => handleEdit(record)
+        },
+        {
+          key: 'delete-episode',
+          icon: <DeleteOutlined />,
+          label: '删除',
+          danger: true,
+          onClick: () => handleDelete(record)
+        }
+      );
+    }
+
+    return (
+      <Dropdown
+        menu={{ items }}
+        trigger={['click']}
+        placement="bottomRight"
+      >
+        <Button 
+          type="text" 
+          icon={<MoreOutlined />} 
+          size="middle"
+          style={{ fontSize: '16px', width: '32px', height: '32px' }}
+        />
+      </Dropdown>
+    );
   };
 
   return (
     <>
       <Card
-        title="媒体项列表"
+        title={
+          <div>
+            <span className="desktop-only">媒体项列表</span>
+            <span className="mobile-only">媒体列表</span>
+          </div>
+        }
         extra={
-          <Space>
+          <div className="desktop-only">
+            <Space wrap>
+              <Button
+                icon={<TableOutlined />}
+                type={viewMode === 'table' ? 'primary' : 'default'}
+                onClick={() => setViewMode('table')}
+                size="small"
+              >
+                表格
+              </Button>
+              <Button
+                icon={<AppstoreOutlined />}
+                type={viewMode === 'card' ? 'primary' : 'default'}
+                onClick={() => setViewMode('card')}
+                size="small"
+              >
+                卡片
+              </Button>
+              <Search
+                placeholder="搜索标题"
+                allowClear
+                style={{ width: 200 }}
+                onSearch={setSearchText}
+              />
+            </Space>
+          </div>
+        }
+      >
+        {/* 移动端头部布局 */}
+        <div className="mobile-only" style={{ marginBottom: 20 }}>
+          <Row gutter={[12, 12]} align="middle">
+            <Col span={12}>
+              <Button
+                icon={<TableOutlined />}
+                type={viewMode === 'table' ? 'primary' : 'default'}
+                onClick={() => setViewMode('table')}
+                size="large"
+                block
+                style={{ height: '44px', fontSize: '16px' }}
+              >
+                表格
+              </Button>
+            </Col>
+            <Col span={12}>
+              <Button
+                icon={<AppstoreOutlined />}
+                type={viewMode === 'card' ? 'primary' : 'default'}
+                onClick={() => setViewMode('card')}
+                size="large"
+                block
+                style={{ height: '44px', fontSize: '16px' }}
+              >
+                卡片
+              </Button>
+            </Col>
+          </Row>
+          <div style={{ marginTop: 16 }}>
             <Search
               placeholder="搜索标题"
               allowClear
-              style={{ width: 200 }}
+              style={{ width: '100%', height: '44px' }}
               onSearch={setSearchText}
             />
-          </Space>
-        }
-      >
-        <Space style={{ marginBottom: 16 }}>
-          <Checkbox
-            indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
-            checked={selectedRowKeys.length === items.length && items.length > 0}
-            onChange={(e) => {
-              if (e.target.checked) {
-                // 全选所有项(包括剧集组、季度、单集、电影)
-                const allKeys = [];
-                const collectKeys = (list) => {
-                  list.forEach(item => {
-                    allKeys.push(item.key);
-                    if (item.children) {
-                      collectKeys(item.children);
-                    }
-                  });
-                };
-                collectKeys(items);
-                setSelectedRowKeys(allKeys);
-              } else {
-                setSelectedRowKeys([]);
-              }
-            }}
-          >
-            全选
-          </Checkbox>
-          <Popconfirm
-            title="确定要删除选中的项目吗?"
-            onConfirm={handleBatchDelete}
-            okText="确定"
-            cancelText="取消"
-            disabled={selectedRowKeys.length === 0}
-          >
-            <Button
-              danger
-              icon={<DeleteOutlined />}
-              disabled={selectedRowKeys.length === 0}
-            >
-              删除选中
-            </Button>
-          </Popconfirm>
-          <Button
-            type="primary"
-            icon={<ImportOutlined />}
-            onClick={handleImport}
-            disabled={selectedRowKeys.length === 0}
-          >
-            导入选中
-          </Button>
+          </div>
+        </div>
+
+        <Space style={{ marginBottom: 20, width: '100%' }} direction="vertical" size="middle">
+          <Row gutter={[12, 12]} align="middle">
+            <Col xs={24} sm={12} md={8}>
+              <Checkbox
+                indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
+                checked={selectedRowKeys.length === items.length && items.length > 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    // 全选所有项(包括剧集组、季度、单集、电影)
+                    const allKeys = [];
+                    const collectKeys = (list) => {
+                      list.forEach(item => {
+                        allKeys.push(item.key);
+                        if (item.children) {
+                          collectKeys(item.children);
+                        }
+                      });
+                    };
+                    collectKeys(items);
+                    setSelectedRowKeys(allKeys);
+                  } else {
+                    setSelectedRowKeys([]);
+                  }
+                }}
+              >
+                全选 ({selectedRowKeys.length}/{items.length})
+              </Checkbox>
+            </Col>
+            <Col xs={24} sm={12} md={16}>
+              <Space wrap>
+                {/* 批量操作按钮已移至LibraryScan组件 */}
+              </Space>
+            </Col>
+          </Row>
         </Space>
 
-        <Table
-          columns={columns}
-          dataSource={items}
-          loading={loading}
-          rowSelection={rowSelection}
-          pagination={pagination}
-          onChange={handleTableChange}
-          expandable={{
-            defaultExpandAllRows: false,
-          }}
-        />
+        {viewMode === 'table' ? (
+          <Table
+            columns={columns}
+            dataSource={items}
+            loading={loading}
+            rowSelection={rowSelection}
+            pagination={pagination}
+            onChange={handleTableChange}
+            expandable={{
+              defaultExpandAllRows: false,
+            }}
+            scroll={{ x: 800 }}
+            size="small"
+            className="desktop-only"
+          />
+        ) : (
+          <List
+            loading={loading}
+            dataSource={items}
+            pagination={{
+              ...pagination,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} 共 ${total} 项`,
+            }}
+            onChange={(page, pageSize) => loadItems(page, pageSize)}
+            renderItem={(item) => (
+              <List.Item
+                key={item.key}
+                actions={[
+                  <div key="mobile-actions" className="mobile-only">
+                    {renderMobileActions(item)}
+                  </div>,
+                  <div key="desktop-actions" className="desktop-only">
+                    {renderItemActions(item)}
+                  </div>
+                ]}
+                style={{ padding: '20px 0' }}
+              >
+                <List.Item.Meta
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <Checkbox
+                        checked={selectedRowKeys.includes(item.key)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRowKeys([...selectedRowKeys, item.key]);
+                          } else {
+                            setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                          }
+                        }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {item.mediaType === 'tv_season' ? (
+                          <Button
+                            type="link"
+                            icon={<FolderOpenOutlined />}
+                            onClick={() => handleOpenEpisodes(item)}
+                            style={{ padding: 0, height: 'auto', fontSize: '16px' }}
+                          >
+                            {item.title}
+                          </Button>
+                        ) : (
+                          <div style={{ fontSize: '18px', fontWeight: 500, lineHeight: '1.4' }}>
+                            {item.title}
+                          </div>
+                        )}
+                        {item.year && (
+                          <div style={{ marginTop: '6px', color: '#666', fontSize: '15px' }}>
+                            {item.year}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  }
+                  description={
+                    <div>
+                      <div style={{ marginTop: '8px', marginLeft: '36px' }} className="desktop-only">
+                        <Space size="small" wrap>
+                          <Tag size="small" color="blue">
+                            {item.mediaType === 'movie' ? '电影' : 
+                             item.mediaType === 'tv_show' ? '电视剧' : 
+                             item.mediaType === 'tv_season' ? '季' : item.mediaType}
+                          </Tag>
+                          {!item.isGroup && (
+                            <Tag size="small" color={item.isImported ? 'success' : 'default'}>
+                              {item.isImported ? '已导入' : '未导入'}
+                            </Tag>
+                          )}
+                          {item.seasonCount && (
+                            <Tag size="small" color="purple">
+                              共{item.seasonCount}季
+                            </Tag>
+                          )}
+                          {item.episodeCount && (
+                            <Tag size="small" color="orange">
+                              {item.episodeCount}集
+                            </Tag>
+                          )}
+                        </Space>
+                      </div>
+                      <div className="mobile-only" style={{ marginTop: '12px', marginLeft: '36px' }}>
+                        <Space size="middle" wrap>
+                          <Tag size="small" color="blue" style={{ fontSize: '13px', padding: '2px 8px' }}>
+                            {item.mediaType === 'movie' ? '电影' : 
+                             item.mediaType === 'tv_show' ? '电视剧' : 
+                             item.mediaType === 'tv_season' ? '季' : item.mediaType}
+                          </Tag>
+                          {!item.isGroup && (
+                            <Tag size="small" color={item.isImported ? 'success' : 'default'} style={{ fontSize: '13px', padding: '2px 8px' }}>
+                              {item.isImported ? '已导入' : '未导入'}
+                            </Tag>
+                          )}
+                          {item.seasonCount && (
+                            <Tag size="small" color="purple" style={{ fontSize: '13px', padding: '2px 8px' }}>
+                              共{item.seasonCount}季
+                            </Tag>
+                          )}
+                          {item.episodeCount && (
+                            <Tag size="small" color="orange" style={{ fontSize: '13px', padding: '2px 8px' }}>
+                              {item.episodeCount}集
+                            </Tag>
+                          )}
+                        </Space>
+                      </div>
+                    </div>
+                  }
+                />
+                {item.children && item.children.length > 0 && (
+                  <div>
+                    {item.children.map((child) => (
+                      <List.Item
+                        key={child.key}
+                        actions={[
+                          <div key="mobile-actions-child" className="mobile-only">
+                            {renderMobileActions(child)}
+                          </div>,
+                          <div key="desktop-actions-child" className="desktop-only">
+                            {renderItemActions(child)}
+                          </div>
+                        ]}
+                        style={{
+                          padding: '16px 0 16px 48px',
+                          borderLeft: '2px solid #f0f0f0',
+                          marginLeft: '12px'
+                        }}
+                        className="desktop-child-item mobile-child-item"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}>
+                          <Checkbox
+                            checked={selectedRowKeys.includes(child.key)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRowKeys([...selectedRowKeys, child.key]);
+                              } else {
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key));
+                              }
+                            }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <Button
+                              type="link"
+                              icon={<FolderOpenOutlined />}
+                              onClick={() => handleOpenEpisodes(child)}
+                              style={{ padding: 0, height: 'auto', fontSize: '16px' }}
+                            >
+                              {child.title}
+                            </Button>
+                          </div>
+                        </div>
+                      </List.Item>
+                    ))}
+                  </div>
+                )}
+              </List.Item>
+            )}
+          />
+        )}
       </Card>
 
       <MediaItemEditor

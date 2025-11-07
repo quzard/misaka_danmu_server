@@ -2,17 +2,20 @@ import { useEffect } from 'react'
 import { getLogs } from '../../../apis'
 import { useState } from 'react'
 import { useRef } from 'react'
-import { Card, Tooltip, message } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { Card, Tooltip, message, Button } from 'antd'
+import { ExportOutlined, CopyOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import Cookies from 'js-cookie'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 
 export const Logs = () => {
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState([])
   const abortControllerRef = useRef(null)
   const [messageApi, contextHolder] = message.useMessage()
+  const isMobile = useAtomValue(isMobileAtom)
 
   useEffect(() => {
     // 获取token
@@ -27,7 +30,7 @@ export const Logs = () => {
     const abortController = new AbortController()
     abortControllerRef.current = abortController
 
-    // 使用fetch-event-source建立SSE连接
+    // 使用fetch-event-source建立SSE连接（开发环境会通过Vite代理）
     fetchEventSource('/api/ui/logs/stream', {
       signal: abortController.signal,
       headers: {
@@ -78,6 +81,32 @@ export const Logs = () => {
     URL.revokeObjectURL(url)
   }
 
+  const copyLogLine = async (logText) => {
+    try {
+      await navigator.clipboard.writeText(logText)
+      messageApi.success('日志已复制到剪贴板')
+    } catch (error) {
+      // 降级方案：使用传统方法
+      const textArea = document.createElement('textarea')
+      textArea.value = logText
+      document.body.appendChild(textArea)
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        messageApi.success('日志已复制到剪贴板')
+      } catch (fallbackError) {
+        messageApi.error('复制失败')
+      }
+      document.body.removeChild(textArea)
+    }
+  }
+
+  const handleLongPress = (logText) => {
+    if (isMobile) {
+      copyLogLine(logText)
+    }
+  }
+
   return (
     <>
       {contextHolder}
@@ -87,17 +116,59 @@ export const Logs = () => {
           title="日志/状态 (实时)"
           extra={
             <Tooltip title="导出日志">
-              <div onClick={exportLogs}>
+              <div onClick={exportLogs} className="cursor-pointer hover:text-primary">
                 <ExportOutlined />
               </div>
             </Tooltip>
           }
         >
-          <div className="max-h-[400px] overflow-y-auto">
+          <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
             {logs?.map((it, index) => (
-              <div key={index}>
-                <div className="my-1">
-                  <pre>{it}</pre>
+              <div 
+                key={index} 
+                className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 border-primary hover:bg-base-hover-hover transition-colors`}
+                onContextMenu={(e) => {
+                  if (isMobile) {
+                    e.preventDefault()
+                    handleLongPress(it)
+                  }
+                }}
+                onTouchStart={(e) => {
+                  if (isMobile) {
+                    const timer = setTimeout(() => {
+                      handleLongPress(it)
+                    }, 500) // 长按500ms触发
+                    e.currentTarget.longPressTimer = timer
+                  }
+                }}
+                onTouchEnd={(e) => {
+                  if (isMobile && e.currentTarget.longPressTimer) {
+                    clearTimeout(e.currentTarget.longPressTimer)
+                    delete e.currentTarget.longPressTimer
+                  }
+                }}
+                onTouchMove={(e) => {
+                  if (isMobile && e.currentTarget.longPressTimer) {
+                    clearTimeout(e.currentTarget.longPressTimer)
+                    delete e.currentTarget.longPressTimer
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
+                    {it}
+                  </pre>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    className={`shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${isMobile ? 'opacity-60' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      copyLogLine(it)
+                    }}
+                    title="复制日志"
+                  />
                 </div>
               </div>
             ))}

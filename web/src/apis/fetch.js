@@ -2,7 +2,8 @@ import axios from 'axios'
 import Cookies from 'js-cookie'
 
 const getURL = url => {
-  const baseURL = import.meta.env.DEV ? 'http://0.0.0.0:7768' : '/'
+  // 开发环境使用 Vite 代理，生产环境使用相对路径
+  const baseURL = '/'
   return { baseURL, url }
 }
 

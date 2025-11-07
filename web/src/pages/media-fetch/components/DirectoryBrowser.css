@@ -1,0 +1,18 @@
+/* Chonky文件浏览器样式调整 */
+.chonky-fileBrowser {
+  height: 100% !important;
+}
+
+.chonky-fileBrowser .chonky-fileListWrapper {
+  height: calc(100% - 50px) !important; /* 减去工具栏高度 */
+}
+
+.chonky-fileBrowser .chonky-toolbar {
+  background: #fafafa !important;
+  border-bottom: 1px solid #f0f0f0 !important;
+}
+
+/* 确保在Modal中正确显示 */
+.ant-modal-body .chonky-fileBrowser {
+  border-radius: 0 !important;
+}

@@ -29,6 +29,8 @@ import {
   Table,
   Tooltip,
   Upload,
+  Tag,
+  Typography,
 } from 'antd'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
@@ -42,12 +44,16 @@ import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { BatchImportModal } from '../../components/BatchImportModal'
 import { isUrl } from '../../utils/data'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../store'
+import { ResponsiveTable } from '@/components/ResponsiveTable'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const animeId = searchParams.get('animeId')
   const navigate = useNavigate()
+  const isMobile = useAtomValue(isMobileAtom)
 
   const [loading, setLoading] = useState(true)
   const [animeDetail, setAnimeDetail] = useState({})
@@ -82,6 +88,13 @@ export const EpisodeDetail = () => {
   const getDetail = async () => {
     setLoading(true)
     try {
+      // 如果 animeId 为 0 或无效，直接返回到库页面
+      if (!animeId || Number(animeId) === 0) {
+        messageApi.error('无效的作品ID')
+        navigate('/library')
+        return
+      }
+
       const [detailRes, episodeRes, sourceRes] = await Promise.all([
         getAnimeDetail({
           animeId: Number(animeId),
@@ -107,6 +120,7 @@ export const EpisodeDetail = () => {
       })
       setLoading(false)
     } catch (error) {
+      messageApi.error('获取剧集详情失败')
       navigate(`/anime/${animeId}`)
     }
   }
@@ -124,6 +138,34 @@ export const EpisodeDetail = () => {
   }
 
   const columns = [
+    {
+      title: '',
+      key: 'selection',
+      width: 50,
+      render: (_, record) => {
+        const isSelected = selectedRows.some(row => row.episodeId === record.episodeId)
+        return (
+          <div
+            className="cursor-pointer flex items-center justify-center"
+            onClick={() => {
+              if (isSelected) {
+                setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+              } else {
+                setSelectedRows([...selectedRows, record])
+              }
+            }}
+          >
+            {isSelected ? (
+              <div className="w-4 h-4 bg-primary rounded flex items-center justify-center">
+                <span className="text-white text-xs">✓</span>
+              </div>
+            ) : (
+              <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
+            )}
+          </div>
+        )
+      },
+    },
     {
       title: 'ID',
       dataIndex: 'episodeId',
@@ -160,7 +202,7 @@ export const EpisodeDetail = () => {
       width: 200,
       render: (_, record) => {
         return (
-          <div>{dayjs(record.fetchedAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+          <Typography.Text>{dayjs(record.fetchedAt).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>
         )
       },
     },
@@ -196,7 +238,7 @@ export const EpisodeDetail = () => {
           <Space>
             <Tooltip title="编辑分集信息">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => {
                   form.setFieldsValue({
                     ...record,
@@ -213,30 +255,30 @@ export const EpisodeDetail = () => {
             {!isXmlImport && (
               <Tooltip title="刷新分集弹幕">
                 <span
-                  className="cursor-pointer hover:text-primary"
+                  className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                   onClick={() => handleRefresh(record)}
                 >
-                  <MyIcon icon="refresh" size={20}></MyIcon>
+                  <MyIcon icon="refresh" size={20} />
                 </span>
               </Tooltip>
             )}
 
             <Tooltip title="弹幕详情">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => {
                   navigate(`/comment/${record.episodeId}?episodeId=${id}`)
                 }}
               >
-                <MyIcon icon="comment" size={20}></MyIcon>
+                <MyIcon icon="comment" size={20} />
               </span>
             </Tooltip>
             <Tooltip title="删除">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => deleteEpisodeSingle(record)}
               >
-                <MyIcon icon="delete" size={20}></MyIcon>
+                <MyIcon icon="delete" size={20} />
               </span>
             </Tooltip>
           </Space>
@@ -272,9 +314,9 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div>
-          您确定要删除选中的 {selectedRows.length} 个分集吗？
+          <Typography.Text>您确定要删除选中的 {selectedRows.length} 个分集吗？</Typography.Text>
           <br />
-          此操作将在后台提交一个批量删除任务。
+          <Typography.Text>此操作将在后台提交一个批量删除任务。</Typography.Text>
         </div>
       ),
       okText: '确认',
@@ -298,9 +340,9 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div>
-          您确定要删除分集 '{record.title}' 吗？
+          <Typography.Text>您确定要删除分集 '{record.title}' 吗？</Typography.Text>
           <br />
-          此操作将在后台提交一个批量删除任务。
+          <Typography.Text>此操作将在后台提交一个批量删除任务。</Typography.Text>
         </div>
       ),
       okText: '确认',
@@ -322,7 +364,7 @@ export const EpisodeDetail = () => {
     modalApi.confirm({
       title: '刷新分集',
       zIndex: 1002,
-      content: <div>您确定要刷新分集 '{record.title}' 的弹幕吗？</div>,
+      content: <Typography.Text>您确定要刷新分集 '{record.title}' 的弹幕吗？</Typography.Text>,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
@@ -349,9 +391,9 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div>
-          您确定要刷新选中的 {selectedRows.length} 个分集的弹幕吗？
+          <Typography.Text>您确定要刷新选中的 {selectedRows.length} 个分集的弹幕吗？</Typography.Text>
           <br />
-          此操作将在后台提交 {selectedRows.length} 个刷新任务。
+          <Typography.Text>此操作将在后台提交 {selectedRows.length} 个刷新任务。</Typography.Text>
         </div>
       ),
       okText: '确认',
@@ -374,9 +416,9 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div>
-          {res.data?.message || '任务已提交'}
+          <Typography.Text>{res.data?.message || '任务已提交'}</Typography.Text>
           <br />
-          是否立即跳转到任务管理器查看进度？
+          <Typography.Text>是否立即跳转到任务管理器查看进度？</Typography.Text>
         </div>
       ),
       okText: '确认',
@@ -431,10 +473,11 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div className="mt-4">
-          <p>请输入一个整数作为偏移量（可为负数）。</p>
-          <p className="text-gray-500 text-xs">
+          <Typography.Text>请输入一个整数作为偏移量（可为负数）。</Typography.Text>
+          <br />
+          <Typography.Text className="text-gray-500 dark:text-gray-400 text-xs">
             例如：输入 12 会将第 1 集变为第 13 集。
-          </p>
+          </Typography.Text>
           <InputNumber
             placeholder="输入偏移量, e.g., 12 or -5"
             onChange={value => (offsetValue = value)}
@@ -469,10 +512,11 @@ export const EpisodeDetail = () => {
       zIndex: 1002,
       content: (
         <div>
-          您确定要为 '{animeDetail.title}
-          '的这个数据源重整集数吗？
+          <Typography.Text>
+            您确定要为 '{animeDetail.title}'的这个数据源重整集数吗？
+          </Typography.Text>
           <br />
-          此操作会按当前顺序将集数重新编号为 1, 2, 3...
+          <Typography.Text>此操作会按当前顺序将集数重新编号为 1, 2, 3...</Typography.Text>
         </div>
       ),
       okText: '确认',
@@ -509,14 +553,6 @@ export const EpisodeDetail = () => {
       setResetOpen(false)
       setResetLoading(false)
     }
-  }
-
-  const rowSelection = {
-    selectedRowKeys: selectedRows.map(row => row.episodeId),
-    onChange: (_, selectedRows) => {
-      console.log('selectedRows: ', selectedRows)
-      setSelectedRows(selectedRows)
-    },
   }
 
   const handleUpload = async ({ file }) => {
@@ -597,22 +633,23 @@ export const EpisodeDetail = () => {
         ]}
       />
       <Card loading={loading} title={`分集列表: ${animeDetail?.title ?? ''}`}>
-        <div className="flex items-center justify-between flex-wrap md:flex-nowrap">
+        <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+          💡 {isMobile ? '点击卡片可选中/取消选中分集' : '点击卡片或前面的方框可选中/取消选中分集'}，用于批量操作
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <Button
             onClick={() => {
               handleBatchDelete()
             }}
             type="primary"
             disabled={!selectedRows.length}
-            style={{ marginBottom: 16 }}
           >
             删除选中
           </Button>
-          <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap md:justify-end gap-2 mb-4">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
             <Button
               onClick={handleOffset}
               disabled={!selectedRows.length}
-              type="primary"
             >
               <Tooltip title="对所有选中的分集应用一个集数偏移量">
                 <VerticalAlignMiddleOutlined />
@@ -651,7 +688,6 @@ export const EpisodeDetail = () => {
                 setResetOpen(true)
               }}
               disabled={!episodeList.length}
-              type="primary"
             >
               正片重整
             </Button>
@@ -660,14 +696,12 @@ export const EpisodeDetail = () => {
                 handleResetEpisode()
               }}
               disabled={!episodeList.length}
-              type="primary"
             >
               重整集数
             </Button>
             <Button
               onClick={handleBatchRefresh}
               disabled={!selectedRows.length || isXmlImport}
-              type="primary"
             >
               <Tooltip title="批量刷新选中分集的弹幕">
                 <MyIcon icon="refresh" size={16} />
@@ -679,7 +713,6 @@ export const EpisodeDetail = () => {
                 onClick={() => {
                   setIsBatchModalOpen(true)
                 }}
-                type="primary"
               >
                 批量导入
               </Button>
@@ -696,9 +729,9 @@ export const EpisodeDetail = () => {
             </Button>
           </div>
         </div>
+        <div className="mb-4"></div>
         {!!episodeList?.length ? (
-          <Table
-            rowSelection={{ type: 'checkbox', ...rowSelection }}
+          <ResponsiveTable
             pagination={{
               ...pagination,
               showTotal: total => `共 ${total} 条数据`,
@@ -726,33 +759,142 @@ export const EpisodeDetail = () => {
             columns={columns}
             rowKey={'episodeId'}
             scroll={{ x: '100%' }}
-            onRow={record => ({
-              onClick: e => {
-                // 如果点击的是操作列的按钮或链接，不触发行选择
-                if (
-                  e.target.closest('.ant-btn') ||
-                  e.target.closest('a') ||
-                  e.target.closest('.cursor-pointer')
-                ) {
-                  return
-                }
+            renderCard={(record) => {
+              const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
+              return (
+                <Card
+                  size="small"
+                  className={`hover:shadow-lg transition-all duration-300 mb-3 cursor-pointer relative ${isSelected ? 'shadow-lg ring-2 ring-pink-400/50 bg-pink-50/30 dark:bg-pink-900/10' : ''}`}
+                  bodyStyle={{ padding: '12px' }}
+                  onClick={(e) => {
+                    // 如果点击的是按钮或链接，不触发选择
+                    if (
+                      e.target.closest('.ant-btn') ||
+                      e.target.closest('a')
+                    ) {
+                      return
+                    }
 
-                // 切换选中状态
-                const isSelected = selectedRows.some(
-                  row => row.episodeId === record.episodeId
-                )
-                if (isSelected) {
-                  setSelectedRows(
-                    selectedRows.filter(
-                      row => row.episodeId !== record.episodeId
-                    )
-                  )
-                } else {
-                  setSelectedRows([...selectedRows, record])
-                }
-              },
-              style: { cursor: 'pointer' },
-            })}
+                    // 切换选中状态
+                    if (isSelected) {
+                      setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+                    } else {
+                      setSelectedRows([...selectedRows, record])
+                    }
+                  }}
+                >
+                  <div className="space-y-3 relative">
+                    {isSelected && (
+                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-400 rounded-full border-2 border-white dark:border-gray-800 z-10"></div>
+                    )}
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Tag color="blue" className="text-xs">
+                              第{record.episodeIndex}集
+                            </Tag>
+                            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                              ID: {record.episodeId}
+                            </span>
+                          </div>
+                          <Button
+                            size="small"
+                            type="text"
+                            danger
+                            className="flex-shrink-0"
+                            icon={<MyIcon icon="delete" size={16} />}
+                            title="删除分集"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              deleteEpisodeSingle(record)
+                            }}
+                          />
+                        </div>
+                        <Typography.Text className="font-semibold text-base mb-2 break-words">
+                          {record.title}
+                        </Typography.Text>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="flex items-center gap-1">
+                              <MyIcon icon="comment" size={14} className="text-blue-500" />
+                              <span className="text-gray-600 dark:text-gray-400">
+                                {record.commentCount || 0} 条弹幕
+                              </span>
+                            </span>
+                          </div>
+                          {record.sourceUrl && isUrl(record.sourceUrl) && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">来源:</span>
+                              <a
+                                href={record.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:text-primary-dark break-all"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {record.sourceUrl.length > 30 ? record.sourceUrl.substring(0, 30) + '...' : record.sourceUrl}
+                              </a>
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            采集时间: {dayjs(record.fetchedAt).format('YYYY-MM-DD HH:mm')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-1 border-t border-gray-200 dark:border-gray-700">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<MyIcon icon="edit" size={14} />}
+                          title="编辑分集信息"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            form.setFieldsValue({
+                              ...record,
+                              episodeId: record.episodeId,
+                              originalEpisodeIndex: record.episodeIndex,
+                            })
+                            setIsEditing(true)
+                            setEditOpen(true)
+                          }}
+                        >
+                          编辑
+                        </Button>
+                        {!isXmlImport && (
+                          <Button
+                            size="small"
+                            type="text"
+                            icon={<MyIcon icon="refresh" size={14} />}
+                            title="刷新分集弹幕"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRefresh(record)
+                            }}
+                          >
+                            刷新
+                          </Button>
+                        )}
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<MyIcon icon="comment" size={14} />}
+                          title="查看弹幕详情"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate(`/comment/${record.episodeId}?episodeId=${id}`)
+                          }}
+                        >
+                          弹幕
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            }}
           />
         ) : (
           <Empty />
@@ -855,29 +997,35 @@ export const EpisodeDetail = () => {
         zIndex={100}
       >
         <div>
-          <div className="mb-2">将基于平均弹幕数进行正片重整：</div>
+          <Typography.Text className="mb-2">将基于平均弹幕数进行正片重整：</Typography.Text>
           <ul>
             <li>
-              平均弹幕数：<strong>{resetInfo?.average?.toFixed(2)}</strong>
+              <Typography.Text>
+                平均弹幕数：<strong>{resetInfo?.average?.toFixed(2)}</strong>
+              </Typography.Text>
             </li>
             <li>
-              预计删除分集：
-              <span className="text-red-400 font-bold">
-                {resetInfo?.toDelete?.length}
-              </span>{' '}
-              / {episodeList.length}
+              <Typography.Text>
+                预计删除分集：
+                <span className="text-red-400 font-bold">
+                  {resetInfo?.toDelete?.length}
+                </span>{' '}
+                / {episodeList.length}
+              </Typography.Text>
             </li>
             <li>
-              预计保留分集：
-              <span className="text-green-500 font-bold">
-                {resetInfo?.toKeep?.length}
-              </span>{' '}
-              / {episodeList.length}
+              <Typography.Text>
+                预计保留分集：
+                <span className="text-green-500 font-bold">
+                  {resetInfo?.toKeep?.length}
+                </span>{' '}
+                / {episodeList.length}
+              </Typography.Text>
             </li>
           </ul>
         </div>
         <div className="my-4 text-sm font-semibold">
-          预览将保留的分集（最多显示 80 条）
+          <Typography.Text>预览将保留的分集（最多显示 80 条）</Typography.Text>
         </div>
         <Table
           pagination={false}

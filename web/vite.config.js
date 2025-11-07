@@ -7,6 +7,22 @@ console.log('当前环境:', process.env.NODE_ENV)
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    host: '0.0.0.0', // 允许外部访问
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:7768',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/data': {
+        target: 'http://localhost:7768',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
+  },
   css: {
     preprocessorOptions: {
       less: {
