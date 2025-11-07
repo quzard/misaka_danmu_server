@@ -229,24 +229,26 @@ const LocalItemList = ({ refreshTrigger }) => {
     const seasons = [];
 
     selectedRowKeys.forEach(key => {
-      if (key.startsWith('movie-')) {
-        // 电影(需要从后端获取ID)
-        const item = findItemByKey(items, key);
-        if (item && item.id) {
+      // 查找对应的item
+      const item = findItemByKey(items, key);
+      if (!item) return;
+
+      if (item.mediaType === 'movie_file') {
+        // 电影文件
+        if (item.id) {
           itemIds.push(item.id);
         }
-      } else {
-        // 查找对应的item
-        const item = findItemByKey(items, key);
-        if (!item) return;
-
-        if (item.mediaType === 'tv_season') {
-          // 某一季
-          seasons.push({
-            title: item.showTitle,
-            season: item.season
-          });
-        }
+      } else if (item.mediaType === 'tv_show') {
+        // 整部剧集
+        shows.push({
+          title: item.title
+        });
+      } else if (item.mediaType === 'tv_season') {
+        // 某一季
+        seasons.push({
+          title: item.showTitle,
+          season: item.season
+        });
       }
     });
 
@@ -811,8 +813,9 @@ const LocalItemList = ({ refreshTrigger }) => {
             rowSelection={{
               selectedRowKeys,
               onChange: setSelectedRowKeys,
+              checkStrictly: false,
               getCheckboxProps: (record) => ({
-                disabled: record.isGroup && record.mediaType === 'tv_show',
+                disabled: record.isGroup && record.mediaType === 'movie',
               }),
             }}
             size="small"
