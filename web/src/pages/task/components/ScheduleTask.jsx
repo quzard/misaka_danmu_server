@@ -406,7 +406,7 @@ export const ScheduleTask = () => {
           form={form}
           layout="vertical"
           initialValues={{
-            jobType: 'tmdbAutoMap',
+            jobType: availableJobTypes.filter(job => !job.isSystemTask)[0]?.jobType || '',
             isEnabled: true,
             cronExpression: '0 2 * * *',
           }}

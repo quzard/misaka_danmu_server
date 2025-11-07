@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio } from 'antd';
-import { FolderOpenOutlined } from '@ant-design/icons';
+import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio, Row, Col } from 'antd';
+import { FolderOpenOutlined, RocketOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { getConfig, setConfig } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
@@ -39,7 +39,7 @@ const DanmakuStorage = () => {
 
   // 模板选择器状态
   const [selectedType, setSelectedType] = useState('movie');
-  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState('${title}/${episodeId}');
 
   // 目录浏览器状态
   const [browserVisible, setBrowserVisible] = useState(false);
@@ -54,6 +54,12 @@ const DanmakuStorage = () => {
   useEffect(() => {
     updatePreview();
   }, [customDanmakuPathEnabled, movieDanmakuDirectoryPath, movieDanmakuFilenameTemplate, tvDanmakuDirectoryPath, tvDanmakuFilenameTemplate]);
+
+  // 当选择类型改变时，更新默认模板
+  useEffect(() => {
+    const defaultTemplate = selectedType === 'movie' ? '${title}/${episodeId}' : '${animeId}/${episodeId}';
+    setSelectedTemplate(defaultTemplate);
+  }, [selectedType]);
 
   const loadConfig = async () => {
     try {
@@ -267,46 +273,80 @@ const DanmakuStorage = () => {
         </Form.Item>
 
         {/* 快速模板选择器 */}
-        <Form.Item label="快速应用模板">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Select
-                style={{ width: 140 }}
-                value={selectedType}
-                onChange={setSelectedType}
-                disabled={!customDanmakuPathEnabled}
-              >
-                <Option value="movie">电影/剧场版</Option>
-                <Option value="tv">电视节目</Option>
-              </Select>
-              <Select
-                style={{ flex: 1, minWidth: 200 }}
-                value={selectedTemplate}
-                onChange={setSelectedTemplate}
-                placeholder="选择一个模板"
-                disabled={!customDanmakuPathEnabled}
-              >
-                {TEMPLATES[selectedType].map((tpl) => (
-                  <Option key={tpl.value} value={tpl.value}>
-                    {tpl.label}
-                  </Option>
-                ))}
-              </Select>
-              <Button
-                type="primary"
-                onClick={applyTemplate}
-                disabled={!customDanmakuPathEnabled || !selectedTemplate}
-              >
-                应用
-              </Button>
-            </div>
-            <div style={{ color: '#999', fontSize: '12px' }}>
-              选择类型和模板后,点击"应用"将自动填充到对应的命名模板字段
+        <Card
+          title={
+            <Space>
+              <RocketOutlined />
+              快速应用模板
+            </Space>
+          }
+          size="small"
+          style={{ marginBottom: '24px' }}
+        >
+          <div style={{ marginBottom: '16px' }}>
+            <Row gutter={[16, 24]}>
+              <Col xs={24} sm={8} style={{ marginBottom: '16px' }}>
+                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>内容类型</div>
+                <Select
+                  value={selectedType}
+                  onChange={setSelectedType}
+                  disabled={!customDanmakuPathEnabled}
+                  placeholder="选择类型"
+                  style={{ width: '100%' }}
+                >
+                  <Option value="movie">🎬 电影/剧场版</Option>
+                  <Option value="tv">📺 电视节目</Option>
+                </Select>
+              </Col>
+              <Col xs={24} sm={10} style={{ marginBottom: '16px' }}>
+                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>命名模板</div>
+                <Select
+                  value={selectedTemplate}
+                  onChange={setSelectedTemplate}
+                  placeholder="选择一个模板"
+                  disabled={!customDanmakuPathEnabled}
+                  style={{ width: '100%' }}
+                >
+                  {TEMPLATES[selectedType].map((tpl) => (
+                    <Option key={tpl.value} value={tpl.value}>
+                      {tpl.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Col>
+              <Col xs={24} sm={6}>
+                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>操作</div>
+                <Button
+                  type="primary"
+                  icon={<CheckCircleOutlined />}
+                  onClick={applyTemplate}
+                  disabled={!customDanmakuPathEnabled || !selectedTemplate}
+                  block
+                  style={{ height: '32px' }}
+                >
+                  应用模板
+                </Button>
+              </Col>
+            </Row>
+          </div>
+
+          <div style={{
+            padding: '12px',
+            background: 'linear-gradient(135deg, #f6f9fc 0%, #e9ecef 100%)',
+            borderRadius: '6px',
+            border: '1px solid #e1e8ed'
+          }}>
+            <div style={{ color: '#666', fontSize: '13px', lineHeight: '1.5' }}>
+              <strong>💡 提示：</strong>选择内容类型和命名模板后，点击"应用模板"按钮将自动填充到对应的命名模板字段中，让配置更加便捷高效。
             </div>
           </div>
-        </Form.Item>
+        </Card>
 
-        <Divider orientation="left">电影/剧场版配置</Divider>
+        <Divider orientation="left">
+          <Space>
+            🎬 电影/剧场版配置
+          </Space>
+        </Divider>
 
         {/* 电影存储目录 */}
         <Form.Item
@@ -367,22 +407,33 @@ const DanmakuStorage = () => {
         </Form.Item>
 
         {/* 电影路径预览 */}
-        <Form.Item label="电影路径预览">
+        <Form.Item label={
+          <Space>
+            👀 电影路径预览
+          </Space>
+        }>
           <div style={{
-            padding: '12px',
-            background: '#f5f5f5',
-            borderRadius: '4px',
-            fontFamily: 'monospace',
-            wordBreak: 'break-all'
+            padding: '16px',
+            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+            borderRadius: '8px',
+            border: '1px solid #dee2e6',
+            fontFamily: 'JetBrains Mono, Consolas, monospace',
+            fontSize: '13px',
+            wordBreak: 'break-all',
+            color: '#495057'
           }}>
             {moviePreviewPath || '请配置模板以查看预览'}
           </div>
-          <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-            示例: 铃芽之旅 (2022)
+          <div style={{ color: '#6c757d', fontSize: '12px', marginTop: '8px' }}>
+            📝 示例: 铃芽之旅 (2022)
           </div>
         </Form.Item>
 
-        <Divider orientation="left">电视节目配置</Divider>
+        <Divider orientation="left">
+          <Space>
+            📺 电视节目配置
+          </Space>
+        </Divider>
 
         {/* 电视存储目录 */}
         <Form.Item
@@ -443,42 +494,87 @@ const DanmakuStorage = () => {
         </Form.Item>
 
         {/* 电视路径预览 */}
-        <Form.Item label="电视路径预览">
+        <Form.Item label={
+          <Space>
+            👀 电视路径预览
+          </Space>
+        }>
           <div style={{
-            padding: '12px',
-            background: '#f5f5f5',
-            borderRadius: '4px',
-            fontFamily: 'monospace',
-            wordBreak: 'break-all'
+            padding: '16px',
+            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+            borderRadius: '8px',
+            border: '1px solid #dee2e6',
+            fontFamily: 'JetBrains Mono, Consolas, monospace',
+            fontSize: '13px',
+            wordBreak: 'break-all',
+            color: '#495057'
           }}>
             {tvPreviewPath || '请配置模板以查看预览'}
           </div>
-          <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-            示例: 葬送的芙莉莲 S01E01
+          <div style={{ color: '#6c757d', fontSize: '12px', marginTop: '8px' }}>
+            📝 示例: 葬送的芙莉莲 S01E01
           </div>
         </Form.Item>
 
         {/* 操作按钮 */}
-        <Form.Item>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button type="primary" onClick={handleSave} loading={loading} className="flex-1 sm:flex-none">
+        <Card
+          title={
+            <Space>
+              操作面板
+            </Space>
+          }
+          size="small"
+          style={{ marginTop: '24px' }}
+        >
+          <div className="flex flex-col gap-3">
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              onClick={handleSave}
+              loading={loading}
+              size="large"
+              block
+              style={{
+                height: '48px',
+                fontSize: '16px',
+                fontWeight: 500
+              }}
+            >
               保存配置
             </Button>
-            <Button onClick={handleBatchRename} disabled={!customDanmakuPathEnabled || loading} className="flex-1 sm:flex-none">
-              批量重命名现有文件
-            </Button>
-            <Popconfirm
-              title="确定要迁移弹幕目录吗?"
-              description="此操作会移动所有弹幕文件到新目录"
-              onConfirm={handleMigrateDirectory}
-              disabled={!customDanmakuPathEnabled || loading}
-            >
-              <Button danger disabled={!customDanmakuPathEnabled || loading} className="flex-1 sm:flex-none">
-                迁移弹幕目录
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={handleBatchRename}
+                disabled={!customDanmakuPathEnabled || loading}
+                size="large"
+                block
+                style={{ flex: 1, height: '44px' }}
+              >
+                批量重命名
               </Button>
-            </Popconfirm>
+
+              <Popconfirm
+                title="确定要迁移弹幕目录吗?"
+                description="此操作会移动所有弹幕文件到新目录"
+                onConfirm={handleMigrateDirectory}
+                disabled={!customDanmakuPathEnabled || loading}
+              >
+                <Button
+                  danger
+                  icon={<RocketOutlined />}
+                  disabled={!customDanmakuPathEnabled || loading}
+                  size="large"
+                  block
+                  style={{ flex: 1, height: '44px' }}
+                >
+                  迁移目录
+                </Button>
+              </Popconfirm>
+            </div>
           </div>
-        </Form.Item>
+        </Card>
       </Form>
 
       {/* 目录浏览器 */}

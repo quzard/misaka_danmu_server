@@ -65,6 +65,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   const [loading, setLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
   const [files, setFiles] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   useEffect(() => {
     if (visible) {
@@ -87,7 +88,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       const chonkyFiles = convertToChonkyFiles(dirs);
       setFiles(chonkyFiles);
     } catch (error) {
-      message.error('加载目录失败: ' + (error.message || '未知错误'));
+      message.error('加载目录失败：' + (error.message || '未知错误'));
       console.error(error);
     } finally {
       setLoading(false);
@@ -106,43 +107,96 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   return (
     <Modal
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <FolderOpenOutlined style={{ color: '#1890ff' }} />
-          <span>选择目录</span>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontSize: '16px',
+          fontWeight: 600,
+          color: 'var(--color-text)'
+        }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'var(--color-primary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white'
+          }}>
+            <FolderOpenOutlined style={{ fontSize: '16px' }} />
+          </div>
+          <span>目录浏览器</span>
         </div>
       }
       open={visible}
       onCancel={onClose}
       width="95vw"
       style={{
-        margin: 0,
-        height: '90vh',
-        maxWidth: 'none'
+        margin: '2vh 2.5vw 4vh',
+        top: '2vh',
+        height: '94vh',
+        maxWidth: 'none',
+        paddingBottom: 0,
+        borderRadius: '12px',
+        overflow: 'hidden'
       }}
       bodyStyle={{
         padding: 0,
-        height: 'calc(90vh - 120px)',
-        overflow: 'hidden'
+        height: 'calc(94vh - 120px)',
+        overflow: 'hidden',
+        background: 'var(--color-bg)'
       }}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            当前目录: <Text strong>{currentPath || '/'}</Text>
-          </Text>
-          <Space>
-            <Button onClick={onClose}>
-              取消
-            </Button>
-            <Button onClick={handleSelectCurrent}>
-              选择当前目录
-            </Button>
-          </Space>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '12px 24px',
+          background: 'var(--color-card)',
+          borderTop: '1px solid var(--color-border)',
+          borderRadius: '0 0 12px 12px'
+        }}>
+          <Button
+            onClick={onClose}
+            style={{
+              borderRadius: '6px',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-secondary)',
+              padding: '6px 16px',
+              height: '32px',
+              fontSize: '14px'
+            }}
+          >
+            取消
+          </Button>
+          <Button
+            type="primary"
+            onClick={handleSelectCurrent}
+            style={{
+              borderRadius: '6px',
+              background: 'var(--color-primary)',
+              border: 'none',
+              fontWeight: 500,
+              padding: '6px 16px',
+              height: '32px',
+              fontSize: '14px'
+            }}
+          >
+            选择此目录
+          </Button>
         </div>
       }
+      destroyOnClose
+      maskClosable={false}
+      centered={false}
     >
       <div style={{
         height: '100%',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden'
       }}>
         <FullFileBrowser
           files={files}
