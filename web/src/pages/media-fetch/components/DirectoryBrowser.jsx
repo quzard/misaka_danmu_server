@@ -192,9 +192,9 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       }
       open={visible}
       onCancel={onClose}
-      width="75vw"
+      width="60vw"
       style={{
-        margin: '2vh 12.5vw 4vh',
+        margin: '2vh 20vw 4vh',
         top: '2vh',
         height: '94vh',
         maxWidth: 'none',
