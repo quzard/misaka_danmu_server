@@ -54,16 +54,7 @@ const ChineseActions = {
     button: {
       name: '按大小排序',
       toolbar: true,
-      icon: ChonkyActions.SortFilesBySize.button.icon,
-    },
-  }),
-  OpenFiles: defineFileAction({
-    id: ChonkyActions.OpenFiles.id,
-    requiresSelection: true,
-    button: {
-      name: '打开',
-      contextMenu: true,
-      icon: ChonkyActions.OpenFiles.button.icon,
+      icon: ChonkyActions.SortFilesBySize.button?.icon,
     },
   }),
 };
@@ -269,7 +260,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
             ChineseActions.SortFilesByName,
             ChineseActions.SortFilesByDate,
             ChineseActions.SortFilesBySize,
-            ChineseActions.OpenFiles,
+            ChonkyActions.OpenFiles,
           ]}
           onFileAction={(data) => {
             // 处理双击进入文件夹
