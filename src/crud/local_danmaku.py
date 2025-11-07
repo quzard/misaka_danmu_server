@@ -263,6 +263,16 @@ async def get_season_episodes(
     }
 
 
+async def get_local_item_by_id(
+    session: AsyncSession,
+    item_id: int
+) -> Optional[LocalDanmakuItem]:
+    """根据ID获取本地弹幕项"""
+    stmt = select(LocalDanmakuItem).where(LocalDanmakuItem.id == item_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def update_local_item(
     session: AsyncSession,
     item_id: int,

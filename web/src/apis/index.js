@@ -570,6 +570,12 @@ export const importMediaItems = (data) => api.post('/api/ui/media-items/import',
 /** 浏览本地目录 */
 export const browseDirectory = (fileitem, sort = 'name') => api.post('/api/ui/local-scan/browse', fileitem, { params: { sort } })
 
+/** 获取上次使用的扫描路径 */
+export const getLastScanPath = () => api.get('/api/ui/local-scan/last-path')
+
+/** 保存扫描路径 */
+export const saveScanPath = (scanPath) => api.post('/api/ui/local-scan/save-path', { scanPath })
+
 /** 扫描本地弹幕文件 */
 export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
 

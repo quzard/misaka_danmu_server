@@ -21,6 +21,7 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) =
         tvdbId: item.tvdbId,
         imdbId: item.imdbId,
         posterUrl: item.posterUrl,
+        filePath: item.filePath,
       });
       setMediaType(item.mediaType);
     }
@@ -146,6 +147,15 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) =
         >
           <Input placeholder="https://..." />
         </Form.Item>
+
+        {isLocal && (
+          <Form.Item
+            label="弹幕文件路径"
+            name="filePath"
+          >
+            <Input disabled style={{ color: '#000' }} />
+          </Form.Item>
+        )}
       </Form>
     </Modal>
   );

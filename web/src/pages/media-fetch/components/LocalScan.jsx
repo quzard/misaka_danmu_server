@@ -1,15 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Input, Button, message, Space } from 'antd';
 import { ScanOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import LocalItemList from './LocalItemList';
 import DirectoryBrowser from './DirectoryBrowser';
-import { scanLocalDanmaku } from '../../../apis';
+import { scanLocalDanmaku, getLastScanPath } from '../../../apis';
 
 const LocalScan = () => {
   const [scanPath, setScanPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [browserVisible, setBrowserVisible] = useState(false);
+
+  // 组件加载时获取上次使用的路径
+  useEffect(() => {
+    loadLastPath();
+  }, []);
+
+  const loadLastPath = async () => {
+    try {
+      const response = await getLastScanPath();
+      if (response.data.path) {
+        setScanPath(response.data.path);
+      }
+    } catch (error) {
+      console.error('加载上次路径失败:', error);
+    }
+  };
 
   // 扫描本地弹幕
   const handleScan = async () => {

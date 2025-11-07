@@ -3,6 +3,7 @@
 """
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,11 +11,12 @@ from pydantic import BaseModel
 
 from ... import models, security
 from ...database import get_db_session
-from ...crud import local_danmaku as crud
-from ...local_danmaku_scanner import LocalDanmakuScanner
-from ...task_manager import TaskManager
+from ...crud import local_danmaku as crud, anime as anime_crud, episode as episode_crud, danmaku as danmaku_crud
+from ...local_danmaku_scanner import LocalDanmakuScanner, copy_local_poster
+from ...danmaku_parser import parse_dandan_xml_to_comments
+from ...task_manager import TaskManager, TaskSuccess
 from ...config_manager import ConfigManager
-from ..dependencies import get_config_manager
+from ..dependencies import get_config_manager, get_task_manager
 from ..ui_models import FileItem
 
 
@@ -129,10 +131,40 @@ async def browse_directory(
         raise HTTPException(status_code=500, detail=f"浏览目录失败: {str(e)}")
 
 
+@router.get("/local-scan/last-path", summary="获取上次使用的扫描路径")
+async def get_last_scan_path(
+    config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取上次使用的扫描路径"""
+    try:
+        last_path = await config_manager.get("local_scan_last_path", "")
+        return {"path": last_path}
+    except Exception as e:
+        logger.error(f"获取上次扫描路径失败: {e}", exc_info=True)
+        return {"path": ""}
+
+
+@router.post("/local-scan/save-path", summary="保存扫描路径")
+async def save_scan_path(
+    payload: LocalScanRequest,
+    config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """保存扫描路径以便下次使用"""
+    try:
+        await config_manager.set("local_scan_last_path", payload.scanPath)
+        return {"message": "路径已保存"}
+    except Exception as e:
+        logger.error(f"保存扫描路径失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"保存路径失败: {str(e)}")
+
+
 @router.post("/local-scan", status_code=202, summary="扫描本地弹幕文件")
 async def scan_local_danmaku(
     payload: LocalScanRequest,
     request: Request,
+    config_manager: ConfigManager = Depends(get_config_manager),
     current_user: models.User = Depends(security.get_current_user)
 ):
     """
@@ -145,6 +177,9 @@ async def scan_local_danmaku(
     4. 存入local_danmaku_items表
     """
     try:
+        # 保存路径以便下次使用
+        await config_manager.set("local_scan_last_path", payload.scanPath)
+
         # 从app.state获取session_factory
         session_factory = request.app.state.db_session_factory
         scanner = LocalDanmakuScanner(session_factory)
@@ -290,18 +325,21 @@ async def batch_delete_local_items(
 @router.post("/local-items/import", status_code=202, summary="导入本地弹幕")
 async def import_local_items(
     payload: LocalItemsImportRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
+    task_manager: TaskManager = Depends(get_task_manager),
     current_user: models.User = Depends(security.get_current_user)
 ):
     """
     导入选中的本地弹幕项到弹幕库
-    
-    TODO: 实现导入逻辑
+
+    实现逻辑:
     1. 读取.xml文件内容
     2. 解析弹幕数据
     3. 创建anime/episode记录
-    4. 批量插入comment记录
-    5. 标记isImported=true
+    4. 复制海报文件(如果有)
+    5. 批量插入comment记录
+    6. 标记isImported=true
     """
     # 收集所有要导入的item_ids
     all_item_ids = set()
@@ -326,15 +364,115 @@ async def import_local_items(
     if not all_item_ids:
         return {"message": "没有要导入的项目"}
 
-    # TODO: 实现实际的导入逻辑
-    # 目前仅标记为已导入
-    for item_id in all_item_ids:
-        await crud.update_local_item(session, item_id, isImported=True)
+    # 创建后台任务执行导入
+    async def import_task():
+        success_count = 0
+        error_count = 0
 
-    logger.info(f"用户 '{current_user.username}' 导入了 {len(all_item_ids)} 个本地弹幕项")
+        for item_id in all_item_ids:
+            try:
+                # 获取本地项信息
+                item = await crud.get_local_item_by_id(session, item_id)
+                if not item:
+                    logger.warning(f"本地项不存在: {item_id}")
+                    error_count += 1
+                    continue
+
+                # 读取XML文件
+                xml_path = Path(item.filePath)
+                if not xml_path.exists():
+                    logger.error(f"弹幕文件不存在: {xml_path}")
+                    error_count += 1
+                    continue
+
+                xml_content = xml_path.read_text(encoding='utf-8')
+                comments = parse_dandan_xml_to_comments(xml_content)
+
+                if not comments:
+                    logger.warning(f"弹幕文件为空或解析失败: {xml_path}")
+                    error_count += 1
+                    continue
+
+                # 处理海报
+                local_image_path = None
+                if item.posterUrl:
+                    # 如果posterUrl是本地路径,复制到海报目录
+                    poster_path = Path(item.posterUrl)
+                    if not poster_path.is_absolute():
+                        # 相对路径,相对于xml文件所在目录
+                        poster_path = xml_path.parent / item.posterUrl
+
+                    if poster_path.exists():
+                        local_image_path = copy_local_poster(str(poster_path))
+                        if local_image_path:
+                            logger.info(f"海报已复制: {poster_path} -> {local_image_path}")
+
+                # 创建或查找anime记录
+                anime_id = await anime_crud.find_or_create_anime(
+                    session,
+                    title=item.title,
+                    anime_type=item.mediaType,
+                    season=item.season or 1,
+                    year=item.year,
+                    image_url=None,  # 不使用URL
+                    local_image_path=local_image_path  # 使用本地路径
+                )
+
+                # 创建custom源(如果不存在)
+                source = await anime_crud.get_or_create_custom_source(session, anime_id)
+
+                # 创建或查找episode记录
+                episode_index = item.episode or 1
+                episode = await episode_crud.find_episode_by_index(session, source.id, episode_index)
+
+                if not episode:
+                    # 创建新episode
+                    episode_id = await episode_crud.create_episode(
+                        session,
+                        source_id=source.id,
+                        episode_index=episode_index,
+                        title=f"第{episode_index}集",
+                        provider_episode_id=None,
+                        source_url=None
+                    )
+                else:
+                    episode_id = episode.id
+
+                # 保存弹幕
+                config_manager = request.app.state.config_manager
+                added_count = await danmaku_crud.save_danmaku_for_episode(
+                    session,
+                    episode_id,
+                    comments,
+                    config_manager
+                )
+
+                # 标记为已导入
+                await crud.update_local_item(session, item_id, {"isImported": True})
+                await session.commit()
+
+                success_count += 1
+                logger.info(f"成功导入: {item.title} - 第{episode_index}集, 弹幕数: {added_count}")
+
+            except Exception as e:
+                logger.error(f"导入本地项失败 (ID: {item_id}): {e}", exc_info=True)
+                error_count += 1
+                await session.rollback()
+                continue
+
+        raise TaskSuccess(f"导入完成: 成功 {success_count} 个, 失败 {error_count} 个")
+
+    # 提交任务
+    task_id, _ = await task_manager.submit_task(
+        import_task,
+        f"导入本地弹幕 ({len(all_item_ids)} 个项目)"
+    )
+
+    logger.info(f"用户 '{current_user.username}' 提交了本地弹幕导入任务: {task_id}")
 
     return {
         "message": f"已提交导入任务,共 {len(all_item_ids)} 个项目",
+        "taskId": task_id,
         "count": len(all_item_ids)
     }
 

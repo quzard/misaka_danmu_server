@@ -4,6 +4,8 @@
 import os
 import re
 import logging
+import shutil
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -98,6 +100,20 @@ class LocalDanmakuScanner:
         if poster_url and os.path.isabs(poster_url):
             poster_url = os.path.relpath(poster_url, scan_root)
 
+        # 对于电影,检测版本标识(如果文件名包含语言/版本信息)
+        # 例如: movie.zh.xml, movie.en.xml, movie.4k.xml
+        version_suffix = None
+        if media_type == "movie" and '.' in file_name:
+            parts = file_name.split('.')
+            if len(parts) > 1:
+                # 最后一部分可能是版本标识
+                potential_version = parts[-1]
+                # 常见的版本标识: zh, en, ja, 4k, 1080p, bluray等
+                if potential_version.lower() in ['zh', 'en', 'ja', 'ko', 'cht', 'chs', '4k', '1080p', '720p', 'bluray', 'web-dl', 'webrip']:
+                    version_suffix = potential_version
+                    # 如果有版本标识,在标题后添加
+                    title = f"{title} [{version_suffix.upper()}]"
+
         # 存入数据库
         async with self.session_factory() as session:
             await crud.create_local_item(
@@ -120,14 +136,24 @@ class LocalDanmakuScanner:
     def _find_and_parse_nfo(self, xml_file: Path) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """
         查找并解析nfo文件
-        
+
         Returns:
             (nfo文件路径, nfo数据字典)
         """
         # 策略1: 查找同名nfo文件(电影)
+        # 例如: movie.zh.xml -> movie.nfo 或 movie.zh.nfo
         nfo_file = xml_file.with_suffix('.nfo')
         if nfo_file.exists():
             return str(nfo_file), self._parse_nfo(nfo_file)
+
+        # 策略1.1: 尝试去除语言后缀后查找nfo
+        # 例如: movie.zh.xml -> movie.nfo
+        stem = xml_file.stem  # 例如: movie.zh
+        if '.' in stem:
+            base_name = stem.rsplit('.', 1)[0]  # 例如: movie
+            base_nfo = xml_file.parent / f"{base_name}.nfo"
+            if base_nfo.exists():
+                return str(base_nfo), self._parse_nfo(base_nfo)
 
         # 策略2: 查找父目录下的tvshow.nfo(电视剧)
         tvshow_nfo = xml_file.parent / 'tvshow.nfo'
@@ -138,6 +164,11 @@ class LocalDanmakuScanner:
         parent_tvshow_nfo = xml_file.parent.parent / 'tvshow.nfo'
         if parent_tvshow_nfo.exists():
             return str(parent_tvshow_nfo), self._parse_nfo(parent_tvshow_nfo)
+
+        # 策略4: 查找父目录下的movie.nfo(电影文件夹)
+        movie_nfo = xml_file.parent / 'movie.nfo'
+        if movie_nfo.exists():
+            return str(movie_nfo), self._parse_nfo(movie_nfo)
 
         return None, None
 
@@ -252,4 +283,52 @@ class LocalDanmakuScanner:
         # 移除多余空格
         title = re.sub(r'\s+', ' ', title).strip()
         return title
+
+
+def copy_local_poster(poster_path: str) -> Optional[str]:
+    """
+    复制本地海报文件到海报目录
+
+    Args:
+        poster_path: 本地海报文件路径(可以是相对路径或绝对路径)
+
+    Returns:
+        复制后的Web可访问路径,例如 /data/images/xxxx.jpg
+        失败返回None
+    """
+    try:
+        from .image_utils import IMAGE_DIR
+
+        poster_file = Path(poster_path)
+
+        # 如果是相对路径,尝试解析为绝对路径
+        if not poster_file.is_absolute():
+            # 尝试相对于当前工作目录
+            poster_file = Path.cwd() / poster_file
+
+        if not poster_file.exists():
+            logger.warning(f"海报文件不存在: {poster_file}")
+            return None
+
+        if not poster_file.is_file():
+            logger.warning(f"海报路径不是文件: {poster_file}")
+            return None
+
+        # 确保图片目录存在
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 生成新文件名
+        extension = poster_file.suffix or ".jpg"
+        new_filename = f"{uuid.uuid4()}{extension}"
+        dest_path = IMAGE_DIR / new_filename
+
+        # 复制文件
+        shutil.copy2(poster_file, dest_path)
+        logger.info(f"海报已复制: {poster_file} -> {dest_path}")
+
+        return f"/data/images/{new_filename}"
+
+    except Exception as e:
+        logger.error(f"复制海报文件失败 {poster_path}: {e}", exc_info=True)
+        return None
 
