@@ -249,11 +249,16 @@ class GamerScraper(BaseScraper):
         Performs a cached search for Gamer content.
         It caches the base results for a title and then filters them based on season.
         """
-        
+        # 检查是否配置了反代域名,如果没有配置则跳过搜索
+        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
+        if not proxy_domain or not proxy_domain.strip():
+            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),跳过搜索。请在'搜索源'设置中配置巴哈姆特反代域名。")
+            return []
+
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
         search_season = parsed['season']
-        
+
         trad_search_title = self.cc_s2t.convert(search_title)
         cache_key = f"search_base_{self.provider_name}_{trad_search_title}"
         cached_results = await self._get_from_cache(cache_key)
@@ -438,9 +443,15 @@ class GamerScraper(BaseScraper):
         return str(provider_episode_id)
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
+        # 检查是否配置了反代域名
+        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
+        if not proxy_domain or not proxy_domain.strip():
+            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),无法获取分集列表。")
+            return []
+
         await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 media_id={media_id} 获取分集列表...")
-        
+
         # 修正：直接请求作品集页面(animeRef.php)，而不是依赖于播放页(animeVideo.php)的重定向，这与Lua脚本的逻辑一致，更健壮。
         url = f"https://ani.gamer.com.tw/animeRef.php?sn={media_id}"
         
@@ -515,9 +526,15 @@ class GamerScraper(BaseScraper):
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
+        # 检查是否配置了反代域名
+        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
+        if not proxy_domain or not proxy_domain.strip():
+            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),无法获取弹幕。")
+            return []
+
         await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 episode_id={episode_id} 获取弹幕...")
-        
+
         url = "https://ani.gamer.com.tw/ajax/danmuGet.php"
         data = {"sn": episode_id}
         
