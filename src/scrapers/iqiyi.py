@@ -441,7 +441,7 @@ class IqiyiScraper(BaseScraper):
                 response = await self._request(method, url, **kwargs)
                 response.raise_for_status()  # 检查 4xx/5xx 错误
                 return response
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError, httpx.ReadError) as e:
                 last_exception = e
                 self.logger.warning(f"爱奇艺: 请求失败 (尝试 {attempt + 1}/{retries}): {e}")
                 if attempt < retries - 1:
@@ -637,7 +637,7 @@ class IqiyiScraper(BaseScraper):
                 all_results.extend(res_list)
             elif isinstance(res_list, Exception):
                 # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
-                if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError)):
+                if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
                     self.logger.warning(f"爱奇艺 ({api_name}): 搜索时连接超时或网络错误: {res_list}")
                 else:
                     # 对于其他意外错误，仍然记录完整的堆栈跟踪以供调试。

@@ -346,7 +346,7 @@ class GamerScraper(BaseScraper):
                 self.logger.info(f"Gamer: 搜索结果列表:\n{log_results}")
             return results
 
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
             self.logger.warning(f"Gamer: 搜索 '{trad_keyword}' 时连接超时或网络错误: {e}")
             return []
         except httpx.HTTPStatusError as e:

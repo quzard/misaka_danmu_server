@@ -514,7 +514,11 @@ class BilibiliScraper(BaseScraper):
         all_results = []
         for res in results_from_all_types:
             if isinstance(res, Exception):
-                self.logger.error(f"Bilibili: A search sub-task failed: {res}", exc_info=True)
+                # 对常见的网络错误只记录警告
+                if isinstance(res, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
+                    self.logger.warning(f"Bilibili: 搜索时网络错误: {res}")
+                else:
+                    self.logger.error(f"Bilibili: A search sub-task failed: {res}", exc_info=True)
             elif res:
                 all_results.extend(res)
         

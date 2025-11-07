@@ -282,6 +282,9 @@ class LetvScraper(BaseScraper):
 
             return results
 
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
+            self.logger.warning(f"乐视网: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
+            return []
         except httpx.HTTPStatusError as e:
             self.logger.error(f"乐视网: HTTP请求失败 (状态码: {e.response.status_code}): {e}", exc_info=True)
             return []

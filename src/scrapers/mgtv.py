@@ -329,7 +329,7 @@ class MgtvScraper(BaseScraper):
                 log_results = "\n".join([f"  - {r.title} (ID: {r.mediaId}, 类型: {r.type}, 年份: {r.year or 'N/A'}, 集数: {r.episodeCount or 'N/A'})" for r in results])
                 self.logger.info(f"MGTV: 搜索结果列表:\n{log_results}")
             return results
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
             self.logger.warning(f"MGTV: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
             return []
         except Exception as e:

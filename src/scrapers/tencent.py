@@ -579,7 +579,7 @@ class TencentScraper(BaseScraper):
             if isinstance(res_list, list):
                 all_fallback_results.extend(res_list)
             elif isinstance(res_list, Exception):
-                if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError)):
+                if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
                     self.logger.warning(f"Tencent (备用 - {api_name}): 搜索时连接超时或网络错误: {res_list}")
                 else:
                     self.logger.error(f"Tencent (备用 - {api_name}): 搜索子任务失败", exc_info=res_list)
