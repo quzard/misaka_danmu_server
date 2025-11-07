@@ -814,9 +814,6 @@ const LocalItemList = ({ refreshTrigger }) => {
               selectedRowKeys,
               onChange: setSelectedRowKeys,
               checkStrictly: false,
-              getCheckboxProps: (record) => ({
-                disabled: record.isGroup && record.mediaType === 'movie',
-              }),
             }}
             size="small"
             scroll={{ x: 600 }}
