@@ -294,8 +294,6 @@ a:hover {
   .ant-modal-body {
     max-height: 60vh;
     overflow-y: auto;
-    background: var(--color-primary) !important; /* Modal内容区域使用主题色背景 */
-    color: white !important; /* 在主题色背景上使用白色文字 */
   }
 
   /* 移动端输入框优化 */
