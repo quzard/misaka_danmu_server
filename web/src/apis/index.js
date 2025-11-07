@@ -567,6 +567,9 @@ export const importMediaItems = (data) => api.post('/api/ui/media-items/import',
 
 // ==================== 本地弹幕扫描 ====================
 
+/** 获取可用的扫描目录列表 */
+export const getAvailableDirectories = () => api.get('/api/ui/local-scan/directories')
+
 /** 扫描本地弹幕文件 */
 export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
 

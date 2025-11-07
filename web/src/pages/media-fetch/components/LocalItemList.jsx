@@ -149,27 +149,70 @@ const LocalItemList = ({ refreshTrigger }) => {
     }
   };
 
-  // 导入
-  const handleImport = async (record) => {
+  // 辅助函数:根据key查找item
+  const findItemByKey = (list, key) => {
+    for (const item of list) {
+      if (item.key === key) return item;
+      if (item.children) {
+        const found = findItemByKey(item.children, key);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // 批量导入
+  const handleBatchImport = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择要导入的项目');
+      return;
+    }
+
+    // 分类收集要导入的项目
+    const itemIds = [];
+    const shows = [];
+    const seasons = [];
+
+    selectedRowKeys.forEach(key => {
+      if (key.startsWith('movie-')) {
+        // 电影(需要从后端获取ID)
+        const item = findItemByKey(items, key);
+        if (item && item.id) {
+          itemIds.push(item.id);
+        }
+      } else {
+        // 查找对应的item
+        const item = findItemByKey(items, key);
+        if (!item) return;
+
+        if (item.mediaType === 'tv_season') {
+          // 某一季
+          seasons.push({
+            title: item.showTitle,
+            season: item.season
+          });
+        }
+      }
+    });
+
+    if (itemIds.length === 0 && shows.length === 0 && seasons.length === 0) {
+      message.warning('没有可导入的项目');
+      return;
+    }
+
     try {
       const payload = {};
-      if (record.mediaType === 'movie') {
-        // 电影: 导入单个项目(需要从后端获取ID)
-        message.warning('电影导入功能待实现');
-        return;
-      } else if (record.mediaType === 'tv_show') {
-        // 电视剧组: 导入所有集
-        payload.shows = [{ title: record.title }];
-      } else if (record.mediaType === 'tv_season') {
-        // 季度: 导入该季所有集
-        payload.seasons = [{ title: record.showTitle, season: record.season }];
-      }
+      if (itemIds.length > 0) payload.itemIds = itemIds;
+      if (shows.length > 0) payload.shows = shows;
+      if (seasons.length > 0) payload.seasons = seasons;
 
       const res = await importLocalItems(payload);
       message.success(res.data.message || '导入任务已提交');
+      setSelectedRowKeys([]);
       loadItems(pagination.current, pagination.pageSize);
     } catch (error) {
       message.error('导入失败: ' + (error.message || '未知错误'));
+      console.error(error);
     }
   };
 
@@ -220,37 +263,126 @@ const LocalItemList = ({ refreshTrigger }) => {
       render: (year) => year || '-',
     },
     {
-      title: 'TMDB ID',
-      dataIndex: 'tmdbId',
-      key: 'tmdbId',
+      title: '状态',
+      dataIndex: 'isImported',
+      key: 'isImported',
       width: '10%',
-      render: (id) => id || '-',
-    },
-    {
-      title: '统计',
-      key: 'stats',
-      width: '15%',
-      render: (_, record) => {
-        if (record.mediaType === 'tv_show') {
-          return `${record.seasonCount || 0}季 / ${record.episodeCount || 0}集`;
-        } else if (record.mediaType === 'tv_season') {
-          return `${record.episodeCount || 0}集`;
-        }
-        return '-';
+      render: (isImported, record) => {
+        if (record.isGroup) return '-';
+        return isImported ? (
+          <Tag color="success">已导入</Tag>
+        ) : (
+          <Tag>未导入</Tag>
+        );
       },
     },
     {
       title: '操作',
       key: 'action',
-      width: '25%',
+      width: '20%',
       render: (_, record) => {
+        // 剧集组显示删除和导入整部按钮
+        if (record.isGroup && record.mediaType === 'tv_show') {
+          return (
+            <Space size="small">
+              <Popconfirm
+                title={`确定要删除《${record.title}》的所有集吗?`}
+                onConfirm={() => {
+                  // 删除整部剧集
+                  batchDeleteLocalItems({
+                    shows: [{ title: record.title }]
+                  })
+                    .then(() => {
+                      message.success(`成功删除《${record.title}》`);
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('删除失败'));
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除整部
+                </Button>
+              </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 导入整部剧集
+                  importLocalItems({
+                    shows: [{ title: record.title }]
+                  })
+                    .then((res) => {
+                      message.success(res.data.message || '导入任务已提交');
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('导入失败'));
+                }}
+              >
+                导入整部
+              </Button>
+            </Space>
+          );
+        }
+
+        // 季度显示删除和导入按钮
+        if (record.mediaType === 'tv_season') {
+          return (
+            <Space size="small">
+              <Popconfirm
+                title={`确定要删除第${record.season}季的所有集吗?`}
+                onConfirm={() => {
+                  // 删除该季度
+                  batchDeleteLocalItems({
+                    seasons: [{
+                      title: record.showTitle,
+                      season: record.season
+                    }]
+                  })
+                    .then(() => {
+                      message.success(`成功删除第${record.season}季`);
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('删除失败'));
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除该季
+                </Button>
+              </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 导入该季度
+                  importLocalItems({
+                    seasons: [{
+                      title: record.showTitle,
+                      season: record.season
+                    }]
+                  })
+                    .then((res) => {
+                      message.success(res.data.message || '导入任务已提交');
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('导入失败'));
+                }}
+              >
+                导入该季
+              </Button>
+            </Space>
+          );
+        }
+
         // 电影操作
         if (record.mediaType === 'movie') {
           return (
             <Space size="small">
-              <Button type="link" size="small" icon={<ImportOutlined />} onClick={() => handleImport(record)}>
-                导入
-              </Button>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
                 编辑
               </Button>
@@ -263,14 +395,7 @@ const LocalItemList = ({ refreshTrigger }) => {
           );
         }
 
-        // 电视剧组和季度操作
-        return (
-          <Space size="small">
-            <Button type="link" size="small" icon={<ImportOutlined />} onClick={() => handleImport(record)}>
-              导入
-            </Button>
-          </Space>
-        );
+        return null;
       },
     },
   ];
@@ -281,6 +406,14 @@ const LocalItemList = ({ refreshTrigger }) => {
         title="扫描结果"
         extra={
           <Space>
+            <Button
+              type="primary"
+              icon={<ImportOutlined />}
+              disabled={selectedRowKeys.length === 0}
+              onClick={handleBatchImport}
+            >
+              批量导入 ({selectedRowKeys.length})
+            </Button>
             <Popconfirm
               title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
               onConfirm={handleBatchDelete}

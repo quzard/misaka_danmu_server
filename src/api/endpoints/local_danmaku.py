@@ -2,6 +2,7 @@
 本地弹幕扫描相关API端点
 """
 import logging
+import os
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,8 @@ from ...database import get_db_session
 from ...crud import local_danmaku as crud
 from ...local_danmaku_scanner import LocalDanmakuScanner
 from ...task_manager import TaskManager
+from ...config_manager import ConfigManager
+from ..dependencies import get_config_manager
 
 
 router = APIRouter()
@@ -43,6 +46,49 @@ class LocalItemsImportRequest(BaseModel):
 
 
 # ==================== API Endpoints ====================
+
+@router.get("/local-scan/directories", summary="获取可用的扫描目录列表")
+async def get_available_directories(
+    config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取可用的本地弹幕扫描目录列表
+
+    从配置中读取预设的目录列表,并检查目录是否存在
+    """
+    try:
+        # 从配置中获取预设目录列表
+        directories_config = await config_manager.get("local_scan_directories", "[]")
+        import json
+        directories = json.loads(directories_config) if isinstance(directories_config, str) else directories_config
+
+        # 如果配置为空,返回一些默认示例
+        if not directories:
+            directories = [
+                "/mnt/media/danmaku",
+                "/mnt/media/anime",
+                "D:\\Media\\Danmaku",
+                "D:\\Media\\Anime"
+            ]
+
+        # 检查目录是否存在并构建返回列表
+        result = []
+        for dir_path in directories:
+            exists = os.path.exists(dir_path) and os.path.isdir(dir_path)
+            result.append({
+                "label": dir_path,
+                "value": dir_path,
+                "exists": exists
+            })
+
+        return {
+            "directories": result
+        }
+    except Exception as e:
+        logger.error(f"获取目录列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取目录列表失败: {str(e)}")
+
 
 @router.post("/local-scan", status_code=202, summary="扫描本地弹幕文件")
 async def scan_local_danmaku(
