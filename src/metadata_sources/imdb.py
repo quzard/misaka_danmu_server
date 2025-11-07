@@ -394,7 +394,11 @@ class ImdbMetadataSource(BaseMetadataSource):
             return None
 
     async def _search_via_api(self, keyword: str, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        """使用第三方API搜索 (api.imdbapi.dev)"""
+        """使用第三方API搜索 (api.imdbapi.dev) - 暂时禁用,因为CORS限制"""
+        self.logger.warning(f"IMDb: 第三方API暂时禁用(CORS限制),跳过API搜索")
+        return []
+
+        # 以下代码保留,待API可用时启用
         formatted_keyword = keyword.strip()
         if not formatted_keyword:
             return []
