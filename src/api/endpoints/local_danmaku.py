@@ -240,6 +240,20 @@ async def get_local_works(
     return result
 
 
+@router.get("/local-movies/{title}/files", response_model=Dict[str, Any], summary="获取电影的弹幕文件列表")
+async def get_local_movie_files(
+    title: str,
+    year: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取电影的所有弹幕文件"""
+    files = await crud.get_movie_files(session, title, year, page, page_size)
+    return files
+
+
 @router.get("/local-shows/{title}/seasons", response_model=List[Dict[str, Any]], summary="获取本地剧集的季度信息")
 async def get_local_show_seasons(
     title: str,

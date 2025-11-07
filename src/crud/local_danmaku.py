@@ -211,6 +211,55 @@ async def get_show_seasons(
     ]
 
 
+async def get_movie_files(
+    session: AsyncSession,
+    title: str,
+    year: Optional[int] = None,
+    page: int = 1,
+    page_size: int = 100
+) -> Dict[str, Any]:
+    """获取电影的弹幕文件列表"""
+    # 构建查询条件
+    conditions = [
+        LocalDanmakuItem.title == title,
+        LocalDanmakuItem.mediaType == "movie"
+    ]
+    if year is not None:
+        conditions.append(LocalDanmakuItem.year == year)
+
+    # 查询总数
+    count_stmt = select(func.count()).select_from(LocalDanmakuItem).where(and_(*conditions))
+    total_result = await session.execute(count_stmt)
+    total = total_result.scalar_one()
+
+    # 分页查询
+    stmt = select(LocalDanmakuItem).where(and_(*conditions)).order_by(LocalDanmakuItem.filePath).offset((page - 1) * page_size).limit(page_size)
+
+    result = await session.execute(stmt)
+    files = result.scalars().all()
+
+    return {
+        "list": [
+            {
+                "id": f.id,
+                "filePath": f.filePath,
+                "title": f.title,
+                "year": f.year,
+                "tmdbId": f.tmdbId,
+                "tvdbId": f.tvdbId,
+                "imdbId": f.imdbId,
+                "posterUrl": f.posterUrl,
+                "nfoPath": f.nfoPath,
+                "isImported": f.isImported
+            }
+            for f in files
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
 async def get_season_episodes(
     session: AsyncSession,
     title: str,

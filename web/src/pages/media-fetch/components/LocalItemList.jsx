@@ -3,6 +3,7 @@ import { Card, Table, Button, Space, message, Popconfirm, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import {
   getLocalWorks,
+  getLocalMovieFiles,
   getLocalShowSeasons,
   deleteLocalItem,
   batchDeleteLocalItems,
@@ -55,18 +56,52 @@ const LocalItemList = ({ refreshTrigger }) => {
     }
   };
 
-  // 构建树形数据结构(作品 > 季度)
+  // 构建树形数据结构(作品 > 季度/文件)
   const buildTreeData = async (worksList) => {
     const result = [];
 
     for (const work of worksList) {
       if (work.type === 'movie') {
-        // 电影节点 - 使用ids作为key
-        result.push({
-          ...work,
-          key: JSON.stringify(work.ids),  // 使用JSON序列化的ids数组作为key
-          isGroup: false,
-        });
+        // 电影节点 - 查询弹幕文件列表
+        try {
+          const filesRes = await getLocalMovieFiles(work.title, work.year);
+          const files = filesRes.data?.list || [];
+
+          result.push({
+            key: JSON.stringify(work.ids),  // 使用JSON序列化的ids数组作为key
+            title: work.title,
+            mediaType: 'movie',
+            year: work.year,
+            tmdbId: work.tmdbId,
+            tvdbId: work.tvdbId,
+            imdbId: work.imdbId,
+            posterUrl: work.posterUrl,
+            isGroup: true,
+            itemCount: work.itemCount,
+            children: files.map(f => ({
+              key: f.id,  // 文件使用id作为key
+              title: f.filePath.split(/[/\\]/).pop(),  // 显示文件名
+              filePath: f.filePath,
+              year: f.year,
+              tmdbId: f.tmdbId,
+              tvdbId: f.tvdbId,
+              imdbId: f.imdbId,
+              posterUrl: f.posterUrl,
+              mediaType: 'movie_file',
+              movieTitle: work.title,
+              isGroup: false,
+              isImported: f.isImported,
+            })),
+          });
+        } catch (error) {
+          console.error(`加载电影文件失败: ${work.title}`, error);
+          // 如果加载失败,仍然显示电影节点,但没有子节点
+          result.push({
+            ...work,
+            key: JSON.stringify(work.ids),
+            isGroup: false,
+          });
+        }
       } else if (work.type === 'tv_show') {
         // 电视剧组节点
         try {

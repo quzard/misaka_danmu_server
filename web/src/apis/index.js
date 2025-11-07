@@ -585,6 +585,14 @@ export const getLocalItems = (params) => api.get('/api/ui/local-items', params)
 /** 获取本地作品列表(按作品分组) */
 export const getLocalWorks = (params) => api.get('/api/ui/local-works', params)
 
+/** 获取电影的弹幕文件列表 */
+export const getLocalMovieFiles = (title, year = null, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-movies/${encodeURIComponent(title)}/files`, {
+    year,
+    page,
+    page_size: pageSize
+  })
+
 /** 获取本地剧集的季度信息 */
 export const getLocalShowSeasons = (title) => api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons`)
 
