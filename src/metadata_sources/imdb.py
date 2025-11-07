@@ -395,7 +395,6 @@ class ImdbMetadataSource(BaseMetadataSource):
 
     async def _search_via_api(self, keyword: str, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         """使用第三方API搜索 (api.imdbapi.dev)"""
-        self.logger.info(f"IMDb: 正在使用第三方API搜索 '{keyword}'")
         formatted_keyword = keyword.strip()
         if not formatted_keyword:
             return []
