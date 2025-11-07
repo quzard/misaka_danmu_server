@@ -8,11 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from ... import models, security
-from ...api.dependencies import get_db_session
+from ...database import get_db_session, get_session_factory
 from ...crud import local_danmaku as crud
 from ...local_danmaku_scanner import LocalDanmakuScanner
 from ...task_manager import TaskManager
-from ...database import get_session_factory
 
 
 router = APIRouter()
