@@ -26,7 +26,6 @@ const MediaFetch = () => {
   return (
     <div style={{ padding: '24px' }}>
       <div className="my-6">
-        <h1 className="text-2xl font-bold mb-6">媒体获取</h1>
         {isMobile ? (
           <MobileTabs
             items={items}

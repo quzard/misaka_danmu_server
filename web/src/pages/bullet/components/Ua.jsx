@@ -145,7 +145,7 @@ export const Ua = () => {
 
   return (
     <div className="my-6">
-      <Card loading={loading} title="全局 User-Agent 过滤">
+      <Card title="全局 User-Agent 过滤">
         <div className="mb-4">
           对所有通过Token的访问请求进行UA过滤。模式为 "off" 时不过滤。
         </div>
@@ -159,7 +159,8 @@ export const Ua = () => {
                 setMode(value)
               }}
               style={{ width: '100%' }}
-              value={mode}
+              value={['off', 'blacklist', 'whitelist'].includes(mode) ? mode : 'off'}
+              loading={loading}
               options={[
                 { value: 'off', label: '关闭 (Off)' },
                 { value: 'blacklist', label: '黑名单 (Blacklist)' },
@@ -167,12 +168,12 @@ export const Ua = () => {
               ]}
             />
           </Col>
-          <Col md={6} xs={12}>
-            <Button type="primary" block onClick={handleEdit}>
+          <Col md={6} xs={12} className="mt-3 md:mt-0">
+            <Button type="primary" block onClick={handleEdit} loading={loading}>
               保存模式
             </Button>
           </Col>
-          <Col md={6} xs={12}>
+          <Col md={6} xs={12} className="mt-3 md:mt-0">
             <Button type="primary" block onClick={handleList}>
               名单管理
             </Button>
