@@ -79,20 +79,12 @@ const { Text } = Typography;
 const convertToChonkyFiles = (apiFiles) => {
   return apiFiles.map(item => {
     const modDate = item.modify_time ? new Date(item.modify_time) : new Date();
-    const year = modDate.getFullYear();
-    const month = String(modDate.getMonth() + 1).padStart(2, '0');
-    const day = String(modDate.getDate()).padStart(2, '0');
-    const hour = String(modDate.getHours()).padStart(2, '0');
-    const minute = String(modDate.getMinutes()).padStart(2, '0');
-    const second = String(modDate.getSeconds()).padStart(2, '0');
-    const formattedDate = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 
     return {
       id: item.path,
       name: item.name,
       isDir: item.type === 'dir',
       modDate: modDate,
-      modDateFormatted: formattedDate,
       size: item.size || 0,
     };
   });
@@ -125,6 +117,39 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   const [currentPath, setCurrentPath] = useState('/');
   const [files, setFiles] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
+
+  // 格式化时间显示
+  useEffect(() => {
+    const formatTimeElements = () => {
+      // 查找所有时间元素并格式化
+      const timeElements = document.querySelectorAll('.chonky-fileEntry > div:nth-child(2)');
+      timeElements.forEach(el => {
+        const text = el.textContent;
+        // 如果是英文时间格式,尝试解析并重新格式化
+        if (text && text.includes(',')) {
+          try {
+            const date = new Date(text);
+            if (!isNaN(date.getTime())) {
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              const hour = String(date.getHours()).padStart(2, '0');
+              const minute = String(date.getMinutes()).padStart(2, '0');
+              const second = String(date.getSeconds()).padStart(2, '0');
+              el.textContent = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+      });
+    };
+
+    if (visible && files.length > 0) {
+      // 延迟执行以确保DOM已渲染
+      setTimeout(formatTimeElements, 100);
+    }
+  }, [visible, files]);
 
   useEffect(() => {
     if (visible) {

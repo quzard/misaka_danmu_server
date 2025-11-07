@@ -33,9 +33,13 @@
   margin-left: 8px;
 }
 
-.chonky-fileListHeader .chonky-fileListHeaderEntry:nth-child(3)::after {
-  content: '大小';
-  margin-left: 8px;
+/* 隐藏大小列 */
+.chonky-fileListHeader .chonky-fileListHeaderEntry:nth-child(3) {
+  display: none !important;
+}
+
+.chonky-fileList .chonky-fileEntry > div:nth-child(3) {
+  display: none !important;
 }
 
 /* 隐藏原始英文文本 */

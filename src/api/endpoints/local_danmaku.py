@@ -50,31 +50,6 @@ class LocalItemsImportRequest(BaseModel):
 
 # ==================== API Endpoints ====================
 
-def calculate_directory_size(path_obj) -> int:
-    """
-    递归计算目录大小(字节)
-
-    参数:
-    - path_obj: Path对象
-
-    返回:
-    - 目录总大小(字节)
-    """
-    total_size = 0
-    try:
-        for item in path_obj.rglob('*'):
-            try:
-                if item.is_file():
-                    total_size += item.stat().st_size
-            except (PermissionError, OSError):
-                # 跳过无权限访问的文件
-                continue
-    except (PermissionError, OSError):
-        # 跳过无权限访问的目录
-        pass
-    return total_size
-
-
 @router.post("/local-scan/browse", summary="浏览本地目录")
 async def browse_directory(
     fileitem: FileItem,
@@ -121,12 +96,6 @@ async def browse_directory(
                     item_stat = item.stat()
                     is_dir = item.is_dir()
 
-                    # 计算文件夹大小
-                    if is_dir:
-                        dir_size = calculate_directory_size(item)
-                    else:
-                        dir_size = item_stat.st_size
-
                     file_item = FileItem(
                         storage="local",
                         type="dir" if is_dir else "file",
@@ -134,7 +103,7 @@ async def browse_directory(
                         name=item.name,
                         basename=item.stem if not is_dir else item.name,
                         extension=item.suffix[1:] if item.suffix else None,
-                        size=dir_size,
+                        size=item_stat.st_size if not is_dir else 0,
                         modify_time=datetime.fromtimestamp(item_stat.st_mtime)
                     )
                     result.append(file_item)
