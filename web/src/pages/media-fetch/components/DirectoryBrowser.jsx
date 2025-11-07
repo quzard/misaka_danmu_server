@@ -15,15 +15,23 @@ import './DirectoryBrowser.css';
 // 定义中文文件操作
 const ChineseActions = {
   EnableListView: defineFileAction({
-    id: 'enable_list_view',
+    id: ChonkyActions.EnableListView.id,
     button: {
       name: '列表视图',
       toolbar: true,
       icon: ChonkyActions.EnableListView.button.icon,
     },
   }),
+  EnableGridView: defineFileAction({
+    id: ChonkyActions.EnableGridView.id,
+    button: {
+      name: '网格视图',
+      toolbar: true,
+      icon: ChonkyActions.EnableGridView.button.icon,
+    },
+  }),
   SortFilesByName: defineFileAction({
-    id: 'sort_by_name',
+    id: ChonkyActions.SortFilesByName.id,
     sortKeySelector: (file) => file.name.toLowerCase(),
     button: {
       name: '按名称排序',
@@ -32,7 +40,7 @@ const ChineseActions = {
     },
   }),
   SortFilesByDate: defineFileAction({
-    id: 'sort_by_date',
+    id: ChonkyActions.SortFilesByDate.id,
     sortKeySelector: (file) => file.modDate,
     button: {
       name: '按日期排序',
@@ -165,9 +173,9 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       }
       open={visible}
       onCancel={onClose}
-      width="95vw"
+      width="75vw"
       style={{
-        margin: '2vh 2.5vw 4vh',
+        margin: '2vh 12.5vw 4vh',
         top: '2vh',
         height: '94vh',
         maxWidth: 'none',
@@ -175,11 +183,13 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
         borderRadius: '12px',
         overflow: 'hidden'
       }}
-      bodyStyle={{
-        padding: 0,
-        height: 'calc(94vh - 120px)',
-        overflow: 'hidden',
-        background: 'var(--color-bg)'
+      styles={{
+        body: {
+          padding: 0,
+          height: 'calc(94vh - 120px)',
+          overflow: 'hidden',
+          background: 'var(--color-bg)'
+        }
       }}
       footer={
         <div style={{
@@ -236,6 +246,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
           folderChain={folderChain}
           fileActions={[
             ChineseActions.EnableListView,
+            ChineseActions.EnableGridView,
             ChineseActions.SortFilesByName,
             ChineseActions.SortFilesByDate,
             ChonkyActions.OpenFiles,
@@ -248,12 +259,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
                 setCurrentPath(targetFile.id);
               }
             }
-            // 处理中文操作
-            if (data.id === 'enable_list_view') {
-              // 列表视图已经是默认的
-            }
           }}
-          defaultFileViewActionId={ChineseActions.EnableListView.id}
+          defaultFileViewActionId={ChonkyActions.EnableListView.id}
           disableSelection={true}
           disableDragAndDrop={true}
           darkMode={false}
