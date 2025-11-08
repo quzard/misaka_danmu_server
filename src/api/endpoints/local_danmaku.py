@@ -510,20 +510,15 @@ async def import_local_items(
 
                 # 创建或查找episode记录
                 episode_index = item.episode or 1
-                episode = await episode_crud.find_episode_by_index(task_session, source_id, episode_index)
-
-                if not episode:
-                    # 创建新episode
-                    episode_id = await episode_crud.create_episode(
-                        task_session,
-                        source_id=source_id,
-                        episode_index=episode_index,
-                        title=f"第{episode_index}集",
-                        provider_episode_id=None,
-                        source_url=None
-                    )
-                else:
-                    episode_id = episode.id
+                episode_id = await episode_crud.create_episode_if_not_exists(
+                    task_session,
+                    anime_id=anime_id,
+                    source_id=source_id,
+                    episode_index=episode_index,
+                    title=f"第{episode_index}集",
+                    url=None,
+                    provider_episode_id=f"local_{item_id}_{episode_index}"
+                )
 
                 # 保存弹幕
                 config_manager = request.app.state.config_manager
