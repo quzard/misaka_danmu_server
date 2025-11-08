@@ -541,10 +541,34 @@ async def import_local_items(
                 provider = config.get('provider', 'custom')
                 media_id = config.get('mediaId')
 
-                # 如果没有指定mediaId,使用唯一格式: custom_{anime_id}_{item_id}
-                # 这样每个弹幕文件都会创建独立的source和episode
+                # 如果没有指定mediaId,从文件名自动识别来源标签
                 if not media_id:
-                    media_id = f"custom_{anime_id}_{item_id}"
+                    # 从文件路径提取文件名
+                    filename = xml_path.name.lower()
+
+                    # 识别来源标签
+                    source_label = None
+                    if 'bilibili' in filename or '哔哩' in filename:
+                        source_label = 'bilibili'
+                    elif 'iqiyi' in filename or '爱奇艺' in filename:
+                        source_label = 'iqiyi'
+                    elif 'tencent' in filename or '腾讯' in filename:
+                        source_label = 'tencent'
+                    elif 'youku' in filename or '优酷' in filename:
+                        source_label = 'youku'
+                    elif 'mgtv' in filename or '芒果' in filename:
+                        source_label = 'mgtv'
+                    elif 'renren' in filename or '人人' in filename:
+                        source_label = 'renren'
+
+                    # 生成mediaId
+                    if source_label:
+                        media_id = f"custom_{source_label}"
+                        logger.info(f"从文件名识别到来源: {source_label}, mediaId: {media_id}")
+                    else:
+                        # 如果无法识别,使用唯一ID避免冲突
+                        media_id = f"custom_{anime_id}_{item_id}"
+                        logger.info(f"未识别到来源标签,使用唯一mediaId: {media_id}")
 
                 # 创建或获取指定的源
                 from ...crud import source as source_crud
