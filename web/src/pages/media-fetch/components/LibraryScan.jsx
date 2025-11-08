@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid } from 'antd';
 import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
@@ -634,24 +634,27 @@ const LibraryScan = () => {
                         }}
                       >
                         <div>
-                          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '8px' }}>
                             <Checkbox
                               checked={selectedLibraryIds.includes(library.id)}
-                              onChange={() => {
+                              onChange={(e) => {
+                                e.stopPropagation();
                                 const newSelected = selectedLibraryIds.includes(library.id)
                                   ? selectedLibraryIds.filter(id => id !== library.id)
                                   : [...selectedLibraryIds, library.id];
                                 setSelectedLibraryIds(newSelected);
                               }}
-                              style={{ marginRight: '8px' }}
+                              style={{ marginRight: '8px', marginTop: '2px' }}
                             />
-                            <Text strong style={{ fontSize: '14px' }}>
-                              {library.name}
-                            </Text>
+                            <div style={{ flex: 1 }}>
+                              <Text strong style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>
+                                {library.name}
+                              </Text>
+                              <Tag color="blue" size="small">
+                                {library.type}
+                              </Tag>
+                            </div>
                           </div>
-                          <Tag color="blue" size="small">
-                            {library.type}
-                          </Tag>
                         </div>
                         {library.episodeCount && (
                           <Text type="secondary" style={{ fontSize: '12px', marginTop: '8px' }}>

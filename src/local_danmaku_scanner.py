@@ -89,6 +89,15 @@ class LocalDanmakuScanner:
             file_name, parent_dir, nfo_data
         )
 
+        # 如果是电视剧分集,尝试从父剧集的tvshow.nfo继承类型
+        if media_type == "tv_series" and season is not None and episode is not None:
+            parent_nfo_data = self._find_parent_tvshow_nfo(file_path)
+            if parent_nfo_data and 'type' in parent_nfo_data:
+                # 将nfo中的type映射到数据库支持的类型
+                nfo_type = parent_nfo_data['type'].lower()
+                media_type = self._normalize_media_type(nfo_type)
+                self.logger.debug(f"分集继承父剧集类型: {nfo_type} -> {media_type}")
+
         # 从nfo提取其他元数据
         year = nfo_data.get('year') if nfo_data else None
         tmdb_id = nfo_data.get('tmdbid') if nfo_data else None
@@ -163,6 +172,42 @@ class LocalDanmakuScanner:
 
         return None
 
+    def _normalize_media_type(self, nfo_type: str) -> str:
+        """
+        将nfo文件中的type字段映射到数据库支持的类型
+
+        Args:
+            nfo_type: nfo文件中的type值(如tvshow, season, episode等)
+
+        Returns:
+            数据库支持的类型(movie或tv_series)
+        """
+        # Kodi nfo type映射
+        type_mapping = {
+            'movie': 'movie',
+            'tvshow': 'tv_series',
+            'season': 'tv_series',
+            'episode': 'tv_series',
+        }
+
+        return type_mapping.get(nfo_type.lower(), 'tv_series')
+
+    def _find_parent_tvshow_nfo(self, xml_file: Path) -> Optional[Dict[str, Any]]:
+        """
+        查找并解析父剧集的tvshow.nfo文件
+        用于分集继承父剧集的类型信息
+
+        Returns:
+            nfo数据字典,如果找不到则返回None
+        """
+        # 策略1: 查找上级目录的tvshow.nfo(季度文件夹内的分集)
+        # 文件结构: 越狱/Season 1/S01E01.xml -> 越狱/tvshow.nfo
+        parent_tvshow_nfo = xml_file.parent.parent / 'tvshow.nfo'
+        if parent_tvshow_nfo.exists():
+            return self._parse_nfo(parent_tvshow_nfo)
+
+        return None
+
     def _find_and_parse_nfo(self, xml_file: Path) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """
         查找并解析nfo文件
@@ -197,7 +242,7 @@ class LocalDanmakuScanner:
             data = {}
 
             # 提取常见字段(不包括thumb,海报从文件系统查找)
-            for tag in ['title', 'year', 'tmdbid', 'tvdbid', 'imdbid']:
+            for tag in ['title', 'year', 'tmdbid', 'tvdbid', 'imdbid', 'type']:
                 elem = root.find(tag)
                 if elem is not None and elem.text:
                     data[tag] = elem.text.strip()

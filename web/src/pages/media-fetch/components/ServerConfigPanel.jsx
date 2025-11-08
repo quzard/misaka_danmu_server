@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, Switch, Button, message } from 'antd';
+import { EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { createMediaServer, updateMediaServer, testMediaServerConnection, deleteMediaServer } from '../../../apis';
 
 const { Option } = Select;
@@ -8,6 +9,8 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [showUrl, setShowUrl] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -151,7 +154,17 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
             { type: 'url', message: '请输入有效的URL' }
           ]}
         >
-          <Input placeholder="http://localhost:8096" />
+          <Input
+            placeholder="http://localhost:8096"
+            type={showUrl ? 'text' : 'password'}
+            suffix={
+              showUrl ? (
+                <EyeOutlined onClick={() => setShowUrl(false)} style={{ cursor: 'pointer' }} />
+              ) : (
+                <EyeInvisibleOutlined onClick={() => setShowUrl(true)} style={{ cursor: 'pointer' }} />
+              )
+            }
+          />
         </Form.Item>
 
         <Form.Item
@@ -159,7 +172,17 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
           name="apiToken"
           rules={[{ required: true, message: '请输入API Token' }]}
         >
-          <Input.Password placeholder="请输入API Token" />
+          <Input
+            placeholder="请输入API Token"
+            type={showToken ? 'text' : 'password'}
+            suffix={
+              showToken ? (
+                <EyeOutlined onClick={() => setShowToken(false)} style={{ cursor: 'pointer' }} />
+              ) : (
+                <EyeInvisibleOutlined onClick={() => setShowToken(true)} style={{ cursor: 'pointer' }} />
+              )
+            }
+          />
         </Form.Item>
 
         <Form.Item
