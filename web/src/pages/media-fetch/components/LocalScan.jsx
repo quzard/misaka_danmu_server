@@ -68,38 +68,40 @@ const LocalScan = () => {
 
   return (
     <div style={{ padding: '8px' }}> {/* 添加移动端内边距 */}
-      <Card title={<span style={{ fontSize: '16px' }}>本地弹幕扫描</span>} style={{ marginBottom: '16px' }}>
+      <Card
+        title={<span style={{ fontSize: '16px' }}>本地弹幕扫描</span>}
+        extra={
+          <Button
+            type="primary"
+            icon={<ScanOutlined />}
+            loading={loading}
+            onClick={handleScan}
+            size="small"
+          >
+            扫描
+          </Button>
+        }
+        style={{ marginBottom: '16px' }}
+      >
         <Space direction="vertical" style={{ width: '100%' }} size="small"> {/* 减小间距 */}
           <div>
             <div style={{ marginBottom: '4px', color: '#666', fontSize: '14px' }}> {/* 调整字体大小 */}
               扫描路径 (支持标准媒体服务器结构和纯弹幕文件结构)
             </div>
-            <Space direction="vertical" style={{ width: '100%' }}> {/* 垂直排列 */}
+            <div style={{ display: 'flex', gap: '8px' }}>
               <Input
                 placeholder="请选择或输入扫描路径"
                 value={scanPath}
                 onChange={(e) => setScanPath(e.target.value)}
-                style={{ marginBottom: '8px' }} /* 添加底部间距 */
+                style={{ flex: 1 }}
               />
-              <Space wrap> {/* 按钮换行 */}
-                <Button
-                  icon={<FolderOpenOutlined />}
-                  onClick={handleBrowse}
-                  size="small" /* 缩小按钮 */
-                >
-                  浏览
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<ScanOutlined />}
-                  loading={loading}
-                  onClick={handleScan}
-                  size="small" /* 缩小按钮 */
-                >
-                  扫描
-                </Button>
-              </Space>
-            </Space>
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={handleBrowse}
+              >
+                浏览
+              </Button>
+            </div>
           </div>
 
           <div style={{ fontSize: '12px', color: '#999' }}>

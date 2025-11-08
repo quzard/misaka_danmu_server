@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid } from 'antd';
-import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
 import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer, batchDeleteMediaItems, importMediaItems, deleteMediaServer } from '../../../apis';
@@ -20,6 +20,7 @@ const LibraryScan = () => {
   const [editingServer, setEditingServer] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
+  const [showServerUrl, setShowServerUrl] = useState(false);
 
   const screens = Grid.useBreakpoint();
 
@@ -447,7 +448,16 @@ const LibraryScan = () => {
                     {currentServer.url && (
                       <Col span={24}>
                         <div>
-                          <Text type="secondary" style={{ fontSize: '12px' }}>服务器地址</Text>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text type="secondary" style={{ fontSize: '12px' }}>服务器地址</Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={showServerUrl ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                              onClick={() => setShowServerUrl(!showServerUrl)}
+                              style={{ padding: '0 4px', height: '20px' }}
+                            />
+                          </div>
                           <div>
                             <Text
                               style={{
@@ -456,7 +466,7 @@ const LibraryScan = () => {
                                 wordBreak: 'break-all'
                               }}
                             >
-                              {currentServer.url}
+                              {showServerUrl ? currentServer.url : '••••••••••••••••'}
                             </Text>
                           </div>
                         </div>
@@ -606,6 +616,7 @@ const LibraryScan = () => {
               <Checkbox.Group
                 style={{ width: '100%' }}
                 value={selectedLibraryIds}
+                onChange={setSelectedLibraryIds}
               >
                 <Row gutter={[16, 16]}>
                   {libraries.map(library => (
@@ -636,14 +647,7 @@ const LibraryScan = () => {
                         <div>
                           <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '8px' }}>
                             <Checkbox
-                              checked={selectedLibraryIds.includes(library.id)}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                const newSelected = selectedLibraryIds.includes(library.id)
-                                  ? selectedLibraryIds.filter(id => id !== library.id)
-                                  : [...selectedLibraryIds, library.id];
-                                setSelectedLibraryIds(newSelected);
-                              }}
+                              value={library.id}
                               style={{ marginRight: '8px', marginTop: '2px' }}
                             />
                             <div style={{ flex: 1 }}>

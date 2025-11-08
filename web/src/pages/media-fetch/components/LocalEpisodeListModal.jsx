@@ -74,35 +74,27 @@ const LocalEpisodeListModal = ({ visible, season, onClose, onRefresh }) => {
       title: '集数',
       dataIndex: 'episode',
       key: 'episode',
-      width: '10%',
+      width: '15%',
       render: (ep) => `第 ${ep} 集`,
     },
     {
       title: '文件路径',
       dataIndex: 'filePath',
       key: 'filePath',
-      width: '40%',
+      width: '50%',
       ellipsis: true,
-    },
-    {
-      title: 'NFO路径',
-      dataIndex: 'nfoPath',
-      key: 'nfoPath',
-      width: '30%',
-      ellipsis: true,
-      render: (path) => path || '-',
     },
     {
       title: '状态',
       dataIndex: 'isImported',
       key: 'isImported',
-      width: '10%',
+      width: '15%',
       render: (imported) => (imported ? '已导入' : '未导入'),
     },
     {
       title: '操作',
       key: 'action',
-      width: '10%',
+      width: '20%',
       render: (_, record) => (
         <Space size="small">
           <Button

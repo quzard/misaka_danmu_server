@@ -350,8 +350,8 @@ const LocalItemList = ({ refreshTrigger }) => {
       render: (type) => {
         const typeMap = {
           movie: '电影',
-          tv_series: '电视剧',
-          tv_show: '电视剧',
+          tv_series: '电视节目',
+          tv_show: '电视节目',
           tv_season: '-',
         };
         return <span style={{ fontSize: '12px' }}>{typeMap[type] || type}</span>; // 调整字体大小
@@ -699,8 +699,8 @@ const LocalItemList = ({ refreshTrigger }) => {
             <div style={{ marginTop: '8px', marginLeft: '36px' }}>
               <Space size="small" wrap>
                 <Tag size="small" color="blue">
-                  {item.mediaType === 'movie' ? '电影' : 
-                   item.mediaType === 'tv_show' ? '电视剧' : 
+                  {item.mediaType === 'movie' ? '电影' :
+                   item.mediaType === 'tv_show' ? '电视节目' :
                    item.mediaType === 'tv_season' ? '季' : item.mediaType}
                 </Tag>
                 {!item.isGroup && (
