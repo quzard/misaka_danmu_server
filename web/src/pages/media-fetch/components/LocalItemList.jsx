@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox, Row, Col } from 'antd';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox } from 'antd';
 import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined } from '@ant-design/icons';
 import {
   getLocalWorks,
@@ -11,7 +11,6 @@ import {
 } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import LocalEpisodeListModal from './LocalEpisodeListModal';
-import LocalMovieFilesModal from './LocalMovieFilesModal';
 
 const LocalItemList = ({ refreshTrigger }) => {
   const [items, setItems] = useState([]);
@@ -26,8 +25,6 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [editorVisible, setEditorVisible] = useState(false);
   const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
   const [currentSeason, setCurrentSeason] = useState(null);
-  const [movieFilesModalVisible, setMovieFilesModalVisible] = useState(false);
-  const [currentMovie, setCurrentMovie] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 添加视图模式状态
 
   // 检测是否为移动端
@@ -217,6 +214,50 @@ const LocalItemList = ({ refreshTrigger }) => {
       }
     }
     return null;
+  };
+
+  // 单个文件导入
+  const handleImportSingleFile = async (record) => {
+    if (!record.id) {
+      message.error('文件ID不存在');
+      return;
+    }
+
+    // 从文件名识别来源标签
+    const filename = record.filePath.split(/[/\\]/).pop();
+    const lowerFilename = filename.toLowerCase();
+    let sourceLabel = 'unknown';
+
+    if (lowerFilename.includes('bilibili') || lowerFilename.includes('哔哩')) {
+      sourceLabel = 'bilibili';
+    } else if (lowerFilename.includes('iqiyi') || lowerFilename.includes('爱奇艺')) {
+      sourceLabel = 'iqiyi';
+    } else if (lowerFilename.includes('tencent') || lowerFilename.includes('腾讯')) {
+      sourceLabel = 'tencent';
+    } else if (lowerFilename.includes('youku') || lowerFilename.includes('优酷')) {
+      sourceLabel = 'youku';
+    } else if (lowerFilename.includes('mgtv') || lowerFilename.includes('芒果')) {
+      sourceLabel = 'mgtv';
+    } else if (lowerFilename.includes('renren') || lowerFilename.includes('人人')) {
+      sourceLabel = 'renren';
+    }
+
+    const mediaId = `custom_${sourceLabel}`;
+
+    try {
+      const res = await importLocalItems({
+        items: [{
+          itemId: record.id,
+          provider: 'custom',
+          mediaId: mediaId,
+        }]
+      });
+      message.success(res.data.message || '导入任务已提交');
+      loadItems(pagination.current, pagination.pageSize);
+    } catch (error) {
+      message.error('导入失败: ' + (error.message || '未知错误'));
+      console.error(error);
+    }
   };
 
   // 批量导入
@@ -438,6 +479,12 @@ const LocalItemList = ({ refreshTrigger }) => {
 
         // 电影操作
         if (record.mediaType === 'movie') {
+          // 如果是分组节点(大条目),不显示操作按钮
+          if (record.isGroup) {
+            return null;
+          }
+
+          // 单独的弹幕文件,显示编辑、删除、导入按钮
           return (
             <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ fontSize: '12px' }}>
@@ -452,16 +499,35 @@ const LocalItemList = ({ refreshTrigger }) => {
                 type="link"
                 size="small"
                 icon={<ImportOutlined />}
-                onClick={() => {
-                  setCurrentMovie({
-                    title: record.title,
-                    year: record.year,
-                  });
-                  setMovieFilesModalVisible(true);
-                }}
+                onClick={() => handleImportSingleFile(record)}
                 style={{ fontSize: '12px' }}
               >
-                选择文件导入
+                导入
+              </Button>
+            </Space>
+          );
+        }
+
+        // 电影文件操作(movie_file)
+        if (record.mediaType === 'movie_file') {
+          return (
+            <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
+              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ fontSize: '12px' }}>
+                编辑
+              </Button>
+              <Popconfirm title="确定要删除吗?" onConfirm={() => handleDelete(record)} okText="确定" cancelText="取消">
+                <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: '12px' }}>
+                  删除
+                </Button>
+              </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => handleImportSingleFile(record)}
+                style={{ fontSize: '12px' }}
+              >
+                导入
               </Button>
             </Space>
           );
@@ -566,7 +632,13 @@ const LocalItemList = ({ refreshTrigger }) => {
       ];
     }
 
-    if (record.mediaType === 'movie') {
+    // 电影分组节点,不显示操作按钮
+    if (record.mediaType === 'movie' && record.isGroup) {
+      return [];
+    }
+
+    // 电影文件或movie_file类型,显示编辑、删除、导入按钮
+    if (record.mediaType === 'movie' || record.mediaType === 'movie_file') {
       return [
         <Button
           key="edit-movie"
@@ -593,15 +665,9 @@ const LocalItemList = ({ refreshTrigger }) => {
           type="link"
           size="small"
           icon={<ImportOutlined />}
-          onClick={() => {
-            setCurrentMovie({
-              title: record.title,
-              year: record.year,
-            });
-            setMovieFilesModalVisible(true);
-          }}
+          onClick={() => handleImportSingleFile(record)}
         >
-          选择文件导入
+          导入
         </Button>
       ];
     }
@@ -890,16 +956,6 @@ const LocalItemList = ({ refreshTrigger }) => {
         onClose={() => {
           setEpisodeModalVisible(false);
           setCurrentSeason(null);
-        }}
-        onRefresh={() => loadItems(pagination.current, pagination.pageSize)}
-      />
-
-      <LocalMovieFilesModal
-        visible={movieFilesModalVisible}
-        movie={currentMovie}
-        onClose={() => {
-          setMovieFilesModalVisible(false);
-          setCurrentMovie(null);
         }}
         onRefresh={() => loadItems(pagination.current, pagination.pageSize)}
       />
