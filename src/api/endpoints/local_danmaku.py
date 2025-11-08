@@ -432,6 +432,10 @@ async def import_local_items(
         total = len(item_configs)
         current = 0
 
+        # 用于缓存已处理的作品海报,避免重复下载
+        # key: (title, season, year), value: local_image_path
+        poster_cache = {}
+
         for item_id, config in item_configs.items():
             try:
                 current += 1
@@ -469,41 +473,49 @@ async def import_local_items(
                     error_count += 1
                     continue
 
-                # 处理海报
-                local_image_path = None
+                # 处理海报 - 使用缓存避免重复下载
+                cache_key = (item.title, item.season or 1, item.year)
+                local_image_path = poster_cache.get(cache_key)
 
-                # 优先使用本地海报
-                if item.posterUrl:
-                    # 如果posterUrl是本地路径,复制到海报目录
-                    poster_path = Path(item.posterUrl)
-                    if not poster_path.is_absolute():
-                        # 相对路径,相对于xml文件所在目录
-                        poster_path = xml_path.parent / item.posterUrl
+                # 如果缓存中没有,则处理海报
+                if local_image_path is None:
+                    # 优先使用本地海报
+                    if item.posterUrl:
+                        # 如果posterUrl是本地路径,复制到海报目录
+                        poster_path = Path(item.posterUrl)
+                        if not poster_path.is_absolute():
+                            # 相对路径,相对于xml文件所在目录
+                            poster_path = xml_path.parent / item.posterUrl
 
-                    if poster_path.exists():
-                        local_image_path = copy_local_poster(str(poster_path))
-                        if local_image_path:
-                            logger.info(f"海报已复制: {poster_path} -> {local_image_path}")
-
-                # 如果没有本地海报但有 TMDB ID,尝试从 TMDB 获取
-                if not local_image_path and item.tmdbId:
-                    try:
-                        # 获取元数据管理器和scraper管理器
-                        metadata_manager: MetadataSourceManager = request.app.state.metadata_manager
-                        scraper_manager = request.app.state.scraper_manager
-
-                        # 确定媒体类型
-                        media_type = "movie" if item.mediaType == "movie" else "tv"
-
-                        # 使用元数据管理器获取 TMDB 详情
-                        details = await metadata_manager.get_details("tmdb", item.tmdbId, current_user, mediaType=media_type)
-                        if details and details.imageUrl:
-                            # 下载并缓存图片
-                            local_image_path = await download_image(details.imageUrl, task_session, scraper_manager, "tmdb")
+                        if poster_path.exists():
+                            local_image_path = copy_local_poster(str(poster_path))
                             if local_image_path:
-                                logger.info(f"从 TMDB 获取海报成功: {details.imageUrl} -> {local_image_path}")
-                    except Exception as e:
-                        logger.warning(f"从 TMDB 获取海报失败 (TMDB ID: {item.tmdbId}): {e}")
+                                logger.info(f"海报已复制: {poster_path} -> {local_image_path}")
+
+                    # 如果没有本地海报但有 TMDB ID,尝试从 TMDB 获取
+                    if not local_image_path and item.tmdbId:
+                        try:
+                            # 获取元数据管理器和scraper管理器
+                            metadata_manager: MetadataSourceManager = request.app.state.metadata_manager
+                            scraper_manager = request.app.state.scraper_manager
+
+                            # 确定媒体类型
+                            media_type = "movie" if item.mediaType == "movie" else "tv"
+
+                            # 使用元数据管理器获取 TMDB 详情
+                            details = await metadata_manager.get_details("tmdb", item.tmdbId, current_user, mediaType=media_type)
+                            if details and details.imageUrl:
+                                # 下载并缓存图片
+                                local_image_path = await download_image(details.imageUrl, task_session, scraper_manager, "tmdb")
+                                if local_image_path:
+                                    logger.info(f"从 TMDB 获取海报成功: {details.imageUrl} -> {local_image_path}")
+                        except Exception as e:
+                            logger.warning(f"从 TMDB 获取海报失败 (TMDB ID: {item.tmdbId}): {e}")
+
+                    # 缓存结果(即使是None也缓存,避免重复尝试)
+                    poster_cache[cache_key] = local_image_path
+                else:
+                    logger.info(f"使用缓存的海报: {item.title} -> {local_image_path}")
 
                 # 创建或查找anime记录
                 anime_id = await anime_crud.get_or_create_anime(
@@ -529,9 +541,10 @@ async def import_local_items(
                 provider = config.get('provider', 'custom')
                 media_id = config.get('mediaId')
 
-                # 如果没有指定mediaId,使用标准格式: custom_{anime_id}
+                # 如果没有指定mediaId,使用唯一格式: custom_{anime_id}_{item_id}
+                # 这样每个弹幕文件都会创建独立的source和episode
                 if not media_id:
-                    media_id = f"custom_{anime_id}"
+                    media_id = f"custom_{anime_id}_{item_id}"
 
                 # 创建或获取指定的源
                 from ...crud import source as source_crud
