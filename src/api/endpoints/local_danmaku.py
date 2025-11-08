@@ -537,7 +537,7 @@ async def import_local_items(
     # 提交任务
     task_id, _ = await task_manager.submit_task(
         import_task,
-        f"导入本地弹幕 ({len(all_item_ids)} 个项目)"
+        f"导入本地弹幕 ({len(item_configs)} 个项目)"
     )
 
     logger.info(f"用户 '{current_user.username}' 提交了本地弹幕导入任务: {task_id}")
