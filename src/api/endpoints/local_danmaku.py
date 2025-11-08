@@ -42,8 +42,16 @@ class LocalItemUpdate(BaseModel):
     posterUrl: Optional[str] = None
 
 
+class LocalItemImportConfig(BaseModel):
+    """单个本地项的导入配置"""
+    itemId: int
+    provider: str = 'custom'  # 默认为custom
+    mediaId: Optional[str] = None  # 如果为None,后端会自动生成
+
+
 class LocalItemsImportRequest(BaseModel):
-    itemIds: Optional[List[int]] = None
+    itemIds: Optional[List[int]] = None  # 简单导入,使用默认custom源
+    items: Optional[List[LocalItemImportConfig]] = None  # 高级导入,指定每个项的来源
     shows: Optional[List[Dict[str, Any]]] = None
     seasons: Optional[List[Dict[str, Any]]] = None
 
@@ -374,17 +382,32 @@ async def import_local_items(
     5. 批量插入comment记录
     6. 标记isImported=true
     """
-    # 收集所有要导入的item_ids
-    all_item_ids = set()
+    # 收集所有要导入的item_ids和配置
+    # item_configs: { item_id: { 'provider': 'xxx', 'mediaId': 'xxx' } }
+    item_configs = {}
 
+    # 处理简单导入(使用默认custom源)
     if payload.itemIds:
-        all_item_ids.update(payload.itemIds)
+        for item_id in payload.itemIds:
+            item_configs[item_id] = {'provider': 'custom', 'mediaId': None}
 
+    # 处理高级导入(指定每个项的来源)
+    if payload.items:
+        for item_config in payload.items:
+            item_configs[item_config.itemId] = {
+                'provider': item_config.provider,
+                'mediaId': item_config.mediaId
+            }
+
+    # 处理整部剧集导入
     if payload.shows:
         for show in payload.shows:
             episode_ids = await crud.get_episode_ids_by_show(session, show['title'])
-            all_item_ids.update(episode_ids)
+            for episode_id in episode_ids:
+                if episode_id not in item_configs:
+                    item_configs[episode_id] = {'provider': 'custom', 'mediaId': None}
 
+    # 处理季度导入
     if payload.seasons:
         for season in payload.seasons:
             episode_ids = await crud.get_episode_ids_by_season(
@@ -392,9 +415,11 @@ async def import_local_items(
                 season['title'],
                 season['season']
             )
-            all_item_ids.update(episode_ids)
+            for episode_id in episode_ids:
+                if episode_id not in item_configs:
+                    item_configs[episode_id] = {'provider': 'custom', 'mediaId': None}
 
-    if not all_item_ids:
+    if not item_configs:
         return {"message": "没有要导入的项目"}
 
     # 创建后台任务执行导入
@@ -402,7 +427,7 @@ async def import_local_items(
         success_count = 0
         error_count = 0
 
-        for item_id in all_item_ids:
+        for item_id, config in item_configs.items():
             try:
                 # 获取本地项信息
                 item = await crud.get_local_item_by_id(session, item_id)
@@ -451,18 +476,32 @@ async def import_local_items(
                     local_image_path=local_image_path  # 使用本地路径
                 )
 
-                # 创建custom源(如果不存在)
-                source = await anime_crud.get_or_create_custom_source(session, anime_id)
+                # 获取配置的provider和mediaId
+                provider = config.get('provider', 'custom')
+                media_id = config.get('mediaId')
+
+                # 如果没有指定mediaId,自动生成一个
+                if not media_id:
+                    import time
+                    import random
+                    timestamp = int(time.time())
+                    random_str = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+                    media_id = f"{provider}_{item.title}_{item_id}_{timestamp}_{random_str}"
+
+                # 创建或获取指定的源
+                from ...crud import source as source_crud
+                source_id = await source_crud.link_source_to_anime(session, anime_id, provider, media_id)
+                await session.flush()
 
                 # 创建或查找episode记录
                 episode_index = item.episode or 1
-                episode = await episode_crud.find_episode_by_index(session, source.id, episode_index)
+                episode = await episode_crud.find_episode_by_index(session, source_id, episode_index)
 
                 if not episode:
                     # 创建新episode
                     episode_id = await episode_crud.create_episode(
                         session,
-                        source_id=source.id,
+                        source_id=source_id,
                         episode_index=episode_index,
                         title=f"第{episode_index}集",
                         provider_episode_id=None,
