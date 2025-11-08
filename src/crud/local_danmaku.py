@@ -182,6 +182,7 @@ async def get_show_seasons(
         LocalDanmakuItem.season,
         LocalDanmakuItem.year,
         LocalDanmakuItem.posterUrl,
+        LocalDanmakuItem.mediaType,  # 添加mediaType字段
         func.count(LocalDanmakuItem.id).label('episodeCount'),
         func.group_concat(LocalDanmakuItem.id).label('ids')  # 收集所有ID(MySQL使用GROUP_CONCAT)
     ).where(
@@ -193,7 +194,8 @@ async def get_show_seasons(
     ).group_by(
         LocalDanmakuItem.season,
         LocalDanmakuItem.year,
-        LocalDanmakuItem.posterUrl
+        LocalDanmakuItem.posterUrl,
+        LocalDanmakuItem.mediaType  # 添加到group_by
     ).order_by(LocalDanmakuItem.season)
 
     result = await session.execute(stmt)
@@ -204,6 +206,7 @@ async def get_show_seasons(
             "season": s.season,
             "year": s.year,
             "posterUrl": s.posterUrl,
+            "mediaType": s.mediaType,  # 返回mediaType
             "episodeCount": s.episodeCount,
             "ids": [int(id_str) for id_str in s.ids.split(',')] if s.ids else []  # 将逗号分隔的字符串转为整数数组
         }

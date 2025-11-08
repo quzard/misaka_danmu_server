@@ -146,7 +146,7 @@ const LocalItemList = ({ refreshTrigger }) => {
               episodeCount: s.episodeCount,
               year: s.year,
               posterUrl: s.posterUrl,
-              mediaType: 'tv_season',
+              mediaType: s.mediaType || 'tv_season',  // 使用后端返回的mediaType,如果没有则使用tv_season
               showTitle: work.title,
               isGroup: true,
             })),
@@ -346,7 +346,7 @@ const LocalItemList = ({ refreshTrigger }) => {
       title: '类型',
       dataIndex: 'mediaType',
       key: 'mediaType',
-      width: '15%', // 调整列宽
+      width: '10%',
       render: (type) => {
         const typeMap = {
           movie: '电影',
@@ -386,7 +386,7 @@ const LocalItemList = ({ refreshTrigger }) => {
         // 剧集组显示删除和导入整部按钮
         if (record.isGroup && record.mediaType === 'tv_show') {
           return (
-            <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
+            <Space size="small">
               <Popconfirm
                 title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
@@ -402,7 +402,7 @@ const LocalItemList = ({ refreshTrigger }) => {
                 okText="确定"
                 cancelText="取消"
               >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: '12px' }}>
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                   删除整部
                 </Button>
               </Popconfirm>
@@ -421,7 +421,6 @@ const LocalItemList = ({ refreshTrigger }) => {
                     })
                     .catch(() => message.error('导入失败'));
                 }}
-                style={{ fontSize: '12px' }}
               >
                 导入整部
               </Button>
@@ -430,9 +429,9 @@ const LocalItemList = ({ refreshTrigger }) => {
         }
 
         // 季度显示删除和导入按钮
-        if (record.mediaType === 'tv_season') {
+        if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
           return (
-            <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
+            <Space size="small">
               <Popconfirm
                 title={`确定要删除第${record.season}季的所有集吗?`}
                 onConfirm={() => {
@@ -448,8 +447,8 @@ const LocalItemList = ({ refreshTrigger }) => {
                 okText="确定"
                 cancelText="取消"
               >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: '12px' }}>
-                  删除该季
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除整季
                 </Button>
               </Popconfirm>
               <Button
@@ -470,9 +469,8 @@ const LocalItemList = ({ refreshTrigger }) => {
                     })
                     .catch(() => message.error('导入失败'));
                 }}
-                style={{ fontSize: '12px' }}
               >
-                导入该季
+                导入整季
               </Button>
             </Space>
           );
@@ -487,12 +485,12 @@ const LocalItemList = ({ refreshTrigger }) => {
 
           // 单独的弹幕文件,显示编辑、删除、导入按钮
           return (
-            <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
-              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ fontSize: '12px' }}>
+            <Space size="small">
+              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
                 编辑
               </Button>
               <Popconfirm title="确定要删除吗?" onConfirm={() => handleDelete(record)} okText="确定" cancelText="取消">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: '12px' }}>
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                   删除
                 </Button>
               </Popconfirm>
@@ -501,7 +499,6 @@ const LocalItemList = ({ refreshTrigger }) => {
                 size="small"
                 icon={<ImportOutlined />}
                 onClick={() => handleImportSingleFile(record)}
-                style={{ fontSize: '12px' }}
               >
                 导入
               </Button>
@@ -514,10 +511,28 @@ const LocalItemList = ({ refreshTrigger }) => {
     },
   ];
 
-  // 渲染卡片操作按钮
+  // 渲染卡片操作按钮 (移动端 - 垂直排列,顺序:导入-编辑-删除)
   const renderCardActions = (record) => {
     if (record.isGroup && record.mediaType === 'tv_show') {
       return [
+        <Button
+          key="import-show"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            importLocalItems({
+              shows: [{ title: record.title }]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('导入失败'));
+          }}
+        >
+          导入整部
+        </Button>,
         <Popconfirm
           key="delete-show"
           title={`确定要删除《${record.title}》的所有集吗?`}
@@ -537,15 +552,23 @@ const LocalItemList = ({ refreshTrigger }) => {
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
             删除整部
           </Button>
-        </Popconfirm>,
+        </Popconfirm>
+      ];
+    }
+
+    if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
+      return [
         <Button
-          key="import-show"
+          key="import-season"
           type="link"
           size="small"
           icon={<ImportOutlined />}
           onClick={() => {
             importLocalItems({
-              shows: [{ title: record.title }]
+              seasons: [{
+                title: record.showTitle,
+                season: record.season
+              }]
             })
               .then((res) => {
                 message.success(res.data.message || '导入任务已提交');
@@ -554,13 +577,8 @@ const LocalItemList = ({ refreshTrigger }) => {
               .catch(() => message.error('导入失败'));
           }}
         >
-          导入整部
-        </Button>
-      ];
-    }
-
-    if (record.mediaType === 'tv_season') {
-      return [
+          导入整季
+        </Button>,
         <Popconfirm
           key="delete-season"
           title={`确定要删除第${record.season}季的所有集吗?`}
@@ -581,30 +599,9 @@ const LocalItemList = ({ refreshTrigger }) => {
           cancelText="取消"
         >
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-            删除该季
+            删除整季
           </Button>
-        </Popconfirm>,
-        <Button
-          key="import-season"
-          type="link"
-          size="small"
-          icon={<ImportOutlined />}
-          onClick={() => {
-            importLocalItems({
-              seasons: [{
-                title: record.showTitle,
-                season: record.season
-              }]
-            })
-              .then((res) => {
-                message.success(res.data.message || '导入任务已提交');
-                loadItems(pagination.current, pagination.pageSize);
-              })
-              .catch(() => message.error('导入失败'));
-          }}
-        >
-          导入该季
-        </Button>
+        </Popconfirm>
       ];
     }
 
@@ -613,9 +610,18 @@ const LocalItemList = ({ refreshTrigger }) => {
       return [];
     }
 
-    // 电影文件,显示编辑、删除、导入按钮
+    // 电影文件,显示导入、编辑、删除按钮 (顺序:导入-编辑-删除)
     if (record.mediaType === 'movie' && !record.isGroup) {
       return [
+        <Button
+          key="import-movie"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => handleImportSingleFile(record)}
+        >
+          导入
+        </Button>,
         <Button
           key="edit-movie"
           type="link"
@@ -635,16 +641,7 @@ const LocalItemList = ({ refreshTrigger }) => {
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
             删除
           </Button>
-        </Popconfirm>,
-        <Button
-          key="import-movie"
-          type="link"
-          size="small"
-          icon={<ImportOutlined />}
-          onClick={() => handleImportSingleFile(record)}
-        >
-          导入
-        </Button>
+        </Popconfirm>
       ];
     }
 
@@ -803,22 +800,7 @@ const LocalItemList = ({ refreshTrigger }) => {
           </div>
         }
         extra={
-          <Space direction="horizontal" size="small" wrap>
-            <Button
-              type="primary"
-              icon={<ImportOutlined />}
-              disabled={selectedRowKeys.length === 0}
-              onClick={handleBatchImport}
-              size="small"
-              style={{ 
-                fontSize: '12px',
-                minWidth: 'auto',
-                height: '28px',
-                padding: '0 8px'
-              }}
-            >
-              导入 ({selectedRowKeys.length})
-            </Button>
+          <Space>
             <Popconfirm
               title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
               onConfirm={handleBatchDelete}
@@ -828,18 +810,20 @@ const LocalItemList = ({ refreshTrigger }) => {
             >
               <Button
                 danger
+                icon={<DeleteOutlined />}
                 disabled={selectedRowKeys.length === 0}
-                size="small"
-                style={{ 
-                  fontSize: '12px',
-                  minWidth: 'auto',
-                  height: '28px',
-                  padding: '0 8px'
-                }}
               >
-                删除 ({selectedRowKeys.length})
+                删除选中
               </Button>
             </Popconfirm>
+            <Button
+              type="primary"
+              icon={<ImportOutlined />}
+              onClick={handleBatchImport}
+              disabled={selectedRowKeys.length === 0}
+            >
+              导入选中
+            </Button>
           </Space>
         }
         style={{ marginBottom: '16px' }}
@@ -876,6 +860,11 @@ const LocalItemList = ({ refreshTrigger }) => {
             columns={columns}
             dataSource={items}
             loading={loading}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: setSelectedRowKeys,
+              checkStrictly: false,
+            }}
             pagination={{
               ...pagination,
               showSizeChanger: true,
@@ -885,13 +874,12 @@ const LocalItemList = ({ refreshTrigger }) => {
               size: 'default',
               position: ['bottomCenter'],
             }}
-            rowSelection={{
-              selectedRowKeys,
-              onChange: setSelectedRowKeys,
-              checkStrictly: false,
+            expandable={{
+              defaultExpandAllRows: false,
             }}
+            scroll={{ x: 800 }}
             size="small"
-            scroll={{ x: 600 }}
+            className="desktop-only"
           />
         ) : (
           <List

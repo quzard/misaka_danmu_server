@@ -76,7 +76,6 @@ const LocalScan = () => {
             icon={<ScanOutlined />}
             loading={loading}
             onClick={handleScan}
-            size="small"
           >
             扫描
           </Button>
