@@ -423,14 +423,22 @@ async def import_local_items(
         return {"message": "没有要导入的项目"}
 
     # 创建后台任务执行导入
-    async def import_task():
+    async def import_task(task_session: AsyncSession, progress_callback):
         success_count = 0
         error_count = 0
+        total = len(item_configs)
+        current = 0
 
         for item_id, config in item_configs.items():
             try:
+                current += 1
+                await progress_callback(
+                    int(current / total * 90),
+                    f"正在导入 {current}/{total}..."
+                )
+
                 # 获取本地项信息
-                item = await crud.get_local_item_by_id(session, item_id)
+                item = await crud.get_local_item_by_id(task_session, item_id)
                 if not item:
                     logger.warning(f"本地项不存在: {item_id}")
                     error_count += 1
@@ -443,9 +451,16 @@ async def import_local_items(
                     error_count += 1
                     continue
 
-                xml_content = xml_path.read_text(encoding='utf-8')
-                comments = parse_dandan_xml_to_comments(xml_content)
+                # 校验XML文件是否可读取
+                try:
+                    xml_content = xml_path.read_text(encoding='utf-8')
+                except Exception as e:
+                    logger.error(f"无法读取弹幕文件 {xml_path}: {e}")
+                    error_count += 1
+                    continue
 
+                # 校验XML文件是否可解析
+                comments = parse_dandan_xml_to_comments(xml_content)
                 if not comments:
                     logger.warning(f"弹幕文件为空或解析失败: {xml_path}")
                     error_count += 1
@@ -467,7 +482,7 @@ async def import_local_items(
 
                 # 创建或查找anime记录
                 anime_id = await anime_crud.find_or_create_anime(
-                    session,
+                    task_session,
                     title=item.title,
                     anime_type=item.mediaType,
                     season=item.season or 1,
@@ -490,17 +505,17 @@ async def import_local_items(
 
                 # 创建或获取指定的源
                 from ...crud import source as source_crud
-                source_id = await source_crud.link_source_to_anime(session, anime_id, provider, media_id)
-                await session.flush()
+                source_id = await source_crud.link_source_to_anime(task_session, anime_id, provider, media_id)
+                await task_session.flush()
 
                 # 创建或查找episode记录
                 episode_index = item.episode or 1
-                episode = await episode_crud.find_episode_by_index(session, source_id, episode_index)
+                episode = await episode_crud.find_episode_by_index(task_session, source_id, episode_index)
 
                 if not episode:
                     # 创建新episode
                     episode_id = await episode_crud.create_episode(
-                        session,
+                        task_session,
                         source_id=source_id,
                         episode_index=episode_index,
                         title=f"第{episode_index}集",
@@ -513,15 +528,15 @@ async def import_local_items(
                 # 保存弹幕
                 config_manager = request.app.state.config_manager
                 added_count = await danmaku_crud.save_danmaku_for_episode(
-                    session,
+                    task_session,
                     episode_id,
                     comments,
                     config_manager
                 )
 
                 # 标记为已导入
-                await crud.update_local_item(session, item_id, {"isImported": True})
-                await session.commit()
+                await crud.update_local_item(task_session, item_id, {"isImported": True})
+                await task_session.commit()
 
                 success_count += 1
                 logger.info(f"成功导入: {item.title} - 第{episode_index}集, 弹幕数: {added_count}")
@@ -529,22 +544,24 @@ async def import_local_items(
             except Exception as e:
                 logger.error(f"导入本地项失败 (ID: {item_id}): {e}", exc_info=True)
                 error_count += 1
-                await session.rollback()
+                await task_session.rollback()
                 continue
 
+        await progress_callback(100, "导入完成")
         raise TaskSuccess(f"导入完成: 成功 {success_count} 个, 失败 {error_count} 个")
 
-    # 提交任务
+    # 提交任务到 management 队列（本地操作，不需要下载队列）
     task_id, _ = await task_manager.submit_task(
         import_task,
-        f"导入本地弹幕 ({len(item_configs)} 个项目)"
+        f"导入本地弹幕 ({len(item_configs)} 个项目)",
+        queue_type="management"
     )
 
     logger.info(f"用户 '{current_user.username}' 提交了本地弹幕导入任务: {task_id}")
 
     return {
-        "message": f"已提交导入任务,共 {len(all_item_ids)} 个项目",
+        "message": f"已提交导入任务,共 {len(item_configs)} 个项目",
         "taskId": task_id,
-        "count": len(all_item_ids)
+        "count": len(item_configs)
     }
 
