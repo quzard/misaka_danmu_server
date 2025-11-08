@@ -481,14 +481,14 @@ async def import_local_items(
                             logger.info(f"海报已复制: {poster_path} -> {local_image_path}")
 
                 # 创建或查找anime记录
-                anime_id = await anime_crud.find_or_create_anime(
+                anime_id = await anime_crud.get_or_create_anime(
                     task_session,
                     title=item.title,
-                    anime_type=item.mediaType,
+                    media_type=item.mediaType,
                     season=item.season or 1,
-                    year=item.year,
                     image_url=None,  # 不使用URL
-                    local_image_path=local_image_path  # 使用本地路径
+                    local_image_path=local_image_path,  # 使用本地路径
+                    year=item.year
                 )
 
                 # 获取配置的provider和mediaId
