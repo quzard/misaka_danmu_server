@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox, Segmented, Input } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, VideoCameraOutlined, PlaySquareOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined } from '@ant-design/icons';
 
 const { Search } = Input;
 import {
@@ -781,71 +781,75 @@ const LocalItemList = ({ refreshTrigger }) => {
     <>
       <Card
         title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <span style={{ fontSize: '16px', fontWeight: 500 }}>扫描结果</span>
-            {!isMobile && (
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <Button
-                  icon={<TableOutlined />}
-                  type={viewMode === 'table' ? 'primary' : 'text'}
-                  onClick={() => setViewMode('table')}
-                  size="small"
-                  style={{ 
-                    minWidth: '32px', 
-                    height: '32px', 
-                    padding: '4px',
-                    border: viewMode === 'table' ? undefined : 'none'
-                  }}
-                  title="表格视图"
-                />
-                <Button
-                  icon={<AppstoreOutlined />}
-                  type={viewMode === 'card' ? 'primary' : 'text'}
-                  onClick={() => setViewMode('card')}
-                  size="small"
-                  style={{ 
-                    minWidth: '32px', 
-                    height: '32px', 
-                    padding: '4px',
-                    border: viewMode === 'card' ? undefined : 'none'
-                  }}
-                  title="卡片视图"
-                />
-              </div>
-            )}
+          <div>
+            <span className="desktop-only">本地扫描</span>
+            <span className="mobile-only">本地扫描</span>
           </div>
         }
         extra={
-          <Space>
-            <Popconfirm
-              title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
-              onConfirm={handleBatchDelete}
-              okText="确定"
-              cancelText="取消"
-              disabled={selectedRowKeys.length === 0}
-            >
+          <div className="desktop-only">
+            <Space wrap>
               <Button
-                danger
-                icon={<DeleteOutlined />}
+                icon={<TableOutlined />}
+                type={viewMode === 'table' ? 'primary' : 'default'}
+                onClick={() => setViewMode('table')}
+                size="small"
+              >
+                表格
+              </Button>
+              <Button
+                icon={<AppstoreOutlined />}
+                type={viewMode === 'card' ? 'primary' : 'default'}
+                onClick={() => setViewMode('card')}
+                size="small"
+              >
+                卡片
+              </Button>
+              <Search
+                placeholder="搜索标题"
+                allowClear
+                style={{ width: 200 }}
+                onSearch={setSearchText}
+              />
+              <Segmented
+                value={mediaTypeFilter}
+                onChange={setMediaTypeFilter}
+                options={[
+                  { label: '全部', value: 'all' },
+                  { label: '电影', value: 'movie' },
+                  { label: '电视节目', value: 'tv_series' },
+                ]}
+              />
+              <Popconfirm
+                title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
+                onConfirm={handleBatchDelete}
+                okText="确定"
+                cancelText="取消"
                 disabled={selectedRowKeys.length === 0}
               >
-                删除选中
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={selectedRowKeys.length === 0}
+                >
+                  删除选中
+                </Button>
+              </Popconfirm>
+              <Button
+                type="primary"
+                icon={<ImportOutlined />}
+                onClick={handleBatchImport}
+                disabled={selectedRowKeys.length === 0}
+              >
+                导入选中
               </Button>
-            </Popconfirm>
-            <Button
-              type="primary"
-              icon={<ImportOutlined />}
-              onClick={handleBatchImport}
-              disabled={selectedRowKeys.length === 0}
-            >
-              导入选中
-            </Button>
-          </Space>
+            </Space>
+          </div>
         }
         style={{ marginBottom: '16px' }}
       >
         {/* 全选复选框 */}
-        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ marginBottom: '16px' }}>
           <Checkbox
             indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
             checked={selectedRowKeys.length === items.length && items.length > 0}
@@ -867,41 +871,8 @@ const LocalItemList = ({ refreshTrigger }) => {
               }
             }}
           >
-            全选 ({selectedRowKeys.length}/{items.length})
+            全选
           </Checkbox>
-          <Space>
-            <Button
-              icon={<TableOutlined />}
-              type={viewMode === 'table' ? 'primary' : 'default'}
-              onClick={() => setViewMode('table')}
-              size="small"
-            >
-              表格
-            </Button>
-            <Button
-              icon={<AppstoreOutlined />}
-              type={viewMode === 'card' ? 'primary' : 'default'}
-              onClick={() => setViewMode('card')}
-              size="small"
-            >
-              卡片
-            </Button>
-            <Segmented
-              value={mediaTypeFilter}
-              onChange={setMediaTypeFilter}
-              options={[
-                { label: '全部', value: 'all' },
-                { label: '电影', value: 'movie', icon: <VideoCameraOutlined /> },
-                { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
-              ]}
-            />
-            <Search
-              placeholder="搜索标题"
-              allowClear
-              style={{ width: 200 }}
-              onSearch={setSearchText}
-            />
-          </Space>
         </div>
 
         {viewMode === 'table' ? (

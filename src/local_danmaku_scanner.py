@@ -99,7 +99,8 @@ class LocalDanmakuScanner:
                 self.logger.debug(f"分集继承父剧集类型: {nfo_type} -> {media_type}")
 
         # 从nfo提取其他元数据
-        year = nfo_data.get('year') if nfo_data else None
+        year_str = nfo_data.get('year') if nfo_data else None
+        year = int(year_str) if year_str and str(year_str).isdigit() else None
         tmdb_id = nfo_data.get('tmdbid') if nfo_data else None
         tvdb_id = nfo_data.get('tvdbid') if nfo_data else None
         imdb_id = nfo_data.get('imdbid') if nfo_data else None
