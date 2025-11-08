@@ -81,7 +81,7 @@ const LocalEpisodeListModal = ({ visible, season, onClose, onRefresh }) => {
       title: '文件路径',
       dataIndex: 'filePath',
       key: 'filePath',
-      width: '50%',
+      width: '37.5%',
       ellipsis: true,
     },
     {
