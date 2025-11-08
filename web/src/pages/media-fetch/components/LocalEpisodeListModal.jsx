@@ -88,7 +88,7 @@ const LocalEpisodeListModal = ({ visible, season, onClose, onRefresh }) => {
       title: '状态',
       dataIndex: 'isImported',
       key: 'isImported',
-      width: '15%',
+      width: '11.25%',
       render: (imported) => (imported ? '已导入' : '未导入'),
     },
     {

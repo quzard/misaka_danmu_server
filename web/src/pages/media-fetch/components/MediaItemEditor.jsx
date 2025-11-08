@@ -85,8 +85,7 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) =
             }
           }}>
             <Option value="movie">电影</Option>
-            <Option value="tv_series">电视剧</Option>
-            <Option value="tv_show">电视节目</Option>
+            <Option value="tv_series">电视节目</Option>
           </Select>
         </Form.Item>
 

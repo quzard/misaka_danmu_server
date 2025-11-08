@@ -310,6 +310,7 @@ async def get_season_episodes(
                 "id": ep.id,
                 "filePath": ep.filePath,
                 "title": ep.title,
+                "mediaType": ep.mediaType,
                 "season": ep.season,
                 "episode": ep.episode,
                 "year": ep.year,
