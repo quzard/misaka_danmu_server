@@ -602,9 +602,31 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
 
   // 渲染项目操作按钮 - 桌面端
   const renderItemActions = (record) => {
-    // 剧集组显示删除和导入整部按钮
+    // 剧集组显示导入整部和删除整部按钮
     if (record.isGroup && record.mediaType === 'tv_show') {
       return [
+        <Button
+          key="import-show"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            // 导入整部剧集
+            importMediaItems({
+              shows: [{
+                serverId: serverId,
+                title: record.title
+              }]
+            })
+              .then((res) => {
+                message.success(res.data.message || '导入任务已提交');
+                loadItems(pagination.current, pagination.pageSize);
+              })
+              .catch(() => message.error('导入失败'));
+          }}
+        >
+          导入整部
+        </Button>,
         <Popconfirm
           key="delete-show"
           title={`确定要删除《${record.title}》的所有集吗?`}
@@ -628,35 +650,50 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
             删除整部
           </Button>
-        </Popconfirm>,
+        </Popconfirm>
+      ];
+    }
+
+    // 季度显示导入、编辑和删除按钮
+    if (record.mediaType === 'tv_season') {
+      return [
         <Button
-          key="import-show"
+          key="import-season"
           type="link"
           size="small"
           icon={<ImportOutlined />}
           onClick={() => {
-            // 导入整部剧集
-            importMediaItems({
-              shows: [{
-                serverId: serverId,
-                title: record.title
-              }]
-            })
-              .then((res) => {
-                message.success(res.data.message || '导入任务已提交');
-                loadItems(pagination.current, pagination.pageSize);
+            // 导入该季度
+            // 需要找到父级的title
+            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
+            const parent = findItemByKey(items, parentKey);
+            if (parent) {
+              importMediaItems({
+                seasons: [{
+                  serverId: serverId,
+                  title: parent.title,
+                  season: record.season
+                }]
               })
-              .catch(() => message.error('导入失败'));
+                .then((res) => {
+                  message.success(res.data.message || '导入任务已提交');
+                  loadItems(pagination.current, pagination.pageSize);
+                })
+                .catch(() => message.error('导入失败'));
+            }
           }}
         >
-          导入整部
-        </Button>
-      ];
-    }
-
-    // 季度显示删除和导入按钮
-    if (record.mediaType === 'tv_season') {
-      return [
+          导入整季
+        </Button>,
+        <Button
+          key="edit-season"
+          type="link"
+          size="small"
+          icon={<EditOutlined />}
+          onClick={() => handleEdit(record)}
+        >
+          编辑
+        </Button>,
         <Popconfirm
           key="delete-season"
           title={`确定要删除第${record.season}季的所有集吗?`}
@@ -686,35 +723,7 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
             删除整季
           </Button>
-        </Popconfirm>,
-        <Button
-          key="import-season"
-          type="link"
-          size="small"
-          icon={<ImportOutlined />}
-          onClick={() => {
-            // 导入该季度
-            // 需要找到父级的title
-            const parentKey = record.key.substring(0, record.key.lastIndexOf('-'));
-            const parent = findItemByKey(items, parentKey);
-            if (parent) {
-              importMediaItems({
-                seasons: [{
-                  serverId: serverId,
-                  title: parent.title,
-                  season: record.season
-                }]
-              })
-                .then((res) => {
-                  message.success(res.data.message || '导入任务已提交');
-                  loadItems(pagination.current, pagination.pageSize);
-                })
-                .catch(() => message.error('导入失败'));
-            }
-          }}
-        >
-          导入整季
-        </Button>
+        </Popconfirm>
       ];
     }
 
@@ -867,6 +876,12 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
                 .catch(() => message.error('导入失败'));
             }
           }
+        },
+        {
+          key: 'edit-season',
+          icon: <EditOutlined />,
+          label: '编辑',
+          onClick: () => handleEdit(record)
         },
         {
           key: 'delete-season',

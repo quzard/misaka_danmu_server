@@ -399,10 +399,28 @@ const LocalItemList = ({ refreshTrigger }) => {
       key: 'action',
       width: '20%', // 调大操作列宽
       render: (_, record) => {
-        // 剧集组显示删除和导入整部按钮
+        // 剧集组显示导入整部和删除整部按钮
         if (record.isGroup && record.mediaType === 'tv_show') {
           return (
             <Space size="small">
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  // 导入整部剧集
+                  importLocalItems({
+                    shows: [{ title: record.title }]
+                  })
+                    .then((res) => {
+                      message.success(res.data.message || '导入任务已提交');
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('导入失败'));
+                }}
+              >
+                导入整部
+              </Button>
               <Popconfirm
                 title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
@@ -422,51 +440,14 @@ const LocalItemList = ({ refreshTrigger }) => {
                   删除整部
                 </Button>
               </Popconfirm>
-              <Button
-                type="link"
-                size="small"
-                icon={<ImportOutlined />}
-                onClick={() => {
-                  // 导入整部剧集
-                  importLocalItems({
-                    shows: [{ title: record.title }]
-                  })
-                    .then((res) => {
-                      message.success(res.data.message || '导入任务已提交');
-                      loadItems(pagination.current, pagination.pageSize);
-                    })
-                    .catch(() => message.error('导入失败'));
-                }}
-              >
-                导入整部
-              </Button>
             </Space>
           );
         }
 
-        // 季度显示删除和导入按钮
+        // 季度显示导入、编辑和删除按钮
         if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
           return (
             <Space size="small">
-              <Popconfirm
-                title={`确定要删除第${record.season}季的所有集吗?`}
-                onConfirm={() => {
-                  // 删除该季度 - 使用record.key中的ids
-                  const ids = JSON.parse(record.key);
-                  batchDeleteLocalItems([ids])
-                    .then(() => {
-                      message.success(`成功删除第${record.season}季`);
-                      loadItems(pagination.current, pagination.pageSize);
-                    })
-                    .catch(() => message.error('删除失败'));
-                }}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                  删除整季
-                </Button>
-              </Popconfirm>
               <Button
                 type="link"
                 size="small"
@@ -488,6 +469,33 @@ const LocalItemList = ({ refreshTrigger }) => {
               >
                 导入整季
               </Button>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+              >
+                编辑
+              </Button>
+              <Popconfirm
+                title={`确定要删除第${record.season}季的所有集吗?`}
+                onConfirm={() => {
+                  // 删除该季度 - 使用record.key中的ids
+                  const ids = JSON.parse(record.key);
+                  batchDeleteLocalItems([ids])
+                    .then(() => {
+                      message.success(`成功删除第${record.season}季`);
+                      loadItems(pagination.current, pagination.pageSize);
+                    })
+                    .catch(() => message.error('删除失败'));
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除整季
+                </Button>
+              </Popconfirm>
             </Space>
           );
         }
@@ -594,6 +602,15 @@ const LocalItemList = ({ refreshTrigger }) => {
           }}
         >
           导入整季
+        </Button>,
+        <Button
+          key="edit-season"
+          type="link"
+          size="small"
+          icon={<EditOutlined />}
+          onClick={() => handleEdit(record)}
+        >
+          编辑
         </Button>,
         <Popconfirm
           key="delete-season"
