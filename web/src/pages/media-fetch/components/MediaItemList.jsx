@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown } from 'antd';
-import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented } from 'antd';
+import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import EpisodeListModal from './EpisodeListModal';
 
 const { Search } = Input;
 
-const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange }) => {
+const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -19,15 +19,30 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
   const [selectedShow, setSelectedShow] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 'table' or 'card'
 
+  // 使用外部传入的 mediaTypeFilter,如果没有则使用默认值
+  const mediaTypeFilter = externalMediaTypeFilter || 'all';
+
   // 加载作品列表
   const loadItems = async (page = 1, pageSize = 100) => {
     setLoading(true);
     try {
-      const res = await getMediaWorks({
+      const params = {
         server_id: serverId,
         page,
         page_size: pageSize,
-      });
+      };
+
+      // 添加类型过滤
+      if (mediaTypeFilter !== 'all') {
+        params.media_type = mediaTypeFilter;
+      }
+
+      // 添加搜索过滤
+      if (searchText) {
+        params.search = searchText;
+      }
+
+      const res = await getMediaWorks(params);
       const data = res.data;
 
       // 构建树形结构(只包含作品和季度,不包含集)
@@ -59,7 +74,7 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
           isGroup: false,
         });
       } else if (work.type === 'tv_show') {
-        // 电视剧组节点
+        // 电视节目组节点
         try {
           const seasonsRes = await getShowSeasons(work.title, work.serverId);
           const seasons = seasonsRes.data || [];
@@ -113,7 +128,7 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
     if (serverId) {
       loadItems();
     }
-  }, [serverId, refreshTrigger]);
+  }, [serverId, refreshTrigger, externalMediaTypeFilter, searchText]);
 
   // 同步外部选中的项目
   useEffect(() => {
@@ -348,8 +363,8 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
       render: (type) => {
         const typeMap = {
           movie: '电影',
-          tv_series: '电视剧',
-          tv_show: '电视剧',
+          tv_series: '电视节目',
+          tv_show: '电视节目',
           tv_season: '-',
         };
         return typeMap[type] || type;
@@ -581,6 +596,7 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
   const rowSelection = {
     selectedRowKeys,
     onChange: handleSelectionChange,
+    columnWidth: 48, // 设置复选框列宽度
     // 所有项都可以选择
   };
 
@@ -1020,39 +1036,6 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
         </div>
 
         <Space style={{ marginBottom: 20, width: '100%' }} direction="vertical" size="middle">
-          <Row gutter={[12, 12]} align="middle">
-            <Col xs={24} sm={12} md={8}>
-              <Checkbox
-                indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
-                checked={selectedRowKeys.length === items.length && items.length > 0}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    // 全选所有项(包括剧集组、季度、单集、电影)
-                    const allKeys = [];
-                    const collectKeys = (list) => {
-                      list.forEach(item => {
-                        allKeys.push(item.key);
-                        if (item.children) {
-                          collectKeys(item.children);
-                        }
-                      });
-                    };
-                    collectKeys(items);
-                    setSelectedRowKeys(allKeys);
-                  } else {
-                    setSelectedRowKeys([]);
-                  }
-                }}
-              >
-                全选 ({selectedRowKeys.length}/{items.length})
-              </Checkbox>
-            </Col>
-            <Col xs={24} sm={12} md={16}>
-              <Space wrap>
-                {/* 批量操作按钮已移至LibraryScan组件 */}
-              </Space>
-            </Col>
-          </Row>
         </Space>
 
         {viewMode === 'table' ? (
@@ -1135,8 +1118,8 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
                       <div style={{ marginTop: '8px', marginLeft: '36px' }} className="desktop-only">
                         <Space size="small" wrap>
                           <Tag size="small" color="blue">
-                            {item.mediaType === 'movie' ? '电影' : 
-                             item.mediaType === 'tv_show' ? '电视剧' : 
+                            {item.mediaType === 'movie' ? '电影' :
+                             item.mediaType === 'tv_show' ? '电视节目' :
                              item.mediaType === 'tv_season' ? '季' : item.mediaType}
                           </Tag>
                           {!item.isGroup && (
@@ -1159,8 +1142,8 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
                       <div className="mobile-only" style={{ marginTop: '12px', marginLeft: '36px' }}>
                         <Space size="middle" wrap>
                           <Tag size="small" color="blue" style={{ fontSize: '13px', padding: '2px 8px' }}>
-                            {item.mediaType === 'movie' ? '电影' : 
-                             item.mediaType === 'tv_show' ? '电视剧' : 
+                            {item.mediaType === 'movie' ? '电影' :
+                             item.mediaType === 'tv_show' ? '电视节目' :
                              item.mediaType === 'tv_season' ? '季' : item.mediaType}
                           </Tag>
                           {!item.isGroup && (

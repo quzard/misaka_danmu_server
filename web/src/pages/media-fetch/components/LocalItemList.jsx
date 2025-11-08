@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox, Segmented, Input } from 'antd';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, VideoCameraOutlined, PlaySquareOutlined, SearchOutlined } from '@ant-design/icons';
+
+const { Search } = Input;
 import {
   getLocalWorks,
   getLocalMovieFiles,
@@ -26,6 +28,8 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
   const [currentSeason, setCurrentSeason] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 添加视图模式状态
+  const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
+  const [searchText, setSearchText] = useState(''); // 添加搜索状态
 
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
@@ -46,16 +50,28 @@ const LocalItemList = ({ refreshTrigger }) => {
 
   useEffect(() => {
     loadItems(pagination.current, pagination.pageSize);
-  }, [refreshTrigger]);
+  }, [refreshTrigger, mediaTypeFilter, searchText]);
 
   // 加载作品列表
   const loadItems = async (page = 1, pageSize = 100) => {
     setLoading(true);
     try {
-      const res = await getLocalWorks({
+      const params = {
         page,
         page_size: pageSize,
-      });
+      };
+
+      // 添加类型过滤
+      if (mediaTypeFilter !== 'all') {
+        params.media_type = mediaTypeFilter;
+      }
+
+      // 添加搜索过滤
+      if (searchText) {
+        params.search = searchText;
+      }
+
+      const res = await getLocalWorks(params);
       const data = res.data;
 
       // 构建树形结构
@@ -327,7 +343,7 @@ const LocalItemList = ({ refreshTrigger }) => {
       width: '40%', // 增加标题列宽度
       render: (title, record) => {
         // 季度节点显示为可点击链接
-        if (record.mediaType === 'tv_season') {
+        if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
           return (
             <Button
               type="link"
@@ -483,17 +499,9 @@ const LocalItemList = ({ refreshTrigger }) => {
             return null;
           }
 
-          // 单独的弹幕文件,显示编辑、删除、导入按钮
+          // 单独的弹幕文件,显示导入、编辑、删除按钮
           return (
             <Space size="small">
-              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
-                编辑
-              </Button>
-              <Popconfirm title="确定要删除吗?" onConfirm={() => handleDelete(record)} okText="确定" cancelText="取消">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                  删除
-                </Button>
-              </Popconfirm>
               <Button
                 type="link"
                 size="small"
@@ -502,6 +510,14 @@ const LocalItemList = ({ refreshTrigger }) => {
               >
                 导入
               </Button>
+              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
+                编辑
+              </Button>
+              <Popconfirm title="确定要删除吗?" onConfirm={() => handleDelete(record)} okText="确定" cancelText="取消">
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
             </Space>
           );
         }
@@ -829,7 +845,7 @@ const LocalItemList = ({ refreshTrigger }) => {
         style={{ marginBottom: '16px' }}
       >
         {/* 全选复选框 */}
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Checkbox
             indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
             checked={selectedRowKeys.length === items.length && items.length > 0}
@@ -853,6 +869,23 @@ const LocalItemList = ({ refreshTrigger }) => {
           >
             全选 ({selectedRowKeys.length}/{items.length})
           </Checkbox>
+          <Space>
+            <Search
+              placeholder="搜索标题"
+              allowClear
+              style={{ width: 200 }}
+              onSearch={setSearchText}
+            />
+            <Segmented
+              value={mediaTypeFilter}
+              onChange={setMediaTypeFilter}
+              options={[
+                { label: '全部', value: 'all' },
+                { label: '电影', value: 'movie', icon: <VideoCameraOutlined /> },
+                { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
+              ]}
+            />
+          </Space>
         </div>
 
         {viewMode === 'table' ? (

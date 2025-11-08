@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid } from 'antd';
-import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented } from 'antd';
+import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
 import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer, batchDeleteMediaItems, importMediaItems, deleteMediaServer } from '../../../apis';
@@ -21,6 +21,7 @@ const LibraryScan = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
   const [showServerUrl, setShowServerUrl] = useState(false);
+  const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
 
   const screens = Grid.useBreakpoint();
 
@@ -731,6 +732,15 @@ const LibraryScan = () => {
           extra={
             screens.xs ? null : (
               <Space>
+                <Segmented
+                  value={mediaTypeFilter}
+                  onChange={setMediaTypeFilter}
+                  options={[
+                    { label: '全部', value: 'all' },
+                    { label: '电影', value: 'movie', icon: <VideoCameraOutlined /> },
+                    { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
+                  ]}
+                />
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
@@ -794,6 +804,7 @@ const LibraryScan = () => {
             refreshTrigger={refreshTrigger}
             selectedItems={selectedMediaItems}
             onSelectionChange={setSelectedMediaItems}
+            mediaTypeFilter={mediaTypeFilter}
           />
         </Card>
       )}
