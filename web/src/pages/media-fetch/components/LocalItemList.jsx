@@ -11,6 +11,7 @@ import {
 } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import LocalEpisodeListModal from './LocalEpisodeListModal';
+import LocalMovieFilesModal from './LocalMovieFilesModal';
 
 const LocalItemList = ({ refreshTrigger }) => {
   const [items, setItems] = useState([]);
@@ -25,6 +26,8 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [editorVisible, setEditorVisible] = useState(false);
   const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
   const [currentSeason, setCurrentSeason] = useState(null);
+  const [movieFilesModalVisible, setMovieFilesModalVisible] = useState(false);
+  const [currentMovie, setCurrentMovie] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 添加视图模式状态
 
   // 检测是否为移动端
@@ -445,6 +448,21 @@ const LocalItemList = ({ refreshTrigger }) => {
                   删除
                 </Button>
               </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                icon={<ImportOutlined />}
+                onClick={() => {
+                  setCurrentMovie({
+                    title: record.title,
+                    year: record.year,
+                  });
+                  setMovieFilesModalVisible(true);
+                }}
+                style={{ fontSize: '12px' }}
+              >
+                选择文件导入
+              </Button>
             </Space>
           );
         }
@@ -569,7 +587,22 @@ const LocalItemList = ({ refreshTrigger }) => {
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>
             删除
           </Button>
-        </Popconfirm>
+        </Popconfirm>,
+        <Button
+          key="import-movie"
+          type="link"
+          size="small"
+          icon={<ImportOutlined />}
+          onClick={() => {
+            setCurrentMovie({
+              title: record.title,
+              year: record.year,
+            });
+            setMovieFilesModalVisible(true);
+          }}
+        >
+          选择文件导入
+        </Button>
       ];
     }
 
@@ -857,6 +890,16 @@ const LocalItemList = ({ refreshTrigger }) => {
         onClose={() => {
           setEpisodeModalVisible(false);
           setCurrentSeason(null);
+        }}
+        onRefresh={() => loadItems(pagination.current, pagination.pageSize)}
+      />
+
+      <LocalMovieFilesModal
+        visible={movieFilesModalVisible}
+        movie={currentMovie}
+        onClose={() => {
+          setMovieFilesModalVisible(false);
+          setCurrentMovie(null);
         }}
         onRefresh={() => loadItems(pagination.current, pagination.pageSize)}
       />
