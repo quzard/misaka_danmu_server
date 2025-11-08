@@ -11,14 +11,14 @@ from pydantic import BaseModel
 
 from ... import models, security
 from ...database import get_db_session
-from ...crud import local_danmaku as crud, anime as anime_crud, episode as episode_crud, danmaku as danmaku_crud
+from ...crud import local_danmaku as crud, anime as anime_crud, episode as episode_crud
 from ...local_danmaku_scanner import LocalDanmakuScanner, copy_local_poster
 from ...danmaku_parser import parse_dandan_xml_to_comments
 from ...task_manager import TaskManager, TaskSuccess
 from ...config_manager import ConfigManager
 from ..dependencies import get_config_manager, get_task_manager
 from ..ui_models import FileItem
-
+from ...crud.episode import update_episode_danmaku_info
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -366,7 +366,6 @@ async def batch_delete_local_items(
 @router.post("/local-items/import", status_code=202, summary="导入本地弹幕")
 async def import_local_items(
     payload: LocalItemsImportRequest,
-    request: Request,
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     current_user: models.User = Depends(security.get_current_user)
@@ -520,21 +519,21 @@ async def import_local_items(
                     provider_episode_id=f"local_{item_id}_{episode_index}"
                 )
 
-                # 保存弹幕
-                config_manager = request.app.state.config_manager
-                added_count = await danmaku_crud.save_danmaku_for_episode(
+                # 直接使用本地弹幕文件路径，不创建新文件
+                # 更新 episode 的弹幕信息，指向本地文件
+                await update_episode_danmaku_info(
                     task_session,
                     episode_id,
-                    comments,
-                    config_manager
+                    str(xml_path),  # 使用本地文件的绝对路径
+                    len(comments)
                 )
 
                 # 标记为已导入
-                await crud.update_local_item(task_session, item_id, {"isImported": True})
+                await crud.update_local_item(task_session, item_id, isImported=True)
                 await task_session.commit()
 
                 success_count += 1
-                logger.info(f"成功导入: {item.title} - 第{episode_index}集, 弹幕数: {added_count}")
+                logger.info(f"成功导入: {item.title} - 第{episode_index}集, 弹幕数: {len(comments)}, 路径: {xml_path}")
 
             except Exception as e:
                 logger.error(f"导入本地项失败 (ID: {item_id}): {e}", exc_info=True)
