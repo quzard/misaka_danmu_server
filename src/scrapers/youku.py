@@ -451,29 +451,25 @@ class YoukuScraper(BaseScraper):
         else:
             filtered_episodes = raw_episodes
 
-        # 参考 parserYouku.js: 综艺节目需要倒序处理，但全量刷新时不倒序
-        if media_type == 'variety' and not is_full_refresh:
-            self.logger.info(f"Youku: 检测到综艺节目，进行倒序处理")
-            filtered_episodes = list(reversed(filtered_episodes))
+        # 已移除综艺倒序处理逻辑,保持原始顺序
+        # 原因: 媒体类型检测不准确,容易误判导致非综艺节目被倒序
 
-            # 检测特殊格式 "第N期：上/中/下"
-            special_format_pattern = re.compile(r'第\d+期\s*[：:]\s*[上中下]\s*[：:]')
-            has_special_format = any(special_format_pattern.search(ep.clean_display_name or ep.title) for ep in filtered_episodes)
+        # 检测特殊格式 "第N期：上/中/下" 并过滤
+        special_format_pattern = re.compile(r'第\d+期\s*[：:]\s*[上中下]\s*[：:]')
+        has_special_format = any(special_format_pattern.search(ep.clean_display_name or ep.title) for ep in filtered_episodes)
 
-            if has_special_format:
-                self.logger.info(f"Youku: 检测到综艺特殊格式 '第N期：上/中/下'，进行智能过滤")
-                # 只保留"上"或没有标记的分集
-                final_filtered = []
-                for ep in filtered_episodes:
-                    title = ep.clean_display_name or ep.title
-                    match = re.search(r'第(\d+)期\s*[：:]\s*([上中下])', title)
-                    if not match or match.group(2) == '上':
-                        final_filtered.append(ep)
-                    else:
-                        self.logger.debug(f"Youku: 过滤掉综艺分段: {title}")
-                filtered_episodes = final_filtered
-        elif media_type == 'variety' and is_full_refresh:
-            self.logger.info(f"Youku: 检测到综艺节目全量刷新操作，保持原始顺序")
+        if has_special_format:
+            self.logger.info(f"Youku: 检测到特殊格式 '第N期：上/中/下'，进行智能过滤")
+            # 只保留"上"或没有标记的分集
+            final_filtered = []
+            for ep in filtered_episodes:
+                title = ep.clean_display_name or ep.title
+                match = re.search(r'第(\d+)期\s*[：:]\s*([上中下])', title)
+                if not match or match.group(2) == '上':
+                    final_filtered.append(ep)
+                else:
+                    self.logger.debug(f"Youku: 过滤掉分段: {title}")
+            filtered_episodes = final_filtered
 
         # 在过滤后的列表上重新编号，使用媒体类型格式化标题
         # 最终输出统一为 tv_series 类型
