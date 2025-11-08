@@ -98,6 +98,7 @@ const LocalItemList = ({ refreshTrigger }) => {
             itemCount: work.itemCount,
             children: files.map(f => ({
               key: f.id,  // 文件使用id作为key
+              id: f.id,  // 添加id字段
               title: f.filePath.split(/[/\\]/).pop(),  // 显示文件名
               filePath: f.filePath,
               year: f.year,
@@ -105,7 +106,7 @@ const LocalItemList = ({ refreshTrigger }) => {
               tvdbId: f.tvdbId,
               imdbId: f.imdbId,
               posterUrl: f.posterUrl,
-              mediaType: 'movie_file',
+              mediaType: 'movie',  // 保持和主条目一致
               movieTitle: work.title,
               isGroup: false,
               isImported: f.isImported,
@@ -277,8 +278,8 @@ const LocalItemList = ({ refreshTrigger }) => {
       const item = findItemByKey(items, key);
       if (!item) return;
 
-      if (item.mediaType === 'movie_file') {
-        // 电影文件
+      if (item.mediaType === 'movie' && !item.isGroup) {
+        // 电影文件(非分组节点)
         if (item.id) {
           itemIds.push(item.id);
         }
@@ -367,7 +368,7 @@ const LocalItemList = ({ refreshTrigger }) => {
       title: '状态',
       dataIndex: 'isImported',
       key: 'isImported',
-      width: '15%', // 调整列宽
+      width: '10%', // 调小状态列宽
       render: (isImported, record) => {
         if (record.isGroup) return '-';
         return isImported ? (
@@ -380,7 +381,7 @@ const LocalItemList = ({ refreshTrigger }) => {
     {
       title: '操作',
       key: 'action',
-      width: '15%', // 调整列宽
+      width: '20%', // 调大操作列宽
       render: (_, record) => {
         // 剧集组显示删除和导入整部按钮
         if (record.isGroup && record.mediaType === 'tv_show') {
@@ -508,31 +509,6 @@ const LocalItemList = ({ refreshTrigger }) => {
           );
         }
 
-        // 电影文件操作(movie_file)
-        if (record.mediaType === 'movie_file') {
-          return (
-            <Space size="small" direction="vertical"> {/* 垂直排列按钮 */}
-              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} style={{ fontSize: '12px' }}>
-                编辑
-              </Button>
-              <Popconfirm title="确定要删除吗?" onConfirm={() => handleDelete(record)} okText="确定" cancelText="取消">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: '12px' }}>
-                  删除
-                </Button>
-              </Popconfirm>
-              <Button
-                type="link"
-                size="small"
-                icon={<ImportOutlined />}
-                onClick={() => handleImportSingleFile(record)}
-                style={{ fontSize: '12px' }}
-              >
-                导入
-              </Button>
-            </Space>
-          );
-        }
-
         return null;
       },
     },
@@ -637,8 +613,8 @@ const LocalItemList = ({ refreshTrigger }) => {
       return [];
     }
 
-    // 电影文件或movie_file类型,显示编辑、删除、导入按钮
-    if (record.mediaType === 'movie' || record.mediaType === 'movie_file') {
+    // 电影文件,显示编辑、删除、导入按钮
+    if (record.mediaType === 'movie' && !record.isGroup) {
       return [
         <Button
           key="edit-movie"
