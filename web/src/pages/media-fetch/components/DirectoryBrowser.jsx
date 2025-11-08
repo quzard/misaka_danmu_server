@@ -19,7 +19,8 @@ const ChineseActions = {
     button: {
       name: '列表视图',
       toolbar: true,
-      icon: ChonkyActions.EnableListView.button.icon,
+      contextMenu: false,
+      icon: ChonkyActions.EnableListView.button?.icon || 'list',
     },
   }),
   EnableGridView: defineFileAction({
@@ -27,7 +28,8 @@ const ChineseActions = {
     button: {
       name: '网格视图',
       toolbar: true,
-      icon: ChonkyActions.EnableGridView.button.icon,
+      contextMenu: false,
+      icon: ChonkyActions.EnableGridView.button?.icon || 'th',
     },
   }),
   SortFilesByName: defineFileAction({
@@ -35,7 +37,7 @@ const ChineseActions = {
     button: {
       name: '按名称排序',
       toolbar: true,
-      icon: ChonkyActions.SortFilesByName.button.icon,
+      contextMenu: false,
     },
   }),
   SortFilesByDate: defineFileAction({
@@ -43,7 +45,7 @@ const ChineseActions = {
     button: {
       name: '按日期排序',
       toolbar: true,
-      icon: ChonkyActions.SortFilesByDate.button.icon,
+      contextMenu: false,
     },
   }),
   SortFilesBySize: defineFileAction({
@@ -51,7 +53,16 @@ const ChineseActions = {
     button: {
       name: '按大小排序',
       toolbar: true,
-      icon: ChonkyActions.SortFilesBySize.button?.icon,
+      contextMenu: false,
+    },
+  }),
+  CreateFolder: defineFileAction({
+    ...ChonkyActions.CreateFolder,
+    button: {
+      name: '新建文件夹',
+      toolbar: false,
+      contextMenu: true,
+      icon: 'folder', // 尝试简单的folder图标
     },
   }),
 };
@@ -59,17 +70,56 @@ const ChineseActions = {
 // 设置Chonky默认配置
 setChonkyDefaults({
   iconComponent: ChonkyIconFA,
+});
+
+// 定义中文国际化配置
+const createChineseI18n = (isMobile) => ({
+  locale: 'zh',
   formatters: {
-    formatFileModDate: (modDate) => {
-      if (!modDate) return '';
-      const year = modDate.getFullYear();
-      const month = String(modDate.getMonth() + 1).padStart(2, '0');
-      const day = String(modDate.getDate()).padStart(2, '0');
-      const hour = String(modDate.getHours()).padStart(2, '0');
-      const minute = String(modDate.getMinutes()).padStart(2, '0');
-      const second = String(modDate.getSeconds()).padStart(2, '0');
-      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    formatFileModDate: (intl, file) => {
+      const safeModDate = FileHelper.getModDate(file);
+      if (safeModDate) {
+        return `${intl.formatDate(safeModDate)}, ${intl.formatTime(safeModDate)}`;
+      } else {
+        return null;
+      }
     },
+    formatFileSize: (intl, file) => {
+      if (!file || typeof file.size !== 'number') return null;
+      return `大小: ${file.size}`;
+    },
+  },
+  messages: {
+    // Chonky UI 翻译字符串
+    'chonky.toolbar.searchPlaceholder': '搜索',
+    'chonky.toolbar.visibleFileCount': `{fileCount, plural,
+      one {# 个文件}
+      other {# 个文件}
+    }`,
+    'chonky.toolbar.hiddenFileCount': `{fileCount, plural,
+      =0 {}
+      one {# 已隐藏}
+      other {# 已隐藏}
+    }`,
+    'chonky.fileList.nothingToShow': '这里空空如也！',
+    'chonky.contextMenu.browserMenuShortcut': 'Alt+鼠标右键：显示浏览器菜单',
+    'chonky.contextMenu.multipleSelection': '已选择 {count} 项',
+    'chonky.contextMenu.emptySelection': '未选择任何项目',
+
+    // 文件操作翻译字符串 - 电脑端隐藏actions和options按钮组
+    [`chonky.actionGroups.Actions`]: isMobile ? '操作' : '',
+    [`chonky.actionGroups.Options`]: isMobile ? '选项' : '',
+    [`chonky.actions.${ChonkyActions.OpenParentFolder.id}.button.name`]: '打开上级文件夹',
+    [`chonky.actions.${ChonkyActions.CreateFolder.id}.button.name`]: '新建文件夹',
+    [`chonky.actions.${ChonkyActions.CreateFolder.id}.button.tooltip`]: '创建新文件夹',
+    [`chonky.actions.${ChonkyActions.OpenSelection.id}.button.name`]: '打开选中项',
+    [`chonky.actions.${ChonkyActions.EnableListView.id}.button.name`]: '列表视图',
+    [`chonky.actions.${ChonkyActions.EnableGridView.id}.button.name`]: '网格视图',
+    [`chonky.actions.${ChonkyActions.SortFilesByName.id}.button.name`]: '按名称排序',
+    [`chonky.actions.${ChonkyActions.SortFilesByDate.id}.button.name`]: '按日期排序',
+    [`chonky.actions.${ChonkyActions.SortFilesBySize.id}.button.name`]: '按大小排序',
+    [`chonky.actions.${ChonkyActions.ToggleHiddenFiles.id}.button.name`]: '隐藏文件',
+    [`chonky.actions.${ChonkyActions.ToggleShowFoldersFirst.id}.button.name`]: '文件夹优先',
   },
 });
 
@@ -85,7 +135,7 @@ const convertToChonkyFiles = (apiFiles) => {
       name: item.name,
       isDir: item.type === 'dir',
       modDate: modDate,
-      size: item.size || 0,
+      ...(item.type !== 'dir' && { size: item.size || 0 }), // 只为文件设置大小，文件夹不设置大小
     };
   });
 };
@@ -116,40 +166,50 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   const [loading, setLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
   const [files, setFiles] = useState([]);
-  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
+  const [createFolderVisible, setCreateFolderVisible] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
 
-  // 格式化时间显示
+  // 检测是否为移动端
   useEffect(() => {
-    const formatTimeElements = () => {
-      // 查找所有时间元素并格式化
-      const timeElements = document.querySelectorAll('.chonky-fileEntry > div:nth-child(2)');
-      timeElements.forEach(el => {
-        const text = el.textContent;
-        // 如果是英文时间格式,尝试解析并重新格式化
-        if (text && text.includes(',')) {
-          try {
-            const date = new Date(text);
-            if (!isNaN(date.getTime())) {
-              const year = date.getFullYear();
-              const month = String(date.getMonth() + 1).padStart(2, '0');
-              const day = String(date.getDate()).padStart(2, '0');
-              const hour = String(date.getHours()).padStart(2, '0');
-              const minute = String(date.getMinutes()).padStart(2, '0');
-              const second = String(date.getSeconds()).padStart(2, '0');
-              el.textContent = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-            }
-          } catch (e) {
-            // 忽略解析错误
-          }
-        }
-      });
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
     };
+    
+    checkIsMobile();
+    window.addEventListener('resize', checkIsMobile);
+    
+    return () => {
+      window.removeEventListener('resize', checkIsMobile);
+    };
+  }, []);
 
-    if (visible && files.length > 0) {
-      // 延迟执行以确保DOM已渲染
+  // 移动端简化日期显示
+  useEffect(() => {
+    if (isMobile && visible && files.length > 0) {
+      const formatTimeElements = () => {
+        const timeElements = document.querySelectorAll('.chonky-fileEntry > div:nth-child(2)');
+        timeElements.forEach(el => {
+          const text = el.textContent;
+          if (text && text.includes(',')) {
+            try {
+              const date = new Date(text);
+              if (!isNaN(date.getTime())) {
+                const month = date.getMonth() + 1;
+                const day = date.getDate();
+                const hour = date.getHours();
+                const minute = date.getMinutes();
+                el.textContent = `${month}-${day} ${hour}:${minute.toString().padStart(2, '0')}`;
+              }
+            } catch (e) {
+              // 忽略解析错误
+            }
+          }
+        });
+      };
       setTimeout(formatTimeElements, 100);
     }
-  }, [visible, files]);
+  }, [isMobile, visible, files]);
 
   useEffect(() => {
     if (visible) {
@@ -167,9 +227,9 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
         name: ''
       }, 'name');
 
-      // 只显示目录,不显示文件
-      const dirs = response.data.filter(item => item.type === 'dir');
-      const chonkyFiles = convertToChonkyFiles(dirs);
+      // 显示所有文件和文件夹
+      const allFiles = response.data;
+      const chonkyFiles = convertToChonkyFiles(allFiles);
       setFiles(chonkyFiles);
     } catch (error) {
       message.error('加载目录失败：' + (error.message || '未知错误'));
@@ -178,6 +238,26 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       setLoading(false);
     }
   };
+
+  // 处理创建文件夹
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) {
+      message.warning('请输入文件夹名称');
+      return;
+    }
+
+    try {
+      // 这里暂时使用提示，实际应该调用创建目录的API
+      message.info(`创建文件夹 "${newFolderName}" 的功能正在开发中`);
+      setCreateFolderVisible(false);
+      setNewFolderName('');
+      // 重新加载目录
+      await loadDirectory(currentPath);
+    } catch (error) {
+      message.error('创建文件夹失败：' + (error.message || '未知错误'));
+    }
+  };
+
 
   // 创建文件夹链
   const folderChain = useMemo(() => createFolderChain(currentPath), [currentPath]);
@@ -217,11 +297,11 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       }
       open={visible}
       onCancel={onClose}
-      width="60vw"
+      width={isMobile ? "95vw" : "60vw"}
       style={{
-        margin: '2vh 20vw 4vh',
-        top: '2vh',
-        height: '94vh',
+        margin: isMobile ? '1vh 2.5vw 2vh' : '2vh 20vw 4vh',
+        top: isMobile ? '1vh' : '2vh',
+        height: isMobile ? '96vh' : '94vh',
         maxWidth: 'none',
         paddingBottom: 0,
         borderRadius: '12px',
@@ -230,7 +310,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       styles={{
         body: {
           padding: 0,
-          height: 'calc(94vh - 120px)',
+          height: isMobile ? 'calc(96vh - 100px)' : 'calc(94vh - 120px)',
           overflow: 'hidden',
           background: 'var(--color-bg)'
         }
@@ -289,13 +369,23 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
           files={files}
           folderChain={folderChain}
           fileActions={[
-            ChineseActions.EnableListView,
-            ChineseActions.EnableGridView,
-            ChineseActions.SortFilesByName,
-            ChineseActions.SortFilesByDate,
-            ChineseActions.SortFilesBySize,
-            ChonkyActions.OpenFiles,
+            // 两端都保留现有按钮，同时都添加创建文件夹功能
+            ...(isMobile ? [
+              // 手机端保留默认的下拉菜单，并添加创建文件夹
+              ChonkyActions.OpenFiles,
+              ChineseActions.CreateFolder,
+            ] : [
+              // 电脑端保留自定义中文按钮
+              ChineseActions.EnableListView,
+              ChineseActions.EnableGridView,
+              ChineseActions.SortFilesByName,
+              ChineseActions.SortFilesByDate,
+              ChineseActions.SortFilesBySize,
+              ChineseActions.CreateFolder,
+            ]),
           ]}
+          // 电脑端完全禁用默认action，手机端显示默认action
+          disableDefaultFileActions={!isMobile}
           onFileAction={(data) => {
             // 处理双击进入文件夹
             if (data.id === ChonkyActions.OpenFiles.id) {
@@ -304,12 +394,61 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
                 setCurrentPath(targetFile.id);
               }
             }
+            // 处理创建文件夹
+            else if (data.id === ChineseActions.CreateFolder.id) {
+              setCreateFolderVisible(true);
+            }
           }}
+          i18n={createChineseI18n(isMobile)}
           defaultFileViewActionId={ChonkyActions.EnableListView.id}
           disableSelection={true}
           disableDragAndDrop={true}
-          darkMode={false}
         />
+
+        {/* 创建文件夹对话框 */}
+        <Modal
+          title="新建文件夹"
+          open={createFolderVisible}
+          onOk={handleCreateFolder}
+          onCancel={() => {
+            setCreateFolderVisible(false);
+            setNewFolderName('');
+          }}
+          okText="创建"
+          cancelText="取消"
+          width={400}
+        >
+          <div style={{ marginTop: '16px' }}>
+            <Typography.Text>在当前目录创建新文件夹：</Typography.Text>
+            <div style={{ marginTop: '12px' }}>
+              <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
+                当前路径: {currentPath}
+              </Typography.Text>
+            </div>
+            <div style={{ marginTop: '16px' }}>
+              <input
+                type="text"
+                placeholder="请输入文件夹名称"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleCreateFolder();
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </Modal>
       </div>
     </Modal>
   );

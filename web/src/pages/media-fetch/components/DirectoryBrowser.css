@@ -71,23 +71,20 @@
   background: var(--color-bg) !important;
 }
 
-/* 移动端优化 */
-@media (max-width: 768px) {
-  .chonky-fileBrowser .chonky-fileListWrapper {
-    height: calc(100% - 45px) !important;
+/* 隐藏工具栏右侧的齿轮按钮（Options）- 只在电脑端隐藏 */
+@media (min-width: 769px) {
+  .chonky-toolbar-right-group {
+    display: none !important;
   }
 
-  .chonky-fileBrowser .chonky-toolbar {
-    padding: 8px 12px !important;
+  /* 隐藏工具栏下拉菜单 - 只在电脑端隐藏 */
+  .chonky-toolbar .chonky-dropdown {
+    display: none !important;
   }
 
-  .chonky-fileBrowser .chonky-fileEntry {
-    font-size: 13px !important;
-    padding: 8px 12px !important;
-  }
-
-  .chonky-fileBrowser .chonky-toolbar button {
-    padding: 6px 12px !important;
-    font-size: 12px !important;
+  /* 隐藏文件条目上的操作菜单 - 只在电脑端隐藏 */
+  .chonky-fileEntry .chonky-dropdown,
+  .chonky-fileEntry .chonky-context-menu {
+    display: none !important;
   }
 }
