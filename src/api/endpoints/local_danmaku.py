@@ -16,6 +16,9 @@ from ...local_danmaku_scanner import LocalDanmakuScanner, copy_local_poster
 from ...danmaku_parser import parse_dandan_xml_to_comments
 from ...task_manager import TaskManager, TaskSuccess
 from ...config_manager import ConfigManager
+from ...metadata_manager import MetadataSourceManager
+from ...image_utils import download_and_cache_image
+from ...crud.danmaku import update_metadata_if_empty
 from ..dependencies import get_config_manager, get_task_manager
 from ..ui_models import FileItem
 from ...crud.episode import update_episode_danmaku_info
@@ -366,6 +369,7 @@ async def batch_delete_local_items(
 @router.post("/local-items/import", status_code=202, summary="导入本地弹幕")
 async def import_local_items(
     payload: LocalItemsImportRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager),
     current_user: models.User = Depends(security.get_current_user)
@@ -467,6 +471,8 @@ async def import_local_items(
 
                 # 处理海报
                 local_image_path = None
+
+                # 优先使用本地海报
                 if item.posterUrl:
                     # 如果posterUrl是本地路径,复制到海报目录
                     poster_path = Path(item.posterUrl)
@@ -479,6 +485,26 @@ async def import_local_items(
                         if local_image_path:
                             logger.info(f"海报已复制: {poster_path} -> {local_image_path}")
 
+                # 如果没有本地海报但有 TMDB ID,尝试从 TMDB 获取
+                if not local_image_path and item.tmdbId:
+                    try:
+                        # 获取元数据管理器
+                        metadata_manager: MetadataSourceManager = request.app.state.metadata_manager
+                        config_manager = ConfigManager(task_session)
+
+                        # 确定媒体类型
+                        media_type = "movie" if item.mediaType == "movie" else "tv"
+
+                        # 使用元数据管理器获取 TMDB 详情
+                        details = await metadata_manager.get_details("tmdb", item.tmdbId, current_user, mediaType=media_type)
+                        if details and details.imageUrl:
+                            # 下载并缓存图片
+                            local_image_path = await download_and_cache_image(details.imageUrl, config_manager)
+                            if local_image_path:
+                                logger.info(f"从 TMDB 获取海报成功: {details.imageUrl} -> {local_image_path}")
+                    except Exception as e:
+                        logger.warning(f"从 TMDB 获取海报失败 (TMDB ID: {item.tmdbId}): {e}")
+
                 # 创建或查找anime记录
                 anime_id = await anime_crud.get_or_create_anime(
                     task_session,
@@ -490,17 +516,22 @@ async def import_local_items(
                     year=item.year
                 )
 
+                # 更新元数据（如果有）
+                await update_metadata_if_empty(
+                    task_session,
+                    anime_id,
+                    tmdb_id=item.tmdbId,
+                    imdb_id=item.imdbId,
+                    tvdb_id=item.tvdbId
+                )
+
                 # 获取配置的provider和mediaId
                 provider = config.get('provider', 'custom')
                 media_id = config.get('mediaId')
 
-                # 如果没有指定mediaId,自动生成一个
+                # 如果没有指定mediaId,使用标准格式: custom_{anime_id}
                 if not media_id:
-                    import time
-                    import random
-                    timestamp = int(time.time())
-                    random_str = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
-                    media_id = f"{provider}_{item.title}_{item_id}_{timestamp}_{random_str}"
+                    media_id = f"custom_{anime_id}"
 
                 # 创建或获取指定的源
                 from ...crud import source as source_crud
