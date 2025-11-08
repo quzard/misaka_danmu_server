@@ -224,13 +224,13 @@ export const Library = () => {
       title: '年份',
       dataIndex: 'year',
       key: 'year',
-      width: 80,
+      width: 70,
     },
     {
       title: '集数',
       dataIndex: 'episodeCount',
       key: 'episodeCount',
-      width: 50,
+      width: 70,
     },
     {
       title: '源数量',

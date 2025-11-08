@@ -182,7 +182,7 @@ export const EpisodeDetail = () => {
       title: '集数',
       dataIndex: 'episodeIndex',
       key: 'episodeIndex',
-      width: 60,
+      width: 80,
       sorter: {
         compare: (a, b) => a.episodeIndex - b.episodeIndex,
         multiple: 1,
@@ -192,14 +192,14 @@ export const EpisodeDetail = () => {
       title: '弹幕数',
       dataIndex: 'commentCount',
       key: 'commentCount',
-      width: 60,
+      width: 80,
     },
 
     {
       title: '采集时间',
       dataIndex: 'fetchedAt',
       key: 'fetchedAt',
-      width: 200,
+      width: 160,
       render: (_, record) => {
         return (
           <Typography.Text>{dayjs(record.fetchedAt).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>
