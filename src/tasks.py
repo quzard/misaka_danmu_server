@@ -32,7 +32,7 @@ from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 from .search_utils import unified_search
-from ..database import sync_postgres_sequence
+from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 

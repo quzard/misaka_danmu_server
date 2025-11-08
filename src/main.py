@@ -32,6 +32,8 @@ from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, 
 from .title_recognition import TitleRecognitionManager
 from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs
+from .database import get_db_type
+from sqlalchemy import text
 
 print(f"当前环境: {settings.environment}")
 
@@ -81,7 +83,7 @@ def _get_default_danmaku_path_template():
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理器。
-    - `yield` 之前的部分在应用启动时执行。 
+    - `yield` 之前的部分在应用启动时执行。
     - `yield` 之后的部分在应用关闭时执行。
     """
     # --- Startup Logic ---
@@ -102,7 +104,20 @@ async def lifespan(app: FastAPI):
         interrupted_count = await crud.mark_interrupted_tasks_as_failed(session)
         if interrupted_count > 0:
             logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
-    
+
+
+    # 新增:PostgreSQL序列自动修复(防止主键冲突)
+    if get_db_type() == "postgresql":
+        async with session_factory() as session:
+            try:
+                await session.execute(text(
+                    "SELECT setval('anime_id_seq', (SELECT COALESCE(MAX(id), 0) FROM anime))"
+                ))
+                await session.commit()
+                logger.info("已自动同步PostgreSQL的anime_id_seq序列")
+            except Exception as e:
+                logger.warning(f"同步PostgreSQL序列时出错(可忽略): {e}")
+
     # 初始化配置管理器
     app.state.config_manager = ConfigManager(session_factory)
 
@@ -145,7 +160,7 @@ async def lifespan(app: FastAPI):
         proxy_enabled = await crud.get_config_value(session, "proxyEnabled", "false")
         app.state.config_manager._cache["proxyUrl"] = proxy_url
         app.state.config_manager._cache["proxyEnabled"] = proxy_enabled
-        
+
         # 一次性查询所有 scraper 设置并缓存
         scraper_settings = await crud.get_all_scraper_settings(session)
         # 存储到 scraper_manager 中供后续使用,避免重复查询
@@ -167,7 +182,7 @@ async def lifespan(app: FastAPI):
     # 初始化媒体服务器管理器
     app.state.media_server_manager = MediaServerManager(session_factory)
     await app.state.media_server_manager.initialize()
-    
+
     app.state.webhook_manager = WebhookManager(
         session_factory, app.state.task_manager, app.state.scraper_manager,
         app.state.rate_limiter, app.state.metadata_manager,
@@ -179,7 +194,7 @@ async def lifespan(app: FastAPI):
     # 5. 启动服务（必须在上面完成后）
     app.state.task_manager.start()
     await create_initial_admin_user(app)
-    
+
     async with session_factory() as session:
         existing_task = await session.get(orm_models.ScheduledTask, "system_token_reset")
         if not existing_task:
@@ -205,11 +220,11 @@ async def lifespan(app: FastAPI):
 
     # --- 前端服务 ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
-    
+
     # 无论开发还是生产环境，都需要挂载用户缓存的图片
     # 这样开发环境下前端通过代理也能访问到这些资源
     app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-    
+
     # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
     # 并且需要一个"捕获所有"的路由来始终提供 index.html，以支持前端路由。
     if settings.environment == "development":
@@ -229,23 +244,23 @@ async def lifespan(app: FastAPI):
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(request: Request, full_path: str):
             return FileResponse("web/dist/index.html")
-    
+
     yield
 
     # --- Shutdown Logic ---
     logger.info("应用正在关闭...")
-    
+
     if hasattr(app.state, "cleanup_task"):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
         except asyncio.CancelledError:
             pass
-    
+
     # 关闭共享的 HTTP 传输层（连接池）
     from .scrapers.base import close_all_shared_transports
     await close_all_shared_transports()
-    
+
     await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
@@ -258,7 +273,7 @@ async def lifespan(app: FastAPI):
         await app.state.media_server_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
-    
+
     logger.info("应用已完全关闭")
 
 app = FastAPI(
@@ -333,7 +348,7 @@ async def log_not_found_requests(request: Request, call_next):
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Forbidden"}
             )
-        
+
         # 对于非 API 路径的 404 (例如，如果静态文件服务被错误配置)，记录详细信息
         scope = request.scope
         serializable_scope = {
