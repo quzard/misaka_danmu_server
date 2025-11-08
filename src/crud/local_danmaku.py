@@ -3,10 +3,22 @@
 """
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update, func, and_, or_
+from sqlalchemy import select, delete, update, func, and_, or_, cast, String
 from sqlalchemy.orm import selectinload
 
 from ..orm_models import LocalDanmakuItem
+from ..database import get_db_type
+
+
+def get_group_concat_func(column):
+    """根据数据库类型返回正确的字符串聚合函数"""
+    db_type = get_db_type()
+    if db_type == 'postgresql':
+        # PostgreSQL 使用 string_agg,需要将整数转换为字符串
+        return func.string_agg(cast(column, String), ',')
+    else:
+        # MySQL/SQLite 使用 group_concat
+        return func.group_concat(column)
 
 
 async def create_local_item(
@@ -129,7 +141,7 @@ async def get_local_works(
         func.count(LocalDanmakuItem.id).label('itemCount'),
         func.max(LocalDanmakuItem.season).label('seasonCount'),
         func.max(LocalDanmakuItem.episode).label('episodeCount'),
-        func.group_concat(LocalDanmakuItem.id).label('ids')  # 收集所有ID(MySQL使用GROUP_CONCAT)
+        get_group_concat_func(LocalDanmakuItem.id).label('ids')  # 收集所有ID
     )
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -184,7 +196,7 @@ async def get_show_seasons(
         LocalDanmakuItem.posterUrl,
         LocalDanmakuItem.mediaType,  # 添加mediaType字段
         func.count(LocalDanmakuItem.id).label('episodeCount'),
-        func.group_concat(LocalDanmakuItem.id).label('ids')  # 收集所有ID(MySQL使用GROUP_CONCAT)
+        get_group_concat_func(LocalDanmakuItem.id).label('ids')  # 收集所有ID
     ).where(
         and_(
             LocalDanmakuItem.title == title,

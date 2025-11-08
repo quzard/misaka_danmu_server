@@ -13,13 +13,18 @@ from .migrations import run_migrations
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
+def get_db_type() -> str:
+    """获取数据库类型"""
+    return settings.database.type.lower()
+
+
 def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
     """
     根据配置生成数据库连接URL。
     :param include_db_name: URL中是否包含数据库名称。
     :param for_server: 是否为连接到服务器（而不是特定数据库）生成URL，主要用于PostgreSQL。
     """
-    db_type = settings.database.type.lower()
+    db_type = get_db_type()
     
     if db_type == "mysql":
         drivername = "mysql+aiomysql"
