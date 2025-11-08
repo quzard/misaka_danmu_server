@@ -17,7 +17,7 @@ from ...danmaku_parser import parse_dandan_xml_to_comments
 from ...task_manager import TaskManager, TaskSuccess
 from ...config_manager import ConfigManager
 from ...metadata_manager import MetadataSourceManager
-from ...image_utils import download_and_cache_image
+from ...image_utils import download_image
 from ...crud.danmaku import update_metadata_if_empty
 from ..dependencies import get_config_manager, get_task_manager
 from ..ui_models import FileItem
@@ -488,9 +488,9 @@ async def import_local_items(
                 # 如果没有本地海报但有 TMDB ID,尝试从 TMDB 获取
                 if not local_image_path and item.tmdbId:
                     try:
-                        # 获取元数据管理器
+                        # 获取元数据管理器和scraper管理器
                         metadata_manager: MetadataSourceManager = request.app.state.metadata_manager
-                        config_manager = ConfigManager(task_session)
+                        scraper_manager = request.app.state.scraper_manager
 
                         # 确定媒体类型
                         media_type = "movie" if item.mediaType == "movie" else "tv"
@@ -499,7 +499,7 @@ async def import_local_items(
                         details = await metadata_manager.get_details("tmdb", item.tmdbId, current_user, mediaType=media_type)
                         if details and details.imageUrl:
                             # 下载并缓存图片
-                            local_image_path = await download_and_cache_image(details.imageUrl, config_manager)
+                            local_image_path = await download_image(details.imageUrl, task_session, scraper_manager, "tmdb")
                             if local_image_path:
                                 logger.info(f"从 TMDB 获取海报成功: {details.imageUrl} -> {local_image_path}")
                     except Exception as e:
