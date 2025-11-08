@@ -32,6 +32,7 @@ from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 from .search_utils import unified_search
+from ..database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -1200,6 +1201,9 @@ async def generic_import_task(
                     session.add(new_anime)
                     await session.flush()
                     logger.info(f"创建新的anime条目: ID={anime_id}, 标题='{title_to_use}'")
+
+                    # 同步PostgreSQL序列(避免主键冲突)
+                    await sync_postgres_sequence(session)
                 else:
                     logger.info(f"anime条目已存在: ID={anime_id}, 标题='{existing_anime.title}'")
             else:

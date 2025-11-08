@@ -28,6 +28,7 @@ from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
 from .search_utils import unified_search
+from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -2290,6 +2291,8 @@ async def get_comments_for_dandan(
                 )
                 session.add(new_anime)
                 await session.flush()
+                # 同步PostgreSQL序列(避免主键冲突)
+                await sync_postgres_sequence(session)
             else:
                 logger.info(f"anime条目已存在: id={real_anime_id}, title='{existing_anime.title}'")
 
@@ -2415,6 +2418,9 @@ async def get_comments_for_dandan(
                         )
                         task_session.add(new_anime)
                         await task_session.flush()
+
+                        # 同步PostgreSQL序列(避免主键冲突)
+                        await sync_postgres_sequence(task_session)
                     else:
                         logger.info(f"任务中anime条目已存在: id={current_real_anime_id}, title='{existing_anime.title}'")
 
@@ -2840,6 +2846,9 @@ async def get_comments_for_dandan(
                                         await task_session.flush()  # 确保ID可用
                                         anime_id = real_anime_id
                                         logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+
+                                        # 同步PostgreSQL序列(避免主键冲突)
+                                        await sync_postgres_sequence(task_session)
 
                                     # 2. 创建源关联
                                     source_id = await crud.link_source_to_anime(

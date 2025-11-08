@@ -18,6 +18,7 @@ from ..orm_models import (
 from .. import models
 from ..timezone import get_now
 from .source import link_source_to_anime
+from ..database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,10 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
     session.add(new_anime)
     await session.flush()  # 获取ID但不提交事务
     logger.info(f"新番剧创建完成: ID={new_anime.id}, 标题='{new_anime.title}', 季数={new_anime.season}, createdAt={new_anime.createdAt}")
+
+    # 同步PostgreSQL序列(避免主键冲突)
+    await sync_postgres_sequence(session)
+
     return new_anime.id
 
 
@@ -221,7 +226,10 @@ async def create_anime(session: AsyncSession, anime_data: models.AnimeCreate) ->
     )
     session.add(new_anime)
     await session.flush()
-    
+
+    # 同步PostgreSQL序列(避免主键冲突)
+    await sync_postgres_sequence(session)
+
     # Create associated metadata and alias records
     new_metadata = AnimeMetadata(animeId=new_anime.id)
     new_alias = AnimeAlias(animeId=new_anime.id)

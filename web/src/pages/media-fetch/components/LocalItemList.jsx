@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Checkbox, Segmented, Input } from 'antd';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, List, Segmented, Input } from 'antd';
 import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined } from '@ant-design/icons';
 
 const { Search } = Input;
@@ -787,92 +787,73 @@ const LocalItemList = ({ refreshTrigger }) => {
           </div>
         }
         extra={
-          <div className="desktop-only">
-            <Space wrap>
+          <Space>
+            <Segmented
+              value={mediaTypeFilter}
+              onChange={setMediaTypeFilter}
+              options={[
+                { label: '全部', value: 'all' },
+                { label: '电影', value: 'movie' },
+                { label: '电视节目', value: 'tv_series' },
+              ]}
+            />
+            <Popconfirm
+              title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
+              onConfirm={handleBatchDelete}
+              okText="确定"
+              cancelText="取消"
+              disabled={selectedRowKeys.length === 0}
+            >
               <Button
-                icon={<TableOutlined />}
-                type={viewMode === 'table' ? 'primary' : 'default'}
-                onClick={() => setViewMode('table')}
-                size="small"
-              >
-                表格
-              </Button>
-              <Button
-                icon={<AppstoreOutlined />}
-                type={viewMode === 'card' ? 'primary' : 'default'}
-                onClick={() => setViewMode('card')}
-                size="small"
-              >
-                卡片
-              </Button>
-              <Search
-                placeholder="搜索标题"
-                allowClear
-                style={{ width: 200 }}
-                onSearch={setSearchText}
-              />
-              <Segmented
-                value={mediaTypeFilter}
-                onChange={setMediaTypeFilter}
-                options={[
-                  { label: '全部', value: 'all' },
-                  { label: '电影', value: 'movie' },
-                  { label: '电视节目', value: 'tv_series' },
-                ]}
-              />
-              <Popconfirm
-                title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
-                onConfirm={handleBatchDelete}
-                okText="确定"
-                cancelText="取消"
+                danger
+                icon={<DeleteOutlined />}
                 disabled={selectedRowKeys.length === 0}
               >
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  disabled={selectedRowKeys.length === 0}
-                >
-                  删除选中
-                </Button>
-              </Popconfirm>
-              <Button
-                type="primary"
-                icon={<ImportOutlined />}
-                onClick={handleBatchImport}
-                disabled={selectedRowKeys.length === 0}
-              >
-                导入选中
+                删除选中
               </Button>
-            </Space>
-          </div>
+            </Popconfirm>
+            <Button
+              type="primary"
+              icon={<ImportOutlined />}
+              onClick={handleBatchImport}
+              disabled={selectedRowKeys.length === 0}
+            >
+              导入选中
+            </Button>
+          </Space>
         }
         style={{ marginBottom: '16px' }}
       >
-        {/* 全选复选框 */}
-        <div style={{ marginBottom: '16px' }}>
-          <Checkbox
-            indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < items.length}
-            checked={selectedRowKeys.length === items.length && items.length > 0}
-            onChange={(e) => {
-              if (e.target.checked) {
-                const allKeys = [];
-                const collectKeys = (list) => {
-                  list.forEach(item => {
-                    allKeys.push(item.key);
-                    if (item.children) {
-                      collectKeys(item.children);
-                    }
-                  });
-                };
-                collectKeys(items);
-                setSelectedRowKeys(allKeys);
-              } else {
-                setSelectedRowKeys([]);
-              }
-            }}
-          >
-            全选
-          </Checkbox>
+        {/* 扫描列表标题 */}
+        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span className="desktop-only">扫描列表</span>
+            <span className="mobile-only">扫描列表</span>
+          </div>
+          <Space>
+            <Button
+              icon={<TableOutlined />}
+              type={viewMode === 'table' ? 'primary' : 'default'}
+              onClick={() => setViewMode('table')}
+              size="small"
+            >
+              表格
+            </Button>
+            <Button
+              icon={<AppstoreOutlined />}
+              type={viewMode === 'card' ? 'primary' : 'default'}
+              onClick={() => setViewMode('card')}
+              size="small"
+            >
+              卡片
+            </Button>
+            <Search
+              placeholder="搜索标题"
+              allowClear
+              style={{ width: 200 }}
+              onSearch={setSearchText}
+            />
+          </Space>
         </div>
 
         {viewMode === 'table' ? (
