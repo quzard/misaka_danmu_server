@@ -817,31 +817,6 @@ const LocalItemList = ({ refreshTrigger }) => {
         }
         extra={
           <Space>
-            <Button
-              icon={<TableOutlined />}
-              type={viewMode === 'table' ? 'primary' : 'default'}
-              onClick={() => setViewMode('table')}
-              size="small"
-            >
-              表格
-            </Button>
-            <Button
-              icon={<AppstoreOutlined />}
-              type={viewMode === 'card' ? 'primary' : 'default'}
-              onClick={() => setViewMode('card')}
-              size="small"
-            >
-              卡片
-            </Button>
-            <Segmented
-              value={mediaTypeFilter}
-              onChange={setMediaTypeFilter}
-              options={[
-                { label: '全部', value: 'all' },
-                { label: '电影', value: 'movie', icon: <VideoCameraOutlined /> },
-                { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
-              ]}
-            />
             <Popconfirm
               title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
               onConfirm={handleBatchDelete}
@@ -894,12 +869,39 @@ const LocalItemList = ({ refreshTrigger }) => {
           >
             全选 ({selectedRowKeys.length}/{items.length})
           </Checkbox>
-          <Search
-            placeholder="搜索标题"
-            allowClear
-            style={{ width: 200 }}
-            onSearch={setSearchText}
-          />
+          <Space>
+            <Button
+              icon={<TableOutlined />}
+              type={viewMode === 'table' ? 'primary' : 'default'}
+              onClick={() => setViewMode('table')}
+              size="small"
+            >
+              表格
+            </Button>
+            <Button
+              icon={<AppstoreOutlined />}
+              type={viewMode === 'card' ? 'primary' : 'default'}
+              onClick={() => setViewMode('card')}
+              size="small"
+            >
+              卡片
+            </Button>
+            <Segmented
+              value={mediaTypeFilter}
+              onChange={setMediaTypeFilter}
+              options={[
+                { label: '全部', value: 'all' },
+                { label: '电影', value: 'movie', icon: <VideoCameraOutlined /> },
+                { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
+              ]}
+            />
+            <Search
+              placeholder="搜索标题"
+              allowClear
+              style={{ width: 200 }}
+              onSearch={setSearchText}
+            />
+          </Space>
         </div>
 
         {viewMode === 'table' ? (
