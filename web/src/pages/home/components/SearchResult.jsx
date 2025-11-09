@@ -205,9 +205,11 @@ export const SearchResult = () => {
       if (loading) return
       setLoading(true)
 
-      // 检查是否有补充源
-      const key = `${item.provider}_${item.mediaId}`
-      const supplement = supplementMap[key]
+      // 检查是否有补充源 - 查找所有以主源key开头的补充源
+      const mainKey = `${item.provider}_${item.mediaId}`
+      const supplement = Object.entries(supplementMap).find(([key, value]) =>
+        key.startsWith(mainKey + '_') && value?.enabled
+      )?.[1]
 
       const res = await importDanmu({
         provider: item.provider,
@@ -545,17 +547,39 @@ export const SearchResult = () => {
   }
 
   // 补充源复选框处理
-  const handleSupplementToggle = (mainItem, supplement, checked) => {
-    const key = `${mainItem.provider}_${mainItem.mediaId}`
-    setSupplementMap(prev => ({
-      ...prev,
-      [key]: checked ? {
+  const handleSupplementToggle = (mainItem, supplement, checked, customKey = null) => {
+    // 使用自定义key或默认key
+    const key = customKey || `${mainItem.provider}_${mainItem.mediaId}`
+
+    if (checked) {
+      // 如果勾选了新的补充源,需要取消同一主源的其他补充源
+      const mainKey = `${mainItem.provider}_${mainItem.mediaId}`
+      const newMap = { ...supplementMap }
+
+      // 清除同一主源的其他补充源
+      Object.keys(newMap).forEach(k => {
+        if (k.startsWith(mainKey + '_') && k !== key) {
+          delete newMap[k]
+        }
+      })
+
+      // 设置新的补充源
+      newMap[key] = {
         provider: supplement.provider,
         mediaId: supplement.mediaId,
         title: supplement.title,
         enabled: true
-      } : null
-    }))
+      }
+
+      setSupplementMap(newMap)
+    } else {
+      // 取消勾选
+      setSupplementMap(prev => {
+        const newMap = { ...prev }
+        delete newMap[key]
+        return newMap
+      })
+    }
   }
 
   // 补充搜索
@@ -576,47 +600,47 @@ export const SearchResult = () => {
         )
       }
 
-      const best_supplement = supplementalResults.find(
+      // 查找所有匹配的补充源(相似度>80且支持分集URL)
+      const matching_supplements = supplementalResults.filter(
         sup =>
           sup.provider !== item.provider &&
-          calculateSimilarity(item.title, sup.title) > 80
+          calculateSimilarity(item.title, sup.title) > 80 &&
+          sup.supportsEpisodeUrls === true
       )
 
-      if (best_supplement) {
-        const key = `${item.provider}_${item.mediaId}`
-        const isChecked = supplementMap[key]?.enabled || false
-
-        // 从API响应中读取是否支持分集URL获取
-        const supports_episode_urls = best_supplement.supportsEpisodeUrls === true
-
-        // 调试日志
-        console.log('[补充源调试]', {
-          provider: best_supplement.provider,
-          title: best_supplement.title,
-          supportsEpisodeUrls: best_supplement.supportsEpisodeUrls,
-          supports_episode_urls,
-          best_supplement
-        })
-
+      if (matching_supplements.length > 0) {
         return (
-          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2 flex-wrap justify-start">
-            <Tag color="purple">{best_supplement.provider}</Tag>
-            <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
-              找到补充源: {best_supplement.title}
-            </span>
-            {supports_episode_urls && (
-              <>
-                <Checkbox
-                  checked={isChecked}
-                  onChange={e => {
-                    e.stopPropagation()
-                    handleSupplementToggle(item, best_supplement, e.target.checked)
-                  }}
-                >
-                  使用补充源分集列表
-                </Checkbox>
-              </>
-            )}
+          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex flex-col gap-2">
+            {matching_supplements.map((supplement, index) => {
+              const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+              const isChecked = supplementMap[key]?.enabled || false
+
+              // 调试日志
+              console.log('[补充源调试]', {
+                provider: supplement.provider,
+                title: supplement.title,
+                supportsEpisodeUrls: supplement.supportsEpisodeUrls,
+                supplement
+              })
+
+              return (
+                <div key={index} className="flex items-center gap-2 flex-wrap justify-start">
+                  <Tag color="purple">{supplement.provider}</Tag>
+                  <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
+                    找到补充源: {supplement.title}
+                  </span>
+                  <Checkbox
+                    checked={isChecked}
+                    onChange={e => {
+                      e.stopPropagation()
+                      handleSupplementToggle(item, supplement, e.target.checked, key)
+                    }}
+                  >
+                    使用补充源分集列表
+                  </Checkbox>
+                </div>
+              )
+            })}
           </div>
         )
       }
@@ -811,9 +835,11 @@ export const SearchResult = () => {
                               if (editLoading) return
                               setEditLoading(true)
 
-                              // 检查是否有补充源
-                              const key = `${item.provider}_${item.mediaId}`
-                              const supplement = supplementMap[key]
+                              // 检查是否有补充源 - 查找所有以主源key开头的补充源
+                              const mainKey = `${item.provider}_${item.mediaId}`
+                              const supplement = Object.entries(supplementMap).find(([key, value]) =>
+                                key.startsWith(mainKey + '_') && value?.enabled
+                              )?.[1]
 
                               // 构建请求参数
                               const params = {
