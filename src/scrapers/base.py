@@ -238,7 +238,7 @@ class BaseScraper(ABC):
         self._current_proxy_config = proxy_to_use
         
         client_kwargs = {"timeout": 20.0, "follow_redirects": True, **kwargs}
-        
+
         # 【优化】如果没有自定义传输层，使用共享传输层（支持代理和非代理）
         if 'transport' not in kwargs:
             if proxy_to_use:
@@ -249,11 +249,9 @@ class BaseScraper(ABC):
                 # 无代理：使用无代理的共享传输层
                 shared_transport = await get_shared_transport()
                 client_kwargs['transport'] = shared_transport
-        else:
-            # 如果有自定义传输层，仍需设置代理参数（向后兼容）
-            if proxy_to_use:
-                client_kwargs['proxy'] = proxy_to_use
-        
+        # 移除else分支：避免在transport层和client层同时设置proxy导致冲突
+        # 所有子类都不传入自定义transport，因此不需要向后兼容逻辑
+
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
