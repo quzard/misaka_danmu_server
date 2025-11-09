@@ -127,7 +127,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                             id=subject.id, doubanId=subject.id, title=subject.title,
                             details=f"评分: {subject.rate}", imageUrl=subject.cover,
                             type=subject_types.get(subject.id, "unknown"),  # 从记录的类型中获取
-                            supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
+                            supportsEpisodeUrls=False  # 豆瓣源不支持获取分集URL (Frodo API的vendors数组为空)
                         ))
                         seen_ids.add(subject.id)
                 return results
@@ -180,7 +180,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                 return models.MetadataDetailsResponse(
                     id=item_id, doubanId=item_id, title=title,
                     imdbId=imdb_id, aliasesCn=aliases_cn, year=year,
-                    supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
+                    supportsEpisodeUrls=False  # 豆瓣源不支持获取分集URL (Frodo API的vendors数组为空)
                 )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:

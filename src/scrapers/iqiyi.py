@@ -582,7 +582,7 @@ class IqiyiScraper(BaseScraper):
                 )
                 results.append(provider_search_info)
         except Exception as e:
-            self.logger.error(f"爱奇艺 (桌面API): 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺 (桌面API): 搜索 '{keyword}' 失败: {type(e).__name__}")
         
         return results
 
@@ -640,8 +640,9 @@ class IqiyiScraper(BaseScraper):
                 if isinstance(res_list, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
                     self.logger.warning(f"爱奇艺 ({api_name}): 搜索时连接超时或网络错误: {res_list}")
                 else:
-                    # 对于其他意外错误，仍然记录完整的堆栈跟踪以供调试。
-                    self.logger.error(f"爱奇艺 ({api_name}): 搜索子任务失败: {res_list}", exc_info=True)
+                    # 对于其他意外错误，只记录错误类型，不打印堆栈跟踪
+                    error_type = type(res_list).__name__ if isinstance(res_list, Exception) else "Unknown"
+                    self.logger.warning(f"爱奇艺 ({api_name}): 搜索子任务失败: {error_type}")
 
         # 基于 mediaId 去重
         unique_results = list({item.mediaId: item for item in all_results}.values())
@@ -719,7 +720,7 @@ class IqiyiScraper(BaseScraper):
                 self.logger.debug(f"爱奇艺: 创建的 ProviderSearchInfo: {provider_search_info.model_dump_json(indent=2)}")
                 results.append(provider_search_info)
         except Exception as e:
-            self.logger.error(f"爱奇艺 (移动API): 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺 (移动API): 搜索 '{keyword}' 失败: {type(e).__name__}")
         return results
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:

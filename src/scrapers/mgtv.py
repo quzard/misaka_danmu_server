@@ -330,7 +330,7 @@ class MgtvScraper(BaseScraper):
                 self.logger.info(f"MGTV: 搜索结果列表:\n{log_results}")
             return results
         except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
-            self.logger.warning(f"MGTV: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
+            self.logger.warning(f"MGTV: 搜索 '{keyword}' 时连接超时或网络错误")
             return []
         except Exception as e:
             self.logger.error(f"MGTV: 搜索 '{keyword}' 失败: {e}", exc_info=True)

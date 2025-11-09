@@ -299,7 +299,7 @@ class YoukuScraper(BaseScraper):
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
-            self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
+            self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误")
         except Exception as e:
             self.logger.error(f"Youku: 网络搜索 '{keyword}' 失败: {e}", exc_info=True)
 

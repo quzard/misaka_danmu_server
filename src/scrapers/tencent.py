@@ -563,7 +563,7 @@ class TencentScraper(BaseScraper):
                     self.logger.info(f"Tencent (主API): 搜索结果列表:\n{log_results}")
                 return unique_results
         except Exception as e:
-            self.logger.warning(f"Tencent: 主API (MultiTerminal) 搜索失败: {e}", exc_info=True)
+            self.logger.warning(f"Tencent: 主API (MultiTerminal) 搜索失败: {type(e).__name__}")
 
         # 2. 如果主API失败或无结果，则回退到备用API
         self.logger.info(f"Tencent: 主API未找到结果或失败，正在回退到备用API (桌面/移动)...")

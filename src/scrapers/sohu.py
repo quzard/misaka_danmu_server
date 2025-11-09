@@ -259,7 +259,7 @@ class SohuScraper(BaseScraper):
             return results
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
-            self.logger.warning(f"搜狐视频: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
+            self.logger.warning(f"搜狐视频: 搜索 '{keyword}' 时连接超时或网络错误")
             return []
         except httpx.HTTPError as e:
             self.logger.error(f"搜狐视频: 搜索请求失败: {e}")
