@@ -579,6 +579,12 @@ export const saveScanPath = (scanPath) => api.post('/api/ui/local-scan/save-path
 /** 扫描本地弹幕文件 */
 export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
 
+/** 创建文件夹 */
+export const createFolder = (parentPath, folderName) => api.post('/api/ui/local-scan/create-folder', { parentPath, folderName })
+
+/** 删除文件夹 */
+export const deleteFolder = (folderPath) => api.delete('/api/ui/local-scan/delete-folder', { params: { folderPath } })
+
 /** 获取本地弹幕项列表 */
 export const getLocalItems = (params) => api.get('/api/ui/local-items', params)
 

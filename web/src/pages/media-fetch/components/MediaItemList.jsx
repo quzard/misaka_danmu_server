@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented } from 'antd';
+import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented, Pagination } from 'antd';
 import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
@@ -964,9 +964,9 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
         trigger={['click']}
         placement="bottomRight"
       >
-        <Button 
-          type="text" 
-          icon={<MoreOutlined />} 
+        <Button
+          type="text"
+          icon={<MoreOutlined />}
           size="middle"
           style={{ fontSize: '16px', width: '32px', height: '32px' }}
         />
@@ -1054,184 +1054,76 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
         </Space>
 
         {viewMode === 'table' ? (
-          <Table
-            columns={columns}
-            dataSource={items}
-            loading={loading}
-            rowSelection={rowSelection}
-            pagination={pagination}
-            onChange={handleTableChange}
-            expandable={{
-              defaultExpandAllRows: false,
-            }}
-            scroll={{ x: 800 }}
-            size="small"
-            className="desktop-only"
-          />
+          <div>
+            <Table
+              columns={columns}
+              dataSource={items}
+              loading={loading}
+              rowSelection={rowSelection}
+              pagination={false}
+              onChange={handleTableChange}
+              expandable={{
+                defaultExpandAllRows: false,
+              }}
+              scroll={{ x: 800 }}
+              size="small"
+              className="desktop-only"
+            />
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px' }}>
+              <Pagination
+                {...pagination}
+                showSizeChanger={true}
+                showQuickJumper={true}
+                position={['bottomCenter']}
+                hideOnSinglePage={false}
+                size="small"
+                pageSizeOptions={['10', '20', '50', '100', '200']}
+                onChange={(page, pageSize) => loadItems(page, pageSize)}
+              />
+            </div>
+          </div>
         ) : (
-          <List
-            loading={loading}
-            dataSource={items}
-            pagination={{
-              ...pagination,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} 共 ${total} 项`,
-            }}
-            onChange={(page, pageSize) => loadItems(page, pageSize)}
-            renderItem={(item) => (
-              <List.Item
-                key={item.key}
-                actions={[
-                  <div key="mobile-actions" className="mobile-only">
-                    {renderMobileActions(item)}
-                  </div>,
-                  <div key="desktop-actions" className="desktop-only">
-                    {renderItemActions(item)}
-                  </div>
-                ]}
-                style={{ padding: '20px 0' }}
-              >
-                <List.Item.Meta
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <Checkbox
-                        checked={selectedRowKeys.includes(item.key)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRowKeys([...selectedRowKeys, item.key]);
-                          } else {
-                            setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
-                          }
-                        }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        {item.mediaType === 'tv_season' ? (
-                          <Button
-                            type="link"
-                            icon={<FolderOpenOutlined />}
-                            onClick={() => handleOpenEpisodes(item)}
-                            style={{ padding: 0, height: 'auto', fontSize: '16px' }}
-                          >
-                            {item.title}
-                          </Button>
-                        ) : (
-                          <div style={{ fontSize: '18px', fontWeight: 500, lineHeight: '1.4' }}>
-                            {item.title}
-                          </div>
-                        )}
-                        {item.year && (
-                          <div style={{ marginTop: '6px', color: '#666', fontSize: '15px' }}>
-                            {item.year}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  }
-                  description={
-                    <div>
-                      <div style={{ marginTop: '8px', marginLeft: '36px' }} className="desktop-only">
-                        <Space size="small" wrap>
-                          <Tag size="small" color="blue">
-                            {item.mediaType === 'movie' ? '电影' :
-                             item.mediaType === 'tv_show' ? '电视节目' :
-                             item.mediaType === 'tv_season' ? '季' : item.mediaType}
-                          </Tag>
-                          {!item.isGroup && (
-                            <Tag size="small" color={item.isImported ? 'success' : 'default'}>
-                              {item.isImported ? '已导入' : '未导入'}
-                            </Tag>
-                          )}
-                          {item.seasonCount && (
-                            <Tag size="small" color="purple">
-                              共{item.seasonCount}季
-                            </Tag>
-                          )}
-                          {item.episodeCount && (
-                            <Tag size="small" color="orange">
-                              {item.episodeCount}集
-                            </Tag>
-                          )}
-                        </Space>
-                      </div>
-                      <div className="mobile-only" style={{ marginTop: '12px', marginLeft: '36px' }}>
-                        <Space size="middle" wrap>
-                          <Tag size="small" color="blue" style={{ fontSize: '13px', padding: '2px 8px' }}>
-                            {item.mediaType === 'movie' ? '电影' :
-                             item.mediaType === 'tv_show' ? '电视节目' :
-                             item.mediaType === 'tv_season' ? '季' : item.mediaType}
-                          </Tag>
-                          {!item.isGroup && (
-                            <Tag size="small" color={item.isImported ? 'success' : 'default'} style={{ fontSize: '13px', padding: '2px 8px' }}>
-                              {item.isImported ? '已导入' : '未导入'}
-                            </Tag>
-                          )}
-                          {item.seasonCount && (
-                            <Tag size="small" color="purple" style={{ fontSize: '13px', padding: '2px 8px' }}>
-                              共{item.seasonCount}季
-                            </Tag>
-                          )}
-                          {item.episodeCount && (
-                            <Tag size="small" color="orange" style={{ fontSize: '13px', padding: '2px 8px' }}>
-                              {item.episodeCount}集
-                            </Tag>
-                          )}
-                        </Space>
-                      </div>
-                    </div>
-                  }
-                />
-                {item.children && item.children.length > 0 && (
-                  <div>
-                    {item.children.map((child) => (
-                      <List.Item
-                        key={child.key}
-                        actions={[
-                          <div key="mobile-actions-child" className="mobile-only">
-                            {renderMobileActions(child)}
-                          </div>,
-                          <div key="desktop-actions-child" className="desktop-only">
-                            {renderItemActions(child)}
-                          </div>
-                        ]}
-                        style={{
-                          padding: '16px 0 16px 48px',
-                          borderLeft: '2px solid #f0f0f0',
-                          marginLeft: '12px'
-                        }}
-                        className="desktop-child-item mobile-child-item"
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}>
-                          <Checkbox
-                            checked={selectedRowKeys.includes(child.key)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedRowKeys([...selectedRowKeys, child.key]);
-                              } else {
-                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key));
-                              }
-                            }}
-                          />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <Button
-                              type="link"
-                              icon={<FolderOpenOutlined />}
-                              onClick={() => handleOpenEpisodes(child)}
-                              style={{ padding: 0, height: 'auto', fontSize: '16px' }}
-                            >
-                              {child.title}
-                            </Button>
-                          </div>
+          <div>
+            <List
+              loading={loading}
+              dataSource={items}
+              pagination={false}
+              renderItem={(item) => (
+                <List.Item key={item.key} style={{ padding: '12px 0' }} actions={[
+                  <div key="mobile-actions" className="mobile-only">{renderMobileActions(item)}</div>,
+                  <div key="desktop-actions" className="desktop-only">{renderItemActions(item)}</div>
+                ]}>
+                  <List.Item.Meta
+                    title={
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Checkbox checked={selectedRowKeys.includes(item.key)} onChange={(e) => {
+                          if (e.target.checked) setSelectedRowKeys([...selectedRowKeys, item.key]);
+                          else setSelectedRowKeys(selectedRowKeys.filter(k => k !== item.key));
+                        }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 16, fontWeight: 500 }}>{item.title}</div>
+                          {item.year && <div style={{ color: '#666' }}>{item.year}</div>}
                         </div>
-                      </List.Item>
-                    ))}
-                  </div>
-                )}
-              </List.Item>
-            )}
-          />
-        )}
-      </Card>
+                      </div>
+                    }
+                    description={null}
+                  />
+                </List.Item>
+              )}
+            />
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+              <Pagination
+                {...pagination}
+                showSizeChanger={true}
+                showQuickJumper={true}
+                hideOnSinglePage={false}
+                size="small"
+                pageSizeOptions={['10', '20', '50', '100', '200']}
+                onChange={(page, pageSize) => loadItems(page, pageSize)}
+              />
+            </div>
+          </div>
+        )}</Card>
 
       <MediaItemEditor
         visible={editorVisible}

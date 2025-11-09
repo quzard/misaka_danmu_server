@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented } from 'antd';
-import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
 import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer, batchDeleteMediaItems, importMediaItems, deleteMediaServer } from '../../../apis';
@@ -371,20 +371,41 @@ const LibraryScan = () => {
                 />
 
                 <div style={{ position: 'relative', zIndex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-                    <div
-                      style={{
-                        width: '8px',
-                        height: '8px',
-                        borderRadius: '50%',
-                        backgroundColor: currentServer.isEnabled ? '#52c41a' : '#faad14',
-                        marginRight: '8px'
-                      }}
-                    />
-                    <Text strong style={{ fontSize: '16px', color: '#262626' }}>
-                      已选择服务器
-                    </Text>
-                    <div style={{ marginLeft: 'auto' }}>
+                  {/* 服务器头部信息 */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div
+                        style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: currentServer.isEnabled ? '#52c41a' : '#faad14'
+                        }}
+                      />
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <Text strong style={{ fontSize: '16px', color: '#262626' }}>
+                            {currentServer.name}
+                          </Text>
+                          <Tag color={currentServer.isEnabled ? 'green' : 'orange'} size="small">
+                            {currentServer.providerName}
+                          </Tag>
+                          <Tag color={currentServer.isEnabled ? 'success' : 'warning'} size="small">
+                            {currentServer.isEnabled ? '已启用' : '已禁用'}
+                          </Tag>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 操作按钮 */}
+                    <Space size="small">
+                      <Button
+                        type="text"
+                        icon={<EditOutlined />}
+                        size="small"
+                        onClick={handleEditServer}
+                        title="编辑服务器"
+                      />
                       <Popconfirm
                         title={`确定要删除服务器 "${currentServer.name}" 吗？`}
                         description="此操作不可撤销，将删除该服务器的所有配置。"
@@ -393,104 +414,62 @@ const LibraryScan = () => {
                         cancelText="取消"
                         okButtonProps={{ danger: true }}
                       >
-                        <DeleteOutlined
-                          style={{
-                            fontSize: '16px',
-                            color: '#ff4d4f',
-                            cursor: 'pointer',
-                            padding: '4px',
-                            borderRadius: '4px',
-                            transition: 'all 0.3s'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.target.style.backgroundColor = '#fff2f0';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.target.style.backgroundColor = 'transparent';
-                          }}
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined />}
+                          size="small"
+                          title="删除服务器"
                         />
                       </Popconfirm>
-                    </div>
+                    </Space>
                   </div>
 
-                  <div style={{ marginBottom: '16px' }}>
-                    <Text strong style={{ fontSize: '18px', color: '#1890ff' }}>
-                      {currentServer.name}
-                    </Text>
-                  </div>
-
-                  <Row gutter={16}>
-                    <Col span={12}>
-                      <div style={{ marginBottom: '8px' }}>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>提供商</Text>
-                        <div>
-                          <Tag
-                            color={currentServer.isEnabled ? 'green' : 'orange'}
-                            style={{ fontSize: '12px' }}
-                          >
-                            {currentServer.providerName}
-                          </Tag>
-                        </div>
-                      </div>
-                    </Col>
-                    <Col span={12}>
-                      <div style={{ marginBottom: '8px' }}>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>状态</Text>
-                        <div>
-                          <Tag
-                            color={currentServer.isEnabled ? 'success' : 'warning'}
-                            style={{ fontSize: '12px' }}
-                          >
-                            {currentServer.isEnabled ? '已启用' : '已禁用'}
-                          </Tag>
-                        </div>
-                      </div>
-                    </Col>
-                    {currentServer.url && (
-                      <Col span={24}>
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <Text type="secondary" style={{ fontSize: '12px' }}>服务器地址</Text>
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={showServerUrl ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                              onClick={() => setShowServerUrl(!showServerUrl)}
-                              style={{ padding: '0 4px', height: '20px' }}
-                            />
-                          </div>
-                          <div>
-                            <Text
-                              style={{
-                                fontSize: '12px',
-                                color: '#666',
-                                wordBreak: 'break-all'
-                              }}
-                            >
-                              {showServerUrl ? currentServer.url : '••••••••••••••••'}
-                            </Text>
-                          </div>
-                        </div>
-                      </Col>
-                    )}
-                  </Row>
-
-                  {!currentServer.isEnabled && (
-                    <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #ffe58f' }}>
-                      <Space>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          服务器未启用，请先配置服务器
+                  {/* 服务器地址 */}
+                  {currentServer.url && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Text type="secondary" style={{ fontSize: '12px', minWidth: '60px' }}>
+                          服务器地址:
                         </Text>
-                        <Button
-                          size="small"
-                          type="primary"
-                          onClick={handleEditServer}
-                          style={{ fontSize: '12px' }}
-                        >
-                          {screens.xs ? '配置' : '立即配置'}
-                        </Button>
-                      </Space>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Text
+                            style={{
+                              fontSize: '13px',
+                              color: '#666',
+                              wordBreak: 'break-all',
+                              flex: 1
+                            }}
+                          >
+                            {showServerUrl ? currentServer.url : '••••••••••••••••••••••••••••••••••••••••'}
+                          </Text>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={showServerUrl ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                            onClick={() => setShowServerUrl(!showServerUrl)}
+                            style={{ padding: '2px 4px', height: '24px', minWidth: '24px' }}
+                            title={showServerUrl ? '隐藏地址' : '显示地址'}
+                          />
+                        </div>
+                      </div>
                     </div>
+                  )}
+
+                  {/* 服务器未启用提示 */}
+                  {!currentServer.isEnabled && (
+                    <Alert
+                      message="服务器未启用"
+                      description="请先启用该媒体服务器以进行扫描操作"
+                      type="warning"
+                      showIcon
+                      action={
+                        <Button size="small" onClick={handleEditServer}>
+                          立即配置
+                        </Button>
+                      }
+                      style={{ marginTop: '16px' }}
+                    />
                   )}
                 </div>
               </div>
