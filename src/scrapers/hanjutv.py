@@ -51,8 +51,8 @@ class HanjuTVScraper(BaseScraper):
         """构造韩剧TV播放页面URL"""
         return f"https://hanju.com/series/{media_id}"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self.display_name = "韩剧TV"
         self.base_url = "https://hxqapi.hiyun.tv"
         self.danmu_url = "https://hxqapi.zmdcq.com"

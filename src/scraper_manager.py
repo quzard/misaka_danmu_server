@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 
 from .scrapers.base import BaseScraper
+from .scrapers.transport import TransportManager
 from .config_manager import ConfigManager
 from .models import ProviderSearchInfo, ScraperSetting
 from . import crud
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from .metadata_manager import MetadataSourceManager
 
 class ScraperManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager"):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager", transport_manager: TransportManager):
         self.scrapers: Dict[str, BaseScraper] = {}
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
@@ -29,6 +30,7 @@ class ScraperManager:
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.metadata_manager = metadata_manager
+        self.transport_manager = transport_manager
 
     async def acquire_search_lock(self, api_key: str) -> bool:
         """Acquires a search lock for a given API key. Returns False if already locked."""
@@ -158,7 +160,7 @@ class ScraperManager:
 
         # Instantiate all discovered scrapers
         for provider_name, scraper_class in self._scraper_classes.items():
-            scraper_instance = scraper_class(self._session_factory, self.config_manager)
+            scraper_instance = scraper_class(self._session_factory, self.config_manager, self.transport_manager)
             # 【优化】设置 scraper_manager 引用,以便使用缓存的配置
             scraper_instance._scraper_manager_ref = self
             self.scrapers[provider_name] = scraper_instance
@@ -209,7 +211,7 @@ class ScraperManager:
         # 重新创建实例
         if provider_name in self._scraper_classes:
             scraper_class = self._scraper_classes[provider_name]
-            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager)
+            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager, self.transport_manager)
             logging.getLogger(__name__).info(f"搜索源 '{provider_name}' 已重新加载。")
         else:
             logging.getLogger(__name__).warning(f"未找到搜索源类 '{provider_name}'，无法重新加载。")

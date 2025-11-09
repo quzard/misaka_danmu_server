@@ -62,8 +62,8 @@ class LetvScraper(BaseScraper):
         """构造乐视网播放页面URL"""
         return f"https://www.le.com/ptv/vplay/{media_id}.html"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self.base_url = "https://www.le.com"
         self.danmu_api_url = "https://hd-my.le.com/danmu/list"
     
