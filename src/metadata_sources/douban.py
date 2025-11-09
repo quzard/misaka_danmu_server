@@ -272,7 +272,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
 
     async def _get_episode_urls_from_douban_page(self, douban_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
         """
-        从豆瓣电影页面解析播放链接
+        从豆瓣移动端API获取播放链接
 
         Args:
             douban_id: 豆瓣条目ID
@@ -281,73 +281,62 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         Returns:
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
-        # 平台映射: 你的项目provider名称 -> 豆瓣subtype ID
-        provider_to_subtype = {
-            "tencent": "1",   # 腾讯视频
-            "iqiyi": "9",     # 爱奇艺
-            "youku": "3",     # 优酷
-            "bilibili": "11", # B站
-            "mgtv": "17"      # 芒果TV
+        # 平台ID映射
+        provider_to_vendor_id = {
+            "tencent": "qq",      # 腾讯视频
+            "iqiyi": "iqiyi",     # 爱奇艺
+            "youku": "youku",     # 优酷
+            "bilibili": "bilibili", # B站
+            "mgtv": "mgtv"        # 芒果TV
         }
 
-        url = f"https://movie.douban.com/subject/{douban_id}/"
-        self.logger.info(f"豆瓣: 正在从页面获取播放链接 {url}")
+        # 使用豆瓣移动端API
+        api_url = f"https://m.douban.com/rexxar/api/v2/movie/{douban_id}?for_mobile=1"
+        self.logger.info(f"豆瓣: 正在从API获取播放链接 {api_url}")
 
         try:
             async with await self._create_client() as client:
-                response = await client.get(url)
+                response = await client.get(api_url, headers={
+                    "Referer": "https://m.douban.com/movie/",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+                })
                 response.raise_for_status()
-                html = response.text
+                data = response.json()
 
-                # 提取sources数据: sources[9] = [...];
-                pattern = r'sources\[(\d+)\]\s*=\s*(\[.*?\]);'
-                matches = re.findall(pattern, html, re.DOTALL)
+                # 获取 vendors 列表
+                vendors = data.get('vendors', [])
 
-                if not matches:
-                    self.logger.warning(f"豆瓣: 未在页面中找到播放链接数据 (douban_id={douban_id})")
+                if not vendors:
+                    self.logger.warning(f"豆瓣: 未找到播放链接 (douban_id={douban_id})")
                     return []
 
+                self.logger.info(f"豆瓣: 找到 {len(vendors)} 个播放平台")
+
+                # 提取播放链接
                 episode_urls: List[Tuple[int, str]] = []
 
-                for source_id, json_str in matches:
-                    # 如果指定了target_provider,只处理对应的source_id
+                for vendor in vendors:
+                    vendor_id = vendor.get('id', '')
+                    vendor_uri = vendor.get('uri', '')
+
+                    # 如果指定了目标平台,只处理该平台
                     if target_provider:
-                        expected_subtype = provider_to_subtype.get(target_provider)
-                        if expected_subtype and source_id != expected_subtype:
+                        target_vendor_id = provider_to_vendor_id.get(target_provider)
+                        if target_vendor_id and vendor_id != target_vendor_id:
                             continue
 
-                    try:
-                        episodes = json.loads(json_str)
-                        for ep_data in episodes:
-                            ep_num = int(ep_data['ep'])
-                            encoded_url = ep_data['play_link']
+                    if vendor_uri:
+                        self.logger.info(f"豆瓣: 找到播放链接 vendor={vendor_id}, uri={vendor_uri}")
+                        # 对于电视剧,返回主页面URL,由调用方解析具体集数
+                        # 这里返回(1, URL)表示第1集或主页面
+                        episode_urls.append((1, vendor_uri))
 
-                            # 解析link2跳转链接: https://www.douban.com/link2/?url=<编码后的URL>&...
-                            parsed = urllib.parse.urlparse(encoded_url)
-                            query = urllib.parse.parse_qs(parsed.query)
-
-                            if 'url' not in query:
-                                self.logger.warning(f"豆瓣: 播放链接格式异常,缺少url参数: {encoded_url}")
-                                continue
-
-                            real_url = urllib.parse.unquote(query['url'][0])
-                            episode_urls.append((ep_num, real_url))
-
-                    except json.JSONDecodeError as e:
-                        self.logger.error(f"豆瓣: 解析播放链接JSON失败 (source_id={source_id}): {e}")
-                        continue
-                    except (KeyError, ValueError) as e:
-                        self.logger.error(f"豆瓣: 解析播放链接数据失败: {e}")
-                        continue
-
-                # 按集数排序
-                episode_urls.sort(key=lambda x: x[0])
-
-                self.logger.info(f"豆瓣: 成功解析 {len(episode_urls)} 个播放链接")
+                self.logger.info(f"豆瓣: 获取到 {len(episode_urls)} 个播放链接")
                 return episode_urls
 
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"豆瓣: 获取页面失败 (HTTP {e.response.status_code}): {url}")
+            self.logger.error(f"豆瓣: 获取API失败 (HTTP {e.response.status_code}): {api_url}")
             return []
         except Exception as e:
             self.logger.error(f"豆瓣: 解析播放链接时发生异常: {e}", exc_info=True)
