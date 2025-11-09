@@ -23,6 +23,7 @@ class GamerScraper(BaseScraper):
     handled_domains = ["ani.gamer.com.tw"]
     referer = "https://ani.gamer.com.tw/"
     test_url = "https://ani.gamer.com.tw"
+
     configurable_fields: Dict[str, Tuple[str, str, str]] = {
         "gamerCookie": ("巴哈姆特动画疯 Cookie", "string", "用于访问动画疯的Cookie。"),
         "gamerUserAgent": ("巴哈姆特动画疯 User-Agent", "string", "用于访问动画疯的User-Agent。"),
@@ -249,12 +250,6 @@ class GamerScraper(BaseScraper):
         Performs a cached search for Gamer content.
         It caches the base results for a title and then filters them based on season.
         """
-        # 检查是否配置了反代域名,如果没有配置则跳过搜索
-        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
-        if not proxy_domain or not proxy_domain.strip():
-            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),跳过搜索。请在'搜索源'设置中配置巴哈姆特反代域名。")
-            return []
-
         parsed = parse_search_keyword(keyword)
         search_title = parsed['title']
         search_season = parsed['season']
@@ -443,12 +438,6 @@ class GamerScraper(BaseScraper):
         return str(provider_episode_id)
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
-        # 检查是否配置了反代域名
-        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
-        if not proxy_domain or not proxy_domain.strip():
-            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),无法获取分集列表。")
-            return []
-
         await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 media_id={media_id} 获取分集列表...")
 
@@ -526,12 +515,6 @@ class GamerScraper(BaseScraper):
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
-        # 检查是否配置了反代域名
-        proxy_domain = await self.config_manager.get("gamerProxyDomain", "")
-        if not proxy_domain or not proxy_domain.strip():
-            self.logger.warning(f"Gamer: 未配置反代域名(gamerProxyDomain),无法获取弹幕。")
-            return []
-
         await self._ensure_client()
         self.logger.info(f"Gamer: 正在为 episode_id={episode_id} 获取弹幕...")
 
