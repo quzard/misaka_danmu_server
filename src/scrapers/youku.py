@@ -301,7 +301,7 @@ class YoukuScraper(BaseScraper):
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
             self.logger.warning(f"Youku: 网络搜索 '{keyword}' 时连接超时或网络错误")
         except Exception as e:
-            self.logger.error(f"Youku: 网络搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.warning(f"Youku: 网络搜索 '{keyword}' 失败: {type(e).__name__}")
 
         self.logger.info(f"Youku: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个有效结果。")
         if results:
@@ -344,7 +344,7 @@ class YoukuScraper(BaseScraper):
                 # 如果搜索未找到，则基于已抓取的信息构建一个基础对象
                 return models.ProviderSearchInfo(provider=self.provider_name, mediaId=show_id, title=cleaned_title, type="tv_series", season=get_season_from_title(cleaned_title), imageUrl=image_url, url=self.build_media_url(show_id))
         except Exception as e:
-            self.logger.error(f"Youku: 从URL '{url}' 提取信息失败: {e}", exc_info=True)
+            self.logger.warning(f"Youku: 从URL '{url}' 提取信息失败: {type(e).__name__}")
             return None
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None, is_full_refresh: bool = False) -> List[models.ProviderEpisodeInfo]:
@@ -570,7 +570,7 @@ class YoukuScraper(BaseScraper):
             self.logger.error(f"Youku: 无法获取有效令牌，任务失败 (vid: {vid})")
             return None
         except Exception as e:
-            self.logger.error(f"Youku: Failed to get danmaku for vid {vid}: {e}", exc_info=True)
+            self.logger.warning(f"Youku: Failed to get danmaku for vid {vid}: {type(e).__name__}")
             return None # 返回 None 表示获取失败
 
     async def _ensure_token_cookie(self, force_refresh: bool = False):

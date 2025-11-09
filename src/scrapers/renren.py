@@ -490,7 +490,7 @@ class RenrenScraper(BaseScraper):
             # 修正：对常见的网络错误只记录警告，避免在日志中产生大量堆栈跟踪。
             self.logger.warning(f"renren: 网络搜索 '{keyword}' 时连接超时或网络错误: {e}")
         except Exception as e:
-            self.logger.error(f"renren: 网络搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.warning(f"renren: 网络搜索 '{keyword}' 失败: {type(e).__name__}")
 
         self.logger.info(f"renren: 网络搜索 '{keyword}' 完成，找到 {len(results)} 个结果。")
         if results:
@@ -546,7 +546,7 @@ class RenrenScraper(BaseScraper):
             return best_match
 
         except Exception as e:
-            self.logger.error(f"Renren: 从URL提取信息时发生错误 (dramaId={drama_id}): {e}", exc_info=True)
+            self.logger.warning(f"Renren: 从URL提取信息时发生错误 (dramaId={drama_id}): {type(e).__name__}")
             return None
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
@@ -667,7 +667,7 @@ class RenrenScraper(BaseScraper):
             if isinstance(decoded, dict) and 'data' in decoded:
                 return RrspDramaDetailEnvelope.model_validate(decoded)
         except Exception as e:
-            self.logger.error(f"renren: 获取剧集详情失败 drama_id={drama_id}: {e}", exc_info=True)
+            self.logger.warning(f"renren: 获取剧集详情失败 drama_id={drama_id}: {type(e).__name__}")
         return None
 
     async def _episode_count_from_sid(self, drama_id: str) -> Optional[int]:
@@ -811,7 +811,7 @@ class RenrenScraper(BaseScraper):
             if isinstance(data, dict) and isinstance(data.get("data"), list):
                 return data["data"]
         except Exception as e:
-            self.logger.error(f"renren: 获取弹幕失败 sid={sid}: {e}", exc_info=True)
+            self.logger.warning(f"renren: 获取弹幕失败 sid={sid}: {type(e).__name__}")
         return []
 
     def _parse_rrsp_p_fields(self, p_field: str) -> dict[str, Any]:

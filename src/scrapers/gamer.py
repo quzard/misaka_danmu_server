@@ -358,10 +358,10 @@ class GamerScraper(BaseScraper):
             if e.response.status_code == 403:
                 self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 失败 (403 Forbidden)。这通常是由于无效或过期的 Cookie 导致的。请尝试在“搜索源”设置中更新巴哈姆特动画疯的 Cookie。")
             else:
-                self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 时发生 HTTP 错误: {e}", exc_info=True)
+                self.logger.warning(f"Gamer: 搜索 '{trad_keyword}' 时发生 HTTP 错误: {type(e).__name__}")
             return []
         except Exception as e:
-            self.logger.error(f"Gamer: 搜索 '{trad_keyword}' 时发生未知错误: {e}", exc_info=True)
+            self.logger.warning(f"Gamer: 搜索 '{trad_keyword}' 时发生未知错误: {type(e).__name__}")
             return []
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
@@ -381,7 +381,7 @@ class GamerScraper(BaseScraper):
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml")
         except Exception as e:
-            self.logger.error(f"Gamer: 访问URL失败 {url}: {e}", exc_info=True)
+            self.logger.warning(f"Gamer: 访问URL失败 {url}: {type(e).__name__}")
             return None
 
         # 检查是否是分集页面，如果是，则找到系列页面的链接
@@ -400,7 +400,7 @@ class GamerScraper(BaseScraper):
                         response.raise_for_status()
                         soup = BeautifulSoup(response.text, "lxml")
                     except Exception as e:
-                        self.logger.error(f"Gamer: 访问系列页面失败 {series_url}: {e}", exc_info=True)
+                        self.logger.warning(f"Gamer: 访问系列页面失败 {series_url}: {type(e).__name__}")
                         return None
                 else:
                     self.logger.warning(f"Gamer: 在分集页面上找到了返回链接，但无法解析出系列sn号。")
@@ -429,7 +429,7 @@ class GamerScraper(BaseScraper):
                 url=self.build_media_url(media_id)
             )
         except Exception as e:
-            self.logger.error(f"Gamer: 解析系列页面 (sn={media_id}) 时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"Gamer: 解析系列页面 (sn={media_id}) 时发生错误: {type(e).__name__}")
             return None
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
@@ -522,7 +522,7 @@ class GamerScraper(BaseScraper):
             self.logger.warning(f"Gamer: 获取分集列表失败 (media_id={media_id})，连接超时或网络错误: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"Gamer: 获取分集列表失败 (media_id={media_id}): {e}", exc_info=True)
+            self.logger.warning(f"Gamer: 获取分集列表失败 (media_id={media_id}): {type(e).__name__}")
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
@@ -608,5 +608,5 @@ class GamerScraper(BaseScraper):
             self.logger.warning(f"Gamer: 获取弹幕失败 (episode_id={episode_id})，连接超时或网络错误: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"Gamer: 获取弹幕失败 (episode_id={episode_id}): {e}", exc_info=True)
+            self.logger.warning(f"Gamer: 获取弹幕失败 (episode_id={episode_id}): {type(e).__name__}")
             return []

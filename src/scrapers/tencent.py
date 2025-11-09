@@ -436,7 +436,7 @@ class TencentScraper(BaseScraper):
         except httpx.HTTPStatusError as e:
             self.logger.error(f"Tencent ({api_name}): 搜索请求失败: {e}")
         except (ValidationError, KeyError) as e:
-            self.logger.error(f"Tencent ({api_name}): 解析搜索结果失败: {e}", exc_info=True)
+            self.logger.warning(f"Tencent ({api_name}): 解析搜索结果失败: {type(e).__name__}")
         return results
 
     async def _search_desktop_api(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> List[models.ProviderSearchInfo]:
@@ -509,7 +509,7 @@ class TencentScraper(BaseScraper):
                 if filtered_item:
                     results.append(filtered_item)
         except (httpx.HTTPStatusError, ValidationError, KeyError, json.JSONDecodeError) as e:
-            self.logger.error(f"Tencent (MultiTerminal API): 解析或请求失败: {e}", exc_info=True)
+            self.logger.warning(f"Tencent (MultiTerminal API): 解析或请求失败: {type(e).__name__}")
         except httpx.TimeoutException:
             self.logger.warning(f"Tencent (MultiTerminal API): 请求超时（5秒）")
         return results
@@ -621,7 +621,7 @@ class TencentScraper(BaseScraper):
                 url=self.build_media_url(cid)
             )
         except Exception as e:
-            self.logger.error(f"Tencent: 从URL '{url}' 提取信息失败: {e}", exc_info=True)
+            self.logger.warning(f"Tencent: 从URL '{url}' 提取信息失败: {type(e).__name__}")
             return None
 
     async def _get_movie_vid_from_api(self, cid: str) -> Optional[str]:
@@ -696,7 +696,7 @@ class TencentScraper(BaseScraper):
                             self.logger.info(f"Tencent: 成功从 module_params 获取到 chapter_info (cid={cid})")
                             return chapter_info
         except Exception as e:
-            self.logger.error(f"Tencent: 获取封面信息(chapterInfo)失败 (cid={cid}): {e}", exc_info=True)
+            self.logger.warning(f"Tencent: 获取封面信息(chapterInfo)失败 (cid={cid}): {type(e).__name__}")
         return None
     
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
@@ -737,7 +737,7 @@ class TencentScraper(BaseScraper):
                         self.logger.info(f"Tencent: 通用分页方法未获取到数据。")
 
             except Exception as e:
-                self.logger.error(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {e}", exc_info=True)
+                self.logger.warning(f"Tencent: 获取分集列表时发生未知错误 (cid={media_id}): {type(e).__name__}")
             
             raw_episodes = network_episodes
             # 仅当请求完整列表且成功获取到数据时，才缓存原始数据
@@ -949,7 +949,7 @@ class TencentScraper(BaseScraper):
                 await asyncio.sleep(0.3)
 
             except Exception as e:
-                self.logger.error(f"请求分集列表失败 (v1 style, cid={cid}, page={i}): {e}", exc_info=True)
+                self.logger.warning(f"请求分集列表失败 (v1 style, cid={cid}, page={i}): {type(e).__name__}")
                 break
 
         final_episodes = list(all_episodes.values())
@@ -1230,7 +1230,7 @@ class TencentScraper(BaseScraper):
                 self.logger.info(f"vid='{vid}' 没有找到弹幕分段索引。")
                 return []
         except Exception as e:
-            self.logger.error(f"获取弹幕索引失败 (vid={vid}): {e}", exc_info=True)
+            self.logger.warning(f"获取弹幕索引失败 (vid={vid}): {type(e).__name__}")
             return []
 
         # 2. 遍历分段，获取弹幕内容
@@ -1271,7 +1271,7 @@ class TencentScraper(BaseScraper):
                         self.logger.warning(f"跳过一个无效的弹幕项目，因为它不符合预期的格式。原始数据: {comment_item}, 错误: {e}")
 
             except Exception as e:
-                self.logger.error(f"获取分段 {segment_name} 失败 (vid={vid}): {e}", exc_info=True)
+                self.logger.warning(f"获取分段 {segment_name} 失败 (vid={vid}): {type(e).__name__}")
                 continue
         
         if progress_callback:
@@ -1383,7 +1383,7 @@ class TencentScraper(BaseScraper):
                 else:
                     self.logger.warning(f"Tencent: 无法为封面页 (cid={cid}) 获取任何分集。")
             except Exception as e:
-                self.logger.error(f"Tencent: 为封面页 (cid={cid}) 获取分集时出错: {e}", exc_info=True)
+                self.logger.warning(f"Tencent: 为封面页 (cid={cid}) 获取分集时出错: {type(e).__name__}")
 
         self.logger.error(f"Tencent: 无法从URL中解析出有效的视频ID: {url}")
         return None

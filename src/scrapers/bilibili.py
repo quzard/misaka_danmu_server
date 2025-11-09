@@ -415,7 +415,7 @@ class BilibiliScraper(BaseScraper):
             self.logger.warning(f"Bilibili: 无法从URL中解析aid和cid: {url}")
             return None
         except Exception as e:
-            self.logger.error(f"Bilibili: 从URL {url} 获取或解析页面ID失败: {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: 从URL {url} 获取或解析页面ID失败: {type(e).__name__}")
             return None
 
     def format_episode_id_for_comments(self, provider_episode_id: Any) -> str:
@@ -442,7 +442,7 @@ class BilibiliScraper(BaseScraper):
         try:
             nav_data = await _fetch_key_data()
         except Exception as e:
-            self.logger.error(f"Bilibili: 获取WBI密钥失败: {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: 获取WBI密钥失败: {type(e).__name__}")
             return "dba4a5925b345b4598b7452c75070bca" # Fallback
 
         try:
@@ -459,7 +459,7 @@ class BilibiliScraper(BaseScraper):
             self.logger.info("Bilibili: Successfully fetched new WBI mixin key.")
             return mixin_key
         except Exception as e:
-            self.logger.error(f"Bilibili: Failed to get WBI mixin key: {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: Failed to get WBI mixin key: {type(e).__name__}")
             return "dba4a5925b345b4598b7452c75070bca"
 
     def _get_wbi_signed_params(self, params: Dict[str, Any], mixin_key: str) -> Dict[str, Any]:
@@ -516,9 +516,9 @@ class BilibiliScraper(BaseScraper):
             if isinstance(res, Exception):
                 # 对常见的网络错误只记录警告
                 if isinstance(res, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
-                    self.logger.warning(f"Bilibili: 搜索时网络错误: {res}")
+                    self.logger.warning(f"Bilibili: 搜索时网络错误")
                 else:
-                    self.logger.error(f"Bilibili: A search sub-task failed: {res}", exc_info=True)
+                    self.logger.warning(f"Bilibili: A search sub-task failed: {type(res).__name__}")
             elif res:
                 all_results.extend(res)
         
@@ -581,7 +581,7 @@ class BilibiliScraper(BaseScraper):
             else:
                 self.logger.info(f"Bilibili: API for type '{search_type}' returned no results. (Code: {api_result.code}, Message: '{api_result.message}')")
         except Exception as e:
-            self.logger.error(f"Bilibili: Search for type '{search_type}' failed: {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: Search for type '{search_type}' failed: {type(e).__name__}")
         
         return results
 
@@ -784,7 +784,7 @@ class BilibiliScraper(BaseScraper):
 
                 return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index] if target_episode_index else final_episodes
         except Exception as e:
-            self.logger.error(f"Bilibili: 获取PGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: 获取PGC分集列表失败 (media_id={media_id}): {type(e).__name__}")
         return []
 
     async def _get_ugc_episodes(self, media_id: str, target_episode_index: Optional[int] = None) -> List[models.ProviderEpisodeInfo]:
@@ -813,7 +813,7 @@ class BilibiliScraper(BaseScraper):
 
                 return [ep for ep in final_episodes if ep.episodeIndex == target_episode_index] if target_episode_index else final_episodes
         except Exception as e:
-            self.logger.error(f"Bilibili: 获取UGC分集列表失败 (media_id={media_id}): {e}", exc_info=True)
+            self.logger.warning(f"Bilibili: 获取UGC分集列表失败 (media_id={media_id}): {type(e).__name__}")
         return []
 
     async def _get_danmaku_pools(self, aid: int, cid: int) -> List[int]:
@@ -854,10 +854,10 @@ class BilibiliScraper(BaseScraper):
                 all_comments.extend(danmu_reply.elems)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404: break
-                self.logger.error(f"Bilibili: 获取弹幕分段失败 (cid={cid}, segment={segment_index}): {e}", exc_info=True)
+                self.logger.warning(f"Bilibili: 获取弹幕分段失败 (cid={cid}, segment={segment_index}): {type(e).__name__}")
                 break
             except Exception as e:
-                self.logger.error(f"Bilibili: 处理弹幕分段时出错 (cid={cid}, segment={segment_index}): {e}", exc_info=True)
+                self.logger.warning(f"Bilibili: 处理弹幕分段时出错 (cid={cid}, segment={segment_index}): {type(e).__name__}")
                 break
         return all_comments
 

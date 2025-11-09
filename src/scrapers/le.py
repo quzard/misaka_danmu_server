@@ -286,10 +286,10 @@ class LetvScraper(BaseScraper):
             self.logger.warning(f"乐视网: 搜索 '{keyword}' 时连接超时或网络错误: {e}")
             return []
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"乐视网: HTTP请求失败 (状态码: {e.response.status_code}): {e}", exc_info=True)
+            self.logger.warning(f"乐视网: HTTP请求失败 (状态码: {e.response.status_code})")
             return []
         except Exception as e:
-            self.logger.error(f"乐视网: 搜索失败: {e}", exc_info=True)
+            self.logger.warning(f"乐视网: 搜索失败: {type(e).__name__}")
             return []
     
     async def get_episodes(
@@ -428,7 +428,7 @@ class LetvScraper(BaseScraper):
             return episodes
 
         except Exception as e:
-            self.logger.error(f"获取分集列表失败: {e}", exc_info=True)
+            self.logger.warning(f"获取分集列表失败: {type(e).__name__}")
             return []
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
@@ -511,7 +511,7 @@ class LetvScraper(BaseScraper):
             )
 
         except Exception as e:
-            self.logger.error(f"从URL提取信息失败: {e}", exc_info=True)
+            self.logger.warning(f"从URL提取信息失败: {type(e).__name__}")
             return None
 
     async def get_id_from_url(self, url: str) -> Optional[Union[str, Dict[str, str]]]:
@@ -538,7 +538,7 @@ class LetvScraper(BaseScraper):
             return None
 
         except Exception as e:
-            self.logger.error(f"从URL提取ID失败: {e}", exc_info=True)
+            self.logger.warning(f"从URL提取ID失败: {type(e).__name__}")
             return None
 
     async def close(self):
@@ -723,8 +723,8 @@ class LetvScraper(BaseScraper):
             
             self.logger.info(f"成功获取乐视视频 {video_id} 的弹幕: {len(formatted_comments)} 条")
             return formatted_comments
-            
+
         except Exception as e:
-            self.logger.error(f"获取乐视弹幕失败: {e}", exc_info=True)
+            self.logger.warning(f"获取乐视弹幕失败: {type(e).__name__}")
             return None
 

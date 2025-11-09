@@ -333,7 +333,7 @@ class MgtvScraper(BaseScraper):
             self.logger.warning(f"MGTV: 搜索 '{keyword}' 时连接超时或网络错误")
             return []
         except Exception as e:
-            self.logger.error(f"MGTV: 搜索 '{keyword}' 失败: {e}", exc_info=True)
+            self.logger.warning(f"MGTV: 搜索 '{keyword}' 失败: {type(e).__name__}")
             return []
 
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
@@ -373,7 +373,7 @@ class MgtvScraper(BaseScraper):
                 url=self.build_media_url(collection_id)
             )
         except Exception as e:
-            self.logger.error(f"MGTV: 解析系列页面 (collection_id={collection_id}) 时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"MGTV: 解析系列页面 (collection_id={collection_id}) 时发生错误: {type(e).__name__}")
             return None
 
     async def _process_variety_episodes(self, raw_episodes: List[MgtvEpisode], db_media_type: Optional[str] = None) -> List[MgtvEpisode]:
@@ -495,7 +495,7 @@ class MgtvScraper(BaseScraper):
                             )
                         ]
             except Exception as e:
-                self.logger.error(f"MGTV: 获取电影分集失败 (media_id={media_id}): {e}", exc_info=True)
+                self.logger.warning(f"MGTV: 获取电影分集失败 (media_id={media_id}): {type(e).__name__}")
                 return []
         # --- 电影处理逻辑结束 ---
         
@@ -562,7 +562,7 @@ class MgtvScraper(BaseScraper):
             self.logger.warning(f"MGTV: 获取分集列表失败 (media_id={media_id})，连接超时或网络错误: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"MGTV: 获取分集列表失败 (media_id={media_id}): {e}", exc_info=True)
+            self.logger.warning(f"MGTV: 获取分集列表失败 (media_id={media_id}): {type(e).__name__}")
             return []
 
     async def get_comments(self, episode_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
@@ -673,7 +673,7 @@ class MgtvScraper(BaseScraper):
                         continue
             return self._format_comments(all_comments)
         except Exception as e:
-            self.logger.error(f"MGTV: 所有弹幕获取策略均失败 (episode_id={episode_id})。最终错误: {e}", exc_info=True)
+            self.logger.warning(f"MGTV: 所有弹幕获取策略均失败 (episode_id={episode_id})。最终错误: {type(e).__name__}")
         return []
 
     def _format_comments(self, comments: List[MgtvComment]) -> List[dict]:

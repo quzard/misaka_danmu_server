@@ -265,7 +265,7 @@ class SohuScraper(BaseScraper):
             self.logger.error(f"搜狐视频: 搜索请求失败: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"搜狐视频: 搜索时发生未知错误: {e}", exc_info=True)
+            self.logger.warning(f"搜狐视频: 搜索时发生未知错误: {type(e).__name__}")
             return []
     
     async def get_episodes(
@@ -378,7 +378,7 @@ class SohuScraper(BaseScraper):
             self.logger.error(f"搜狐视频: 获取分集列表失败: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"搜狐视频: 获取分集列表时发生未知错误: {e}", exc_info=True)
+            self.logger.warning(f"搜狐视频: 获取分集列表时发生未知错误: {type(e).__name__}")
             return []
 
     async def get_comments(
@@ -484,7 +484,7 @@ class SohuScraper(BaseScraper):
             return formatted_comments
 
         except Exception as e:
-            self.logger.error(f"搜狐视频: 获取弹幕时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"搜狐视频: 获取弹幕时发生错误: {type(e).__name__}")
             return None
 
     async def _get_danmu_segment(

@@ -816,7 +816,7 @@ class IqiyiScraper(BaseScraper):
                 self.logger.warning(f"爱奇艺 (v3): API未成功返回数据。状态码: {parsed_response.status_code}")
                 return None
         except Exception as e:
-            self.logger.error(f"爱奇艺 (v3): 获取 full_response 时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺 (v3): 获取 full_response 时发生错误: {type(e).__name__}")
             return None
 
     async def _get_v3_base_info(self, media_id: str) -> Optional[IqiyiV3BaseData]:
@@ -886,7 +886,7 @@ class IqiyiScraper(BaseScraper):
                                     title=title, episodeIndex=order, url=page_url
                                 ))
         except Exception as e:
-            self.logger.error(f"爱奇艺 (v3): 解析分集列表时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺 (v3): 解析分集列表时发生错误: {type(e).__name__}")
             return []
 
         unique_episodes = list({ep.episodeId: ep for ep in all_episodes}.values())
@@ -976,7 +976,7 @@ class IqiyiScraper(BaseScraper):
             await self._set_to_cache(cache_key, info_to_cache, 'base_info_ttl_seconds', 1800)
             return video_info
         except Exception as e:
-            self.logger.error(f"爱奇艺: 获取或解析 baseinfo 失败 (tvid: {tvid}): {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺: 获取或解析 baseinfo 失败 (tvid: {tvid}): {type(e).__name__}")
             
         # 备用方案：如果API失败，则尝试解析HTML页面
         self.logger.warning(f"爱奇艺: API获取基础信息失败，正在尝试备用方案 (解析HTML)...")
@@ -996,7 +996,7 @@ class IqiyiScraper(BaseScraper):
                 await self._set_to_cache(cache_key, info_to_cache, 'base_info_ttl_seconds', 1800)
                 return video_info
         except Exception as fallback_e:
-            self.logger.error(f"爱奇艺: 备用方案 (解析HTML) 也失败了: {fallback_e}", exc_info=True)
+            self.logger.warning(f"爱奇艺: 备用方案 (解析HTML) 也失败了: {type(fallback_e).__name__}")
             return None
 
     async def _get_comments_protobuf(self, tv_id: str, progress_callback: Optional[Callable] = None) -> List[dict]:
@@ -1043,7 +1043,7 @@ class IqiyiScraper(BaseScraper):
                 await asyncio.sleep(0.1)
             except Exception as e:
                 failed_segments += 1
-                self.logger.error(f"爱奇艺 (Protobuf): 处理分段 {i+1} 时发生错误: {e}", exc_info=True)
+                self.logger.warning(f"爱奇艺 (Protobuf): 处理分段 {i+1} 时发生错误: {type(e).__name__}")
 
         self.logger.info(f"爱奇艺 (Protobuf): 弹幕获取完成，成功分段: {successful_segments}/{total_segments}，失败分段: {failed_segments}，总弹幕数: {len(all_danmu)}")
         
@@ -1261,7 +1261,7 @@ class IqiyiScraper(BaseScraper):
             return final_episodes
 
         except Exception as e:
-            self.logger.error(f"爱奇艺: 获取综艺分集列表失败 (album_id={album_id}): {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺: 获取综艺分集列表失败 (album_id={album_id}): {type(e).__name__}")
             return []
 
     async def get_episodes(self, media_id: str, target_episode_index: Optional[int] = None, db_media_type: Optional[str] = None) -> List[models.ProviderEpisodeInfo]:
@@ -1270,7 +1270,7 @@ class IqiyiScraper(BaseScraper):
             # 方案 #1: 使用新的 base_info API
             provider_episodes = await self._get_episodes_v3(media_id)
         except Exception as e:
-            self.logger.warning(f"爱奇艺: 新版API (v3) 获取分集时发生错误: {e}", exc_info=True)
+            self.logger.warning(f"爱奇艺: 新版API (v3) 获取分集时发生错误: {type(e).__name__}")
 
         if not provider_episodes:
             self.logger.warning("爱奇艺: 新版API (v3) 未返回分集或失败，正在回退到旧版API...")
@@ -1461,7 +1461,7 @@ class IqiyiScraper(BaseScraper):
         except (etree.XMLSyntaxError, Exception) as e:
             if isinstance(e, etree.XMLSyntaxError):
                 self._log_error_context(xml_str, e.lineno, e.position[1])
-            self.logger.error(f"处理弹幕分段时发生错误", exc_info=True)
+            self.logger.warning(f"处理弹幕分段时发生错误: {type(e).__name__}")
 
         return []
 

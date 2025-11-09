@@ -604,7 +604,7 @@ class HanjuTVScraper(BaseScraper):
             )
 
         except Exception as e:
-            self.logger.error(f"HanjuTV: 从URL提取信息时发生错误 (sid={sid}): {e}", exc_info=True)
+            self.logger.warning(f"HanjuTV: 从URL提取信息时发生错误 (sid={sid}): {type(e).__name__}")
             return None
 
     async def get_id_from_url(self, url: str) -> Optional[str]:
