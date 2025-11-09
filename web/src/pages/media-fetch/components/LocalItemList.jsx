@@ -342,8 +342,8 @@ const LocalItemList = ({ refreshTrigger }) => {
       key: 'title',
       width: '40%', // 增加标题列宽度
       render: (title, record) => {
-        // 季度节点显示为可点击链接
-        if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
+        // 只有tv_season显示为可点击链接(电影不显示)
+        if (record.mediaType === 'tv_season') {
           return (
             <Button
               type="link"
@@ -399,51 +399,6 @@ const LocalItemList = ({ refreshTrigger }) => {
       key: 'action',
       width: '20%', // 调大操作列宽
       render: (_, record) => {
-        // 剧集组显示导入整部和删除整部按钮
-        if (record.isGroup && record.mediaType === 'tv_show') {
-          return (
-            <Space size="small">
-              <Button
-                type="link"
-                size="small"
-                icon={<ImportOutlined />}
-                onClick={() => {
-                  // 导入整部剧集
-                  importLocalItems({
-                    shows: [{ title: record.title }]
-                  })
-                    .then((res) => {
-                      message.success(res.data.message || '导入任务已提交');
-                      loadItems(pagination.current, pagination.pageSize);
-                    })
-                    .catch(() => message.error('导入失败'));
-                }}
-              >
-                导入整部
-              </Button>
-              <Popconfirm
-                title={`确定要删除《${record.title}》的所有集吗?`}
-                onConfirm={() => {
-                  // 删除整部剧集 - 使用record.key中的ids
-                  const ids = JSON.parse(record.key);
-                  batchDeleteLocalItems([ids])
-                    .then(() => {
-                      message.success(`成功删除《${record.title}》`);
-                      loadItems(pagination.current, pagination.pageSize);
-                    })
-                    .catch(() => message.error('删除失败'));
-                }}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                  删除整部
-                </Button>
-              </Popconfirm>
-            </Space>
-          );
-        }
-
         // 季度显示导入、编辑和删除按钮
         if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
           return (
@@ -537,49 +492,6 @@ const LocalItemList = ({ refreshTrigger }) => {
 
   // 渲染卡片操作按钮 (移动端 - 垂直排列,顺序:导入-编辑-删除)
   const renderCardActions = (record) => {
-    if (record.isGroup && record.mediaType === 'tv_show') {
-      return [
-        <Button
-          key="import-show"
-          type="link"
-          size="small"
-          icon={<ImportOutlined />}
-          onClick={() => {
-            importLocalItems({
-              shows: [{ title: record.title }]
-            })
-              .then((res) => {
-                message.success(res.data.message || '导入任务已提交');
-                loadItems(pagination.current, pagination.pageSize);
-              })
-              .catch(() => message.error('导入失败'));
-          }}
-        >
-          导入整部
-        </Button>,
-        <Popconfirm
-          key="delete-show"
-          title={`确定要删除《${record.title}》的所有集吗?`}
-          onConfirm={() => {
-            batchDeleteLocalItems({
-              shows: [{ title: record.title }]
-            })
-              .then(() => {
-                message.success(`成功删除《${record.title}》`);
-                loadItems(pagination.current, pagination.pageSize);
-              })
-              .catch(() => message.error('删除失败'));
-          }}
-          okText="确定"
-          cancelText="取消"
-        >
-          <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-            删除整部
-          </Button>
-        </Popconfirm>
-      ];
-    }
-
     if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
       return [
         <Button
