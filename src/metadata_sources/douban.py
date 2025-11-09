@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import re
 import urllib.parse
@@ -319,6 +318,10 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         """
         from datetime import datetime
 
+        # 获取配置
+        provider_setting = await self._get_provider_setting()
+        log_raw = provider_setting.get('logRawResponses', False)
+
         # 平台ID映射
         provider_to_vendor_id = {
             "tencent": "qq",      # 腾讯视频
@@ -368,25 +371,22 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
                     }, follow_redirects=False)  # 不跟随重定向
 
+                    # 记录原始响应(如果启用)
+                    if log_raw:
+                        metadata_logger.info(f"豆瓣Frodo API响应 ({media_type}/{douban_id}):\nURL: {api_url}\nStatus: {response.status_code}\nBody:\n{response.text}\n{'='*80}")
+
                     if response.status_code == 200:
                         data = response.json()
                         break
                     elif response.status_code in [301, 302]:
                         # 如果是重定向,尝试下一个类型
-                        self.logger.info(f"豆瓣: {media_type}类型重定向,尝试其他类型")
                         continue
                     else:
                         self.logger.error(f"豆瓣: 获取Frodo API失败 (HTTP {response.status_code}): {api_url}")
-                        if response.status_code == 400:
-                            try:
-                                error_data = response.json()
-                                self.logger.error(f"豆瓣: API响应: {error_data}")
-                            except:
-                                pass
                         continue
 
             except Exception as e:
-                self.logger.error(f"豆瓣: 请求Frodo API异常: {e}")
+                self.logger.error(f"豆瓣: 请求Frodo API异常 ({media_type}): {e}")
                 continue
 
         if not data:
