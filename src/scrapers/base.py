@@ -26,6 +26,8 @@ _proxy_transport_lock = asyncio.Lock()
 async def get_shared_transport() -> httpx.AsyncHTTPTransport:
     """获取或创建共享的 HTTP 传输层（线程安全）"""
     global _shared_transport
+    logger = logging.getLogger(__name__)
+
     if _shared_transport is None:
         async with _transport_lock:
             if _shared_transport is None:
@@ -37,12 +39,17 @@ async def get_shared_transport() -> httpx.AsyncHTTPTransport:
                         keepalive_expiry=30.0  # 缩短为5秒,减少连接复用问题
                     )
                 )
-                logging.getLogger(__name__).info("已创建共享 HTTP 传输层（无代理）")
+                logger.warning(f"[DEBUG] 已创建共享 HTTP 传输层（无代理）, transport_id={id(_shared_transport)}")
+    else:
+        logger.warning(f"[DEBUG] 复用共享 HTTP 传输层（无代理）, transport_id={id(_shared_transport)}")
+
     return _shared_transport
 
 async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
     """获取或创建指定代理的共享 HTTP 传输层（线程安全）"""
     global _proxy_transports
+    logger = logging.getLogger(__name__)
+
     if proxy_url not in _proxy_transports:
         async with _proxy_transport_lock:
             if proxy_url not in _proxy_transports:
@@ -50,12 +57,15 @@ async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
                     proxy=proxy_url,
                     retries=3,
                     limits=httpx.Limits(
-                        max_keepalive_connections=50,
+                        max_keepalive_connections=0,  # 禁用keepalive,每次建立新连接
                         max_connections=200,
-                        keepalive_expiry=30.0  # 缩短为5秒,减少连接复用问题
+                        keepalive_expiry=5.0
                     )
                 )
-                logging.getLogger(__name__).info(f"已创建共享 HTTP 传输层（代理: {proxy_url}）")
+                logger.warning(f"[DEBUG] 已创建共享 HTTP 传输层（代理: {proxy_url}）, transport_id={id(_proxy_transports[proxy_url])}")
+    else:
+        logger.warning(f"[DEBUG] 复用共享 HTTP 传输层（代理: {proxy_url}）, transport_id={id(_proxy_transports[proxy_url])}")
+
     return _proxy_transports[proxy_url]
 
 async def close_all_shared_transports():
@@ -245,14 +255,18 @@ class BaseScraper(ABC):
                 # 有代理：使用代理专用的共享传输层
                 shared_transport = await get_proxy_transport(proxy_to_use)
                 client_kwargs['transport'] = shared_transport
+                self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client使用代理transport, transport_id={id(shared_transport)}, proxy={proxy_to_use}")
             else:
                 # 无代理：使用无代理的共享传输层
                 shared_transport = await get_shared_transport()
                 client_kwargs['transport'] = shared_transport
+                self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client使用无代理transport, transport_id={id(shared_transport)}")
         # 移除else分支：避免在transport层和client层同时设置proxy导致冲突
         # 所有子类都不传入自定义transport，因此不需要向后兼容逻辑
 
-        return httpx.AsyncClient(**client_kwargs)
+        client = httpx.AsyncClient(**client_kwargs)
+        self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client完成, client_id={id(client)}")
+        return client
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
         """
