@@ -37,8 +37,8 @@ class GamerScraper(BaseScraper):
         """构造巴哈姆特动画疯播放页面URL"""
         return f"https://ani.gamer.com.tw/animeRef.php?sn={media_id}"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self.cc_s2t = OpenCC('s2twp')  # Simplified to Traditional Chinese with phrases
         self.cc_t2s = OpenCC('t2s') # Traditional to Simplified
         self.client: Optional[httpx.AsyncClient] = None

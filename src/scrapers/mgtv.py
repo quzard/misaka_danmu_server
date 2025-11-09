@@ -161,8 +161,8 @@ class MgtvScraper(BaseScraper):
         """构造芒果TV播放页面URL"""
         return f"https://www.mgtv.com/b/{media_id}.html"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         # 根据用户反馈，0.5秒的请求间隔在某些网络环境下仍然过快，

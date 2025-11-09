@@ -123,8 +123,8 @@ class SohuScraper(BaseScraper):
         """构造搜狐视频播放页面URL"""
         return f"https://tv.sohu.com/item/{media_id}.html"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self.base_url = "https://tv.sohu.com"
         self.danmu_api_url = "https://api.danmu.tv.sohu.com/dmh5/dmListAll"
         self.search_api_url = "https://m.so.tv.sohu.com/search/pc/keyword"

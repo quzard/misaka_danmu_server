@@ -181,8 +181,8 @@ class BilibiliScraper(BaseScraper):
             # 假设是bvid
             return f"https://www.bilibili.com/video/{media_id}"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0
         self._min_interval = 0.5
@@ -835,7 +835,7 @@ class BilibiliScraper(BaseScraper):
             self.logger.warning(f"Bilibili: 获取额外弹幕池失败 (aid={aid}, cid={cid}): {e}", exc_info=False)
         return list(all_cids)
 
-    async def _fetch_comments_for_cid(self, aid: int, cid: int, progress_callback: Optional[Callable] = None) -> List[DanmakuElem]:
+    async def _fetch_comments_for_cid(self, aid: int, cid: int, progress_callback: Optional[Callable] = None) -> List[Any]:
         """为单个CID获取所有弹幕分段。"""
         all_comments = []
         for segment_index in range(1, 100): # Limit to 100 segments to prevent infinite loops
@@ -893,15 +893,15 @@ class BilibiliScraper(BaseScraper):
         self.logger.info(f"Bilibili: 为 episode_id='{episode_id}' 获取了 {len(unique_comments)} 条唯一弹幕。")
         return self._format_comments(unique_comments)
 
-    def _format_comments(self, comments: List[DanmakuElem]) -> List[dict]:
+    def _format_comments(self, comments: List[Any]) -> List[dict]:
         """格式化弹幕，并处理重复内容。"""
         if not comments: return []
 
-        grouped_by_content: Dict[str, List[DanmakuElem]] = defaultdict(list)
+        grouped_by_content: Dict[str, List[Any]] = defaultdict(list)
         for c in comments:
             grouped_by_content[c.content].append(c)
 
-        processed_comments: List[DanmakuElem] = []
+        processed_comments: List[Any] = []
         for content, group in grouped_by_content.items():
             if len(group) == 1:
                 processed_comments.append(group[0])

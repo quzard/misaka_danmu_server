@@ -290,8 +290,8 @@ class IqiyiScraper(BaseScraper):
         """构造爱奇艺播放页面URL"""
         return f"https://www.iqiyi.com/v_{media_id}.html"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self.mobile_user_agent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36 Edg/136.0.0.0"
         self.reg_video_info = re.compile(r'"videoInfo":(\{.+?\}),')
         self.cookies = {"pgv_pvid": "40b67e3b06027f3d","video_platform": "2","vversion_name": "8.2.95","video_bucketid": "4","video_omgid": "0a1ff6bc9407c0b1cff86ee5d359614d"}

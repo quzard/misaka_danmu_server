@@ -286,8 +286,8 @@ class RenrenScraper(BaseScraper):
         """构造人人影视播放页面URL"""
         return f"https://rrsp.com.cn/pc/drama/{media_id}"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager):
-        super().__init__(session_factory, config_manager)
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, transport_manager):
+        super().__init__(session_factory, config_manager, transport_manager)
         self._api_lock = asyncio.Lock()
         self._last_request_time = 0.0
         self._min_interval = 0.4

@@ -33,6 +33,7 @@ from .title_recognition import TitleRecognitionManager
 from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs
 from .database import get_db_type
+from .scrapers.transport import TransportManager
 from sqlalchemy import text
 
 print(f"当前环境: {settings.environment}")
@@ -84,7 +85,10 @@ async def lifespan(app: FastAPI):
     """
     应用生命周期管理器。
     - `yield` 之前的部分在应用启动时执行。
-    - `yield` 之后的部分在应用关闭时执行。
+            try:
+                await app.state.metadata_manager.close_all()
+            except Exception as e:
+                logger.exception(f"关闭 MetadataManager 时发生错误: {e}")
     """
     # --- Startup Logic ---
     setup_logging()
@@ -134,12 +138,15 @@ async def lifespan(app: FastAPI):
 
     await app.state.config_manager.register_defaults(default_configs)
 
+    # 初始化 TransportManager
+    app.state.transport_manager = TransportManager()
+
     # --- 并行优化的初始化顺序 ---
     startup_start = time.time()
 
     # 1-3. 创建管理器实例（不阻塞）
     app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None)
-    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager)
+    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager, app.state.transport_manager)
     app.state.metadata_manager.scraper_manager = app.state.scraper_manager
 
     # 4. 【并行优化】同时初始化 + 预热
@@ -171,6 +178,11 @@ async def lifespan(app: FastAPI):
     # 初始化关键组件（同步执行，确保启动正常）
     app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
+
+    # Add bangumi specific routes with /bangumi prefix
+    if 'bangumi' in app.state.metadata_manager.sources:
+        bangumi_router = app.state.metadata_manager.sources['bangumi'].api_router
+        app.include_router(bangumi_router, prefix="/api/bangumi", tags=["Bangumi"])
 
 
 
@@ -260,6 +272,12 @@ async def lifespan(app: FastAPI):
     await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
+    # 关闭 TransportManager
+    if hasattr(app.state, "transport_manager"):
+        try:
+            await app.state.transport_manager.close_all()
+        except Exception as e:
+            logger.exception(f"关闭 TransportManager 时发生错误: {e}")
     if hasattr(app.state, "task_manager"):
         await app.state.task_manager.stop()
     # 新增：在关闭时也关闭元数据管理器
