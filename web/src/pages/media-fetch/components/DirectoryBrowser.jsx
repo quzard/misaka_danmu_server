@@ -297,11 +297,15 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
         return;
       }
 
+      // 规范化路径，移除多余的前导斜杠
+      const normalizedPath = path.replace(/^\/+/, '/');
+      console.log('规范化路径:', normalizedPath);
+
       const requestData = {
-        id: path || 'root',  // 添加id字段，使用路径或root
+        id: normalizedPath || 'root',  // 添加id字段，使用路径或root
         storage: 'local',
         type: 'dir',
-        path: path,
+        path: normalizedPath,
         name: ''
       };
       console.log('发送请求数据:', requestData);
@@ -331,13 +335,14 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
     }
 
     try {
-      const res = await createFolder(currentPath, newFolderName.trim());
+      const normalizedCurrentPath = currentPath.replace(/^\/+/, '/');
+      const separator = normalizedCurrentPath.includes('\\') ? '\\' : '/';
+      const newFolderPath = normalizedCurrentPath ? `${normalizedCurrentPath}${separator}${newFolderName.trim()}` : newFolderName.trim();
+      const res = await createFolder(normalizedCurrentPath, newFolderName.trim());
       message.success(res.data.message || '文件夹创建成功');
       setCreateFolderVisible(false);
       setNewFolderName('');
       // 定位到新创建的文件夹 - 使用正确的路径分隔符
-      const separator = currentPath.includes('\\') ? '\\' : '/';
-      const newFolderPath = currentPath ? `${currentPath}${separator}${newFolderName.trim()}` : newFolderName.trim();
       setCurrentPath(newFolderPath);
     } catch (error) {
       message.error('创建文件夹失败：' + (error.message || '未知错误'));
@@ -347,7 +352,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
 
   // 处理删除文件夹
   const handleDeleteFolder = async (folderPath) => {
-    const folderName = folderPath.split('/').pop() || folderPath.split('\\').pop();
+    const normalizedPath = folderPath.replace(/^\/+/, '/');
+    const folderName = normalizedPath.split('/').pop() || normalizedPath.split('\\').pop();
 
     Modal.confirm({
       title: '确认删除文件夹',
@@ -357,8 +363,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
       cancelText: '取消',
       onOk: async () => {
         try {
-          console.log('正在删除文件夹:', folderPath);
-          const res = await deleteFolder(folderPath);
+          console.log('正在删除文件夹:', normalizedPath);
+          const res = await deleteFolder(normalizedPath);
           console.log('删除响应:', res);
           message.success(res.data.message || '文件夹删除成功');
           // 重新加载目录
@@ -382,7 +388,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   // 选择当前目录
   const handleSelectCurrent = () => {
     // 如果有选中的文件夹，使用选中文件夹的路径，否则使用当前路径
-    const pathToSelect = selectedFile ? selectedFile.id : currentPath;
+    const rawPath = selectedFile ? selectedFile.id : currentPath;
+    const pathToSelect = rawPath.replace(/^\/+/, '/');
     console.log('选择目录 - selectedFile:', selectedFile, 'pathToSelect:', pathToSelect);
     onSelect(pathToSelect);
     onClose();
@@ -523,7 +530,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
             if (data.id === ChonkyActions.OpenFiles.id) {
               const { targetFile } = data.payload;
               if (targetFile && FileHelper.isDirectory(targetFile)) {
-                setCurrentPath(targetFile.id);
+                const normalizedPath = targetFile.id.replace(/^\/+/, '/');
+                setCurrentPath(normalizedPath);
                 // 清空选择状态，因为进入了新目录
                 setSelectedFile(null);
               }
@@ -532,7 +540,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
             else if (data.id === ChonkyActions.OpenParentFolder.id) {
               const { targetFile } = data.payload;
               if (targetFile) {
-                setCurrentPath(targetFile.id);
+                const normalizedPath = targetFile.id.replace(/^\/+/, '/');
+                setCurrentPath(normalizedPath);
                 // 清空选择状态，因为进入了新目录
                 setSelectedFile(null);
               }

@@ -230,9 +230,9 @@ async def create_folder(
         raise HTTPException(status_code=500, detail=f"创建文件夹失败: {str(e)}")
 
 
-@router.post("/local-scan/delete-folder", summary="删除文件夹")
+@router.delete("/local-scan/delete-folder", summary="删除文件夹")
 async def delete_folder(
-    payload: DeleteFolderRequest,
+    folderPath: str = Query(..., description="要删除的文件夹路径"),
     current_user: models.User = Depends(security.get_current_user)
 ):
     """
@@ -244,17 +244,30 @@ async def delete_folder(
         from pathlib import Path
         import shutil
 
-        folder_path = payload.folderPath
+        # folder_path = payload.folderPath
 
         # 防止路径遍历攻击
-        if '..' in folder_path or folder_path.startswith('/') or folder_path.startswith('\\'):
+        if '..' in folderPath:
             raise HTTPException(status_code=400, detail="无效的文件夹路径")
+
+        # 检查是否是绝对路径（Windows或Unix风格）
+        import os
+        if os.name == 'nt':  # Windows
+            # Windows: 允许驱动器字母路径，如 C:\ 或 E:\test
+            if not (len(folderPath) >= 3 and folderPath[1:3] == ':\\' and folderPath[0].isalpha()):
+                # 如果不是Windows绝对路径，则不允许以 / 或 \ 开头（防止Unix风格路径遍历）
+                if folderPath.startswith('/') or folderPath.startswith('\\'):
+                    raise HTTPException(status_code=400, detail="无效的文件夹路径")
+        else:  # Unix/Linux
+            # Unix: 不允许以 / 开头的绝对路径（防止路径遍历）
+            if folderPath.startswith('/'):
+                raise HTTPException(status_code=400, detail="无效的文件夹路径")
 
         # 解析文件夹路径
         try:
-            folder_path_obj = Path(folder_path).resolve()
+            folder_path_obj = Path(folderPath).resolve()
         except Exception as e:
-            logger.error(f"文件夹路径解析失败: {folder_path}, 错误: {e}")
+            logger.error(f"文件夹路径解析失败: {folderPath}, 错误: {e}")
             raise HTTPException(status_code=400, detail="无效的文件夹路径")
 
         # 检查文件夹是否存在
