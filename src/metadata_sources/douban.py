@@ -331,76 +331,99 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         # 使用豆瓣Frodo API (参考MoviePilot的实现)
         api_key = "0dad551ec0f84ed02907ff5c42e8ec70"
         base_url = "https://frodo.douban.com/api/v2"
-        url_path = f"/api/v2/movie/{douban_id}"
 
         # 生成时间戳 (格式: YYYYMMDD)
         timestamp = datetime.now().strftime('%Y%m%d')
 
-        # 生成签名
-        signature = self._generate_douban_signature(url_path, timestamp)
-
-        # 构造完整URL
-        api_url = f"{base_url}/movie/{douban_id}"
-
-        # 构造请求参数
-        params = {
-            "apiKey": api_key,
-            "os_rom": "android",
-            "_ts": timestamp,
-            "_sig": signature
-        }
-
         # Android豆瓣客户端User-Agent
         user_agent = "api-client/1 com.douban.frodo/7.22.0.beta9(231) Android/23 product/Mate 40 vendor/HUAWEI model/Mate 40 brand/HUAWEI  rom/android  network/wifi  platform/AndroidPad"
 
-        self.logger.info(f"豆瓣: 正在从Frodo API获取播放链接 {api_url}")
+        # 尝试movie和tv两种类型
+        data = None
+        for media_type in ['movie', 'tv']:
+            url_path = f"/api/v2/{media_type}/{douban_id}"
+
+            # 生成签名
+            signature = self._generate_douban_signature(url_path, timestamp)
+
+            # 构造完整URL
+            api_url = f"{base_url}/{media_type}/{douban_id}"
+
+            # 构造请求参数
+            params = {
+                "apiKey": api_key,
+                "os_rom": "android",
+                "_ts": timestamp,
+                "_sig": signature
+            }
+
+            self.logger.info(f"豆瓣: 正在从Frodo API获取播放链接 {api_url}")
+
+            try:
+                async with await self._create_client() as client:
+                    response = await client.get(api_url, params=params, headers={
+                        "User-Agent": user_agent,
+                        "Referer": "https://frodo.douban.com",
+                        "Accept": "*/*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+                    }, follow_redirects=False)  # 不跟随重定向
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        break
+                    elif response.status_code in [301, 302]:
+                        # 如果是重定向,尝试下一个类型
+                        self.logger.info(f"豆瓣: {media_type}类型重定向,尝试其他类型")
+                        continue
+                    else:
+                        self.logger.error(f"豆瓣: 获取Frodo API失败 (HTTP {response.status_code}): {api_url}")
+                        if response.status_code == 400:
+                            try:
+                                error_data = response.json()
+                                self.logger.error(f"豆瓣: API响应: {error_data}")
+                            except:
+                                pass
+                        continue
+
+            except Exception as e:
+                self.logger.error(f"豆瓣: 请求Frodo API异常: {e}")
+                continue
+
+        if not data:
+            self.logger.warning(f"豆瓣: 无法获取播放链接 (douban_id={douban_id})")
+            return []
 
         try:
-            async with await self._create_client() as client:
-                response = await client.get(api_url, params=params, headers={
-                    "User-Agent": user_agent,
-                    "Referer": "https://frodo.douban.com",
-                    "Accept": "*/*",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
-                })
-                response.raise_for_status()
-                data = response.json()
+            # 获取 vendors 列表
+            vendors = data.get('vendors', [])
 
-                # 获取 vendors 列表
-                vendors = data.get('vendors', [])
+            if not vendors:
+                self.logger.warning(f"豆瓣: 未找到播放链接 (douban_id={douban_id})")
+                return []
 
-                if not vendors:
-                    self.logger.warning(f"豆瓣: 未找到播放链接 (douban_id={douban_id})")
-                    return []
+            self.logger.info(f"豆瓣: 找到 {len(vendors)} 个播放平台")
 
-                self.logger.info(f"豆瓣: 找到 {len(vendors)} 个播放平台")
+            # 提取播放链接
+            episode_urls: List[Tuple[int, str]] = []
 
-                # 提取播放链接
-                episode_urls: List[Tuple[int, str]] = []
+            for vendor in vendors:
+                vendor_id = vendor.get('id', '')
+                vendor_uri = vendor.get('uri', '')
 
-                for vendor in vendors:
-                    vendor_id = vendor.get('id', '')
-                    vendor_uri = vendor.get('uri', '')
+                # 如果指定了目标平台,只处理该平台
+                if target_provider:
+                    target_vendor_id = provider_to_vendor_id.get(target_provider)
+                    if target_vendor_id and vendor_id != target_vendor_id:
+                        continue
 
-                    # 如果指定了目标平台,只处理该平台
-                    if target_provider:
-                        target_vendor_id = provider_to_vendor_id.get(target_provider)
-                        if target_vendor_id and vendor_id != target_vendor_id:
-                            continue
+                if vendor_uri:
+                    self.logger.info(f"豆瓣: 找到播放链接 vendor={vendor_id}, uri={vendor_uri}")
+                    # 直接返回vendor.uri,由调用方(scraper)的get_id_from_url方法解析
+                    episode_urls.append((1, vendor_uri))
 
-                    if vendor_uri:
-                        self.logger.info(f"豆瓣: 找到播放链接 vendor={vendor_id}, uri={vendor_uri}")
-                        # 直接返回vendor.uri,由调用方(scraper)的get_id_from_url方法解析
-                        episode_urls.append((1, vendor_uri))
+            self.logger.info(f"豆瓣: 获取到 {len(episode_urls)} 个播放链接")
+            return episode_urls
 
-                self.logger.info(f"豆瓣: 获取到 {len(episode_urls)} 个播放链接")
-                return episode_urls
-
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"豆瓣: 获取Frodo API失败 (HTTP {e.response.status_code}): {api_url}")
-            if e.response.status_code == 400:
-                self.logger.error(f"豆瓣: API响应: {e.response.text}")
-            return []
         except Exception as e:
             self.logger.error(f"豆瓣: 解析播放链接时发生异常: {e}", exc_info=True)
             return []

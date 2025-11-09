@@ -355,30 +355,29 @@ class So360MetadataSource(BaseMetadataSource):
 
             url = f"{self.api_base_url}/episodesv2"
 
-            async with await self._create_client() as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
 
-                # 去掉JSONP包装
-                data = response.text
-                json_data = data[data.index('(') + 1:data.rindex(')')]
-                parsed = json.loads(json_data)
+            # 去掉JSONP包装
+            data = response.text
+            json_data = data[data.index('(') + 1:data.rindex(')')]
+            parsed = json.loads(json_data)
 
-                if parsed.get('code') == 0 and len(parsed.get('data', [])) > 0:
-                    series_html = parsed['data'][0].get('seriesHTML', {})
-                    if 'seriesPlaylinks' in series_html:
-                        episodes = series_html['seriesPlaylinks']
-                        result = []
-                        for i, episode in enumerate(episodes):
-                            if isinstance(episode, dict):
-                                episode_url = episode.get('url', '')
-                            elif isinstance(episode, str):
-                                episode_url = episode
-                            else:
-                                continue
-                            if episode_url:
-                                result.append((i + 1, episode_url))
-                        return result
+            if parsed.get('code') == 0 and len(parsed.get('data', [])) > 0:
+                series_html = parsed['data'][0].get('seriesHTML', {})
+                if 'seriesPlaylinks' in series_html:
+                    episodes = series_html['seriesPlaylinks']
+                    result = []
+                    for i, episode in enumerate(episodes):
+                        if isinstance(episode, dict):
+                            episode_url = episode.get('url', '')
+                        elif isinstance(episode, str):
+                            episode_url = episode
+                        else:
+                            continue
+                        if episode_url:
+                            result.append((i + 1, episode_url))
+                    return result
 
             return []
 
@@ -432,28 +431,27 @@ class So360MetadataSource(BaseMetadataSource):
 
                     url = f"{self.api_base_url}/episodeszongyi"
 
-                    async with await self._create_client() as client:
-                        response = await client.get(url, params=params)
-                        response.raise_for_status()
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
 
-                        # 去掉JSONP包装
-                        data = response.text
-                        json_data = data[data.index('(') + 1:data.rindex(')')]
-                        parsed = json.loads(json_data)
+                    # 去掉JSONP包装
+                    data = response.text
+                    json_data = data[data.index('(') + 1:data.rindex(')')]
+                    parsed = json.loads(json_data)
 
-                        if parsed.get('code') == 0 and parsed.get('data'):
-                            episodes = parsed['data'].get('list', [])
-                            if not episodes:
-                                break
-
-                            all_episodes.extend(episodes)
-
-                            if len(episodes) < count:
-                                break
-
-                            offset += count
-                        else:
+                    if parsed.get('code') == 0 and parsed.get('data'):
+                        episodes = parsed['data'].get('list', [])
+                        if not episodes:
                             break
+
+                        all_episodes.extend(episodes)
+
+                        if len(episodes) < count:
+                            break
+
+                        offset += count
+                    else:
+                        break
 
             # 转换为(集数, URL)格式
             result = []
@@ -492,20 +490,19 @@ class So360MetadataSource(BaseMetadataSource):
             possible_paths = [f"/dianshiju/{metadata_id}.html", f"/dongman/{metadata_id}.html", f"/dianying/{metadata_id}.html", f"/zongyi/{metadata_id}.html"]
             title = None
 
-            async with await self._create_client() as client:
-                for path in possible_paths:
-                    detail_url = f"{self.web_base_url}{path}"
-                    try:
-                        response = await client.get(detail_url)
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.text, 'html.parser')
-                            title_tag = soup.find('h1', class_='title')
-                            if title_tag:
-                                title = title_tag.get_text(strip=True)
-                                self.logger.info(f"360: 从详情页获取到标题: {title}")
-                                break
-                    except:
-                        continue
+            for path in possible_paths:
+                detail_url = f"{self.web_base_url}{path}"
+                try:
+                    response = await self.client.get(detail_url)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        title_tag = soup.find('h1', class_='title')
+                        if title_tag:
+                            title = title_tag.get_text(strip=True)
+                            self.logger.info(f"360: 从详情页获取到标题: {title}")
+                            break
+                except:
+                    continue
 
             if not title:
                 self.logger.warning(f"360: 无法获取条目标题 (metadata_id={metadata_id})")
@@ -523,22 +520,21 @@ class So360MetadataSource(BaseMetadataSource):
                 'cb': '__jp0'
             }
 
-            async with await self._create_client() as client:
-                response = await client.get(search_url, params=params)
-                response.raise_for_status()
+            response = await self.client.get(search_url, params=params)
+            response.raise_for_status()
 
-                # 去掉JSONP包装
-                data = response.text
-                json_data = data[data.index('(') + 1:data.rindex(')')]
-                parsed_data = json.loads(json_data)
+            # 去掉JSONP包装
+            data = response.text
+            json_data = data[data.index('(') + 1:data.rindex(')')]
+            parsed_data = json.loads(json_data)
 
-                if parsed_data.get('code') == 0 and parsed_data.get('data'):
-                    rows = parsed_data['data'].get('longData', {}).get('rows', [])
+            if parsed_data.get('code') == 0 and parsed_data.get('data'):
+                rows = parsed_data['data'].get('longData', {}).get('rows', [])
 
-                    # 查找ID匹配的条目
-                    for row in rows:
-                        if row.get('id') == metadata_id:
-                            return So360SearchResultItem(**row)
+                # 查找ID匹配的条目
+                for row in rows:
+                    if row.get('id') == metadata_id:
+                        return So360SearchResultItem(**row)
 
             self.logger.warning(f"360: 未找到匹配的条目 (metadata_id={metadata_id})")
             return None
