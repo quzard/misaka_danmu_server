@@ -59,6 +59,15 @@ class LocalItemsImportRequest(BaseModel):
     seasons: Optional[List[Dict[str, Any]]] = None
 
 
+class CreateFolderRequest(BaseModel):
+    parentPath: str
+    folderName: str
+
+
+class DeleteFolderRequest(BaseModel):
+    folderPath: str
+
+
 # ==================== API Endpoints ====================
 
 @router.post("/local-scan/browse", summary="浏览本地目录")
@@ -140,6 +149,154 @@ async def browse_directory(
     except Exception as e:
         logger.error(f"浏览目录失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"浏览目录失败: {str(e)}")
+
+
+@router.post("/local-scan/create-folder", summary="创建文件夹")
+async def create_folder(
+    payload: CreateFolderRequest,
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    在指定路径创建新文件夹
+
+    支持Windows和Linux路径格式
+    """
+    try:
+        from pathlib import Path
+        import os
+
+        parent_path = payload.parentPath
+        folder_name = payload.folderName.strip()
+
+        # 验证文件夹名称
+        if not folder_name:
+            raise HTTPException(status_code=400, detail="文件夹名称不能为空")
+
+        # 检查文件夹名称是否包含非法字符
+        invalid_chars = ['<', '>', ':', '"', '|', '?', '*']
+        if any(char in folder_name for char in invalid_chars):
+            raise HTTPException(status_code=400, detail="文件夹名称包含非法字符")
+
+        # Windows下还有额外的非法字符
+        if os.name == 'nt':  # Windows
+            windows_invalid = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
+            if any(char in folder_name for char in windows_invalid):
+                raise HTTPException(status_code=400, detail="文件夹名称包含Windows非法字符")
+
+        # 防止路径遍历攻击
+        if '..' in folder_name or folder_name.startswith('/') or folder_name.startswith('\\'):
+            raise HTTPException(status_code=400, detail="无效的文件夹名称")
+
+        # 解析父路径
+        try:
+            parent_path_obj = Path(parent_path).resolve()
+        except Exception as e:
+            logger.error(f"父路径解析失败: {parent_path}, 错误: {e}")
+            raise HTTPException(status_code=400, detail="无效的父路径")
+
+        # 检查父路径是否存在且为目录
+        if not parent_path_obj.exists():
+            raise HTTPException(status_code=404, detail="父路径不存在")
+
+        if not parent_path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="父路径不是目录")
+
+        # 构造新文件夹路径
+        new_folder_path = parent_path_obj / folder_name
+
+        # 检查文件夹是否已存在
+        if new_folder_path.exists():
+            raise HTTPException(status_code=409, detail="文件夹已存在")
+
+        # 创建文件夹
+        try:
+            new_folder_path.mkdir(parents=True, exist_ok=False)
+            logger.info(f"用户 '{current_user.username}' 创建了文件夹: {new_folder_path}")
+            return {
+                "message": "文件夹创建成功",
+                "path": str(new_folder_path),
+                "name": folder_name
+            }
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="没有权限创建文件夹")
+        except Exception as e:
+            logger.error(f"创建文件夹失败: {new_folder_path}, 错误: {e}")
+            raise HTTPException(status_code=500, detail=f"创建文件夹失败: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"创建文件夹失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建文件夹失败: {str(e)}")
+
+
+@router.post("/local-scan/delete-folder", summary="删除文件夹")
+async def delete_folder(
+    payload: DeleteFolderRequest,
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    删除指定的文件夹
+
+    注意：此操作不可逆，请谨慎使用
+    """
+    try:
+        from pathlib import Path
+        import shutil
+
+        folder_path = payload.folderPath
+
+        # 防止路径遍历攻击
+        if '..' in folder_path or folder_path.startswith('/') or folder_path.startswith('\\'):
+            raise HTTPException(status_code=400, detail="无效的文件夹路径")
+
+        # 解析文件夹路径
+        try:
+            folder_path_obj = Path(folder_path).resolve()
+        except Exception as e:
+            logger.error(f"文件夹路径解析失败: {folder_path}, 错误: {e}")
+            raise HTTPException(status_code=400, detail="无效的文件夹路径")
+
+        # 检查文件夹是否存在
+        if not folder_path_obj.exists():
+            raise HTTPException(status_code=404, detail="文件夹不存在")
+
+        # 检查是否为目录
+        if not folder_path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="路径不是文件夹")
+
+        # 检查文件夹是否为空（为了安全起见）
+        try:
+            folder_contents = list(folder_path_obj.iterdir())
+            if folder_contents:
+                raise HTTPException(status_code=400, detail="只能删除空文件夹")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="没有权限访问文件夹内容")
+
+        # 删除文件夹
+        try:
+            folder_path_obj.rmdir()  # 只删除空文件夹
+            logger.info(f"用户 '{current_user.username}' 删除了文件夹: {folder_path_obj}")
+            return {
+                "message": "文件夹删除成功",
+                "path": str(folder_path_obj)
+            }
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="没有权限删除文件夹")
+        except OSError as e:
+            if "directory not empty" in str(e).lower():
+                raise HTTPException(status_code=400, detail="文件夹不为空，无法删除")
+            else:
+                raise HTTPException(status_code=500, detail=f"删除文件夹失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"删除文件夹失败: {folder_path_obj}, 错误: {e}")
+            raise HTTPException(status_code=500, detail=f"删除文件夹失败: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除文件夹失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除文件夹失败: {str(e)}")
 
 
 @router.get("/local-scan/last-path", summary="获取上次使用的扫描路径")

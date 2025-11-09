@@ -86,15 +86,31 @@ const api = {
     })
   },
   delete(url, data, other = { headers: {} }) {
-    return instance({
-      method: 'delete',
-      baseURL: getURL(url).baseURL,
-      url: getURL(url).url,
-      headers: { ...other.headers },
-      data,
-      onUploadProgress: other.onUploadProgress,
-      onDownloadProgress: other.onDownloadProgress,
-    })
+    // 检查是否是config对象（包含params属性）
+    const isConfig = data && typeof data === 'object' && (data.params || data.headers || data.data);
+    if (isConfig) {
+      return instance({
+        method: 'delete',
+        baseURL: getURL(url).baseURL,
+        url: getURL(url).url,
+        headers: { ...other.headers, ...(data.headers || {}) },
+        params: data.params,
+        data: data.data,
+        onUploadProgress: data.onUploadProgress || other.onUploadProgress,
+        onDownloadProgress: data.onDownloadProgress || other.onDownloadProgress,
+      });
+    } else {
+      // 向后兼容：data作为请求体
+      return instance({
+        method: 'delete',
+        baseURL: getURL(url).baseURL,
+        url: getURL(url).url,
+        headers: { ...other.headers },
+        data,
+        onUploadProgress: other.onUploadProgress,
+        onDownloadProgress: other.onDownloadProgress,
+      });
+    }
   },
 }
 
