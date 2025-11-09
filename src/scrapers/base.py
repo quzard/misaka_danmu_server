@@ -32,9 +32,9 @@ async def get_shared_transport() -> httpx.AsyncHTTPTransport:
                 _shared_transport = httpx.AsyncHTTPTransport(
                     retries=3,
                     limits=httpx.Limits(
-                        max_keepalive_connections=50,
+                        max_keepalive_connections=0,  # 禁用keepalive,每次建立新连接
                         max_connections=200,
-                        keepalive_expiry=5.0  # 缩短为5秒,减少连接复用问题
+                        keepalive_expiry=5.0
                     )
                 )
                 logging.getLogger(__name__).info("已创建共享 HTTP 传输层（无代理）")
@@ -50,9 +50,9 @@ async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
                     proxy=proxy_url,
                     retries=3,
                     limits=httpx.Limits(
-                        max_keepalive_connections=50,
+                        max_keepalive_connections=0,  # 禁用keepalive,每次建立新连接
                         max_connections=200,
-                        keepalive_expiry=5.0  # 缩短为5秒,减少连接复用问题
+                        keepalive_expiry=5.0
                     )
                 )
                 logging.getLogger(__name__).info(f"已创建共享 HTTP 传输层（代理: {proxy_url}）")
