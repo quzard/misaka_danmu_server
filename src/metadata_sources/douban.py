@@ -328,8 +328,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
 
                     if vendor_uri:
                         self.logger.info(f"豆瓣: 找到播放链接 vendor={vendor_id}, uri={vendor_uri}")
-                        # 对于电视剧,返回主页面URL,由调用方解析具体集数
-                        # 这里返回(1, URL)表示第1集或主页面
+                        # 直接返回vendor.uri,由调用方(scraper)的get_id_from_url方法解析
                         episode_urls.append((1, vendor_uri))
 
                 self.logger.info(f"豆瓣: 获取到 {len(episode_urls)} 个播放链接")

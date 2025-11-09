@@ -23,6 +23,7 @@ import {
   Space,
   Checkbox,
   Popover,
+  Select,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -609,38 +610,47 @@ export const SearchResult = () => {
       )
 
       if (matching_supplements.length > 0) {
+        const mainKey = `${item.provider}_${item.mediaId}`
+
+        // 查找当前选中的补充源
+        const selectedKey = Object.keys(supplementMap).find(k =>
+          k.startsWith(mainKey + '_') && supplementMap[k]?.enabled
+        )
+        const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
+
         return (
-          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex flex-col gap-2">
-            {matching_supplements.map((supplement, index) => {
-              const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
-              const isChecked = supplementMap[key]?.enabled || false
-
-              // 调试日志
-              console.log('[补充源调试]', {
-                provider: supplement.provider,
-                title: supplement.title,
-                supportsEpisodeUrls: supplement.supportsEpisodeUrls,
-                supplement
-              })
-
-              return (
-                <div key={index} className="flex items-center gap-2 flex-wrap justify-start">
-                  <Tag color="purple">{supplement.provider}</Tag>
-                  <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
-                    找到补充源: {supplement.title}
-                  </span>
-                  <Checkbox
-                    checked={isChecked}
-                    onChange={e => {
-                      e.stopPropagation()
-                      handleSupplementToggle(item, supplement, e.target.checked, key)
-                    }}
-                  >
-                    使用补充源分集列表
-                  </Checkbox>
-                </div>
-              )
-            })}
+          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2">
+            <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
+              找到补充源:
+            </span>
+            <Select
+              placeholder="选择补充源"
+              value={selectedProvider}
+              onChange={value => {
+                // 如果选择了补充源
+                if (value) {
+                  const supplement = matching_supplements.find(s => s.provider === value)
+                  if (supplement) {
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    handleSupplementToggle(item, supplement, true, key)
+                  }
+                } else {
+                  // 如果清空选择
+                  if (selectedKey) {
+                    const supplement = matching_supplements.find(s => s.provider === selectedProvider)
+                    if (supplement) {
+                      handleSupplementToggle(item, supplement, false, selectedKey)
+                    }
+                  }
+                }
+              }}
+              allowClear
+              style={{ minWidth: 200 }}
+              options={matching_supplements.map(supplement => ({
+                label: `${supplement.provider} - ${supplement.title}`,
+                value: supplement.provider
+              }))}
+            />
           </div>
         )
       }
