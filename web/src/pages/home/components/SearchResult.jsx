@@ -810,9 +810,18 @@ export const SearchResult = () => {
                             try {
                               if (editLoading) return
                               setEditLoading(true)
+
+                              // 检查是否有补充源
+                              const key = `${item.provider}_${item.mediaId}`
+                              const supplement = supplementMap[key]
+
+                              // 如果启用了补充源,从补充源获取分集列表
+                              const providerToUse = supplement?.enabled ? supplement.provider : item.provider
+                              const mediaIdToUse = supplement?.enabled ? supplement.mediaId : item.mediaId
+
                               const res = await getEditEpisodes({
-                                provider: item.provider,
-                                media_id: item.mediaId,
+                                provider: providerToUse,
+                                media_id: mediaIdToUse,
                                 media_type: item.type,
                               })
                               setEditEpisodeList(res.data)
