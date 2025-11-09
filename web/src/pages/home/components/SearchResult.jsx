@@ -612,12 +612,12 @@ export const SearchResult = () => {
       if (matching_supplements.length > 0) {
         const mainKey = `${item.provider}_${item.mediaId}`
 
-        // 查找当前选中的补充源
+        // 查找当前选中的补充源(不管是否启用)
         const selectedKey = Object.keys(supplementMap).find(k =>
-          k.startsWith(mainKey + '_') && supplementMap[k]?.enabled
+          k.startsWith(mainKey + '_')
         )
         const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
-        const isEnabled = selectedKey ? supplementMap[selectedKey]?.enabled : false
+        const isEnabled = selectedKey ? (supplementMap[selectedKey]?.enabled || false) : false
 
         return (
           <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2">
