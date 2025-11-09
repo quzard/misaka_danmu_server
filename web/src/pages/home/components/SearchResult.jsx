@@ -617,6 +617,7 @@ export const SearchResult = () => {
           k.startsWith(mainKey + '_') && supplementMap[k]?.enabled
         )
         const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
+        const isEnabled = selectedKey ? supplementMap[selectedKey]?.enabled : false
 
         return (
           <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2">
@@ -632,16 +633,36 @@ export const SearchResult = () => {
                   const supplement = matching_supplements.find(s => s.provider === value)
                   if (supplement) {
                     const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
-                    handleSupplementToggle(item, supplement, true, key)
+                    // 选择补充源时,不自动启用,需要用户勾选checkbox
+                    setSupplementMap(prev => {
+                      const newMap = { ...prev }
+                      // 清除同一主源的其他补充源
+                      Object.keys(newMap).forEach(k => {
+                        if (k.startsWith(mainKey + '_') && k !== key) {
+                          delete newMap[k]
+                        }
+                      })
+                      // 添加新选择的补充源(但不启用)
+                      newMap[key] = {
+                        provider: supplement.provider,
+                        mediaId: supplement.mediaId,
+                        title: supplement.title,
+                        enabled: false
+                      }
+                      return newMap
+                    })
                   }
                 } else {
-                  // 如果清空选择
-                  if (selectedKey) {
-                    const supplement = matching_supplements.find(s => s.provider === selectedProvider)
-                    if (supplement) {
-                      handleSupplementToggle(item, supplement, false, selectedKey)
-                    }
-                  }
+                  // 如果清空选择,删除所有该主源的补充源
+                  setSupplementMap(prev => {
+                    const newMap = { ...prev }
+                    Object.keys(newMap).forEach(k => {
+                      if (k.startsWith(mainKey + '_')) {
+                        delete newMap[k]
+                      }
+                    })
+                    return newMap
+                  })
                 }
               }}
               allowClear
@@ -651,6 +672,21 @@ export const SearchResult = () => {
                 value: supplement.provider
               }))}
             />
+            {selectedProvider && (
+              <Checkbox
+                checked={isEnabled}
+                onChange={e => {
+                  e.stopPropagation()
+                  const supplement = matching_supplements.find(s => s.provider === selectedProvider)
+                  if (supplement) {
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    handleSupplementToggle(item, supplement, e.target.checked, key)
+                  }
+                }}
+              >
+                使用补充源分集列表
+              </Checkbox>
+            )}
           </div>
         )
       }
