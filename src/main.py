@@ -257,10 +257,6 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
-    # 关闭共享的 HTTP 传输层（连接池）
-    from .scrapers.base import close_all_shared_transports
-    await close_all_shared_transports()
-
     await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()

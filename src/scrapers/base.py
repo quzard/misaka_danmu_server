@@ -15,85 +15,6 @@ from .. import models
 if TYPE_CHECKING:
     from ..config_manager import ConfigManager
 
-# 全局共享的 HTTP 传输层（用于无代理的连接池复用）
-_shared_transport: Optional[httpx.AsyncHTTPTransport] = None
-_transport_lock = asyncio.Lock()
-
-# 全局共享的代理传输层缓存（按代理URL缓存不同的传输层）
-_proxy_transports: Dict[str, httpx.AsyncHTTPTransport] = {}
-_proxy_transport_lock = asyncio.Lock()
-
-async def get_shared_transport() -> httpx.AsyncHTTPTransport:
-    """获取或创建共享的 HTTP 传输层（线程安全）"""
-    global _shared_transport
-    logger = logging.getLogger(__name__)
-
-    if _shared_transport is None:
-        async with _transport_lock:
-            if _shared_transport is None:
-                _shared_transport = httpx.AsyncHTTPTransport(
-                    retries=3,
-                    limits=httpx.Limits(
-                        max_keepalive_connections=50,
-                        max_connections=200,
-                        keepalive_expiry=30.0  # 缩短为5秒,减少连接复用问题
-                    )
-                )
-                logger.warning(f"[DEBUG] 已创建共享 HTTP 传输层（无代理）, transport_id={id(_shared_transport)}")
-    else:
-        logger.warning(f"[DEBUG] 复用共享 HTTP 传输层（无代理）, transport_id={id(_shared_transport)}")
-
-    return _shared_transport
-
-async def get_proxy_transport(proxy_url: str) -> httpx.AsyncHTTPTransport:
-    """获取或创建指定代理的共享 HTTP 传输层（线程安全）"""
-    global _proxy_transports
-    logger = logging.getLogger(__name__)
-
-    if proxy_url not in _proxy_transports:
-        async with _proxy_transport_lock:
-            if proxy_url not in _proxy_transports:
-                _proxy_transports[proxy_url] = httpx.AsyncHTTPTransport(
-                    proxy=proxy_url,
-                    retries=3,
-                    limits=httpx.Limits(
-                        max_keepalive_connections=0,  # 禁用keepalive,每次建立新连接
-                        max_connections=200,
-                        keepalive_expiry=5.0
-                    )
-                )
-                logger.warning(f"[DEBUG] 已创建共享 HTTP 传输层（代理: {proxy_url}）, transport_id={id(_proxy_transports[proxy_url])}")
-    else:
-        logger.warning(f"[DEBUG] 复用共享 HTTP 传输层（代理: {proxy_url}）, transport_id={id(_proxy_transports[proxy_url])}")
-
-    return _proxy_transports[proxy_url]
-
-async def close_all_shared_transports():
-    """关闭所有全局共享传输层（应在应用关闭时调用）"""
-    global _shared_transport, _proxy_transports
-    
-    logger = logging.getLogger(__name__)
-    
-    # 关闭无代理的共享传输层
-    if _shared_transport is not None:
-        async with _transport_lock:
-            if _shared_transport is not None:
-                await _shared_transport.aclose()
-                _shared_transport = None
-                logger.info("已关闭共享 HTTP 传输层（无代理）")
-    
-    # 关闭所有代理的共享传输层
-    if _proxy_transports:
-        async with _proxy_transport_lock:
-            close_tasks = []
-            for proxy_url, transport in _proxy_transports.items():
-                logger.info(f"正在关闭代理传输层: {proxy_url}")
-                close_tasks.append(transport.aclose())
-            
-            await asyncio.gather(*close_tasks, return_exceptions=True)
-            _proxy_transports.clear()
-            logger.info("已关闭所有代理传输层")
-
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -239,34 +160,13 @@ class BaseScraper(ABC):
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
         子类可以传递额外的 httpx.AsyncClient 参数。
-        使用共享传输层以提高性能和连接复用（支持有代理和无代理两种情况）。
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
-        
-        # 关键：在创建客户端后，记录下当前使用的代理配置
         self._current_proxy_config = proxy_to_use
-        
-        client_kwargs = {"timeout": 20.0, "follow_redirects": True, **kwargs}
 
-        # 【优化】如果没有自定义传输层，使用共享传输层（支持代理和非代理）
-        if 'transport' not in kwargs:
-            if proxy_to_use:
-                # 有代理：使用代理专用的共享传输层
-                shared_transport = await get_proxy_transport(proxy_to_use)
-                client_kwargs['transport'] = shared_transport
-                self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client使用代理transport, transport_id={id(shared_transport)}, proxy={proxy_to_use}")
-            else:
-                # 无代理：使用无代理的共享传输层
-                shared_transport = await get_shared_transport()
-                client_kwargs['transport'] = shared_transport
-                self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client使用无代理transport, transport_id={id(shared_transport)}")
-        # 移除else分支：避免在transport层和client层同时设置proxy导致冲突
-        # 所有子类都不传入自定义transport，因此不需要向后兼容逻辑
-
-        client = httpx.AsyncClient(**client_kwargs)
-        self.logger.warning(f"[DEBUG] {self.provider_name}: 创建Client完成, client_id={id(client)}")
-        return client
+        client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
+        return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
         """
