@@ -316,14 +316,63 @@ async def get_episodes_for_search_result(
     provider: str = Query(...),
     media_id: str = Query(...),
     media_type: Optional[str] = Query(None), # Pass media_type to help scraper
+    supplement_provider: Optional[str] = Query(None, description="补充源provider"),
+    supplement_media_id: Optional[str] = Query(None, description="补充源mediaId"),
     manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    """为指定的搜索结果获取完整的分集列表。"""
+    """为指定的搜索结果获取完整的分集列表。支持从补充源获取分集URL。"""
     try:
-        scraper = manager.get_scraper(provider)
-        # 将 db_media_type 传递给 get_episodes 以帮助需要它的刮削器（如 mgtv）
-        episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
+        episodes = []
+
+        # 如果提供了补充源参数,从补充源获取分集URL
+        if supplement_provider and supplement_media_id:
+            logger.info(f"使用补充源 {supplement_provider} 获取分集列表")
+
+            try:
+                # 获取补充源实例
+                supplement_source = metadata_manager.sources.get(supplement_provider)
+                if not supplement_source:
+                    logger.warning(f"补充源 {supplement_provider} 不可用")
+                elif not getattr(supplement_source, 'supports_episode_urls', False):
+                    logger.warning(f"补充源 {supplement_provider} 不支持分集URL获取")
+                else:
+                    # 使用补充源获取分集URL列表
+                    episode_urls = await supplement_source.get_episode_urls(
+                        supplement_media_id, provider  # 目标平台
+                    )
+                    logger.info(f"补充源获取到 {len(episode_urls)} 个分集URL")
+
+                    if episode_urls:
+                        # 获取主源scraper用于解析URL
+                        scraper = manager.get_scraper(provider)
+
+                        # 解析URL获取分集信息
+                        for i, url in episode_urls:
+                            try:
+                                # 从URL提取episode_id
+                                episode_id = await scraper.get_id_from_url(url)
+                                if episode_id:
+                                    episodes.append(models.ProviderEpisodeInfo(
+                                        provider=provider,
+                                        episodeId=episode_id,
+                                        title=f"第{i}集",
+                                        episodeIndex=i,
+                                        url=url
+                                    ))
+                            except Exception as e:
+                                logger.warning(f"解析URL失败 (第{i}集): {e}")
+
+                        logger.info(f"补充源成功解析 {len(episodes)} 个分集")
+            except Exception as e:
+                logger.error(f"使用补充源获取分集失败: {e}", exc_info=True)
+        else:
+            # 从主源获取分集列表
+            scraper = manager.get_scraper(provider)
+            # 将 db_media_type 传递给 get_episodes 以帮助需要它的刮削器（如 mgtv）
+            episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
+
         return episodes
     except httpx.RequestError as e:
         # 新增：捕获网络错误

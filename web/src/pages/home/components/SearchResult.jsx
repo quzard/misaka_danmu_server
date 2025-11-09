@@ -815,15 +815,20 @@ export const SearchResult = () => {
                               const key = `${item.provider}_${item.mediaId}`
                               const supplement = supplementMap[key]
 
-                              // 如果启用了补充源,从补充源获取分集列表
-                              const providerToUse = supplement?.enabled ? supplement.provider : item.provider
-                              const mediaIdToUse = supplement?.enabled ? supplement.mediaId : item.mediaId
-
-                              const res = await getEditEpisodes({
-                                provider: providerToUse,
-                                media_id: mediaIdToUse,
+                              // 构建请求参数
+                              const params = {
+                                provider: item.provider,
+                                media_id: item.mediaId,
                                 media_type: item.type,
-                              })
+                              }
+
+                              // 如果启用了补充源,添加补充源参数
+                              if (supplement?.enabled) {
+                                params.supplement_provider = supplement.provider
+                                params.supplement_media_id = supplement.mediaId
+                              }
+
+                              const res = await getEditEpisodes(params)
                               setEditEpisodeList(res.data)
                               setEditImportOpen(true)
                               setEditItem(item)
