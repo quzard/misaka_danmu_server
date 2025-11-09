@@ -34,8 +34,15 @@ const LocalScan = () => {
       return;
     }
 
+    // 验证路径是否合理
+    if (scanPath.includes('node_modules') || scanPath.includes('.git') || scanPath.includes('cache') || scanPath.includes('temp')) {
+      message.warning('不建议扫描系统目录或缓存目录，请选择媒体文件目录');
+      return;
+    }
+
     setLoading(true);
     try {
+      message.info('开始扫描，请稍候...');
       const res = await scanLocalDanmaku(scanPath);
       message.success(res.data.message || '扫描完成');
       // 触发列表刷新

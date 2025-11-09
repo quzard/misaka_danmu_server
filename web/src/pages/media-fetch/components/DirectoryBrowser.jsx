@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Modal, Button, Space, Typography, message } from 'antd';
 import { FolderOpenOutlined } from '@ant-design/icons';
+import Cookies from 'js-cookie';
 import {
   FullFileBrowser,
   setChonkyDefaults,
@@ -10,6 +11,7 @@ import {
 } from 'chonky';
 import { ChonkyIconFA } from 'chonky-icon-fontawesome';
 import { browseDirectory } from '../../../apis';
+import { createFolder, deleteFolder } from '../../../apis';
 import './DirectoryBrowser.css';
 
 // 定义中文文件操作
@@ -56,6 +58,14 @@ const ChineseActions = {
       contextMenu: false,
     },
   }),
+  ToggleShowFoldersFirst: defineFileAction({
+    ...ChonkyActions.ToggleShowFoldersFirst,
+    button: {
+      name: '文件夹优先',
+      toolbar: true,
+      contextMenu: false,
+    },
+  }),
   CreateFolder: defineFileAction({
     ...ChonkyActions.CreateFolder,
     button: {
@@ -65,12 +75,34 @@ const ChineseActions = {
       icon: 'folder', // 尝试简单的folder图标
     },
   }),
+  DeleteFolder: defineFileAction({
+    id: 'delete_folder',
+    requiresSelection: true,
+    fileFilter: (file) => FileHelper.isDirectory(file), // 只对文件夹显示
+    button: {
+      name: '删除文件夹',
+      toolbar: false,
+      contextMenu: true,
+      icon: 'trash',
+    },
+  }),
 };
 
 // 设置Chonky默认配置
 setChonkyDefaults({
   iconComponent: ChonkyIconFA,
 });
+
+// 文件大小格式化函数
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 B';
+
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
 
 // 定义中文国际化配置
 const createChineseI18n = (isMobile) => ({
@@ -86,7 +118,7 @@ const createChineseI18n = (isMobile) => ({
     },
     formatFileSize: (intl, file) => {
       if (!file || typeof file.size !== 'number') return null;
-      return `大小: ${file.size}`;
+      return formatFileSize(file.size);
     },
   },
   messages: {
@@ -95,6 +127,11 @@ const createChineseI18n = (isMobile) => ({
     'chonky.toolbar.visibleFileCount': `{fileCount, plural,
       one {# 个文件}
       other {# 个文件}
+    }`,
+    'chonky.toolbar.selectedFileCount': `{fileCount, plural,
+      =0 {未选}
+      one {选#个}
+      other {选#个}
     }`,
     'chonky.toolbar.hiddenFileCount': `{fileCount, plural,
       =0 {}
@@ -112,7 +149,11 @@ const createChineseI18n = (isMobile) => ({
     [`chonky.actions.${ChonkyActions.OpenParentFolder.id}.button.name`]: '打开上级文件夹',
     [`chonky.actions.${ChonkyActions.CreateFolder.id}.button.name`]: '新建文件夹',
     [`chonky.actions.${ChonkyActions.CreateFolder.id}.button.tooltip`]: '创建新文件夹',
+    [`chonky.actions.delete_folder.button.name`]: '删除文件夹',
+    [`chonky.actions.delete_folder.button.tooltip`]: '删除选中的文件夹',
     [`chonky.actions.${ChonkyActions.OpenSelection.id}.button.name`]: '打开选中项',
+    [`chonky.actions.${ChonkyActions.SelectAllFiles.id}.button.name`]: '全选文件',
+    [`chonky.actions.${ChonkyActions.ClearSelection.id}.button.name`]: '清除选择',
     [`chonky.actions.${ChonkyActions.EnableListView.id}.button.name`]: '列表视图',
     [`chonky.actions.${ChonkyActions.EnableGridView.id}.button.name`]: '网格视图',
     [`chonky.actions.${ChonkyActions.SortFilesByName.id}.button.name`]: '按名称排序',
@@ -142,14 +183,37 @@ const convertToChonkyFiles = (apiFiles) => {
 
 // 创建文件夹链
 const createFolderChain = (currentPath) => {
-  if (!currentPath || currentPath === '/') {
-    return [{ id: '/', name: '根目录', isDir: true }];
+  if (!currentPath) {
+    return [{ id: 'root', name: '根目录', isDir: true }];
   }
 
-  const parts = currentPath.split('/').filter(p => p);
-  const chain = [{ id: '/', name: '根目录', isDir: true }];
+  // 检测路径分隔符
+  const separator = currentPath.includes('\\') ? '\\' : '/';
+  const parts = currentPath.split(separator).filter(p => p);
 
+  // 对于Windows驱动器路径，如 C:\ 或 D:\
+  if (separator === '\\' && parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
+    const drive = parts[0];
+    const chain = [{ id: drive + '\\', name: drive, isDir: true }];
+
+    let currentId = drive + '\\';
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      currentId = currentId + part + '\\';
+      chain.push({
+        id: currentId,
+        name: part,
+        isDir: true,
+      });
+    }
+
+    return chain;
+  }
+
+  // Unix/Linux路径
+  const chain = [{ id: '/', name: '根目录', isDir: true }];
   let currentId = '/';
+
   for (const part of parts) {
     currentId = currentId === '/' ? `/${part}` : `${currentId}/${part}`;
     chain.push({
@@ -169,6 +233,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [createFolderVisible, setCreateFolderVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
 
   // 检测是否为移动端
   useEffect(() => {
@@ -214,26 +279,45 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   useEffect(() => {
     if (visible) {
       loadDirectory(currentPath);
+      // 重置选择状态
+      setSelectedFile(null);
     }
   }, [visible, currentPath]);
 
   const loadDirectory = async (path) => {
     setLoading(true);
     try {
-      const response = await browseDirectory({
+      console.log('正在加载目录:', path);
+      const token = Cookies.get('danmu_token');
+      console.log('当前token:', token);
+
+      // 检查token是否存在
+      if (!token) {
+        message.error('请先登录');
+        return;
+      }
+
+      const requestData = {
+        id: path || 'root',  // 添加id字段，使用路径或root
         storage: 'local',
         type: 'dir',
         path: path,
         name: ''
-      }, 'name');
+      };
+      console.log('发送请求数据:', requestData);
+
+      const response = await browseDirectory(requestData, 'name');
+      console.log('浏览目录响应:', response);
 
       // 显示所有文件和文件夹
       const allFiles = response.data;
       const chonkyFiles = convertToChonkyFiles(allFiles);
       setFiles(chonkyFiles);
     } catch (error) {
-      message.error('加载目录失败：' + (error.message || '未知错误'));
-      console.error(error);
+      console.error('加载目录失败:', error);
+      console.error('错误详情:', error.response);
+      const errorMessage = error.response?.data?.detail || error.message || '未知错误';
+      message.error('加载目录失败：' + errorMessage);
     } finally {
       setLoading(false);
     }
@@ -247,15 +331,48 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
     }
 
     try {
-      // 这里暂时使用提示，实际应该调用创建目录的API
-      message.info(`创建文件夹 "${newFolderName}" 的功能正在开发中`);
+      const res = await createFolder(currentPath, newFolderName.trim());
+      message.success(res.data.message || '文件夹创建成功');
       setCreateFolderVisible(false);
       setNewFolderName('');
-      // 重新加载目录
-      await loadDirectory(currentPath);
+      // 定位到新创建的文件夹 - 使用正确的路径分隔符
+      const separator = currentPath.includes('\\') ? '\\' : '/';
+      const newFolderPath = currentPath ? `${currentPath}${separator}${newFolderName.trim()}` : newFolderName.trim();
+      setCurrentPath(newFolderPath);
     } catch (error) {
       message.error('创建文件夹失败：' + (error.message || '未知错误'));
+      console.error(error);
     }
+  };
+
+  // 处理删除文件夹
+  const handleDeleteFolder = async (folderPath) => {
+    const folderName = folderPath.split('/').pop() || folderPath.split('\\').pop();
+
+    Modal.confirm({
+      title: '确认删除文件夹',
+      content: `确定要删除文件夹 "${folderName}" 吗？此操作不可逆。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          console.log('正在删除文件夹:', folderPath);
+          const res = await deleteFolder(folderPath);
+          console.log('删除响应:', res);
+          message.success(res.data.message || '文件夹删除成功');
+          // 重新加载目录
+          await loadDirectory(currentPath);
+        } catch (error) {
+          console.error('删除文件夹失败:', error);
+          const errorMessage = error.response?.data?.detail || error.message || '未知错误';
+          message.error('删除文件夹失败：' + errorMessage);
+        }
+      },
+      onCancel: () => {
+        console.log('用户取消了删除操作');
+      },
+    });
   };
 
 
@@ -264,7 +381,10 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
 
   // 选择当前目录
   const handleSelectCurrent = () => {
-    onSelect(currentPath);
+    // 如果有选中的文件夹，使用选中文件夹的路径，否则使用当前路径
+    const pathToSelect = selectedFile ? selectedFile.id : currentPath;
+    console.log('选择目录 - selectedFile:', selectedFile, 'pathToSelect:', pathToSelect);
+    onSelect(pathToSelect);
     onClose();
   };
 
@@ -352,7 +472,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               fontSize: '14px'
             }}
           >
-            选择此目录
+            {selectedFile && selectedFile.isDir ? `选择选中目录` : '选择当前目录'}
           </Button>
         </div>
       }
@@ -374,6 +494,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               // 手机端保留默认的下拉菜单，并添加创建文件夹
               ChonkyActions.OpenFiles,
               ChineseActions.CreateFolder,
+              ChineseActions.DeleteFolder,
             ] : [
               // 电脑端保留自定义中文按钮
               ChineseActions.EnableListView,
@@ -381,27 +502,66 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               ChineseActions.SortFilesByName,
               ChineseActions.SortFilesByDate,
               ChineseActions.SortFilesBySize,
+              ChineseActions.ToggleShowFoldersFirst,
               ChineseActions.CreateFolder,
+              ChineseActions.DeleteFolder,
             ]),
           ]}
           // 电脑端完全禁用默认action，手机端显示默认action
           disableDefaultFileActions={!isMobile}
           onFileAction={(data) => {
+            console.log('File action:', data.id, data.payload);
+
+            // 处理鼠标点击选择文件
+            if (data.id === 'mouse_click_file' && data.payload.clickType === 'single') {
+              const clickedFile = data.payload.file;
+              console.log('点击文件:', clickedFile);
+              setSelectedFile(clickedFile);
+            }
+
             // 处理双击进入文件夹
             if (data.id === ChonkyActions.OpenFiles.id) {
               const { targetFile } = data.payload;
               if (targetFile && FileHelper.isDirectory(targetFile)) {
                 setCurrentPath(targetFile.id);
+                // 清空选择状态，因为进入了新目录
+                setSelectedFile(null);
+              }
+            }
+            // 处理点击面包屑导航
+            else if (data.id === ChonkyActions.OpenParentFolder.id) {
+              const { targetFile } = data.payload;
+              if (targetFile) {
+                setCurrentPath(targetFile.id);
+                // 清空选择状态，因为进入了新目录
+                setSelectedFile(null);
               }
             }
             // 处理创建文件夹
             else if (data.id === ChineseActions.CreateFolder.id) {
               setCreateFolderVisible(true);
             }
+            // 处理删除文件夹
+            else if (data.id === ChineseActions.DeleteFolder.id) {
+              console.log('Delete folder action triggered', data.payload);
+              // 对于需要选择的action，使用 selectedFilesForAction
+              const selectedFiles = data.state.selectedFilesForAction || [];
+              const targetFile = selectedFiles.length > 0 ? selectedFiles[0] : null;
+              console.log('Selected files for delete:', selectedFiles);
+              console.log('Target file for delete:', targetFile);
+
+              if (targetFile && FileHelper.isDirectory(targetFile)) {
+                console.log('Calling handleDeleteFolder with:', targetFile.id);
+                handleDeleteFolder(targetFile.id);
+              } else {
+                console.log('No valid folder selected for deletion');
+                message.warning('请先选择一个文件夹');
+              }
+            }
           }}
           i18n={createChineseI18n(isMobile)}
           defaultFileViewActionId={ChonkyActions.EnableListView.id}
-          disableSelection={true}
+          disableSelection={false}
           disableDragAndDrop={true}
         />
 
@@ -438,7 +598,8 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
                   borderRadius: '6px',
                   fontSize: '14px',
                   outline: 'none',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  backgroundColor: 'white'
                 }}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter') {

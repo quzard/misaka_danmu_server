@@ -9,7 +9,6 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [showUrl, setShowUrl] = useState(false);
   const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
@@ -40,31 +39,31 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
 
       setTesting(true);
 
-      // 如果是编辑模式,使用server.id测试
-      if (server && server.id) {
-        const res = await testMediaServerConnection(server.id);
+      // 统一使用临时保存然后测试的方式
+      try {
+        let tempServer;
+        if (server && server.id) {
+          // 编辑模式: 先临时更新服务器配置
+          tempServer = await updateMediaServer(server.id, { ...values, isEnabled: false });
+        } else {
+          // 新增模式: 先临时保存服务器
+          tempServer = await createMediaServer({ ...values, isEnabled: false });
+        }
+
+        const res = await testMediaServerConnection(tempServer.data.id);
         const result = res.data;
         if (result.success) {
           message.success('连接成功!');
         } else {
           message.error('连接失败: ' + (result.message || '未知错误'));
         }
-      } else {
-        // 新增模式: 先临时保存然后测试
-        try {
-          const tempServer = await createMediaServer({ ...values, isEnabled: false });
-          const res = await testMediaServerConnection(tempServer.data.id);
-          const result = res.data;
-          if (result.success) {
-            message.success('连接成功!');
-          } else {
-            message.error('连接失败: ' + (result.message || '未知错误'));
-          }
-          // 删除临时服务器
+
+        // 如果是新增模式，删除临时服务器
+        if (!server || !server.id) {
           await deleteMediaServer(tempServer.data.id);
-        } catch (tempError) {
-          message.error('测试失败: ' + (tempError.message || '未知错误'));
         }
+      } catch (tempError) {
+        message.error('测试失败: ' + (tempError.message || '未知错误'));
       }
     } catch (error) {
       if (error.errorFields) {
@@ -154,17 +153,7 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
             { type: 'url', message: '请输入有效的URL' }
           ]}
         >
-          <Input
-            placeholder="http://localhost:8096"
-            type={showUrl ? 'text' : 'password'}
-            suffix={
-              showUrl ? (
-                <EyeOutlined onClick={() => setShowUrl(false)} style={{ cursor: 'pointer' }} />
-              ) : (
-                <EyeInvisibleOutlined onClick={() => setShowUrl(true)} style={{ cursor: 'pointer' }} />
-              )
-            }
-          />
+          <Input placeholder="http://localhost:8096" />
         </Form.Item>
 
         <Form.Item
@@ -198,4 +187,3 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
 };
 
 export default ServerConfigPanel;
-
