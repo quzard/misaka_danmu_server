@@ -318,6 +318,19 @@ export const setSingleScraper = data =>
 export const getSingleScraper = data =>
   api.get(`/api/ui/scrapers/${data.name}/config`)
 
+/** 获取资源仓库配置 */
+export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
+/** 保存资源仓库配置 */
+export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
+/** 加载弹幕源资源 */
+export const loadScraperResources = data => api.post('/api/ui/scrapers/load-resources', data)
+/** 备份弹幕源 */
+export const backupScrapers = () => api.post('/api/ui/scrapers/backup')
+/** 还原弹幕源 */
+export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
+/** 获取备份信息 */
+export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
+
 /** 获取元信息搜索 配置 */
 export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */

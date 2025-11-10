@@ -24,6 +24,11 @@ import {
   pollBiliLogin,
   setScrapers,
   setSingleScraper,
+  getResourceRepo,
+  saveResourceRepo,
+  loadScraperResources,
+  backupScrapers,
+  restoreScrapers,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -160,6 +165,10 @@ export const Scrapers = () => {
   const [dandanAuthMode, setDandanAuthMode] = useState('local') // 'local' or 'proxy'
   const [showAppSecret, setShowAppSecret] = useState(false)
 
+  // 资源仓库相关
+  const [resourceRepoUrl, setResourceRepoUrl] = useState('')
+  const [loadingResources, setLoadingResources] = useState(false)
+
   const modalApi = useModal()
   const messageApi = useMessage()
 
@@ -179,6 +188,7 @@ export const Scrapers = () => {
 
   useEffect(() => {
     getInfo()
+    loadResourceRepoConfig()
   }, [])
 
   const getInfo = async () => {
@@ -190,6 +200,41 @@ export const Scrapers = () => {
     } catch (error) {
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadResourceRepoConfig = async () => {
+    try {
+      const res = await getResourceRepo()
+      setResourceRepoUrl(res.data?.repoUrl || '')
+    } catch (error) {
+      console.error('加载资源仓库配置失败:', error)
+    }
+  }
+
+  const handleLoadResources = async () => {
+    if (!resourceRepoUrl.trim()) {
+      messageApi.error('请输入资源仓库链接')
+      return
+    }
+
+    try {
+      setLoadingResources(true)
+
+      // 保存配置
+      await saveResourceRepo({ repoUrl: resourceRepoUrl })
+
+      // 加载资源
+      const res = await loadScraperResources({ repoUrl: resourceRepoUrl })
+
+      messageApi.success(res.data?.message || '加载成功')
+
+      // 重新加载列表
+      await getInfo()
+    } catch (error) {
+      messageApi.error(error.response?.data?.detail || '加载失败')
+    } finally {
+      setLoadingResources(false)
     }
   }
 
@@ -512,6 +557,68 @@ export const Scrapers = () => {
 
   return (
     <div className="my-6">
+      {/* 资源仓库配置卡片 */}
+      <Card title="资源仓库" className="mb-4">
+        <div className="space-y-4">
+          <div>
+            <div className="mb-2 text-sm text-gray-600">
+              从GitHub仓库加载编译好的弹幕源文件（.so/.pyd）
+            </div>
+            <Input
+              placeholder="请输入GitHub仓库链接，例如：https://github.com/username/repo"
+              value={resourceRepoUrl}
+              onChange={(e) => setResourceRepoUrl(e.target.value)}
+              addonAfter={
+                <Button
+                  type="link"
+                  size="small"
+                  loading={loadingResources}
+                  onClick={handleLoadResources}
+                >
+                  加载资源
+                </Button>
+              }
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={async () => {
+                try {
+                  const res = await backupScrapers()
+                  messageApi.success(res.data?.message || '备份成功')
+                } catch (error) {
+                  messageApi.error(error.response?.data?.detail || '备份失败')
+                }
+              }}
+            >
+              备份当前弹幕源
+            </Button>
+            <Button
+              onClick={() => {
+                modalApi.confirm({
+                  title: '还原弹幕源',
+                  content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                  okText: '确认',
+                  cancelText: '取消',
+                  onOk: async () => {
+                    try {
+                      const res = await restoreScrapers()
+                      messageApi.success(res.data?.message || '还原成功')
+                      await getInfo()
+                    } catch (error) {
+                      messageApi.error(error.response?.data?.detail || '还原失败')
+                    }
+                  },
+                })
+              }}
+            >
+              从备份还原
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* 弹幕搜索源卡片 */}
       <Card loading={loading} title="弹幕搜索源">
         <DndContext
           sensors={sensors}
