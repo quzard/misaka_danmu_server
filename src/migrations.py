@@ -506,10 +506,7 @@ async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type:
                 nfo_path VARCHAR(1024) NULL,
                 is_imported BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_local_file_path (file_path(255)),
-                INDEX idx_local_media_type (media_type),
-                INDEX idx_local_is_imported (is_imported)
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
     else:  # postgresql
@@ -542,22 +539,30 @@ async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type:
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        await conn.execute(create_table_sql)
 
-        # 创建索引
+    # 先创建表
+    await conn.execute(create_table_sql)
+
+    # 然后创建索引，根据数据库类型使用合适的语法
+    if db_type == 'postgresql':
+        index_sqls = [
+            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items ((LEFT(file_path, 255)))"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
+        ]
+        db_name = "PostgreSQL"
+    else:  # mysql
         index_sqls = [
             text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items (file_path(255))"),
             text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
             text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
         ]
-        for index_sql in index_sqls:
-            await conn.execute(index_sql)
+        db_name = "MySQL"
 
-        logger.info("local_danmaku_items 表创建完成(PostgreSQL)")
-        return
+    for index_sql in index_sqls:
+        await conn.execute(index_sql)
 
-    await conn.execute(create_table_sql)
-    logger.info("local_danmaku_items 表创建完成(MySQL)")
+    logger.info(f"local_danmaku_items 表及索引创建完成 ({db_name})")
 
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
