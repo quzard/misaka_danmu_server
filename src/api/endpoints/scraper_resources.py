@@ -128,8 +128,8 @@ async def save_resource_repo(
             parse_github_url(repo_url)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-    
-    await config_manager.set("scraper_resource_repo", repo_url)
+
+    await config_manager.setValue("scraper_resource_repo", repo_url)
     logger.info(f"用户 '{current_user.username}' 更新了资源仓库配置: {repo_url}")
 
 
