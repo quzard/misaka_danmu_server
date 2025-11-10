@@ -19,7 +19,7 @@ from ...database import get_db_session
 from ...config_manager import ConfigManager
 from ...api.dependencies import get_scraper_manager, get_config_manager
 from ... import models
-from ...api.security import get_current_user
+from ...security import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
