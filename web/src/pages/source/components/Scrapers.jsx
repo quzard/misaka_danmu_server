@@ -658,24 +658,13 @@ export const Scrapers = () => {
                   label={
                     <span>
                       跨域代理配置{' '}
-                      <Tooltip title="JSON格式的代理配置，支持多个代理服务器">
+                      <Tooltip title="支持base64编码的JSON或明文JSON格式">
                         <QuestionCircleOutlined className="cursor-pointer text-gray-400" />
                       </Tooltip>
                     </span>
                   }
                   rules={[
                     { required: true, message: '请输入代理配置' },
-                    {
-                      validator: (_, value) => {
-                        if (!value) return Promise.resolve()
-                        try {
-                          JSON.parse(value)
-                          return Promise.resolve()
-                        } catch {
-                          return Promise.reject(new Error('请输入有效的JSON格式'))
-                        }
-                      },
-                    },
                   ]}
                   className="mb-6"
                 >
