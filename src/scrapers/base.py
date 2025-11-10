@@ -9,7 +9,7 @@ from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..scrapers.transport import TransportManager
+from ..transport_manager import TransportManager
 
 from .. import crud
 from .. import models

@@ -33,7 +33,7 @@ from .title_recognition import TitleRecognitionManager
 from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs
 from .database import get_db_type
-from .scrapers.transport import TransportManager
+from .transport_manager import TransportManager
 from sqlalchemy import text
 
 print(f"当前环境: {settings.environment}")

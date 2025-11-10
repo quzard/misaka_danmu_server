@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 
 from .scrapers.base import BaseScraper
-from .scrapers.transport import TransportManager
+from .transport_manager import TransportManager
 from .config_manager import ConfigManager
 from .models import ProviderSearchInfo, ScraperSetting
 from . import crud

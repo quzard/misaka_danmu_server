@@ -8,6 +8,7 @@ import {
   List,
   message,
   Modal,
+  Progress,
   Row,
   Switch,
   Space,
@@ -26,6 +27,7 @@ import {
   setSingleScraper,
   getResourceRepo,
   saveResourceRepo,
+  getScraperVersions,
   loadScraperResources,
   backupScrapers,
   restoreScrapers,
@@ -168,6 +170,21 @@ export const Scrapers = () => {
   // 资源仓库相关
   const [resourceRepoUrl, setResourceRepoUrl] = useState('')
   const [loadingResources, setLoadingResources] = useState(false)
+  const [versionInfo, setVersionInfo] = useState({
+    localVersion: 'unknown',
+    remoteVersion: null,
+    hasUpdate: false
+  })
+  const [loadingVersions, setLoadingVersions] = useState(false)
+
+  // 进度相关
+  const [progress, setProgress] = useState({
+    visible: false,
+    percent: 0,
+    message: '',
+    type: '' // 'download', 'backup', 'restore'
+  })
+  const eventSourceRef = useRef(null)
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -189,6 +206,14 @@ export const Scrapers = () => {
   useEffect(() => {
     getInfo()
     loadResourceRepoConfig()
+
+    // 清理函数:组件卸载时关闭SSE连接
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
+    }
   }, [])
 
   const getInfo = async () => {
@@ -207,8 +232,94 @@ export const Scrapers = () => {
     try {
       const res = await getResourceRepo()
       setResourceRepoUrl(res.data?.repoUrl || '')
+
+      // 同时加载版本信息
+      await loadVersionInfo()
     } catch (error) {
       console.error('加载资源仓库配置失败:', error)
+    }
+  }
+
+  const loadVersionInfo = async () => {
+    try {
+      setLoadingVersions(true)
+      const res = await getScraperVersions()
+      setVersionInfo({
+        localVersion: res.data?.localVersion || 'unknown',
+        remoteVersion: res.data?.remoteVersion || null,
+        hasUpdate: res.data?.hasUpdate || false
+      })
+    } catch (error) {
+      console.error('加载版本信息失败:', error)
+    } finally {
+      setLoadingVersions(false)
+    }
+  }
+
+  const connectSSE = (taskId, type) => {
+    // 关闭之前的连接
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+
+    // 显示进度条
+    setProgress({
+      visible: true,
+      percent: 0,
+      message: '正在连接...',
+      type
+    })
+
+    // 创建 SSE 连接
+    const eventSource = new EventSource(`/api/ui/scrapers/progress/${taskId}`)
+    eventSourceRef.current = eventSource
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'progress') {
+          const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0
+          setProgress(prev => ({
+            ...prev,
+            percent,
+            message: data.message || ''
+          }))
+        } else if (data.type === 'complete') {
+          setProgress(prev => ({
+            ...prev,
+            percent: 100,
+            message: data.message || '完成'
+          }))
+
+          // 延迟关闭进度条
+          setTimeout(() => {
+            setProgress({ visible: false, percent: 0, message: '', type: '' })
+            eventSource.close()
+            eventSourceRef.current = null
+          }, 1500)
+
+          messageApi.success(data.message || '操作完成')
+
+          // 重新加载列表和版本信息
+          getInfo()
+          loadVersionInfo()
+        } else if (data.type === 'error') {
+          setProgress({ visible: false, percent: 0, message: '', type: '' })
+          eventSource.close()
+          eventSourceRef.current = null
+          messageApi.error(data.message || '操作失败')
+        }
+      } catch (error) {
+        console.error('解析SSE消息失败:', error)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error)
+      setProgress({ visible: false, percent: 0, message: '', type: '' })
+      eventSource.close()
+      eventSourceRef.current = null
     }
   }
 
@@ -224,15 +335,17 @@ export const Scrapers = () => {
       // 保存配置
       await saveResourceRepo({ repoUrl: resourceRepoUrl })
 
+      // 生成任务ID
+      const taskId = `load_${Date.now()}`
+
+      // 连接SSE
+      connectSSE(taskId, 'download')
+
       // 加载资源
-      const res = await loadScraperResources({ repoUrl: resourceRepoUrl })
-
-      messageApi.success(res.data?.message || '加载成功')
-
-      // 重新加载列表
-      await getInfo()
+      await loadScraperResources({ repoUrl: resourceRepoUrl, taskId })
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '加载失败')
+      setProgress({ visible: false, percent: 0, message: '', type: '' })
     } finally {
       setLoadingResources(false)
     }
@@ -580,6 +693,52 @@ export const Scrapers = () => {
               }
             />
           </div>
+
+          {/* 版本信息 */}
+          {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion) && (
+            <div className="flex items-center gap-4 p-3 bg-gray-50 rounded">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">本地版本:</span>
+                <Tag color="blue">{versionInfo.localVersion}</Tag>
+              </div>
+              {versionInfo.remoteVersion && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">远程版本:</span>
+                    <Tag color="green">{versionInfo.remoteVersion}</Tag>
+                  </div>
+                  {versionInfo.hasUpdate && (
+                    <Tag color="orange">有更新可用</Tag>
+                  )}
+                </>
+              )}
+              <Button
+                type="link"
+                size="small"
+                loading={loadingVersions}
+                onClick={loadVersionInfo}
+              >
+                刷新
+              </Button>
+            </div>
+          )}
+
+          {/* 进度条 */}
+          {progress.visible && (
+            <div className="p-3 bg-blue-50 rounded">
+              <div className="mb-2 text-sm font-medium text-blue-900">
+                {progress.message}
+              </div>
+              <Progress
+                percent={progress.percent}
+                status={progress.percent === 100 ? 'success' : 'active'}
+                strokeColor={{
+                  '0%': '#108ee9',
+                  '100%': '#87d068',
+                }}
+              />
+            </div>
+          )}
           <div className="flex gap-2">
             <Button
               onClick={async () => {

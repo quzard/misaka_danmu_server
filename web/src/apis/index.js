@@ -322,6 +322,8 @@ export const getSingleScraper = data =>
 export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
 /** 保存资源仓库配置 */
 export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
+/** 获取资源包版本信息 */
+export const getScraperVersions = () => api.get('/api/ui/scrapers/versions')
 /** 加载弹幕源资源 */
 export const loadScraperResources = data => api.post('/api/ui/scrapers/load-resources', data)
 /** 备份弹幕源 */
