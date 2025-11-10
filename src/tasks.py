@@ -2568,7 +2568,7 @@ async def webhook_search_and_dispatch_task(
                 success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
             raise TaskSuccess(success_message)
 
-        # 传统匹配: 优先查找精确标记源
+        # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
         favorited_match = None
         from .orm_models import AnimeSource as AS
         from sqlalchemy import select as sql_select
@@ -2586,9 +2586,17 @@ async def webhook_search_and_dispatch_task(
             result_row = await session.execute(stmt)
             is_favorited = result_row.scalar_one_or_none()
             if is_favorited:
-                favorited_match = result
-                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title}")
-                break
+                # 验证标题相似度,避免错误匹配
+                similarity = fuzz.token_set_ratio(animeTitle, result.title)
+                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                # 只有相似度 >= 60% 才使用精确标记源
+                if similarity >= 60:
+                    favorited_match = result
+                    logger.info(f"Webhook 任务: 标题相似度验证通过 ({similarity}% >= 60%)")
+                    break
+                else:
+                    logger.warning(f"Webhook 任务: 标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
         # 检查是否启用顺延机制
         fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
@@ -3311,7 +3319,7 @@ async def auto_search_and_import_task(
                 raise ValueError("AI匹配失败且传统匹配兜底已禁用")
             # 允许降级，继续使用传统匹配
             logger.info("AI匹配失败，使用传统匹配兜底")
-            # 传统匹配: 优先查找精确标记源
+            # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
             favorited_match = None
             async with scraper_manager._session_factory() as ai_session:
                 from .orm_models import AnimeSource
@@ -3330,9 +3338,17 @@ async def auto_search_and_import_task(
                     result_row = await ai_session.execute(stmt)
                     is_favorited = result_row.scalar_one_or_none()
                     if is_favorited:
-                        favorited_match = result
-                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
-                        break
+                        # 验证标题相似度,避免错误匹配
+                        similarity = fuzz.token_set_ratio(main_title, result.title)
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                        # 只有相似度 >= 60% 才使用精确标记源
+                        if similarity >= 60:
+                            favorited_match = result
+                            logger.info(f"自动导入：标题相似度验证通过 ({similarity}% >= 60%)")
+                            break
+                        else:
+                            logger.warning(f"自动导入：标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
             if favorited_match:
                 best_match = favorited_match
@@ -3344,7 +3360,7 @@ async def auto_search_and_import_task(
                 logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
         else:
             # AI未启用，使用传统匹配
-            # 传统匹配: 优先查找精确标记源
+            # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
             favorited_match = None
             async with scraper_manager._session_factory() as ai_session:
                 from .orm_models import AnimeSource
@@ -3363,9 +3379,17 @@ async def auto_search_and_import_task(
                     result_row = await ai_session.execute(stmt)
                     is_favorited = result_row.scalar_one_or_none()
                     if is_favorited:
-                        favorited_match = result
-                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
-                        break
+                        # 验证标题相似度,避免错误匹配
+                        similarity = fuzz.token_set_ratio(main_title, result.title)
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                        # 只有相似度 >= 60% 才使用精确标记源
+                        if similarity >= 60:
+                            favorited_match = result
+                            logger.info(f"自动导入：标题相似度验证通过 ({similarity}% >= 60%)")
+                            break
+                        else:
+                            logger.warning(f"自动导入：标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
             if favorited_match:
                 best_match = favorited_match

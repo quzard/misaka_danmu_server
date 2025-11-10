@@ -19,7 +19,7 @@ from ...database import get_db_session
 from ...config_manager import ConfigManager
 from ...api.dependencies import get_scraper_manager, get_config_manager
 from ... import models
-from ...api import security
+from ...api.security import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -106,7 +106,7 @@ def parse_github_url(url: str) -> Dict[str, str]:
 
 @router.get("/scrapers/resource-repo", summary="获取资源仓库配置")
 async def get_resource_repo(
-    current_user: models.User = Depends(security.get_current_user),
+    current_user: models.User = Depends(get_current_user),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """获取当前配置的资源仓库链接"""
@@ -117,7 +117,7 @@ async def get_resource_repo(
 @router.put("/scrapers/resource-repo", status_code=status.HTTP_204_NO_CONTENT, summary="保存资源仓库配置")
 async def save_resource_repo(
     payload: Dict[str, str],
-    current_user: models.User = Depends(security.get_current_user),
+    current_user: models.User = Depends(get_current_user),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """保存资源仓库链接"""
@@ -135,7 +135,7 @@ async def save_resource_repo(
 
 @router.post("/scrapers/backup", summary="备份当前弹幕源")
 async def backup_scrapers(
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(get_current_user)
 ):
     """备份当前 scrapers 目录下的编译文件到持久化目录"""
     try:
@@ -202,7 +202,7 @@ async def backup_scrapers(
 
 @router.get("/scrapers/backup-info", summary="获取备份信息")
 async def get_backup_info(
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(get_current_user)
 ):
     """获取当前备份的详细信息"""
     try:
@@ -233,7 +233,7 @@ async def get_backup_info(
 
 @router.post("/scrapers/restore", summary="从备份还原弹幕源")
 async def restore_scrapers(
-    current_user: models.User = Depends(security.get_current_user),
+    current_user: models.User = Depends(get_current_user),
     manager = Depends(get_scraper_manager)
 ):
     """从持久化备份目录还原弹幕源文件"""
@@ -291,7 +291,7 @@ async def restore_scrapers(
 @router.post("/scrapers/load-resources", summary="从资源仓库加载弹幕源")
 async def load_resources(
     payload: Dict[str, Any],
-    current_user: models.User = Depends(security.get_current_user),
+    current_user: models.User = Depends(get_current_user),
     config_manager: ConfigManager = Depends(get_config_manager),
     manager = Depends(get_scraper_manager)
 ):

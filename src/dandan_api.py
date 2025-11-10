@@ -1844,14 +1844,23 @@ async def _get_match_for_item(
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    # 传统匹配: 优先查找精确标记源
+                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            favorited_match = result
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
-                            break
+                            # 验证标题相似度,避免错误匹配
+                            from thefuzz import fuzz
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                            # 只有相似度 >= 80% 才使用精确标记源
+                            if similarity >= 80:
+                                favorited_match = result
+                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                break
+                            else:
+                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
 
                     if favorited_match:
                         best_match = favorited_match
@@ -1862,14 +1871,23 @@ async def _get_match_for_item(
                         logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
                 else:
                     # AI未启用，使用传统匹配
-                    # 传统匹配: 优先查找精确标记源
+                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            favorited_match = result
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
-                            break
+                            # 验证标题相似度,避免错误匹配
+                            from thefuzz import fuzz
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                            # 只有相似度 >= 80% 才使用精确标记源
+                            if similarity >= 80:
+                                favorited_match = result
+                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                break
+                            else:
+                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
 
                     if favorited_match:
                         best_match = favorited_match
