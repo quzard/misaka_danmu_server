@@ -18,3 +18,13 @@ src/security_core.py
 src/rate_limiter.py
 .vscode/settings.json
 generator_config.ini
+src/scrapers/bilibili.py
+src/scrapers/gamer.py
+src/scrapers/hanjutv.py
+src/scrapers/iqiyi.py
+src/scrapers/le.py
+src/scrapers/mgtv.py
+src/scrapers/renren.py
+src/scrapers/sohu.py
+src/scrapers/tencent.py
+src/scrapers/youku.py
