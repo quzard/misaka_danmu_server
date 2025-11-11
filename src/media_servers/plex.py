@@ -147,16 +147,30 @@ class PlexMediaServer(BaseMediaServer):
         """获取电视节目的所有季度"""
         try:
             data = await self._request('GET', f'/library/metadata/{series_id}/children')
-            
+
             seasons = []
             for item in data.get('MediaContainer', {}).get('Metadata', []):
                 if item.get('type') == 'season':
+                    season_id = item.get('ratingKey')
+                    season_number = item.get('index', 0)
+
+                    # 获取该季度的实际集数(不使用leafCount,因为可能不准确)
+                    episode_count = 0
+                    try:
+                        episodes_data = await self._request('GET', f'/library/metadata/{season_id}/children')
+                        episodes = episodes_data.get('MediaContainer', {}).get('Metadata', [])
+                        # 只统计type为episode的项目
+                        episode_count = sum(1 for ep in episodes if ep.get('type') == 'episode')
+                    except Exception as e:
+                        self.logger.warning(f"获取季度 {season_number} 的集数失败: {e}, 使用leafCount")
+                        episode_count = item.get('leafCount', 0)
+
                     seasons.append({
-                        'season_id': item.get('ratingKey'),
-                        'season_number': item.get('index', 0),
-                        'episode_count': item.get('leafCount', 0),
+                        'season_id': season_id,
+                        'season_number': season_number,
+                        'episode_count': episode_count,
                     })
-            
+
             return sorted(seasons, key=lambda x: x['season_number'])
         except Exception as e:
             self.logger.error(f"获取Plex季度信息失败: {e}")

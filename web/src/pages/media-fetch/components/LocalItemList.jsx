@@ -270,7 +270,7 @@ const LocalItemList = ({ refreshTrigger }) => {
             // 子节点:季度
             children: seasons.map(s => ({
               key: `season-${work.title}-S${s.season}`,
-              title: `第 ${s.season} 季 (${s.episodeCount}集)`,
+              title: `第 ${s.season} 季`,
               showTitle: work.title,
               season: s.season,
               year: s.year || work.year,
