@@ -77,6 +77,7 @@ export const EpisodeDetail = () => {
   const uploadRef = useRef(null)
   const [uploading, setUploading] = useState(false)
   const [fileList, setFileList] = useState([])
+  const [lastSelectedIndex, setLastSelectedIndex] = useState(null)
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -126,8 +127,14 @@ export const EpisodeDetail = () => {
   }
 
   useEffect(() => {
-    getDetail()
-  }, [pagination.current, pagination.pageSize])
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedRows([])
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -138,34 +145,6 @@ export const EpisodeDetail = () => {
   }
 
   const columns = [
-    {
-      title: '',
-      key: 'selection',
-      width: 50,
-      render: (_, record) => {
-        const isSelected = selectedRows.some(row => row.episodeId === record.episodeId)
-        return (
-          <div
-            className="cursor-pointer flex items-center justify-center"
-            onClick={() => {
-              if (isSelected) {
-                setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
-              } else {
-                setSelectedRows([...selectedRows, record])
-              }
-            }}
-          >
-            {isSelected ? (
-              <div className="w-4 h-4 bg-primary rounded flex items-center justify-center">
-                <span className="text-white text-xs">✓</span>
-              </div>
-            ) : (
-              <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
-            )}
-          </div>
-        )
-      },
-    },
     {
       title: 'ID',
       dataIndex: 'episodeId',
@@ -286,6 +265,20 @@ export const EpisodeDetail = () => {
       },
     },
   ]
+
+  const rowSelection = {
+    selectedRowKeys: selectedRows.map(r => r.episodeId),
+    onChange: (selectedRowKeys, selectedRows) => {
+      setSelectedRows(selectedRows)
+    },
+    onSelectAll: (selected, selectedRows, changeRows) => {
+      if (selected) {
+        setSelectedRows(episodeList)
+      } else {
+        setSelectedRows([])
+      }
+    }
+  }
 
   const keepColumns = [
     {
@@ -634,7 +627,7 @@ export const EpisodeDetail = () => {
       />
       <Card loading={loading} title={`分集列表: ${animeDetail?.title ?? ''}`}>
         <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
-          💡 {isMobile ? '点击卡片可选中/取消选中分集' : '点击卡片或前面的方框可选中/取消选中分集'}，用于批量操作
+          💡 {isMobile ? '点击卡片可选中/取消选中分集，支持Shift多选' : '点击复选框或卡片可选中/取消选中分集，支持Shift多选'}，用于批量操作
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <Button
@@ -758,6 +751,7 @@ export const EpisodeDetail = () => {
             dataSource={episodeList}
             columns={columns}
             rowKey={'episodeId'}
+            tableProps={{ rowSelection, rowClassName: () => '' }}
             scroll={{ x: '100%' }}
             renderCard={(record) => {
               const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
@@ -775,11 +769,27 @@ export const EpisodeDetail = () => {
                       return
                     }
 
-                    // 切换选中状态
-                    if (isSelected) {
-                      setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+                    const currentIndex = episodeList.findIndex(ep => ep.episodeId === record.episodeId)
+                    if (e.shiftKey && lastSelectedIndex !== null) {
+                      const start = Math.min(lastSelectedIndex, currentIndex)
+                      const end = Math.max(lastSelectedIndex, currentIndex)
+                      const range = episodeList.slice(start, end + 1)
+                      const newSelected = [...selectedRows]
+                      range.forEach(ep => {
+                        const isInSelected = newSelected.some(s => s.episodeId === ep.episodeId)
+                        if (!isInSelected) {
+                          newSelected.push(ep)
+                        }
+                      })
+                      setSelectedRows(newSelected)
                     } else {
-                      setSelectedRows([...selectedRows, record])
+                      // 切换选中状态
+                      if (isSelected) {
+                        setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+                      } else {
+                        setSelectedRows([...selectedRows, record])
+                      }
+                      setLastSelectedIndex(currentIndex)
                     }
                   }}
                 >
