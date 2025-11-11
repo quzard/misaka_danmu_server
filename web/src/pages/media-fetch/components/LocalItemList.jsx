@@ -706,9 +706,15 @@ const LocalItemList = ({ refreshTrigger }) => {
             key="delete-show"
             title={`确定要删除《${record.title}》的所有集吗?`}
             onConfirm={() => {
-              handleDeleteItems('剧集', {
+              // 删除整部剧集
+              batchDeleteLocalItems({
                 shows: [{ title: record.title }]
-              });
+              })
+                .then(() => {
+                  message.success(`成功删除《${record.title}》`);
+                  refreshData();
+                })
+                .catch(() => message.error('删除失败'));
             }}
             okText="确定"
             cancelText="取消"
@@ -749,12 +755,17 @@ const LocalItemList = ({ refreshTrigger }) => {
             key="delete-season"
             title={`确定要删除第${record.season}季的所有集吗?`}
             onConfirm={() => {
-              handleDeleteItems('季度', {
-                seasons: [{
-                  title: record.showTitle,
-                  season: record.season
-                }]
-              });
+              // 删除该季度 - 使用record.ids
+              if (record.ids && record.ids.length > 0) {
+                batchDeleteLocalItems({ itemIds: record.ids })
+                  .then(() => {
+                    message.success(`成功删除第${record.season}季`);
+                    refreshData();
+                  })
+                  .catch(() => message.error('删除失败'));
+              } else {
+                message.warning('该季度没有可删除的项目');
+              }
             }}
             okText="确定"
             cancelText="取消"
@@ -769,13 +780,13 @@ const LocalItemList = ({ refreshTrigger }) => {
       return actions;
     }
 
-    // 电影分组节点,不显示操作按钮
-    if (record.mediaType === 'movie' && record.isGroup) {
+    // 电影作品组节点,不显示操作按钮
+    if (record.isGroup && record.mediaType === 'movie') {
       return [];
     }
 
     // 电影文件,显示导入、编辑、删除按钮 (顺序:导入-编辑-删除)
-    if (record.mediaType === 'movie' && !record.isGroup) {
+    if (record.mediaType === 'movie_file') {
       const actions = [
         <Button
           key="import-movie"
@@ -975,60 +986,147 @@ const LocalItemList = ({ refreshTrigger }) => {
             <List
               loading={loading}
               dataSource={currentPageItems}
-              renderItem={(item) => (
-                <List.Item
-                  key={item.key}
-                  actions={[
-                    <div key="mobile-actions" className="mobile-only">{renderCardActions(item, false, false)}</div>,
-                    <div key="desktop-actions" className="desktop-only">{renderCardActions(item, false, true)}</div>
-                  ]}
-                  style={{ padding: '12px 0' }}
-                >
-                  <List.Item.Meta
-                    title={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <Checkbox
-                          checked={selectedRowKeys.includes(item.key)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedRowKeys([...selectedRowKeys, item.key]);
-                            } else {
-                              setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
-                            }
-                          }}
-                        />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 16, fontWeight: 500 }}>
-                            {item.mediaType === 'tv_season' ? item.seasonInfo : item.fileName}
-                          </div>
-                          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                            📁 {item.displayPath}
-                            {item.year && <span style={{ marginLeft: 8 }}>• {item.year}</span>}
-                          </div>
-                          <div style={{ marginTop: 8 }}>
-                            <Space size="small" wrap>
-                              <Tag size="small" color={item.mediaType === 'movie' ? 'magenta' : 'purple'}>
-                                {item.mediaType === 'movie' ? '电影文件' : '剧集季'}
+              renderItem={(item) => {
+                // 作品组节点
+                if (item.isGroup) {
+                  return (
+                    <div key={item.key} style={{ marginBottom: 16 }}>
+                      {/* 作品标题 */}
+                      <div style={{
+                        padding: '12px 16px',
+                        background: '#f5f5f5',
+                        borderRadius: '8px 8px 0 0',
+                        borderBottom: '1px solid #d9d9d9'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <Checkbox
+                            checked={selectedRowKeys.includes(item.key)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRowKeys([...selectedRowKeys, item.key]);
+                              } else {
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                              }
+                            }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 16, fontWeight: 600 }}>
+                              {item.title}
+                              {item.year && <span style={{ marginLeft: 8, color: '#666', fontWeight: 400 }}>({item.year})</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                              <Tag size="small" color={item.mediaType === 'movie' ? 'blue' : 'purple'}>
+                                {item.mediaType === 'movie' ? '电影' : '电视节目'}
                               </Tag>
-                              {item.mediaType === 'tv_season' && (
-                                <Tag size="small" color="orange">
-                                  {item.episodeCount}集
-                                </Tag>
-                              )}
-                              {item.mediaType === 'movie' && (
-                                <Tag size="small" color={item.isImported ? 'success' : 'default'}>
-                                  {item.isImported ? '已导入' : '未导入'}
-                                </Tag>
-                              )}
-                            </Space>
+                              <span style={{ marginLeft: 8 }}>
+                                {item.children?.length || 0} {item.mediaType === 'movie' ? '个文件' : '季'}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    }
-                    description={null}
-                  />
-                </List.Item>
-              )}
+
+                      {/* 子项列表 */}
+                      {item.children && item.children.length > 0 && (
+                        <div style={{
+                          background: '#fff',
+                          borderRadius: '0 0 8px 8px',
+                          border: '1px solid #d9d9d9',
+                          borderTop: 'none'
+                        }}>
+                          {item.children.map((child, index) => (
+                            <div
+                              key={child.key}
+                              style={{
+                                padding: '12px 16px 12px 48px',
+                                borderBottom: index < item.children.length - 1 ? '1px solid #f0f0f0' : 'none'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <Checkbox
+                                  checked={selectedRowKeys.includes(child.key)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedRowKeys([...selectedRowKeys, child.key]);
+                                    } else {
+                                      setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key));
+                                    }
+                                  }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 14 }}>
+                                    {child.mediaType === 'tv_season' ? (
+                                      <Button
+                                        type="link"
+                                        icon={<FolderOpenOutlined />}
+                                        onClick={() => handleOpenEpisodes(child)}
+                                        style={{ padding: 0, height: 'auto' }}
+                                      >
+                                        {child.title}
+                                      </Button>
+                                    ) : (
+                                      child.title
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                                    <Space size="small" wrap>
+                                      <Tag size="small" color={child.mediaType === 'movie_file' ? 'cyan' : 'orange'}>
+                                        {child.mediaType === 'movie_file' ? '弹幕文件' : `${child.episodeCount}集`}
+                                      </Tag>
+                                      {child.isImported !== undefined && (
+                                        <Tag size="small" color={child.isImported ? 'success' : 'default'}>
+                                          {child.isImported ? '已导入' : '未导入'}
+                                        </Tag>
+                                      )}
+                                    </Space>
+                                  </div>
+                                </div>
+                                <div className="mobile-only">{renderCardActions(child, false, false)}</div>
+                                <div className="desktop-only">{renderCardActions(child, false, true)}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                // 非分组节点(不应该出现在这里,但保留兼容性)
+                return (
+                  <List.Item
+                    key={item.key}
+                    actions={[
+                      <div key="mobile-actions" className="mobile-only">{renderCardActions(item, false, false)}</div>,
+                      <div key="desktop-actions" className="desktop-only">{renderCardActions(item, false, true)}</div>
+                    ]}
+                    style={{ padding: '12px 0' }}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <Checkbox
+                            checked={selectedRowKeys.includes(item.key)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRowKeys([...selectedRowKeys, item.key]);
+                              } else {
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                              }
+                            }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 16, fontWeight: 500 }}>
+                              {item.title}
+                            </div>
+                          </div>
+                        </div>
+                      }
+                      description={null}
+                    />
+                  </List.Item>
+                );
+              }}
             />
             {/* 自定义分页控件 */}
             <div style={{ textAlign: 'center', marginTop: '8px' }}>
