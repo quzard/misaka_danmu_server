@@ -47,7 +47,7 @@ async def get_github_token(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """获取GitHub Token配置"""
-    token = await config_manager.getValue("github_token", "")
+    token = await config_manager.get("github_token", "")
     return {"token": token}
 
 

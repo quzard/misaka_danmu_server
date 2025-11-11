@@ -256,7 +256,7 @@ async def get_versions(
                 repo = repo_info['repo']
 
                 # 获取 GitHub Token (如果配置了)
-                github_token = await config_manager.getValue("github_token", "")
+                github_token = await config_manager.get("github_token", "")
                 headers = {}
                 if github_token:
                     headers["Authorization"] = f"Bearer {github_token}"
@@ -556,7 +556,7 @@ async def load_resources(
         logger.info(f"当前平台: {platform_key}")
 
         # 获取 GitHub Token (如果配置了)
-        github_token = await config_manager.getValue("github_token", "")
+        github_token = await config_manager.get("github_token", "")
         headers = {}
         if github_token:
             headers["Authorization"] = f"Bearer {github_token}"
