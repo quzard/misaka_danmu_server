@@ -54,6 +54,8 @@ export const EpisodeDetail = () => {
   const animeId = searchParams.get('animeId')
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
+  const messageApi = useMessage()
+  const modalApi = useModal()
 
   const [loading, setLoading] = useState(true)
   const [animeDetail, setAnimeDetail] = useState({})
@@ -135,7 +137,7 @@ export const EpisodeDetail = () => {
 
   useEffect(() => {
     getDetail()
-  }, [pagination.current, pagination.pageSize])
+  }, [id, animeId, pagination.current, pagination.pageSize])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -898,6 +900,7 @@ export const EpisodeDetail = () => {
                               ...record,
                               episodeId: record.episodeId,
                               originalEpisodeIndex: record.episodeIndex,
+                              episodeIndex: Math.max(1, record.episodeIndex || 1),
                             })
                             setIsEditing(true)
                             setEditOpen(true)
@@ -949,8 +952,11 @@ export const EpisodeDetail = () => {
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
-        onCancel={() => setEditOpen(false)}
-        destroyOnHidden
+        onCancel={() => {
+          setEditOpen(false)
+          setIsEditing(false)
+          form.resetFields()
+        }}
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -969,6 +975,7 @@ export const EpisodeDetail = () => {
             <InputNumber
               style={{ width: '100%' }}
               placeholder="请输入分集集数"
+              min={1}
             />
           </Form.Item>
           {isXmlImport ? (
@@ -1035,7 +1042,6 @@ export const EpisodeDetail = () => {
         cancelText="取消"
         okText="确认执行"
         onCancel={() => setResetOpen(false)}
-        destroyOnHidden
         zIndex={100}
       >
         <div>
@@ -1074,7 +1080,7 @@ export const EpisodeDetail = () => {
           size="small"
           dataSource={resetInfo?.toKeep?.slice(0, 80) ?? []}
           columns={keepColumns}
-          rowKey={'id'}
+          rowKey={'episodeId'}
           scroll={{ x: '100%' }}
         />
       </Modal>
