@@ -10,6 +10,7 @@ import {
   Table,
   Tag,
   Tooltip,
+  Typography,
 } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
@@ -346,9 +347,7 @@ export const ScheduleTask = () => {
 
                     <div className="flex items-center gap-2">
                       <span className="text-gray-600">Cron表达式：</span>
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">
-                        {task.cronExpression}
-                      </span>
+                      <Typography.Text code>{task.cronExpression}</Typography.Text>
                     </div>
 
                     <div className="flex items-center gap-2">
