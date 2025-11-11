@@ -15,7 +15,7 @@ import httpx
 from ... import models
 from ...security import get_current_user
 from ...config_manager import ConfigManager
-from ...dependencies import get_config_manager, get_scraper_manager
+from ..dependencies import get_config_manager, get_scraper_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
