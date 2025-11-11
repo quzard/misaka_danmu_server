@@ -127,8 +127,14 @@ export const EpisodeDetail = () => {
   }
 
   useEffect(() => {
-    getDetail()
-  }, [pagination.current, pagination.pageSize])
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedRows([])
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
