@@ -551,16 +551,34 @@ async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type:
             text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
         ]
         db_name = "PostgreSQL"
+
+        for index_sql in index_sqls:
+            await conn.execute(index_sql)
     else:  # mysql
-        index_sqls = [
-            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items (file_path(255))"),
-            text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
-            text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
+        # MySQL 不支持 CREATE INDEX IF NOT EXISTS，需要先检查索引是否存在
+        indexes = [
+            ("idx_local_file_path", "CREATE INDEX idx_local_file_path ON local_danmaku_items (file_path(255))"),
+            ("idx_local_media_type", "CREATE INDEX idx_local_media_type ON local_danmaku_items (media_type)"),
+            ("idx_local_is_imported", "CREATE INDEX idx_local_is_imported ON local_danmaku_items (is_imported)")
         ]
         db_name = "MySQL"
 
-    for index_sql in index_sqls:
-        await conn.execute(index_sql)
+        for index_name, create_sql in indexes:
+            # 检查索引是否存在
+            check_sql = text(f"""
+                SELECT COUNT(*) as cnt
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                AND table_name = 'local_danmaku_items'
+                AND index_name = '{index_name}'
+            """)
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
+
+            # 如果索引不存在，则创建
+            if row[0] == 0:
+                await conn.execute(text(create_sql))
+                logger.info(f"创建索引: {index_name}")
 
     logger.info(f"local_danmaku_items 表及索引创建完成 ({db_name})")
 
