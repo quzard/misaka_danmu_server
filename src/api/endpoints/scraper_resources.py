@@ -64,6 +64,7 @@ BACKUP_METADATA_FILE = BACKUP_DIR / "backup_metadata.json"
 
 # 弹幕源版本信息文件
 SCRAPERS_VERSIONS_FILE = _get_scrapers_dir() / "versions.json"
+SCRAPERS_PACKAGE_FILE = _get_scrapers_dir() / "package.json"
 
 
 # 进度管理器

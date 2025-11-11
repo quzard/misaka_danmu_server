@@ -35,7 +35,7 @@ const ServerConfigPanel = ({ visible, server, onClose, onSaved }) => {
 
   const handleTest = async () => {
     try {
-      const values = await form.validateFields(['url', 'apiToken', 'providerName']);
+      const values = await form.validateFields(['name', 'url', 'apiToken', 'providerName']);
 
       setTesting(true);
 

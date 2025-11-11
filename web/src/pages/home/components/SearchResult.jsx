@@ -1106,7 +1106,7 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        <div className="max-h-[70vh] overflow-y-auto">
+        <div className={isMobile ? "max-h-[60vh]" : "max-h-[70vh] overflow-y-auto"}>
           {isMobile ? (
             <div className="space-y-4 my-6">
               <div>
