@@ -1002,11 +1002,19 @@ const LocalItemList = ({ refreshTrigger }) => {
                           <Checkbox
                             checked={selectedRowKeys.includes(item.key)}
                             onChange={(e) => {
+                              let newSelected;
                               if (e.target.checked) {
-                                setSelectedRowKeys([...selectedRowKeys, item.key]);
+                                newSelected = [...selectedRowKeys, item.key];
+                                item.children.forEach(child => {
+                                  if (!newSelected.includes(child.key)) {
+                                    newSelected.push(child.key);
+                                  }
+                                });
                               } else {
-                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                                const keysToRemove = [item.key, ...item.children.map(child => child.key)];
+                                newSelected = selectedRowKeys.filter(key => !keysToRemove.includes(key));
                               }
+                              setSelectedRowKeys(newSelected);
                             }}
                           />
                           <div style={{ flex: 1 }}>
@@ -1046,11 +1054,17 @@ const LocalItemList = ({ refreshTrigger }) => {
                                 <Checkbox
                                   checked={selectedRowKeys.includes(child.key)}
                                   onChange={(e) => {
+                                    let newSelected;
                                     if (e.target.checked) {
-                                      setSelectedRowKeys([...selectedRowKeys, child.key]);
+                                      newSelected = [...selectedRowKeys, child.key];
+                                      const allChildrenSelected = item.children.every(c => newSelected.includes(c.key));
+                                      if (allChildrenSelected && !newSelected.includes(item.key)) {
+                                        newSelected.push(item.key);
+                                      }
                                     } else {
-                                      setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key));
+                                      newSelected = selectedRowKeys.filter(key => key !== child.key && key !== item.key);
                                     }
+                                    setSelectedRowKeys(newSelected);
                                   }}
                                 />
                                 <div style={{ flex: 1, minWidth: 0 }}>

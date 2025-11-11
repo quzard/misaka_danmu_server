@@ -99,8 +99,7 @@ const SortableItem = ({
 
   return (
     <List.Item ref={setNodeRef} style={style}>
-      {/* 保留你原有的列表项渲染逻辑 */}
-      <div className="w-full flex items-center justify-between">
+      <div className={`w-full flex ${isMobile ? 'flex-col gap-2' : 'items-center justify-between'}`}>
         {/* 左侧添加拖拽手柄 */}
         <div className="flex items-center gap-2">
           {/* 将attributes移到拖拽图标容器上，确保只有拖拽图标可触发拖拽 */}
@@ -109,35 +108,37 @@ const SortableItem = ({
           </div>
           <div>{item.providerName}</div>
         </div>
-        <div className="flex items-center justify-around gap-4">
-          {item.providerName === 'bilibili' && !isMobile && (
-            <div>
+        <div className={`flex ${isMobile ? 'flex-col gap-2 w-full' : 'items-center justify-around'} gap-4`}>
+          {item.providerName === 'bilibili' && (
+            <div className={isMobile ? 'text-center' : ''}>
               {biliUserinfo.isLogin ? (
-                <div className="flex items-center justify-start gap-2">
+                <div className={`flex ${isMobile ? 'flex-row items-center justify-center gap-2' : 'items-center justify-start gap-2'}`}>
                   <img
                     className="w-6 h-6 rounded-full"
                     src={biliUserinfo.face}
                   />
-                  <span>{biliUserinfo.uname}</span>
+                  <span className={isMobile ? 'text-sm' : ''}>{biliUserinfo.uname}</span>
                 </div>
               ) : (
                 <span className="opacity-50">未登录</span>
               )}
             </div>
           )}
-          <div onClick={handleConfig} className="cursor-pointer">
-            <MyIcon icon="setting" size={24} />
-          </div>
-          {item.isEnabled ? (
-            <Tag color="green">已启用</Tag>
-          ) : (
-            <Tag color="red">未启用</Tag>
-          )}
-          <Tooltip title="切换启用状态">
-            <div onClick={handleChangeStatus}>
-              <MyIcon icon="exchange" size={24} />
+          <div className={`flex ${isMobile ? 'justify-between items-center' : 'items-center justify-around'} gap-4`}>
+            <div onClick={handleConfig} className="cursor-pointer">
+              <MyIcon icon="setting" size={24} />
             </div>
-          </Tooltip>
+            {item.isEnabled ? (
+              <Tag color="green">已启用</Tag>
+            ) : (
+              <Tag color="red">未启用</Tag>
+            )}
+            <Tooltip title="切换启用状态">
+              <div onClick={handleChangeStatus}>
+                <MyIcon icon="exchange" size={24} />
+              </div>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </List.Item>
@@ -149,12 +150,15 @@ export const Scrapers = () => {
   const [list, setList] = useState([])
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
+  const eventSourceRef = useRef(null)
   // 设置窗口
   const [open, setOpen] = useState(false)
   // 设置类型
   const [setname, setSetname] = useState('')
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [form] = Form.useForm()
+
+  const isMobile = useAtomValue(isMobileAtom)
 
   // bili 相关
   const [biliQrcode, setBiliQrcode] = useState({})
@@ -624,79 +628,129 @@ export const Scrapers = () => {
             <div className="mb-2 text-sm text-gray-600">
               从GitHub仓库加载编译好的弹幕源文件（.so/.pyd）
             </div>
-            <div className="flex gap-2">
+            <div className={`flex gap-2 ${isMobile ? 'flex-col' : 'flex-row'}`}>
               <Input
                 placeholder="请输入GitHub仓库链接，例如：https://github.com/username/repo"
                 value={resourceRepoUrl}
                 onChange={(e) => setResourceRepoUrl(e.target.value)}
               />
-              <Button
-                onClick={async () => {
-                  if (!resourceRepoUrl.trim()) {
-                    messageApi.error('请输入资源仓库链接')
-                    return
-                  }
-                  try {
-                    await saveResourceRepo({ repoUrl: resourceRepoUrl })
-                    messageApi.success('保存成功')
-                    await loadVersionInfo()
-                  } catch (error) {
-                    messageApi.error(error.response?.data?.detail || '保存失败')
-                  }
-                }}
-              >
-                保存
-              </Button>
-              <Button
-                type="primary"
-                loading={loadingResources}
-                onClick={handleLoadResources}
-              >
-                加载资源
-              </Button>
-              <Upload
-                beforeUpload={handleUploadPackage}
-                accept=".zip,.tar.gz,.tgz"
-                showUploadList={false}
-                disabled={uploadingPackage}
-              >
-                <Button loading={uploadingPackage} disabled={uploadingPackage}>
-                  离线包上传
-                </Button>
-              </Upload>
+              {isMobile ? (
+                <>
+                  <Button
+                    type="primary"
+                    loading={loadingResources}
+                    onClick={handleLoadResources}
+                    className="w-full"
+                  >
+                    加载资源
+                  </Button>
+                  <div className="flex gap-2 w-full">
+                    <Button
+                      onClick={async () => {
+                        if (!resourceRepoUrl.trim()) {
+                          messageApi.error('请输入资源仓库链接')
+                          return
+                        }
+                        try {
+                          await saveResourceRepo({ repoUrl: resourceRepoUrl })
+                          messageApi.success('保存成功')
+                          await loadVersionInfo()
+                        } catch (error) {
+                          messageApi.error(error.response?.data?.detail || '保存失败')
+                        }
+                      }}
+                      className="flex-1"
+                      style={{ flex: 1, height: '30px' }}
+                    >
+                      保存
+                    </Button>
+                    <Upload
+                      beforeUpload={handleUploadPackage}
+                      accept=".zip,.tar.gz,.tgz"
+                      showUploadList={false}
+                      disabled={uploadingPackage}
+                      className="flex-1"
+                      style={{ flex: 1, width: '100%' }}
+                    >
+                      <Button loading={uploadingPackage} disabled={uploadingPackage} className="w-full" style={{ width: '100%', minHeight: '10px', height: '30px' }}>
+                        离线包上传
+                      </Button>
+                    </Upload>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Button
+                    onClick={async () => {
+                      if (!resourceRepoUrl.trim()) {
+                        messageApi.error('请输入资源仓库链接')
+                        return
+                      }
+                      try {
+                        await saveResourceRepo({ repoUrl: resourceRepoUrl })
+                        messageApi.success('保存成功')
+                        await loadVersionInfo()
+                      } catch (error) {
+                        messageApi.error(error.response?.data?.detail || '保存失败')
+                      }
+                    }}
+                  >
+                    保存
+                  </Button>
+                  <Button
+                    type="primary"
+                    loading={loadingResources}
+                    onClick={handleLoadResources}
+                  >
+                    加载资源
+                  </Button>
+                  <Upload
+                    beforeUpload={handleUploadPackage}
+                    accept=".zip,.tar.gz,.tgz"
+                    showUploadList={false}
+                    disabled={uploadingPackage}
+                  >
+                    <Button loading={uploadingPackage} disabled={uploadingPackage}>
+                      离线包上传
+                    </Button>
+                  </Upload>
+                </>
+              )}
             </div>
           </div>
 
           {/* 版本信息 */}
           {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion) && (
-            <div className="flex items-center gap-4 p-3 bg-gray-50 rounded">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">本地版本:</span>
-                <Tag color="blue">{versionInfo.localVersion}</Tag>
-              </div>
-              {versionInfo.remoteVersion && (
-                <>
+            <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded">
+              <div className={`flex ${isMobile ? 'items-center justify-between gap-2' : 'items-center gap-4'}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">本地版本:</span>
+                  <Tag color="blue">{versionInfo.localVersion}</Tag>
+                </div>
+                {versionInfo.remoteVersion && (
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-600">远程版本:</span>
                     <Tag color="green">{versionInfo.remoteVersion}</Tag>
                   </div>
-                  {versionInfo.hasUpdate && (
-                    <Tag color="orange">有更新可用</Tag>
-                  )}
-                </>
-              )}
-              <Button
-                type="link"
-                size="small"
-                loading={loadingVersions}
-                onClick={loadVersionInfo}
-              >
-                刷新
-              </Button>
+                )}
+                {versionInfo.hasUpdate && (
+                  <Tag color="orange">有更新可用</Tag>
+                )}
+              </div>
+              <div className={isMobile ? 'text-center' : 'text-right'}>
+                <Button
+                  type="link"
+                  size="small"
+                  loading={loadingVersions}
+                  onClick={loadVersionInfo}
+                >
+                  刷新
+                </Button>
+              </div>
             </div>
           )}
 
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${isMobile ? 'flex-wrap' : ''}`}>
             <Button
               onClick={async () => {
                 try {
@@ -706,8 +760,10 @@ export const Scrapers = () => {
                   messageApi.error(error.response?.data?.detail || '备份失败')
                 }
               }}
+              className={isMobile ? 'flex-1 min-w-0' : ''}
+              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
             >
-              备份当前弹幕源
+              {isMobile ? '备份' : '备份当前弹幕源'}
             </Button>
             <Button
               onClick={() => {
@@ -728,8 +784,10 @@ export const Scrapers = () => {
                   },
                 })
               }}
+              className={isMobile ? 'flex-1 min-w-0' : ''}
+              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
             >
-              从备份还原
+              {isMobile ? '还原' : '从备份还原'}
             </Button>
             <Button
               type="primary"
@@ -746,8 +804,10 @@ export const Scrapers = () => {
                   setLoading(false)
                 }
               }}
+              className={isMobile ? 'flex-1 min-w-0' : ''}
+              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
             >
-              重载弹幕源
+              {isMobile ? '重载' : '重载弹幕源'}
             </Button>
           </div>
         </div>
@@ -781,7 +841,6 @@ export const Scrapers = () => {
               )}
             />
           </SortableContext>
-
           {/* 拖拽覆盖层 */}
           <DragOverlay>{renderDragOverlay()}</DragOverlay>
         </DndContext>
@@ -796,6 +855,8 @@ export const Scrapers = () => {
         onCancel={() => setOpen(false)}
         destroyOnClose // 确保每次打开时都重新渲染
         forceRender // 确保表单项在Modal打开时就存在
+        width={isMobile ? '95%' : '600px'}
+        centered
       >
         <Form form={form} layout="vertical">
           <div className="mb-4">请为 {setname} 源填写以下配置信息。</div>
@@ -814,24 +875,29 @@ export const Scrapers = () => {
           {setname === 'dandanplay' && (
             <>
               <Form.Item label="认证方式" className="mb-6">
-                <Switch
-                  checkedChildren={
-                    <Space>
-                      <CloudOutlined />
-                      跨域代理
-                    </Space>
-                  }
-                  unCheckedChildren={
-                    <Space>
-                      <DesktopOutlined />
-                      本地功能
-                    </Space>
-                  }
-                  checked={dandanAuthMode === 'proxy'}
-                  onChange={checked =>
-                    setDandanAuthMode(checked ? 'proxy' : 'local')
-                  }
-                />
+                <div className={`flex ${isMobile ? 'flex-col gap-2' : 'items-center gap-4'}`}>
+                  <Switch
+                    checkedChildren={
+                      <Space>
+                        <CloudOutlined />
+                        跨域代理
+                      </Space>
+                    }
+                    unCheckedChildren={
+                      <Space>
+                        <DesktopOutlined />
+                        本地功能
+                      </Space>
+                    }
+                    checked={dandanAuthMode === 'proxy'}
+                    onChange={checked =>
+                      setDandanAuthMode(checked ? 'proxy' : 'local')
+                    }
+                  />
+                  <div className="text-sm text-gray-600">
+                    {dandanAuthMode === 'local' ? '使用本地App ID和Secret进行认证' : '通过跨域代理使用API'}
+                  </div>
+                </div>
               </Form.Item>
 
               {dandanAuthMode === 'local' && (
@@ -910,7 +976,7 @@ export const Scrapers = () => {
                   ]}
                   className="mb-6"
                 >
-                  <Input.TextArea rows={8} />
+                  <Input.TextArea rows={isMobile ? 6 : 8} />
                 </Form.Item>
               )}
             </>
@@ -927,28 +993,28 @@ export const Scrapers = () => {
           >
             <Input.TextArea rows={6} />
           </Form.Item>
-          <div className="flex items-center justify-start flex-wrap gap-2 mb-4">
+          <div className={`flex ${isMobile ? 'flex-col gap-2' : 'items-center justify-start flex-wrap'} gap-2 mb-4`}>
             <Form.Item
               name={`scraper${setname.charAt(0).toUpperCase()}${setname.slice(1)}LogResponses`}
               label="记录原始响应"
               valuePropName="checked"
-              className="min-w-[100px] shrink-0 !mb-0"
+              className={isMobile ? "min-w-full !mb-0" : "min-w-[100px] shrink-0 !mb-0"}
             >
               <Switch />
             </Form.Item>
-            <div className="w-full">
+            <div className={`w-full ${isMobile ? 'text-sm' : ''}`}>
               启用后，此源的所有API请求的原始响应将被记录到
               config/logs/scraper_responses.log 文件中，用于调试。
             </div>
           </div>
           {/* bilibili登录信息 */}
           {setname === 'bilibili' && (
-            <div>
+            <div className="text-center">
               {biliUserinfo.isLogin ? (
                 <div className="text-center">
-                  <div className="flex items-center justify-center gap-2 mb-4">
+                  <div className={`flex ${isMobile ? 'flex-col items-center gap-2' : 'items-center justify-center gap-2'} mb-4`}>
                     <img
-                      className="w-10 h-10 rounded-full"
+                      className={`${isMobile ? 'w-8 h-8' : 'w-10 h-10'} rounded-full`}
                       src={biliUserinfo.face}
                     />
                     <span>{biliUserinfo.uname}</span>
@@ -967,19 +1033,19 @@ export const Scrapers = () => {
               ) : (
                 <div className="text-center">
                   <div className="mb-4">当前未登录。</div>
-                  <div className="flex items-center justify-center">
+                  <div className={`flex ${isMobile ? 'flex-col items-center gap-2' : 'items-center justify-center'} mb-4`}>
                     <Checkbox
                       checked={biliQrcodeChecked}
                       onChange={() => setBiliQrcodeChecked(v => !v)}
                     />
                     <span
-                      className="ml-2 cursor-pointer"
+                      className="cursor-pointer text-sm"
                       onClick={() => setBiliQrcodeChecked(v => !v)}
                     >
                       我已阅读并同意以下免责声明
                     </span>
                   </div>
-                  <div className="my-3">
+                  <div className={`my-3 text-sm ${isMobile ? 'px-2' : ''}`}>
                     登录接口由{' '}
                     <a
                       href="https://github.com/SocialSisterYi/bilibili-API-collect"
@@ -1010,12 +1076,14 @@ export const Scrapers = () => {
         open={biliLoginOpen}
         footer={null}
         onCancel={() => setBiliLoginOpen(false)}
+        width={isMobile ? '90%' : '400px'}
+        centered
       >
         <div className="text-center">
-          <div className="relative w-[200px] h-[200px] mx-auto mb-3">
+          <div className={`relative ${isMobile ? 'w-[150px] h-[150px]' : 'w-[200px] h-[200px]'} mx-auto mb-3`}>
             <QRCodeCanvas
               value={biliQrcode.url}
-              size={200}
+              size={isMobile ? 150 : 200}
               fgColor="#000"
               level="M"
             />
@@ -1048,7 +1116,7 @@ export const Scrapers = () => {
               </div>
             )}
           </div>
-          <div className="mb-3">请使用Bilibili手机客户端扫描二维码</div>
+          <div className={`mb-3 ${isMobile ? 'text-sm px-2' : ''}`}>请使用Bilibili手机客户端扫描二维码</div>
           <Button type="primary" danger onClick={cancelBiliLogin}>
             取消登录
           </Button>

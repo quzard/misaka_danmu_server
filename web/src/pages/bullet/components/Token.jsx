@@ -316,7 +316,7 @@ export const Token = ({ domain }) => {
       title: '访问时间',
       dataIndex: 'accessTime',
       key: 'accessTime',
-      width: 200,
+      width: 300,
       render: (_, record) => {
         return (
           <Typography.Text>{dayjs(record.accessTime).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>
@@ -327,7 +327,7 @@ export const Token = ({ domain }) => {
       title: 'IP地址',
       dataIndex: 'ipAddress',
       key: 'ipAddress',
-      width: 150,
+      width: 200,
       render: (_, record) => (
         <Typography.Text code>{record.ipAddress}</Typography.Text>
       ),
@@ -336,14 +336,14 @@ export const Token = ({ domain }) => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 200,
+      width: 150,
       render: (_, record) => (
         <Typography.Text>{record.status}</Typography.Text>
       ),
     },
     {
       title: '路径',
-      width: 250,
+      width: 300,
       dataIndex: 'path',
       key: 'path',
       render: (_, record) => (
@@ -356,7 +356,7 @@ export const Token = ({ domain }) => {
       title: 'User-Agent',
       dataIndex: 'userAgent',
       key: 'userAgent',
-      width: 400,
+      width: 250,
       render: (_, record) => (
         <span className="text-gray-600 dark:text-gray-400 text-xs break-all">
           {record.userAgent}
@@ -560,9 +560,7 @@ export const Token = ({ domain }) => {
       <Modal
         title={
           <div className="flex items-center gap-3">
-            <span className="text-lg font-semibold text-gray-900 dark:text-white">
-              Token访问日志
-            </span>
+            <Typography.Text>Token访问日志</Typography.Text>
           </div>
         }
         width={isMobile ? '100%' : 900}
@@ -577,7 +575,7 @@ export const Token = ({ domain }) => {
         {isMobile ? (
           <div className="space-y-4">
             {tokenLogs.map((log, index) => {
-              const isSuccess = log.status?.includes('成功') || log.status?.includes('200');
+              const isAllowed = log.status?.toLowerCase().includes('allowed');
               return (
                 <Card
                   key={index}
@@ -588,12 +586,12 @@ export const Token = ({ domain }) => {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <div className={`w-2 h-2 rounded-full ${isAllowed ? 'bg-green-500' : 'bg-red-500'}`} />
                         <span className="text-sm font-medium">
                           {dayjs(log.accessTime).format('MM-DD HH:mm:ss')}
                         </span>
                       </div>
-                      <Tag color={isSuccess ? 'success' : 'error'}>
+                      <Tag color={isAllowed ? 'success' : 'error'}>
                         {log.status}
                       </Tag>
                     </div>

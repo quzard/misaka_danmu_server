@@ -418,26 +418,29 @@ const LibraryScan = () => {
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   {/* 服务器头部信息 */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '2px' }}>
                       <div
                         style={{
                           width: '8px',
                           height: '8px',
                           borderRadius: '50%',
-                          backgroundColor: currentServer.isEnabled ? '#52c41a' : '#faad14'
+                          backgroundColor: currentServer.isEnabled ? '#52c41a' : '#faad14',
+                          flexShrink: 0
                         }}
                       />
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <Text strong style={{ fontSize: '16px', color: '#262626' }}>
+                        <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: screens.xs ? 'wrap' : 'nowrap' }}>
+                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: screens.xs ? 'break-word' : 'normal', flex: screens.xs ? '1 1 auto' : 'none' }}>
                             {currentServer.name}
                           </Text>
-                          <Tag color={currentServer.isEnabled ? 'green' : 'orange'} size="small">
-                            {currentServer.providerName}
-                          </Tag>
-                          <Tag color={currentServer.isEnabled ? 'success' : 'warning'} size="small">
-                            {currentServer.isEnabled ? '已启用' : '已禁用'}
-                          </Tag>
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: screens.xs ? 'nowrap' : 'wrap', flexShrink: 0 }}>
+                            <Tag color={currentServer.isEnabled ? 'green' : 'orange'} size="small">
+                              {currentServer.providerName}
+                            </Tag>
+                            <Tag color={currentServer.isEnabled ? 'success' : 'warning'} size="small">
+                              {currentServer.isEnabled ? '已启用' : '已禁用'}
+                            </Tag>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -474,26 +477,29 @@ const LibraryScan = () => {
                   {currentServer.url && (
                     <div style={{ marginBottom: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Text type="secondary" style={{ fontSize: '12px', minWidth: '60px' }}>
+                        <Text type="secondary" style={{ fontSize: screens.xs ? '11px' : '12px', minWidth: screens.xs ? '50px' : '60px', flexShrink: 0 }}>
                           服务器地址:
                         </Text>
-                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                           <Text
                             style={{
-                              fontSize: '13px',
+                              fontSize: screens.xs ? '12px' : '13px',
                               color: '#666',
-                              wordBreak: 'break-all',
-                              flex: 1
+                              wordBreak: screens.xs ? 'break-all' : 'break-all',
+                              flex: 1,
+                              whiteSpace: screens.xs ? 'nowrap' : 'normal',
+                              overflow: screens.xs ? 'hidden' : 'visible',
+                              textOverflow: screens.xs ? 'ellipsis' : 'clip'
                             }}
                           >
-                            {showServerUrl ? currentServer.url : '••••••••••••••••••••••••••••••••••••••••'}
+                            {showServerUrl ? currentServer.url : '•'.repeat(currentServer.url.length)}
                           </Text>
                           <Button
                             type="text"
                             size="small"
                             icon={showServerUrl ? <EyeInvisibleOutlined /> : <EyeOutlined />}
                             onClick={() => setShowServerUrl(!showServerUrl)}
-                            style={{ padding: '2px 4px', height: '24px', minWidth: '24px' }}
+                            style={{ padding: '2px 4px', height: '24px', minWidth: '24px', flexShrink: 0 }}
                             title={showServerUrl ? '隐藏地址' : '显示地址'}
                           />
                         </div>
@@ -522,7 +528,7 @@ const LibraryScan = () => {
           </Col>
 
           <Col xs={24} md={12}>
-            <div style={{ padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '8px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ padding: '20px', borderRadius: '8px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <Title level={4} style={{ marginBottom: '12px' }}>操作说明</Title>
               <Space direction="vertical" size="small">
                 <Text>1. 选择已配置的媒体服务器</Text>
