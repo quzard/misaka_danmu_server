@@ -54,6 +54,8 @@ export const EpisodeDetail = () => {
   const animeId = searchParams.get('animeId')
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
+  const messageApi = useMessage()
+  const modalApi = useModal()
 
   const [loading, setLoading] = useState(true)
   const [animeDetail, setAnimeDetail] = useState({})
@@ -77,10 +79,17 @@ export const EpisodeDetail = () => {
   const uploadRef = useRef(null)
   const [uploading, setUploading] = useState(false)
   const [fileList, setFileList] = useState([])
-  const [lastSelectedIndex, setLastSelectedIndex] = useState(null)
+  const [lastClickedIndex, setLastClickedIndex] = useState(null)
 
-  const modalApi = useModal()
-  const messageApi = useMessage()
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedRows([])
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const isXmlImport = useMemo(() => {
     return sourceInfo.providerName === 'custom'
@@ -127,24 +136,8 @@ export const EpisodeDetail = () => {
   }
 
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedRows([])
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedRows([])
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [])
+    getDetail()
+  }, [id, animeId, pagination.current, pagination.pageSize])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -155,6 +148,66 @@ export const EpisodeDetail = () => {
   }
 
   const columns = [
+    {
+      title: (
+        <div className="flex items-center justify-center cursor-pointer" onClick={() => {
+          if (selectedRows.length === episodeList.length && episodeList.length > 0) {
+            setSelectedRows([])
+          } else {
+            setSelectedRows(episodeList)
+          }
+        }}>
+          {selectedRows.length === episodeList.length && episodeList.length > 0 ? (
+            <div className="w-4 h-4 bg-pink-400 rounded flex items-center justify-center">
+              <span className="text-white text-xs">✓</span>
+            </div>
+          ) : (
+            <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
+          )}
+        </div>
+      ),
+      key: 'selection',
+      width: 50,
+      render: (_, record, index) => {
+        const isSelected = selectedRows.some(row => row.episodeId === record.episodeId)
+        return (
+          <div
+            className="cursor-pointer flex items-center justify-center"
+            onClick={(e) => {
+              const newSelected = [...selectedRows]
+              if (e.shiftKey && lastClickedIndex !== null) {
+                const start = Math.min(lastClickedIndex, index)
+                const end = Math.max(lastClickedIndex, index)
+                const range = episodeList.slice(start, end + 1)
+                if (isSelected) {
+                  // 如果当前已选，移除范围
+                  setSelectedRows(selectedRows.filter(row => !range.some(r => r.episodeId === row.episodeId)))
+                } else {
+                  // 添加范围
+                  const toAdd = range.filter(r => !selectedRows.some(s => s.episodeId === r.episodeId))
+                  setSelectedRows([...selectedRows, ...toAdd])
+                }
+              } else {
+                if (isSelected) {
+                  setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+                } else {
+                  setSelectedRows([...selectedRows, record])
+                }
+              }
+              setLastClickedIndex(index)
+            }}
+          >
+            {isSelected ? (
+              <div className="w-4 h-4 bg-primary rounded flex items-center justify-center">
+                <span className="text-white text-xs">✓</span>
+              </div>
+            ) : (
+              <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
+            )}
+          </div>
+        )
+      },
+    },
     {
       title: 'ID',
       dataIndex: 'episodeId',
@@ -765,6 +818,7 @@ export const EpisodeDetail = () => {
             scroll={{ x: '100%' }}
             renderCard={(record) => {
               const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
+              const index = episodeList.findIndex(ep => ep.episodeId === record.episodeId);
               return (
                 <Card
                   size="small"
@@ -801,6 +855,7 @@ export const EpisodeDetail = () => {
                       }
                       setLastSelectedIndex(currentIndex)
                     }
+                    setLastClickedIndex(index)
                   }}
                 >
                   <div className="space-y-3 relative">
@@ -876,6 +931,7 @@ export const EpisodeDetail = () => {
                               ...record,
                               episodeId: record.episodeId,
                               originalEpisodeIndex: record.episodeIndex,
+                              episodeIndex: Math.max(1, record.episodeIndex || 1),
                             })
                             setIsEditing(true)
                             setEditOpen(true)
@@ -927,8 +983,11 @@ export const EpisodeDetail = () => {
         confirmLoading={confirmLoading}
         cancelText="取消"
         okText="确认"
-        onCancel={() => setEditOpen(false)}
-        destroyOnHidden
+        onCancel={() => {
+          setEditOpen(false)
+          setIsEditing(false)
+          form.resetFields()
+        }}
         zIndex={100}
       >
         <Form form={form} layout="horizontal">
@@ -947,6 +1006,7 @@ export const EpisodeDetail = () => {
             <InputNumber
               style={{ width: '100%' }}
               placeholder="请输入分集集数"
+              min={1}
             />
           </Form.Item>
           {isXmlImport ? (
@@ -1013,7 +1073,6 @@ export const EpisodeDetail = () => {
         cancelText="取消"
         okText="确认执行"
         onCancel={() => setResetOpen(false)}
-        destroyOnHidden
         zIndex={100}
       >
         <div>
@@ -1052,7 +1111,7 @@ export const EpisodeDetail = () => {
           size="small"
           dataSource={resetInfo?.toKeep?.slice(0, 80) ?? []}
           columns={keepColumns}
-          rowKey={'id'}
+          rowKey={'episodeId'}
           scroll={{ x: '100%' }}
         />
       </Modal>
