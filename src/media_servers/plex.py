@@ -179,7 +179,14 @@ class PlexMediaServer(BaseMediaServer):
     async def get_season_episodes(
         self,
         series_id: str,
-        season_number: int
+        season_number: int,
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
     ) -> List[MediaItem]:
         """获取某一季的所有集"""
         try:
@@ -190,17 +197,28 @@ class PlexMediaServer(BaseMediaServer):
                 if season['season_number'] == season_number:
                     season_id = season['season_id']
                     break
-            
+
             if not season_id:
                 return []
-            
+
             data = await self._request('GET', f'/library/metadata/{season_id}/children')
-            
+
             episodes = []
             for item in data.get('MediaContainer', {}).get('Metadata', []):
                 if item.get('type') == 'episode':
-                    episodes.append(self._parse_episode(item))
-            
+                    # 使用传入的剧集信息来补充集数据
+                    episode = self._parse_episode(
+                        item,
+                        library_id=library_id,
+                        series_name=series_name,
+                        series_year=series_year,
+                        series_tmdb_id=series_tmdb_id,
+                        series_tvdb_id=series_tvdb_id,
+                        series_imdb_id=series_imdb_id,
+                        series_poster=series_poster
+                    )
+                    episodes.append(episode)
+
             return sorted(episodes, key=lambda x: x.episode or 0)
         except Exception as e:
             self.logger.error(f"获取Plex集数信息失败: {e}")
@@ -264,33 +282,52 @@ class PlexMediaServer(BaseMediaServer):
             library_id=library_id,
         )
     
-    def _parse_episode(self, data: Dict[str, Any]) -> MediaItem:
+    def _parse_episode(
+        self,
+        data: Dict[str, Any],
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
+    ) -> MediaItem:
         """解析集数据"""
+        # 优先使用传入的剧集信息,如果没有则从集数据中获取
         guids = data.get('Guid', [])
-        tmdb_id = None
-        tvdb_id = None
-        imdb_id = None
-        
-        for guid in guids:
-            guid_id = guid.get('id', '')
-            if guid_id.startswith('tmdb://'):
-                tmdb_id = guid_id.replace('tmdb://', '')
-            elif guid_id.startswith('tvdb://'):
-                tvdb_id = guid_id.replace('tvdb://', '')
-            elif guid_id.startswith('imdb://'):
-                imdb_id = guid_id.replace('imdb://', '')
-        
+        tmdb_id = series_tmdb_id
+        tvdb_id = series_tvdb_id
+        imdb_id = series_imdb_id
+
+        # 如果没有传入剧集ID,尝试从集的GUID中获取
+        if not tmdb_id and not tvdb_id and not imdb_id:
+            for guid in guids:
+                guid_id = guid.get('id', '')
+                if guid_id.startswith('tmdb://'):
+                    tmdb_id = guid_id.replace('tmdb://', '')
+                elif guid_id.startswith('tvdb://'):
+                    tvdb_id = guid_id.replace('tvdb://', '')
+                elif guid_id.startswith('imdb://'):
+                    imdb_id = guid_id.replace('imdb://', '')
+
+        # 优先使用传入的剧集名称和年份
+        title = series_name or data.get('grandparentTitle', data.get('title'))
+        year = series_year or data.get('year')
+        poster_url = series_poster or self._get_image_url(data.get('grandparentThumb'))
+
         return MediaItem(
             media_id=data.get('ratingKey'),
-            title=data.get('grandparentTitle', data.get('title')),
+            title=title,
             media_type='tv_series',
-            year=data.get('year'),
+            year=year,
             season=data.get('parentIndex'),
             episode=data.get('index'),
             tmdb_id=tmdb_id,
             tvdb_id=tvdb_id,
             imdb_id=imdb_id,
-            poster_url=self._get_image_url(data.get('grandparentThumb')),
+            poster_url=poster_url,
+            library_id=library_id,
         )
     
     def _get_image_url(self, thumb_path: Optional[str]) -> Optional[str]:
