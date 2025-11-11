@@ -77,9 +77,17 @@ export const EpisodeDetail = () => {
   const uploadRef = useRef(null)
   const [uploading, setUploading] = useState(false)
   const [fileList, setFileList] = useState([])
+  const [lastClickedIndex, setLastClickedIndex] = useState(null)
 
-  const modalApi = useModal()
-  const messageApi = useMessage()
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedRows([])
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const isXmlImport = useMemo(() => {
     return sourceInfo.providerName === 'custom'
@@ -139,20 +147,52 @@ export const EpisodeDetail = () => {
 
   const columns = [
     {
-      title: '',
+      title: (
+        <div className="flex items-center justify-center cursor-pointer" onClick={() => {
+          if (selectedRows.length === episodeList.length && episodeList.length > 0) {
+            setSelectedRows([])
+          } else {
+            setSelectedRows(episodeList)
+          }
+        }}>
+          {selectedRows.length === episodeList.length && episodeList.length > 0 ? (
+            <div className="w-4 h-4 bg-pink-400 rounded flex items-center justify-center">
+              <span className="text-white text-xs">✓</span>
+            </div>
+          ) : (
+            <div className="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded"></div>
+          )}
+        </div>
+      ),
       key: 'selection',
       width: 50,
-      render: (_, record) => {
+      render: (_, record, index) => {
         const isSelected = selectedRows.some(row => row.episodeId === record.episodeId)
         return (
           <div
             className="cursor-pointer flex items-center justify-center"
-            onClick={() => {
-              if (isSelected) {
-                setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+            onClick={(e) => {
+              const newSelected = [...selectedRows]
+              if (e.shiftKey && lastClickedIndex !== null) {
+                const start = Math.min(lastClickedIndex, index)
+                const end = Math.max(lastClickedIndex, index)
+                const range = episodeList.slice(start, end + 1)
+                if (isSelected) {
+                  // 如果当前已选，移除范围
+                  setSelectedRows(selectedRows.filter(row => !range.some(r => r.episodeId === row.episodeId)))
+                } else {
+                  // 添加范围
+                  const toAdd = range.filter(r => !selectedRows.some(s => s.episodeId === r.episodeId))
+                  setSelectedRows([...selectedRows, ...toAdd])
+                }
               } else {
-                setSelectedRows([...selectedRows, record])
+                if (isSelected) {
+                  setSelectedRows(selectedRows.filter(row => row.episodeId !== record.episodeId))
+                } else {
+                  setSelectedRows([...selectedRows, record])
+                }
               }
+              setLastClickedIndex(index)
             }}
           >
             {isSelected ? (
@@ -761,6 +801,7 @@ export const EpisodeDetail = () => {
             scroll={{ x: '100%' }}
             renderCard={(record) => {
               const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
+              const index = episodeList.findIndex(ep => ep.episodeId === record.episodeId);
               return (
                 <Card
                   size="small"
@@ -781,6 +822,7 @@ export const EpisodeDetail = () => {
                     } else {
                       setSelectedRows([...selectedRows, record])
                     }
+                    setLastClickedIndex(index)
                   }}
                 >
                   <div className="space-y-3 relative">
