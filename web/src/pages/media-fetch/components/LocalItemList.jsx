@@ -131,19 +131,19 @@ const LocalItemList = ({ refreshTrigger }) => {
       const res = await getLocalWorks(params);
       const data = res.data;
 
-      // 构建扁平化数据结构
-      const flatData = await buildFlatData(data.list);
-      
+      // 构建树形数据结构
+      const treeData = await buildTreeData(data.list);
+
       // 缓存数据到localStorage
       try {
-        localStorage.setItem(cacheKey, JSON.stringify(flatData));
+        localStorage.setItem(cacheKey, JSON.stringify(treeData));
         localStorage.setItem(cacheTimestampKey, Date.now().toString());
       } catch (error) {
         console.warn('保存缓存失败:', error);
       }
 
       // 缓存所有数据
-      setAllItems(flatData);
+      setAllItems(treeData);
       setIsDataLoaded(true); // 标记数据已加载
     } catch (error) {
       message.error('加载作品列表失败');
@@ -199,8 +199,8 @@ const LocalItemList = ({ refreshTrigger }) => {
     await loadItems(pagination.current, pagination.pageSize, true); // 强制刷新
   };
 
-  // 构建扁平化数据结构(所有文件都在同一级，显示完整路径)
-  const buildFlatData = async (worksList) => {
+  // 构建树形数据结构(作品 -> 文件/季度)
+  const buildTreeData = async (worksList) => {
     const result = [];
 
     for (const work of worksList) {
@@ -210,28 +210,45 @@ const LocalItemList = ({ refreshTrigger }) => {
           const filesRes = await getLocalMovieFiles(work.title, work.year);
           const files = filesRes.data?.list || [];
 
-          // 将每个文件作为独立项，包含作品信息
-          files.forEach(f => {
-            result.push({
-              key: f.id,
+          // 创建电影作品节点
+          result.push({
+            key: `movie-${work.title}${work.year ? `-${work.year}` : ''}`,
+            title: work.title,
+            year: work.year,
+            tmdbId: work.tmdbId,
+            tvdbId: work.tvdbId,
+            imdbId: work.imdbId,
+            posterUrl: work.posterUrl,
+            mediaType: 'movie',
+            isGroup: true,
+            // 子节点:弹幕文件
+            children: files.map(f => ({
+              key: `file-${f.id}`,
               id: f.id,
               title: f.filePath.split(/[/\\]/).pop(), // 文件名
               filePath: f.filePath,
-              workTitle: work.title, // 作品标题
+              workTitle: work.title,
               year: f.year || work.year,
               tmdbId: f.tmdbId || work.tmdbId,
               tvdbId: f.tvdbId || work.tvdbId,
               imdbId: f.imdbId || work.imdbId,
               posterUrl: f.posterUrl || work.posterUrl,
-              mediaType: 'movie',
+              mediaType: 'movie_file',
               isImported: f.isImported,
-              // 添加路径显示信息
-              displayPath: `${work.title}${work.year ? ` (${work.year})` : ''}`,
-              fileName: f.filePath.split(/[/\\]/).pop(),
-            });
+              isGroup: false,
+            }))
           });
         } catch (error) {
           console.error(`加载电影文件失败: ${work.title}`, error);
+          // 即使加载失败,也添加作品节点
+          result.push({
+            key: `movie-${work.title}${work.year ? `-${work.year}` : ''}`,
+            title: work.title,
+            year: work.year,
+            mediaType: 'movie',
+            isGroup: true,
+            children: [],
+          });
         }
       } else if (work.type === 'tv_show') {
         // 电视剧 - 查询季度信息
@@ -239,25 +256,45 @@ const LocalItemList = ({ refreshTrigger }) => {
           const seasonsRes = await getLocalShowSeasons(work.title);
           const seasons = seasonsRes.data || [];
 
-          // 为每个季度创建条目
-          seasons.forEach(season => {
-            result.push({
-              key: JSON.stringify(season.ids),
-              title: `第 ${season.season} 季`,
-              workTitle: work.title,
-              season: season.season,
-              episodeCount: season.episodeCount,
-              year: season.year || work.year,
-              posterUrl: season.posterUrl || work.posterUrl,
-              mediaType: 'tv_season',
+          // 创建电视剧作品节点
+          result.push({
+            key: `show-${work.title}`,
+            title: work.title,
+            year: work.year,
+            tmdbId: work.tmdbId,
+            tvdbId: work.tvdbId,
+            imdbId: work.imdbId,
+            posterUrl: work.posterUrl,
+            mediaType: 'tv_show',
+            isGroup: true,
+            // 子节点:季度
+            children: seasons.map(s => ({
+              key: `season-${work.title}-S${s.season}`,
+              title: `第 ${s.season} 季 (${s.episodeCount}集)`,
               showTitle: work.title,
-              // 添加路径显示信息
-              displayPath: `${work.title}${work.year ? ` (${work.year})` : ''}`,
-              seasonInfo: `第 ${season.season} 季 (${season.episodeCount}集)`,
-            });
+              season: s.season,
+              year: s.year || work.year,
+              tmdbId: work.tmdbId,
+              tvdbId: work.tvdbId,
+              imdbId: work.imdbId,
+              posterUrl: s.posterUrl || work.posterUrl,
+              mediaType: 'tv_season',
+              episodeCount: s.episodeCount,
+              isGroup: false,
+              ids: s.ids || [],
+            }))
           });
         } catch (error) {
           console.error(`获取剧集 ${work.title} 的季度信息失败:`, error);
+          // 即使加载失败,也添加作品节点
+          result.push({
+            key: `show-${work.title}`,
+            title: work.title,
+            year: work.year,
+            mediaType: 'tv_show',
+            isGroup: true,
+            children: [],
+          });
         }
       }
     }
@@ -484,14 +521,19 @@ const LocalItemList = ({ refreshTrigger }) => {
       dataIndex: 'mediaType',
       key: 'mediaType',
       width: '10%',
-      render: (type) => {
+      render: (type, record) => {
         const typeMap = {
           movie: '电影',
+          movie_file: '弹幕文件',
           tv_series: '电视节目',
           tv_show: '电视节目',
-          tv_season: '-',
+          tv_season: '季度',
         };
-        return <span style={{ fontSize: '12px' }}>{typeMap[type] || type}</span>; // 调整字体大小
+        // 如果是作品组,显示作品类型
+        if (record.isGroup) {
+          return <span style={{ fontSize: '12px' }}>{typeMap[type] || type}</span>;
+        }
+        return <span style={{ fontSize: '12px' }}>{typeMap[type] || type}</span>;
       },
     },
     {
@@ -524,18 +566,6 @@ const LocalItemList = ({ refreshTrigger }) => {
         if (record.isGroup && record.mediaType === 'tv_show') {
           return (
             <Space size="small">
-              <Popconfirm
-                title={`确定要删除《${record.title}》的所有集吗?`}
-                onConfirm={() => {
-                  handleDeleteItems('剧集', [JSON.parse(record.key)]);
-                }}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                  删除整部
-                </Button>
-              </Popconfirm>
               <Button
                 type="link"
                 size="small"
@@ -548,26 +578,34 @@ const LocalItemList = ({ refreshTrigger }) => {
               >
                 导入整部
               </Button>
-            </Space>
-          );
-        }
-
-        // 季度显示删除和导入按钮
-        if (record.mediaType === 'tv_season' || record.mediaType === 'tv_series') {
-          return (
-            <Space size="small">
               <Popconfirm
-                title={`确定要删除第${record.season}季的所有集吗?`}
+                title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
-                  handleDeleteItems('季度', [JSON.parse(record.key)]);
+                  // 删除整部剧集
+                  batchDeleteLocalItems({
+                    shows: [{ title: record.title }]
+                  })
+                    .then(() => {
+                      message.success(`成功删除《${record.title}》`);
+                      refreshData();
+                    })
+                    .catch(() => message.error('删除失败'));
                 }}
                 okText="确定"
                 cancelText="取消"
               >
                 <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                  删除整季
+                  删除整部
                 </Button>
               </Popconfirm>
+            </Space>
+          );
+        }
+
+        // 季度显示删除和导入按钮
+        if (record.mediaType === 'tv_season') {
+          return (
+            <Space size="small">
               <Button
                 type="link"
                 size="small"
@@ -583,25 +621,20 @@ const LocalItemList = ({ refreshTrigger }) => {
               >
                 导入整季
               </Button>
-              <Button
-                type="link"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => handleEdit(record)}
-              >
-                编辑
-              </Button>
               <Popconfirm
                 title={`确定要删除第${record.season}季的所有集吗?`}
                 onConfirm={() => {
-                  // 删除该季度 - 使用record.key中的ids
-                  const ids = JSON.parse(record.key);
-                  batchDeleteLocalItems([ids])
-                    .then(() => {
-                      message.success(`成功删除第${record.season}季`);
-                      loadItems(pagination.current, pagination.pageSize);
-                    })
-                    .catch(() => message.error('删除失败'));
+                  // 删除该季度 - 使用record.ids
+                  if (record.ids && record.ids.length > 0) {
+                    batchDeleteLocalItems({ itemIds: record.ids })
+                      .then(() => {
+                        message.success(`成功删除第${record.season}季`);
+                        refreshData();
+                      })
+                      .catch(() => message.error('删除失败'));
+                  } else {
+                    message.warning('该季度没有可删除的项目');
+                  }
                 }}
                 okText="确定"
                 cancelText="取消"
@@ -614,14 +647,13 @@ const LocalItemList = ({ refreshTrigger }) => {
           );
         }
 
-        // 电影操作
-        if (record.mediaType === 'movie') {
-          // 如果是分组节点(大条目),不显示操作按钮
-          if (record.isGroup) {
-            return null;
-          }
+        // 电影作品组操作
+        if (record.isGroup && record.mediaType === 'movie') {
+          return null; // 电影作品组不显示操作按钮
+        }
 
-          // 单独的弹幕文件,显示导入、编辑、删除按钮
+        // 电影文件操作
+        if (record.mediaType === 'movie_file') {
           return (
             <Space size="small">
               <Button
@@ -674,9 +706,15 @@ const LocalItemList = ({ refreshTrigger }) => {
             key="delete-show"
             title={`确定要删除《${record.title}》的所有集吗?`}
             onConfirm={() => {
-              handleDeleteItems('剧集', {
+              // 删除整部剧集
+              batchDeleteLocalItems({
                 shows: [{ title: record.title }]
-              });
+              })
+                .then(() => {
+                  message.success(`成功删除《${record.title}》`);
+                  refreshData();
+                })
+                .catch(() => message.error('删除失败'));
             }}
             okText="确定"
             cancelText="取消"
@@ -717,12 +755,17 @@ const LocalItemList = ({ refreshTrigger }) => {
             key="delete-season"
             title={`确定要删除第${record.season}季的所有集吗?`}
             onConfirm={() => {
-              handleDeleteItems('季度', {
-                seasons: [{
-                  title: record.showTitle,
-                  season: record.season
-                }]
-              });
+              // 删除该季度 - 使用record.ids
+              if (record.ids && record.ids.length > 0) {
+                batchDeleteLocalItems({ itemIds: record.ids })
+                  .then(() => {
+                    message.success(`成功删除第${record.season}季`);
+                    refreshData();
+                  })
+                  .catch(() => message.error('删除失败'));
+              } else {
+                message.warning('该季度没有可删除的项目');
+              }
             }}
             okText="确定"
             cancelText="取消"
@@ -737,13 +780,13 @@ const LocalItemList = ({ refreshTrigger }) => {
       return actions;
     }
 
-    // 电影分组节点,不显示操作按钮
-    if (record.mediaType === 'movie' && record.isGroup) {
+    // 电影作品组节点,不显示操作按钮
+    if (record.isGroup && record.mediaType === 'movie') {
       return [];
     }
 
     // 电影文件,显示导入、编辑、删除按钮 (顺序:导入-编辑-删除)
-    if (record.mediaType === 'movie' && !record.isGroup) {
+    if (record.mediaType === 'movie_file') {
       const actions = [
         <Button
           key="import-movie"
@@ -943,77 +986,147 @@ const LocalItemList = ({ refreshTrigger }) => {
             <List
               loading={loading}
               dataSource={currentPageItems}
-              renderItem={(item) => (
-                <List.Item
-                  key={item.key}
-                  actions={isMobile ? [] : renderCardActions(item, false, true)}
-                  style={{ padding: '8px 0' }}
-                >
-                  <Card
-                    size="small"
-                    style={{
-                      width: '100%',
-                      border: '1px solid #ffccc7',
-                      backgroundColor: selectedRowKeys.includes(item.key) ? '#fff2f0' : '#fff7f6'
-                    }}
-                    bodyStyle={{ padding: '12px' }}
+              renderItem={(item) => {
+                // 作品组节点
+                if (item.isGroup) {
+                  return (
+                    <div key={item.key} style={{ marginBottom: 16 }}>
+                      {/* 作品标题 */}
+                      <div style={{
+                        padding: '12px 16px',
+                        background: '#f5f5f5',
+                        borderRadius: '8px 8px 0 0',
+                        borderBottom: '1px solid #d9d9d9'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <Checkbox
+                            checked={selectedRowKeys.includes(item.key)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRowKeys([...selectedRowKeys, item.key]);
+                              } else {
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                              }
+                            }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 16, fontWeight: 600 }}>
+                              {item.title}
+                              {item.year && <span style={{ marginLeft: 8, color: '#666', fontWeight: 400 }}>({item.year})</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                              <Tag size="small" color={item.mediaType === 'movie' ? 'blue' : 'purple'}>
+                                {item.mediaType === 'movie' ? '电影' : '电视节目'}
+                              </Tag>
+                              <span style={{ marginLeft: 8 }}>
+                                {item.children?.length || 0} {item.mediaType === 'movie' ? '个文件' : '季'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 子项列表 */}
+                      {item.children && item.children.length > 0 && (
+                        <div style={{
+                          background: '#fff',
+                          borderRadius: '0 0 8px 8px',
+                          border: '1px solid #d9d9d9',
+                          borderTop: 'none'
+                        }}>
+                          {item.children.map((child, index) => (
+                            <div
+                              key={child.key}
+                              style={{
+                                padding: '12px 16px 12px 48px',
+                                borderBottom: index < item.children.length - 1 ? '1px solid #f0f0f0' : 'none'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <Checkbox
+                                  checked={selectedRowKeys.includes(child.key)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedRowKeys([...selectedRowKeys, child.key]);
+                                    } else {
+                                      setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key));
+                                    }
+                                  }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 14 }}>
+                                    {child.mediaType === 'tv_season' ? (
+                                      <Button
+                                        type="link"
+                                        icon={<FolderOpenOutlined />}
+                                        onClick={() => handleOpenEpisodes(child)}
+                                        style={{ padding: 0, height: 'auto' }}
+                                      >
+                                        {child.title}
+                                      </Button>
+                                    ) : (
+                                      child.title
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                                    <Space size="small" wrap>
+                                      <Tag size="small" color={child.mediaType === 'movie_file' ? 'cyan' : 'orange'}>
+                                        {child.mediaType === 'movie_file' ? '弹幕文件' : `${child.episodeCount}集`}
+                                      </Tag>
+                                      {child.isImported !== undefined && (
+                                        <Tag size="small" color={child.isImported ? 'success' : 'default'}>
+                                          {child.isImported ? '已导入' : '未导入'}
+                                        </Tag>
+                                      )}
+                                    </Space>
+                                  </div>
+                                </div>
+                                <div className="mobile-only">{renderCardActions(child, false, false)}</div>
+                                <div className="desktop-only">{renderCardActions(child, false, true)}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                // 非分组节点(不应该出现在这里,但保留兼容性)
+                return (
+                  <List.Item
+                    key={item.key}
+                    actions={[
+                      <div key="mobile-actions" className="mobile-only">{renderCardActions(item, false, false)}</div>,
+                      <div key="desktop-actions" className="desktop-only">{renderCardActions(item, false, true)}</div>
+                    ]}
+                    style={{ padding: '12px 0' }}
                   >
-                    {/* 头部信息 */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <Checkbox
-                        checked={selectedRowKeys.includes(item.key)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRowKeys([...selectedRowKeys, item.key]);
-                          } else {
-                            setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
-                          }
-                        }}
-                        style={{ marginTop: '2px' }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        {/* 文件名和作品信息合并显示 */}
-                        <div style={{ fontSize: '16px', fontWeight: 500, color: '#ff4d4f', marginBottom: '4px' }}>
-                          {item.mediaType === 'tv_season' ? item.seasonInfo : item.fileName}
+                    <List.Item.Meta
+                      title={
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <Checkbox
+                            checked={selectedRowKeys.includes(item.key)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRowKeys([...selectedRowKeys, item.key]);
+                              } else {
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key));
+                              }
+                            }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 16, fontWeight: 500 }}>
+                              {item.title}
+                            </div>
+                          </div>
                         </div>
-                        {/* 作品路径 - 更简洁的显示 */}
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          📁 {item.displayPath}
-                          {item.year && <span style={{ marginLeft: '8px' }}>• {item.year}</span>}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 信息标签 */}
-                    <div style={{ marginBottom: '12px' }}>
-                      <Space size="small" wrap>
-                        <Tag size="small" color={item.mediaType === 'movie' ? 'magenta' : 'purple'}>
-                          {item.mediaType === 'movie' ? '电影文件' : '剧集季'}
-                        </Tag>
-                        {item.mediaType === 'tv_season' && (
-                          <Tag size="small" color="orange">
-                            {item.episodeCount}集
-                          </Tag>
-                        )}
-                        {item.mediaType === 'movie' && (
-                          <Tag size="small" color={item.isImported ? 'success' : 'default'}>
-                            {item.isImported ? '已导入' : '未导入'}
-                          </Tag>
-                        )}
-                      </Space>
-                    </div>
-
-                    {/* 移动端操作按钮 */}
-                    {isMobile && (
-                      <div style={{ borderTop: '1px solid #ffccc7', paddingTop: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '8px' }}>
-                          {renderCardActions(item, false, false)}
-                        </div>
-                      </div>
-                    )}
-                  </Card>
-                </List.Item>
-              )}
+                      }
+                      description={null}
+                    />
+                  </List.Item>
+                );
+              }}
             />
             {/* 自定义分页控件 */}
             <div style={{ textAlign: 'center', marginTop: '8px' }}>

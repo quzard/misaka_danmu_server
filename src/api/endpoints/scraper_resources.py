@@ -256,7 +256,7 @@ async def get_versions(
                 repo = repo_info['repo']
 
                 # 获取 GitHub Token (如果配置了)
-                github_token = await config_manager.getValue("github_token", "")
+                github_token = await config_manager.get("github_token", "")
                 headers = {}
                 if github_token:
                     headers["Authorization"] = f"Bearer {github_token}"
@@ -396,13 +396,23 @@ async def backup_scrapers(
                 backed_files.append(file_info)
                 backup_count += 1
 
+        # 读取 package.json 的版本号
+        package_version = None
+        if SCRAPERS_PACKAGE_FILE.exists():
+            try:
+                package_data = json.loads(SCRAPERS_PACKAGE_FILE.read_text())
+                package_version = package_data.get("version")
+            except Exception as e:
+                logger.warning(f"读取 package.json 失败: {e}")
+
         # 保存备份元数据
         metadata = {
             "backup_time": datetime.now().isoformat(),
             "backup_user": current_user.username,
             "file_count": backup_count,
             "files": backed_files,
-            "platform": get_platform_key()
+            "platform": get_platform_key(),
+            "package_version": package_version  # 添加资源包版本号
         }
 
         BACKUP_METADATA_FILE.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
@@ -476,6 +486,34 @@ async def restore_scrapers(
 
         if restore_count == 0:
             raise HTTPException(status_code=404, detail="备份目录为空")
+
+        # 从备份元数据恢复版本信息到 versions.json
+        if backup_info and "files" in backup_info:
+            versions = {}
+            for file_info in backup_info["files"]:
+                if "version" in file_info and "scraper" in file_info:
+                    versions[file_info["scraper"]] = file_info["version"]
+
+            # 写入 versions.json
+            if versions:
+                try:
+                    SCRAPERS_VERSIONS_FILE.write_text(json.dumps(versions, indent=2, ensure_ascii=False))
+                    logger.info(f"恢复了 {len(versions)} 个弹幕源的版本信息")
+                except Exception as e:
+                    logger.warning(f"写入版本信息失败: {e}")
+
+        # 从备份元数据恢复 package.json
+        if backup_info and "package_version" in backup_info:
+            try:
+                package_data = {
+                    "version": backup_info["package_version"],
+                    "restored_from_backup": True,
+                    "restore_time": datetime.now().isoformat()
+                }
+                SCRAPERS_PACKAGE_FILE.write_text(json.dumps(package_data, indent=2, ensure_ascii=False))
+                logger.info(f"恢复了资源包版本信息: {backup_info['package_version']}")
+            except Exception as e:
+                logger.warning(f"写入 package.json 失败: {e}")
 
         # 重新加载 scrapers
         await manager.load_and_sync_scrapers()
@@ -556,7 +594,7 @@ async def load_resources(
         logger.info(f"当前平台: {platform_key}")
 
         # 获取 GitHub Token (如果配置了)
-        github_token = await config_manager.getValue("github_token", "")
+        github_token = await config_manager.get("github_token", "")
         headers = {}
         if github_token:
             headers["Authorization"] = f"Bearer {github_token}"
