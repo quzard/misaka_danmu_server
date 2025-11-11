@@ -70,7 +70,7 @@ export const Logs = () => {
   }, [])
 
   const exportLogs = () => {
-    const blob = new Blob([logs.join('\r\n')], { type: 'text/plain' })
+    const blob = new Blob([logs.slice().reverse().join('\r\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

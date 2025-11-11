@@ -20,6 +20,16 @@ export default defineConfig({
         target: 'http://localhost:7768',
         changeOrigin: true,
         secure: false,
+      },
+      '/static': {
+        target: 'http://localhost:7768',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/openapi.json': {
+        target: 'http://localhost:7768',
+        changeOrigin: true,
+        secure: false,
       }
     }
   },
