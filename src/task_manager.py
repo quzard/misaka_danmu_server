@@ -26,6 +26,13 @@ class TaskSuccess(Exception):
     """自定义异常，用于表示任务成功完成并附带一条最终消息。"""
     pass
 
+class TaskPauseForRateLimit(Exception):
+    """自定义异常，用于表示任务因速率限制需要暂停"""
+    def __init__(self, retry_after_seconds: float, message: str = ""):
+        self.retry_after_seconds = retry_after_seconds
+        self.message = message
+        super().__init__(message)
+
 class Task:
     def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None, queue_type: str = "download"):
         self.task_id = task_id
@@ -53,11 +60,13 @@ class TaskManager:
         self._download_worker_task: asyncio.Task | None = None
         self._management_worker_task: asyncio.Task | None = None
         self._fallback_worker_task: asyncio.Task | None = None
+        self._paused_tasks_monitor_task: asyncio.Task | None = None
         self._current_download_task: Optional[Task] = None
         self._current_management_task: Optional[Task] = None
         self._current_fallback_task: Optional[Task] = None
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
+        self._paused_tasks: Dict[str, Tuple[Task, float]] = {}  # {task_id: (task, resume_time)}
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -68,9 +77,10 @@ class TaskManager:
             self._download_worker_task = asyncio.create_task(self._download_worker())
             self._management_worker_task = asyncio.create_task(self._management_worker())
             self._fallback_worker_task = asyncio.create_task(self._fallback_worker())
+            self._paused_tasks_monitor_task = asyncio.create_task(self._paused_tasks_monitor())
             # 启动时处理中断的任务
             asyncio.create_task(self._handle_interrupted_tasks())
-            self.logger.info("任务管理器已启动 (下载队列 + 管理队列 + 后备队列)。")
+            self.logger.info("任务管理器已启动 (下载队列 + 管理队列 + 后备队列 + 暂停任务监控)。")
 
     async def _run_task_wrapper(self, task: Task, queue_type: str = "download"):
         """
@@ -110,6 +120,19 @@ class TaskManager:
                     session, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
                 )
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成 [队列: {queue_type}]。")
+        except TaskPauseForRateLimit as e:
+            # 任务因速率限制需要暂停
+            self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {e.retry_after_seconds:.0f} 秒")
+            async with self._session_factory() as final_session:
+                await crud.update_task_progress_in_history(
+                    final_session, task.task_id, TaskStatus.PAUSED,
+                    None,  # 保持当前进度
+                    e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+                )
+            # 将任务放入暂停列表
+            await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
+            # 不设置 done_event，因为任务还会继续
+            return  # 提前返回，不执行 finally 块
         except TaskSuccess as e:
             self.logger.debug(f"捕获到 TaskSuccess 异常: {e}")
             final_message = str(e) if str(e) else "任务成功完成"
@@ -211,6 +234,43 @@ class TaskManager:
             finally:
                 self._current_fallback_task = None
                 self._fallback_queue.task_done()
+
+    async def _paused_tasks_monitor(self):
+        """监控暂停的任务，到时间后重新放回队列"""
+        while True:
+            try:
+                await asyncio.sleep(1)  # 每秒检查一次
+                current_time = time.time()
+                tasks_to_resume = []
+
+                async with self._lock:
+                    for task_id, (task, resume_time) in list(self._paused_tasks.items()):
+                        if current_time >= resume_time:
+                            tasks_to_resume.append((task_id, task))
+
+                    # 从暂停列表中移除
+                    for task_id, _ in tasks_to_resume:
+                        del self._paused_tasks[task_id]
+
+                # 重新放回队列
+                for task_id, task in tasks_to_resume:
+                    self.logger.info(f"任务 '{task.title}' (ID: {task_id}) 暂停时间已到，重新放回 {task.queue_type} 队列")
+                    if task.queue_type == "download":
+                        await self._download_queue.put(task)
+                    elif task.queue_type == "management":
+                        await self._management_queue.put(task)
+                    elif task.queue_type == "fallback":
+                        await self._fallback_queue.put(task)
+
+            except Exception as e:
+                self.logger.error(f"❌ 暂停任务监控器发生错误: {type(e).__name__}: {e}", exc_info=True)
+
+    async def pause_task_for_rate_limit(self, task: Task, retry_after_seconds: float):
+        """将任务暂停指定时间，然后重新放回队列"""
+        resume_time = time.time() + retry_after_seconds
+        async with self._lock:
+            self._paused_tasks[task.task_id] = (task, resume_time)
+        self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {retry_after_seconds:.0f} 秒")
 
     async def submit_task(
         self,

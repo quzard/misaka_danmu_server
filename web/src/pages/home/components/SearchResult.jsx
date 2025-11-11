@@ -294,7 +294,7 @@ export const SearchResult = () => {
       onOk: async () => {
         try {
           setConfirmLoading(true)
-          await Promise.all(
+          const results = await Promise.allSettled(
             selectList.map(item => {
               console.log(item, '1')
               return importDanmu(
@@ -313,11 +313,26 @@ export const SearchResult = () => {
               )
             })
           )
-          messageApi.success('批量导入任务已提交，请在任务管理器中查看进度。')
+
+          // 统计成功和失败的任务
+          const successCount = results.filter(r => r.status === 'fulfilled').length
+          const failedCount = results.filter(r => r.status === 'rejected').length
+
+          if (successCount > 0) {
+            if (failedCount > 0) {
+              messageApi.warning(`已提交 ${successCount} 个任务，${failedCount} 个任务提交失败，请在任务管理器中查看进度。`)
+            } else {
+              messageApi.success('批量导入任务已提交，请在任务管理器中查看进度。')
+            }
+          } else {
+            messageApi.error('所有任务提交失败')
+          }
+
           setSelectList([])
           setConfirmLoading(false)
           setBatchOpen(false)
         } catch (err) {
+          messageApi.error('批量导入失败')
         } finally {
           setConfirmLoading(false)
           setBatchOpen(false)

@@ -26,12 +26,44 @@ from ...security import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    import os
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+
+def _get_scrapers_dir() -> Path:
+    """获取 scrapers 目录路径"""
+    if _is_docker_environment():
+        return Path("/app/src/scrapers")
+    else:
+        return Path("src/scrapers")
+
+
+def _get_backup_dir() -> Path:
+    """获取备份目录路径"""
+    if _is_docker_environment():
+        return Path("/app/config/scrapers_backup")
+    else:
+        return Path("config/scrapers_backup")
+
+
 # 备份目录配置
-BACKUP_DIR = Path("/app/config/scrapers_backup")
+BACKUP_DIR = _get_backup_dir()
 BACKUP_METADATA_FILE = BACKUP_DIR / "backup_metadata.json"
 
 # 弹幕源版本信息文件
-SCRAPERS_VERSIONS_FILE = Path("src/scrapers/versions.json")
+SCRAPERS_VERSIONS_FILE = _get_scrapers_dir() / "versions.json"
 
 
 # 进度管理器
@@ -205,7 +237,7 @@ async def get_versions(
     try:
         # 获取本地版本
         local_version = "unknown"
-        local_package_file = Path("src/scrapers/package.json")
+        local_package_file = _get_scrapers_dir() / "package.json"
         if local_package_file.exists():
             try:
                 local_package = json.loads(local_package_file.read_text())
@@ -223,9 +255,15 @@ async def get_versions(
                 owner = repo_info['owner']
                 repo = repo_info['repo']
 
+                # 获取 GitHub Token (如果配置了)
+                github_token = await config_manager.getValue("github_token", "")
+                headers = {}
+                if github_token:
+                    headers["Authorization"] = f"Bearer {github_token}"
+
                 # 下载远程 package.json
                 package_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/package.json"
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
                     response = await client.get(package_url)
                     if response.status_code == 200:
                         remote_package = response.json()
@@ -316,7 +354,7 @@ async def backup_scrapers(
 ):
     """备份当前 scrapers 目录下的编译文件到持久化目录"""
     try:
-        scrapers_dir = Path("src/scrapers")
+        scrapers_dir = _get_scrapers_dir()
 
         # 创建备份目录
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -415,7 +453,7 @@ async def restore_scrapers(
 ):
     """从持久化备份目录还原弹幕源文件"""
     try:
-        scrapers_dir = Path("src/scrapers")
+        scrapers_dir = _get_scrapers_dir()
 
         if not BACKUP_DIR.exists():
             raise HTTPException(status_code=404, detail="未找到备份目录")
@@ -517,10 +555,17 @@ async def load_resources(
         platform_key = get_platform_key()
         logger.info(f"当前平台: {platform_key}")
 
+        # 获取 GitHub Token (如果配置了)
+        github_token = await config_manager.getValue("github_token", "")
+        headers = {}
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+            logger.info("使用 GitHub Token 请求 API")
+
         # 下载 package.json
         await progress_manager.update_progress(task_id, 10, 100, "正在下载资源包信息...")
         package_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/package.json"
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(package_url)
             if response.status_code != 200:
                 await progress_manager.fail_task(task_id, "无法获取资源包信息")
@@ -535,7 +580,7 @@ async def load_resources(
             raise HTTPException(status_code=404, detail="资源包中未找到弹幕源文件")
 
         # 保存 package.json 到本地
-        local_package_file = Path("src/scrapers/package.json")
+        local_package_file = _get_scrapers_dir() / "package.json"
         local_package_file.write_text(json.dumps(package_data, indent=2, ensure_ascii=False))
 
         # 先备份当前文件
@@ -544,7 +589,7 @@ async def load_resources(
 
         # 下载并替换文件
         await progress_manager.update_progress(task_id, 30, 100, "开始下载弹幕源文件...")
-        scrapers_dir = Path("src/scrapers")
+        scrapers_dir = _get_scrapers_dir()
         download_count = 0
         failed_downloads = []
         versions_data = {}  # 用于保存版本信息
@@ -552,7 +597,7 @@ async def load_resources(
         total_resources = len(resources)
         current_index = 0
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
             for scraper_name, scraper_info in resources.items():
                 current_index += 1
                 progress_percent = 30 + int((current_index / total_resources) * 50)  # 30-80%

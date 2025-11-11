@@ -7,7 +7,7 @@ from .endpoints import (
     config, auth, scraper, metadata_source, media_server,
     anime, source, episode, search, import_api, task,
     token, config_extra, settings, scheduled_task, webhook, system, auth_extra,
-    local_danmaku, scraper_resources
+    local_danmaku, scraper_resources, parameters
 )
 
 # This router aggregates all non-dandanplay API endpoints.
@@ -21,6 +21,7 @@ api_router.include_router(auth_router, prefix="/ui/auth", tags=["Auth"], include
 api_router.include_router(auth.router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 api_router.include_router(scraper.router, prefix="/ui", tags=["Scraper"], include_in_schema=False)
 api_router.include_router(scraper_resources.router, prefix="/ui", tags=["Scraper Resources"], include_in_schema=False)
+api_router.include_router(parameters.router, prefix="/ui", tags=["Parameters"], include_in_schema=False)
 api_router.include_router(metadata_source.router, prefix="/ui", tags=["Metadata Source"], include_in_schema=False)
 api_router.include_router(media_server.router, prefix="/ui", tags=["Media Server"], include_in_schema=False)
 api_router.include_router(local_danmaku.router, prefix="/ui", tags=["Local Danmaku"], include_in_schema=False)

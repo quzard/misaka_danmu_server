@@ -107,7 +107,8 @@ class ScraperManager:
 
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
-        for file_path in scrapers_dir.iterdir():
+        # 对文件列表排序以确保每次发现的顺序一致
+        for file_path in sorted(scrapers_dir.iterdir()):
             # 我们只关心 .py 文件或已知的二进制扩展名
             if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
                 continue

@@ -27,7 +27,7 @@ from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
-from .task_manager import TaskManager, TaskSuccess, TaskStatus
+from .task_manager import TaskManager, TaskSuccess, TaskStatus, TaskPauseForRateLimit
 from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
@@ -1241,27 +1241,12 @@ async def generic_import_task(
         if e.retry_after_seconds >= 3600:
             raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+        # 抛出暂停异常，让任务管理器处理
         logger.warning(f"通用导入任务因达到速率限制而暂停: {e}")
-        await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-        await asyncio.sleep(e.retry_after_seconds)
-        # 重试流控检查和第一集获取
-        if is_fallback:
-            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
-        else:
-            await rate_limiter.check(scraper.provider_name)
-        first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-
-        # 只有在实际获取到弹幕时才增加计数
-        if first_comments is not None:
-            if is_fallback:
-                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
-            else:
-                await rate_limiter.increment(scraper.provider_name)
-
-        if first_comments:
-            first_episode_success = True
-            logger.info(f"数据源验证成功（重试后），第一集获取到 {len(first_comments)} 条弹幕")
-            await progress_callback(30, "数据源验证成功，正在创建数据库条目...")
+        raise TaskPauseForRateLimit(
+            retry_after_seconds=e.retry_after_seconds,
+            message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+        )
 
             # 下载海报图片
             if imageUrl:
@@ -1641,11 +1626,12 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
             if e.retry_after_seconds >= 3600:
                 raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+            # 抛出暂停异常，让任务管理器处理
             logger.warning(f"刷新分集任务因达到速率限制而暂停: {e}")
-            await progress_callback(30, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试流控检查
-            await rate_limiter.check(provider_name)
+            raise TaskPauseForRateLimit(
+                retry_after_seconds=e.retry_after_seconds,
+                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
 
         await progress_callback(30, "正在从源获取新弹幕...")
 
@@ -2211,11 +2197,12 @@ async def manual_import_task(
             if e.retry_after_seconds >= 3600:
                 raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+            # 抛出暂停异常，让任务管理器处理
             logger.warning(f"手动导入任务因达到速率限制而暂停: {e}")
-            await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试流控检查
-            await rate_limiter.check(providerName)
+            raise TaskPauseForRateLimit(
+                retry_after_seconds=e.retry_after_seconds,
+                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
 
         comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
         if not comments:

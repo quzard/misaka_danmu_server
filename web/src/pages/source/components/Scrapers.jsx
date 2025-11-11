@@ -14,6 +14,7 @@ import {
   Space,
   Tag,
   Tooltip,
+  Upload,
 } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import {
@@ -32,6 +33,7 @@ import {
   backupScrapers,
   restoreScrapers,
   reloadScrapers,
+  uploadScraperPackage,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -177,6 +179,7 @@ export const Scrapers = () => {
     hasUpdate: false
   })
   const [loadingVersions, setLoadingVersions] = useState(false)
+  const [uploadingPackage, setUploadingPackage] = useState(false)
 
   // 进度相关
   const [progress, setProgress] = useState({
@@ -350,6 +353,25 @@ export const Scrapers = () => {
     } finally {
       setLoadingResources(false)
     }
+  }
+
+  const handleUploadPackage = async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      setUploadingPackage(true)
+      const res = await uploadScraperPackage(formData)
+      messageApi.success(res.data?.message || '上传成功')
+      await getInfo()
+      await loadVersionInfo()
+    } catch (error) {
+      messageApi.error(error.response?.data?.detail || '上传失败')
+    } finally {
+      setUploadingPackage(false)
+    }
+
+    return false // 阻止默认上传行为
   }
 
   const handleDragEnd = event => {
@@ -708,6 +730,16 @@ export const Scrapers = () => {
               >
                 加载资源
               </Button>
+              <Upload
+                beforeUpload={handleUploadPackage}
+                accept=".zip,.tar.gz,.tgz"
+                showUploadList={false}
+                disabled={uploadingPackage}
+              >
+                <Button loading={uploadingPackage} disabled={uploadingPackage}>
+                  离线包上传
+                </Button>
+              </Upload>
             </div>
           </div>
 

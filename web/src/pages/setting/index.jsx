@@ -2,6 +2,7 @@ import { Tabs } from 'antd'
 import { Security } from './components/Security'
 import { Webhook } from './components/Webhook'
 import { Proxy } from './components/Proxy'
+import { Parameters } from './components/Parameters'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Recognition } from './components/Recognition'
 import { Performance } from './components/Performance'
@@ -21,6 +22,11 @@ export const Setting = () => {
       label: '账户安全',
       key: 'security',
       children: <Security />,
+    },
+    {
+      label: '参数配置',
+      key: 'parameters',
+      children: <Parameters />,
     },
     {
       label: '代理设置',
