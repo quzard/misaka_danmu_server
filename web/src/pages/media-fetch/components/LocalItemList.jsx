@@ -389,17 +389,6 @@ const LocalItemList = ({ refreshTrigger }) => {
     }
   };
 
-  // 通用删除函数
-  const handleDeleteItems = async (type, data) => {
-    try {
-      const res = await batchDeleteLocalItems(data);
-      message.success(`${type}删除成功`);
-      refreshData();
-    } catch (error) {
-      message.error('删除失败: ' + (error.message || '未知错误'));
-    }
-  };
-
   // 单个文件导入
   const handleImportSingleFile = async (record) => {
     if (!record.id) {
@@ -581,10 +570,13 @@ const LocalItemList = ({ refreshTrigger }) => {
               <Popconfirm
                 title={`确定要删除《${record.title}》的所有集吗?`}
                 onConfirm={() => {
-                  // 删除整部剧集
-                  batchDeleteLocalItems({
-                    shows: [{ title: record.title }]
-                  })
+                  // 删除整部剧集 - 收集所有季度的IDs
+                  const allIds = record.children?.flatMap(child => child.ids || []) || [];
+                  if (allIds.length === 0) {
+                    message.warning('该剧集没有可删除的项目');
+                    return;
+                  }
+                  batchDeleteLocalItems(allIds)
                     .then(() => {
                       message.success(`成功删除《${record.title}》`);
                       refreshData();
@@ -626,7 +618,7 @@ const LocalItemList = ({ refreshTrigger }) => {
                 onConfirm={() => {
                   // 删除该季度 - 使用record.ids
                   if (record.ids && record.ids.length > 0) {
-                    batchDeleteLocalItems({ itemIds: record.ids })
+                    batchDeleteLocalItems(record.ids)
                       .then(() => {
                         message.success(`成功删除第${record.season}季`);
                         refreshData();
@@ -706,10 +698,13 @@ const LocalItemList = ({ refreshTrigger }) => {
             key="delete-show"
             title={`确定要删除《${record.title}》的所有集吗?`}
             onConfirm={() => {
-              // 删除整部剧集
-              batchDeleteLocalItems({
-                shows: [{ title: record.title }]
-              })
+              // 删除整部剧集 - 收集所有季度的IDs
+              const allIds = record.children?.flatMap(child => child.ids || []) || [];
+              if (allIds.length === 0) {
+                message.warning('该剧集没有可删除的项目');
+                return;
+              }
+              batchDeleteLocalItems(allIds)
                 .then(() => {
                   message.success(`成功删除《${record.title}》`);
                   refreshData();
@@ -757,7 +752,7 @@ const LocalItemList = ({ refreshTrigger }) => {
             onConfirm={() => {
               // 删除该季度 - 使用record.ids
               if (record.ids && record.ids.length > 0) {
-                batchDeleteLocalItems({ itemIds: record.ids })
+                batchDeleteLocalItems(record.ids)
                   .then(() => {
                     message.success(`成功删除第${record.season}季`);
                     refreshData();
@@ -1001,20 +996,20 @@ const LocalItemList = ({ refreshTrigger }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <Checkbox
                             checked={selectedRowKeys.includes(item.key)}
+                            indeterminate={
+                              !selectedRowKeys.includes(item.key) &&
+                              item.children?.some(child => selectedRowKeys.includes(child.key))
+                            }
                             onChange={(e) => {
-                              let newSelected;
                               if (e.target.checked) {
-                                newSelected = [...selectedRowKeys, item.key];
-                                item.children.forEach(child => {
-                                  if (!newSelected.includes(child.key)) {
-                                    newSelected.push(child.key);
-                                  }
-                                });
+                                // 选中父节点时,同时选中所有子节点
+                                const childKeys = item.children?.map(child => child.key) || [];
+                                setSelectedRowKeys([...new Set([...selectedRowKeys, item.key, ...childKeys])]);
                               } else {
-                                const keysToRemove = [item.key, ...item.children.map(child => child.key)];
-                                newSelected = selectedRowKeys.filter(key => !keysToRemove.includes(key));
+                                // 取消选中父节点时,同时取消所有子节点
+                                const childKeys = item.children?.map(child => child.key) || [];
+                                setSelectedRowKeys(selectedRowKeys.filter(key => key !== item.key && !childKeys.includes(key)));
                               }
-                              setSelectedRowKeys(newSelected);
                             }}
                           />
                           <div style={{ flex: 1 }}>
@@ -1054,17 +1049,21 @@ const LocalItemList = ({ refreshTrigger }) => {
                                 <Checkbox
                                   checked={selectedRowKeys.includes(child.key)}
                                   onChange={(e) => {
-                                    let newSelected;
                                     if (e.target.checked) {
-                                      newSelected = [...selectedRowKeys, child.key];
-                                      const allChildrenSelected = item.children.every(c => newSelected.includes(c.key));
-                                      if (allChildrenSelected && !newSelected.includes(item.key)) {
-                                        newSelected.push(item.key);
+                                      // 选中子节点
+                                      const newKeys = [...selectedRowKeys, child.key];
+                                      // 检查是否所有子节点都被选中,如果是则自动选中父节点
+                                      const allChildrenSelected = item.children?.every(c =>
+                                        newKeys.includes(c.key)
+                                      );
+                                      if (allChildrenSelected && !newKeys.includes(item.key)) {
+                                        newKeys.push(item.key);
                                       }
+                                      setSelectedRowKeys(newKeys);
                                     } else {
-                                      newSelected = selectedRowKeys.filter(key => key !== child.key && key !== item.key);
+                                      // 取消选中子节点时,同时取消父节点
+                                      setSelectedRowKeys(selectedRowKeys.filter(key => key !== child.key && key !== item.key));
                                     }
-                                    setSelectedRowKeys(newSelected);
                                   }}
                                 />
                                 <div style={{ flex: 1, minWidth: 0 }}>

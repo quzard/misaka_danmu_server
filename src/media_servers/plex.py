@@ -100,19 +100,22 @@ class PlexMediaServer(BaseMediaServer):
                     # 获取所有季度
                     seasons = await self.get_tv_seasons(series_id)
                     for season in seasons:
-                        # 获取该季度的所有集
-                        episodes = await self.get_season_episodes(
-                            series_id,
-                            season['season_number'],
-                            library_id,
-                            series_name,
-                            series_year,
-                            series_tmdb_id,
-                            series_tvdb_id,
-                            series_imdb_id,
-                            series_poster
-                        )
-                        items.extend(episodes)
+                        try:
+                            # 获取该季度的所有集
+                            episodes = await self.get_season_episodes(
+                                series_id,
+                                season['season_number'],
+                                library_id,
+                                series_name,
+                                series_year,
+                                series_tmdb_id,
+                                series_tvdb_id,
+                                series_imdb_id,
+                                series_poster
+                            )
+                            items.extend(episodes)
+                        except Exception as e:
+                            self.logger.warning(f"获取剧集 {series_name} 第 {season['season_number']} 季失败: {e}, 跳过该季度")
 
             return items
         except Exception as e:
