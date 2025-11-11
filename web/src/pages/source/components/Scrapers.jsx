@@ -31,6 +31,7 @@ import {
   loadScraperResources,
   backupScrapers,
   restoreScrapers,
+  reloadScrapers,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -677,21 +678,37 @@ export const Scrapers = () => {
             <div className="mb-2 text-sm text-gray-600">
               从GitHub仓库加载编译好的弹幕源文件（.so/.pyd）
             </div>
-            <Input
-              placeholder="请输入GitHub仓库链接，例如：https://github.com/username/repo"
-              value={resourceRepoUrl}
-              onChange={(e) => setResourceRepoUrl(e.target.value)}
-              addonAfter={
-                <Button
-                  type="link"
-                  size="small"
-                  loading={loadingResources}
-                  onClick={handleLoadResources}
-                >
-                  加载资源
-                </Button>
-              }
-            />
+            <div className="flex gap-2">
+              <Input
+                placeholder="请输入GitHub仓库链接，例如：https://github.com/username/repo"
+                value={resourceRepoUrl}
+                onChange={(e) => setResourceRepoUrl(e.target.value)}
+              />
+              <Button
+                onClick={async () => {
+                  if (!resourceRepoUrl.trim()) {
+                    messageApi.error('请输入资源仓库链接')
+                    return
+                  }
+                  try {
+                    await saveResourceRepo({ repoUrl: resourceRepoUrl })
+                    messageApi.success('保存成功')
+                    await loadVersionInfo()
+                  } catch (error) {
+                    messageApi.error(error.response?.data?.detail || '保存失败')
+                  }
+                }}
+              >
+                保存
+              </Button>
+              <Button
+                type="primary"
+                loading={loadingResources}
+                onClick={handleLoadResources}
+              >
+                加载资源
+              </Button>
+            </div>
           </div>
 
           {/* 版本信息 */}
@@ -764,6 +781,7 @@ export const Scrapers = () => {
                       const res = await restoreScrapers()
                       messageApi.success(res.data?.message || '还原成功')
                       await getInfo()
+                      await loadVersionInfo()
                     } catch (error) {
                       messageApi.error(error.response?.data?.detail || '还原失败')
                     }
@@ -772,6 +790,24 @@ export const Scrapers = () => {
               }}
             >
               从备份还原
+            </Button>
+            <Button
+              type="primary"
+              onClick={async () => {
+                try {
+                  setLoading(true)
+                  const res = await reloadScrapers()
+                  messageApi.success(res.data?.message || '重载成功')
+                  await getInfo()
+                  await loadVersionInfo()
+                } catch (error) {
+                  messageApi.error(error.response?.data?.detail || '重载失败')
+                } finally {
+                  setLoading(false)
+                }
+              }}
+            >
+              重载弹幕源
             </Button>
           </div>
         </div>

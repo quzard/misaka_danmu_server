@@ -465,6 +465,21 @@ async def restore_scrapers(
         raise HTTPException(status_code=500, detail=f"还原失败: {str(e)}")
 
 
+@router.post("/scrapers/reload", summary="重载弹幕源")
+async def reload_scrapers(
+    current_user: models.User = Depends(get_current_user),
+    manager = Depends(get_scraper_manager)
+):
+    """重新加载所有弹幕源"""
+    try:
+        await manager.load_and_sync_scrapers()
+        logger.info(f"用户 '{current_user.username}' 重载了弹幕源")
+        return {"message": "弹幕源重载成功"}
+    except Exception as e:
+        logger.error(f"重载弹幕源失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"重载失败: {str(e)}")
+
+
 @router.post("/scrapers/load-resources", summary="从资源仓库加载弹幕源")
 async def load_resources(
     payload: Dict[str, Any],

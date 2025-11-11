@@ -332,6 +332,8 @@ export const backupScrapers = () => api.post('/api/ui/scrapers/backup')
 export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
 /** 获取备份信息 */
 export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
+/** 重载弹幕源 */
+export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
 
 /** 获取元信息搜索 配置 */
 export const getMetaData = () => api.get('/api/ui/metadata-sources')

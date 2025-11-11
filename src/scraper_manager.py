@@ -61,14 +61,7 @@ class ScraperManager:
         self._scraper_classes.clear()
         self.scraper_settings.clear()
 
-
-        self._domain_map.clear()
-        discovered_providers = []
-        scraper_classes = {}
-        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
-
-        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
-        # 我们需要同时处理源码和编译后的情况。
+        # 检查是否需要从备份恢复
         def _is_docker_environment():
             """检测是否在Docker容器中运行"""
             import os
@@ -85,8 +78,35 @@ class ScraperManager:
 
         if _is_docker_environment():
             scrapers_dir = Path("/app/src/scrapers")
+            backup_dir = Path("/app/config/scrapers_backup")
         else:
             scrapers_dir = Path("src/scrapers")
+            backup_dir = Path("config/scrapers_backup")
+
+        # 检查 scrapers 目录是否为空(没有 .so/.pyd 文件)
+        has_scrapers = any(
+            f.suffix in ['.so', '.pyd']
+            for f in scrapers_dir.iterdir()
+            if f.is_file()
+        )
+
+        # 如果没有弹幕源文件但有备份,自动恢复
+        if not has_scrapers and backup_dir.exists():
+            backup_files = list(backup_dir.glob("*.so")) + list(backup_dir.glob("*.pyd"))
+            if backup_files:
+                import shutil
+                logging.getLogger(__name__).info(f"检测到 scrapers 目录为空但存在备份,正在自动恢复 {len(backup_files)} 个文件...")
+                for file in backup_files:
+                    shutil.copy2(file, scrapers_dir / file.name)
+                logging.getLogger(__name__).info("备份恢复完成")
+
+        self._domain_map.clear()
+        discovered_providers = []
+        scraper_classes = {}
+        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
+
+        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
+        # 我们需要同时处理源码和编译后的情况。
         for file_path in scrapers_dir.iterdir():
             # 我们只关心 .py 文件或已知的二进制扩展名
             if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
