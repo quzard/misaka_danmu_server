@@ -191,6 +191,7 @@ async def get_media_works(
     server_id: Optional[int] = None,
     is_imported: Optional[bool] = None,
     media_type: Optional[str] = None,
+    search: Optional[str] = None,
     page: int = 1,
     page_size: int = 100
 ) -> Dict[str, Any]:
@@ -208,6 +209,8 @@ async def get_media_works(
             movie_stmt = movie_stmt.where(orm_models.MediaItem.serverId == server_id)
         if is_imported is not None:
             movie_stmt = movie_stmt.where(orm_models.MediaItem.isImported == is_imported)
+        if search:
+            movie_stmt = movie_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
 
         movie_stmt = movie_stmt.order_by(orm_models.MediaItem.createdAt.desc())
         movie_result = await session.execute(movie_stmt)
@@ -251,6 +254,8 @@ async def get_media_works(
             tv_stmt = tv_stmt.where(orm_models.MediaItem.serverId == server_id)
         if is_imported is not None:
             tv_stmt = tv_stmt.where(orm_models.MediaItem.isImported == is_imported)
+        if search:
+            tv_stmt = tv_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
 
         tv_stmt = tv_stmt.group_by(orm_models.MediaItem.title, orm_models.MediaItem.serverId)
         tv_stmt = tv_stmt.order_by(func.max(orm_models.MediaItem.createdAt).desc())

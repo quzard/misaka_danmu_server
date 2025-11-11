@@ -361,6 +361,7 @@ async def get_media_works(
     server_id: Optional[int] = Query(None),
     is_imported: Optional[bool] = Query(None),
     media_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     session: AsyncSession = Depends(get_db_session),
@@ -372,6 +373,7 @@ async def get_media_works(
         server_id=server_id,
         is_imported=is_imported,
         media_type=media_type,
+        search=search,
         page=page,
         page_size=page_size
     )
