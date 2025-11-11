@@ -8,12 +8,10 @@ import platform
 import sys
 import re
 import json
-import asyncio
 from pathlib import Path
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
@@ -65,86 +63,6 @@ BACKUP_METADATA_FILE = BACKUP_DIR / "backup_metadata.json"
 # 弹幕源版本信息文件
 SCRAPERS_VERSIONS_FILE = _get_scrapers_dir() / "versions.json"
 SCRAPERS_PACKAGE_FILE = _get_scrapers_dir() / "package.json"
-
-
-# 进度管理器
-class ProgressManager:
-    """管理操作进度的单例类"""
-    _instance = None
-    _lock = asyncio.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.progress = {}
-            cls._instance.queues = {}
-        return cls._instance
-
-    async def create_task(self, task_id: str):
-        """创建新任务"""
-        async with self._lock:
-            self.progress[task_id] = {
-                "status": "running",
-                "current": 0,
-                "total": 0,
-                "message": ""
-            }
-            self.queues[task_id] = asyncio.Queue()
-
-    async def update_progress(self, task_id: str, current: int, total: int, message: str = ""):
-        """更新进度"""
-        async with self._lock:
-            if task_id in self.progress:
-                self.progress[task_id] = {
-                    "status": "running",
-                    "current": current,
-                    "total": total,
-                    "message": message
-                }
-                if task_id in self.queues:
-                    await self.queues[task_id].put({
-                        "type": "progress",
-                        "current": current,
-                        "total": total,
-                        "message": message
-                    })
-
-    async def complete_task(self, task_id: str, message: str = "完成"):
-        """完成任务"""
-        async with self._lock:
-            if task_id in self.progress:
-                self.progress[task_id]["status"] = "completed"
-                self.progress[task_id]["message"] = message
-                if task_id in self.queues:
-                    await self.queues[task_id].put({
-                        "type": "complete",
-                        "message": message
-                    })
-
-    async def fail_task(self, task_id: str, error: str):
-        """任务失败"""
-        async with self._lock:
-            if task_id in self.progress:
-                self.progress[task_id]["status"] = "failed"
-                self.progress[task_id]["message"] = error
-                if task_id in self.queues:
-                    await self.queues[task_id].put({
-                        "type": "error",
-                        "message": error
-                    })
-
-    async def get_queue(self, task_id: str) -> asyncio.Queue:
-        """获取任务队列"""
-        return self.queues.get(task_id)
-
-    async def cleanup_task(self, task_id: str):
-        """清理任务"""
-        async with self._lock:
-            self.progress.pop(task_id, None)
-            self.queues.pop(task_id, None)
-
-
-progress_manager = ProgressManager()
 
 
 def get_platform_info() -> Dict[str, str]:
@@ -281,53 +199,6 @@ async def get_versions(
     except Exception as e:
         logger.error(f"获取版本信息失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取版本信息失败: {str(e)}")
-
-
-@router.get("/scrapers/progress/{task_id}", summary="获取操作进度(SSE)")
-async def get_progress_stream(
-    task_id: str,
-    current_user: models.User = Depends(get_current_user)
-):
-    """通过 Server-Sent Events 实时推送操作进度"""
-
-    async def event_generator() -> AsyncGenerator[str, None]:
-        """生成 SSE 事件流"""
-        queue = await progress_manager.get_queue(task_id)
-        if not queue:
-            yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'})}\n\n"
-            return
-
-        try:
-            while True:
-                # 等待进度更新
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
-
-                # 发送事件
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-                # 如果任务完成或失败,结束流
-                if event.get("type") in ["complete", "error"]:
-                    break
-
-        except asyncio.TimeoutError:
-            # 超时,发送心跳
-            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-        except Exception as e:
-            logger.error(f"SSE 流错误: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        finally:
-            # 清理任务
-            await progress_manager.cleanup_task(task_id)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用 nginx 缓冲
-        }
-    )
 
 
 @router.put("/scrapers/resource-repo", status_code=status.HTTP_204_NO_CONTENT, summary="保存资源仓库配置")
@@ -565,24 +436,13 @@ async def load_resources(
     manager = Depends(get_scraper_manager)
 ):
     """从 GitHub 资源仓库下载并加载编译好的弹幕源文件"""
-    # 生成任务ID
-    task_id = payload.get("taskId")
-    if not task_id:
-        import uuid
-        task_id = str(uuid.uuid4())
-
-    # 创建进度任务
-    await progress_manager.create_task(task_id)
-
     try:
         # 获取仓库链接
-        await progress_manager.update_progress(task_id, 0, 100, "正在获取仓库信息...")
         repo_url = payload.get("repoUrl")
         if not repo_url:
             repo_url = await config_manager.get("scraper_resource_repo", "")
 
         if not repo_url:
-            await progress_manager.fail_task(task_id, "未配置资源仓库链接")
             raise HTTPException(status_code=400, detail="未配置资源仓库链接")
 
         # 解析仓库信息
@@ -602,12 +462,10 @@ async def load_resources(
             logger.info("使用 GitHub Token 请求 API")
 
         # 下载 package.json
-        await progress_manager.update_progress(task_id, 10, 100, "正在下载资源包信息...")
         package_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/package.json"
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(package_url)
             if response.status_code != 200:
-                await progress_manager.fail_task(task_id, "无法获取资源包信息")
                 raise HTTPException(status_code=404, detail="无法获取资源包信息，请检查仓库链接")
 
             package_data = response.json()
@@ -615,7 +473,6 @@ async def load_resources(
         # 获取资源列表 (支持 resources 字段)
         resources = package_data.get('resources', {})
         if not resources:
-            await progress_manager.fail_task(task_id, "资源包中未找到弹幕源文件")
             raise HTTPException(status_code=404, detail="资源包中未找到弹幕源文件")
 
         # 保存 package.json 到本地
@@ -623,29 +480,16 @@ async def load_resources(
         local_package_file.write_text(json.dumps(package_data, indent=2, ensure_ascii=False))
 
         # 先备份当前文件
-        await progress_manager.update_progress(task_id, 20, 100, "正在备份当前文件...")
         await backup_scrapers(current_user)
 
         # 下载并替换文件
-        await progress_manager.update_progress(task_id, 30, 100, "开始下载弹幕源文件...")
         scrapers_dir = _get_scrapers_dir()
         download_count = 0
         failed_downloads = []
         versions_data = {}  # 用于保存版本信息
 
-        total_resources = len(resources)
-        current_index = 0
-
         async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
             for scraper_name, scraper_info in resources.items():
-                current_index += 1
-                progress_percent = 30 + int((current_index / total_resources) * 50)  # 30-80%
-                await progress_manager.update_progress(
-                    task_id,
-                    progress_percent,
-                    100,
-                    f"正在下载 {scraper_name} ({current_index}/{total_resources})..."
-                )
                 try:
                     # 获取当前平台的文件路径
                     files = scraper_info.get('files', {})
@@ -683,7 +527,6 @@ async def load_resources(
                     logger.error(f"下载 {scraper_name} 失败: {e}")
 
         # 保存版本信息到本地文件
-        await progress_manager.update_progress(task_id, 85, 100, "正在保存版本信息...")
         if versions_data:
             try:
                 SCRAPERS_VERSIONS_FILE.write_text(json.dumps(versions_data, indent=2, ensure_ascii=False))
@@ -693,20 +536,15 @@ async def load_resources(
 
         if download_count == 0:
             # 下载失败，还原备份
-            await progress_manager.fail_task(task_id, "所有文件下载失败")
             await restore_scrapers(current_user, manager)
             raise HTTPException(status_code=500, detail="所有文件下载失败，已还原备份")
 
         # 重新加载 scrapers
         try:
-            await progress_manager.update_progress(task_id, 90, 100, "正在加载弹幕源...")
             await manager.load_and_sync_scrapers()
             logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
 
-            await progress_manager.complete_task(task_id, f"成功加载 {download_count} 个弹幕源")
-
             result = {
-                "taskId": task_id,
                 "message": f"成功加载 {download_count} 个弹幕源",
                 "downloadCount": download_count,
                 "totalCount": len(resources)
@@ -721,7 +559,6 @@ async def load_resources(
         except Exception as e:
             # 加载失败，还原备份
             logger.error(f"加载弹幕源失败: {e}", exc_info=True)
-            await progress_manager.fail_task(task_id, f"加载失败: {str(e)}")
             await restore_scrapers(current_user, manager)
             raise HTTPException(status_code=500, detail=f"加载失败已还原备份: {str(e)}")
 
@@ -729,6 +566,5 @@ async def load_resources(
         raise
     except Exception as e:
         logger.error(f"加载资源失败: {e}", exc_info=True)
-        await progress_manager.fail_task(task_id, f"加载失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"加载失败: {str(e)}")
 
