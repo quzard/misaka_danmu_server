@@ -772,22 +772,22 @@ export const Scrapers = () => {
             </div>
           )}
 
-          {/* 进度条 */}
-          {progress.visible && (
-            <div className="p-3 bg-blue-50 rounded">
+          {/* 进度条 - 常驻显示 */}
+          <div className="p-3 bg-blue-50 rounded">
+            {progress.visible && progress.message && (
               <div className="mb-2 text-sm font-medium text-blue-900">
                 {progress.message}
               </div>
-              <Progress
-                percent={progress.percent}
-                status={progress.percent === 100 ? 'success' : 'active'}
-                strokeColor={{
-                  '0%': '#108ee9',
-                  '100%': '#87d068',
-                }}
-              />
-            </div>
-          )}
+            )}
+            <Progress
+              percent={progress.visible ? progress.percent : 0}
+              status={progress.percent === 100 ? 'success' : (progress.visible ? 'active' : 'normal')}
+              strokeColor={{
+                '0%': '#108ee9',
+                '100%': '#87d068',
+              }}
+            />
+          </div>
           <div className="flex gap-2">
             <Button
               onClick={async () => {
