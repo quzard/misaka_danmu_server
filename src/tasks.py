@@ -1247,45 +1247,6 @@ async def generic_import_task(
             retry_after_seconds=e.retry_after_seconds,
             message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
         )
-
-            # 下载海报图片
-            if imageUrl:
-                try:
-                    local_image_path = await download_image(imageUrl, session, manager, provider)
-                except Exception as e:
-                    logger.warning(f"海报下载失败: {e}")
-                    image_download_failed = True
-
-            # 创建主条目
-            anime_id = await crud.get_or_create_anime(
-                session,
-                title_to_use,
-                mediaType,
-                season_to_use,
-                imageUrl,
-                local_image_path,
-                year,
-                title_recognition_manager,
-                provider
-            )
-
-            # 更新元数据
-            await crud.update_metadata_if_empty(
-                session, anime_id,
-                tmdb_id=tmdbId,
-                imdb_id=imdbId,
-                tvdb_id=tvdbId,
-                douban_id=doubanId,
-                bangumi_id=bangumiId
-            )
-
-            # 链接数据源
-            source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
-            await session.commit()
-
-            logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})")
-        else:
-            logger.warning(f"第一集未获取到弹幕（重试后），数据源可能无效")
     except Exception as e:
         logger.error(f"验证第一集时发生错误: {e}")
 
