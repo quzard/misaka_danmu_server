@@ -283,7 +283,7 @@ export const Scrapers = () => {
     }
   }
 
-  const handleUploadPackage = async (file) => {
+  const handleUploadPackage = async ({ file, onSuccess, onError }) => {
     const formData = new FormData()
     formData.append('file', file)
 
@@ -293,13 +293,13 @@ export const Scrapers = () => {
       messageApi.success(res.data?.message || '上传成功')
       await getInfo()
       await loadVersionInfo()
+      onSuccess && onSuccess(res.data)
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
+      onError && onError(error)
     } finally {
       setUploadingPackage(false)
     }
-
-    return false // 阻止默认上传行为
   }
 
   const handleDragEnd = event => {
@@ -665,7 +665,7 @@ export const Scrapers = () => {
                       保存
                     </Button>
                     <Upload
-                      beforeUpload={handleUploadPackage}
+                      customRequest={handleUploadPackage}
                       accept=".zip,.tar.gz,.tgz"
                       showUploadList={false}
                       disabled={uploadingPackage}
