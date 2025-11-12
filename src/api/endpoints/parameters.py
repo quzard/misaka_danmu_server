@@ -204,9 +204,18 @@ async def upload_scraper_package(
 
             logger.info(f"用户 '{current_user.username}' 上传了离线包,共 {file_count} 个文件")
 
-            # 在后台异步重载弹幕源,避免阻塞响应
+            # 先返回响应,再在后台异步重载弹幕源
+            response_data = {
+                "message": f"上传成功,共安装 {file_count} 个文件",
+                "version": versions_data.get('version'),
+                "scrapers": list(versions_data.get('scrapers', {}).keys())
+            }
+
+            # 在后台异步重载弹幕源,添加延迟避免阻塞响应
             async def reload_scrapers_background():
                 try:
+                    import asyncio
+                    await asyncio.sleep(0.5)  # 延迟0.5秒,确保响应已发送
                     await manager.load_and_sync_scrapers()
                     logger.info("弹幕源重载完成")
                 except Exception as e:
@@ -215,11 +224,7 @@ async def upload_scraper_package(
             import asyncio
             asyncio.create_task(reload_scrapers_background())
 
-            return {
-                "message": f"上传成功,共安装 {file_count} 个文件,弹幕源正在后台重载",
-                "version": versions_data.get('version'),
-                "scrapers": list(versions_data.get('scrapers', {}).keys())
-            }
+            return response_data
 
     except HTTPException:
         raise
