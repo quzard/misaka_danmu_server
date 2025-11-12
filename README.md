@@ -42,6 +42,7 @@
   - 创建和管理供第三方客户端（如 yamby, hills, 小幻影视, SenPlayer等）使用的API令牌。
   - 配置搜索源的优先级和启用状态。
   - 查看后台任务进度和系统日志。
+- **弹幕源管理**: 支持从[资源仓库](docs/scraper-management.md)加载或上传离线包来安装弹幕源，支持备份和恢复功能。
 - **元数据整合**: 支持与 TMDB, TVDB, Bangumi, Douban, IMDb 集成，丰富您的媒体信息。
 - **自动化**: 支持通过 Webhook 接收来自 Sonarr, Radarr, Emby 等服务的通知，实现全自动化的弹幕导入。
 - **灵活部署**: 提供 Docker 镜像和 Docker Compose 文件，方便快速部署。
@@ -87,6 +88,7 @@
 - **[🔗 Webhook 配置](docs/webhook-configuration.md)** - Emby/Jellyfin/Plex 自动化配置
 - **[🤖 Telegram Bot](docs/telegram-bot.md)** - 机器人集成指南
 - **[🔍 智能搜索](docs/smart-search.md)** - 后备搜索与匹配功能
+- **[🔧 弹幕源管理](docs/scraper-management.md)** - 弹幕源加载、备份与恢复
 - **[⚡ MySQL 优化](docs/mysql-optimization.md)** - 内存优化配置指南
 - **[❓ 常见问题](docs/faq.md)** - 故障排除与解决方案
 

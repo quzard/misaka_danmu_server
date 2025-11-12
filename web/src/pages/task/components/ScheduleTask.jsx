@@ -10,6 +10,7 @@ import {
   Table,
   Tag,
   Tooltip,
+  Typography,
 } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
@@ -28,6 +29,8 @@ import { useMessage } from '../../../MessageContext'
 import { Cron } from 'react-js-cron'
 import 'react-js-cron/dist/styles.css'
 import cronstrue from 'cronstrue/i18n'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 
 export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
@@ -41,6 +44,7 @@ export const ScheduleTask = () => {
   const editid = Form.useWatch('taskId', form)
   const modalApi = useModal()
   const messageApi = useMessage()
+  const isMobile = useAtomValue(isMobileAtom)
 
   // 获取Cron表达式的人类可读描述
   const getCronDescription = (cronExpression) => {
@@ -278,14 +282,108 @@ export const ScheduleTask = () => {
         <div className="mb-4">
           定时任务用于自动执行维护操作，例如自动更新和映射TMDB数据。使用标准的Cron表达式格式。
         </div>
-        <Table
-          pagination={false}
-          size="small"
-          dataSource={tasks}
-          columns={columns}
-          rowKey={'taskId'}
-          scroll={{ x: '100%' }}
-        />
+        {isMobile ? (
+          <div className="grid grid-cols-1 gap-4">
+            {tasks.map((task) => {
+              const jobType = availableJobTypes.find(
+                job => job.jobType === task.jobType
+              )
+              const isSystemTask = task.isSystemTask || false
+
+              return (
+                <Card
+                  key={task.taskId}
+                  className="shadow-sm hover:shadow-md transition-shadow"
+                  title={
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-lg">{task.name}</span>
+                      {isSystemTask && (
+                        <Tag color="blue" size="small">系统任务</Tag>
+                      )}
+                    </div>
+                  }
+                  extra={
+                    !isSystemTask && (
+                      <Space size="small">
+                        <Tooltip title="立即运行">
+                          <Button
+                            type="text"
+                            icon={<MyIcon icon="canshuzhihang" size={16} />}
+                            onClick={() => handleRun(task)}
+                            size="small"
+                          />
+                        </Tooltip>
+                        <Tooltip title="编辑任务">
+                          <Button
+                            type="text"
+                            icon={<MyIcon icon="edit" size={16} />}
+                            onClick={() => {
+                              form.setFieldsValue({
+                                ...task,
+                              })
+                              setAddOpen(true)
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                        <Tooltip title="删除任务">
+                          <Button
+                            type="text"
+                            icon={<MyIcon icon="delete" size={16} />}
+                            onClick={() => handleDelete(task)}
+                            size="small"
+                            danger
+                          />
+                        </Tooltip>
+                      </Space>
+                    )
+                  }
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600">类型：</span>
+                      <span>{jobType?.name || task.jobType}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600">Cron表达式：</span>
+                      <Typography.Text code>{task.cronExpression}</Typography.Text>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600">状态：</span>
+                      {task.isEnabled ? (
+                        <Tag color="green">启用</Tag>
+                      ) : (
+                        <Tag color="red">禁用</Tag>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">上次运行：</span>
+                        <span>{dayjs(task.lastRunAt).format('YYYY-MM-DD HH:mm:ss')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">下次运行：</span>
+                        <span>{dayjs(task.nextRunAt).format('YYYY-MM-DD HH:mm:ss')}</span>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        ) : (
+          <Table
+            pagination={false}
+            size="small"
+            dataSource={tasks}
+            columns={columns}
+            rowKey={'taskId'}
+            scroll={{ x: '100%' }}
+          />
+        )}
       </Card>
       <Modal
         title={!!editid ? '编辑定时任务' : '添加定时任务'}
@@ -307,7 +405,7 @@ export const ScheduleTask = () => {
           form={form}
           layout="vertical"
           initialValues={{
-            jobType: 'tmdbAutoMap',
+            jobType: availableJobTypes.filter(job => !job.isSystemTask)[0]?.jobType || '',
             isEnabled: true,
             cronExpression: '0 2 * * *',
           }}

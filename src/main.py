@@ -1,16 +1,19 @@
+import time
 import uvicorn
 import asyncio
 import secrets
 import httpx
+import logging
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, status
 from fastapi.openapi.docs import get_swagger_ui_html
-import logging
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
-from fastapi.middleware.cors import CORSMiddleware  # 新增：处理跨域
-import json
+from fastapi.middleware.cors import CORSMiddleware
+
+# 内部模块导入
 from .config_manager import ConfigManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api import api_router, control_router
@@ -21,11 +24,17 @@ from .scraper_manager import ScraperManager
 from .webhook_manager import WebhookManager
 from .scheduler import SchedulerManager
 from .config import settings
-from . import crud, security, orm_models  # 添加 orm_models 导入
+from . import crud, security, orm_models
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
 from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT
+from .title_recognition import TitleRecognitionManager
+from .media_server_manager import MediaServerManager
+from .default_configs import get_default_configs
+from .database import get_db_type
+from .transport_manager import TransportManager
+from sqlalchemy import text
 
 print(f"当前环境: {settings.environment}")
 
@@ -75,8 +84,11 @@ def _get_default_danmaku_path_template():
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理器。
-    - `yield` 之前的部分在应用启动时执行。 
-    - `yield` 之后的部分在应用关闭时执行。
+    - `yield` 之前的部分在应用启动时执行。
+            try:
+                await app.state.metadata_manager.close_all()
+            except Exception as e:
+                logger.exception(f"关闭 MetadataManager 时发生错误: {e}")
     """
     # --- Startup Logic ---
     setup_logging()
@@ -96,140 +108,137 @@ async def lifespan(app: FastAPI):
         interrupted_count = await crud.mark_interrupted_tasks_as_failed(session)
         if interrupted_count > 0:
             logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
-    
-    # 新增：初始化配置管理器
+
+
+    # 新增:PostgreSQL序列自动修复(防止主键冲突)
+    if get_db_type() == "postgresql":
+        async with session_factory() as session:
+            try:
+                await session.execute(text(
+                    "SELECT setval('anime_id_seq', (SELECT COALESCE(MAX(id), 0) FROM anime))"
+                ))
+                await session.commit()
+                logger.info("已自动同步PostgreSQL的anime_id_seq序列")
+            except Exception as e:
+                logger.warning(f"同步PostgreSQL序列时出错(可忽略): {e}")
+
+    # 初始化配置管理器
     app.state.config_manager = ConfigManager(session_factory)
-    # 新增：集中定义所有默认配置
-    default_configs = {
-        # 缓存 TTL
-        'jwtSecretKey': (secrets.token_hex(32), '用于签名JWT令牌的密钥，在首次启动时自动生成。'),
-        'searchTtlSeconds': (10800, '搜索结果的缓存时间（秒），最低3小时。'),
-        'episodesTtlSeconds': (10800, '分集列表的缓存时间（秒），最低3小时。'),
-        'baseInfoTtlSeconds': (10800, '基础媒体信息（如爱奇艺）的缓存时间（秒），最低3小时。'),
-        'metadataSearchTtlSeconds': (10800, '元数据（如TMDB, Bangumi）搜索结果的缓存时间（秒），最低3小时。'),
-        # API 和 Webhook
-        'customApiDomain': ('', '用于拼接弹幕API地址的自定义域名。'),
-        'webhookApiKey': ('', '用于Webhook调用的安全密钥。'),
-        'trustedProxies': ('', '受信任的反向代理IP列表，用逗号分隔。当请求来自这些IP时，将从 X-Forwarded-For 或 X-Real-IP 头中解析真实客户端IP。'),
-        'webhookEnabled': ('true', '是否全局启用 Webhook 功能。'),
-        'webhookDelayedImportEnabled': ('false', '是否为 Webhook 触发的导入启用延时。'),
-        'webhookDelayedImportHours': ('24', 'Webhook 延时导入的小时数。'),
-        'webhookFilterMode': ('blacklist', 'Webhook 标题过滤模式 (blacklist/whitelist)。'),
-        'webhookFilterRegex': ('', '用于过滤 Webhook 标题的正则表达式。'),
-        'webhookLogRawRequest': ('false', '是否记录 Webhook 的原始请求体。'),
-        'externalApiKey': ('', '用于外部API调用的安全密钥。'),
-        'externalApiDuplicateTaskThresholdHours': (3, '（外部API）重复任务提交阈值（小时）。在此时长内，不允许为同一媒体提交重复的自动导入任务。0为禁用。'),
-        'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
-        # 认证
-        # 代理
-        'proxyUrl': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),
-        'proxyEnabled': ('false', '是否全局启用代理。'),
-        'proxySslVerify': ('true', '使用HTTPS代理时是否验证SSL证书。设为false可解决自签名证书问题。'),
-        'jwtExpireMinutes': (settings.jwt.access_token_expire_minutes, 'JWT令牌的有效期（分钟）。-1 表示永不过期。'),
-        # 元数据源
-        'tmdbApiKey': ('', '用于访问 The Movie Database API 的密钥。'),
-        'tmdbApiBaseUrl': ('https://api.themoviedb.org', 'TMDB API 的基础域名。'),
-        'tmdbImageBaseUrl': ('https://image.tmdb.org', 'TMDB 图片服务的基础 URL。'),
-        'tvdbApiKey': ('', '用于访问 TheTVDB API 的密钥。'),
-        'bangumiClientId': ('', '用于Bangumi OAuth的App ID。'),
-        'bangumiClientSecret': ('', '用于Bangumi OAuth的App Secret。'),
-        'doubanCookie': ('', '用于访问豆瓣API的Cookie。'),
-        # 弹幕源
-        'danmakuOutputLimitPerSource': ('-1', '弹幕输出上限。-1为无限制。超出限制时按时间段均匀采样。'),
-        'danmakuAggregationEnabled': ('true', '是否启用跨源弹幕聚合功能。'),
-        'scraperVerificationEnabled': ('false', '是否启用搜索源签名验证。'),
-        'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
-        'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
-        'matchFallbackEnabled': ('false', '是否为匹配接口启用后备机制（自动搜索导入）。'),
-        'matchFallbackBlacklist': ('', '匹配后备黑名单，使用正则表达式过滤文件名，匹配的文件不会触发后备机制。'),
-        'searchFallbackEnabled': ('false', '是否为搜索接口启用后备搜索功能（全网搜索）。'),
-        # 弹幕文件路径配置
-        'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
-        'customDanmakuPathTemplate': (_get_default_danmaku_path_template(), '自定义弹幕文件路径模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}。.xml后缀会自动添加。'),
-        'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
-        'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
-        # 搜索性能优化
-        'searchMaxResultsPerSource': ('30', '每个搜索源最多返回的结果数量。设置较小的值可以提高搜索速度。'),
-        # 全局过滤
-        'search_result_global_blacklist_cn': (r'特典|预告|广告|菜单|花絮|特辑|速看|资讯|彩蛋|直拍|直播回顾|片头|片尾|幕后|映像|番外篇|纪录片|访谈|番外|短片|加更|走心|解忧|纯享|解读|揭秘|赏析', '用于过滤搜索结果标题的全局中文黑名单(正则表达式)。'),
-        'search_result_global_blacklist_eng': (r'NC|OP|ED|SP|OVA|OAD|CM|PV|MV|BDMenu|Menu|Bonus|Recap|Teaser|Trailer|Preview|CD|Disc|Scan|Sample|Logo|Info|EDPV|SongSpot|BDSpot', '用于过滤搜索结果标题的全局英文黑名单(正则表达式)。'),
-        'mysqlBinlogRetentionDays': (3, '（仅MySQL）自动清理多少天前的二进制日志（binlog）。0为不清理。需要SUPER或BINLOG_ADMIN权限。'),
-        # 顺延机制配置
-        'webhookFallbackEnabled': ('false', '是否启用Webhook顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
-        'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
-        # AI匹配配置
-        'aiMatchEnabled': ('false', '是否启用AI智能匹配。启用后，在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。'),
-        'aiMatchFallbackEnabled': ('true', '是否启用传统匹配兜底。当AI匹配失败时，自动降级到传统匹配算法。'),
-        'aiMatchProvider': ('deepseek', 'AI提供商: deepseek, openai, gemini'),
-        'aiMatchApiKey': ('', 'AI服务的API密钥'),
-        'aiMatchBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
-        'aiMatchModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, gpt-4, gemini-pro'),
-        'aiMatchPrompt': (DEFAULT_AI_MATCH_PROMPT, 'AI智能匹配提示词'),
-        'aiRecognitionEnabled': ('false', '是否启用AI辅助识别。启用后，在TMDB自动刮削任务中使用AI识别标题和季度信息。'),
-        'aiRecognitionPrompt': (DEFAULT_AI_RECOGNITION_PROMPT, 'AI辅助识别提示词'),
-        'aiAliasCorrectionEnabled': ('false', '是否启用AI别名修正。启用后，在TMDB自动刮削任务中使用AI验证和修正别名。'),
-        'aiAliasValidationPrompt': (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, 'AI别名验证提示词'),
-        'aiAliasExpansionEnabled': ('false', '是否启用AI别名扩展。启用后，当元数据源返回非中文标题时，使用AI生成可能的别名用于搜索。'),
-        'aiAliasExpansionPrompt': (DEFAULT_AI_ALIAS_EXPANSION_PROMPT, 'AI别名扩展提示词'),
-        'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
+
+    # 注册默认配置(从default_configs.py导入)
+    ai_prompts = {
+        'DEFAULT_AI_MATCH_PROMPT': DEFAULT_AI_MATCH_PROMPT,
+        'DEFAULT_AI_RECOGNITION_PROMPT': DEFAULT_AI_RECOGNITION_PROMPT,
+        'DEFAULT_AI_ALIAS_VALIDATION_PROMPT': DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
+        'DEFAULT_AI_ALIAS_EXPANSION_PROMPT': DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
     }
+    default_configs = get_default_configs(settings=settings, ai_prompts=ai_prompts)
+    # 添加运行时生成的配置
+    default_configs['jwtSecretKey'] = (secrets.token_hex(32), '用于签名JWT令牌的密钥，在首次启动时自动生成。')
+
     await app.state.config_manager.register_defaults(default_configs)
 
-    # --- 新的初始化顺序以解决循环依赖 ---
-    # 1. 初始化元数据管理器，但暂时不传入 scraper_manager
-    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None) # type: ignore
+    # 初始化 TransportManager
+    app.state.transport_manager = TransportManager()
 
-    # 2. 初始化搜索源管理器，并传入元数据管理器
-    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager)
+    # --- 并行优化的初始化顺序 ---
+    startup_start = time.time()
 
-    # 3. 将 scraper_manager 实例回填到 metadata_manager 中
+    # 1-3. 创建管理器实例（不阻塞）
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None)
+    app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager, app.state.transport_manager)
     app.state.metadata_manager.scraper_manager = app.state.scraper_manager
 
-    # 4. 现在可以安全地初始化所有管理器
-    await app.state.scraper_manager.initialize()
-    await app.state.metadata_manager.initialize()
+    # 4. 【并行优化】同时初始化 + 预热
+    logger.info("开始并行初始化...")
+    init_start = time.time()
 
-    # 5. 初始化其他依赖于上述管理器的组件
+    # 先并行初始化两个管理器
+    await asyncio.gather(
+        app.state.scraper_manager.initialize(),
+        app.state.metadata_manager.initialize()
+    )
+
+    # 【优化】预加载所有配置到缓存
+    logger.info("预加载配置缓存...")
+    async with session_factory() as session:
+        # 预加载代理相关配置
+        proxy_url = await crud.get_config_value(session, "proxyUrl", "")
+        proxy_enabled = await crud.get_config_value(session, "proxyEnabled", "false")
+        app.state.config_manager._cache["proxyUrl"] = proxy_url
+        app.state.config_manager._cache["proxyEnabled"] = proxy_enabled
+
+        # 一次性查询所有 scraper 设置并缓存
+        scraper_settings = await crud.get_all_scraper_settings(session)
+        # 存储到 scraper_manager 中供后续使用,避免重复查询
+        app.state.scraper_manager._cached_scraper_settings = {
+            s['providerName']: s for s in scraper_settings
+        }
+
+    # 初始化关键组件（同步执行，确保启动正常）
     app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
-
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
+
+    # Add bangumi specific routes with /bangumi prefix
+    if 'bangumi' in app.state.metadata_manager.sources:
+        bangumi_router = app.state.metadata_manager.sources['bangumi'].api_router
+        app.include_router(bangumi_router, prefix="/api/bangumi", tags=["Bangumi"])
 
 
 
     app.state.task_manager = TaskManager(session_factory, app.state.config_manager)
-    
+
     # 初始化识别词管理器
-    from .title_recognition import TitleRecognitionManager
     app.state.title_recognition_manager = TitleRecognitionManager(session_factory)
-    
+
+    # 初始化媒体服务器管理器
+    app.state.media_server_manager = MediaServerManager(session_factory)
+    await app.state.media_server_manager.initialize()
+
     app.state.webhook_manager = WebhookManager(
-        session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager
+        session_factory, app.state.task_manager, app.state.scraper_manager,
+        app.state.rate_limiter, app.state.metadata_manager,
+        app.state.config_manager, app.state.title_recognition_manager
     )
+
+    init_time = time.time() - init_start
+    logger.info(f"并行初始化完成，耗时 {init_time:.2f} 秒")
+    # 5. 启动服务（必须在上面完成后）
     app.state.task_manager.start()
     await create_initial_admin_user(app)
-    
-    # 新增：创建系统内置定时任务
+
     async with session_factory() as session:
         existing_task = await session.get(orm_models.ScheduledTask, "system_token_reset")
         if not existing_task:
             await crud.create_scheduled_task(
-                session, 
+                session,
                 task_id="system_token_reset",
                 name="系统内置：Token每日重置",
-                job_type="tokenReset", 
+                job_type="tokenReset",
                 cron="0 0 * * *",
                 is_enabled=True
             )
-            logger.info("已创建系统内置定时任务：重置API Token每日调用次数")
-    
+
     app.state.cleanup_task = asyncio.create_task(cleanup_task(app))
-    app.state.scheduler_manager = SchedulerManager(session_factory, app.state.task_manager, app.state.scraper_manager, app.state.rate_limiter, app.state.metadata_manager, app.state.config_manager, app.state.title_recognition_manager)
+    app.state.scheduler_manager = SchedulerManager(
+        session_factory, app.state.task_manager, app.state.scraper_manager,
+        app.state.rate_limiter, app.state.metadata_manager,
+        app.state.config_manager, app.state.title_recognition_manager
+    )
     await app.state.scheduler_manager.start()
-    
-    # --- 前端服务 (生产环境) ---
+
+    total_time = time.time() - startup_start
+    logger.info(f"应用启动完成，总耗时 {total_time:.2f} 秒")
+
+    # --- 前端服务 ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
+
+    # 无论开发还是生产环境，都需要挂载用户缓存的图片
+    # 这样开发环境下前端通过代理也能访问到这些资源
+    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
+
     # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-    # 并且需要一个“捕获所有”的路由来始终提供 index.html，以支持前端路由。
+    # 并且需要一个"捕获所有"的路由来始终提供 index.html，以支持前端路由。
     if settings.environment == "development":
         # 开发环境：所有非API请求都重定向到Vite开发服务器
         @app.get("/{full_path:path}", include_in_schema=False)
@@ -243,32 +252,43 @@ async def lifespan(app: FastAPI):
         app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
         # dist挂载
         app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
-        # 挂载用户缓存的图片 (如海报)
-        app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
         # 然后，为所有其他路径提供 index.html 以支持前端路由
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(request: Request, full_path: str):
             return FileResponse("web/dist/index.html")
-    
+
     yield
-    
+
     # --- Shutdown Logic ---
+    logger.info("应用正在关闭...")
+
     if hasattr(app.state, "cleanup_task"):
         app.state.cleanup_task.cancel()
         try:
             await app.state.cleanup_task
         except asyncio.CancelledError:
             pass
+
     await close_db_engine(app)
     if hasattr(app.state, "scraper_manager"):
         await app.state.scraper_manager.close_all()
+    # 关闭 TransportManager
+    if hasattr(app.state, "transport_manager"):
+        try:
+            await app.state.transport_manager.close_all()
+        except Exception as e:
+            logger.exception(f"关闭 TransportManager 时发生错误: {e}")
     if hasattr(app.state, "task_manager"):
         await app.state.task_manager.stop()
     # 新增：在关闭时也关闭元数据管理器
     if hasattr(app.state, "metadata_manager"):
         await app.state.metadata_manager.close_all()
+    if hasattr(app.state, "media_server_manager"):
+        await app.state.media_server_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
+
+    logger.info("应用已完全关闭")
 
 app = FastAPI(
     title="Misaka Danmaku External Control API",
@@ -342,7 +362,7 @@ async def log_not_found_requests(request: Request, call_next):
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Forbidden"}
             )
-        
+
         # 对于非 API 路径的 404 (例如，如果静态文件服务被错误配置)，记录详细信息
         scope = request.scope
         serializable_scope = {

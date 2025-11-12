@@ -13,13 +13,34 @@ from .migrations import run_migrations
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
+def get_db_type() -> str:
+    """获取数据库类型"""
+    return settings.database.type.lower()
+
+
+async def sync_postgres_sequence(session: AsyncSession, table_name: str = "anime", sequence_name: str = "anime_id_seq"):
+    """
+    同步PostgreSQL序列到表的最大ID值,避免主键冲突
+
+    Args:
+        session: 数据库会话
+        table_name: 表名,默认为"anime"
+        sequence_name: 序列名,默认为"anime_id_seq"
+    """
+    if get_db_type() == "postgresql":
+        await session.execute(text(
+            f"SELECT setval('{sequence_name}', (SELECT MAX(id) FROM {table_name}))"
+        ))
+        logger.info(f"已同步PostgreSQL序列 {sequence_name} 到表 {table_name} 的最大ID")
+
+
 def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
     """
     根据配置生成数据库连接URL。
     :param include_db_name: URL中是否包含数据库名称。
     :param for_server: 是否为连接到服务器（而不是特定数据库）生成URL，主要用于PostgreSQL。
     """
-    db_type = settings.database.type.lower()
+    db_type = get_db_type()
     
     if db_type == "mysql":
         drivername = "mysql+aiomysql"

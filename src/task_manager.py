@@ -26,6 +26,13 @@ class TaskSuccess(Exception):
     """自定义异常，用于表示任务成功完成并附带一条最终消息。"""
     pass
 
+class TaskPauseForRateLimit(Exception):
+    """自定义异常，用于表示任务因速率限制需要暂停"""
+    def __init__(self, retry_after_seconds: float, message: str = ""):
+        self.retry_after_seconds = retry_after_seconds
+        self.message = message
+        super().__init__(message)
+
 class Task:
     def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None, queue_type: str = "download"):
         self.task_id = task_id
@@ -53,11 +60,13 @@ class TaskManager:
         self._download_worker_task: asyncio.Task | None = None
         self._management_worker_task: asyncio.Task | None = None
         self._fallback_worker_task: asyncio.Task | None = None
+        self._paused_tasks_monitor_task: asyncio.Task | None = None
         self._current_download_task: Optional[Task] = None
         self._current_management_task: Optional[Task] = None
         self._current_fallback_task: Optional[Task] = None
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
+        self._paused_tasks: Dict[str, Tuple[Task, float]] = {}  # {task_id: (task, resume_time)}
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -68,9 +77,10 @@ class TaskManager:
             self._download_worker_task = asyncio.create_task(self._download_worker())
             self._management_worker_task = asyncio.create_task(self._management_worker())
             self._fallback_worker_task = asyncio.create_task(self._fallback_worker())
+            self._paused_tasks_monitor_task = asyncio.create_task(self._paused_tasks_monitor())
             # 启动时处理中断的任务
             asyncio.create_task(self._handle_interrupted_tasks())
-            self.logger.info("任务管理器已启动 (下载队列 + 管理队列 + 后备队列)。")
+            self.logger.info("任务管理器已启动 (下载队列 + 管理队列 + 后备队列 + 暂停任务监控)。")
 
     async def _run_task_wrapper(self, task: Task, queue_type: str = "download"):
         """
@@ -110,7 +120,21 @@ class TaskManager:
                     session, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
                 )
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成 [队列: {queue_type}]。")
+        except TaskPauseForRateLimit as e:
+            # 任务因速率限制需要暂停
+            self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {e.retry_after_seconds:.0f} 秒")
+            async with self._session_factory() as final_session:
+                await crud.update_task_progress_in_history(
+                    final_session, task.task_id, TaskStatus.PAUSED,
+                    None,  # 保持当前进度
+                    e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+                )
+            # 将任务放入暂停列表
+            await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
+            # 不设置 done_event，因为任务还会继续
+            return  # 提前返回，不执行 finally 块
         except TaskSuccess as e:
+            self.logger.debug(f"捕获到 TaskSuccess 异常: {e}")
             final_message = str(e) if str(e) else "任务成功完成"
             async with self._session_factory() as final_session:
                 await crud.finalize_task_in_history(
@@ -174,6 +198,9 @@ class TaskManager:
                 self._current_download_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="download")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Download Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_download_task = None
                 self._download_queue.task_done()
@@ -186,6 +213,9 @@ class TaskManager:
                 self._current_management_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="management")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Management Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_management_task = None
                 self._management_queue.task_done()
@@ -198,9 +228,49 @@ class TaskManager:
                 self._current_fallback_task = task
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="fallback")
+            except Exception as e:
+                # 防止 worker 崩溃 - 捕获所有未被 _run_task_wrapper 处理的异常
+                self.logger.error(f"❌ Fallback Worker 捕获到未处理的异常: {type(e).__name__}: {e}", exc_info=True)
             finally:
                 self._current_fallback_task = None
                 self._fallback_queue.task_done()
+
+    async def _paused_tasks_monitor(self):
+        """监控暂停的任务，到时间后重新放回队列"""
+        while True:
+            try:
+                await asyncio.sleep(1)  # 每秒检查一次
+                current_time = time.time()
+                tasks_to_resume = []
+
+                async with self._lock:
+                    for task_id, (task, resume_time) in list(self._paused_tasks.items()):
+                        if current_time >= resume_time:
+                            tasks_to_resume.append((task_id, task))
+
+                    # 从暂停列表中移除
+                    for task_id, _ in tasks_to_resume:
+                        del self._paused_tasks[task_id]
+
+                # 重新放回队列
+                for task_id, task in tasks_to_resume:
+                    self.logger.info(f"任务 '{task.title}' (ID: {task_id}) 暂停时间已到，重新放回 {task.queue_type} 队列")
+                    if task.queue_type == "download":
+                        await self._download_queue.put(task)
+                    elif task.queue_type == "management":
+                        await self._management_queue.put(task)
+                    elif task.queue_type == "fallback":
+                        await self._fallback_queue.put(task)
+
+            except Exception as e:
+                self.logger.error(f"❌ 暂停任务监控器发生错误: {type(e).__name__}: {e}", exc_info=True)
+
+    async def pause_task_for_rate_limit(self, task: Task, retry_after_seconds: float):
+        """将任务暂停指定时间，然后重新放回队列"""
+        resume_time = time.time() + retry_after_seconds
+        async with self._lock:
+            self._paused_tasks[task.task_id] = (task, resume_time)
+        self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {retry_after_seconds:.0f} 秒")
 
     async def submit_task(
         self,
@@ -237,9 +307,14 @@ class TaskManager:
             # 新增：检查唯一键，防止同一资源的多个任务同时进行
             if unique_key:
                 if unique_key in self._active_unique_keys:
+                    # 根据unique_key的前缀提供更友好的错误消息
+                    if unique_key.startswith("scan-media-server-"):
+                        error_msg = "该媒体服务器的扫描任务正在进行中，请等待当前任务完成后再试。"
+                    else:
+                        error_msg = "一个针对此资源的相似任务已在队列中或正在运行，请勿重复提交。"
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail=f"一个针对此媒体的相似任务已在队列中或正在运行，请勿重复提交。"
+                        detail=error_msg
                     )
                 self._active_unique_keys.add(unique_key)
             self._pending_titles.add(title)
@@ -249,7 +324,7 @@ class TaskManager:
 
         async with self._session_factory() as session:
             await crud.create_task_in_history(
-                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, queue_type=queue_type
+                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type
             )
 
         if run_immediately:
@@ -345,6 +420,25 @@ class TaskManager:
             for task in temp_list:
                 await self._management_queue.put(task)
 
+        # 如果在管理队列中也没找到，检查后备队列
+        if not found_and_removed:
+            temp_list = []
+            while not self._fallback_queue.empty():
+                try:
+                    task = self._fallback_queue.get_nowait()
+                    if task.task_id == task_id:
+                        found_and_removed = True
+                        task_to_remove = task
+                        task.done_event.set()
+                        self.logger.info(f"已从后备队列中取消待处理任务 '{task.title}' (ID: {task_id})。")
+                    else:
+                        temp_list.append(task)
+                except asyncio.QueueEmpty:
+                    break
+
+            for task in temp_list:
+                await self._fallback_queue.put(task)
+
         # 修正：如果一个待处理任务被取消，必须同时清理其在管理器中的状态（任务标题和唯一键），
         # 以允许用户重新提交该任务。
         if found_and_removed and task_to_remove:
@@ -376,6 +470,15 @@ class TaskManager:
             self._current_management_task.running_coro_task.cancel()
             return True
 
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id and self._current_fallback_task.running_coro_task:
+            self.logger.info(f"正在中止后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})")
+            # 解除暂停，以便任务可以接收到取消异常
+            self._current_fallback_task.pause_event.set()
+            # 取消底层的协程
+            self._current_fallback_task.running_coro_task.cancel()
+            return True
+
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
@@ -397,6 +500,14 @@ class TaskManager:
                 self.logger.info(f"已暂停管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
                 return True
 
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_fallback_task.pause_event.clear()
+                await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
@@ -416,6 +527,14 @@ class TaskManager:
                 self._current_management_task.pause_event.set()
                 await crud.update_task_status(session, self._current_management_task.task_id, TaskStatus.RUNNING)
                 self.logger.info(f"已恢复管理队列任务 '{self._current_management_task.title}' (ID: {task_id})。")
+                return True
+
+        # 检查后备队列的当前任务
+        if self._current_fallback_task and self._current_fallback_task.task_id == task_id:
+            async with self._session_factory() as session:
+                self._current_fallback_task.pause_event.set()
+                await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
                 return True
 
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")

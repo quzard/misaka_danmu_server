@@ -291,8 +291,83 @@ class RateLimitState(Base):
 class TitleRecognition(Base):
     """识别词配置表 - 单记录全量存储"""
     __tablename__ = "title_recognition"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     content: Mapped[str] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
     created_at: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
     updated_at: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
+
+
+class MediaServer(Base):
+    """媒体服务器配置表"""
+    __tablename__ = "media_servers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    providerName: Mapped[str] = mapped_column("provider_name", String(50))  # emby, jellyfin, plex
+    url: Mapped[str] = mapped_column(String(512))
+    apiToken: Mapped[str] = mapped_column("api_token", String(512))
+    isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    selectedLibraries: Mapped[Optional[str]] = mapped_column("selected_libraries", TEXT)  # JSON array
+    filterRules: Mapped[Optional[str]] = mapped_column("filter_rules", TEXT)  # JSON object
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
+
+    mediaItems: Mapped[List["MediaItem"]] = relationship(back_populates="server", cascade="all, delete-orphan")
+
+
+class MediaItem(Base):
+    """扫描到的媒体项"""
+    __tablename__ = "media_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    serverId: Mapped[int] = mapped_column("server_id", ForeignKey("media_servers.id", ondelete="CASCADE"))
+    mediaId: Mapped[str] = mapped_column("media_id", String(255))  # 媒体服务器中的ID
+    libraryId: Mapped[Optional[str]] = mapped_column("library_id", String(255))  # 所属媒体库ID
+    title: Mapped[str] = mapped_column(String(255))
+    mediaType: Mapped[str] = mapped_column("media_type", Enum('movie', 'tv_series', name="media_item_type"))
+    season: Mapped[Optional[int]] = mapped_column(Integer)
+    episode: Mapped[Optional[int]] = mapped_column(Integer)
+    year: Mapped[Optional[int]] = mapped_column(Integer)
+    tmdbId: Mapped[Optional[str]] = mapped_column("tmdb_id", String(50))
+    tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(50))
+    imdbId: Mapped[Optional[str]] = mapped_column("imdb_id", String(50))
+    posterUrl: Mapped[Optional[str]] = mapped_column("poster_url", String(1024))
+    isImported: Mapped[bool] = mapped_column("is_imported", Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
+
+    server: Mapped["MediaServer"] = relationship(back_populates="mediaItems")
+
+    __table_args__ = (
+        UniqueConstraint('server_id', 'media_id', name='idx_server_media_unique'),
+        Index('idx_media_type', 'media_type'),
+        Index('idx_is_imported', 'is_imported'),
+    )
+
+
+class LocalDanmakuItem(Base):
+    """本地扫描的弹幕文件"""
+    __tablename__ = "local_danmaku_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    filePath: Mapped[str] = mapped_column("file_path", String(1024))  # .xml文件路径
+    title: Mapped[str] = mapped_column(String(512))  # 标题
+    mediaType: Mapped[str] = mapped_column("media_type", Enum('movie', 'tv_series', name="local_media_type"))
+    season: Mapped[Optional[int]] = mapped_column(Integer)  # 季度
+    episode: Mapped[Optional[int]] = mapped_column(Integer)  # 集数
+    year: Mapped[Optional[int]] = mapped_column(Integer)  # 年份
+    tmdbId: Mapped[Optional[str]] = mapped_column("tmdb_id", String(50))
+    tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(50))
+    imdbId: Mapped[Optional[str]] = mapped_column("imdb_id", String(50))
+    posterUrl: Mapped[Optional[str]] = mapped_column("poster_url", String(1024))
+    nfoPath: Mapped[Optional[str]] = mapped_column("nfo_path", String(1024))  # nfo文件路径
+    isImported: Mapped[bool] = mapped_column("is_imported", Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    updatedAt: Mapped[datetime] = mapped_column("updated_at", NaiveDateTime, default=get_now, onupdate=get_now)
+
+    __table_args__ = (
+        Index('idx_local_file_path', 'file_path', mysql_length=255),
+        Index('idx_local_media_type', 'media_type'),
+        Index('idx_local_is_imported', 'is_imported'),
+    )

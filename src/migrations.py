@@ -405,6 +405,183 @@ async def _add_alias_locked_to_anime_aliases_task(conn: AsyncConnection, db_type
     else:
         logger.info("未找到需要删除的旧TMDB映射定时任务")
 
+async def _add_updated_at_to_media_items_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 为media_items表添加updated_at字段"""
+    table_name = "media_items"
+    column_name = "updated_at"
+
+    # 检查列是否已存在
+    if db_type == "mysql":
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table_name}'
+            AND COLUMN_NAME = '{column_name}'
+        """)
+    else:  # postgresql
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = '{table_name}'
+            AND column_name = '{column_name}'
+        """)
+
+    column_exists = (await conn.execute(check_sql)).scalar() > 0
+
+    if not column_exists:
+        logger.info(f"为表 '{table_name}' 添加 '{column_name}' 列...")
+        if db_type == "mysql":
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            """)
+        else:  # postgresql
+            alter_sql = text(f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN {column_name} TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+            """)
+        await conn.execute(alter_sql)
+        logger.info(f"成功为表 '{table_name}' 添加 '{column_name}' 列")
+    else:
+        logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
+
+async def _rename_ai_config_keys_task(conn: AsyncConnection):
+    """迁移任务: 重命名AI配置键,统一使用不带Match的键名"""
+    # 定义需要重命名的配置键映射 (旧键名 -> 新键名)
+    key_mappings = {
+        'aiMatchProvider': 'aiProvider',
+        'aiMatchApiKey': 'aiApiKey',
+        'aiMatchBaseUrl': 'aiBaseUrl',
+        'aiMatchModel': 'aiModel',
+        'aiMatchPrompt': 'aiPrompt',
+        'aiMatchFallbackEnabled': 'aiFallbackEnabled',
+    }
+
+    for old_key, new_key in key_mappings.items():
+        # 检查旧键是否存在
+        check_old_sql = text("SELECT config_value, description FROM config WHERE config_key = :old_key")
+        result = await conn.execute(check_old_sql, {"old_key": old_key})
+        old_row = result.fetchone()
+
+        if old_row:
+            old_value, old_desc = old_row
+            logger.info(f"正在重命名配置键: '{old_key}' -> '{new_key}'")
+
+            # 检查新键是否已存在
+            check_new_sql = text("SELECT 1 FROM config WHERE config_key = :new_key")
+            new_exists = (await conn.execute(check_new_sql, {"new_key": new_key})).scalar_one_or_none()
+
+            if new_exists:
+                # 新键已存在,只删除旧键
+                logger.info(f"新键 '{new_key}' 已存在,删除旧键 '{old_key}'")
+                delete_sql = text("DELETE FROM config WHERE config_key = :old_key")
+                await conn.execute(delete_sql, {"old_key": old_key})
+            else:
+                # 新键不存在,重命名旧键
+                update_sql = text("UPDATE config SET config_key = :new_key WHERE config_key = :old_key")
+                await conn.execute(update_sql, {"new_key": new_key, "old_key": old_key})
+                logger.info(f"成功重命名配置键: '{old_key}' -> '{new_key}'")
+        else:
+            logger.info(f"旧键 '{old_key}' 不存在,跳过重命名")
+
+    logger.info("AI配置键重命名完成")
+
+async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type: str):
+    """创建本地弹幕扫描表"""
+    logger.info("开始创建 local_danmaku_items 表...")
+
+    if db_type == 'mysql':
+        create_table_sql = text("""
+            CREATE TABLE IF NOT EXISTS local_danmaku_items (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                file_path VARCHAR(1024) NOT NULL,
+                title VARCHAR(512) NOT NULL,
+                media_type ENUM('movie', 'tv_series') NOT NULL,
+                season INT NULL,
+                episode INT NULL,
+                year INT NULL,
+                tmdb_id VARCHAR(50) NULL,
+                tvdb_id VARCHAR(50) NULL,
+                imdb_id VARCHAR(50) NULL,
+                poster_url VARCHAR(1024) NULL,
+                nfo_path VARCHAR(1024) NULL,
+                is_imported BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+    else:  # postgresql
+        # 先创建枚举类型
+        create_enum_sql = text("""
+            DO $$ BEGIN
+                CREATE TYPE local_media_type AS ENUM ('movie', 'tv_series');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """)
+        await conn.execute(create_enum_sql)
+
+        create_table_sql = text("""
+            CREATE TABLE IF NOT EXISTS local_danmaku_items (
+                id BIGSERIAL PRIMARY KEY,
+                file_path VARCHAR(1024) NOT NULL,
+                title VARCHAR(512) NOT NULL,
+                media_type local_media_type NOT NULL,
+                season INTEGER NULL,
+                episode INTEGER NULL,
+                year INTEGER NULL,
+                tmdb_id VARCHAR(50) NULL,
+                tvdb_id VARCHAR(50) NULL,
+                imdb_id VARCHAR(50) NULL,
+                poster_url VARCHAR(1024) NULL,
+                nfo_path VARCHAR(1024) NULL,
+                is_imported BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    # 先创建表
+    await conn.execute(create_table_sql)
+
+    # 然后创建索引，根据数据库类型使用合适的语法
+    if db_type == 'postgresql':
+        index_sqls = [
+            text("CREATE INDEX IF NOT EXISTS idx_local_file_path ON local_danmaku_items ((LEFT(file_path, 255)))"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_media_type ON local_danmaku_items (media_type)"),
+            text("CREATE INDEX IF NOT EXISTS idx_local_is_imported ON local_danmaku_items (is_imported)")
+        ]
+        db_name = "PostgreSQL"
+
+        for index_sql in index_sqls:
+            await conn.execute(index_sql)
+    else:  # mysql
+        # MySQL 不支持 CREATE INDEX IF NOT EXISTS，需要先检查索引是否存在
+        indexes = [
+            ("idx_local_file_path", "CREATE INDEX idx_local_file_path ON local_danmaku_items (file_path(255))"),
+            ("idx_local_media_type", "CREATE INDEX idx_local_media_type ON local_danmaku_items (media_type)"),
+            ("idx_local_is_imported", "CREATE INDEX idx_local_is_imported ON local_danmaku_items (is_imported)")
+        ]
+        db_name = "MySQL"
+
+        for index_name, create_sql in indexes:
+            # 检查索引是否存在
+            check_sql = text(f"""
+                SELECT COUNT(*) as cnt
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                AND table_name = 'local_danmaku_items'
+                AND index_name = '{index_name}'
+            """)
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
+
+            # 如果索引不存在，则创建
+            if row[0] == 0:
+                await conn.execute(text(create_sql))
+                logger.info(f"创建索引: {index_name}")
+
+    logger.info(f"local_danmaku_items 表及索引创建完成 ({db_name})")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -428,6 +605,9 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_create_title_recognition_table_v1", _create_title_recognition_table_task, (db_type,)),
         ("migrate_add_queue_type_to_task_history_v1", _add_queue_type_to_task_history_task, (db_type,)),
         ("migrate_add_alias_locked_to_anime_aliases_v1", _add_alias_locked_to_anime_aliases_task, (db_type,)),
+        ("migrate_add_updated_at_to_media_items_v1", _add_updated_at_to_media_items_task, (db_type,)),
+        ("migrate_rename_ai_config_keys_v1", _rename_ai_config_keys_task, ()),
+        ("migrate_create_local_danmaku_items_table_v1", _create_local_danmaku_items_table_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

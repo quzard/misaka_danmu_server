@@ -188,10 +188,9 @@ class MetadataSourceManager:
         for source_setting in enabled_sources_settings:
             provider = source_setting['providerName']
             if source_instance := self.sources.get(provider):
-                # 关键修复：为 TMDB 特殊处理，同时搜索 'tv' 和 'movie'
+                # 优化：为 TMDB 使用 multi 搜索，一次性搜索 tv 和 movie
                 if provider == 'tmdb':
-                    tasks.append(source_instance.search(keyword, user, mediaType='tv'))
-                    tasks.append(source_instance.search(keyword, user, mediaType='movie'))
+                    tasks.append(source_instance.search(keyword, user, mediaType='multi'))
                 else:
                     # 对于其他源，正常调用
                     tasks.append(source_instance.search(keyword, user))
@@ -202,17 +201,13 @@ class MetadataSourceManager:
             return set(), []
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         all_aliases: Set[str] = set()
         supplemental_results: List[models.ProviderSearchInfo] = []
 
         for i, res in enumerate(results):
-            # 修正：由于 TMDB 会产生两个任务，我们需要一个更健壮的方式来获取 provider_name
-            # 这是一个简化的逻辑，假设任务顺序与 settings 顺序大致对应
-            # 注意：这个逻辑在 TMDB 不是第一个或最后一个源时可能不完美，但对于当前场景是有效的
-            provider_name = "tmdb"
-            if i < len(enabled_sources_settings):
-                provider_name = enabled_sources_settings[i]['providerName']
+            # 优化：现在每个源只产生一个任务，直接使用索引获取 provider_name
+            provider_name = enabled_sources_settings[i]['providerName'] if i < len(enabled_sources_settings) else 'unknown'
 
             if isinstance(res, list):
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
@@ -422,7 +417,7 @@ class MetadataSourceManager:
             "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
-            "imdb": [],  # IMDb 目前没有特定配置
+            "imdb": ["imdbUseApi", "imdbEnableFallback"],  # IMDb 配置
             # Scrapers
             "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
         }
@@ -438,7 +433,14 @@ class MetadataSourceManager:
             else:
                 raise ValueError(f"未找到提供商: {providerName}")
         else:
-            config_values = {key: await self._config_manager.get(key, "") for key in keys_to_fetch}
+            config_values = {}
+            for key in keys_to_fetch:
+                value_str = await self._config_manager.get(key, "")
+                # 对于IMDB的布尔值配置,转换为布尔类型
+                if key in ['imdbUseApi', 'imdbEnableFallback']:
+                    config_values[key] = value_str.lower() == 'true' if value_str else True
+                else:
+                    config_values[key] = value_str
 
         # 新增：从数据库获取 useProxy 和 logRawResponses 并添加到配置中
         # 修正：将此逻辑移到更前面，确保所有源都能执行
@@ -513,12 +515,17 @@ class MetadataSourceManager:
             "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
+            "imdb": ["imdbUseApi", "imdbEnableFallback"],
         }
         allowed_keys = allowed_keys_map.get(providerName)
         if allowed_keys:
             for key, value in payload.items():
                 if key in allowed_keys:
-                    config_fields_to_update[key] = str(value if value is not None else "")
+                    # 对于布尔值,转换为字符串 "true" 或 "false"
+                    if isinstance(value, bool):
+                        config_fields_to_update[key] = str(value).lower()
+                    else:
+                        config_fields_to_update[key] = str(value if value is not None else "")
 
         # 3. 检查是否有任何需要更新的内容
         if not db_fields_to_update and not config_fields_to_update:

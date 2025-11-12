@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from xml.sax.saxutils import escape as xml_escape
 
 from . import crud, models, orm_models
+from .orm_models import Anime
 from .rate_limiter import RateLimiter, RateLimitExceededError
 from .config_manager import ConfigManager
 from .image_utils import download_image
@@ -26,11 +27,12 @@ from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .utils import parse_search_keyword, clean_xml_string
 from .crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
-from .task_manager import TaskManager, TaskSuccess, TaskStatus
+from .task_manager import TaskManager, TaskSuccess, TaskStatus, TaskPauseForRateLimit
 from .timezone import get_now
 from .title_recognition import TitleRecognitionManager
 from sqlalchemy.exc import OperationalError
 from .search_utils import unified_search
+from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -832,6 +834,18 @@ async def _import_episodes_iteratively(
                         failed_episodes_details[episode.episodeIndex] = "获取弹幕为空"
                         logger.warning(f"分集 '{episode.title}' 获取弹幕为空（0条），不创建分集记录。")
 
+            except RuntimeError as e:
+                # 配置错误（如速率限制配置验证失败），跳过当前分集
+                if "配置验证失败" in str(e):
+                    failed_episodes_count += 1
+                    failed_episodes_details[episode.episodeIndex] = f"配置错误: {str(e)}"
+                    logger.error(f"分集 '{episode.title}' 因配置错误而跳过: {str(e)}")
+                    continue
+                # 其他 RuntimeError 也应该跳过
+                failed_episodes_count += 1
+                failed_episodes_details[episode.episodeIndex] = f"运行时错误: {str(e)}"
+                logger.error(f"分集 '{episode.title}' 因运行时错误而跳过: {str(e)}")
+                continue
             except RateLimitExceededError as e:
                 # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
                 if e.retry_after_seconds >= 3600:
@@ -1187,6 +1201,9 @@ async def generic_import_task(
                     session.add(new_anime)
                     await session.flush()
                     logger.info(f"创建新的anime条目: ID={anime_id}, 标题='{title_to_use}'")
+
+                    # 同步PostgreSQL序列(避免主键冲突)
+                    await sync_postgres_sequence(session)
                 else:
                     logger.info(f"anime条目已存在: ID={anime_id}, 标题='{existing_anime.title}'")
             else:
@@ -1224,66 +1241,12 @@ async def generic_import_task(
         if e.retry_after_seconds >= 3600:
             raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+        # 抛出暂停异常，让任务管理器处理
         logger.warning(f"通用导入任务因达到速率限制而暂停: {e}")
-        await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-        await asyncio.sleep(e.retry_after_seconds)
-        # 重试流控检查和第一集获取
-        if is_fallback:
-            await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
-        else:
-            await rate_limiter.check(scraper.provider_name)
-        first_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(20 + p * 0.1, msg))
-
-        # 只有在实际获取到弹幕时才增加计数
-        if first_comments is not None:
-            if is_fallback:
-                await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
-            else:
-                await rate_limiter.increment(scraper.provider_name)
-
-        if first_comments:
-            first_episode_success = True
-            logger.info(f"数据源验证成功（重试后），第一集获取到 {len(first_comments)} 条弹幕")
-            await progress_callback(30, "数据源验证成功，正在创建数据库条目...")
-
-            # 下载海报图片
-            if imageUrl:
-                try:
-                    local_image_path = await download_image(imageUrl, session, manager, provider)
-                except Exception as e:
-                    logger.warning(f"海报下载失败: {e}")
-                    image_download_failed = True
-
-            # 创建主条目
-            anime_id = await crud.get_or_create_anime(
-                session,
-                title_to_use,
-                mediaType,
-                season_to_use,
-                imageUrl,
-                local_image_path,
-                year,
-                title_recognition_manager,
-                provider
-            )
-
-            # 更新元数据
-            await crud.update_metadata_if_empty(
-                session, anime_id,
-                tmdb_id=tmdbId,
-                imdb_id=imdbId,
-                tvdb_id=tvdbId,
-                douban_id=doubanId,
-                bangumi_id=bangumiId
-            )
-
-            # 链接数据源
-            source_id = await crud.link_source_to_anime(session, anime_id, provider, mediaId)
-            await session.commit()
-
-            logger.info(f"主条目创建完成 (Anime ID: {anime_id}, Source ID: {source_id})")
-        else:
-            logger.warning(f"第一集未获取到弹幕（重试后），数据源可能无效")
+        raise TaskPauseForRateLimit(
+            retry_after_seconds=e.retry_after_seconds,
+            message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+        )
     except Exception as e:
         logger.error(f"验证第一集时发生错误: {e}")
 
@@ -1490,8 +1453,13 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
         # 步骤 1: 获取新分集列表的元数据
         await progress_callback(10, "正在获取新分集列表...")
         current_media_id = source_info["mediaId"]
-        new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"))
-        
+
+        # 对于优酷源,传入 is_full_refresh 参数
+        if source_info["providerName"] == "youku":
+            new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"), is_full_refresh=True)
+        else:
+            new_episodes_meta = await scraper.get_episodes(current_media_id, db_media_type=source_info.get("type"))
+
         # --- 故障转移逻辑 ---
         if not new_episodes_meta:
             logger.info(f"主源 '{source_info['providerName']}' 未能找到分集，尝试故障转移...")
@@ -1502,7 +1470,12 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
                 await progress_callback(18, f"找到新的媒体ID，正在重试...")
                 await crud.update_source_media_id(session, sourceId, new_media_id)
                 await session.commit() # 提交 mediaId 的更新
-                new_episodes_meta = await scraper.get_episodes(new_media_id)
+
+                # 对于优酷源,传入 is_full_refresh 参数
+                if source_info["providerName"] == "youku":
+                    new_episodes_meta = await scraper.get_episodes(new_media_id, is_full_refresh=True)
+                else:
+                    new_episodes_meta = await scraper.get_episodes(new_media_id)
 
         if not new_episodes_meta:
             raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
@@ -1603,16 +1576,23 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         scraper = manager.get_scraper(provider_name)
         try:
             await rate_limiter.check(provider_name)
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），直接失败
+            if "配置验证失败" in str(e):
+                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
+            # 其他 RuntimeError 也应该失败
+            raise
         except RateLimitExceededError as e:
             # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
             if e.retry_after_seconds >= 3600:
                 raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+            # 抛出暂停异常，让任务管理器处理
             logger.warning(f"刷新分集任务因达到速率限制而暂停: {e}")
-            await progress_callback(30, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试流控检查
-            await rate_limiter.check(provider_name)
+            raise TaskPauseForRateLimit(
+                retry_after_seconds=e.retry_after_seconds,
+                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
 
         await progress_callback(30, "正在从源获取新弹幕...")
 
@@ -1730,6 +1710,16 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 # 2. 检查流控
                 try:
                     await rate_limiter.check(provider_name)
+                except RuntimeError as e:
+                    # 配置错误（如速率限制配置验证失败），跳过当前分集
+                    if "配置验证失败" in str(e):
+                        logger.error(f"配置错误，跳过分集 {episode_id}: {str(e)}")
+                        failed_episodes.append((episode_index, episode_id))
+                        continue
+                    # 其他 RuntimeError 也应该跳过
+                    logger.error(f"运行时错误，跳过分集 {episode_id}: {str(e)}")
+                    failed_episodes.append((episode_index, episode_id))
+                    continue
                 except RateLimitExceededError as e:
                     if e.retry_after_seconds >= 3600:
                         logger.error(f"流控配置验证失败，跳过分集 {episode_id}: {str(e)}")
@@ -2157,16 +2147,23 @@ async def manual_import_task(
 
         try:
             await rate_limiter.check(providerName)
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），直接失败
+            if "配置验证失败" in str(e):
+                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
+            # 其他 RuntimeError 也应该失败
+            raise
         except RateLimitExceededError as e:
             # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
             if e.retry_after_seconds >= 3600:
                 raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
 
+            # 抛出暂停异常，让任务管理器处理
             logger.warning(f"手动导入任务因达到速率限制而暂停: {e}")
-            await progress_callback(20, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-            await asyncio.sleep(e.retry_after_seconds)
-            # 重试流控检查
-            await rate_limiter.check(providerName)
+            raise TaskPauseForRateLimit(
+                retry_after_seconds=e.retry_after_seconds,
+                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
 
         comments = await scraper.get_comments(episode_id_for_comments, progress_callback=progress_callback)
         if not comments:
@@ -2273,7 +2270,15 @@ async def webhook_search_and_dispatch_task(
                 logger.info(f"Webhook 任务: 找到已收藏的源 '{favorited_source['providerName']}'，将直接使用此源。")
                 await progress_callback(10, f"找到已收藏的源: {favorited_source['providerName']}")
 
-                task_title = f"Webhook自动导入: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
+                # 根据来源动态生成任务标题前缀
+                if webhookSource == "media_server":
+                    source_prefix = "媒体库读取导入"
+                elif webhookSource in ["emby", "jellyfin", "plex"]:
+                    source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+                else:
+                    source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+                task_title = f"{source_prefix}: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
                 unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
                 task_coro = lambda session, cb: generic_import_task(
                     provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
@@ -2285,7 +2290,13 @@ async def webhook_search_and_dispatch_task(
                     title_recognition_manager=title_recognition_manager
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-                raise TaskSuccess(f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。")
+
+                # 根据来源动态生成成功消息
+                if webhookSource == "media_server":
+                    success_message = f"已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
+                else:
+                    success_message = f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
+                raise TaskSuccess(success_message)
 
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
@@ -2392,59 +2403,63 @@ async def webhook_search_and_dispatch_task(
         if ai_match_enabled:
             logger.info("Webhook 任务: AI匹配已启用")
             try:
-                # 获取AI配置
+                # 获取AI配置 - 使用 AIMatcher 期望的键名
                 ai_config = {
-                    'provider': await config_manager.get("aiProvider", "deepseek"),
-                    'api_key': await config_manager.get("aiApiKey", ""),
-                    'base_url': await config_manager.get("aiBaseUrl", ""),
-                    'model': await config_manager.get("aiModel", ""),
-                    'match_prompt': await config_manager.get("aiMatchPrompt", ""),
-                    'log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
+                    'ai_match_provider': await config_manager.get("aiProvider", "deepseek"),
+                    'ai_match_api_key': await config_manager.get("aiApiKey", ""),
+                    'ai_match_base_url': await config_manager.get("aiBaseUrl", ""),
+                    'ai_match_model': await config_manager.get("aiModel", ""),
+                    'ai_match_prompt': await config_manager.get("aiPrompt", ""),
+                    'ai_log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
                 }
 
-                # 构建查询信息
-                query_info = {
-                    'title': animeTitle,
-                    'season': season if mediaType == 'tv_series' else None,
-                    'episode': currentEpisodeIndex,
-                    'year': year,
-                    'type': mediaType
-                }
+                # 检查必要配置
+                if not ai_config['ai_match_api_key']:
+                    logger.warning("Webhook 任务: AI匹配已启用但未配置API密钥，降级到传统匹配")
+                else:
+                    # 构建查询信息
+                    query_info = {
+                        'title': animeTitle,
+                        'season': season if mediaType == 'tv_series' else None,
+                        'episode': currentEpisodeIndex,
+                        'year': year,
+                        'type': mediaType
+                    }
 
-                # 获取精确标记信息
-                favorited_info = {}
-                from .orm_models import AnimeSource as AS
-                from sqlalchemy import select as sql_select
+                    # 获取精确标记信息
+                    favorited_info = {}
+                    from .orm_models import AnimeSource as AS
+                    from sqlalchemy import select as sql_select
 
-                for result in all_search_results:
-                    # 查找是否有相同provider和mediaId的源被标记
-                    stmt = (
-                        sql_select(AS.isFavorited)
-                        .where(
-                            AS.providerName == result.provider,
-                            AS.mediaId == result.mediaId
+                    for result in all_search_results:
+                        # 查找是否有相同provider和mediaId的源被标记
+                        stmt = (
+                            sql_select(AS.isFavorited)
+                            .where(
+                                AS.providerName == result.provider,
+                                AS.mediaId == result.mediaId
+                            )
+                            .limit(1)
                         )
-                        .limit(1)
-                    )
-                    result_row = await session.execute(stmt)
-                    is_favorited = result_row.scalar_one_or_none()
-                    if is_favorited:
-                        key = f"{result.provider}:{result.mediaId}"
-                        favorited_info[key] = True
+                        result_row = await session.execute(stmt)
+                        is_favorited = result_row.scalar_one_or_none()
+                        if is_favorited:
+                            key = f"{result.provider}:{result.mediaId}"
+                            favorited_info[key] = True
 
-                # 初始化AI匹配器并选择
-                from .ai_matcher import AIMatcher
-                matcher = AIMatcher(ai_config)
-                ai_selected_index = await matcher.select_best_match(
-                    query_info, all_search_results, favorited_info
-                )
+                    # 初始化AI匹配器并选择
+                    from .ai_matcher import AIMatcher
+                    matcher = AIMatcher(ai_config)
+                    ai_selected_index = await matcher.select_best_match(
+                        query_info, all_search_results, favorited_info
+                    )
 
                 if ai_selected_index is not None:
                     best_match = all_search_results[ai_selected_index]
                     logger.info(f"Webhook 任务: AI匹配成功选择: {best_match.provider} - {best_match.title}")
                 else:
                     # 检查是否启用传统匹配兜底
-                    ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                    ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                     if ai_fallback_enabled:
                         logger.info("Webhook 任务: AI匹配未找到合适结果，降级到传统匹配")
                     else:
@@ -2453,11 +2468,11 @@ async def webhook_search_and_dispatch_task(
 
             except Exception as e:
                 # 检查是否启用传统匹配兜底
-                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                 if ai_fallback_enabled:
-                    logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}", exc_info=True)
+                    logger.error(f"Webhook 任务: AI匹配失败，降级到传统匹配: {e}")
                 else:
-                    logger.error(f"Webhook 任务: AI匹配失败，且传统匹配兜底已禁用: {e}", exc_info=True)
+                    logger.error(f"Webhook 任务: AI匹配失败，且传统匹配兜底已禁用: {e}")
                     raise ValueError(f"AI匹配失败且传统匹配兜底已禁用: {e}")
                 ai_selected_index = None
 
@@ -2467,7 +2482,18 @@ async def webhook_search_and_dispatch_task(
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            # 根据来源动态生成任务标题前缀
+            if webhookSource == "media_server":
+                source_prefix = "媒体库读取导入"
+            elif webhookSource in ["emby", "jellyfin", "plex"]:
+                source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+            else:
+                source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+            if mediaType == "tv_series":
+                task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+            else:
+                task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
             unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -2482,9 +2508,15 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
 
-        # 传统匹配: 优先查找精确标记源
+            # 根据来源动态生成成功消息
+            if webhookSource == "media_server":
+                success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+            else:
+                success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+            raise TaskSuccess(success_message)
+
+        # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
         favorited_match = None
         from .orm_models import AnimeSource as AS
         from sqlalchemy import select as sql_select
@@ -2502,9 +2534,17 @@ async def webhook_search_and_dispatch_task(
             result_row = await session.execute(stmt)
             is_favorited = result_row.scalar_one_or_none()
             if is_favorited:
-                favorited_match = result
-                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title}")
-                break
+                # 验证标题相似度,避免错误匹配
+                similarity = fuzz.token_set_ratio(animeTitle, result.title)
+                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                # 只有相似度 >= 60% 才使用精确标记源
+                if similarity >= 60:
+                    favorited_match = result
+                    logger.info(f"Webhook 任务: 标题相似度验证通过 ({similarity}% >= 60%)")
+                    break
+                else:
+                    logger.warning(f"Webhook 任务: 标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
         # 检查是否启用顺延机制
         fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
@@ -2521,7 +2561,18 @@ async def webhook_search_and_dispatch_task(
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
             current_time = get_now().strftime("%H:%M:%S")
-            task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+            # 根据来源动态生成任务标题前缀
+            if webhookSource == "media_server":
+                source_prefix = "媒体库读取导入"
+            elif webhookSource in ["emby", "jellyfin", "plex"]:
+                source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+            else:
+                source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+            if mediaType == "tv_series":
+                task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+            else:
+                task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
             unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -2536,7 +2587,13 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-            raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+            # 根据来源动态生成成功消息
+            if webhookSource == "media_server":
+                success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+            else:
+                success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+            raise TaskSuccess(success_message)
 
         # 顺延机制启用：依次验证候选源 (按分数从高到低)
         logger.info(f"🔄 Webhook 顺延机制: 已启用，共有 {len(all_search_results)} 个候选源待验证")
@@ -2588,7 +2645,18 @@ async def webhook_search_and_dispatch_task(
         await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
 
         current_time = get_now().strftime("%H:%M:%S")
-        task_title = f"Webhook（{webhookSource}）自动导入：{best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]" if mediaType == "tv_series" else f"Webhook（{webhookSource}）自动导入：{best_match.title} ({best_match.provider}) [{current_time}]"
+        # 根据来源动态生成任务标题前缀
+        if webhookSource == "media_server":
+            source_prefix = "媒体库读取导入"
+        elif webhookSource in ["emby", "jellyfin", "plex"]:
+            source_prefix = f"Webhook自动导入 ({webhookSource.capitalize()})"
+        else:
+            source_prefix = f"Webhook自动导入 ({webhookSource})"
+
+        if mediaType == "tv_series":
+            task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
+        else:
+            task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
         unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
 
         # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
@@ -2603,7 +2671,13 @@ async def webhook_search_and_dispatch_task(
             title_recognition_manager=title_recognition_manager
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
-        raise TaskSuccess(f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。")
+
+        # 根据来源动态生成成功消息
+        if webhookSource == "media_server":
+            success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
+        else:
+            success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
+        raise TaskSuccess(success_message)
     except TaskSuccess:
         raise
     except Exception as e:
@@ -2682,6 +2756,20 @@ async def batch_manual_import_task(
             
             await session.commit()
             i += 1 # 成功处理，移动到下一个
+        except RuntimeError as e:
+            # 配置错误（如速率限制配置验证失败），跳过当前条目
+            if "配置验证失败" in str(e):
+                logger.error(f"配置错误，跳过条目 '{item_desc}': {str(e)}")
+                failed_items += 1
+                await session.rollback()
+                i += 1
+                continue
+            # 其他 RuntimeError 也应该跳过
+            logger.error(f"运行时错误，跳过条目 '{item_desc}': {str(e)}")
+            failed_items += 1
+            await session.rollback()
+            i += 1
+            continue
         except RateLimitExceededError as e:
             logger.warning(f"批量导入任务因达到速率限制而暂停: {e}")
             await progress_callback(progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
@@ -3094,11 +3182,11 @@ async def auto_search_and_import_task(
                 # 获取AI配置
                 # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
                 ai_config = {
-                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
-                    "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
-                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
-                    "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
-                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                    "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                    "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                    "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                    "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                    "ai_match_prompt": await config_manager.get("aiPrompt", ""),
                     "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                 }
 
@@ -3147,7 +3235,7 @@ async def auto_search_and_import_task(
                         logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                     else:
                         # 检查是否启用传统匹配兜底
-                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                         if ai_fallback_enabled:
                             logger.info("AI匹配未找到合适结果，降级到传统匹配")
                         else:
@@ -3155,7 +3243,7 @@ async def auto_search_and_import_task(
 
             except Exception as e:
                 # 检查是否启用传统匹配兜底
-                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                 if ai_fallback_enabled:
                     logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
                 else:
@@ -3179,7 +3267,7 @@ async def auto_search_and_import_task(
                 raise ValueError("AI匹配失败且传统匹配兜底已禁用")
             # 允许降级，继续使用传统匹配
             logger.info("AI匹配失败，使用传统匹配兜底")
-            # 传统匹配: 优先查找精确标记源
+            # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
             favorited_match = None
             async with scraper_manager._session_factory() as ai_session:
                 from .orm_models import AnimeSource
@@ -3198,9 +3286,17 @@ async def auto_search_and_import_task(
                     result_row = await ai_session.execute(stmt)
                     is_favorited = result_row.scalar_one_or_none()
                     if is_favorited:
-                        favorited_match = result
-                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
-                        break
+                        # 验证标题相似度,避免错误匹配
+                        similarity = fuzz.token_set_ratio(main_title, result.title)
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                        # 只有相似度 >= 60% 才使用精确标记源
+                        if similarity >= 60:
+                            favorited_match = result
+                            logger.info(f"自动导入：标题相似度验证通过 ({similarity}% >= 60%)")
+                            break
+                        else:
+                            logger.warning(f"自动导入：标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
             if favorited_match:
                 best_match = favorited_match
@@ -3212,7 +3308,7 @@ async def auto_search_and_import_task(
                 logger.info(f"自动导入：顺延机制已关闭，选择第一个结果 '{best_match.title}' (Provider: {best_match.provider}, 相似度: {similarity}%)")
         else:
             # AI未启用，使用传统匹配
-            # 传统匹配: 优先查找精确标记源
+            # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
             favorited_match = None
             async with scraper_manager._session_factory() as ai_session:
                 from .orm_models import AnimeSource
@@ -3231,9 +3327,17 @@ async def auto_search_and_import_task(
                     result_row = await ai_session.execute(stmt)
                     is_favorited = result_row.scalar_one_or_none()
                     if is_favorited:
-                        favorited_match = result
-                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title}")
-                        break
+                        # 验证标题相似度,避免错误匹配
+                        similarity = fuzz.token_set_ratio(main_title, result.title)
+                        logger.info(f"自动导入：找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                        # 只有相似度 >= 60% 才使用精确标记源
+                        if similarity >= 60:
+                            favorited_match = result
+                            logger.info(f"自动导入：标题相似度验证通过 ({similarity}% >= 60%)")
+                            break
+                        else:
+                            logger.warning(f"自动导入：标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
 
             if favorited_match:
                 best_match = favorited_match
@@ -3398,3 +3502,313 @@ async def auto_search_and_import_task(
         if api_key:
             await scraper_manager.release_search_lock(api_key)
             logger.info(f"自动导入任务已为 API key 释放搜索锁。")
+
+
+# --- Media Server Tasks ---
+
+async def scan_media_server_library(
+    server_id: int,
+    library_ids: Optional[List[str]],
+    session: AsyncSession,
+    progress_callback: Callable
+):
+    """扫描媒体服务器的媒体库"""
+    from .media_server_manager import get_media_server_manager
+
+    await progress_callback(0, "开始扫描媒体库...")
+
+    manager = get_media_server_manager()
+    server = manager.servers.get(server_id)
+    if not server:
+        raise ValueError(f"媒体服务器 {server_id} 不存在或未启用")
+
+    # 获取服务器配置
+    server_config = await crud.get_media_server_by_id(session, server_id)
+    if not server_config:
+        raise ValueError(f"媒体服务器配置 {server_id} 不存在")
+
+    # 确定要扫描的媒体库
+    selected_libraries = server_config.get("selectedLibraries", [])
+    if library_ids:
+        # 使用指定的媒体库
+        scan_libraries = library_ids
+    elif selected_libraries:
+        # 使用配置中选中的媒体库
+        scan_libraries = selected_libraries
+    else:
+        # 扫描所有媒体库
+        all_libraries = await server.get_libraries()
+        scan_libraries = [lib.id for lib in all_libraries]
+
+    logger.info(f"开始扫描 {len(scan_libraries)} 个媒体库")
+
+    total_items = 0
+    for idx, library_id in enumerate(scan_libraries):
+        library_progress_base = int((idx / len(scan_libraries)) * 100)
+        library_progress_range = int(100 / len(scan_libraries))
+
+        await progress_callback(
+            library_progress_base,
+            f"正在扫描媒体库 {idx + 1}/{len(scan_libraries)}..."
+        )
+
+        try:
+            # 获取媒体库中的所有项目
+            items = await server.get_library_items(library_id)
+
+            logger.info(f"媒体库 {library_id} 获取到 {len(items)} 个项目,开始保存...")
+
+            # 保存到数据库,并显示进度
+            for item_idx, item in enumerate(items):
+                # 每10个项目更新一次进度
+                if item_idx % 10 == 0:
+                    item_progress = int((item_idx / len(items)) * library_progress_range)
+                    await progress_callback(
+                        library_progress_base + item_progress,
+                        f"正在保存媒体库 {idx + 1}/{len(scan_libraries)} 的项目 {item_idx}/{len(items)}..."
+                    )
+
+                await crud.create_media_item(
+                    session,
+                    server_id=server_id,
+                    media_id=item.media_id,
+                    library_id=library_id,
+                    title=item.title,
+                    media_type=item.media_type,
+                    season=item.season,
+                    episode=item.episode,
+                    year=item.year,
+                    tmdb_id=item.tmdb_id,
+                    tvdb_id=item.tvdb_id,
+                    imdb_id=item.imdb_id,
+                    poster_url=item.poster_url
+                )
+                total_items += 1
+
+            await session.commit()
+            logger.info(f"媒体库 {library_id} 扫描完成,共 {len(items)} 个项目")
+
+        except Exception as e:
+            logger.error(f"扫描媒体库 {library_id} 失败: {e}", exc_info=True)
+            await session.rollback()
+            continue
+
+    await progress_callback(100, f"扫描完成,共 {total_items} 个媒体项")
+    raise TaskSuccess(f"媒体库扫描完成,共扫描到 {total_items} 个媒体项")
+
+
+async def import_media_items(
+    item_ids: List[int],
+    session: AsyncSession,
+    task_manager: TaskManager,
+    progress_callback: Callable,
+    scraper_manager=None,
+    metadata_manager=None,
+    config_manager=None,
+    rate_limiter=None,
+    title_recognition_manager=None
+):
+    """导入媒体项(按季度导入电视剧,电影直接导入)"""
+    from .orm_models import MediaItem
+
+    # 如果没有传入manager,从全局获取
+    if scraper_manager is None:
+        from .main import scraper_manager as global_scraper_manager
+        scraper_manager = global_scraper_manager
+    if metadata_manager is None:
+        from .main import metadata_manager as global_metadata_manager
+        metadata_manager = global_metadata_manager
+    if config_manager is None:
+        from .main import config_manager as global_config_manager
+        config_manager = global_config_manager
+    if rate_limiter is None:
+        from .main import rate_limiter as global_rate_limiter
+        rate_limiter = global_rate_limiter
+    if title_recognition_manager is None:
+        from .main import title_recognition_manager as global_title_recognition_manager
+        title_recognition_manager = global_title_recognition_manager
+
+    await progress_callback(0, "开始导入媒体项...")
+
+    # 获取所有媒体项
+    items_stmt = select(MediaItem).where(MediaItem.id.in_(item_ids))
+    result = await session.execute(items_stmt)
+    items = result.scalars().all()
+
+    if not items:
+        raise ValueError("未找到要导入的媒体项")
+
+    # 按类型分组
+    movies = []
+    tv_shows = {}  # {(title, season): [items]}
+
+    for item in items:
+        if item.mediaType == 'movie':
+            movies.append(item)
+        elif item.mediaType == 'tv_series':
+            key = (item.title, item.season)
+            if key not in tv_shows:
+                tv_shows[key] = []
+            tv_shows[key].append(item)
+
+    # 计算任务数: 电影数 + 电视剧季度数(如果某季只有1集则按单集计,否则按整季计)
+    tv_task_count = 0
+    for season_items in tv_shows.values():
+        if len(season_items) == 1:
+            tv_task_count += 1  # 单集导入
+        else:
+            tv_task_count += 1  # 整季导入
+
+    total_tasks = len(movies) + tv_task_count
+    completed = 0
+
+    logger.info(f"准备导入: {len(movies)} 部电影, {len(tv_shows)} 个电视节目季度")
+
+    # 导入电影
+    for movie in movies:
+        await progress_callback(
+            int((completed / total_tasks) * 100),
+            f"导入电影: {movie.title}..."
+        )
+
+        try:
+            # 触发webhook式搜索
+            task_id, _ = await task_manager.submit_task(
+                lambda session, progress_callback: webhook_search_and_dispatch_task(
+                    animeTitle=movie.title,
+                    mediaType="movie",
+                    season=1,
+                    currentEpisodeIndex=1,
+                    searchKeyword=movie.title,
+                    year=movie.year,
+                    tmdbId=movie.tmdbId,
+                    tvdbId=movie.tvdbId,
+                    imdbId=movie.imdbId,
+                    doubanId=None,
+                    bangumiId=None,
+                    webhookSource="media_server",
+                    session=session,
+                    progress_callback=progress_callback,
+                    manager=scraper_manager,
+                    task_manager=task_manager,
+                    metadata_manager=metadata_manager,
+                    config_manager=config_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager
+                ),
+                title=f"自动导入 (库内): {movie.title}",
+                queue_type="download"
+            )
+            logger.info(f"电影 {movie.title} 导入任务已提交: {task_id}")
+
+            # 标记为已导入
+            await crud.mark_media_items_imported(session, [movie.id])
+            await session.commit()
+
+        except Exception as e:
+            logger.error(f"导入电影 {movie.title} 失败: {e}", exc_info=True)
+            await session.rollback()
+
+        completed += 1
+
+    # 导入电视节目(支持单集和整季)
+    for (title, season), season_items in tv_shows.items():
+        # 判断是单集还是整季
+        if len(season_items) == 1:
+            # 单集导入
+            episode_item = season_items[0]
+            await progress_callback(
+                int((completed / total_tasks) * 100),
+                f"导入电视节目: {title} S{season:02d}E{episode_item.episode:02d}..."
+            )
+
+            try:
+                task_id, _ = await task_manager.submit_task(
+                    lambda session, progress_callback, item=episode_item: webhook_search_and_dispatch_task(
+                        animeTitle=item.title,
+                        mediaType="tv_series",
+                        season=item.season,
+                        currentEpisodeIndex=item.episode,
+                        searchKeyword=f"{item.title} S{item.season:02d}E{item.episode:02d}",
+                        year=item.year,
+                        tmdbId=item.tmdbId,
+                        tvdbId=item.tvdbId,
+                        imdbId=item.imdbId,
+                        doubanId=None,
+                        bangumiId=None,
+                        webhookSource="media_server",
+                        session=session,
+                        progress_callback=progress_callback,
+                        manager=scraper_manager,
+                        task_manager=task_manager,
+                        metadata_manager=metadata_manager,
+                        config_manager=config_manager,
+                        rate_limiter=rate_limiter,
+                        title_recognition_manager=title_recognition_manager
+                    ),
+                    title=f"自动导入 (库内): {title} S{season:02d}E{episode_item.episode:02d}",
+                    queue_type="download"
+                )
+                logger.info(f"电视节目 {title} S{season:02d}E{episode_item.episode:02d} 导入任务已提交: {task_id}")
+
+                # 标记为已导入
+                await crud.mark_media_items_imported(session, [episode_item.id])
+                await session.commit()
+
+            except Exception as e:
+                logger.error(f"导入电视节目 {title} S{season:02d}E{episode_item.episode:02d} 失败: {e}", exc_info=True)
+                await session.rollback()
+        else:
+            # 整季导入
+            await progress_callback(
+                int((completed / total_tasks) * 100),
+                f"导入电视节目: {title} S{season:02d} (共{len(season_items)}集)..."
+            )
+
+            try:
+                # 获取该季度的所有集数
+                episodes = sorted([item.episode for item in season_items if item.episode])
+                first_item = season_items[0]
+
+                # 为整季创建一个导入任务(使用第一集的集数)
+                task_id, _ = await task_manager.submit_task(
+                    lambda session, progress_callback, item=first_item: webhook_search_and_dispatch_task(
+                        animeTitle=item.title,
+                        mediaType="tv_series",
+                        season=item.season,
+                        currentEpisodeIndex=1,  # 整季导入从第一集开始
+                        searchKeyword=f"{item.title} S{item.season:02d}",
+                        year=item.year,
+                        tmdbId=item.tmdbId,
+                        tvdbId=item.tvdbId,
+                        imdbId=item.imdbId,
+                        doubanId=None,
+                        bangumiId=None,
+                        webhookSource="media_server",
+                        session=session,
+                        progress_callback=progress_callback,
+                        manager=scraper_manager,
+                        task_manager=task_manager,
+                        metadata_manager=metadata_manager,
+                        config_manager=config_manager,
+                        rate_limiter=rate_limiter,
+                        title_recognition_manager=title_recognition_manager
+                    ),
+                    title=f"自动导入 (库内): {title} S{season:02d} (共{len(episodes)}集)",
+                    queue_type="download"
+                )
+                logger.info(f"电视节目 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
+
+                # 标记该季度的所有项为已导入
+                item_ids_to_mark = [item.id for item in season_items]
+                await crud.mark_media_items_imported(session, item_ids_to_mark)
+                await session.commit()
+
+            except Exception as e:
+                logger.error(f"导入电视节目 {title} S{season:02d} 失败: {e}", exc_info=True)
+                await session.rollback()
+
+        completed += 1
+
+    await progress_callback(100, f"导入完成,共提交 {total_tasks} 个任务")
+    raise TaskSuccess(f"媒体项导入完成,共提交 {total_tasks} 个任务")

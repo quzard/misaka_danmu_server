@@ -1,12 +1,15 @@
 import logging
-import time
 import asyncio
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, Tuple, TYPE_CHECKING
 from typing import Union
+from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from ..transport_manager import TransportManager
 
 from .. import crud
 from .. import models
@@ -68,6 +71,28 @@ def get_season_from_title(title: str) -> int:
                 continue
     return 1 # Default to season 1
 
+
+def track_performance(func):
+    """
+    装饰器: 跟踪异步方法的执行时间,不影响并发性能。
+    记录到 INFO 级别,方便查看性能统计。
+    """
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        start_time = time.perf_counter()
+        try:
+            result = await func(self, *args, **kwargs)
+            elapsed = time.perf_counter() - start_time
+            # 记录到 INFO 级别,显示搜索源名称和耗时
+            self.logger.info(f"[{self.provider_name}] {func.__name__} 耗时: {elapsed:.3f}s")
+            return result
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            self.logger.warning(f"[{self.provider_name}] {func.__name__} 失败耗时: {elapsed:.3f}s")
+            raise
+    return wrapper
+
+
 class BaseScraper(ABC):
     """
     所有搜索源的抽象基类。
@@ -93,28 +118,43 @@ class BaseScraper(ABC):
     _GLOBAL_EPISODE_BLACKLIST_DEFAULT = r"^(.*?)((.+?版)|(特(别|典))|((导|演)员|嘉宾|角色)访谈|福利|彩蛋|花絮|预告|特辑|专访|访谈|幕后|周边|资讯|看点|速看|回顾|盘点|合集|PV|MV|CM|OST|ED|OP|BD|特典|SP|NCOP|NCED|MENU|Web-DL|rip|x264|x265|aac|flac)(.*?)$"
     _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT: str = ""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: "ConfigManager"):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: "ConfigManager", transport_manager: TransportManager):
         self._session_factory = session_factory
         self.config_manager = config_manager
+        self.transport_manager = transport_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        # 新增：用于跟踪当前客户端实例所使用的代理配置
+        # 用于跟踪当前客户端实例所使用的代理配置
         self._current_proxy_config: Optional[str] = None
+        # 缓存 scraper_manager 引用,用于访问预加载的 scraper 设置
+        self._scraper_manager_ref: Optional[Any] = None
 
     async def _get_proxy_for_provider(self) -> Optional[str]:
-        """Helper to get the configured proxy URL for the current provider, if any."""
+        """
+        获取当前 provider 的代理配置。
+        优先使用预加载的缓存,避免重复数据库查询。
+        """
+        # config_manager 自带缓存,已预加载的配置会直接从内存返回
         proxy_url = await self.config_manager.get("proxyUrl", "")
         proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
 
         if not proxy_enabled_globally or not proxy_url:
             return None
 
-        async with self._session_factory() as session:
-            scraper_settings = await crud.get_all_scraper_settings(session)
+        # 获取当前 provider 的代理设置
+        provider_setting = None
+        if self._scraper_manager_ref and hasattr(self._scraper_manager_ref, '_cached_scraper_settings'):
+            # 使用预加载的缓存（快速路径）
+            provider_setting = self._scraper_manager_ref._cached_scraper_settings.get(self.provider_name)
+        else:
+            # 降级到数据库查询（仅在缓存未初始化时，如测试环境）
+            async with self._session_factory() as session:
+                scraper_settings = await crud.get_all_scraper_settings(session)
+            provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
         
-        provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
+    
     async def _log_proxy_usage(self, proxy_url: Optional[str]):
         if proxy_url:
             self.logger.debug(f"通过代理 '{proxy_url}' 发起请求...")
@@ -126,15 +166,30 @@ class BaseScraper(ABC):
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
-        
-        # 关键：在创建客户端后，记录下当前使用的代理配置
         self._current_proxy_config = proxy_to_use
-        
+
         client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
-        """从数据库缓存中获取数据。"""
+        """
+        从缓存中获取数据。
+        优先使用预取的缓存（批量查询优化），否则单独查询数据库。
+        """
+        # 【优化】优先使用预取的缓存
+        if hasattr(self, '_prefetched_cache'):
+            if key in self._prefetched_cache:
+                cached_value = self._prefetched_cache[key]
+                if cached_value is not None:
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (命中) - {key}")
+                    return cached_value
+                else:
+                    # 批量查询已执行，但缓存不存在
+                    self.logger.debug(f"{self.provider_name}: 使用预取缓存 (未命中) - {key}")
+                    return None
+        
+        # 降级到单独数据库查询（仅在批量查询未执行时）
+        self.logger.debug(f"{self.provider_name}: 缓存未预取，进行单独查询 - {key}")
         async with self._session_factory() as session:
             try:
                 return await crud.get_cache(session, key)

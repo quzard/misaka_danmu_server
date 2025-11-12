@@ -333,6 +333,216 @@ class So360MetadataSource(BaseMetadataSource):
             return new_url
         return url
 
+    async def _get_episodes_v2(self, cat_id: str, ent_id: str, site: str) -> List[Tuple[int, str]]:
+        """
+        使用episodesv2 API获取分集列表
+
+        Args:
+            cat_id: 类别ID
+            ent_id: 内容ID
+            site: 平台代码
+
+        Returns:
+            List[Tuple[int, str]]: (集数, URL) 的列表
+        """
+        try:
+            s_param = json.dumps([{"cat_id": cat_id, "ent_id": ent_id, "site": site}])
+            params = {
+                'v_ap': '1',
+                's': s_param,
+                'cb': '__jp8'
+            }
+
+            url = f"{self.api_base_url}/episodesv2"
+
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
+
+            # 去掉JSONP包装
+            data = response.text
+            json_data = data[data.index('(') + 1:data.rindex(')')]
+            parsed = json.loads(json_data)
+
+            if parsed.get('code') == 0 and len(parsed.get('data', [])) > 0:
+                series_html = parsed['data'][0].get('seriesHTML', {})
+                if 'seriesPlaylinks' in series_html:
+                    episodes = series_html['seriesPlaylinks']
+                    result = []
+                    for i, episode in enumerate(episodes):
+                        if isinstance(episode, dict):
+                            episode_url = episode.get('url', '')
+                        elif isinstance(episode, str):
+                            episode_url = episode
+                        else:
+                            continue
+                        if episode_url:
+                            result.append((i + 1, episode_url))
+                    return result
+
+            return []
+
+        except Exception as e:
+            self.logger.error(f"360: 调用episodesv2 API失败: {e}", exc_info=True)
+            return []
+
+    async def _get_zongyi_episodes(self, ent_id: str, site: str, item: So360SearchResultItem) -> List[Tuple[int, str]]:
+        """
+        使用episodeszongyi API获取综艺分集列表
+
+        Args:
+            ent_id: 内容ID
+            site: 平台代码
+            item: 搜索结果条目(用于获取年份信息)
+
+        Returns:
+            List[Tuple[int, str]]: (集数, URL) 的列表
+        """
+        try:
+            # 获取所有年份
+            years = []
+            if item.playlinks_year and site in item.playlinks_year:
+                years = [str(y) for y in item.playlinks_year[site] if y]
+            elif item.years:
+                years = [str(y) for y in item.years if y]
+
+            if not years:
+                years = ['']
+
+            all_episodes = []
+
+            for year in years:
+                offset = 0
+                count = 8
+                cb_index = 7
+
+                while True:
+                    cb = f'__jp{cb_index}'
+                    cb_index += 1
+
+                    params = {
+                        'site': site,
+                        'y': year,
+                        'entid': ent_id,
+                        'offset': offset,
+                        'count': count,
+                        'v_ap': '1',
+                        'cb': cb
+                    }
+
+                    url = f"{self.api_base_url}/episodeszongyi"
+
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+
+                    # 去掉JSONP包装
+                    data = response.text
+                    json_data = data[data.index('(') + 1:data.rindex(')')]
+                    parsed = json.loads(json_data)
+
+                    if parsed.get('code') == 0 and parsed.get('data'):
+                        episodes = parsed['data'].get('list', [])
+                        if not episodes:
+                            break
+
+                        all_episodes.extend(episodes)
+
+                        if len(episodes) < count:
+                            break
+
+                        offset += count
+                    else:
+                        break
+
+            # 转换为(集数, URL)格式
+            result = []
+            for i, episode in enumerate(all_episodes):
+                if isinstance(episode, dict):
+                    episode_url = episode.get('url', '')
+                elif isinstance(episode, str):
+                    episode_url = episode
+                else:
+                    continue
+                if episode_url:
+                    result.append((i + 1, episode_url))
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"360: 调用episodeszongyi API失败: {e}", exc_info=True)
+            return []
+
+    async def _get_item_info_by_id(self, metadata_id: str) -> Optional[So360SearchResultItem]:
+        """
+        通过metadata_id获取条目的完整信息
+
+        Args:
+            metadata_id: 360影视条目ID
+
+        Returns:
+            So360SearchResultItem或None
+        """
+        try:
+            # 使用搜索API,但通过ID精确匹配
+            # 注意: 360的搜索API可能不支持直接通过ID搜索,所以我们需要另一种方法
+            # 这里我们尝试通过详情页获取标题,然后搜索
+
+            # 方法1: 尝试从详情页获取标题
+            possible_paths = [f"/dianshiju/{metadata_id}.html", f"/dongman/{metadata_id}.html", f"/dianying/{metadata_id}.html", f"/zongyi/{metadata_id}.html"]
+            title = None
+
+            for path in possible_paths:
+                detail_url = f"{self.web_base_url}{path}"
+                try:
+                    response = await self.client.get(detail_url)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        title_tag = soup.find('h1', class_='title')
+                        if title_tag:
+                            title = title_tag.get_text(strip=True)
+                            self.logger.info(f"360: 从详情页获取到标题: {title}")
+                            break
+                except:
+                    continue
+
+            if not title:
+                self.logger.warning(f"360: 无法获取条目标题 (metadata_id={metadata_id})")
+                return None
+
+            # 方法2: 使用标题搜索,找到匹配的条目
+            search_url = f"{self.api_base_url}/index"
+            params = {
+                'force_v': '1',
+                'kw': title,
+                'from': '',
+                'pageno': '1',
+                'v_ap': '1',
+                'tab': 'all',
+                'cb': '__jp0'
+            }
+
+            response = await self.client.get(search_url, params=params)
+            response.raise_for_status()
+
+            # 去掉JSONP包装
+            data = response.text
+            json_data = data[data.index('(') + 1:data.rindex(')')]
+            parsed_data = json.loads(json_data)
+
+            if parsed_data.get('code') == 0 and parsed_data.get('data'):
+                rows = parsed_data['data'].get('longData', {}).get('rows', [])
+
+                # 查找ID匹配的条目
+                for row in rows:
+                    if row.get('id') == metadata_id:
+                        return So360SearchResultItem(**row)
+
+            self.logger.warning(f"360: 未找到匹配的条目 (metadata_id={metadata_id})")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"360: 获取条目信息失败: {e}", exc_info=True)
+            return None
+
     async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
         """
         获取分集URL列表 (补充源功能)。
@@ -345,26 +555,46 @@ class So360MetadataSource(BaseMetadataSource):
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
         try:
-            # 1. 获取详情
-            user = models.User(id=0, username="system")
-            details = await self.get_details(metadata_id, user)
-            if not details:
-                self.logger.warning(f"360: 无法获取详情 (metadata_id={metadata_id})")
+            # 1. 获取条目信息
+            item = await self._get_item_info_by_id(metadata_id)
+            if not item:
+                self.logger.warning(f"360: 无法获取条目信息 (metadata_id={metadata_id})")
                 return []
 
             # 2. 转换provider名称到360的site名称
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
             target_site = provider_map.get(target_provider) if target_provider else None
 
-            # 3. 逐集获取URL (最多尝试200集)
-            episode_urls: List[Tuple[int, str]] = []
-            max_episodes = 200
+            # 3. 使用360 API获取分集列表
+            cat_id = item.cat_id or ''
+            cat_name = item.cat_name or ''
 
-            for i in range(1, max_episodes + 1):
-                url = await self._get_episode_url_from_360(details, i, target_site)
-                if not url:
-                    break
-                episode_urls.append((i, url))
+            # 确定使用哪个ID
+            if cat_id == '3' or '综艺' in cat_name:
+                ent_id = item.id  # 综艺使用id
+            else:
+                ent_id = item.en_id or item.id  # 其他使用en_id
+
+            # 确定使用哪个平台
+            if target_site:
+                site = target_site
+            else:
+                # 如果没有指定平台,使用第一个可用平台
+                if item.playlinks:
+                    site = list(item.playlinks.keys())[0]
+                else:
+                    self.logger.warning(f"360: 没有可用的播放平台 (metadata_id={metadata_id})")
+                    return []
+
+            # 4. 调用API获取分集
+            episode_urls: List[Tuple[int, str]] = []
+
+            if cat_id == '3' or '综艺' in cat_name:
+                # 综艺使用episodeszongyi接口
+                episode_urls = await self._get_zongyi_episodes(ent_id, site, item)
+            else:
+                # 其他使用episodesv2接口
+                episode_urls = await self._get_episodes_v2(cat_id, ent_id, site)
 
             self.logger.info(f"360: 成功获取 {len(episode_urls)} 个分集URL")
             return episode_urls

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import re
 import urllib.parse
@@ -8,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 from .. import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
@@ -24,8 +23,16 @@ class DoubanJsonSearchSubject(BaseModel):
     url: str
     cover: str
     rate: str
-    cover_x: int
-    cover_y: int
+    cover_x: Optional[int] = None
+    cover_y: Optional[int] = None
+
+    @field_validator('cover_x', 'cover_y', mode='before')
+    @classmethod
+    def convert_empty_to_none(cls, v):
+        """将空字符串转换为None"""
+        if v == '' or v is None:
+            return None
+        return v
 
 class DoubanJsonSearchResponse(BaseModel):
     subjects: List[DoubanJsonSearchSubject]
@@ -120,7 +127,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                             id=subject.id, doubanId=subject.id, title=subject.title,
                             details=f"评分: {subject.rate}", imageUrl=subject.cover,
                             type=subject_types.get(subject.id, "unknown"),  # 从记录的类型中获取
-                            supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
+                            supportsEpisodeUrls=False  # 豆瓣源不支持获取分集URL (Frodo API的vendors数组为空)
                         ))
                         seen_ids.add(subject.id)
                 return results
@@ -173,7 +180,7 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
                 return models.MetadataDetailsResponse(
                     id=item_id, doubanId=item_id, title=title,
                     imdbId=imdb_id, aliasesCn=aliases_cn, year=year,
-                    supportsEpisodeUrls=True  # 豆瓣源支持获取分集URL
+                    supportsEpisodeUrls=False  # 豆瓣源不支持获取分集URL (Frodo API的vendors数组为空)
                 )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:
@@ -262,9 +269,45 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         """
         return await self._get_episode_urls_from_douban_page(metadata_id, target_provider)
 
+    def _generate_douban_signature(self, url_path: str, timestamp: str, method: str = 'GET') -> str:
+        """
+        生成豆瓣Frodo API签名
+
+        Args:
+            url_path: URL路径 (例如: /api/v2/movie/1419297)
+            timestamp: 时间戳 (格式: YYYYMMDD)
+            method: HTTP方法 (默认: GET)
+
+        Returns:
+            Base64编码的HMAC-SHA1签名
+        """
+        import hmac
+        import hashlib
+        import base64
+        from urllib.parse import quote
+
+        secret_key = "bf7dddc7c9cfe6f7"
+
+        # 构造签名原文: METHOD&URL_PATH&TIMESTAMP
+        raw_sign = '&'.join([
+            method.upper(),
+            quote(url_path, safe=''),
+            str(timestamp)
+        ])
+
+        # HMAC-SHA1签名
+        signature = hmac.new(
+            secret_key.encode(),
+            raw_sign.encode(),
+            hashlib.sha1
+        ).digest()
+
+        # Base64编码
+        return base64.b64encode(signature).decode()
+
     async def _get_episode_urls_from_douban_page(self, douban_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
         """
-        从豆瓣电影页面解析播放链接
+        从豆瓣Frodo API获取播放链接
 
         Args:
             douban_id: 豆瓣条目ID
@@ -273,74 +316,114 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         Returns:
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
-        # 平台映射: 你的项目provider名称 -> 豆瓣subtype ID
-        provider_to_subtype = {
-            "tencent": "1",   # 腾讯视频
-            "iqiyi": "9",     # 爱奇艺
-            "youku": "3",     # 优酷
-            "bilibili": "11", # B站
-            "mgtv": "17"      # 芒果TV
+        from datetime import datetime
+
+        # 获取配置
+        provider_setting = await self._get_provider_setting()
+        log_raw = provider_setting.get('logRawResponses', False)
+
+        # 平台ID映射
+        provider_to_vendor_id = {
+            "tencent": "qq",      # 腾讯视频
+            "iqiyi": "iqiyi",     # 爱奇艺
+            "youku": "youku",     # 优酷
+            "bilibili": "bilibili", # B站
+            "mgtv": "mgtv"        # 芒果TV
         }
 
-        url = f"https://movie.douban.com/subject/{douban_id}/"
-        self.logger.info(f"豆瓣: 正在从页面获取播放链接 {url}")
+        # 使用豆瓣Frodo API (参考MoviePilot的实现)
+        api_key = "0dad551ec0f84ed02907ff5c42e8ec70"
+        base_url = "https://frodo.douban.com/api/v2"
+
+        # 生成时间戳 (格式: YYYYMMDD)
+        timestamp = datetime.now().strftime('%Y%m%d')
+
+        # Android豆瓣客户端User-Agent
+        user_agent = "api-client/1 com.douban.frodo/7.22.0.beta9(231) Android/23 product/Mate 40 vendor/HUAWEI model/Mate 40 brand/HUAWEI  rom/android  network/wifi  platform/AndroidPad"
+
+        # 尝试movie和tv两种类型
+        data = None
+        for media_type in ['movie', 'tv']:
+            url_path = f"/api/v2/{media_type}/{douban_id}"
+
+            # 生成签名
+            signature = self._generate_douban_signature(url_path, timestamp)
+
+            # 构造完整URL
+            api_url = f"{base_url}/{media_type}/{douban_id}"
+
+            # 构造请求参数
+            params = {
+                "apiKey": api_key,
+                "os_rom": "android",
+                "_ts": timestamp,
+                "_sig": signature
+            }
+
+            self.logger.info(f"豆瓣: 正在从Frodo API获取播放链接 {api_url}")
+
+            try:
+                async with await self._create_client() as client:
+                    response = await client.get(api_url, params=params, headers={
+                        "User-Agent": user_agent,
+                        "Referer": "https://frodo.douban.com",
+                        "Accept": "*/*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+                    }, follow_redirects=False)  # 不跟随重定向
+
+                    # 记录原始响应(如果启用)
+                    if log_raw:
+                        metadata_logger.info(f"豆瓣Frodo API响应 ({media_type}/{douban_id}):\nURL: {api_url}\nStatus: {response.status_code}\nBody:\n{response.text}\n{'='*80}")
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        break
+                    elif response.status_code in [301, 302]:
+                        # 如果是重定向,尝试下一个类型
+                        continue
+                    else:
+                        self.logger.error(f"豆瓣: 获取Frodo API失败 (HTTP {response.status_code}): {api_url}")
+                        continue
+
+            except Exception as e:
+                self.logger.error(f"豆瓣: 请求Frodo API异常 ({media_type}): {e}")
+                continue
+
+        if not data:
+            self.logger.warning(f"豆瓣: 无法获取播放链接 (douban_id={douban_id})")
+            return []
 
         try:
-            async with await self._create_client() as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                html = response.text
+            # 获取 vendors 列表
+            vendors = data.get('vendors', [])
 
-                # 提取sources数据: sources[9] = [...];
-                pattern = r'sources\[(\d+)\]\s*=\s*(\[.*?\]);'
-                matches = re.findall(pattern, html, re.DOTALL)
+            if not vendors:
+                self.logger.warning(f"豆瓣: 未找到播放链接 (douban_id={douban_id})")
+                return []
 
-                if not matches:
-                    self.logger.warning(f"豆瓣: 未在页面中找到播放链接数据 (douban_id={douban_id})")
-                    return []
+            self.logger.info(f"豆瓣: 找到 {len(vendors)} 个播放平台")
 
-                episode_urls: List[Tuple[int, str]] = []
+            # 提取播放链接
+            episode_urls: List[Tuple[int, str]] = []
 
-                for source_id, json_str in matches:
-                    # 如果指定了target_provider,只处理对应的source_id
-                    if target_provider:
-                        expected_subtype = provider_to_subtype.get(target_provider)
-                        if expected_subtype and source_id != expected_subtype:
-                            continue
+            for vendor in vendors:
+                vendor_id = vendor.get('id', '')
+                vendor_uri = vendor.get('uri', '')
 
-                    try:
-                        episodes = json.loads(json_str)
-                        for ep_data in episodes:
-                            ep_num = int(ep_data['ep'])
-                            encoded_url = ep_data['play_link']
-
-                            # 解析link2跳转链接: https://www.douban.com/link2/?url=<编码后的URL>&...
-                            parsed = urllib.parse.urlparse(encoded_url)
-                            query = urllib.parse.parse_qs(parsed.query)
-
-                            if 'url' not in query:
-                                self.logger.warning(f"豆瓣: 播放链接格式异常,缺少url参数: {encoded_url}")
-                                continue
-
-                            real_url = urllib.parse.unquote(query['url'][0])
-                            episode_urls.append((ep_num, real_url))
-
-                    except json.JSONDecodeError as e:
-                        self.logger.error(f"豆瓣: 解析播放链接JSON失败 (source_id={source_id}): {e}")
-                        continue
-                    except (KeyError, ValueError) as e:
-                        self.logger.error(f"豆瓣: 解析播放链接数据失败: {e}")
+                # 如果指定了目标平台,只处理该平台
+                if target_provider:
+                    target_vendor_id = provider_to_vendor_id.get(target_provider)
+                    if target_vendor_id and vendor_id != target_vendor_id:
                         continue
 
-                # 按集数排序
-                episode_urls.sort(key=lambda x: x[0])
+                if vendor_uri:
+                    self.logger.info(f"豆瓣: 找到播放链接 vendor={vendor_id}, uri={vendor_uri}")
+                    # 直接返回vendor.uri,由调用方(scraper)的get_id_from_url方法解析
+                    episode_urls.append((1, vendor_uri))
 
-                self.logger.info(f"豆瓣: 成功解析 {len(episode_urls)} 个播放链接")
-                return episode_urls
+            self.logger.info(f"豆瓣: 获取到 {len(episode_urls)} 个播放链接")
+            return episode_urls
 
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"豆瓣: 获取页面失败 (HTTP {e.response.status_code}): {url}")
-            return []
         except Exception as e:
             self.logger.error(f"豆瓣: 解析播放链接时发生异常: {e}", exc_info=True)
             return []

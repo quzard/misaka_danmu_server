@@ -22,6 +22,7 @@ import {
   Tag,
   Tooltip,
   Dropdown,
+  Input as AntInput,
 } from 'antd'
 import {
   CheckOutlined,
@@ -40,7 +41,7 @@ import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
 import { useAtom } from 'jotai'
 import { isMobileAtom } from '../../../../store'
-// 移除useScroll导入，改用分页模式
+import { ResponsiveTable } from '@/components/ResponsiveTable'
 
 export const ImportTask = () => {
   const [loading, setLoading] = useState(true)
@@ -104,8 +105,6 @@ export const ImportTask = () => {
       current: 1,
     }))
   }, [search, status, queueFilter])
-
-
 
   /**
    * 轮询刷新当前页面任务列表
@@ -426,27 +425,263 @@ export const ImportTask = () => {
     return <DownloadOutlined />
   }
 
+  // 移动端任务卡片渲染
+  const renderTaskCard = (item) => {
+    const isActive = selectList.some(it => it.taskId === item.taskId)
+
+    return (
+      <div
+        className={`p-4 rounded-lg transition-all relative cursor-pointer ${
+          isActive
+            ? 'shadow-lg ring-2 ring-pink-400/50 bg-pink-50/30 dark:bg-pink-900/10'
+            : 'hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/30'
+        }`}
+        onClick={() => {
+          setSelectList(list => {
+            return list.map(it => it.taskId).includes(item.taskId)
+              ? list.filter(i => i.taskId !== item.taskId)
+              : [...list, item]
+          })
+        }}
+      >
+        <div className="space-y-3 relative">
+          {isActive && (
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-400 rounded-full border-2 border-white dark:border-gray-800 z-10"></div>
+          )}
+
+          {/* 标题区域 */}
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              <div className="flex-shrink-0 mt-0.5">
+                {getQueueIcon(item.queueType)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-base break-words mb-2">
+                  {item.title}
+                </div>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  <Tag
+                    color={
+                      item.status.includes('失败')
+                        ? 'red'
+                        : item.status.includes('运行中')
+                          ? 'green'
+                          : item.status.includes('已暂停')
+                            ? 'orange'
+                            : item.status.includes('已完成')
+                              ? 'blue'
+                              : 'default'
+                    }
+                    className="text-xs"
+                  >
+                    {item.status}
+                  </Tag>
+                  <Tag
+                    color={
+                      item.queueType === 'management'
+                        ? 'cyan'
+                        : item.queueType === 'fallback'
+                          ? 'orange'
+                          : 'geekblue'
+                    }
+                    className="text-xs"
+                  >
+                    {item.queueType === 'management'
+                      ? '管理'
+                      : item.queueType === 'fallback'
+                        ? '后备'
+                        : '下载'}
+                  </Tag>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 描述 */}
+          {item.description && (
+            <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+              {item.description}
+            </div>
+          )}
+
+          {/* 时间 */}
+          {item.createdAt && (
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              {(() => {
+                const date = new Date(item.createdAt)
+                const year = date.getFullYear()
+                const month = String(date.getMonth() + 1).padStart(2, '0')
+                const day = String(date.getDate()).padStart(2, '0')
+                const hour = String(date.getHours()).padStart(2, '0')
+                const minute = String(date.getMinutes()).padStart(2, '0')
+                const second = String(date.getSeconds()).padStart(2, '0')
+                return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+              })()}
+            </div>
+          )}
+
+          {/* 进度条 */}
+          <div className="pt-2">
+            <Progress
+              percent={item.progress}
+              status={item.status.includes('失败') && 'exception'}
+              strokeWidth={8}
+              showInfo={true}
+              size="small"
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="my-6">
       <Card
         loading={loading}
         title="任务管理器"
         extra={
-          <div className='flex items-center justify-end gap-2 flex-wrap' style={{ maxWidth: '100%' }}>
-            <Dropdown menu={statusMenu}>
-              <Button icon={<FilterOutlined />}>
-                {getStatusLabel(status)}
-              </Button>
-            </Dropdown>
-            <Dropdown menu={queueMenu}>
-              <Button icon={<FilterOutlined />}>
-                {getQueueLabel(queueFilter)}
-              </Button>
-            </Dropdown>
-            <Tooltip title="全选/取消全选">
+          !isMobile && (
+            <div className='flex items-center justify-end gap-2 flex-wrap' style={{ maxWidth: '100%' }}>
+              <Dropdown menu={statusMenu}>
+                <Button icon={<FilterOutlined />}>
+                  {getStatusLabel(status)}
+                </Button>
+              </Dropdown>
+              <Dropdown menu={queueMenu}>
+                <Button icon={<FilterOutlined />}>
+                  {getQueueLabel(queueFilter)}
+                </Button>
+              </Dropdown>
+              <Tooltip title="全选/取消全选">
+                <Button
+                  type="default"
+                  shape="circle"
+                  icon={
+                    selectList.length === taskList.length &&
+                    !!selectList.length ? (
+                      <CheckOutlined />
+                    ) : (
+                      <MinusOutlined />
+                    )
+                  }
+                  onClick={() => {
+                    if (
+                      selectList.length === taskList.length &&
+                      !!selectList.length
+                    ) {
+                      setSelectList([])
+                    } else {
+                      setSelectList(taskList)
+                    }
+                  }}
+                />
+              </Tooltip>
+              <Tooltip title="启用/暂停任务">
+                <Button
+                  disabled={!canPause}
+                  type="default"
+                  shape="circle"
+                  icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
+                  onClick={handlePause}
+                />
+              </Tooltip>
+              <Tooltip title="删除任务">
+                <Button
+                  disabled={!canDelete}
+                  type="default"
+                  shape="circle"
+                  icon={<DeleteOutlined />}
+                  onClick={handleDelete}
+                />
+              </Tooltip>
+              <Tooltip title="中止任务">
+                <Button
+                  disabled={!canStop}
+                  type="default"
+                  shape="circle"
+                  icon={<StopOutlined />}
+                  onClick={handleStop}
+                />
+              </Tooltip>
+              <Input.Search
+                placeholder="按任务标题搜索"
+                allowClear
+                enterButton
+                style={{ width: isMobile ? '100%' : '200px' }}
+                onSearch={value => {
+                  navigate(`/task?search=${value}&status=${status}`, {
+                    replace: true,
+                  })
+                }}
+              />
+            </div>
+          )
+        }
+      >
+        {isMobile && (
+          <div className="mb-4 space-y-3">
+            {/* 筛选器区域 */}
+            <div className="grid grid-cols-2 gap-2">
+              <Dropdown menu={statusMenu} trigger={['click']}>
+                <Button icon={<FilterOutlined />} block>
+                  {getStatusLabel(status)}
+                </Button>
+              </Dropdown>
+              <Dropdown menu={queueMenu} trigger={['click']}>
+                <Button icon={<FilterOutlined />} block>
+                  {getQueueLabel(queueFilter)}
+                </Button>
+              </Dropdown>
+            </div>
+
+            {/* 搜索框 */}
+            <div className="mb-4">
+              <AntInput.Group compact style={{ width: '100%', display: 'flex' }}>
+                <AntInput
+                  placeholder="搜索任务"
+                  value={search}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    // 这里可以添加防抖逻辑，如果需要的话
+                    navigate(`/task?search=${value}&status=${status}`, {
+                      replace: true,
+                    })
+                  }}
+                  onPressEnter={(e) => {
+                    const value = e.target.value
+                    navigate(`/task?search=${value}&status=${status}`, {
+                      replace: true,
+                    })
+                  }}
+                  allowClear
+                  style={{
+                    flex: 1,
+                    borderTopRightRadius: 0,
+                    borderBottomRightRadius: 0,
+                    textAlign: 'left',
+                    height: '50px'
+                  }}
+                />
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    // 搜索按钮点击时可以不做额外操作，因为输入框已经实时搜索
+                  }}
+                  style={{
+                    borderTopLeftRadius: 0,
+                    borderBottomLeftRadius: 0,
+                    height: '50px'
+                  }}
+                >
+                  搜索
+                </Button>
+              </AntInput.Group>
+            </div>
+
+            {/* 批量操作按钮 */}
+            <div className="grid grid-cols-2 gap-2">
               <Button
-                type="default"
-                shape="circle"
                 icon={
                   selectList.length === taskList.length &&
                   !!selectList.length ? (
@@ -465,195 +700,226 @@ export const ImportTask = () => {
                     setSelectList(taskList)
                   }
                 }}
-              />
-            </Tooltip>
-            <Tooltip title="启用/暂停任务">
+                block
+              >
+                {selectList.length === taskList.length && !!selectList.length
+                  ? '取消全选'
+                  : '全选'}
+              </Button>
               <Button
                 disabled={!canPause}
-                type="default"
-                shape="circle"
                 icon={isPause ? <PauseOutlined /> : <StepBackwardOutlined />}
                 onClick={handlePause}
-              />
-            </Tooltip>
-            <Tooltip title="删除任务">
+                block
+              >
+                {isPause ? '继续' : '暂停'}
+              </Button>
+            </div>
+
+            {/* 危险操作按钮 */}
+            <div className="grid grid-cols-2 gap-2">
               <Button
                 disabled={!canDelete}
-                type="default"
-                shape="circle"
+                danger
                 icon={<DeleteOutlined />}
                 onClick={handleDelete}
-              />
-            </Tooltip>
-            <Tooltip title="中止任务">
+                block
+              >
+                删除
+              </Button>
               <Button
                 disabled={!canStop}
-                type="default"
-                shape="circle"
+                danger
                 icon={<StopOutlined />}
                 onClick={handleStop}
-              />
-            </Tooltip>
-            <Input.Search
-              placeholder="按任务标题搜索"
-              allowClear
-              enterButton
-              style={{ width: isMobile ? '100%' : '200px' }}
-              onSearch={value => {
-                navigate(`/task?search=${value}&status=${status}`, {
-                  replace: true,
-                })
-              }}
-            />
+                block
+              >
+                中止
+              </Button>
+            </div>
+
+            {/* 选中任务提示 */}
+            {selectList.length > 0 && (
+              <div className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                已选择 {selectList.length} 个任务
+              </div>
+            )}
           </div>
-        }
-      >
+        )}
+
         <div>
           {!!taskList?.length ? (
-            <List
-              itemLayout="vertical"
-              size="small"
-              dataSource={taskList}
-              pagination={{
-                ...pagination,
-                showLessItems: true,
-                align: 'center',
-                onChange: (page, pageSize) => {
-                  setPagination(n => {
-                    return {
-                      ...n,
-                      current: page,
-                      pageSize,
-                    }
-                  })
-                },
-                onShowSizeChange: (_, size) => {
-                  setPagination(n => {
-                    return {
-                      ...n,
-                      pageSize: size,
-                    }
-                  })
-                },
-                hideOnSinglePage: true,
-              }}
-              renderItem={(item, index) => {
-                const isActive = selectList.some(
-                  it => it.taskId === item.taskId
-                )
+            isMobile ? (
+              <ResponsiveTable
+                pagination={false}
+                size="small"
+                dataSource={taskList}
+                columns={[]} // 移动端不需要表格列
+                rowKey={'taskId'}
+                scroll={{ x: '100%' }}
+                renderCard={renderTaskCard}
+              />
+            ) : (
+              <List
+                itemLayout="vertical"
+                size="small"
+                dataSource={taskList}
+                pagination={{
+                  ...pagination,
+                  showLessItems: true,
+                  align: 'center',
+                  onChange: (page, pageSize) => {
+                    setPagination(n => {
+                      return {
+                        ...n,
+                        current: page,
+                        pageSize,
+                      }
+                    })
+                  },
+                  onShowSizeChange: (_, size) => {
+                    setPagination(n => {
+                      return {
+                        ...n,
+                        pageSize: size,
+                      }
+                    })
+                  },
+                  hideOnSinglePage: true,
+                  showSizeChanger: true,
+                  showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
+                  locale: {
+                    items_per_page: '条/页',
+                    jump_to: '跳至',
+                    jump_to_confirm: '确定',
+                    page: '页',
+                    prev_page: '上一页',
+                    next_page: '下一页',
+                    prev_5: '向前 5 页',
+                    next_5: '向后 5 页',
+                    prev_3: '向前 3 页',
+                    next_3: '向后 3 页',
+                  },
+                }}
+                renderItem={(item, index) => {
+                  const isActive = selectList.some(
+                    it => it.taskId === item.taskId
+                  )
 
-                return (
-                  <List.Item
-                    key={index}
-                    onClick={() => {
-                      setSelectList(list => {
-                        return list.map(it => it.taskId).includes(item.taskId)
-                          ? list.filter(i => i.taskId !== item.taskId)
-                          : [...list, item]
-                      })
-                    }}
-                    style={{ padding: '16px 24px' }}
-                  >
-                    <div
-                      className={classNames('relative w-full', {
-                        'pl-9': isActive,
-                      })}
+                  return (
+                    <List.Item
+                      key={index}
+                      onClick={() => {
+                        setSelectList(list => {
+                          return list.map(it => it.taskId).includes(item.taskId)
+                            ? list.filter(i => i.taskId !== item.taskId)
+                            : [...list, item]
+                        })
+                      }}
+                      style={{ padding: '16px 24px' }}
                     >
-                      {isActive && (
-                        <Checkbox
-                          checked={isActive}
-                          className="absolute top-1/2 left-0 transform -translate-y-1/2"
-                        />
-                      )}
+                      <div
+                        className={classNames('relative w-full', {
+                          'pl-9': isActive,
+                        })}
+                      >
+                        {isActive && (
+                          <Checkbox
+                            checked={isActive}
+                            className="absolute top-1/2 left-0 transform -translate-y-1/2"
+                          />
+                        )}
 
-                      {/* 第一行: 标题 + 状态标签 + 队列标签 */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <div className="text-base font-semibold" style={{ flex: 1 }}>
-                          <span style={{ marginRight: '8px', fontSize: '18px' }}>
-                            {getQueueIcon(item.queueType)}
-                          </span>
-                          {item.title}
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                          <Tag
-                            color={
-                              item.status.includes('失败')
-                                ? 'red'
-                                : item.status.includes('运行中')
-                                  ? 'green'
-                                  : item.status.includes('已暂停')
-                                    ? 'orange'
-                                    : item.status.includes('已完成')
-                                      ? 'blue'
-                                      : 'default'
-                            }
-                          >
-                            {item.status}
-                          </Tag>
-                          <Tag
-                            color={
-                              item.queueType === 'management'
-                                ? 'cyan'
-                                : item.queueType === 'fallback'
-                                  ? 'orange'
-                                  : 'geekblue'
-                            }
-                          >
-                            <span style={{ marginRight: '4px' }}>
+                        {/* 第一行: 标题 + 状态标签 + 队列标签 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div className="text-base font-semibold" style={{ flex: 1 }}>
+                            <span style={{ marginRight: '8px', fontSize: '18px' }}>
                               {getQueueIcon(item.queueType)}
                             </span>
-                            {item.queueType === 'management'
-                              ? '管理队列'
-                              : item.queueType === 'fallback'
-                                ? '后备队列'
-                                : '下载队列'}
-                          </Tag>
-                        </div>
-                      </div>
-
-                      {/* 第二行: 描述 + 时间 */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <Tooltip title={item.description}>
-                          <div
-                            className="text-gray-600"
-                            style={{
-                              flex: 1,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              marginRight: '16px'
-                            }}
-                          >
-                            {item.description}
+                            {item.title}
                           </div>
-                        </Tooltip>
-                        {item.createdAt && (
-                          <Tag style={{ flexShrink: 0 }}>
-                            {new Date(item.createdAt).toLocaleString('zh-CN', {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                              hour12: false
-                            })}
-                          </Tag>
-                        )}
-                      </div>
+                          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                            <Tag
+                              color={
+                                item.status.includes('失败')
+                                  ? 'red'
+                                  : item.status.includes('运行中')
+                                    ? 'green'
+                                    : item.status.includes('已暂停')
+                                      ? 'orange'
+                                      : item.status.includes('已完成')
+                                        ? 'blue'
+                                        : 'default'
+                              }
+                            >
+                              {item.status}
+                            </Tag>
+                            <Tag
+                              color={
+                                item.queueType === 'management'
+                                  ? 'cyan'
+                                  : item.queueType === 'fallback'
+                                    ? 'orange'
+                                    : 'geekblue'
+                              }
+                            >
+                              <span style={{ marginRight: '4px' }}>
+                                {getQueueIcon(item.queueType)}
+                              </span>
+                              {item.queueType === 'management'
+                                ? '管理队列'
+                                : item.queueType === 'fallback'
+                                  ? '后备队列'
+                                  : '下载队列'}
+                            </Tag>
+                          </div>
+                        </div>
 
-                      {/* 第三行: 进度条 */}
-                      <Progress
-                        percent={item.progress}
-                        status={item.status.includes('失败') && 'exception'}
-                        strokeWidth={10}
-                        showInfo={true}
-                      />
-                    </div>
-                  </List.Item>
-                )
-              }}
-            />
+                        {/* 第二行: 描述 + 时间 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <Tooltip title={item.description}>
+                            <div
+                              className="text-gray-600"
+                              style={{
+                                flex: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginRight: '16px'
+                              }}
+                            >
+                              {item.description}
+                            </div>
+                          </Tooltip>
+                          {item.createdAt && (
+                            <Tag style={{ flexShrink: 0 }}>
+                              {(() => {
+                                const date = new Date(item.createdAt)
+                                const year = date.getFullYear()
+                                const month = String(date.getMonth() + 1).padStart(2, '0')
+                                const day = String(date.getDate()).padStart(2, '0')
+                                const hour = String(date.getHours()).padStart(2, '0')
+                                const minute = String(date.getMinutes()).padStart(2, '0')
+                                const second = String(date.getSeconds()).padStart(2, '0')
+                                return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+                              })()}
+                            </Tag>
+                          )}
+                        </div>
+
+                        {/* 第三行: 进度条 */}
+                        <Progress
+                          percent={item.progress}
+                          status={item.status.includes('失败') && 'exception'}
+                          strokeWidth={10}
+                          showInfo={true}
+                        />
+                      </div>
+                    </List.Item>
+                  )
+                }}
+              />
+            )
           ) : (
             <Empty description="没有符合条件的任务" />
           )}

@@ -28,6 +28,7 @@ from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
 from .search_utils import unified_search
+from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -1780,11 +1781,11 @@ async def _get_match_for_item(
                         # 获取AI配置
                         # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
                         ai_config = {
-                            "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
-                            "ai_match_api_key": await config_manager.get("aiMatchApiKey", ""),
-                            "ai_match_base_url": await config_manager.get("aiMatchBaseUrl", ""),
-                            "ai_match_model": await config_manager.get("aiMatchModel", "deepseek-chat"),
-                            "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                            "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                            "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                            "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                            "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                            "ai_match_prompt": await config_manager.get("aiPrompt", ""),
                             "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                         }
 
@@ -1811,7 +1812,7 @@ async def _get_match_for_item(
                                 logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
                             else:
                                 # 检查是否启用传统匹配兜底
-                                ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                                 if ai_fallback_enabled:
                                     logger.info("AI匹配未找到合适结果，降级到传统匹配")
                                 else:
@@ -1819,7 +1820,7 @@ async def _get_match_for_item(
 
                     except Exception as e:
                         # 检查是否启用传统匹配兜底
-                        ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                        ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                         if ai_fallback_enabled:
                             logger.error(f"AI匹配失败，降级到传统匹配: {e}", exc_info=True)
                         else:
@@ -1837,20 +1838,29 @@ async def _get_match_for_item(
                     logger.info(f"  - 使用AI选择的结果: {best_match.provider} - {best_match.title}")
                 elif ai_match_enabled:
                     # AI匹配已启用但失败，检查是否允许降级到传统匹配
-                    ai_fallback_enabled = (await config_manager.get("aiMatchFallbackEnabled", "true")).lower() == 'true'
+                    ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
                     if not ai_fallback_enabled:
                         logger.warning("AI匹配失败且传统匹配兜底已禁用，匹配后备失败")
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    # 传统匹配: 优先查找精确标记源
+                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            favorited_match = result
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
-                            break
+                            # 验证标题相似度,避免错误匹配
+                            from thefuzz import fuzz
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                            # 只有相似度 >= 80% 才使用精确标记源
+                            if similarity >= 80:
+                                favorited_match = result
+                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                break
+                            else:
+                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
 
                     if favorited_match:
                         best_match = favorited_match
@@ -1861,14 +1871,23 @@ async def _get_match_for_item(
                         logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
                 else:
                     # AI未启用，使用传统匹配
-                    # 传统匹配: 优先查找精确标记源
+                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            favorited_match = result
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title}")
-                            break
+                            # 验证标题相似度,避免错误匹配
+                            from thefuzz import fuzz
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+
+                            # 只有相似度 >= 80% 才使用精确标记源
+                            if similarity >= 80:
+                                favorited_match = result
+                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                break
+                            else:
+                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
 
                     if favorited_match:
                         best_match = favorited_match
@@ -2290,6 +2309,8 @@ async def get_comments_for_dandan(
                 )
                 session.add(new_anime)
                 await session.flush()
+                # 同步PostgreSQL序列(避免主键冲突)
+                await sync_postgres_sequence(session)
             else:
                 logger.info(f"anime条目已存在: id={real_anime_id}, title='{existing_anime.title}'")
 
@@ -2415,6 +2436,9 @@ async def get_comments_for_dandan(
                         )
                         task_session.add(new_anime)
                         await task_session.flush()
+
+                        # 同步PostgreSQL序列(避免主键冲突)
+                        await sync_postgres_sequence(task_session)
                     else:
                         logger.info(f"任务中anime条目已存在: id={current_real_anime_id}, title='{existing_anime.title}'")
 
@@ -2840,6 +2864,9 @@ async def get_comments_for_dandan(
                                         await task_session.flush()  # 确保ID可用
                                         anime_id = real_anime_id
                                         logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+
+                                        # 同步PostgreSQL序列(避免主键冲突)
+                                        await sync_postgres_sequence(task_session)
 
                                     # 2. 创建源关联
                                     source_id = await crud.link_source_to_anime(

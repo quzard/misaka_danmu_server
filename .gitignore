@@ -3,7 +3,6 @@ venv/*
 
 src/**/__pycache__/
 src/**/.DS_Store
-src/scrapers/dandanplay.py
 config/danmaku
 config/image
 
@@ -18,3 +17,5 @@ src/security_core.py
 src/rate_limiter.py
 .vscode/settings.json
 generator_config.ini
+src/scrapers
+!src/scrapers/base.py

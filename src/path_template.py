@@ -87,31 +87,8 @@ class DanmakuPathTemplate:
             
         except Exception as e:
             logger.error(f"生成弹幕路径失败: {e}, 模板: {self.template}, 上下文: {context}")
-            # 回退到默认路径
-            def _is_docker_environment():
-                """检测是否在Docker容器中运行"""
-                import os
-                # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-                if Path("/.dockerenv").exists():
-                    return True
-                # 方法2: 检查环境变量
-                if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-                    return True
-                # 方法3: 检查当前工作目录是否为 /app
-                if Path.cwd() == Path("/app"):
-                    return True
-                return False
-
-            def _get_default_path():
-                """根据运行环境获取默认路径"""
-                if _is_docker_environment():
-                    # 容器环境
-                    return f"/app/config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
-                else:
-                    # 源码运行环境
-                    return f"config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml"
-
-            return Path(_get_default_path())
+            # 回退到默认路径 - 使用相对路径确保源码运行时也能正常工作
+            return Path(f"config/danmaku/{context.get('animeId', 'unknown')}/{context.get('episodeId', 'unknown')}.xml")
     
     def _prepare_context(self, context: Dict[str, Any]) -> Dict[str, str]:
         """准备和清理上下文变量"""
@@ -220,3 +197,113 @@ TEMPLATE_EXAMPLES = {
     'windows_absolute': 'D:/弹幕/${title}/${title} - S${season:02d}E${episode:02d}',
     'windows_downloads': 'C:/Users/${username}/Downloads/弹幕/${title}/${episode:03d}'
 }
+
+
+# ==================== 路径生成函数 ====================
+
+async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path]:
+    """
+    生成弹幕文件的完整路径
+
+    Args:
+        episode: Episode 对象
+        config_manager: ConfigManager 实例
+
+    Returns:
+        tuple: (web_path, absolute_path)
+    """
+    anime_id = episode.source.anime.id
+    episode_id = episode.id
+    anime_type = episode.source.anime.type  # 获取类型: tv_series, movie, ova, other
+
+    # 检查是否启用自定义路径
+    custom_path_enabled = False
+
+    if config_manager:
+        try:
+            custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
+            custom_path_enabled = custom_path_enabled_str.lower() == 'true'
+        except Exception as e:
+            logger.warning(f"获取自定义路径配置失败: {e}")
+
+    if custom_path_enabled and config_manager:
+        try:
+            # 根据类型选择不同的配置
+            # movie 类型使用电影配置,其他类型使用电视配置
+            if anime_type == 'movie':
+                root_directory = await config_manager.get('movieDanmakuDirectoryPath', '/app/config/danmaku/movies')
+                filename_template = await config_manager.get('movieDanmakuFilenameTemplate', '${title}/${episodeId}')
+                logger.info(f"使用电影/剧场版路径配置")
+            else:
+                root_directory = await config_manager.get('tvDanmakuDirectoryPath', '/app/config/danmaku/tv')
+                filename_template = await config_manager.get('tvDanmakuFilenameTemplate', '${animeId}/${episodeId}')
+                logger.info(f"使用电视节目路径配置")
+
+            # 创建路径模板上下文
+            context = create_danmaku_context(
+                anime_title=episode.source.anime.title,
+                season=episode.source.anime.season or 1,
+                episode_index=episode.episodeIndex,
+                year=episode.source.anime.year,
+                provider=episode.source.providerName,
+                anime_id=anime_id,
+                episode_id=episode_id,
+                source_id=episode.source.id
+            )
+
+            # 生成相对路径(不包含.xml后缀)
+            path_template = DanmakuPathTemplate(filename_template)
+            relative_path_obj = path_template.generate_path(context)
+            relative_path = str(relative_path_obj)
+
+            # 移除自动添加的.xml后缀(因为我们要手动控制)
+            if relative_path.endswith('.xml'):
+                relative_path = relative_path[:-4]
+
+            # 手动拼接.xml后缀
+            relative_path += '.xml'
+
+            # 拼接完整路径: 根目录 + 相对路径
+            # 确保路径分隔符正确
+            root_directory = root_directory.rstrip('/').rstrip('\\')
+            relative_path = relative_path.lstrip('/').lstrip('\\')
+
+            full_path = f"{root_directory}/{relative_path}"
+
+            # 规范化路径
+            full_path = str(Path(full_path))
+
+            web_path = full_path
+            absolute_path = Path(full_path)
+
+            logger.info(f"使用自定义路径模板生成弹幕路径: {absolute_path}")
+            return web_path, absolute_path
+
+        except Exception as e:
+            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
+
+    # 默认路径逻辑 - 根据运行环境自动调整
+    def _is_docker_environment():
+        """检测是否在Docker容器中运行"""
+        import os
+        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+        if Path("/.dockerenv").exists():
+            return True
+        # 方法2: 检查环境变量
+        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+            return True
+        # 方法3: 检查当前工作目录是否为 /app
+        if Path.cwd() == Path("/app"):
+            return True
+        return False
+
+    if _is_docker_environment():
+        # Docker容器环境
+        web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
+        absolute_path = Path(f"/app/config/danmaku/{anime_id}/{episode_id}.xml")
+    else:
+        # 源码运行环境 - 使用相对路径
+        web_path = f"/app/config/danmaku/{anime_id}/{episode_id}.xml"
+        absolute_path = Path(f"config/danmaku/{anime_id}/{episode_id}.xml")
+
+    return web_path, absolute_path

@@ -318,6 +318,31 @@ export const setSingleScraper = data =>
 export const getSingleScraper = data =>
   api.get(`/api/ui/scrapers/${data.name}/config`)
 
+/** 获取资源仓库配置 */
+export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
+/** 保存资源仓库配置 */
+export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
+/** 获取资源包版本信息 */
+export const getScraperVersions = () => api.get('/api/ui/scrapers/versions')
+/** 加载弹幕源资源 */
+export const loadScraperResources = data => api.post('/api/ui/scrapers/load-resources', data)
+/** 备份弹幕源 */
+export const backupScrapers = () => api.post('/api/ui/scrapers/backup')
+/** 还原弹幕源 */
+export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
+/** 获取备份信息 */
+export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
+/** 重载弹幕源 */
+export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
+/** 获取GitHub Token */
+export const getGithubToken = () => api.get('/api/ui/config/github-token')
+/** 保存GitHub Token */
+export const saveGithubToken = data => api.post('/api/ui/config/github-token', data)
+/** 验证GitHub Token */
+export const verifyGithubToken = data => api.post('/api/ui/config/github-token/verify', data)
+/** 上传弹幕源离线包 */
+export const uploadScraperPackage = (data, config) => api.post('/api/ui/scrapers/upload-package', data, config)
+
 /** 获取元信息搜索 配置 */
 export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */
@@ -512,3 +537,111 @@ export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tm
 /** 通用配置管理 */
 export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
 export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
+
+/** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
+/** 获取所有媒体服务器 */
+export const getMediaServers = () => api.get('/api/ui/media-servers')
+
+/** 创建媒体服务器 */
+export const createMediaServer = (data) => api.post('/api/ui/media-servers', data)
+
+/** 更新媒体服务器 */
+export const updateMediaServer = (serverId, data) => api.put(`/api/ui/media-servers/${serverId}`, data)
+
+/** 删除媒体服务器 */
+export const deleteMediaServer = (serverId) => api.delete(`/api/ui/media-servers/${serverId}`)
+
+/** 测试媒体服务器连接 */
+export const testMediaServerConnection = (serverId) => api.post(`/api/ui/media-servers/${serverId}/test`)
+
+/** 获取媒体服务器的媒体库列表 */
+export const getMediaServerLibraries = (serverId) => api.get(`/api/ui/media-servers/${serverId}/libraries`)
+
+/** 扫描媒体服务器 */
+export const scanMediaServer = (serverId, libraryIds = null) =>
+  api.post(`/api/ui/media-servers/${serverId}/scan`, { library_ids: libraryIds })
+
+/** 获取媒体项列表 */
+export const getMediaItems = (params) => api.get('/api/ui/media-items', params)
+
+/** 获取作品列表(按作品分组) */
+export const getMediaWorks = (params) => api.get('/api/ui/media-works', params)
+
+/** 获取剧集的季度信息 */
+export const getShowSeasons = (title, serverId) => api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons`, { server_id: serverId })
+
+/** 获取某一季的分集列表 */
+export const getSeasonEpisodes = (title, season, serverId, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    server_id: serverId,
+    page,
+    page_size: pageSize
+  })
+
+/** 更新媒体项 */
+export const updateMediaItem = (itemId, data) => api.put(`/api/ui/media-items/${itemId}`, data)
+
+/** 删除媒体项 */
+export const deleteMediaItem = (itemId) => api.delete(`/api/ui/media-items/${itemId}`)
+
+/** 批量删除媒体项 */
+export const batchDeleteMediaItems = (itemIds) => api.post('/api/ui/media-items/batch-delete', itemIds)
+
+/** 导入媒体项 */
+export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)
+
+// ==================== 本地弹幕扫描 ====================
+
+/** 浏览本地目录 */
+export const browseDirectory = (fileitem, sort = 'name') => api.post('/api/ui/local-scan/browse', fileitem, { params: { sort } })
+
+/** 获取上次使用的扫描路径 */
+export const getLastScanPath = () => api.get('/api/ui/local-scan/last-path')
+
+/** 保存扫描路径 */
+export const saveScanPath = (scanPath) => api.post('/api/ui/local-scan/save-path', { scanPath })
+
+/** 扫描本地弹幕文件 */
+export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
+
+/** 创建文件夹 */
+export const createFolder = (parentPath, folderName) => api.post('/api/ui/local-scan/create-folder', { parentPath, folderName })
+
+/** 删除文件夹 */
+export const deleteFolder = (folderPath) => api.delete('/api/ui/local-scan/delete-folder', { params: { folderPath } })
+
+/** 获取本地弹幕项列表 */
+export const getLocalItems = (params) => api.get('/api/ui/local-items', params)
+
+/** 获取本地作品列表(按作品分组) */
+export const getLocalWorks = (params) => api.get('/api/ui/local-works', params)
+
+/** 获取电影的弹幕文件列表 */
+export const getLocalMovieFiles = (title, year = null, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-movies/${encodeURIComponent(title)}/files`, {
+    year,
+    page,
+    page_size: pageSize
+  })
+
+/** 获取本地剧集的季度信息 */
+export const getLocalShowSeasons = (title) => api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons`)
+
+/** 获取本地某一季的分集列表 */
+export const getLocalSeasonEpisodes = (title, season, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    page,
+    page_size: pageSize
+  })
+
+/** 更新本地弹幕项 */
+export const updateLocalItem = (itemId, data) => api.put(`/api/ui/local-items/${itemId}`, data)
+
+/** 删除本地弹幕项 */
+export const deleteLocalItem = (itemId) => api.delete(`/api/ui/local-items/${itemId}`)
+
+/** 批量删除本地弹幕项 */
+export const batchDeleteLocalItems = (itemIds) => api.post('/api/ui/local-items/batch-delete', { itemIds })
+
+/** 导入本地弹幕项 */
+export const importLocalItems = (data) => api.post('/api/ui/local-items/import', data)

@@ -14,6 +14,7 @@ import {
   Switch,
   Table,
   Tooltip,
+  Tag,
 } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
@@ -41,7 +42,9 @@ import { RoutePaths } from '../../general/RoutePaths'
 import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
-import { useDebounce } from '../../hooks/useDebounce'
+import { ResponsiveTable } from '@/components/ResponsiveTable'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../store/index.js'
 
 const ApplyField = ({ name, label, fetchedValue, form }) => {
   const currentValue = Form.useWatch(name, form)
@@ -70,6 +73,7 @@ export const Library = () => {
   const [list, setList] = useState([])
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
+  const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 50,
@@ -136,6 +140,10 @@ export const Library = () => {
   useEffect(() => {
     getList()
   }, [keyword, pagination.current, pagination.pageSize])
+
+  useEffect(() => {
+    setSearchInputValue(keyword)
+  }, [keyword])
 
   useEffect(() => {
     if (!fetchedMetadata) return
@@ -216,13 +224,13 @@ export const Library = () => {
       title: '年份',
       dataIndex: 'year',
       key: 'year',
-      width: 80,
+      width: 70,
     },
     {
       title: '集数',
       dataIndex: 'episodeCount',
       key: 'episodeCount',
-      width: 50,
+      width: 70,
     },
     {
       title: '源数量',
@@ -270,6 +278,10 @@ export const Library = () => {
               <span
                 className="cursor-pointer hover:text-primary"
                 onClick={() => {
+                  if (!record.animeId || record.animeId === 0) {
+                    messageApi.error('无效的作品ID')
+                    return
+                  }
                   navigate(`/anime/${record.animeId}`)
                 }}
               >
@@ -599,9 +611,17 @@ export const Library = () => {
     }
   }
 
-  const handleKeywordChange = useDebounce(e => {
-    setKeyword(e.target.value)
-  }, 500)
+  const [searchInputValue, setSearchInputValue] = useState('')
+
+  const handleSearch = (value) => {
+    setKeyword(value)
+    setSearchInputValue(value)
+  }
+
+  const handleReset = () => {
+    setKeyword('')
+    setSearchInputValue('')
+  }
 
   const [bgmResult, setBgmResult] = useState([])
   const [bgmOpen, setBgmOpen] = useState(false)
@@ -632,50 +652,159 @@ export const Library = () => {
         loading={loading}
         title="弹幕库"
         extra={
-          <Space>
-            <Input
-              placeholder="搜索已收录的影视"
-              onChange={e => handleKeywordChange(e)}
-            />
-            <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
-              自定义影视条目
-            </Button>
-          </Space>
+          !isMobile && (
+            <Space>
+              <Input.Search
+                placeholder="请输入影视名称"
+                value={searchInputValue}
+                onChange={(e) => setSearchInputValue(e.target.value)}
+                onSearch={handleSearch}
+                enterButton="搜索"
+                allowClear
+                style={{ width: 300 }}
+              />
+              {keyword && (
+                <Button onClick={handleReset}>
+                  重置
+                </Button>
+              )}
+              <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
+                自定义影视条目
+              </Button>
+            </Space>
+          )
         }
       >
-        {!!list?.length ? (
-          <Table
-            pagination={{
-              ...pagination,
-              showTotal: total => `共 ${total} 条数据`,
-              onChange: (page, pageSize) => {
-                setPagination(n => {
-                  return {
-                    ...n,
-                    current: page,
-                    pageSize,
-                  }
-                })
-              },
-              onShowSizeChange: (_, size) => {
-                setPagination(n => {
-                  return {
-                    ...n,
-                    pageSize: size,
-                  }
-                })
-              },
-              hideOnSinglePage: true,
-            }}
-            size="small"
-            dataSource={list}
-            columns={columns}
-            rowKey={'animeId'}
-            scroll={{ x: '100%' }}
-          />
-        ) : (
-          <Empty />
+        {isMobile && (
+          <div className="mb-4">
+            <div className="flex gap-2 mb-3">
+              <Input.Search
+                placeholder="请输入影视名称"
+                value={searchInputValue}
+                onChange={(e) => setSearchInputValue(e.target.value)}
+                onSearch={handleSearch}
+                enterButton="搜索"
+                allowClear
+                className="flex-1"
+              />
+              {keyword && (
+                <Button onClick={handleReset}>
+                  重置
+                </Button>
+              )}
+            </div>
+            <Button
+              type="primary"
+              block
+              size="large"
+              onClick={() => setIsCreateModalOpen(true)}
+            >
+              自定义影视条目
+            </Button>
+          </div>
         )}
+        <ResponsiveTable
+          dataSource={list}
+          columns={columns}
+          loading={loading}
+          rowKey="animeId"
+          pagination={{
+            ...pagination,
+            showTotal: total => `共 ${total} 条数据`,
+            onChange: (page, pageSize) => {
+              setPagination(n => ({
+                ...n,
+                current: page,
+                pageSize,
+              }))
+            },
+            onShowSizeChange: (_, size) => {
+              setPagination(n => ({
+                ...n,
+                pageSize: size,
+              }))
+            },
+            hideOnSinglePage: true,
+          }}
+          renderCard={(record) => (
+            <div className="space-y-3">
+              <div className="flex gap-3">
+                {(() => {
+                  let imageSrc = record.localImagePath || record.imageUrl
+                  if (imageSrc && imageSrc.startsWith('/images/')) {
+                    imageSrc = imageSrc.replace('/images/', '/data/images/')
+                  }
+                  return imageSrc ? (
+                    <img src={imageSrc} className="w-20 h-28 object-cover rounded" alt={record.title} />
+                  ) : (
+                    <div className="w-20 h-28 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                      <MyIcon icon="image" size={32} />
+                    </div>
+                  )
+                })()}
+                <div className="flex-1 space-y-2">
+                  <div className="font-bold text-lg line-clamp-2">{record.title}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <Tag color="blue">{DANDAN_TYPE_DESC_MAPPING[record.type]}</Tag>
+                    {record.season && <Tag>第{record.season}季</Tag>}
+                    {record.year && <Tag>{record.year}年</Tag>}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <span>集数: {record.episodeCount || 0}</span>
+                    <span className="mx-2">·</span>
+                    <span>源: {record.sourceCount || 0}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                    {dayjs(record.createdAt).format('YYYY-MM-DD HH:mm')}
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon="edit" size={16} />}
+                  title="编辑影视信息"
+                  onClick={async () => {
+                    const res = await getAnimeDetail({ animeId: record.animeId })
+                    form.setFieldsValue({
+                      ...(res.data || {}),
+                      animeId: record.animeId,
+                    })
+                    setEditOpen(true)
+                  }}
+                >
+                  编辑
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon="book" size={16} />}
+                  title="查看详情"
+                  onClick={() => {
+                    if (!record.animeId || record.animeId === 0) {
+                      messageApi.error('无效的作品ID')
+                      return
+                    }
+                    navigate(`/anime/${record.animeId}`)
+                  }}
+                >
+                  详情
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<MyIcon icon="delete" size={16} />}
+                  title="删除影视条目"
+                  onClick={() => handleDelete(record)}
+                >
+                  删除
+                </Button>
+              </div>
+            </div>
+          )}
+        />
       </Card>
       <CreateAnimeModal
         open={isCreateModalOpen}

@@ -1,28 +1,26 @@
 import { Button, Card, Input, message } from 'antd'
 import { useEffect, useState } from 'react'
-import { getCustomDomain, setCustomDomain } from '../../../apis'
+import { setCustomDomain } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 
-export const Domain = () => {
+export const Domain = ({ domain: propDomain, onDomainChange }) => {
   const [loading, setLoading] = useState(false)
-  const [domain, setDomain] = useState('')
+  const [domain, setDomain] = useState(propDomain || '')
   const messageApi = useMessage()
 
+  // 监听 prop 变化，同步到本地状态
   useEffect(() => {
-    setLoading(true)
-    getCustomDomain()
-      .then(res => {
-        setDomain(res.data?.value ?? '')
-      })
-      .finally(() => {
-        setLoading(false)
-      })
-  }, [])
+    setDomain(propDomain || '')
+  }, [propDomain])
 
   const handleEdit = async () => {
     try {
       await setCustomDomain({ value: domain })
       messageApi.success('保存成功')
+      // 通知父组件更新 domain
+      if (onDomainChange) {
+        onDomainChange(domain)
+      }
     } catch (error) {
       messageApi.error('保存失败')
     }

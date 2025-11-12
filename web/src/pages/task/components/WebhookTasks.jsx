@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { List, Button, Tag, Space, Card, Checkbox, Empty, Tooltip, Input } from 'antd'
-import { DeleteOutlined, CheckOutlined, MinusOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { List, Button, Tag, Space, Card, Checkbox, Empty, Tooltip, Input, Modal } from 'antd'
+import { DeleteOutlined, CheckOutlined, MinusOutlined, PlayCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { getWebhookTasks, deleteWebhookTasks, runWebhookTasksNow } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
@@ -33,6 +33,8 @@ export const WebhookTasks = () => {
     total: 0,
   })
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchModalVisible, setSearchModalVisible] = useState(false)
+  const [tempSearchTerm, setTempSearchTerm] = useState('')
   const messageApi = useMessage()
   const modalApi = useModal()
 
@@ -153,15 +155,17 @@ export const WebhookTasks = () => {
                 onClick={handleBulkDelete}
               />
             </Tooltip>
-            <Input.Search
-              placeholder="搜索任务标题"
-              allowClear
-              enterButton
-              onSearch={value => {
-                setSearchTerm(value)
-                setPagination(prev => ({ ...prev, current: 1 }))
-              }}
-            />
+            <Tooltip title="搜索任务">
+              <Button
+                type="default"
+                shape="circle"
+                icon={<SearchOutlined />}
+                onClick={() => {
+                  setTempSearchTerm(searchTerm)
+                  setSearchModalVisible(true)
+                }}
+              />
+            </Tooltip>
           </Space>
         }
       >
@@ -220,6 +224,40 @@ export const WebhookTasks = () => {
           )}
         </div>
       </Card>
+
+      {/* 搜索模态框 */}
+      <Modal
+        title="搜索任务"
+        open={searchModalVisible}
+        onCancel={() => setSearchModalVisible(false)}
+        onOk={() => {
+          setSearchTerm(tempSearchTerm)
+          setPagination(prev => ({ ...prev, current: 1 }))
+          setSearchModalVisible(false)
+        }}
+        okText="搜索"
+        cancelText="取消"
+      >
+        <div className="py-4">
+          <Input
+            placeholder="请输入任务标题关键词"
+            value={tempSearchTerm}
+            onChange={(e) => setTempSearchTerm(e.target.value)}
+            onPressEnter={() => {
+              setSearchTerm(tempSearchTerm)
+              setPagination(prev => ({ ...prev, current: 1 }))
+              setSearchModalVisible(false)
+            }}
+            allowClear
+            autoFocus
+          />
+          {searchTerm && (
+            <div className="mt-2 text-sm text-gray-500">
+              当前搜索: "{searchTerm}"
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

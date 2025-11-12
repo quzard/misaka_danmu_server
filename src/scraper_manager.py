@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 
 from .scrapers.base import BaseScraper
+from .transport_manager import TransportManager
 from .config_manager import ConfigManager
 from .models import ProviderSearchInfo, ScraperSetting
 from . import crud
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from .metadata_manager import MetadataSourceManager
 
 class ScraperManager:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager"):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager", transport_manager: TransportManager):
         self.scrapers: Dict[str, BaseScraper] = {}
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
@@ -29,6 +30,7 @@ class ScraperManager:
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.metadata_manager = metadata_manager
+        self.transport_manager = transport_manager
 
     async def acquire_search_lock(self, api_key: str) -> bool:
         """Acquires a search lock for a given API key. Returns False if already locked."""
@@ -59,14 +61,7 @@ class ScraperManager:
         self._scraper_classes.clear()
         self.scraper_settings.clear()
 
-
-        self._domain_map.clear()
-        discovered_providers = []
-        scraper_classes = {}
-        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
-
-        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
-        # 我们需要同时处理源码和编译后的情况。
+        # 检查是否需要从备份恢复
         def _is_docker_environment():
             """检测是否在Docker容器中运行"""
             import os
@@ -83,9 +78,37 @@ class ScraperManager:
 
         if _is_docker_environment():
             scrapers_dir = Path("/app/src/scrapers")
+            backup_dir = Path("/app/config/scrapers_backup")
         else:
             scrapers_dir = Path("src/scrapers")
-        for file_path in scrapers_dir.iterdir():
+            backup_dir = Path("config/scrapers_backup")
+
+        # 检查 scrapers 目录是否为空(没有 .so/.pyd 文件)
+        has_scrapers = any(
+            f.suffix in ['.so', '.pyd']
+            for f in scrapers_dir.iterdir()
+            if f.is_file()
+        )
+
+        # 如果没有弹幕源文件但有备份,自动恢复
+        if not has_scrapers and backup_dir.exists():
+            backup_files = list(backup_dir.glob("*.so")) + list(backup_dir.glob("*.pyd"))
+            if backup_files:
+                import shutil
+                logging.getLogger(__name__).info(f"检测到 scrapers 目录为空但存在备份,正在自动恢复 {len(backup_files)} 个文件...")
+                for file in backup_files:
+                    shutil.copy2(file, scrapers_dir / file.name)
+                logging.getLogger(__name__).info("备份恢复完成")
+
+        self._domain_map.clear()
+        discovered_providers = []
+        scraper_classes = {}
+        default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
+
+        # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
+        # 我们需要同时处理源码和编译后的情况。
+        # 对文件列表排序以确保每次发现的顺序一致
+        for file_path in sorted(scrapers_dir.iterdir()):
             # 我们只关心 .py 文件或已知的二进制扩展名
             if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
                 continue
@@ -158,7 +181,10 @@ class ScraperManager:
 
         # Instantiate all discovered scrapers
         for provider_name, scraper_class in self._scraper_classes.items():
-            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager)
+            scraper_instance = scraper_class(self._session_factory, self.config_manager, self.transport_manager)
+            # 【优化】设置 scraper_manager 引用,以便使用缓存的配置
+            scraper_instance._scraper_manager_ref = self
+            self.scrapers[provider_name] = scraper_instance
             setting = self.scraper_settings.get(provider_name, {})
             
             is_enabled_by_user = setting.get('isEnabled', True)
@@ -184,12 +210,32 @@ class ScraperManager:
         async with self._session_factory() as session:
             # CRUD函数负责处理更新逻辑并提交事务。
             await crud.update_scrapers_settings(session, settings)
-        
+
         # 更新数据库后，重新加载所有搜索源以应用新设置。
         # 这能确保启用/禁用、代理设置等立即生效。
         await self.load_and_sync_scrapers()
         # 使用标准日志记录器
         logging.getLogger(__name__).info("搜索源设置已更新并重新加载。")
+
+    async def reload_scraper(self, provider_name: str):
+        """
+        重新加载单个搜索源实例。
+        当配置更新时调用此方法以使更改生效。
+        """
+        # 关闭现有实例
+        if provider_name in self.scrapers:
+            try:
+                await self.scrapers[provider_name].close()
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"关闭搜索源 '{provider_name}' 时出错: {e}")
+
+        # 重新创建实例
+        if provider_name in self._scraper_classes:
+            scraper_class = self._scraper_classes[provider_name]
+            self.scrapers[provider_name] = scraper_class(self._session_factory, self.config_manager, self.transport_manager)
+            logging.getLogger(__name__).info(f"搜索源 '{provider_name}' 已重新加载。")
+        else:
+            logging.getLogger(__name__).warning(f"未找到搜索源类 '{provider_name}'，无法重新加载。")
 
     @property
     def has_enabled_scrapers(self) -> bool:

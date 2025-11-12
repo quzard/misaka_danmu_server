@@ -22,6 +22,8 @@ import {
   Dropdown,
   Space,
   Checkbox,
+  Popover,
+  Select,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -34,6 +36,8 @@ import {
   CalendarOutlined,
   CloudServerOutlined,
   LinkOutlined,
+  ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
@@ -202,9 +206,11 @@ export const SearchResult = () => {
       if (loading) return
       setLoading(true)
 
-      // 检查是否有补充源
-      const key = `${item.provider}_${item.mediaId}`
-      const supplement = supplementMap[key]
+      // 检查是否有补充源 - 查找所有以主源key开头的补充源
+      const mainKey = `${item.provider}_${item.mediaId}`
+      const supplement = Object.entries(supplementMap).find(([key, value]) =>
+        key.startsWith(mainKey + '_') && value?.enabled
+      )?.[1]
 
       const res = await importDanmu({
         provider: item.provider,
@@ -288,7 +294,7 @@ export const SearchResult = () => {
       onOk: async () => {
         try {
           setConfirmLoading(true)
-          await Promise.all(
+          const results = await Promise.allSettled(
             selectList.map(item => {
               console.log(item, '1')
               return importDanmu(
@@ -307,11 +313,26 @@ export const SearchResult = () => {
               )
             })
           )
-          messageApi.success('批量导入任务已提交，请在任务管理器中查看进度。')
+
+          // 统计成功和失败的任务
+          const successCount = results.filter(r => r.status === 'fulfilled').length
+          const failedCount = results.filter(r => r.status === 'rejected').length
+
+          if (successCount > 0) {
+            if (failedCount > 0) {
+              messageApi.warning(`已提交 ${successCount} 个任务，${failedCount} 个任务提交失败，请在任务管理器中查看进度。`)
+            } else {
+              messageApi.success('批量导入任务已提交，请在任务管理器中查看进度。')
+            }
+          } else {
+            messageApi.error('所有任务提交失败')
+          }
+
           setSelectList([])
           setConfirmLoading(false)
           setBatchOpen(false)
         } catch (err) {
+          messageApi.error('批量导入失败')
         } finally {
           setConfirmLoading(false)
           setBatchOpen(false)
@@ -542,17 +563,39 @@ export const SearchResult = () => {
   }
 
   // 补充源复选框处理
-  const handleSupplementToggle = (mainItem, supplement, checked) => {
-    const key = `${mainItem.provider}_${mainItem.mediaId}`
-    setSupplementMap(prev => ({
-      ...prev,
-      [key]: checked ? {
+  const handleSupplementToggle = (mainItem, supplement, checked, customKey = null) => {
+    // 使用自定义key或默认key
+    const key = customKey || `${mainItem.provider}_${mainItem.mediaId}`
+
+    if (checked) {
+      // 如果勾选了新的补充源,需要取消同一主源的其他补充源
+      const mainKey = `${mainItem.provider}_${mainItem.mediaId}`
+      const newMap = { ...supplementMap }
+
+      // 清除同一主源的其他补充源
+      Object.keys(newMap).forEach(k => {
+        if (k.startsWith(mainKey + '_') && k !== key) {
+          delete newMap[k]
+        }
+      })
+
+      // 设置新的补充源
+      newMap[key] = {
         provider: supplement.provider,
         mediaId: supplement.mediaId,
         title: supplement.title,
         enabled: true
-      } : null
-    }))
+      }
+
+      setSupplementMap(newMap)
+    } else {
+      // 取消勾选
+      setSupplementMap(prev => {
+        const newMap = { ...prev }
+        delete newMap[key]
+        return newMap
+      })
+    }
   }
 
   // 补充搜索
@@ -573,46 +616,91 @@ export const SearchResult = () => {
         )
       }
 
-      const best_supplement = supplementalResults.find(
+      // 查找所有匹配的补充源(相似度>80且支持分集URL)
+      const matching_supplements = supplementalResults.filter(
         sup =>
           sup.provider !== item.provider &&
-          calculateSimilarity(item.title, sup.title) > 80
+          calculateSimilarity(item.title, sup.title) > 80 &&
+          sup.supportsEpisodeUrls === true
       )
 
-      if (best_supplement) {
-        const key = `${item.provider}_${item.mediaId}`
-        const isChecked = supplementMap[key]?.enabled || false
+      if (matching_supplements.length > 0) {
+        const mainKey = `${item.provider}_${item.mediaId}`
 
-        // 从API响应中读取是否支持分集URL获取
-        const supports_episode_urls = best_supplement.supportsEpisodeUrls === true
-
-        // 调试日志
-        console.log('[补充源调试]', {
-          provider: best_supplement.provider,
-          title: best_supplement.title,
-          supportsEpisodeUrls: best_supplement.supportsEpisodeUrls,
-          supports_episode_urls,
-          best_supplement
-        })
+        // 查找当前选中的补充源(不管是否启用)
+        const selectedKey = Object.keys(supplementMap).find(k =>
+          k.startsWith(mainKey + '_')
+        )
+        const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
+        const isEnabled = selectedKey ? (supplementMap[selectedKey]?.enabled || false) : false
 
         return (
-          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2 flex-wrap justify-start">
-            <Tag color="purple">{best_supplement.provider}</Tag>
+          <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-md flex items-center gap-2">
             <span className="text-sm text-gray-500 dark:text-gray-400 shrink-0">
-              找到补充源: {best_supplement.title}
+              找到补充源:
             </span>
-            {supports_episode_urls && (
-              <>
-                <Checkbox
-                  checked={isChecked}
-                  onChange={e => {
-                    e.stopPropagation()
-                    handleSupplementToggle(item, best_supplement, e.target.checked)
-                  }}
-                >
-                  使用补充源分集列表
-                </Checkbox>
-              </>
+            <Select
+              placeholder="选择补充源"
+              value={selectedProvider}
+              onChange={value => {
+                // 如果选择了补充源
+                if (value) {
+                  const supplement = matching_supplements.find(s => s.provider === value)
+                  if (supplement) {
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    // 选择补充源时,不自动启用,需要用户勾选checkbox
+                    setSupplementMap(prev => {
+                      const newMap = { ...prev }
+                      // 清除同一主源的其他补充源
+                      Object.keys(newMap).forEach(k => {
+                        if (k.startsWith(mainKey + '_') && k !== key) {
+                          delete newMap[k]
+                        }
+                      })
+                      // 添加新选择的补充源(但不启用)
+                      newMap[key] = {
+                        provider: supplement.provider,
+                        mediaId: supplement.mediaId,
+                        title: supplement.title,
+                        enabled: false
+                      }
+                      return newMap
+                    })
+                  }
+                } else {
+                  // 如果清空选择,删除所有该主源的补充源
+                  setSupplementMap(prev => {
+                    const newMap = { ...prev }
+                    Object.keys(newMap).forEach(k => {
+                      if (k.startsWith(mainKey + '_')) {
+                        delete newMap[k]
+                      }
+                    })
+                    return newMap
+                  })
+                }
+              }}
+              allowClear
+              style={{ minWidth: 200 }}
+              options={matching_supplements.map(supplement => ({
+                label: `${supplement.provider} - ${supplement.title}`,
+                value: supplement.provider
+              }))}
+            />
+            {selectedProvider && (
+              <Checkbox
+                checked={isEnabled}
+                onChange={e => {
+                  e.stopPropagation()
+                  const supplement = matching_supplements.find(s => s.provider === selectedProvider)
+                  if (supplement) {
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    handleSupplementToggle(item, supplement, e.target.checked, key)
+                  }
+                }}
+              >
+                使用补充源分集列表
+              </Checkbox>
             )}
           </div>
         )
@@ -623,15 +711,16 @@ export const SearchResult = () => {
   }
 
   return (
-    <div className="my-4">
-      <Card title="搜索结果" loading={searchLoading}>
-        <div>
-          <Row gutter={[12, 12]} className="mb-6">
-            <Col md={20} xs={24}>
-              <Space wrap align="center">
+    <>
+      {lastSearchResultData && (
+        <div className="border-t border-base-border mt-6 pt-6">
+          <div className="text-lg font-semibold mb-4">搜索结果</div>
+          <div>
+            <div className="mb-6">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   type="primary"
-                  className="w-32"
+                  className={isMobile ? 'flex-1' : ''}
                   onClick={() => {
                     setSelectList(list =>
                       list.length === renderData.length ? [] : renderData
@@ -644,63 +733,79 @@ export const SearchResult = () => {
                     : '全选'}
                 </Button>
                 <Dropdown menu={typeMenu}>
-                  <Button>
+                  <Button className={isMobile ? 'flex-1' : ''}>
                     {typeFilter === 'all' ? (
                       <>
                         <MyIcon icon="tvlibrary" size={16} className="mr-1" />
-                        按类型
+                        {isMobile ? '类型' : '按类型'}
                       </>
                     ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
                       <>
                         <MyIcon icon="movie" size={16} className="mr-1" />
-                        电影/剧场版
+                        {isMobile ? '电影' : '电影/剧场版'}
                       </>
                     ) : (
                       <>
                         <MyIcon icon="tv" size={16} className="mr-1" />
-                        电视节目
+                        {isMobile ? 'TV' : '电视节目'}
                       </>
                     )}
                   </Button>
                 </Dropdown>
                 <Dropdown menu={yearMenu} disabled={!years.length}>
-                  <Button icon={<CalendarOutlined />}>
-                    {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
+                  <Button icon={<CalendarOutlined />} className={isMobile ? 'flex-1' : ''}>
+                    {yearFilter === 'all' ? (isMobile ? '年份' : '按年份') : `${yearFilter}年`}
                   </Button>
                 </Dropdown>
                 <Dropdown menu={providerMenu} disabled={!providers.length}>
-                  <Button icon={<CloudServerOutlined />}>
+                  <Button icon={<CloudServerOutlined />} className={isMobile ? 'flex-1' : ''}>
                     {providerFilter === 'all'
-                      ? '按来源'
+                      ? (isMobile ? '来源' : '按来源')
                       : providerFilter.charAt(0).toUpperCase() +
                         providerFilter.slice(1)}
                   </Button>
                 </Dropdown>
-                <div className="w-full">
-                  <Input
-                    placeholder="在结果中过滤标题"
-                    onChange={e => setKeyword(e.target.value)}
-                  />
-                </div>
-              </Space>
-            </Col>
-            <Col md={4} xs={24}>
-              <Button
-                block
-                type="primary"
-                onClick={() => {
-                  if (selectList.length === 0) {
-                    messageApi.error('请选择要导入的媒体')
-                    return
+                
+                <Popover
+                  content={
+                    <div style={{ width: 250 }}>
+                      <Input
+                        placeholder="输入标题关键词过滤"
+                        allowClear
+                        value={keyword}
+                        onChange={e => setKeyword(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
                   }
-
-                  setBatchOpen(true)
-                }}
-              >
-                批量导入
-              </Button>
-            </Col>
-          </Row>
+                  title="过滤结果"
+                  trigger="click"
+                  placement={isMobile ? 'bottom' : 'bottomRight'}
+                >
+                  <Button 
+                    icon={<SearchOutlined />}
+                    className={isMobile ? 'flex-1' : ''}
+                  >
+                    {keyword ? `过滤: ${keyword.length > 5 ? keyword.slice(0, 5) + '...' : keyword}` : '过滤'}
+                  </Button>
+                </Popover>
+                
+                <Button
+                  className={isMobile ? 'flex-1' : 'ml-auto'}
+                  type="primary"
+                  onClick={() => {
+                    if (selectList.length === 0) {
+                      messageApi.error('请选择要导入的媒体')
+                      return
+                    }
+                    setBatchOpen(true)
+                  }}
+                  disabled={!renderData.length}
+                >
+                  批量导入
+                </Button>
+              </div>
+            </div>
           {!!renderData?.length ? (
             <List
               itemLayout="vertical"
@@ -790,11 +895,27 @@ export const SearchResult = () => {
                             try {
                               if (editLoading) return
                               setEditLoading(true)
-                              const res = await getEditEpisodes({
+
+                              // 检查是否有补充源 - 查找所有以主源key开头的补充源
+                              const mainKey = `${item.provider}_${item.mediaId}`
+                              const supplement = Object.entries(supplementMap).find(([key, value]) =>
+                                key.startsWith(mainKey + '_') && value?.enabled
+                              )?.[1]
+
+                              // 构建请求参数
+                              const params = {
                                 provider: item.provider,
                                 media_id: item.mediaId,
                                 media_type: item.type,
-                              })
+                              }
+
+                              // 如果启用了补充源,添加补充源参数
+                              if (supplement?.enabled) {
+                                params.supplement_provider = supplement.provider
+                                params.supplement_media_id = supplement.mediaId
+                              }
+
+                              const res = await getEditEpisodes(params)
                               setEditEpisodeList(res.data)
                               setEditImportOpen(true)
                               setEditItem(item)
@@ -832,7 +953,8 @@ export const SearchResult = () => {
             <Empty description="暂无搜索结果" />
           )}
         </div>
-      </Card>
+        </div>
+      )}
       <Modal
         title="批量导入确认"
         open={batchOpen}
@@ -959,12 +1081,6 @@ export const SearchResult = () => {
       <Modal
         title={`编辑导入: ${editItem.title}`}
         open={editImportOpen}
-        onOk={() => {
-          handleImportEdit()
-        }}
-        confirmLoading={editConfirmLoading}
-        cancelText="取消"
-        okText="确认导入"
         onCancel={() => setEditImportOpen(false)}
         footer={[
           <Button
@@ -990,142 +1106,237 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-          <div className="shrink-0">作品标题:</div>
-          <div className="w-full">
-            <Input
-              value={editAnimeTitle || editItem.title}
-              placeholder="请输入作品标题"
-              onChange={e => {
-                setEditAnimeTitle(e.target.value)
-              }}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div>
-            <Button
-              type="default"
-              onClick={async () => {
-                try {
-                  const res = await getInLibraryEpisodes({
-                    title: editAnimeTitle || editItem.title,
-                    season: editItem.season ?? 1,
-                  })
-                  if (!res.data?.length) {
-                    messageApi.error(
-                      `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+        <div className={isMobile ? "max-h-[60vh]" : "max-h-[70vh] overflow-y-auto"}>
+          {isMobile ? (
+            <div className="space-y-4 my-6">
+              <div>
+                <div className="font-medium text-sm mb-2">作品标题</div>
+                <Input
+                  value={editAnimeTitle || editItem.title}
+                  placeholder="请输入作品标题"
+                  onChange={e => {
+                    setEditAnimeTitle(e.target.value)
+                  }}
+                />
+              </div>
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                block
+                onClick={async () => {
+                  try {
+                    const res = await getInLibraryEpisodes({
+                      title: editAnimeTitle || editItem.title,
+                      season: editItem.season ?? 1,
+                    })
+                    if (!res.data?.length) {
+                      messageApi.error(
+                        `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+                      )
+                      return
+                    }
+                    setEditEpisodeList(list => {
+                      return list.filter(
+                        it => !(res.data ?? []).includes(it.episodeIndex)
+                      )
+                    })
+                    const removedCount = editEpisodeList.reduce((total, item) => {
+                      return (
+                        total +
+                        (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                      )
+                    }, 0)
+
+                    messageApi.success(
+                      `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
                     )
-                    return
+                  } catch (error) {
+                    messageApi.error(`查询已存在分集失败: ${error.message}`)
                   }
-                  setEditEpisodeList(list => {
-                    return list.filter(
-                      it => !(res.data ?? []).includes(it.episodeIndex)
-                    )
-                  })
-                  const removedCount = editEpisodeList.reduce((total, item) => {
-                    return (
-                      total +
-                      (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
-                    )
-                  }, 0)
-
-                  messageApi.success(
-                    `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
-                  )
-                } catch (error) {
-                  messageApi.error(`查询已存在分集失败: ${error.message}`)
-                }
-              }}
-            >
-              重整分集导入
-            </Button>
-          </div>
-        </div>
-        <div className="flex item-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
-          <div className="shrink-0">集数区间:</div>
-          <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
-            <div className="flex items-center justify-start gap-2">
-              <span>从</span>
-              <InputNumber
-                value={range[0]}
-                onChange={value => setRange(r => [value, r[1]])}
-                min={1}
-                max={range[1]}
-                step={1}
-                style={{
-                  width: '100%',
                 }}
-              />
-              <span>到</span>
-              <InputNumber
-                value={range[1]}
-                onChange={value => setRange(r => [r[0], value])}
-                min={range[0]}
-                step={1}
-                style={{
-                  width: '100%',
-                }}
-              />
-            </div>
-            <Button
-              type="primary"
-              block
-              onClick={() => {
-                console.log(range)
-                setEditEpisodeList(list => {
-                  return list.filter(
-                    it =>
-                      it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
-                  )
-                })
-              }}
-            >
-              确认区间
-            </Button>
-          </div>
-        </div>
-        <div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={editEpisodeList.map(item => item.episodeId)}
-              strategy={verticalListSortingStrategy}
-            >
-              <List
-                itemLayout="vertical"
-                size="large"
-                pagination={{
-                  pageSize: episodePageSize,
-                  onShowSizeChange: (_, size) => {
-                    setEpisodePageSize(size)
-                  },
-                  hideOnSinglePage: true,
-                  showLessItems: true,
-                }}
-                dataSource={editEpisodeList}
-                renderItem={(item, index) => (
-                  <SortableItem
-                    key={item.episodeId}
-                    item={item}
-                    index={index}
-                    handleDelete={() => handleDelete(item)}
-                    handleEditTitle={value => handleEditTitle(item, value)}
-                    handleEditIndex={value => handleEditIndex(item, value)}
+              >
+                重整分集导入
+              </Button>
+              
+              <div>
+                <div className="font-medium text-sm mb-2">集数区间</div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm">从</span>
+                  <InputNumber
+                    className="flex-1"
+                    value={range[0]}
+                    onChange={value => setRange(r => [value, r[1]])}
+                    min={1}
+                    max={range[1]}
+                    step={1}
                   />
-                )}
-              />
-            </SortableContext>
+                  <span className="text-sm">到</span>
+                  <InputNumber
+                    className="flex-1"
+                    value={range[1]}
+                    onChange={value => setRange(r => [r[0], value])}
+                    min={range[0]}
+                    step={1}
+                  />
+                </div>
+                <Button
+                  type="primary"
+                  block
+                  onClick={() => {
+                    console.log(range)
+                    setEditEpisodeList(list => {
+                      return list.filter(
+                        it =>
+                          it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                      )
+                    })
+                  }}
+                >
+                  确认区间
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+                <div className="shrink-0">作品标题:</div>
+                <div className="w-full">
+                  <Input
+                    value={editAnimeTitle || editItem.title}
+                    placeholder="请输入作品标题"
+                    onChange={e => {
+                      setEditAnimeTitle(e.target.value)
+                    }}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div>
+                  <Button
+                    type="default"
+                    onClick={async () => {
+                      try {
+                        const res = await getInLibraryEpisodes({
+                          title: editAnimeTitle || editItem.title,
+                          season: editItem.season ?? 1,
+                        })
+                        if (!res.data?.length) {
+                          messageApi.error(
+                            `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
+                          )
+                          return
+                        }
+                        setEditEpisodeList(list => {
+                          return list.filter(
+                            it => !(res.data ?? []).includes(it.episodeIndex)
+                          )
+                        })
+                        const removedCount = editEpisodeList.reduce((total, item) => {
+                          return (
+                            total +
+                            (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
+                          )
+                        }, 0)
 
-            {/* 拖拽覆盖层 */}
-            <DragOverlay>{renderDragOverlay()}</DragOverlay>
-          </DndContext>
+                        messageApi.success(
+                          `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
+                        )
+                      } catch (error) {
+                        messageApi.error(`查询已存在分集失败: ${error.message}`)
+                      }
+                    }}
+                  >
+                    重整分集导入
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+                <div className="shrink-0">集数区间:</div>
+                <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
+                  <div className="flex items-center justify-start gap-2">
+                    <span>从</span>
+                    <InputNumber
+                      value={range[0]}
+                      onChange={value => setRange(r => [value, r[1]])}
+                      min={1}
+                      max={range[1]}
+                      step={1}
+                      style={{
+                        width: '100%',
+                      }}
+                    />
+                    <span>到</span>
+                    <InputNumber
+                      value={range[1]}
+                      onChange={value => setRange(r => [r[0], value])}
+                      min={range[0]}
+                      step={1}
+                      style={{
+                        width: '100%',
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type="primary"
+                    block
+                    onClick={() => {
+                      console.log(range)
+                      setEditEpisodeList(list => {
+                        return list.filter(
+                          it =>
+                            it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                        )
+                      })
+                    }}
+                  >
+                    确认区间
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+          <div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={editEpisodeList.map(item => item.episodeId)}
+                strategy={verticalListSortingStrategy}
+              >
+                <List
+                  itemLayout="vertical"
+                  size="large"
+                  pagination={{
+                    pageSize: episodePageSize,
+                    onShowSizeChange: (_, size) => {
+                      setEpisodePageSize(size)
+                    },
+                    hideOnSinglePage: true,
+                    showLessItems: true,
+                  }}
+                  dataSource={editEpisodeList}
+                  renderItem={(item, index) => (
+                    <SortableItem
+                      key={item.episodeId}
+                      item={item}
+                      index={index}
+                      handleDelete={() => handleDelete(item)}
+                      handleEditTitle={value => handleEditTitle(item, value)}
+                      handleEditIndex={value => handleEditIndex(item, value)}
+                    />
+                  )}
+                />
+              </SortableContext>
+
+              {/* 拖拽覆盖层 */}
+              <DragOverlay>{renderDragOverlay()}</DragOverlay>
+            </DndContext>
+          </div>
         </div>
       </Modal>
-    </div>
+    </>
   )
 }
 

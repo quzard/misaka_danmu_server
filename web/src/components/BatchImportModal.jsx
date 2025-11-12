@@ -324,7 +324,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
               <div className="ml-2">或直接拖拽文件到此处</div>
             </div>
             <div className="mt-2">
-              支持批量上传，仅接受.xml格式文件，单次最多20个
+              支持批量上传，仅接受.xml格式文件
             </div>
           </div>
         </Upload>
