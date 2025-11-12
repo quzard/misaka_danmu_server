@@ -189,7 +189,7 @@ async def upload_scraper_package(
 
             # 备份当前弹幕源
             from .scraper_resources import backup_scrapers as backup_func
-            await backup_func(current_user, manager)
+            await backup_func(current_user)
             logger.info("已备份当前弹幕源")
 
             # 复制文件到 scrapers 目录
