@@ -202,12 +202,21 @@ async def upload_scraper_package(
                     file_count += 1
                     logger.info(f"已复制文件: {file.name}")
 
-            # 重载弹幕源
-            await manager.load_and_sync_scrapers()
             logger.info(f"用户 '{current_user.username}' 上传了离线包,共 {file_count} 个文件")
 
+            # 在后台异步重载弹幕源,避免阻塞响应
+            async def reload_scrapers_background():
+                try:
+                    await manager.load_and_sync_scrapers()
+                    logger.info("弹幕源重载完成")
+                except Exception as e:
+                    logger.error(f"后台重载弹幕源失败: {e}", exc_info=True)
+
+            import asyncio
+            asyncio.create_task(reload_scrapers_background())
+
             return {
-                "message": f"上传成功,共安装 {file_count} 个文件",
+                "message": f"上传成功,共安装 {file_count} 个文件,弹幕源正在后台重载",
                 "version": versions_data.get('version'),
                 "scrapers": list(versions_data.get('scrapers', {}).keys())
             }
