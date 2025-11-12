@@ -473,6 +473,20 @@ const LocalItemList = ({ refreshTrigger }) => {
     });
   };
 
+  // 递归查找item的辅助函数
+  const findItemByKey = (items, key) => {
+    for (const item of items) {
+      if (item.key === key) {
+        return item;
+      }
+      if (item.children) {
+        const found = findItemByKey(item.children, key);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   // 批量导入
   const handleBatchImport = async () => {
     if (selectedRowKeys.length === 0) {
@@ -486,12 +500,12 @@ const LocalItemList = ({ refreshTrigger }) => {
     const seasons = [];
 
     selectedRowKeys.forEach(key => {
-      // 查找对应的item
-      const item = allItems.find(item => item.key === key);
+      // 递归查找对应的item
+      const item = findItemByKey(allItems, key);
       if (!item) return;
 
-      if (item.mediaType === 'movie' && !item.isGroup) {
-        // 电影文件(非分组节点)
+      if (item.mediaType === 'movie_file') {
+        // 电影文件
         if (item.id) {
           itemIds.push(item.id);
         }
