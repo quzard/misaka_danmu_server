@@ -623,7 +623,7 @@ async def _import_episodes_iteratively(
     smart_refresh: bool = False,
     is_fallback: bool = False,
     fallback_type: Optional[str] = None
-) -> Tuple[int, List[int], int, Dict[int, str]]:
+) -> Tuple[int, List[int], List[int], int, Dict[int, str]]:
     """
     迭代地导入分集弹幕。
 
@@ -635,14 +635,16 @@ async def _import_episodes_iteratively(
         fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
 
     Returns:
-        Tuple[int, List[int], int, Dict[int, str]]:
+        Tuple[int, List[int], List[int], int, Dict[int, str]]:
             - total_comments_added: 总共新增的弹幕数
             - successful_episodes_indices: 成功导入的分集索引列表
+            - skipped_episodes_indices: 已跳过的分集索引列表(已有弹幕)
             - failed_episodes_count: 失败的分集数量
             - failed_episodes_details: 失败分集的详细信息 {集数: 错误原因}
     """
     total_comments_added = 0
     successful_episodes_indices = []
+    skipped_episodes_indices = []  # 记录已跳过的分集(已有弹幕)
     failed_episodes_count = 0
     failed_episodes_details: Dict[int, str] = {}  # 记录失败分集的详细信息
 
@@ -694,11 +696,11 @@ async def _import_episodes_iteratively(
                                 await session.commit()
                             elif new_count == existing_count:
                                 logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                successful_episodes_indices.append(episode.episodeIndex)
+                                skipped_episodes_indices.append(episode.episodeIndex)
                                 continue
                             else:
                                 logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                successful_episodes_indices.append(episode.episodeIndex)
+                                skipped_episodes_indices.append(episode.episodeIndex)
                                 continue
                         else:
                             # 没有现有弹幕，直接导入
@@ -711,7 +713,7 @@ async def _import_episodes_iteratively(
                         existing_episode = episode_result.scalar_one_or_none()
                         if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
                             logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                            successful_episodes_indices.append(episode.episodeIndex)
+                            skipped_episodes_indices.append(episode.episodeIndex)  # 记录为跳过
                             continue
 
                         added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
@@ -795,11 +797,11 @@ async def _import_episodes_iteratively(
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
                                 elif new_count == existing_count:
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    skipped_episodes_indices.append(episode.episodeIndex)
                                     continue
                                 else:
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    skipped_episodes_indices.append(episode.episodeIndex)
                                     continue
                         else:
                             # 普通模式：检查是否已有弹幕，如果有则跳过
@@ -808,7 +810,7 @@ async def _import_episodes_iteratively(
                             existing_episode = episode_result.scalar_one_or_none()
                             if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
                                 logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                                successful_episodes_indices.append(episode.episodeIndex)
+                                skipped_episodes_indices.append(episode.episodeIndex)  # 记录为跳过
                                 continue
 
                         added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
@@ -892,11 +894,11 @@ async def _import_episodes_iteratively(
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
                                 elif new_count == existing_count:
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    skipped_episodes_indices.append(episode.episodeIndex)
                                     continue
                                 else:
                                     logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                    successful_episodes_indices.append(episode.episodeIndex)
+                                    skipped_episodes_indices.append(episode.episodeIndex)
                                     continue
                         else:
                             # 普通模式：检查是否已有弹幕，如果有则跳过
@@ -935,7 +937,7 @@ async def _import_episodes_iteratively(
                 logger.error(f"处理分集 '{episode.title}' 时发生错误: {e}", exc_info=True)
                 continue
 
-    return total_comments_added, successful_episodes_indices, failed_episodes_count, failed_episodes_details
+    return total_comments_added, successful_episodes_indices, skipped_episodes_indices, failed_episodes_count, failed_episodes_details
 
 async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, progress_callback: Callable):
     """后台任务：批量删除多个分集。"""
@@ -1255,7 +1257,7 @@ async def generic_import_task(
         raise TaskSuccess("数据源验证失败，未能获取到任何弹幕，未创建数据库条目。")
 
     # 处理所有分集（包括第一集）
-    total_comments_added, successful_episodes_indices, failed_episodes_count, failed_episodes_details = await _import_episodes_iteratively(
+    total_comments_added, successful_episodes_indices, skipped_episodes_indices, failed_episodes_count, failed_episodes_details = await _import_episodes_iteratively(
         session=session,
         scraper=scraper,
         rate_limiter=rate_limiter,
@@ -1270,16 +1272,27 @@ async def generic_import_task(
         fallback_type=fallback_type  # 传递后备类型
     )
 
-    if not successful_episodes_indices and failed_episodes_count > 0:
+    if not successful_episodes_indices and not skipped_episodes_indices and failed_episodes_count > 0:
         # 生成失败详情消息
         failure_details = []
         for ep_index, error_msg in sorted(failed_episodes_details.items()):
             failure_details.append(f"第{ep_index}集: {error_msg}")
         failure_msg = "导入完成，但所有分集弹幕获取失败。\n失败详情:\n" + "\n".join(failure_details)
         raise TaskSuccess(failure_msg)
-    
-    episode_range_str = _generate_episode_range_string(successful_episodes_indices)
-    final_message = f"导入完成，导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕。"
+
+    # 生成最终消息
+    final_message_parts = []
+
+    if successful_episodes_indices:
+        episode_range_str = _generate_episode_range_string(successful_episodes_indices)
+        final_message_parts.append(f"导入集: < {episode_range_str} >，新增 {total_comments_added} 条弹幕")
+
+    if skipped_episodes_indices:
+        skipped_range_str = _generate_episode_range_string(skipped_episodes_indices)
+        final_message_parts.append(f"跳过集: < {skipped_range_str} > (已有弹幕)")
+
+    final_message = "导入完成，" + "；".join(final_message_parts) + "。"
+
     if failed_episodes_count > 0:
         final_message += f" {failed_episodes_count} 个分集因网络或解析错误获取失败。"
     if image_download_failed:
@@ -1405,7 +1418,7 @@ async def edited_import_task(
         raise TaskSuccess(error_msg)
 
     # 处理所有分集
-    total_comments_added, successful_indices, failed_count, failed_details = await _import_episodes_iteratively(
+    total_comments_added, successful_indices, skipped_indices, failed_count, failed_details = await _import_episodes_iteratively(
         session=session,
         scraper=scraper,
         rate_limiter=rate_limiter,
@@ -1481,7 +1494,7 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
             raise TaskSuccess("刷新失败：未能从源获取任何分集信息。旧数据已保留。")
 
         # 步骤 2: 迭代地导入/更新分集
-        total_comments_added, successful_indices, failed_count, failed_details = await _import_episodes_iteratively(
+        total_comments_added, successful_indices, skipped_indices, failed_count, failed_details = await _import_episodes_iteratively(
             session=session,
             scraper=scraper,
             rate_limiter=rate_limiter,
@@ -3651,18 +3664,12 @@ async def import_media_items(
                 tv_shows[key] = []
             tv_shows[key].append(item)
 
-    # 计算任务数: 电影数 + 电视剧季度数(如果某季只有1集则按单集计,否则按整季计)
-    tv_task_count = 0
-    for season_items in tv_shows.values():
-        if len(season_items) == 1:
-            tv_task_count += 1  # 单集导入
-        else:
-            tv_task_count += 1  # 整季导入
-
-    total_tasks = len(movies) + tv_task_count
+    # 计算任务数: 电影数 + 电视剧集数(每集单独计算)
+    tv_episode_count = sum(len(season_items) for season_items in tv_shows.values())
+    total_tasks = len(movies) + tv_episode_count
     completed = 0
 
-    logger.info(f"准备导入: {len(movies)} 部电影, {len(tv_shows)} 个电视节目季度")
+    logger.info(f"准备导入: {len(movies)} 部电影, {tv_episode_count} 集电视节目")
 
     # 导入电影
     for movie in movies:
@@ -3711,12 +3718,10 @@ async def import_media_items(
 
         completed += 1
 
-    # 导入电视节目(支持单集和整季)
+    # 导入电视节目(逐集导入,每集单独检查)
     for (title, season), season_items in tv_shows.items():
-        # 判断是单集还是整季
-        if len(season_items) == 1:
-            # 单集导入
-            episode_item = season_items[0]
+        # 无论选择多少集,都逐集导入
+        for episode_item in season_items:
             await progress_callback(
                 int((completed / total_tasks) * 100),
                 f"导入电视节目: {title} S{season:02d}E{episode_item.episode:02d}..."
@@ -3728,7 +3733,7 @@ async def import_media_items(
                         animeTitle=item.title,
                         mediaType="tv_series",
                         season=item.season,
-                        currentEpisodeIndex=item.episode,
+                        currentEpisodeIndex=item.episode,  # 使用实际的集数
                         searchKeyword=f"{item.title} S{item.season:02d}E{item.episode:02d}",
                         year=item.year,
                         tmdbId=item.tmdbId,
@@ -3758,57 +3763,8 @@ async def import_media_items(
             except Exception as e:
                 logger.error(f"导入电视节目 {title} S{season:02d}E{episode_item.episode:02d} 失败: {e}", exc_info=True)
                 await session.rollback()
-        else:
-            # 整季导入
-            await progress_callback(
-                int((completed / total_tasks) * 100),
-                f"导入电视节目: {title} S{season:02d} (共{len(season_items)}集)..."
-            )
 
-            try:
-                # 获取该季度的所有集数
-                episodes = sorted([item.episode for item in season_items if item.episode])
-                first_item = season_items[0]
-
-                # 为整季创建一个导入任务(使用第一集的集数)
-                task_id, _ = await task_manager.submit_task(
-                    lambda session, progress_callback, item=first_item: webhook_search_and_dispatch_task(
-                        animeTitle=item.title,
-                        mediaType="tv_series",
-                        season=item.season,
-                        currentEpisodeIndex=1,  # 整季导入从第一集开始
-                        searchKeyword=f"{item.title} S{item.season:02d}",
-                        year=item.year,
-                        tmdbId=item.tmdbId,
-                        tvdbId=item.tvdbId,
-                        imdbId=item.imdbId,
-                        doubanId=None,
-                        bangumiId=None,
-                        webhookSource="media_server",
-                        session=session,
-                        progress_callback=progress_callback,
-                        manager=scraper_manager,
-                        task_manager=task_manager,
-                        metadata_manager=metadata_manager,
-                        config_manager=config_manager,
-                        rate_limiter=rate_limiter,
-                        title_recognition_manager=title_recognition_manager
-                    ),
-                    title=f"自动导入 (库内): {title} S{season:02d} (共{len(episodes)}集)",
-                    queue_type="download"
-                )
-                logger.info(f"电视节目 {title} S{season:02d} 导入任务已提交: {task_id}, 包含 {len(episodes)} 集")
-
-                # 标记该季度的所有项为已导入
-                item_ids_to_mark = [item.id for item in season_items]
-                await crud.mark_media_items_imported(session, item_ids_to_mark)
-                await session.commit()
-
-            except Exception as e:
-                logger.error(f"导入电视节目 {title} S{season:02d} 失败: {e}", exc_info=True)
-                await session.rollback()
-
-        completed += 1
+            completed += 1  # 每集完成后递增
 
     await progress_callback(100, f"导入完成,共提交 {total_tasks} 个任务")
     raise TaskSuccess(f"媒体项导入完成,共提交 {total_tasks} 个任务")
