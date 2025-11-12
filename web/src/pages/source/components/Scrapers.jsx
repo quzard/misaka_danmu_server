@@ -303,8 +303,16 @@ export const Scrapers = () => {
         }
       })
       messageApi.success(res.data?.message || '上传成功')
-      await getInfo()
-      await loadVersionInfo()
+
+      // 延迟刷新,等待后台重载完成
+      setTimeout(async () => {
+        try {
+          await getInfo()
+          await loadVersionInfo()
+        } catch (error) {
+          console.error('刷新信息失败:', error)
+        }
+      }, 2000) // 延迟2秒
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
     } finally {
