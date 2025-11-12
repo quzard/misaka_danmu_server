@@ -296,7 +296,12 @@ export const Scrapers = () => {
     setUploadingPackage(true)
 
     try {
-      const res = await uploadScraperPackage(formData)
+      // 传递配置对象,设置正确的 Content-Type
+      const res = await uploadScraperPackage(formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
       messageApi.success(res.data?.message || '上传成功')
       await getInfo()
       await loadVersionInfo()
