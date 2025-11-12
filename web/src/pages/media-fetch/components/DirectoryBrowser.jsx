@@ -240,10 +240,10 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
     const checkIsMobile = () => {
       setIsMobile(window.innerWidth <= 768);
     };
-    
+
     checkIsMobile();
     window.addEventListener('resize', checkIsMobile);
-    
+
     return () => {
       window.removeEventListener('resize', checkIsMobile);
     };
@@ -523,7 +523,19 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
             if (data.id === 'mouse_click_file' && data.payload.clickType === 'single') {
               const clickedFile = data.payload.file;
               console.log('点击文件:', clickedFile);
-              setSelectedFile(clickedFile);
+
+              // 如果点击的是已选择的文件，则取消选择；否则选择该文件
+              if (selectedFile && selectedFile.id === clickedFile.id) {
+                setSelectedFile(null);
+              } else {
+                setSelectedFile(clickedFile);
+              }
+            }
+
+            // 处理空白区域点击
+            if (data.id === 'change_selection') {
+              console.log('点击空白处');
+              setSelectedFile(null); // 取消文件选择
             }
 
             // 处理双击进入文件夹
