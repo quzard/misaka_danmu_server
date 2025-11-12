@@ -268,6 +268,15 @@ async def backup_scrapers(
                 backed_files.append(file_info)
                 backup_count += 1
 
+        # 备份 package.json 和 versions.json
+        if SCRAPERS_PACKAGE_FILE.exists():
+            shutil.copy2(SCRAPERS_PACKAGE_FILE, BACKUP_DIR / "package.json")
+            logger.info("已备份 package.json")
+
+        if SCRAPERS_VERSIONS_FILE.exists():
+            shutil.copy2(SCRAPERS_VERSIONS_FILE, BACKUP_DIR / "versions.json")
+            logger.info("已备份 versions.json")
+
         # 读取 package.json 的版本号
         package_version = None
         if SCRAPERS_PACKAGE_FILE.exists():
@@ -359,20 +368,38 @@ async def restore_scrapers(
         if restore_count == 0:
             raise HTTPException(status_code=404, detail="备份目录为空")
 
-        # 从备份元数据恢复版本信息到 versions.json
-        if backup_info and "files" in backup_info:
-            versions = {}
-            for file_info in backup_info["files"]:
-                if "version" in file_info and "scraper" in file_info:
-                    versions[file_info["scraper"]] = file_info["version"]
+        # 还原 package.json
+        backup_package_file = BACKUP_DIR / "package.json"
+        if backup_package_file.exists():
+            try:
+                shutil.copy2(backup_package_file, SCRAPERS_PACKAGE_FILE)
+                logger.info("已还原 package.json")
+            except Exception as e:
+                logger.warning(f"还原 package.json 失败: {e}")
 
-            # 写入 versions.json
-            if versions:
-                try:
-                    SCRAPERS_VERSIONS_FILE.write_text(json.dumps(versions, indent=2, ensure_ascii=False))
-                    logger.info(f"恢复了 {len(versions)} 个弹幕源的版本信息")
-                except Exception as e:
-                    logger.warning(f"写入版本信息失败: {e}")
+        # 还原 versions.json
+        backup_versions_file = BACKUP_DIR / "versions.json"
+        if backup_versions_file.exists():
+            try:
+                shutil.copy2(backup_versions_file, SCRAPERS_VERSIONS_FILE)
+                logger.info("已还原 versions.json")
+            except Exception as e:
+                logger.warning(f"还原 versions.json 失败: {e}")
+        else:
+            # 如果备份中没有 versions.json,尝试从备份元数据恢复
+            if backup_info and "files" in backup_info:
+                versions = {}
+                for file_info in backup_info["files"]:
+                    if "version" in file_info and "scraper" in file_info:
+                        versions[file_info["scraper"]] = file_info["version"]
+
+                # 写入 versions.json
+                if versions:
+                    try:
+                        SCRAPERS_VERSIONS_FILE.write_text(json.dumps(versions, indent=2, ensure_ascii=False))
+                        logger.info(f"从元数据恢复了 {len(versions)} 个弹幕源的版本信息")
+                    except Exception as e:
+                        logger.warning(f"写入版本信息失败: {e}")
 
         # 从备份元数据恢复 package.json
         if backup_info and "package_version" in backup_info:
