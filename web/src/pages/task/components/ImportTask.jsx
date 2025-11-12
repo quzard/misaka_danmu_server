@@ -65,8 +65,8 @@ export const ImportTask = () => {
     return [
       (selectList.every(item => item.status === '运行中') &&
         selectList.length > 0) ||
-        (selectList.every(item => item.status === '已暂停') &&
-          selectList.length > 0),
+      (selectList.every(item => item.status === '已暂停') &&
+        selectList.length > 0),
       selectList.every(item => item.status === '已暂停'),
     ]
   }, [selectList])
@@ -90,6 +90,7 @@ export const ImportTask = () => {
 
   const [searchParams] = useSearchParams()
   const [queueFilter, setQueueFilter] = useState('all') // 队列类型过滤: all, download, management
+  const [searchInputValue, setSearchInputValue] = useState('')
 
   const [search, status] = useMemo(() => {
     return [
@@ -105,6 +106,10 @@ export const ImportTask = () => {
       current: 1,
     }))
   }, [search, status, queueFilter])
+
+  useEffect(() => {
+    setSearchInputValue(search)
+  }, [search])
 
   /**
    * 轮询刷新当前页面任务列表
@@ -155,6 +160,13 @@ export const ImportTask = () => {
       setLoading(false)
     }
   }, [search, status, pagination.current, pagination.pageSize, queueFilter])
+
+  /**
+   * 处理搜索操作
+   */
+  const handleSearch = () => {
+    navigate(`/task?search=${searchInputValue}&status=${status}`, { replace: true })
+  }
 
   /**
    * 处理暂停/恢复任务操作
@@ -431,11 +443,10 @@ export const ImportTask = () => {
 
     return (
       <div
-        className={`p-4 rounded-lg transition-all relative cursor-pointer ${
-          isActive
+        className={`p-4 rounded-lg transition-all relative cursor-pointer ${isActive
             ? 'shadow-lg ring-2 ring-pink-400/50 bg-pink-50/30 dark:bg-pink-900/10'
             : 'hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/30'
-        }`}
+          }`}
         onClick={() => {
           setSelectList(list => {
             return list.map(it => it.taskId).includes(item.taskId)
@@ -559,7 +570,7 @@ export const ImportTask = () => {
                   shape="circle"
                   icon={
                     selectList.length === taskList.length &&
-                    !!selectList.length ? (
+                      !!selectList.length ? (
                       <CheckOutlined />
                     ) : (
                       <MinusOutlined />
@@ -637,46 +648,34 @@ export const ImportTask = () => {
 
             {/* 搜索框 */}
             <div className="mb-4">
-              <AntInput.Group compact style={{ width: '100%', display: 'flex' }}>
-                <AntInput
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
                   placeholder="搜索任务"
-                  value={search}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    // 这里可以添加防抖逻辑，如果需要的话
-                    navigate(`/task?search=${value}&status=${status}`, {
-                      replace: true,
-                    })
-                  }}
-                  onPressEnter={(e) => {
-                    const value = e.target.value
-                    navigate(`/task?search=${value}&status=${status}`, {
-                      replace: true,
-                    })
-                  }}
+                  value={searchInputValue}
+                  onChange={(e) => setSearchInputValue(e.target.value)}
+                  onPressEnter={handleSearch}
                   allowClear
                   style={{
-                    flex: 1,
-                    borderTopRightRadius: 0,
-                    borderBottomRightRadius: 0,
-                    textAlign: 'left',
-                    height: '50px'
+                    height: 44,
+                    lineHeight: '44px',
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                    borderTopLeftRadius: 20,
+                    borderBottomLeftRadius: 20,
+
+                    fontSize: 14
                   }}
+                  className="flex-1"
                 />
-                <Button
-                  type="primary"
-                  onClick={() => {
-                    // 搜索按钮点击时可以不做额外操作，因为输入框已经实时搜索
-                  }}
-                  style={{
-                    borderTopLeftRadius: 0,
-                    borderBottomLeftRadius: 0,
-                    height: '50px'
-                  }}
-                >
-                  搜索
-                </Button>
-              </AntInput.Group>
+                <Button type="primary" onClick={handleSearch} style={{
+                  height: 44, 
+                  borderTopLeftRadius: 0,
+                  borderTopRightRadius: 20,
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 20,
+                  fontSize: 14
+                }}>搜索</Button>
+              </Space.Compact>
             </div>
 
             {/* 批量操作按钮 */}
@@ -684,7 +683,7 @@ export const ImportTask = () => {
               <Button
                 icon={
                   selectList.length === taskList.length &&
-                  !!selectList.length ? (
+                    !!selectList.length ? (
                     <CheckOutlined />
                   ) : (
                     <MinusOutlined />
