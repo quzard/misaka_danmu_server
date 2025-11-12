@@ -8,6 +8,7 @@ import platform
 import sys
 import re
 import json
+import asyncio
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
@@ -566,28 +567,36 @@ async def load_resources(
             await restore_scrapers(current_user, manager)
             raise HTTPException(status_code=500, detail="所有文件下载失败，已还原备份")
 
-        # 重新加载 scrapers
-        try:
-            await manager.load_and_sync_scrapers()
-            logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
+        # 准备响应结果
+        result = {
+            "message": f"成功下载 {download_count} 个弹幕源，正在后台重载...",
+            "downloadCount": download_count,
+            "totalCount": len(resources)
+        }
 
-            result = {
-                "message": f"成功加载 {download_count} 个弹幕源",
-                "downloadCount": download_count,
-                "totalCount": len(resources)
-            }
+        if failed_downloads:
+            result["failedScrapers"] = failed_downloads
+            result["message"] += f"，{len(failed_downloads)} 个失败"
 
-            if failed_downloads:
-                result["failedScrapers"] = failed_downloads
-                result["message"] += f"，{len(failed_downloads)} 个失败"
+        # 创建后台任务重新加载 scrapers
+        async def reload_scrapers_background():
+            await asyncio.sleep(0.5)  # 短暂延迟,确保响应已发送
+            try:
+                await manager.load_and_sync_scrapers()
+                logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
+            except Exception as e:
+                logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
+                # 加载失败，还原备份
+                try:
+                    await restore_scrapers(current_user, manager)
+                    logger.info("已还原备份")
+                except Exception as restore_error:
+                    logger.error(f"还原备份失败: {restore_error}", exc_info=True)
 
-            return result
+        # 启动后台任务
+        asyncio.create_task(reload_scrapers_background())
 
-        except Exception as e:
-            # 加载失败，还原备份
-            logger.error(f"加载弹幕源失败: {e}", exc_info=True)
-            await restore_scrapers(current_user, manager)
-            raise HTTPException(status_code=500, detail=f"加载失败已还原备份: {str(e)}")
+        return result
 
     except HTTPException:
         raise
