@@ -429,8 +429,8 @@ const LibraryScan = () => {
                         }}
                       />
                       <div>
-                        <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: screens.xs ? 'wrap' : 'nowrap' }}>
-                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: screens.xs ? 'break-word' : 'normal', flex: screens.xs ? '1 1 auto' : 'none' }}>
+                        <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: screens.xs ? 'wrap' : 'wrap' }}>
+                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: screens.xs ? 'break-word' : 'break-word', flex: screens.xs ? '1 1 auto' : '1 1 auto' }}>
                             {currentServer.name}
                           </Text>
                           <div style={{ display: 'flex', gap: '4px', flexWrap: screens.xs ? 'nowrap' : 'wrap', flexShrink: 0 }}>
@@ -485,11 +485,11 @@ const LibraryScan = () => {
                             style={{
                               fontSize: screens.xs ? '12px' : '13px',
                               color: '#666',
-                              wordBreak: screens.xs ? 'break-all' : 'break-all',
+                              wordBreak: 'break-all',
                               flex: 1,
-                              whiteSpace: screens.xs ? 'nowrap' : 'normal',
-                              overflow: screens.xs ? 'hidden' : 'visible',
-                              textOverflow: screens.xs ? 'ellipsis' : 'clip'
+                              whiteSpace: 'normal',
+                              overflow: 'visible',
+                              textOverflow: 'clip'
                             }}
                           >
                             {showServerUrl ? currentServer.url : '•'.repeat(currentServer.url.length)}
