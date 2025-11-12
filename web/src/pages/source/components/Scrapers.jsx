@@ -283,23 +283,31 @@ export const Scrapers = () => {
     }
   }
 
-  const handleUploadPackage = async ({ file, onSuccess, onError }) => {
+  const handleUploadPackage = async (file) => {
+    // 验证文件对象
+    if (!file || !(file instanceof File)) {
+      messageApi.error('无效的文件对象')
+      return false
+    }
+
     const formData = new FormData()
     formData.append('file', file)
 
+    setUploadingPackage(true)
+
     try {
-      setUploadingPackage(true)
       const res = await uploadScraperPackage(formData)
       messageApi.success(res.data?.message || '上传成功')
       await getInfo()
       await loadVersionInfo()
-      onSuccess && onSuccess(res.data)
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
-      onError && onError(error)
     } finally {
       setUploadingPackage(false)
     }
+
+    // 返回 false 阻止 Upload 组件的默认上传行为
+    return false
   }
 
   const handleDragEnd = event => {
@@ -665,7 +673,7 @@ export const Scrapers = () => {
                       保存
                     </Button>
                     <Upload
-                      customRequest={handleUploadPackage}
+                      beforeUpload={handleUploadPackage}
                       accept=".zip,.tar.gz,.tgz"
                       showUploadList={false}
                       disabled={uploadingPackage}
