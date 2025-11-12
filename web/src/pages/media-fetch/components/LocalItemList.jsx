@@ -336,14 +336,61 @@ const LocalItemList = ({ refreshTrigger }) => {
     }
 
     try {
-      // 将JSON字符串解析回ID数组
-      const itemIds = selectedRowKeys.map(key => JSON.parse(key));
-      await batchDeleteLocalItems(itemIds);
-      message.success(`已删除 ${selectedRowKeys.length} 个项目`);
+      // 从选中的 keys 中提取所有 IDs
+      const allIds = [];
+
+      selectedRowKeys.forEach(key => {
+        // 在 currentPageItems 和 allItems 中查找对应的项目
+        const findItem = (items) => {
+          for (const item of items) {
+            if (item.key === key) {
+              return item;
+            }
+            if (item.children) {
+              const found = item.children.find(child => child.key === key);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+
+        const item = findItem(currentPageItems) || findItem(allItems);
+        if (!item) return;
+
+        // 根据不同类型提取 IDs
+        if (item.isGroup && item.mediaType === 'tv_show') {
+          // 电视剧作品组 - 收集所有季度的 IDs
+          const seasonIds = item.children?.flatMap(child => child.ids || []) || [];
+          allIds.push(...seasonIds);
+        } else if (item.isGroup && item.mediaType === 'movie') {
+          // 电影作品组 - 收集所有文件的 IDs
+          const fileIds = item.children?.map(child => child.id).filter(id => id) || [];
+          allIds.push(...fileIds);
+        } else if (item.mediaType === 'tv_season') {
+          // 季度 - 使用 ids 数组
+          if (item.ids && item.ids.length > 0) {
+            allIds.push(...item.ids);
+          }
+        } else if (item.mediaType === 'movie_file') {
+          // 电影文件 - 使用 id
+          if (item.id) {
+            allIds.push(item.id);
+          }
+        }
+      });
+
+      if (allIds.length === 0) {
+        message.warning('没有可删除的项目');
+        return;
+      }
+
+      await batchDeleteLocalItems(allIds);
+      message.success(`已删除 ${allIds.length} 个项目`);
       setSelectedRowKeys([]);
       refreshData();
     } catch (error) {
       message.error('批量删除失败: ' + (error.message || '未知错误'));
+      console.error('批量删除错误:', error);
     }
   };
 
