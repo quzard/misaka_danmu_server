@@ -9,6 +9,7 @@ import tarfile
 import shutil
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 import httpx
 
@@ -196,11 +197,39 @@ async def upload_scraper_package(
             scrapers_dir = _get_scrapers_dir()
             file_count = 0
 
+            # 复制 .so 和 .pyd 文件
             for file in extract_dir.iterdir():
-                if file.is_file() and file.suffix in ['.so', '.pyd', '.json']:
+                if file.is_file() and file.suffix in ['.so', '.pyd']:
                     shutil.copy2(file, scrapers_dir / file.name)
                     file_count += 1
                     logger.info(f"已复制文件: {file.name}")
+
+            # 复制 versions.json (必需)
+            versions_file = extract_dir / "versions.json"
+            if versions_file.exists():
+                shutil.copy2(versions_file, scrapers_dir / "versions.json")
+                logger.info("已复制 versions.json")
+            else:
+                logger.warning("离线包中缺少 versions.json")
+
+            # 复制 package.json (如果存在)
+            package_file = extract_dir / "package.json"
+            if package_file.exists():
+                shutil.copy2(package_file, scrapers_dir / "package.json")
+                logger.info("已复制 package.json")
+            else:
+                # 如果离线包中没有 package.json,从 versions.json 创建一个
+                logger.info("离线包中没有 package.json,从 versions.json 创建")
+                package_data = {
+                    "version": versions_data.get('version', 'unknown'),
+                    "platform": versions_data.get('platform', ''),
+                    "type": versions_data.get('type', ''),
+                    "created_from_upload": True,
+                    "upload_time": datetime.now().isoformat()
+                }
+                package_file_path = scrapers_dir / "package.json"
+                package_file_path.write_text(json.dumps(package_data, indent=2, ensure_ascii=False))
+                logger.info("已创建 package.json")
 
             logger.info(f"用户 '{current_user.username}' 上传了离线包,共 {file_count} 个文件")
 
