@@ -984,14 +984,7 @@ export const Scrapers = () => {
               {dandanAuthMode === 'proxy' && (
                 <Form.Item
                   name="dandanplayProxyConfig"
-                  label={
-                    <span>
-                      跨域代理配置{' '}
-                      <Tooltip title="支持base64编码的JSON或明文JSON格式">
-                        <QuestionCircleOutlined className="cursor-pointer text-gray-400" />
-                      </Tooltip>
-                    </span>
-                  }
+                  label="跨域代理配置"
                   rules={[
                     { required: true, message: '请输入代理配置' },
                   ]}

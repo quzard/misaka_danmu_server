@@ -1653,12 +1653,13 @@ async def _get_match_for_item(
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
             try:
+                # 导入需要的模块 (在函数开头导入,避免作用域问题)
+                from .utils import parse_search_keyword
+                from thefuzz import fuzz as fuzz_module  # 使用别名避免与后面的局部导入冲突
+
                 # 构造 auto_search_and_import_task 需要的 payload
                 # 根据 is_movie 标记判断媒体类型
                 media_type_for_fallback = "movie" if parsed_info.get("is_movie") else "tv_series"
-
-                # 统一使用后备搜索的虚拟ID逻辑
-                from .utils import parse_search_keyword
 
                 logger.info(f"开始匹配后备流程: {item.fileName}")
 
@@ -1716,7 +1717,7 @@ async def _get_match_for_item(
                         logger.debug(f"  - {result.provider} - {result.title}: 类型匹配 +1000")
 
                     # 2. 标题相似度 (0-100分)
-                    similarity = fuzz.token_set_ratio(base_title, result.title)
+                    similarity = fuzz_module.token_set_ratio(base_title, result.title)
                     score += similarity
                     logger.debug(f"  - {result.provider} - {result.title}: 相似度{similarity} +{similarity}")
 
@@ -1850,8 +1851,7 @@ async def _get_match_for_item(
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
                             # 验证标题相似度,避免错误匹配
-                            from thefuzz import fuzz
-                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            similarity = fuzz_module.token_set_ratio(base_title, result.title)
                             logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
 
                             # 只有相似度 >= 80% 才使用精确标记源
@@ -1877,8 +1877,7 @@ async def _get_match_for_item(
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
                             # 验证标题相似度,避免错误匹配
-                            from thefuzz import fuzz
-                            similarity = fuzz.token_set_ratio(base_title, result.title)
+                            similarity = fuzz_module.token_set_ratio(base_title, result.title)
                             logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
 
                             # 只有相似度 >= 80% 才使用精确标记源
