@@ -462,7 +462,7 @@ async def load_resources(
     config_manager: ConfigManager = Depends(get_config_manager),
     manager = Depends(get_scraper_manager)
 ):
-    """从 GitHub 资源仓库下载并加载编译好的弹幕源文件"""
+    """从资源仓库下载并加载弹幕源文件"""
     try:
         # 获取仓库链接
         repo_url = payload.get("repoUrl")

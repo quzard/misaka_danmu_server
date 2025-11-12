@@ -647,7 +647,7 @@ export const Scrapers = () => {
         <div className="space-y-4">
           <div>
             <div className="mb-2 text-sm text-gray-600">
-              从GitHub仓库加载编译好的弹幕源文件（.so/.pyd）
+              从资源仓库加载弹幕源文件,或上传离线包进行安装
             </div>
             <div className={`flex gap-2 ${isMobile ? 'flex-col' : 'flex-row'}`}>
               <Input
