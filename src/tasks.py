@@ -849,14 +849,7 @@ async def _import_episodes_iteratively(
                 logger.error(f"分集 '{episode.title}' 因运行时错误而跳过: {str(e)}")
                 continue
             except RateLimitExceededError as e:
-                # 如果是配置验证失败（通常retry_after_seconds=3600），跳过当前分集
-                if e.retry_after_seconds >= 3600:
-                    failed_episodes_count += 1
-                    error_msg = _extract_short_error_message(e)
-                    failed_episodes_details[episode.episodeIndex] = f"流控配置验证失败: {error_msg}"
-                    logger.error(f"分集 '{episode.title}' 因流控配置验证失败而跳过: {error_msg}")
-                    continue
-
+                # 达到流控限制，暂停并等待
                 logger.warning(f"分集导入因达到速率限制而暂停: {e}")
                 await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
                 await asyncio.sleep(e.retry_after_seconds)
@@ -1239,10 +1232,6 @@ async def generic_import_task(
         else:
             logger.warning(f"第一集未获取到弹幕，数据源可能无效")
     except RateLimitExceededError as e:
-        # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
-        if e.retry_after_seconds >= 3600:
-            raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
-
         # 抛出暂停异常，让任务管理器处理
         logger.warning(f"通用导入任务因达到速率限制而暂停: {e}")
         raise TaskPauseForRateLimit(
@@ -1369,7 +1358,7 @@ async def edited_import_task(
         await rate_limiter.check(scraper.provider_name)
         first_episode_comments = await scraper.get_comments(first_episode.episodeId, progress_callback=lambda p, msg: progress_callback(10 + p * 0.1, msg))
         await rate_limiter.increment(scraper.provider_name)
-        
+
         if first_episode_comments:
             await progress_callback(20, "数据源验证成功，正在创建数据库条目...")
 
@@ -1407,6 +1396,13 @@ async def edited_import_task(
             error_msg = f"数据源验证失败：'{first_episode.title}' 未获取到任何弹幕数据。请到 {request_data.provider} 源验证该视频是否有弹幕。未创建数据库条目。"
             logger.warning(error_msg)
             raise TaskSuccess(error_msg)
+    except RateLimitExceededError as e:
+        # 抛出暂停异常，让任务管理器处理
+        logger.warning(f"编辑后导入任务因达到速率限制而暂停: {e}")
+        raise TaskPauseForRateLimit(
+            retry_after_seconds=e.retry_after_seconds,
+            message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+        )
     except TaskSuccess:
         # 重新抛出 TaskSuccess 异常
         raise
@@ -1596,10 +1592,6 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
             # 其他 RuntimeError 也应该失败
             raise
         except RateLimitExceededError as e:
-            # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
-            if e.retry_after_seconds >= 3600:
-                raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
-
             # 抛出暂停异常，让任务管理器处理
             logger.warning(f"刷新分集任务因达到速率限制而暂停: {e}")
             raise TaskPauseForRateLimit(
@@ -1734,11 +1726,7 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                     failed_episodes.append((episode_index, episode_id))
                     continue
                 except RateLimitExceededError as e:
-                    if e.retry_after_seconds >= 3600:
-                        logger.error(f"流控配置验证失败，跳过分集 {episode_id}: {str(e)}")
-                        failed_episodes.append((episode_index, episode_id))
-                        continue
-
+                    # 达到流控限制，等待后重试
                     logger.warning(f"批量刷新遇到速率限制，等待 {e.retry_after_seconds:.0f} 秒...")
                     await asyncio.sleep(e.retry_after_seconds)
                     await rate_limiter.check(provider_name)
@@ -2167,10 +2155,6 @@ async def manual_import_task(
             # 其他 RuntimeError 也应该失败
             raise
         except RateLimitExceededError as e:
-            # 如果是配置验证失败（通常retry_after_seconds=3600），直接失败
-            if e.retry_after_seconds >= 3600:
-                raise TaskSuccess(f"流控配置验证失败，任务已终止: {str(e)}")
-
             # 抛出暂停异常，让任务管理器处理
             logger.warning(f"手动导入任务因达到速率限制而暂停: {e}")
             raise TaskPauseForRateLimit(
