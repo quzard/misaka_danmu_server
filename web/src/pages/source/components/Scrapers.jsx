@@ -16,6 +16,8 @@ import {
   Upload,
 } from 'antd'
 import { useEffect, useState, useRef } from 'react'
+import Cookies from 'js-cookie'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 import {
   biliLogout,
   getbiliLoginQrcode,
@@ -183,6 +185,8 @@ export const Scrapers = () => {
   })
   const [loadingVersions, setLoadingVersions] = useState(false)
   const [uploadingPackage, setUploadingPackage] = useState(false)
+  const [sseConnected, setSseConnected] = useState(false)
+
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -205,10 +209,55 @@ export const Scrapers = () => {
     getInfo()
     loadResourceRepoConfig()
 
+    // 建立 SSE 日志流, 根据相关事件自动刷新版本信息
+    const token = Cookies.get('danmu_token')
+    if (token) {
+      const abortController = new AbortController()
+      eventSourceRef.current = abortController
+
+      fetchEventSource('/api/ui/logs/stream', {
+        signal: abortController.signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        onopen: async response => {
+          if (response.ok) {
+            setSseConnected(true)
+          } else {
+            setSseConnected(false)
+            throw new Error(`连接失败: ${response.status}`)
+          }
+        },
+        onmessage: event => {
+          const data = event.data || ''
+          if (!data) return
+
+          // 监听与弹幕源加载/重载/还原相关的日志, 自动刷新版本信息
+          if (
+            data.includes('弹幕源') &&
+            (data.includes('成功加载了') || data.includes('成功重载了') || data.includes('成功从备份重载了'))
+          ) {
+            loadVersionInfo()
+          }
+        },
+        onerror: error => {
+          console.error('版本信息 SSE 连接错误:', error)
+          setSseConnected(false)
+          throw error
+        },
+      }).catch(error => {
+        if (error.name !== 'AbortError') {
+          console.error('版本信息 SSE 流错误:', error)
+        }
+      })
+    } else {
+      console.warn('未找到 danmu_token, 跳过版本信息 SSE 监听')
+    }
+
     // 清理函数:组件卸载时关闭SSE连接
     return () => {
       if (eventSourceRef.current) {
-        eventSourceRef.current.close()
+        eventSourceRef.current.abort()
         eventSourceRef.current = null
       }
     }
@@ -757,6 +806,9 @@ export const Scrapers = () => {
                 {versionInfo.hasUpdate && (
                   <Tag color="orange">有更新可用</Tag>
                 )}
+                {sseConnected && (
+                  <Tag color="default">自动监听</Tag>
+                )}
               </div>
               <div className={isMobile ? 'text-center' : 'text-right'}>
                 <Button
@@ -765,7 +817,7 @@ export const Scrapers = () => {
                   loading={loadingVersions}
                   onClick={loadVersionInfo}
                 >
-                  刷新
+                  手动刷新
                 </Button>
               </div>
             </div>
