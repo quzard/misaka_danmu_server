@@ -275,7 +275,7 @@ export const Scrapers = () => {
       setTimeout(() => {
         getInfo()
         loadVersionInfo()
-      }, 3000)
+      }, 2500)
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '加载失败')
     } finally {
@@ -312,7 +312,7 @@ export const Scrapers = () => {
         } catch (error) {
           console.error('刷新信息失败:', error)
         }
-      }, 2000) // 延迟2秒
+      }, 2500) // 延迟2.5秒
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
     } finally {
@@ -802,7 +802,7 @@ export const Scrapers = () => {
                       setTimeout(() => {
                         getInfo()
                         loadVersionInfo()
-                      }, 3000)
+                      }, 2500)
                     } catch (error) {
                       messageApi.error(error.response?.data?.detail || '还原失败')
                     }
@@ -820,9 +820,13 @@ export const Scrapers = () => {
                 try {
                   setLoading(true)
                   const res = await reloadScrapers()
-                  messageApi.success(res.data?.message || '重载成功')
-                  await getInfo()
-                  await loadVersionInfo()
+                  messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+
+                  // 延迟刷新，等待后台重载完成
+                  setTimeout(() => {
+                    getInfo()
+                    loadVersionInfo()
+                  }, 2500)
                 } catch (error) {
                   messageApi.error(error.response?.data?.detail || '重载失败')
                 } finally {
