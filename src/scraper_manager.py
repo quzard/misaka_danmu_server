@@ -98,6 +98,19 @@ class ScraperManager:
                 logging.getLogger(__name__).info(f"检测到 scrapers 目录为空但存在备份,正在自动恢复 {len(backup_files)} 个文件...")
                 for file in backup_files:
                     shutil.copy2(file, scrapers_dir / file.name)
+
+                # 恢复 package.json
+                backup_package_file = backup_dir / "package.json"
+                if backup_package_file.exists():
+                    shutil.copy2(backup_package_file, scrapers_dir / "package.json")
+                    logging.getLogger(__name__).info("已恢复 package.json")
+
+                # 恢复 versions.json
+                backup_versions_file = backup_dir / "versions.json"
+                if backup_versions_file.exists():
+                    shutil.copy2(backup_versions_file, scrapers_dir / "versions.json")
+                    logging.getLogger(__name__).info("已恢复 versions.json")
+
                 logging.getLogger(__name__).info("备份恢复完成")
 
         self._domain_map.clear()
