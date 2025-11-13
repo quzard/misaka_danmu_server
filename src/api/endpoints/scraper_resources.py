@@ -415,13 +415,10 @@ async def restore_scrapers(
             except Exception as e:
                 logger.warning(f"写入 package.json 失败: {e}")
 
-        # 重新加载 scrapers
-        await manager.load_and_sync_scrapers()
-
         logger.info(f"用户 '{current_user.username}' 从备份还原了 {restore_count} 个弹幕源文件")
 
         result = {
-            "message": f"成功还原 {restore_count} 个文件",
+            "message": f"成功还原 {restore_count} 个文件，正在后台重载...",
             "count": restore_count
         }
 
@@ -431,6 +428,18 @@ async def restore_scrapers(
                 "backupUser": backup_info.get("backup_user"),
                 "fileCount": backup_info.get("file_count")
             }
+
+        # 创建后台任务重新加载 scrapers
+        async def reload_scrapers_background():
+            await asyncio.sleep(1)  # 延迟1秒,确保响应已发送
+            try:
+                await manager.load_and_sync_scrapers()
+                logger.info(f"用户 '{current_user.username}' 成功从备份重载了 {restore_count} 个弹幕源")
+            except Exception as e:
+                logger.error(f"后台重载弹幕源失败: {e}", exc_info=True)
+
+        # 启动后台任务
+        asyncio.create_task(reload_scrapers_background())
 
         return result
 

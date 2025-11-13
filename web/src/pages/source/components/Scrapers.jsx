@@ -796,9 +796,13 @@ export const Scrapers = () => {
                   onOk: async () => {
                     try {
                       const res = await restoreScrapers()
-                      messageApi.success(res.data?.message || '还原成功')
-                      await getInfo()
-                      await loadVersionInfo()
+                      messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+
+                      // 延迟刷新，等待后台重载完成
+                      setTimeout(() => {
+                        getInfo()
+                        loadVersionInfo()
+                      }, 3000)
                     } catch (error) {
                       messageApi.error(error.response?.data?.detail || '还原失败')
                     }
