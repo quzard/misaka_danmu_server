@@ -806,19 +806,19 @@ export const Scrapers = () => {
                 {versionInfo.hasUpdate && (
                   <Tag color="orange">有更新可用</Tag>
                 )}
-                {sseConnected && (
-                  <Tag color="default">自动监听</Tag>
-                )}
-              </div>
-              <div className={isMobile ? 'text-center' : 'text-right'}>
-                <Button
-                  type="link"
-                  size="small"
-                  loading={loadingVersions}
-                  onClick={loadVersionInfo}
-                >
-                  手动刷新
-                </Button>
+                <div className="flex items-center gap-2">
+                  {sseConnected && (
+                    <Tag color="default">自动监听</Tag>
+                  )}
+                  <Button
+                    type="link"
+                    size="small"
+                    loading={loadingVersions}
+                    onClick={loadVersionInfo}
+                  >
+                    手动刷新
+                  </Button>
+                </div>
               </div>
             </div>
           )}
