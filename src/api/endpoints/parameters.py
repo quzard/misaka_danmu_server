@@ -257,6 +257,26 @@ async def upload_scraper_package(
 
     except HTTPException:
         raise
+    except PermissionError as pe:
+        scrapers_dir = _get_scrapers_dir()
+        logger.error(
+            f"上传弹幕源离线包失败，写入目录 '{scrapers_dir}' 时发生权限错误: {pe}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"权限错误: 无法写入弹幕源文件到 {scrapers_dir}。错误: {pe}",
+        )
+    except OSError as oe:
+        scrapers_dir = _get_scrapers_dir()
+        logger.error(
+            f"上传弹幕源离线包失败，访问目录 '{scrapers_dir}' 时发生文件系统错误: {oe}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"文件系统错误: 无法写入弹幕源文件到 {scrapers_dir}。错误: {oe}",
+        )
     except Exception as e:
         logger.error(f"上传弹幕源离线包失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
