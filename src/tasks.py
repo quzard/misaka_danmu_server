@@ -1004,22 +1004,6 @@ async def generic_import_task(
         is_fallback: 是否为后备任务（默认False）
         fallback_type: 后备类型 ("match" 或 "search"，仅当is_fallback=True时需要）
     """
-    # 添加重复检查
-    await progress_callback(5, "检查重复导入...")
-    duplicate_reason = await crud.check_duplicate_import(
-        session=session,
-        provider=provider,
-        media_id=mediaId,
-        anime_title=animeTitle,
-        media_type=mediaType,
-        season=season,
-        year=year,
-        is_single_episode=currentEpisodeIndex is not None,
-        episode_index=currentEpisodeIndex,
-        title_recognition_manager=title_recognition_manager
-    )
-    if duplicate_reason:
-        raise ValueError(duplicate_reason)
 
     scraper = manager.get_scraper(provider)
     title_to_use = animeTitle.strip()
