@@ -20,15 +20,17 @@ from fastapi.routing import APIRoute
 from . import crud, models, orm_models, tasks
 from .config_manager import ConfigManager
 from .timezone import get_now, get_app_timezone
-from .database import get_db_session
-from .utils import parse_search_keyword
+from .database import get_db_session, sync_postgres_sequence
+from .utils import parse_search_keyword, sample_comments_evenly
 from .rate_limiter import RateLimiter
-from .task_manager import TaskManager
+from .task_manager import TaskManager, TaskStatus
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
 from .search_utils import unified_search
-from .database import sync_postgres_sequence
+from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
+from .orm_models import Anime, AnimeSource, Episode
+from .models import ProviderEpisodeInfo
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +68,6 @@ async def _store_episode_mapping(session: AsyncSession, episode_id: int, provide
     """
     存储episodeId到源的映射关系到数据库缓存
     """
-    from . import crud
-    import json
-
     mapping_data = {
         "provider": provider,
         "media_id": media_id,
@@ -86,9 +85,6 @@ async def _get_episode_mapping(session: AsyncSession, episode_id: int) -> Option
     """
     从数据库缓存中获取episodeId的映射关系
     """
-    from . import crud
-    import json
-
     cache_key = f"{EPISODE_MAPPING_CACHE_PREFIX}{episode_id}"
     cached_data = await crud.get_cache(session, cache_key)
 
@@ -192,9 +188,6 @@ async def _check_related_match_fallback_task(session: AsyncSession, search_term:
     检查是否有相关的后备匹配任务正在进行
     返回任务信息（包含进度）或None
     """
-    from . import crud
-    from .task_manager import TaskStatus
-
     # 查找正在进行的匹配后备任务
     # 通过TaskStateCache查找match_fallback类型的任务
 
@@ -264,8 +257,6 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
     获取下一个真实的animeId（当前最大animeId + 1）
     用于实际的episodeId生成
     """
-    from . import orm_models
-
     # 查询当前最大的animeId
     result = await session.execute(
         select(func.max(orm_models.Anime.id))
@@ -553,8 +544,6 @@ async def _handle_fallback_search(
     """
     处理后备搜索逻辑
     """
-    import time
-
     # 生成搜索任务的唯一标识
     search_key = f"search_{hash(search_term + token)}"
 
@@ -655,7 +644,6 @@ async def _handle_fallback_search(
                 ])
 
     # 解析搜索词，提取季度和集数信息
-    from .utils import parse_search_keyword
     parsed_info = parse_search_keyword(search_term)
 
     # 启动新的搜索任务
@@ -878,8 +866,6 @@ async def _execute_fallback_search_task(
 
             try:
                 # 查询库内已有的分集信息
-                from . import crud
-
                 existing_episodes = await crud.get_episode_indices_by_anime_title(
                     session, result.title
                 )
@@ -919,10 +905,6 @@ async def _execute_fallback_search_task(
 
         # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
         try:
-            from . import crud
-            from .utils import parse_search_keyword
-            import json
-
             # 提取核心标题（去除季度和集数信息）
             parsed = parse_search_keyword(search_term)
             core_title = parsed["title"]
@@ -1293,7 +1275,6 @@ async def search_anime_for_dandan(
     if search_fallback_enabled.lower() == 'true' and (not db_results or should_trigger_fallback):
         # 检查Token是否被允许使用后备搜索功能
         try:
-            import json
             # 获取当前token的信息
             token_stmt = select(orm_models.ApiToken).where(orm_models.ApiToken.token == token)
             token_result = await session.execute(token_stmt)
@@ -1425,9 +1406,6 @@ async def get_bangumi_details(
                                         logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
                                     else:
                                         # 新剧集，先检查数据库中是否已有相同标题的条目
-                                        from .utils import parse_search_keyword
-                                        from .orm_models import Anime
-
                                         # 解析搜索关键词，提取纯标题
                                         parsed_info = parse_search_keyword(original_title)
                                         base_title = parsed_info["title"]
@@ -1706,7 +1684,6 @@ async def _get_match_for_item(
         # 检查Token是否被允许使用匹配后备功能
         if current_token:
             try:
-                import json
                 # 获取当前token的信息
                 token_stmt = select(orm_models.ApiToken).where(orm_models.ApiToken.token == current_token)
                 token_result = await session.execute(token_stmt)
@@ -1732,7 +1709,6 @@ async def _get_match_for_item(
         blacklist_pattern = await config_manager.get("matchFallbackBlacklist", "")
         if blacklist_pattern.strip():
             try:
-                import re
                 if re.search(blacklist_pattern, item.fileName, re.IGNORECASE):
                     logger.info(f"文件 '{item.fileName}' 匹配黑名单规则 '{blacklist_pattern}'，跳过后备机制。")
                     response = DandanMatchResponse(isMatched=False, matches=[])
@@ -1749,10 +1725,6 @@ async def _get_match_for_item(
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
             try:
-                # 导入需要的模块 (在函数开头导入,避免作用域问题)
-                from .utils import parse_search_keyword
-                from thefuzz import fuzz as fuzz_module  # 使用别名避免与后面的局部导入冲突
-
                 # 构造 auto_search_and_import_task 需要的 payload
                 # 根据 is_movie 标记判断媒体类型
                 media_type_for_fallback = "movie" if parsed_info.get("is_movie") else "tv_series"
@@ -1813,7 +1785,7 @@ async def _get_match_for_item(
                         logger.debug(f"  - {result.provider} - {result.title}: 类型匹配 +1000")
 
                     # 2. 标题相似度 (0-100分)
-                    similarity = fuzz_module.token_set_ratio(base_title, result.title)
+                    similarity = fuzz.token_set_ratio(base_title, result.title)
                     score += similarity
                     logger.debug(f"  - {result.provider} - {result.title}: 相似度{similarity} +{similarity}")
 
@@ -1842,16 +1814,13 @@ async def _get_match_for_item(
                 # 获取精确标记信息 (AI匹配和传统匹配都需要)
                 favorited_info = {}
                 async with scraper_manager._session_factory() as ai_session:
-                    from .orm_models import AnimeSource as AS
-                    from sqlalchemy import select as sql_select
-
                     for result in sorted_results:
                         # 查找是否有相同provider和mediaId的源被标记
                         stmt = (
-                            sql_select(AS.isFavorited)
+                            select(AnimeSource.isFavorited)
                             .where(
-                                AS.providerName == result.provider,
-                                AS.mediaId == result.mediaId
+                                AnimeSource.providerName == result.provider,
+                                AnimeSource.mediaId == result.mediaId
                             )
                             .limit(1)
                         )
@@ -1868,8 +1837,6 @@ async def _get_match_for_item(
                 ai_selected_index = None
                 if ai_match_enabled:
                     try:
-                        from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
-
                         # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
                         await crud.initialize_configs(session_inner, {
                             "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
@@ -1947,7 +1914,7 @@ async def _get_match_for_item(
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
                             # 验证标题相似度,避免错误匹配
-                            similarity = fuzz_module.token_set_ratio(base_title, result.title)
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
                             logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
 
                             # 只有相似度 >= 80% 才使用精确标记源
@@ -1973,7 +1940,7 @@ async def _get_match_for_item(
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
                             # 验证标题相似度,避免错误匹配
-                            similarity = fuzz_module.token_set_ratio(base_title, result.title)
+                            similarity = fuzz.token_set_ratio(base_title, result.title)
                             logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
 
                             # 只有相似度 >= 80% 才使用精确标记源
@@ -2329,9 +2296,6 @@ async def get_comments_for_dandan(
     模拟 dandanplay 的弹幕获取接口。
     优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
-    # 导入必要的模块
-    from . import crud
-
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
@@ -2383,9 +2347,6 @@ async def get_comments_for_dandan(
             year = fallback_info.get("year")
 
             # 步骤1：创建或获取anime条目
-            from .orm_models import Anime, AnimeSource, Episode
-            from .timezone import get_now
-
             stmt = select(Anime).where(Anime.id == real_anime_id)
             result = await session.execute(stmt)
             existing_anime = result.scalar_one_or_none()
@@ -2510,9 +2471,6 @@ async def get_comments_for_dandan(
                     await progress_callback(60, "创建数据库条目...")
 
                     # 在task_session中创建或获取anime条目
-                    from .orm_models import Anime
-                    from .timezone import get_now
-
                     stmt = select(Anime).where(Anime.id == current_real_anime_id)
                     result = await task_session.execute(stmt)
                     existing_anime = result.scalar_one_or_none()
@@ -2542,7 +2500,6 @@ async def get_comments_for_dandan(
                     logger.info(f"source_id={source_id}")
 
                     # 获取source_order用于生成虚拟episodeId
-                    from .orm_models import AnimeSource
                     stmt_source = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
                     result_source = await task_session.execute(stmt_source)
                     source_order = result_source.scalar_one()
@@ -2679,7 +2636,6 @@ async def get_comments_for_dandan(
                         # 复用现有的保存逻辑：查找或创建动画条目、源关联、分集条目，然后保存弹幕
                         try:
                             # 1. 首先尝试根据real_anime_id查找已存在的anime记录
-                            from .orm_models import Anime
                             existing_anime_stmt = select(Anime).where(Anime.id == real_anime_id)
                             existing_anime_result = await session.execute(existing_anime_stmt)
                             existing_anime = existing_anime_result.scalar_one_or_none()
@@ -2690,7 +2646,6 @@ async def get_comments_for_dandan(
                                 logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
                             else:
                                 # 如果不存在，解析标题并检查数据库中是否已有相同条目
-                                from .utils import parse_search_keyword
                                 parsed_info = parse_search_keyword(original_title)
                                 base_title = parsed_info["title"]
 
@@ -2857,7 +2812,6 @@ async def get_comments_for_dandan(
                                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
                                 # 使用三线程下载模式获取弹幕
-                                from .models import ProviderEpisodeInfo
                                 virtual_episode = ProviderEpisodeInfo(
                                     provider=current_provider,
                                     episodeIndex=current_episode_number,
@@ -2895,8 +2849,6 @@ async def get_comments_for_dandan(
 
                                 # 参考 WebUI 导入逻辑：先获取弹幕成功，再创建数据库条目
                                 try:
-                                    from . import crud
-
                                     # 从映射信息中获取创建条目所需的数据
                                     original_title = mapping_info.get("original_title", "未知标题")
                                     media_type = mapping_info.get("type", "movie")
@@ -2923,7 +2875,6 @@ async def get_comments_for_dandan(
                                                 break
 
                                     # 解析搜索关键词，提取纯标题（如"天才基本法 S01E13" -> "天才基本法"）
-                                    from .utils import parse_search_keyword
                                     search_term = search_keyword or original_title
                                     parsed_info = parse_search_keyword(search_term)
                                     base_title = parsed_info["title"]
@@ -2933,7 +2884,6 @@ async def get_comments_for_dandan(
                                     # 如果没有，real_anime_id就是新分配的anime_id，需要创建条目
 
                                     # 检查数据库中是否已有这个anime_id的条目
-                                    from .orm_models import Anime
                                     stmt = select(Anime.id).where(Anime.id == real_anime_id)
                                     result = await task_session.execute(stmt)
                                     existing_anime_row = result.scalar_one_or_none()
@@ -2944,8 +2894,6 @@ async def get_comments_for_dandan(
                                         logger.info(f"使用已存在的番剧: ID={anime_id}")
                                     else:
                                         # 如果不存在，直接创建新的（使用real_anime_id作为指定ID）
-                                        from .orm_models import Anime
-                                        from .timezone import get_now
                                         new_anime = Anime(
                                             id=real_anime_id,
                                             title=base_title,
@@ -2969,7 +2917,6 @@ async def get_comments_for_dandan(
                                     )
 
                                     # 获取source_order用于生成虚拟episodeId
-                                    from .orm_models import AnimeSource
                                     stmt_source = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
                                     result_source = await task_session.execute(stmt_source)
                                     source_order = result_source.scalar_one()
@@ -3125,7 +3072,6 @@ async def get_comments_for_dandan(
             else:
                 # 缓存过期,重新采样
                 logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样 (缓存已过期)")
-                from .utils import sample_comments_evenly
                 original_count = len(comments_data)
                 comments_data = sample_comments_evenly(comments_data, limit)
                 logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
@@ -3135,7 +3081,6 @@ async def get_comments_for_dandan(
         else:
             # 无缓存,执行采样
             logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
-            from .utils import sample_comments_evenly
             original_count = len(comments_data)
             comments_data = sample_comments_evenly(comments_data, limit)
             logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
