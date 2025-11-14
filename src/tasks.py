@@ -2276,7 +2276,7 @@ async def webhook_search_and_dispatch_task(
                     source_prefix = f"Webhook自动导入 ({webhookSource})"
 
                 task_title = f"{source_prefix}: {favorited_source['animeTitle']} - S{season:02d}E{currentEpisodeIndex:02d} ({favorited_source['providerName']})"
-                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-ep{currentEpisodeIndex}"
+                unique_key = f"import-{favorited_source['providerName']}-{favorited_source['mediaId']}-S{season}-ep{currentEpisodeIndex}"
                 task_coro = lambda session, cb: generic_import_task(
                     provider=favorited_source['providerName'], mediaId=favorited_source['mediaId'], animeTitle=favorited_source['animeTitle'], year=year,
                     mediaType=favorited_source['mediaType'], season=season, currentEpisodeIndex=currentEpisodeIndex,
@@ -2491,14 +2491,14 @@ async def webhook_search_and_dispatch_task(
                 task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
             else:
                 task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
-            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-S{season}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
             final_year = best_match.year if best_match.year is not None else year
             task_coro = lambda session, cb: generic_import_task(
                 provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
                 animeTitle=best_match.title, mediaType=best_match.type,
-                season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
                 doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
                 progress_callback=cb, session=session, manager=manager,
                 task_manager=task_manager,
@@ -2570,14 +2570,14 @@ async def webhook_search_and_dispatch_task(
                 task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
             else:
                 task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
-            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+            unique_key = f"import-{best_match.provider}-{best_match.mediaId}-S{season}-ep{currentEpisodeIndex}"
 
             # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
             final_year = best_match.year if best_match.year is not None else year
             task_coro = lambda session, cb: generic_import_task(
                 provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
                 animeTitle=best_match.title, mediaType=best_match.type,
-                season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+                season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
                 doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
                 progress_callback=cb, session=session, manager=manager,
                 task_manager=task_manager,
@@ -2654,14 +2654,14 @@ async def webhook_search_and_dispatch_task(
             task_title = f"{source_prefix}: {best_match.title} - S{season:02d}E{currentEpisodeIndex:02d} ({best_match.provider}) [{current_time}]"
         else:
             task_title = f"{source_prefix}: {best_match.title} ({best_match.provider}) [{current_time}]"
-        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-ep{currentEpisodeIndex}"
+        unique_key = f"import-{best_match.provider}-{best_match.mediaId}-S{season}-ep{currentEpisodeIndex}"
 
         # 修正：优先使用搜索结果的年份，如果搜索结果没有年份则使用webhook传入的年份
         final_year = best_match.year if best_match.year is not None else year
         task_coro = lambda session, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId, year=final_year,
             animeTitle=best_match.title, mediaType=best_match.type,
-            season=best_match.season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
+            season=season, currentEpisodeIndex=currentEpisodeIndex, imageUrl=best_match.imageUrl, config_manager=config_manager, metadata_manager=metadata_manager,
             doubanId=doubanId, tmdbId=tmdbId, imdbId=imdbId, tvdbId=tvdbId, bangumiId=bangumiId, rate_limiter=rate_limiter,
             progress_callback=cb, session=session, manager=manager,
             task_manager=task_manager,
@@ -3649,11 +3649,12 @@ async def import_media_items(
             tv_shows[key].append(item)
 
     # 计算任务数: 电影数 + 电视剧集数(每集单独计算)
-    tv_episode_count = sum(len(season_items) for season_items in tv_shows.values())
-    total_tasks = len(movies) + tv_episode_count
+    # 统计任务数量: 电影按部, 电视按季度
+    tv_season_count = len(tv_shows)
+    total_tasks = len(movies) + tv_season_count
     completed = 0
 
-    logger.info(f"准备导入: {len(movies)} 部电影, {tv_episode_count} 集电视节目")
+    logger.info(f"准备导入: {len(movies)} 部电影, {tv_season_count} 个电视季度")
 
     # 导入电影
     for movie in movies:
@@ -3696,59 +3697,71 @@ async def import_media_items(
             await crud.mark_media_items_imported(session, [movie.id])
             await session.commit()
 
+            # 小延迟，避免瞬间提交过多任务
+            await asyncio.sleep(0.2)
+
         except Exception as e:
             logger.error(f"导入电影 {movie.title} 失败: {e}", exc_info=True)
             await session.rollback()
 
         completed += 1
 
-    # 导入电视节目(逐集导入,每集单独检查)
+    # 导入电视节目(按季度合并为单个任务)
     for (title, season), season_items in tv_shows.items():
-        # 无论选择多少集,都逐集导入
-        for episode_item in season_items:
-            await progress_callback(
-                int((completed / total_tasks) * 100),
-                f"导入电视节目: {title} S{season:02d}E{episode_item.episode:02d}..."
+        await progress_callback(
+            int((completed / total_tasks) * 100),
+            f"导入电视节目: {title} S{season:02d} (共 {len(season_items)} 集)..."
+        )
+
+        try:
+            # 选取该季度中集数最小的一集作为代表，用于搜索和匹配
+            representative_item = min(
+                season_items,
+                key=lambda item: item.episode or 0
             )
 
-            try:
-                task_id, _ = await task_manager.submit_task(
-                    lambda session, progress_callback, item=episode_item: webhook_search_and_dispatch_task(
-                        animeTitle=item.title,
-                        mediaType="tv_series",
-                        season=item.season,
-                        currentEpisodeIndex=item.episode,  # 使用实际的集数
-                        searchKeyword=f"{item.title} S{item.season:02d}E{item.episode:02d}",
-                        year=item.year,
-                        tmdbId=item.tmdbId,
-                        tvdbId=item.tvdbId,
-                        imdbId=item.imdbId,
-                        doubanId=None,
-                        bangumiId=None,
-                        webhookSource="media_server",
-                        session=session,
-                        progress_callback=progress_callback,
-                        manager=scraper_manager,
-                        task_manager=task_manager,
-                        metadata_manager=metadata_manager,
-                        config_manager=config_manager,
-                        rate_limiter=rate_limiter,
-                        title_recognition_manager=title_recognition_manager
-                    ),
-                    title=f"自动导入 (库内): {title} S{season:02d}E{episode_item.episode:02d}",
-                    queue_type="download"
-                )
-                logger.info(f"电视节目 {title} S{season:02d}E{episode_item.episode:02d} 导入任务已提交: {task_id}")
+            task_id, _ = await task_manager.submit_task(
+                lambda session, progress_callback, item=representative_item: webhook_search_and_dispatch_task(
+                    animeTitle=item.title,
+                    mediaType="tv_series",
+                    season=item.season,
+                    currentEpisodeIndex=item.episode,  # 使用代表集数进行匹配
+                    searchKeyword=f"{item.title} S{item.season:02d}E{item.episode:02d}",
+                    year=item.year,
+                    tmdbId=item.tmdbId,
+                    tvdbId=item.tvdbId,
+                    imdbId=item.imdbId,
+                    doubanId=None,
+                    bangumiId=None,
+                    webhookSource="media_server",
+                    session=session,
+                    progress_callback=progress_callback,
+                    manager=scraper_manager,
+                    task_manager=task_manager,
+                    metadata_manager=metadata_manager,
+                    config_manager=config_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager
+                ),
+                title=f"自动导入 (库内): {title} S{season:02d} (共 {len(season_items)} 集)",
+                queue_type="download"
+            )
+            logger.info(f"电视节目 {title} S{season:02d} (共 {len(season_items)} 集) 导入任务已提交: {task_id}")
+            selected_episodes = sorted([item.episode for item in season_items if item.episode is not None])
+            logger.info(f"电视节目 {title} S{season:02d} 选中的分集: {selected_episodes}")
 
-                # 标记为已导入
-                await crud.mark_media_items_imported(session, [episode_item.id])
-                await session.commit()
+            # 标记该季度内所有选中分集为已导入
+            await crud.mark_media_items_imported(session, [item.id for item in season_items])
+            await session.commit()
 
-            except Exception as e:
-                logger.error(f"导入电视节目 {title} S{season:02d}E{episode_item.episode:02d} 失败: {e}", exc_info=True)
-                await session.rollback()
+            # 小延迟，避免瞬间提交过多任务
+            await asyncio.sleep(0.2)
 
-            completed += 1  # 每集完成后递增
+        except Exception as e:
+            logger.error(f"导入电视节目 {title} S{season:02d} 失败: {e}", exc_info=True)
+            await session.rollback()
+
+        completed += 1  # 每个季度任务完成后递增
 
     await progress_callback(100, f"导入完成,共提交 {total_tasks} 个任务")
     raise TaskSuccess(f"媒体项导入完成,共提交 {total_tasks} 个任务")
