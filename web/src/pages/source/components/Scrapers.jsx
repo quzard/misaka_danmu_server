@@ -181,6 +181,7 @@ export const Scrapers = () => {
   const [versionInfo, setVersionInfo] = useState({
     localVersion: 'unknown',
     remoteVersion: null,
+    officialVersion: null,
     hasUpdate: false
   })
   const [loadingVersions, setLoadingVersions] = useState(false)
@@ -294,6 +295,7 @@ export const Scrapers = () => {
       setVersionInfo({
         localVersion: res.data?.localVersion || 'unknown',
         remoteVersion: res.data?.remoteVersion || null,
+        officialVersion: res.data?.officialVersion || null,
         hasUpdate: res.data?.hasUpdate || false
       })
     } catch (error) {
@@ -790,19 +792,25 @@ export const Scrapers = () => {
           </div>
 
           {/* 版本信息 */}
-          {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion) && (
+          {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion || versionInfo.officialVersion) && (
             <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded">
               <div className={`flex ${isMobile ? 'items-center justify-between gap-2' : 'items-center gap-4'}`}>
+                {versionInfo.officialVersion && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">主仓库版本:</span>
+                    <Tag color="purple">{versionInfo.officialVersion}</Tag>
+                  </div>
+                )}
+                {versionInfo.remoteVersion && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">远程仓库版本:</span>
+                    <Tag color="green">{versionInfo.remoteVersion}</Tag>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-600">本地版本:</span>
                   <Tag color="blue">{versionInfo.localVersion}</Tag>
                 </div>
-                {versionInfo.remoteVersion && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">远程版本:</span>
-                    <Tag color="green">{versionInfo.remoteVersion}</Tag>
-                  </div>
-                )}
                 {versionInfo.hasUpdate && (
                   <Tag color="orange">有更新可用</Tag>
                 )}

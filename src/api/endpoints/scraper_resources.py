@@ -165,24 +165,37 @@ async def get_versions(
             except Exception as e:
                 logger.warning(f"读取本地 package.json 失败: {e}")
 
-        # 获取远程版本
+        # 获取远程版本（当前配置的资源仓库）
         remote_version = None
         repo_url = await config_manager.get("scraper_resource_repo", "")
 
         if repo_url:
             try:
-                repo_info = parse_github_url(repo_url)
-                owner = repo_info['owner']
-                repo = repo_info['repo']
-
-                # 获取 GitHub Token (如果配置了)
-                github_token = await config_manager.get("github_token", "")
                 headers = {}
-                if github_token:
-                    headers["Authorization"] = f"Bearer {github_token}"
+
+                # 优先尝试按 GitHub 仓库解析
+                repo_info = None
+                try:
+                    repo_info = parse_github_url(repo_url)
+                except ValueError:
+                    repo_info = None
+
+                if repo_info:
+                    owner = repo_info['owner']
+                    repo = repo_info['repo']
+
+                    # 获取 GitHub Token (如果配置了)
+                    github_token = await config_manager.get("github_token", "")
+                    if github_token:
+                        headers["Authorization"] = f"Bearer {github_token}"
+
+                    base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
+                else:
+                    # 非 GitHub 地址：视为静态资源根路径
+                    base_url = repo_url.rstrip("/")
 
                 # 下载远程 package.json
-                package_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/package.json"
+                package_url = f"{base_url}/package.json"
                 async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
                     response = await client.get(package_url)
                     if response.status_code == 200:
@@ -191,9 +204,31 @@ async def get_versions(
             except Exception as e:
                 logger.warning(f"获取远程版本失败: {e}")
 
+        # 固定源仓库（官方仓库）版本
+        official_version = None
+        try:
+            official_repo_info = parse_github_url("https://github.com/l429609201/Misaka-Scraper-Resources")
+            official_owner = official_repo_info["owner"]
+            official_repo = official_repo_info["repo"]
+
+            github_token = await config_manager.get("github_token", "")
+            headers_official = {}
+            if github_token:
+                headers_official["Authorization"] = f"Bearer {github_token}"
+
+            official_package_url = f"https://raw.githubusercontent.com/{official_owner}/{official_repo}/main/package.json"
+            async with httpx.AsyncClient(timeout=10.0, headers=headers_official) as client:
+                official_resp = await client.get(official_package_url)
+                if official_resp.status_code == 200:
+                    official_package = official_resp.json()
+                    official_version = official_package.get("version", "unknown")
+        except Exception as e:
+            logger.warning(f"获取官方资源仓库版本失败: {e}")
+
         return {
             "localVersion": local_version,
             "remoteVersion": remote_version,
+            "officialVersion": official_version,
             "hasUpdate": remote_version and local_version != "unknown" and remote_version != local_version
         }
 
@@ -211,11 +246,9 @@ async def save_resource_repo(
     """保存资源仓库链接"""
     repo_url = payload.get("repoUrl", "").strip()
     if repo_url:
-        # 验证 URL 格式
-        try:
-            parse_github_url(repo_url)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        # 基础校验：要求是 http/https 链接，其他格式直接拒绝
+        if not (repo_url.startswith("http://") or repo_url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="资源仓库链接必须以 http:// 或 https:// 开头")
 
     await config_manager.setValue("scraper_resource_repo", repo_url)
     logger.info(f"用户 '{current_user.username}' 更新了资源仓库配置: {repo_url}")
@@ -494,24 +527,38 @@ async def load_resources(
         if not repo_url:
             raise HTTPException(status_code=400, detail="未配置资源仓库链接")
 
-        # 解析仓库信息
-        repo_info = parse_github_url(repo_url)
-        owner = repo_info['owner']
-        repo = repo_info['repo']
-
         # 获取平台信息
         platform_key = get_platform_key()
         logger.info(f"当前平台: {platform_key}")
 
-        # 获取 GitHub Token (如果配置了)
-        github_token = await config_manager.get("github_token", "")
+        # 根据仓库地址确定基础下载 URL
         headers = {}
-        if github_token:
-            headers["Authorization"] = f"Bearer {github_token}"
-            logger.info("使用 GitHub Token 请求 API")
+        base_url = None
+
+        # 优先尝试按 GitHub 仓库解析
+        repo_info = None
+        try:
+            repo_info = parse_github_url(repo_url)
+        except ValueError:
+            repo_info = None
+
+        if repo_info:
+            owner = repo_info['owner']
+            repo = repo_info['repo']
+
+            # GitHub 模式：可选使用 Token
+            github_token = await config_manager.get("github_token", "")
+            if github_token:
+                headers["Authorization"] = f"Bearer {github_token}"
+                logger.info("使用 GitHub Token 请求 API")
+
+            base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
+        else:
+            # 非 GitHub 地址：视为静态资源根路径
+            base_url = repo_url.rstrip("/")
 
         # 下载 package.json
-        package_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/package.json"
+        package_url = f"{base_url}/package.json"
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(package_url)
             if response.status_code != 200:
@@ -553,7 +600,7 @@ async def load_resources(
                     filename = Path(file_path).name
 
                     # 下载文件
-                    file_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{file_path}"
+                    file_url = f"{base_url}/{file_path}"
                     logger.info(f"下载: {file_url}")
 
                     response = await client.get(file_url)
