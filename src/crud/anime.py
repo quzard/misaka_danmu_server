@@ -34,7 +34,7 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
             Anime.type,
             Anime.season,
             Anime.year,
-            func.coalesce(Anime.createdAt, func.now()).label("createdAt"),  # 处理NULL值
+            Anime.createdAt.label("createdAt"),  # 直接使用 createdAt，不使用 func.now()
             case(
                 (Anime.type == 'movie', 1),
                 else_=func.coalesce(func.max(Episode.episodeIndex), 0)
@@ -84,7 +84,7 @@ async def get_library_anime_by_id(session: AsyncSession, anime_id: int) -> Optio
             Anime.type,
             Anime.season,
             Anime.year,
-            func.coalesce(Anime.createdAt, func.now()).label("createdAt"),  # 处理NULL值
+            Anime.createdAt.label("createdAt"),  # 直接使用 createdAt，不使用 func.now()
             case(
                 (Anime.type == 'movie', 1),
                 else_=func.coalesce(func.max(Episode.episodeIndex), 0)
