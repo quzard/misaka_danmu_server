@@ -429,8 +429,8 @@ const LibraryScan = () => {
                         }}
                       />
                       <div>
-                        <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: screens.xs ? 'wrap' : 'wrap' }}>
-                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: screens.xs ? 'break-word' : 'break-word', flex: screens.xs ? '1 1 auto' : '1 1 auto' }}>
+                        <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: 'break-word', flex: '1 1 auto' }}>
                             {currentServer.name}
                           </Text>
                           <div style={{ display: 'flex', gap: '4px', flexWrap: screens.xs ? 'nowrap' : 'wrap', flexShrink: 0 }}>

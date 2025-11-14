@@ -45,7 +45,8 @@ export const Logs = () => {
         }
       },
       onmessage: event => {
-        const newLog = event.data
+        const newLog = event.data.trim()
+        if (!newLog) return
         setLogs(prevLogs => [newLog, ...prevLogs].slice(0, 200)) // 保持最多200条
       },
       onerror: error => {
