@@ -131,6 +131,9 @@ const SortableItem = ({
             <div onClick={handleConfig} className="cursor-pointer">
               <MyIcon icon="setting" size={24} />
             </div>
+            {item.version && (
+              <Tag color="blue">{item.version}</Tag>
+            )}
             {item.isEnabled ? (
               <Tag color="green">已启用</Tag>
             ) : (

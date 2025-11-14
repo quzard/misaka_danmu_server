@@ -403,6 +403,7 @@ class MetadataSourceStatusResponse(BaseModel):
 class ScraperSettingWithConfig(ScraperSetting):
     configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str]]]] = None
     isLoggable: bool
+    version: Optional[str] = None  # 弹幕源版本号
 
 class ProxySettingsResponse(BaseModel):
     proxyProtocol: str

@@ -23,6 +23,7 @@ class ScraperManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, metadata_manager: "MetadataSourceManager", transport_manager: TransportManager):
         self.scrapers: Dict[str, BaseScraper] = {}
         self._scraper_classes: Dict[str, Type[BaseScraper]] = {}
+        self._scraper_versions: Dict[str, str] = {}  # 存储每个源的版本号
         self.scraper_settings: Dict[str, Dict[str, Any]] = {}
         self._session_factory = session_factory
         self._domain_map: Dict[str, str] = {}
@@ -136,6 +137,10 @@ class ScraperManager:
 
                 module_name = f"src.scrapers.{module_name_stem}"
                 module = importlib.import_module(module_name)
+
+                # 提取模块级别的 __version__ 属性
+                module_version = getattr(module, '__version__', None)
+
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     if issubclass(obj, BaseScraper) and obj is not BaseScraper:
                         provider_name = obj.provider_name # 直接访问类属性，避免实例化
@@ -143,7 +148,7 @@ class ScraperManager:
                         # (新增) 注册该刮削器能处理的域名
                         for domain in getattr(obj, 'handled_domains', []):
                             self._domain_map[domain] = provider_name
-                        
+
                         # 在加载时直接发现并收集提供商特定的默认配置
                         if hasattr(obj, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT'):
                             config_key = f"{provider_name}_episode_blacklist_regex"
@@ -152,6 +157,9 @@ class ScraperManager:
                             default_configs_to_register[config_key] = (default_value, description)
 
                         self._scraper_classes[provider_name] = obj
+                        # 存储版本号
+                        if module_version:
+                            self._scraper_versions[provider_name] = module_version
 
             except TypeError as e:
                 if "couldn't parse file content" in str(e).lower():
@@ -386,6 +394,10 @@ class ScraperManager:
     def get_scraper_class(self, provider_name: str) -> Optional[Type[BaseScraper]]:
         """获取刮削器的类，而不实例化它。"""
         return self._scraper_classes.get(provider_name)
+
+    def get_scraper_version(self, provider_name: str) -> Optional[str]:
+        """获取刮削器的版本号。"""
+        return self._scraper_versions.get(provider_name)
 
     def get_scraper_by_domain(self, url: str) -> Optional[BaseScraper]:
         """
