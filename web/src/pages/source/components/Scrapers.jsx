@@ -1,7 +1,6 @@
 import {
   Button,
   Card,
-  Col,
   Checkbox,
   Form,
   Input,
@@ -9,11 +8,13 @@ import {
   message,
   Modal,
   Row,
+  Spin,
   Switch,
   Space,
   Tag,
   Tooltip,
   Upload,
+  Typography,
 } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import Cookies from 'js-cookie'
@@ -101,7 +102,7 @@ const SortableItem = ({
 
   return (
     <List.Item ref={setNodeRef} style={style}>
-      <div className={`w-full flex ${isMobile ? 'flex-col gap-2' : 'items-center justify-between'}`}>
+      <div className={`w-full flex ${isMobile ? 'gap-2' : 'items-center justify-between'}`}>
         {/* 左侧添加拖拽手柄 */}
         <div className="flex items-center gap-2">
           {/* 将attributes移到拖拽图标容器上，确保只有拖拽图标可触发拖拽 */}
@@ -110,9 +111,9 @@ const SortableItem = ({
           </div>
           <div>{item.providerName}</div>
         </div>
-        <div className={`flex ${isMobile ? 'flex-col gap-2 w-full' : 'items-center justify-around'} gap-4`}>
+        <div className={`flex ${isMobile ? 'ml-auto' : 'items-center justify-around'} gap-4`}>
           {item.providerName === 'bilibili' && (
-            <div className={isMobile ? 'text-center' : ''}>
+            <div className={`flex ${isMobile ? 'items-center gap-2' : ''} ${isMobile ? 'text-center' : ''}`}>
               {biliUserinfo.isLogin ? (
                 <div className={`flex ${isMobile ? 'flex-row items-center justify-center gap-2' : 'items-center justify-start gap-2'}`}>
                   <img
@@ -122,7 +123,7 @@ const SortableItem = ({
                   <span className={isMobile ? 'text-sm' : ''}>{biliUserinfo.uname}</span>
                 </div>
               ) : (
-                <span className="opacity-50">未登录</span>
+                <span className="opacity-50 text-sm">未登录</span>
               )}
             </div>
           )}
@@ -174,6 +175,7 @@ export const Scrapers = () => {
   // dandanplay auth mode
   const [dandanAuthMode, setDandanAuthMode] = useState('local') // 'local' or 'proxy'
   const [showAppSecret, setShowAppSecret] = useState(false)
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState(false)
 
   // 资源仓库相关
   const [resourceRepoUrl, setResourceRepoUrl] = useState('')
@@ -572,7 +574,7 @@ export const Scrapers = () => {
           await biliLogout()
           getInfo()
           setBiliQrcodeStatus('')
-        } catch (err) {}
+        } catch (err) { }
       },
     })
   }
@@ -791,119 +793,254 @@ export const Scrapers = () => {
             </div>
           </div>
 
-          {/* 版本信息 */}
+          {/* 版本信息 + 操作按钮（合并为一行） */}
           {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion || versionInfo.officialVersion) && (
-            <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded">
-              <div className={`flex ${isMobile ? 'items-center justify-between gap-2' : 'items-center gap-4'}`}>
-                {versionInfo.officialVersion && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">主仓库版本:</span>
-                    <Tag color="purple">{versionInfo.officialVersion}</Tag>
-                  </div>
-                )}
-                {versionInfo.remoteVersion && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">远程仓库版本:</span>
-                    <Tag color="green">{versionInfo.remoteVersion}</Tag>
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">本地版本:</span>
-                  <Tag color="blue">{versionInfo.localVersion}</Tag>
-                </div>
-                {versionInfo.hasUpdate && (
-                  <Tag color="orange">有更新可用</Tag>
-                )}
-                <div className="flex items-center gap-2">
-                  {sseConnected && (
-                    <Tag color="default">自动监听</Tag>
+            <div className={`flex ${isMobile ? 'flex-col gap-4' : 'items-center justify-between'} mb-4`}>
+              <Card size="small" className={isMobile ? 'w-full' : ''}>
+                <div className="flex flex-col gap-2">
+                  {isMobile ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        {versionInfo.officialVersion && (
+                          <>
+                            <Typography.Text className="text-sm text-gray-600">主仓:</Typography.Text>
+                            <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                          </>
+                        )}
+                        {versionInfo.remoteVersion && (
+                          <>
+                            <Typography.Text className="text-sm text-gray-600">远程:</Typography.Text>
+                            <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex items-center gap-8">
+                          <Typography.Text className="text-sm text-gray-600">本地:</Typography.Text>
+                          <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                        </div>
+                        <div className="ml-auto">
+                          <Button
+                            type="text"
+                            onClick={loadVersionInfo}
+                            style={{
+                              color: '#ff69b4',
+                              width: 60,
+                              position: 'relative',
+                              padding: 0,
+                            }}
+                          >
+                            {loadingVersions ? (
+                              <>
+                                <Spin
+                                  size="small"
+                                  style={{
+                                    position: 'absolute',
+                                    left: '50%',
+                                    top: '50%',
+                                    transform: 'translate(-50%, -50%)',
+                                  }}
+                                />
+                                <span style={{ opacity: 0 }}>刷新</span>
+                              </>
+                            ) : '刷新'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      {versionInfo.officialVersion && (
+                        <div className="flex items-center gap-2">
+                          <Typography.Text className="text-sm text-gray-600">主仓版本:</Typography.Text>
+                          <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                        </div>
+                      )}
+                      {versionInfo.remoteVersion && (
+                        <div className="flex items-center gap-2">
+                          <Typography.Text className="text-sm text-gray-600">远程版本:</Typography.Text>
+                          <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
+                        <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                      </div>
+                      {sseConnected && <Tag color="default">自动监听</Tag>}
+                      <Button
+                        type="text"
+                        onClick={loadVersionInfo}
+                        style={{
+                          color: '#ff69b4',
+                          width: 60,
+                          position: 'relative',
+                          padding: 0,
+                        }}
+                      >
+                        {loadingVersions ? (
+                          <>
+                            <Spin
+                              size="small"
+                              style={{
+                                position: 'absolute',
+                                left: '50%',
+                                top: '50%',
+                                transform: 'translate(-50%, -50%)',
+                              }}
+                            />
+                            <span style={{ opacity: 0 }}>刷新</span>
+                          </>
+                        ) : '刷新'}
+                      </Button>
+                    </div>
                   )}
+                  {versionInfo.hasUpdate && (
+                    <div className="flex items-center gap-2">
+                      <Typography.Text type="warning">有更新可用</Typography.Text>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* 右侧：操作按钮组 —— 仅在 PC 端显示 */}
+              {!isMobile && (
+                <div className="flex gap-2">
                   <Button
-                    type="link"
-                    size="small"
-                    loading={loadingVersions}
-                    onClick={loadVersionInfo}
+                    onClick={async () => {
+                      try {
+                        const res = await backupScrapers()
+                        messageApi.success(res.data?.message || '备份成功')
+                      } catch (error) {
+                        messageApi.error(error.response?.data?.detail || '备份失败')
+                      }
+                    }}
                   >
-                    手动刷新
+                    备份当前弹幕源
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      modalApi.confirm({
+                        title: '还原弹幕源',
+                        content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                        okText: '确认',
+                        cancelText: '取消',
+                        onOk: async () => {
+                          try {
+                            const res = await restoreScrapers()
+                            messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+                            setTimeout(() => {
+                              getInfo()
+                              loadVersionInfo()
+                            }, 2500)
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '还原失败')
+                          }
+                        },
+                      })
+                    }}
+                  >
+                    从备份还原
+                  </Button>
+                  <Button
+                    type="primary"
+                    onClick={async () => {
+                      try {
+                        setLoading(true)
+                        const res = await reloadScrapers()
+                        messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+                        setTimeout(() => {
+                          getInfo()
+                          loadVersionInfo()
+                        }, 2500)
+                      } catch (error) {
+                        messageApi.error(error.response?.data?.detail || '重载失败')
+                      } finally {
+                        setLoading(false)
+                      }
+                    }}
+                  >
+                    重载弹幕源
                   </Button>
                 </div>
-              </div>
+              )}
             </div>
-          )}
+          )
+          }
 
-          <div className={`flex gap-2 ${isMobile ? 'flex-wrap' : ''}`}>
-            <Button
-              onClick={async () => {
-                try {
-                  const res = await backupScrapers()
-                  messageApi.success(res.data?.message || '备份成功')
-                } catch (error) {
-                  messageApi.error(error.response?.data?.detail || '备份失败')
-                }
-              }}
-              className={isMobile ? 'flex-1 min-w-0' : ''}
-              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
-            >
-              {isMobile ? '备份' : '备份当前弹幕源'}
-            </Button>
-            <Button
-              onClick={() => {
-                modalApi.confirm({
-                  title: '还原弹幕源',
-                  content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
-                  okText: '确认',
-                  cancelText: '取消',
-                  onOk: async () => {
+          {/* 移动端：单独显示按钮 */}
+          {
+            isMobile && (
+              <div className="flex gap-2 flex-wrap mb-4">
+                <Button
+                  onClick={async () => {
                     try {
-                      const res = await restoreScrapers()
-                      messageApi.success(res.data?.message || '还原成功，正在后台重载...')
-
-                      // 延迟刷新，等待后台重载完成
+                      const res = await backupScrapers()
+                      messageApi.success(res.data?.message || '备份成功')
+                    } catch (error) {
+                      messageApi.error(error.response?.data?.detail || '备份失败')
+                    }
+                  }}
+                  className="flex-1 min-w-0"
+                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                >
+                  备份
+                </Button>
+                <Button
+                  onClick={() => {
+                    modalApi.confirm({
+                      title: '还原弹幕源',
+                      content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                      okText: '确认',
+                      cancelText: '取消',
+                      onOk: async () => {
+                        try {
+                          const res = await restoreScrapers()
+                          messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+                          setTimeout(() => {
+                            getInfo()
+                            loadVersionInfo()
+                          }, 2500)
+                        } catch (error) {
+                          messageApi.error(error.response?.data?.detail || '还原失败')
+                        }
+                      },
+                    })
+                  }}
+                  className="flex-1 min-w-0"
+                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                >
+                  还原
+                </Button>
+                <Button
+                  type="primary"
+                  onClick={async () => {
+                    try {
+                      setLoading(true)
+                      const res = await reloadScrapers()
+                      messageApi.success(res.data?.message || '重载成功，正在后台重载...')
                       setTimeout(() => {
                         getInfo()
                         loadVersionInfo()
                       }, 2500)
                     } catch (error) {
-                      messageApi.error(error.response?.data?.detail || '还原失败')
+                      messageApi.error(error.response?.data?.detail || '重载失败')
+                    } finally {
+                      setLoading(false)
                     }
-                  },
-                })
-              }}
-              className={isMobile ? 'flex-1 min-w-0' : ''}
-              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
-            >
-              {isMobile ? '还原' : '从备份还原'}
-            </Button>
-            <Button
-              type="primary"
-              onClick={async () => {
-                try {
-                  setLoading(true)
-                  const res = await reloadScrapers()
-                  messageApi.success(res.data?.message || '重载成功，正在后台重载...')
-
-                  // 延迟刷新，等待后台重载完成
-                  setTimeout(() => {
-                    getInfo()
-                    loadVersionInfo()
-                  }, 2500)
-                } catch (error) {
-                  messageApi.error(error.response?.data?.detail || '重载失败')
-                } finally {
-                  setLoading(false)
-                }
-              }}
-              className={isMobile ? 'flex-1 min-w-0' : ''}
-              style={isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}}
-            >
-              {isMobile ? '重载' : '重载弹幕源'}
-            </Button>
-          </div>
-        </div>
-      </Card>
+                  }}
+                  className="flex-1 min-w-0"
+                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                >
+                  重载
+                </Button>
+              </div>
+            )
+          }
+        </div >
+      </Card >
 
       {/* 弹幕搜索源卡片 */}
-      <Card loading={loading} title="弹幕搜索源">
+      < Card loading={loading} title="弹幕搜索源" >
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -933,7 +1070,7 @@ export const Scrapers = () => {
           {/* 拖拽覆盖层 */}
           <DragOverlay>{renderDragOverlay()}</DragOverlay>
         </DndContext>
-      </Card>
+      </Card >
       <Modal
         title={`配置: ${setname}`}
         open={open}
@@ -948,7 +1085,6 @@ export const Scrapers = () => {
         centered
       >
         <Form form={form} layout="vertical">
-          <div className="mb-4">请为 {setname} 源填写以下配置信息。</div>
           {setname !== 'dandanplay' && (
             <Form.Item
               name="useProxy"
@@ -1113,40 +1249,35 @@ export const Scrapers = () => {
                   </Button>
                 </div>
               ) : (
-                <div className="text-center">
-                  <div className="mb-4">当前未登录。</div>
-                  <div className={`flex ${isMobile ? 'flex-col items-center gap-2' : 'items-center justify-center'} mb-4`}>
-                    <Checkbox
-                      checked={biliQrcodeChecked}
-                      onChange={() => setBiliQrcodeChecked(v => !v)}
-                    />
-                    <span
-                      className="cursor-pointer text-sm"
-                      onClick={() => setBiliQrcodeChecked(v => !v)}
+                <div className="flex flex-col items-center gap-4 w-full max-w-md mx-auto p-4">
+                  <div className="flex flex-col items-center gap-4">
+                    <Button
+                      disabled={!biliQrcodeChecked}
+                      type="primary"
+                      loading={biliQrcodeLoading}
+                      onClick={handleBiliQrcode}
                     >
-                      我已阅读并同意以下免责声明
-                    </span>
+                      扫码登录
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={biliQrcodeChecked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setShowDisclaimerModal(true);
+                          } else {
+                            setBiliQrcodeChecked(false);
+                          }
+                        }}
+                      />
+                      <span
+                        className="cursor-pointer text-sm"
+                        onClick={() => setShowDisclaimerModal(true)}
+                      >
+                        我已阅读并同意免责声明
+                      </span>
+                    </div>
                   </div>
-                  <div className={`my-3 text-sm ${isMobile ? 'px-2' : ''}`}>
-                    登录接口由{' '}
-                    <a
-                      href="https://github.com/SocialSisterYi/bilibili-API-collect"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      bilibili-API-collect
-                    </a>{' '}
-                    提供，为Blibili官方非公开接口。
-                    您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
-                  </div>
-                  <Button
-                    disabled={!biliQrcodeChecked}
-                    type="primary"
-                    loading={biliQrcodeLoading}
-                    onClick={handleBiliQrcode}
-                  >
-                    扫码登录
-                  </Button>
                 </div>
               )}
             </div>
@@ -1204,6 +1335,30 @@ export const Scrapers = () => {
           </Button>
         </div>
       </Modal>
-    </div>
+      <Modal
+        title="免责声明"
+        open={showDisclaimerModal}
+        onOk={() => {
+          setBiliQrcodeChecked(true)
+          setShowDisclaimerModal(false)
+        }}
+        onCancel={() => setShowDisclaimerModal(false)}
+        okText="同意"
+        cancelText="取消"
+      >
+        <div className="text-sm text-left">
+          登录接口由{' '}
+          <a
+            href="https://github.com/SocialSisterYi/bilibili-API-collect"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            bilibili-API-collect
+          </a>{' '}
+          提供，为Blibili官方非公开接口。
+          您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
+        </div>
+      </Modal>
+    </div >
   )
 }
