@@ -5,7 +5,7 @@ src/**/__pycache__
 src/**/.DS_Store
 
 .vscode
-config
+config/
 
 .augment/rules/rules.md
 .cunzhi-memory/metadata.json
