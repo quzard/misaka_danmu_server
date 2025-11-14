@@ -1742,18 +1742,18 @@ async def _get_match_for_item(
                 # 步骤1：使用统一的搜索函数
                 logger.info(f"步骤1：全网搜索 '{base_title}'")
 
-                # 使用统一的搜索函数（使用严格过滤模式）
+                # 使用统一的搜索函数（与 WebUI 搜索保持一致的过滤策略）
                 all_results = await unified_search(
                     search_term=base_title,
                     session=session_inner,
                     scraper_manager=scraper_manager,
-                    metadata_manager=None,  # 不使用别名扩展
-                    use_alias_expansion=False,
-                    use_alias_filtering=False,
+                    metadata_manager=metadata_manager,  # 启用元数据别名扩展
+                    use_alias_expansion=True,  # 启用别名扩展
+                    use_alias_filtering=True,  # 启用别名过滤
                     use_title_filtering=True,  # 启用标题过滤
                     use_source_priority_sorting=False,  # 仅按相似度排序
                     strict_filtering=True,  # 使用严格过滤模式
-                    custom_aliases={base_title},  # 使用基础标题作为别名
+                    alias_similarity_threshold=70,  # 与 WebUI 一致的别名相似度阈值
                     progress_callback=progress_callback
                 )
 
