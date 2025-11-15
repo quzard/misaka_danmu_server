@@ -120,21 +120,59 @@ def get_platform_key() -> str:
 
 
 def parse_github_url(url: str) -> Dict[str, str]:
-    """解析 GitHub 仓库 URL"""
-    # 支持多种格式
+    """解析 GitHub 仓库 URL,支持代理链接
+
+    支持的格式:
+    - https://github.com/owner/repo
+    - https://github.com/owner/repo.git
+    - https://任意域名/https://github.com/owner/repo (通用代理格式)
+    - https://任意域名/https://raw.githubusercontent.com/owner/repo/main (通用代理格式)
+    - https://cdn.jsdelivr.net/gh/owner/repo@main (jsDelivr CDN)
+    - https://cdn.jsdelivr.net/gh/owner/repo (jsDelivr CDN)
+
+    返回:
+        {
+            'owner': 'owner',
+            'repo': 'repo',
+            'proxy': 'https://代理域名' (如果有代理),
+            'proxy_type': 'generic_proxy' | 'jsdelivr' (代理类型)
+        }
+    """
+    # 检查是否是 jsDelivr CDN 格式
+    jsdelivr_match = re.match(r'^https?://cdn\.jsdelivr\.net/gh/([^/]+)/([^/@]+)(?:@[^/]+)?', url)
+    if jsdelivr_match:
+        return {
+            'owner': jsdelivr_match.group(1),
+            'repo': jsdelivr_match.group(2),
+            'proxy': 'https://cdn.jsdelivr.net',
+            'proxy_type': 'jsdelivr'
+        }
+
+    # 检查是否是通用代理格式: https://任意域名/https://github.com/...
+    generic_proxy_match = re.match(r'^(https?://[^/]+)/https?://(github\.com|raw\.githubusercontent\.com)/([^/]+)/([^/]+)', url)
+    if generic_proxy_match:
+        return {
+            'owner': generic_proxy_match.group(3),
+            'repo': generic_proxy_match.group(4).replace('.git', '').split('/')[0],  # 去掉可能的路径部分
+            'proxy': generic_proxy_match.group(1),
+            'proxy_type': 'generic_proxy'
+        }
+
+    # 普通 GitHub URL
     patterns = [
         r'github\.com/([^/]+)/([^/]+?)(?:\.git)?$',
         r'github\.com/([^/]+)/([^/]+)',
+        r'raw\.githubusercontent\.com/([^/]+)/([^/]+)',
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
             return {
                 'owner': match.group(1),
-                'repo': match.group(2).replace('.git', '')
+                'repo': match.group(2).replace('.git', '').split('/')[0]  # 去掉可能的路径部分
             }
-    
+
     raise ValueError("无效的 GitHub 仓库链接")
 
 
@@ -183,13 +221,22 @@ async def get_versions(
                 if repo_info:
                     owner = repo_info['owner']
                     repo = repo_info['repo']
+                    proxy = repo_info.get('proxy')
+                    proxy_type = repo_info.get('proxy_type')
 
                     # 获取 GitHub Token (如果配置了)
                     github_token = await config_manager.get("github_token", "")
                     if github_token:
                         headers["Authorization"] = f"Bearer {github_token}"
 
-                    base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
+                    # 构造 base_url (支持代理)
+                    if proxy:
+                        if proxy_type == 'jsdelivr':
+                            base_url = f"{proxy}/gh/{owner}/{repo}@main"
+                        else:  # generic_proxy (通用代理格式)
+                            base_url = f"{proxy}/https://raw.githubusercontent.com/{owner}/{repo}/main"
+                    else:
+                        base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
                 else:
                     # 非 GitHub 地址：视为静态资源根路径
                     base_url = repo_url.rstrip("/")
@@ -210,13 +257,23 @@ async def get_versions(
             official_repo_info = parse_github_url("https://github.com/l429609201/Misaka-Scraper-Resources")
             official_owner = official_repo_info["owner"]
             official_repo = official_repo_info["repo"]
+            official_proxy = official_repo_info.get('proxy')
+            official_proxy_type = official_repo_info.get('proxy_type')
 
             github_token = await config_manager.get("github_token", "")
             headers_official = {}
             if github_token:
                 headers_official["Authorization"] = f"Bearer {github_token}"
 
-            official_package_url = f"https://raw.githubusercontent.com/{official_owner}/{official_repo}/main/package.json"
+            # 构造 URL (支持代理)
+            if official_proxy:
+                if official_proxy_type == 'jsdelivr':
+                    official_package_url = f"{official_proxy}/gh/{official_owner}/{official_repo}@main/package.json"
+                else:  # generic_proxy (通用代理格式)
+                    official_package_url = f"{official_proxy}/https://raw.githubusercontent.com/{official_owner}/{official_repo}/main/package.json"
+            else:
+                official_package_url = f"https://raw.githubusercontent.com/{official_owner}/{official_repo}/main/package.json"
+
             async with httpx.AsyncClient(timeout=10.0, headers=headers_official) as client:
                 official_resp = await client.get(official_package_url)
                 if official_resp.status_code == 200:
@@ -545,6 +602,8 @@ async def load_resources(
         if repo_info:
             owner = repo_info['owner']
             repo = repo_info['repo']
+            proxy = repo_info.get('proxy')
+            proxy_type = repo_info.get('proxy_type')
 
             # GitHub 模式：可选使用 Token
             github_token = await config_manager.get("github_token", "")
@@ -552,7 +611,16 @@ async def load_resources(
                 headers["Authorization"] = f"Bearer {github_token}"
                 logger.info("使用 GitHub Token 请求 API")
 
-            base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
+            # 构造 base_url (支持代理)
+            if proxy:
+                if proxy_type == 'jsdelivr':
+                    base_url = f"{proxy}/gh/{owner}/{repo}@main"
+                    logger.info(f"使用 jsDelivr CDN 加速: {proxy}")
+                else:  # generic_proxy (通用代理格式)
+                    base_url = f"{proxy}/https://raw.githubusercontent.com/{owner}/{repo}/main"
+                    logger.info(f"使用 GitHub 代理: {proxy}")
+            else:
+                base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main"
         else:
             # 非 GitHub 地址：视为静态资源根路径
             base_url = repo_url.rstrip("/")
