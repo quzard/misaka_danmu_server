@@ -979,8 +979,30 @@ export const Scrapers = () => {
           {/* 下载进度条 */}
           {downloadProgress.visible && (
             <div className="mt-4">
-              <div className="mb-2 text-sm text-gray-600">
-                {downloadProgress.message}
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm text-gray-600">{downloadProgress.message}</span>
+                <Button
+                  size="small"
+                  danger
+                  onClick={() => {
+                    if (downloadAbortController.current) {
+                      downloadAbortController.current.abort()
+                      downloadAbortController.current = null
+                    }
+                    setDownloadProgress({
+                      visible: false,
+                      current: 0,
+                      total: 0,
+                      progress: 0,
+                      message: '',
+                      scraper: ''
+                    })
+                    setLoadingResources(false)
+                    messageApi.warning('已取消下载')
+                  }}
+                >
+                  取消
+                </Button>
               </div>
               <Progress
                 percent={downloadProgress.progress}

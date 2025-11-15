@@ -651,6 +651,7 @@ async def load_resources_stream(
 
             # 下载 package.json
             package_url = f"{base_url}/package.json"
+            logger.info(f"正在从 {package_url} 获取资源包信息...")
             yield f"data: {json.dumps({'type': 'info', 'message': '正在获取资源包信息...'}, ensure_ascii=False)}\n\n"
 
             # 设置更详细的超时配置: 连接超时10秒, 读取超时30秒
@@ -660,28 +661,35 @@ async def load_resources_stream(
                 async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True) as client:
                     response = await client.get(package_url)
                     if response.status_code != 200:
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'无法获取资源包信息 (HTTP {response.status_code})，请检查仓库链接'}, ensure_ascii=False)}\n\n"
+                        logger.error(f"获取资源包信息失败: HTTP {response.status_code}")
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'无法获取资源包信息 (HTTP {response.status_code})，请检查仓库链接或更换CDN节点'}, ensure_ascii=False)}\n\n"
                         return
 
                     package_data = response.json()
-            except httpx.TimeoutException:
-                yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或代理设置'}, ensure_ascii=False)}\n\n"
+                    logger.info("成功获取资源包信息")
+            except httpx.TimeoutException as timeout_err:
+                logger.error(f"连接超时: {timeout_err}")
+                yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
                 return
-            except httpx.ConnectError:
-                yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或代理设置'}, ensure_ascii=False)}\n\n"
+            except httpx.ConnectError as conn_err:
+                logger.error(f"连接失败: {conn_err}")
+                yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
                 return
             except Exception as e:
+                logger.error(f"获取资源包信息异常: {e}", exc_info=True)
                 yield f"data: {json.dumps({'type': 'error', 'message': f'获取资源包信息失败: {str(e)}'}, ensure_ascii=False)}\n\n"
                 return
 
             # 获取资源列表 (支持 resources 字段)
             resources = package_data.get('resources', {})
             if not resources:
+                logger.error("资源包中未找到弹幕源文件")
                 yield f"data: {json.dumps({'type': 'error', 'message': '资源包中未找到弹幕源文件'}, ensure_ascii=False)}\n\n"
                 return
 
             # 计算总数
             total_count = len(resources)
+            logger.info(f"发现 {total_count} 个弹幕源待下载")
             yield f"data: {json.dumps({'type': 'total', 'total': total_count}, ensure_ascii=False)}\n\n"
 
             # 保存 package.json 到本地 - 使用异步IO
@@ -691,7 +699,14 @@ async def load_resources_stream(
 
             # 先备份当前文件
             yield f"data: {json.dumps({'type': 'info', 'message': '正在备份当前弹幕源...'}, ensure_ascii=False)}\n\n"
-            await backup_scrapers(current_user)
+            try:
+                await backup_scrapers(current_user)
+                logger.info("备份当前弹幕源成功")
+                yield f"data: {json.dumps({'type': 'info', 'message': '备份完成,开始下载...'}, ensure_ascii=False)}\n\n"
+            except Exception as backup_error:
+                logger.error(f"备份失败: {backup_error}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'备份失败: {str(backup_error)}'}, ensure_ascii=False)}\n\n"
+                return
 
             # 下载并替换文件
             scrapers_dir = _get_scrapers_dir()
@@ -732,12 +747,17 @@ async def load_resources_stream(
 
                             # 下载文件 - 添加重试机制
                             file_url = f"{base_url}/{file_path}"
-                            max_retries = 2
+                            max_retries = 3  # 最多重试3次
                             retry_count = 0
                             download_success = False
 
+                            logger.info(f"开始下载 {scraper_name} ({filename}) [{index}/{total_count}]")
+
                             while retry_count <= max_retries and not download_success:
                                 try:
+                                    if retry_count > 0:
+                                        logger.info(f"[重试 {retry_count}/{max_retries}] 下载 {scraper_name}")
+
                                     response = await client.get(file_url, timeout=httpx.Timeout(10.0, read=30.0))
                                     if response.status_code == 200:
                                         # 保存文件 (保持原文件名) - 使用异步IO避免阻塞
@@ -749,6 +769,7 @@ async def load_resources_stream(
                                         version = scraper_info.get('version', 'unknown')
                                         versions_data[scraper_name] = version
 
+                                        logger.info(f"成功下载: {filename} (版本: {version})")
                                         last_heartbeat = asyncio.get_event_loop().time()
                                         yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
                                         download_success = True
@@ -758,20 +779,23 @@ async def load_resources_stream(
                                     else:
                                         if retry_count < max_retries:
                                             retry_count += 1
-                                            logger.warning(f"下载 {scraper_name} 失败 (HTTP {response.status_code}), 重试 {retry_count}/{max_retries}")
+                                            logger.warning(f"[失败] 下载 {scraper_name} HTTP {response.status_code}, 将进行第 {retry_count} 次重试...")
                                             await asyncio.sleep(1)
                                         else:
                                             failed_downloads.append(scraper_name)
-                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'status': response.status_code}, ensure_ascii=False)}\n\n"
+                                            logger.error(f"[最终失败] 下载 {scraper_name} 经过 {max_retries} 次重试后仍然失败: HTTP {response.status_code}")
+                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'status': response.status_code, 'message': f'HTTP {response.status_code} (重试{max_retries}次后失败)'}, ensure_ascii=False)}\n\n"
                                             break
                                 except (httpx.TimeoutException, httpx.ConnectError) as net_error:
+                                    error_type = "超时" if isinstance(net_error, httpx.TimeoutException) else "连接失败"
                                     if retry_count < max_retries:
                                         retry_count += 1
-                                        logger.warning(f"下载 {scraper_name} 网络错误, 重试 {retry_count}/{max_retries}: {net_error}")
+                                        logger.warning(f"[失败] 下载 {scraper_name} {error_type}: {net_error}, 将进行第 {retry_count} 次重试...")
                                         await asyncio.sleep(1)
                                     else:
                                         failed_downloads.append(scraper_name)
-                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '网络超时或连接失败'}, ensure_ascii=False)}\n\n"
+                                        logger.error(f"[最终失败] 下载 {scraper_name} 经过 {max_retries} 次重试后仍然失败: {error_type}")
+                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'{error_type} (重试{max_retries}次后失败)'}, ensure_ascii=False)}\n\n"
                                         break
 
                         except Exception as e:
@@ -791,21 +815,37 @@ async def load_resources_stream(
                 try:
                     versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
                     await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
+                    logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息")
                 except Exception as e:
                     logger.warning(f"保存版本信息失败: {e}")
 
+            # 检查下载结果
+            if download_count == 0:
+                logger.error("没有成功下载任何弹幕源,取消重载")
+                yield f"data: {json.dumps({'type': 'error', 'message': '没有成功下载任何弹幕源,已取消重载。请检查网络连接或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                # 尝试还原备份
+                try:
+                    await restore_scrapers(current_user, manager)
+                    logger.info("已还原备份")
+                except Exception as restore_error:
+                    logger.error(f"还原备份失败: {restore_error}", exc_info=True)
+                return
+
             # 推送完成信息
+            logger.info(f"下载完成: 成功 {download_count} 个, 失败 {len(failed_downloads)} 个")
             yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
 
             # 创建后台任务重新加载 scrapers
             async def reload_scrapers_background():
                 await asyncio.sleep(0.5)
                 try:
+                    logger.info("开始重载弹幕源...")
                     await manager.load_and_sync_scrapers()
                     logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
                 except Exception as e:
                     logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
                     try:
+                        logger.info("尝试还原备份...")
                         await restore_scrapers(current_user, manager)
                         logger.info("已还原备份")
                     except Exception as restore_error:

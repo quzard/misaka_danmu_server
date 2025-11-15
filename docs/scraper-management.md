@@ -7,10 +7,23 @@
 ### 配置资源仓库
 
 1. 在 Web UI 的 "搜索源" 页面,找到 "资源仓库" 卡片
-2. 在输入框中填入 GitHub 仓库链接
+2. 在输入框中填入 GitHub 仓库链接或 CDN 加速链接
+
+   **官方仓库:**
    ```
    https://github.com/l429609201/Misaka-Scraper-Resources
    ```
+
+   **CDN 加速链接 (推荐,国内访问更快):**
+   ```
+   https://cdn.jsdelivr.net/gh/l429609201/Misaka-Scraper-Resources
+   https://hk.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   https://gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   https://cdn.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   https://edgeone.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   https://ghproxy.com/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+
 3. 点击 "保存" 按钮保存配置
 
 ### 加载弹幕源
@@ -117,7 +130,8 @@
 - **平台兼容性**: 确保离线包的平台和架构与您的系统匹配
 - **备份重要性**: 在更新弹幕源前,系统会自动备份,但建议定期手动备份
 - **版本管理**: 建议使用资源仓库方式,可以方便地查看和更新版本
-- **网络要求**: 从资源仓库加载需要能够访问 GitHub
+- **网络要求**: 从资源仓库加载需要能够访问 GitHub,国内用户建议使用 CDN 加速链接
+- **CDN 选择**: 如果某个 CDN 访问较慢,可以尝试切换到其他 CDN 链接
 
 ## 6. 故障排除
 
@@ -130,7 +144,8 @@
 ### 加载资源失败
 
 - 检查资源仓库链接是否正确
-- 确认网络可以访问 GitHub
+- 确认网络可以访问 GitHub,国内用户建议使用 CDN 加速链接
+- 如果使用 CDN 链接仍然失败,尝试切换到其他 CDN 节点
 - 查看系统日志获取详细错误信息
 
 ### 重载失败
