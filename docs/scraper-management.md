@@ -19,6 +19,7 @@
    https://cdn.jsdelivr.net/gh/l429609201/Misaka-Scraper-Resources
    https://hk.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
    https://gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   https://proxy.pipers.cn/https://github.com/l429609201/Misaka-Scraper-Resources
    https://cdn.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
    https://edgeone.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
    https://ghproxy.com/https://github.com/l429609201/Misaka-Scraper-Resources
