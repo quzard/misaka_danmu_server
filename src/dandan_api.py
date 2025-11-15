@@ -1717,6 +1717,16 @@ async def _get_match_for_item(
             except re.error as e:
                 logger.warning(f"黑名单正则表达式 '{blacklist_pattern}' 格式错误: {e}，忽略黑名单检查")
 
+        # 方案C: 防重复机制 - 检查5分钟内是否已完成过相同的后备任务
+        recent_fallback_key = f"recent_fallback_{parsed_info['title']}_{parsed_info.get('season')}_{parsed_info.get('episode')}"
+        if recent_fallback_key in fallback_search_cache:
+            cached_time = fallback_search_cache[recent_fallback_key].get("timestamp", 0)
+            if time.time() - cached_time < 300:  # 5分钟内
+                logger.info(f"检测到5分钟内已完成的后备任务，直接返回缓存结果")
+                cached_response = fallback_search_cache[recent_fallback_key].get("response")
+                if cached_response:
+                    return cached_response
+
         logger.info(f"匹配失败，已启用后备机制，正在为 '{item.fileName}' 创建自动搜索任务。")
 
         # 将匹配后备逻辑包装成协程工厂
@@ -2104,6 +2114,60 @@ async def _get_match_for_item(
 
                 logger.info(f"匹配后备完成: virtual_anime_id={virtual_anime_id}, real_anime_id={real_anime_id}, episodeId={real_episode_id}")
 
+                # 方案A: 写入数据库 - 创建anime和episode记录
+                try:
+                    logger.info("开始将后备匹配结果写入数据库...")
+
+                    # 检查anime是否已存在
+                    stmt = select(orm_models.Anime).where(orm_models.Anime.id == real_anime_id)
+                    result = await session_inner.execute(stmt)
+                    existing_anime = result.scalar_one_or_none()
+
+                    if not existing_anime:
+                        # 创建anime条目
+                        logger.info(f"创建anime条目: id={real_anime_id}, title='{final_title}'")
+                        new_anime = orm_models.Anime(
+                            id=real_anime_id,
+                            title=final_title,
+                            type=best_match.type,
+                            season=final_season,
+                            imageUrl=best_match.imageUrl,
+                            year=best_match.year,
+                            createdAt=get_now()
+                        )
+                        session_inner.add(new_anime)
+                        await session_inner.flush()
+                        # 同步PostgreSQL序列
+                        await sync_postgres_sequence(session_inner)
+                    else:
+                        logger.info(f"anime条目已存在: id={real_anime_id}, title='{existing_anime.title}'")
+
+                    # 创建或获取source关联
+                    source_id = await crud.link_source_to_anime(session_inner, real_anime_id, best_match.provider, best_match.mediaId)
+                    logger.info(f"source_id={source_id}, provider={best_match.provider}, mediaId={best_match.mediaId}")
+
+                    # 创建episode记录
+                    episode_title = f"第{final_episode_number}集" if not is_movie else final_title
+                    episode_db_id = await crud.create_episode_if_not_exists(
+                        session_inner,
+                        real_anime_id,
+                        source_id,
+                        final_episode_number,
+                        episode_title,
+                        None,  # url
+                        f"fallback_{best_match.provider}_{best_match.mediaId}_{final_episode_number}"  # provider_episode_id
+                    )
+                    logger.info(f"episode记录已创建/获取: episode_db_id={episode_db_id}")
+
+                    # 提交数据库更改
+                    await session_inner.commit()
+                    logger.info("后备匹配结果已成功写入数据库")
+
+                except Exception as db_error:
+                    logger.error(f"写入数据库失败: {db_error}", exc_info=True)
+                    await session_inner.rollback()
+                    # 即使数据库写入失败,也继续返回结果(依赖缓存)
+
                 # 返回真实的匹配结果
                 match_result = DandanMatchInfo(
                     episodeId=real_episode_id,
@@ -2116,6 +2180,14 @@ async def _get_match_for_item(
                 )
                 response = DandanMatchResponse(isMatched=True, matches=[match_result])
                 logger.info(f"发送匹配响应 (匹配后备): episodeId={real_episode_id}, animeId={virtual_anime_id}")
+
+                # 存储到防重复缓存
+                recent_fallback_key = f"recent_fallback_{parsed_info['title']}_{parsed_info.get('season')}_{parsed_info.get('episode')}"
+                fallback_search_cache[recent_fallback_key] = {
+                    "response": response,
+                    "timestamp": time.time()
+                }
+
                 match_fallback_result["response"] = response
             except Exception as e:
                 logger.error(f"匹配后备失败: {e}", exc_info=True)
