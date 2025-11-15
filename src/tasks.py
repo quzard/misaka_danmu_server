@@ -2668,8 +2668,11 @@ async def webhook_search_and_dispatch_task(
             logger.info(f"Webhook 任务: 使用精确标记源: {best_match.provider} - {best_match.title}")
         elif not fallback_enabled:
             # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
-            best_match = all_search_results[0]
-            logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+            if all_search_results:
+                best_match = all_search_results[0]
+                logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+            else:
+                logger.warning(f"Webhook 任务: 顺延机制已关闭，但搜索结果为空，无法选择结果")
 
         if best_match is not None:
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
