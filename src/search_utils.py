@@ -28,7 +28,9 @@ async def unified_search(
     strict_filtering: bool = False,
     custom_aliases: Optional[set] = None,
     max_results_per_source: Optional[int] = None,
-    progress_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None,
+    episode_info: Optional[dict] = None,
+    alias_similarity_threshold: int = 75
 ) -> List[Any]:
     """
     统一的搜索函数，用于后备搜索和匹配后备
@@ -89,7 +91,7 @@ async def unified_search(
                     # 验证缓存的别名相似度（使用核心标题进行比较）
                     for alias in cached_alias_list:
                         similarity = fuzz.token_set_ratio(core_title, alias)
-                        if similarity >= 75:
+                        if similarity >= alias_similarity_threshold:
                             filter_aliases.add(alias)
                 else:
                     filter_aliases.update(cached_alias_list)
@@ -131,7 +133,7 @@ async def unified_search(
 
     # 创建搜索任务
     async def perform_search():
-        return await scraper_manager.search_all([search_term], max_results_per_source=max_results_per_source)
+        return await scraper_manager.search_all([search_term], episode_info=episode_info, max_results_per_source=max_results_per_source)
 
     search_task = asyncio.create_task(perform_search())
 
@@ -139,13 +141,15 @@ async def unified_search(
     if alias_task:
         all_possible_aliases, all_results = await asyncio.gather(alias_task, search_task)
 
-        # 验证别名相似度
+        # 验证别名相似度（使用核心标题进行比较，与获取别名时保持一致）
         if use_alias_filtering:
             validated_aliases = set()
             for alias in all_possible_aliases:
-                similarity = fuzz.token_set_ratio(search_term, alias)
-                if similarity >= 75:  # 相似度阈值
+                similarity = fuzz.token_set_ratio(core_title, alias)
+                if similarity >= alias_similarity_threshold:  # 相似度阈值
                     validated_aliases.add(alias)
+                else:
+                    logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{core_title}' 相比，相似度={similarity})")
             filter_aliases.update(validated_aliases)
         else:
             filter_aliases.update(all_possible_aliases)

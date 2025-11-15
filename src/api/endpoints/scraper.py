@@ -54,11 +54,14 @@ async def get_scraper_settings(
             configurable_fields[blacklist_key] = ("分集标题黑名单 (正则)", "string", "使用正则表达式过滤不想要的分集标题。")
             full_setting_data['configurableFields'] = configurable_fields
             full_setting_data['actions'] = getattr(scraper_class, 'actions', [])
+            # 从 ScraperManager 获取版本号
+            full_setting_data['version'] = manager.get_scraper_version(provider_name)
         else:
             # Provide defaults if scraper_class is not found to prevent validation errors
             full_setting_data['isLoggable'] = False
             full_setting_data['configurableFields'] = {}
             full_setting_data['actions'] = []
+            full_setting_data['version'] = None
 
         full_setting_data['verificationEnabled'] = verification_enabled
 

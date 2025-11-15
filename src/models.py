@@ -403,6 +403,7 @@ class MetadataSourceStatusResponse(BaseModel):
 class ScraperSettingWithConfig(ScraperSetting):
     configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str]]]] = None
     isLoggable: bool
+    version: Optional[str] = None  # 弹幕源版本号
 
 class ProxySettingsResponse(BaseModel):
     proxyProtocol: str
@@ -589,8 +590,8 @@ class ControlRateLimitFallbackStatus(BaseModel):
     """后备流控状态"""
     totalCount: int = Field(0, description="后备调用总计数")
     totalLimit: int = Field(50, description="后备调用总限制")
-    matchCount: int = Field(0, description="后备匹配计数")
-    searchCount: int = Field(0, description="后备搜索计数")
+    matchFallbackCount: int = Field(0, description="匹配后备计数")
+    searchFallbackCount: int = Field(0, description="后备搜索计数")
 
 class ControlRateLimitStatusResponse(BaseModel):
     """用于外部API的流控状态响应模型"""

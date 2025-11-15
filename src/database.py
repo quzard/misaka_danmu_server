@@ -124,8 +124,8 @@ async def create_db_engine_and_session(app: FastAPI):
         engine_args = {
             "echo": False,
             "pool_recycle": 3600,
-            "pool_size": 10,
-            "max_overflow": 20,
+            "pool_size": 20,
+            "max_overflow": 40,
             "pool_timeout": 30
         }
 

@@ -353,8 +353,23 @@ async def log_not_found_requests(request: Request, call_next):
     """
     response = await call_next(request)
     if response.status_code == 404:
-        # 如果是 API 路径未找到，返回 403
+        # 如果是 API 路径未找到，返回 403，同时记录原始响应内容
         if request.url.path.startswith("/api/"):
+            original_body_text = None
+            try:
+                body_bytes = getattr(response, "body", b"")
+                if isinstance(body_bytes, (bytes, bytearray)) and body_bytes:
+                    try:
+                        original_json = json.loads(body_bytes)
+                        original_body_text = json.dumps(original_json, ensure_ascii=False)
+                    except Exception:
+                        original_body_text = body_bytes.decode("utf-8", "ignore")
+            except Exception as e:
+                logger.debug(f"读取原始404响应body失败: {e}")
+
+            if original_body_text:
+                logger.warning("API路径未找到原始响应内容: %s", original_body_text)
+
             logger.warning(
                 f"API路径未找到 (返回403): {request.method} {request.url.path} from {request.client.host}"
             )

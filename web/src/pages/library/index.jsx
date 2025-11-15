@@ -613,9 +613,8 @@ export const Library = () => {
 
   const [searchInputValue, setSearchInputValue] = useState('')
 
-  const handleSearch = (value) => {
-    setKeyword(value)
-    setSearchInputValue(value)
+  const handleSearch = () => {
+    setKeyword(searchInputValue)
   }
 
   const handleReset = () => {
@@ -677,18 +676,43 @@ export const Library = () => {
       >
         {isMobile && (
           <div className="mb-4">
-            <div className="flex gap-2 mb-3">
-              <Input.Search
-                placeholder="请输入影视名称"
-                value={searchInputValue}
-                onChange={(e) => setSearchInputValue(e.target.value)}
-                onSearch={handleSearch}
-                enterButton="搜索"
-                allowClear
-                className="flex-1"
-              />
+            <div className="flex gap-2 mb-3 items-center">
+              <div className="flex-1 flex items-center">
+                <Input
+                  placeholder="请输入影视名称"
+                  value={searchInputValue}
+                  onChange={(e) => setSearchInputValue(e.target.value)}
+                  onPressEnter={handleSearch}
+                  allowClear
+                  style={{
+                    height: 44,
+                    lineHeight: '44px',
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                    borderTopRightRadius: 0,
+                    borderBottomRightRadius: 0,
+                    fontSize: 14
+                  }}
+                  className="flex-1"
+                />
+                <Button
+                  type="primary"
+                  onClick={handleSearch}
+                  style={{
+                    height: 44,
+                    lineHeight: '44px',
+                    borderTopLeftRadius: 0,
+                    borderTopRightRadius: 9,
+                    borderBottomLeftRadius: 0,
+                    borderBottomRightRadius: 9,
+                    fontSize: 14
+                  }}
+                >
+                  搜索
+                </Button>
+              </div>
               {keyword && (
-                <Button onClick={handleReset}>
+                <Button onClick={handleReset} style={{ height: 44 }}>
                   重置
                 </Button>
               )}
