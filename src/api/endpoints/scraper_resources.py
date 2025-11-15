@@ -720,6 +720,9 @@ async def load_resources_stream(
             try:
                 async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True) as client:
                     for index, (scraper_name, scraper_info) in enumerate(resources.items(), 1):
+                        # 让出CPU给其他任务
+                        await asyncio.sleep(0)
+
                         # 发送心跳(如果需要)
                         heartbeat = await send_heartbeat_if_needed()
                         if heartbeat:
@@ -754,16 +757,32 @@ async def load_resources_stream(
                             logger.info(f"开始下载 {scraper_name} ({filename}) [{index}/{total_count}]")
 
                             while retry_count <= max_retries and not download_success:
+                                # 每次循环开始前短暂休眠,避免CPU占满
+                                if retry_count > 0:
+                                    await asyncio.sleep(2.0)  # 重试前等待2秒,降低CPU占用
+                                else:
+                                    await asyncio.sleep(0.2)  # 首次尝试前短暂休眠
+
                                 try:
                                     if retry_count > 0:
                                         logger.info(f"[重试 {retry_count}/{max_retries}] 下载 {scraper_name}")
 
+                                    # 让出CPU给其他任务
+                                    await asyncio.sleep(0)
+
                                     response = await client.get(file_url, timeout=httpx.Timeout(10.0, read=30.0))
+
+                                    # 让出CPU
+                                    await asyncio.sleep(0)
+
                                     if response.status_code == 200:
                                         # 保存文件 (保持原文件名) - 使用异步IO避免阻塞
                                         target_path = scrapers_dir / filename
                                         await asyncio.to_thread(target_path.write_bytes, response.content)
                                         download_count += 1
+
+                                        # 让出CPU
+                                        await asyncio.sleep(0)
 
                                         # 保存版本信息
                                         version = scraper_info.get('version', 'unknown')
@@ -774,13 +793,13 @@ async def load_resources_stream(
                                         yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
                                         download_success = True
 
-                                        # 短暂休眠,让出CPU
-                                        await asyncio.sleep(0.05)
+                                        # 下载成功后休眠,降低CPU占用
+                                        await asyncio.sleep(0.15)
                                     else:
                                         if retry_count < max_retries:
                                             retry_count += 1
                                             logger.warning(f"[失败] 下载 {scraper_name} HTTP {response.status_code}, 将进行第 {retry_count} 次重试...")
-                                            await asyncio.sleep(1)
+                                            # 休眠已移到循环开始处
                                         else:
                                             failed_downloads.append(scraper_name)
                                             logger.error(f"[最终失败] 下载 {scraper_name} 经过 {max_retries} 次重试后仍然失败: HTTP {response.status_code}")
@@ -791,7 +810,7 @@ async def load_resources_stream(
                                     if retry_count < max_retries:
                                         retry_count += 1
                                         logger.warning(f"[失败] 下载 {scraper_name} {error_type}: {net_error}, 将进行第 {retry_count} 次重试...")
-                                        await asyncio.sleep(1)
+                                        # 休眠已移到循环开始处
                                     else:
                                         failed_downloads.append(scraper_name)
                                         logger.error(f"[最终失败] 下载 {scraper_name} 经过 {max_retries} 次重试后仍然失败: {error_type}")
@@ -803,8 +822,8 @@ async def load_resources_stream(
                             logger.error(f"下载 {scraper_name} 失败: {e}")
                             yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
 
-                        # 每下载一个文件后短暂休眠,避免CPU占满
-                        await asyncio.sleep(0.1)
+                        # 每处理完一个源后休眠,降低CPU占用
+                        await asyncio.sleep(0.3)
             except Exception as client_error:
                 logger.error(f"HTTP客户端错误: {client_error}")
                 yield f"data: {json.dumps({'type': 'error', 'message': f'下载客户端错误: {str(client_error)}'}, ensure_ascii=False)}\n\n"
