@@ -148,13 +148,23 @@ def parse_github_url(url: str) -> Dict[str, str]:
             'proxy_type': 'jsdelivr'
         }
 
-    # 检查是否是通用代理格式: https://任意域名/https://github.com/...
+    # 检查是否是通用代理格式: https://任意域名/https://github.com/... 或 https://任意域名/github.com/...
     generic_proxy_match = re.match(r'^(https?://[^/]+)/https?://(github\.com|raw\.githubusercontent\.com)/([^/]+)/([^/]+)', url)
     if generic_proxy_match:
         return {
             'owner': generic_proxy_match.group(3),
             'repo': generic_proxy_match.group(4).replace('.git', '').split('/')[0],  # 去掉可能的路径部分
             'proxy': generic_proxy_match.group(1),
+            'proxy_type': 'generic_proxy'
+        }
+
+    # 检查是否是简化的代理格式: https://任意域名/github.com/... (不带 https://)
+    simple_proxy_match = re.match(r'^(https?://[^/]+)/(github\.com|raw\.githubusercontent\.com)/([^/]+)/([^/]+)', url)
+    if simple_proxy_match:
+        return {
+            'owner': simple_proxy_match.group(3),
+            'repo': simple_proxy_match.group(4).replace('.git', '').split('/')[0],  # 去掉可能的路径部分
+            'proxy': simple_proxy_match.group(1),
             'proxy_type': 'generic_proxy'
         }
 
