@@ -15,6 +15,7 @@ import {
   Tooltip,
   Upload,
   Typography,
+  Progress,
 } from 'antd'
 import { useEffect, useState, useRef } from 'react'
 import Cookies from 'js-cookie'
@@ -193,6 +194,17 @@ export const Scrapers = () => {
   const [uploadingPackage, setUploadingPackage] = useState(false)
   const [sseConnected, setSseConnected] = useState(false)
 
+  // 下载进度相关
+  const [downloadProgress, setDownloadProgress] = useState({
+    visible: false,
+    current: 0,
+    total: 0,
+    progress: 0,
+    message: '',
+    scraper: ''
+  })
+  const downloadAbortController = useRef(null)
+
 
   const modalApi = useModal()
   const messageApi = useMessage()
@@ -322,19 +334,162 @@ export const Scrapers = () => {
       // 保存配置
       await saveResourceRepo({ repoUrl: resourceRepoUrl })
 
-      // 加载资源
-      await loadScraperResources({ repoUrl: resourceRepoUrl })
+      // 重置进度状态
+      setDownloadProgress({
+        visible: true,
+        current: 0,
+        total: 0,
+        progress: 0,
+        message: '正在连接资源仓库...',
+        scraper: ''
+      })
 
-      messageApi.success('资源加载成功,服务正在重启...')
+      // 使用 SSE 加载资源
+      const token = Cookies.get('danmu_token')
+      if (!token) {
+        messageApi.error('未找到认证令牌')
+        return
+      }
 
-      // 延迟刷新页面
-      setTimeout(() => {
-        getInfo()
-        loadVersionInfo()
-      }, 2500)
+      // 取消之前的下载
+      if (downloadAbortController.current) {
+        downloadAbortController.current.abort()
+      }
+
+      const abortController = new AbortController()
+      downloadAbortController.current = abortController
+
+      await fetchEventSource('/api/ui/scrapers/load-resources-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ repoUrl: resourceRepoUrl }),
+        signal: abortController.signal,
+        onopen: async response => {
+          if (response.ok) {
+            console.log('SSE 下载流已连接')
+          } else {
+            throw new Error(`连接失败: ${response.status}`)
+          }
+        },
+        onmessage: event => {
+          try {
+            const data = JSON.parse(event.data)
+
+            switch (data.type) {
+              case 'info':
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  message: data.message
+                }))
+                break
+
+              case 'total':
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  total: data.total,
+                  message: `准备下载 ${data.total} 个弹幕源...`
+                }))
+                break
+
+              case 'progress':
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  current: data.current,
+                  progress: data.progress,
+                  scraper: data.scraper,
+                  message: `正在下载 ${data.filename} (${data.current}/${data.total})`
+                }))
+                break
+
+              case 'success':
+                console.log(`成功下载: ${data.scraper}`)
+                break
+
+              case 'skip':
+                console.log(`跳过: ${data.scraper}`)
+                break
+
+              case 'failed':
+                console.warn(`下载失败: ${data.scraper}`)
+                break
+
+              case 'complete':
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 100,
+                  message: `下载完成! 成功: ${data.downloaded}, 失败: ${data.failed}`
+                }))
+
+                messageApi.success('资源加载成功,服务正在重启...')
+
+                // 延迟刷新页面
+                setTimeout(() => {
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: ''
+                  })
+                  getInfo()
+                  loadVersionInfo()
+                  setLoadingResources(false)
+                }, 2500)
+                break
+
+              case 'error':
+                messageApi.error(data.message || '加载失败')
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: ''
+                })
+                setLoadingResources(false)
+                break
+            }
+          } catch (e) {
+            console.error('解析 SSE 消息失败:', e)
+          }
+        },
+        onerror: error => {
+          console.error('SSE 下载流错误:', error)
+          if (error.name !== 'AbortError') {
+            messageApi.error('下载连接出错')
+            setDownloadProgress({
+              visible: false,
+              current: 0,
+              total: 0,
+              progress: 0,
+              message: '',
+              scraper: ''
+            })
+            setLoadingResources(false)
+          }
+          throw error
+        },
+      }).catch(error => {
+        if (error.name !== 'AbortError') {
+          console.error('SSE 流错误:', error)
+        }
+      })
+
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '加载失败')
-    } finally {
+      setDownloadProgress({
+        visible: false,
+        current: 0,
+        total: 0,
+        progress: 0,
+        message: '',
+        scraper: ''
+      })
       setLoadingResources(false)
     }
   }
@@ -795,6 +950,23 @@ export const Scrapers = () => {
               )}
             </div>
           </div>
+
+          {/* 下载进度条 */}
+          {downloadProgress.visible && (
+            <div className="mt-4">
+              <div className="mb-2 text-sm text-gray-600">
+                {downloadProgress.message}
+              </div>
+              <Progress
+                percent={downloadProgress.progress}
+                status={downloadProgress.progress === 100 ? 'success' : 'active'}
+                strokeColor={{
+                  '0%': '#108ee9',
+                  '100%': '#87d068',
+                }}
+              />
+            </div>
+          )}
 
           {/* 版本信息 + 操作按钮（合并为一行） */}
           {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion || versionInfo.officialVersion) && (
