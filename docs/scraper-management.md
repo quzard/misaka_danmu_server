@@ -17,12 +17,27 @@
    **CDN 加速链接 (推荐,国内访问更快):**
    ```
    https://cdn.jsdelivr.net/gh/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://hk.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://proxy.pipers.cn/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://cdn.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://edgeone.gh-proxy.org/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
    https://ghproxy.com/https://github.com/l429609201/Misaka-Scraper-Resources
+   ```
+   ```
+   https://dl.122896.xyz/https://github.com/l429609201/Misaka-Scraper-Resources
    ```
 
 3. 点击 "保存" 按钮保存配置
