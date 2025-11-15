@@ -163,7 +163,7 @@ async def unified_search(
     
     # 3. 使用标题过滤（如果启用）
     filtered_results = all_results
-    if use_title_filtering and len(filter_aliases) > 1:  # 只有当有别名时才过滤
+    if use_title_filtering:  # 移除别名数量限制,即使只有原始搜索词也要过滤
         await progress_callback(60, "过滤搜索结果...")
 
         def normalize_for_filtering(title: str) -> str:
