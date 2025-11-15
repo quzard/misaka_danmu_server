@@ -589,6 +589,17 @@ async def load_resources_stream(
 
     async def event_generator():
         """SSE事件生成器"""
+        last_heartbeat = asyncio.get_event_loop().time()
+
+        async def send_heartbeat_if_needed():
+            """如果距离上次发送超过5秒,发送心跳"""
+            nonlocal last_heartbeat
+            current_time = asyncio.get_event_loop().time()
+            if current_time - last_heartbeat > 5:
+                last_heartbeat = current_time
+                return ": heartbeat\n\n"
+            return None
+
         try:
             # 获取仓库链接
             repo_url = payload.get("repoUrl")
@@ -601,6 +612,7 @@ async def load_resources_stream(
 
             # 获取平台信息
             platform_key = get_platform_key()
+            last_heartbeat = asyncio.get_event_loop().time()
             yield f"data: {json.dumps({'type': 'info', 'message': f'当前平台: {platform_key}'}, ensure_ascii=False)}\n\n"
 
             # 根据仓库地址确定基础下载 URL
@@ -641,13 +653,26 @@ async def load_resources_stream(
             package_url = f"{base_url}/package.json"
             yield f"data: {json.dumps({'type': 'info', 'message': '正在获取资源包信息...'}, ensure_ascii=False)}\n\n"
 
-            async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
-                response = await client.get(package_url)
-                if response.status_code != 200:
-                    yield f"data: {json.dumps({'type': 'error', 'message': '无法获取资源包信息，请检查仓库链接'}, ensure_ascii=False)}\n\n"
-                    return
+            # 设置更详细的超时配置: 连接超时10秒, 读取超时30秒
+            timeout_config = httpx.Timeout(10.0, read=30.0)
 
-                package_data = response.json()
+            try:
+                async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True) as client:
+                    response = await client.get(package_url)
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'无法获取资源包信息 (HTTP {response.status_code})，请检查仓库链接'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    package_data = response.json()
+            except httpx.TimeoutException:
+                yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或代理设置'}, ensure_ascii=False)}\n\n"
+                return
+            except httpx.ConnectError:
+                yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或代理设置'}, ensure_ascii=False)}\n\n"
+                return
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'获取资源包信息失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                return
 
             # 获取资源列表 (支持 resources 字段)
             resources = package_data.get('resources', {})
@@ -659,9 +684,10 @@ async def load_resources_stream(
             total_count = len(resources)
             yield f"data: {json.dumps({'type': 'total', 'total': total_count}, ensure_ascii=False)}\n\n"
 
-            # 保存 package.json 到本地
+            # 保存 package.json 到本地 - 使用异步IO
             local_package_file = _get_scrapers_dir() / "package.json"
-            local_package_file.write_text(json.dumps(package_data, indent=2, ensure_ascii=False))
+            package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
+            await asyncio.to_thread(local_package_file.write_text, package_json_str)
 
             # 先备份当前文件
             yield f"data: {json.dumps({'type': 'info', 'message': '正在备份当前弹幕源...'}, ensure_ascii=False)}\n\n"
@@ -673,53 +699,98 @@ async def load_resources_stream(
             failed_downloads = []
             versions_data = {}  # 用于保存版本信息
 
-            async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
-                for index, (scraper_name, scraper_info) in enumerate(resources.items(), 1):
-                    try:
-                        # 获取当前平台的文件路径
-                        files = scraper_info.get('files', {})
-                        file_path = files.get(platform_key)
+            # 为下载设置更长的超时: 连接10秒, 读取60秒
+            download_timeout = httpx.Timeout(10.0, read=60.0)
 
-                        if not file_path:
-                            logger.warning(f"弹幕源 {scraper_name} 不支持当前平台 {platform_key}")
+            try:
+                async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True) as client:
+                    for index, (scraper_name, scraper_info) in enumerate(resources.items(), 1):
+                        # 发送心跳(如果需要)
+                        heartbeat = await send_heartbeat_if_needed()
+                        if heartbeat:
+                            yield heartbeat
+
+                        try:
+                            # 获取当前平台的文件路径
+                            files = scraper_info.get('files', {})
+                            file_path = files.get(platform_key)
+
+                            if not file_path:
+                                logger.warning(f"弹幕源 {scraper_name} 不支持当前平台 {platform_key}")
+                                failed_downloads.append(scraper_name)
+                                last_heartbeat = asyncio.get_event_loop().time()
+                                yield f"data: {json.dumps({'type': 'skip', 'scraper': scraper_name, 'current': index, 'total': total_count}, ensure_ascii=False)}\n\n"
+                                continue
+
+                            # 从路径中提取文件名
+                            filename = Path(file_path).name
+
+                            # 推送下载进度
+                            progress = int((index / total_count) * 100)
+                            last_heartbeat = asyncio.get_event_loop().time()
+                            yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count, 'progress': progress}, ensure_ascii=False)}\n\n"
+
+                            # 下载文件 - 添加重试机制
+                            file_url = f"{base_url}/{file_path}"
+                            max_retries = 2
+                            retry_count = 0
+                            download_success = False
+
+                            while retry_count <= max_retries and not download_success:
+                                try:
+                                    response = await client.get(file_url, timeout=httpx.Timeout(10.0, read=30.0))
+                                    if response.status_code == 200:
+                                        # 保存文件 (保持原文件名) - 使用异步IO避免阻塞
+                                        target_path = scrapers_dir / filename
+                                        await asyncio.to_thread(target_path.write_bytes, response.content)
+                                        download_count += 1
+
+                                        # 保存版本信息
+                                        version = scraper_info.get('version', 'unknown')
+                                        versions_data[scraper_name] = version
+
+                                        last_heartbeat = asyncio.get_event_loop().time()
+                                        yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
+                                        download_success = True
+
+                                        # 短暂休眠,让出CPU
+                                        await asyncio.sleep(0.05)
+                                    else:
+                                        if retry_count < max_retries:
+                                            retry_count += 1
+                                            logger.warning(f"下载 {scraper_name} 失败 (HTTP {response.status_code}), 重试 {retry_count}/{max_retries}")
+                                            await asyncio.sleep(1)
+                                        else:
+                                            failed_downloads.append(scraper_name)
+                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'status': response.status_code}, ensure_ascii=False)}\n\n"
+                                            break
+                                except (httpx.TimeoutException, httpx.ConnectError) as net_error:
+                                    if retry_count < max_retries:
+                                        retry_count += 1
+                                        logger.warning(f"下载 {scraper_name} 网络错误, 重试 {retry_count}/{max_retries}: {net_error}")
+                                        await asyncio.sleep(1)
+                                    else:
+                                        failed_downloads.append(scraper_name)
+                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '网络超时或连接失败'}, ensure_ascii=False)}\n\n"
+                                        break
+
+                        except Exception as e:
                             failed_downloads.append(scraper_name)
-                            yield f"data: {json.dumps({'type': 'skip', 'scraper': scraper_name, 'current': index, 'total': total_count}, ensure_ascii=False)}\n\n"
-                            continue
+                            logger.error(f"下载 {scraper_name} 失败: {e}")
+                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
 
-                        # 从路径中提取文件名
-                        filename = Path(file_path).name
+                        # 每下载一个文件后短暂休眠,避免CPU占满
+                        await asyncio.sleep(0.1)
+            except Exception as client_error:
+                logger.error(f"HTTP客户端错误: {client_error}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'下载客户端错误: {str(client_error)}'}, ensure_ascii=False)}\n\n"
+                return
 
-                        # 推送下载进度
-                        progress = int((index / total_count) * 100)
-                        yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count, 'progress': progress}, ensure_ascii=False)}\n\n"
-
-                        # 下载文件
-                        file_url = f"{base_url}/{file_path}"
-                        response = await client.get(file_url)
-                        if response.status_code == 200:
-                            # 保存文件 (保持原文件名)
-                            target_path = scrapers_dir / filename
-                            target_path.write_bytes(response.content)
-                            download_count += 1
-
-                            # 保存版本信息
-                            version = scraper_info.get('version', 'unknown')
-                            versions_data[scraper_name] = version
-
-                            yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
-                        else:
-                            failed_downloads.append(scraper_name)
-                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'status': response.status_code}, ensure_ascii=False)}\n\n"
-
-                    except Exception as e:
-                        failed_downloads.append(scraper_name)
-                        logger.error(f"下载 {scraper_name} 失败: {e}")
-                        yield f"data: {json.dumps({'type': 'error', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
-
-            # 保存版本信息到本地文件
+            # 保存版本信息到本地文件 - 使用异步IO
             if versions_data:
                 try:
-                    SCRAPERS_VERSIONS_FILE.write_text(json.dumps(versions_data, indent=2, ensure_ascii=False))
+                    versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+                    await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
                 except Exception as e:
                     logger.warning(f"保存版本信息失败: {e}")
 

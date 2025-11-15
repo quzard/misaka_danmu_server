@@ -278,6 +278,11 @@ export const Scrapers = () => {
         eventSourceRef.current.abort()
         eventSourceRef.current = null
       }
+      // 同时中断下载
+      if (downloadAbortController.current) {
+        downloadAbortController.current.abort()
+        downloadAbortController.current = null
+      }
     }
   }, [])
 
@@ -359,6 +364,22 @@ export const Scrapers = () => {
       const abortController = new AbortController()
       downloadAbortController.current = abortController
 
+      // 设置全局超时保护 (5分钟)
+      const globalTimeout = setTimeout(() => {
+        console.warn('下载超时,自动中断')
+        abortController.abort()
+        messageApi.error('下载超时,请检查网络连接')
+        setDownloadProgress({
+          visible: false,
+          current: 0,
+          total: 0,
+          progress: 0,
+          message: '',
+          scraper: ''
+        })
+        setLoadingResources(false)
+      }, 5 * 60 * 1000) // 5分钟
+
       await fetchEventSource('/api/ui/scrapers/load-resources-stream', {
         method: 'POST',
         headers: {
@@ -417,6 +438,7 @@ export const Scrapers = () => {
                 break
 
               case 'complete':
+                clearTimeout(globalTimeout) // 清除超时
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
@@ -442,6 +464,7 @@ export const Scrapers = () => {
                 break
 
               case 'error':
+                clearTimeout(globalTimeout) // 清除超时
                 messageApi.error(data.message || '加载失败')
                 setDownloadProgress({
                   visible: false,
@@ -460,6 +483,7 @@ export const Scrapers = () => {
         },
         onerror: error => {
           console.error('SSE 下载流错误:', error)
+          clearTimeout(globalTimeout) // 清除超时
           if (error.name !== 'AbortError') {
             messageApi.error('下载连接出错')
             setDownloadProgress({
@@ -475,6 +499,7 @@ export const Scrapers = () => {
           throw error
         },
       }).catch(error => {
+        clearTimeout(globalTimeout) // 清除超时
         if (error.name !== 'AbortError') {
           console.error('SSE 流错误:', error)
         }
