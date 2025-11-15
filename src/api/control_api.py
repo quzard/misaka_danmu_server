@@ -1518,16 +1518,16 @@ async def get_rate_limit_status(
     # 获取后备流控状态
     fallback_match_state = states_map.get("__fallback_match__")
     fallback_search_state = states_map.get("__fallback_search__")
-    match_count = fallback_match_state.requestCount if fallback_match_state else 0
-    search_count = fallback_search_state.requestCount if fallback_search_state else 0
-    fallback_total = match_count + search_count
+    match_fallback_count = fallback_match_state.requestCount if fallback_match_state else 0
+    search_fallback_count = fallback_search_state.requestCount if fallback_search_state else 0
+    fallback_total = match_fallback_count + search_fallback_count
     fallback_limit = 50  # 固定50次
 
     fallback_status = models.ControlRateLimitFallbackStatus(
         totalCount=fallback_total,
         totalLimit=fallback_limit,
-        matchCount=match_count,
-        searchCount=search_count
+        matchFallbackCount=match_fallback_count,
+        searchFallbackCount=search_fallback_count
     )
 
     provider_items = []
