@@ -496,7 +496,7 @@ export const Scrapers = () => {
             })
             setLoadingResources(false)
           }
-          throw error
+          // 不抛出错误,停止自动重试
         },
       }).catch(error => {
         clearTimeout(globalTimeout) // 清除超时
