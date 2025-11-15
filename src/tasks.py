@@ -2366,51 +2366,101 @@ async def webhook_search_and_dispatch_task(
         await progress_callback(20, "并发搜索所有源...")
 
         parsed_keyword = parse_search_keyword(searchKeyword)
-        search_title_only = parsed_keyword["title"]
-        logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title_only}' 进行搜索。")
+        original_title = parsed_keyword["title"]
+        season_to_filter = parsed_keyword.get("season") or season
+        episode_to_filter = parsed_keyword.get("episode") or currentEpisodeIndex
 
-        all_search_results = await manager.search_all(
-            [search_title_only], episode_info={"season": season, "episode": currentEpisodeIndex}
+        # 应用与 WebUI 一致的标题预处理规则
+        search_title = original_title
+        if title_recognition_manager:
+            (
+                processed_title,
+                processed_episode,
+                processed_season,
+                preprocessing_applied,
+            ) = await title_recognition_manager.apply_search_preprocessing(
+                original_title, episode_to_filter, season_to_filter
+            )
+            if preprocessing_applied:
+                search_title = processed_title
+                logger.info(
+                    f"✓ Webhook搜索预处理: '{original_title}' -> '{search_title}'"
+                )
+                if processed_episode != episode_to_filter:
+                    logger.info(
+                        f"✓ Webhook集数预处理: {episode_to_filter} -> {processed_episode}"
+                    )
+                    episode_to_filter = processed_episode
+                if processed_season != season_to_filter:
+                    logger.info(
+                        f"✓ Webhook季度预处理: {season_to_filter} -> {processed_season}"
+                    )
+                    season_to_filter = processed_season
+            else:
+                logger.info(f"○ Webhook搜索预处理未生效: '{original_title}'")
+        else:
+            logger.info("○ 未配置标题识别管理器，跳过Webhook搜索预处理。")
+
+        # 构造 episode_info
+        episode_info = (
+            {"season": season_to_filter, "episode": episode_to_filter}
+            if episode_to_filter is not None
+            else {"season": season_to_filter}
+        )
+
+        logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title}' 进行搜索。")
+
+        # 使用统一的搜索函数（与 WebUI 搜索保持一致）
+        all_search_results = await unified_search(
+            search_term=search_title,
+            session=session,
+            scraper_manager=manager,
+            metadata_manager=metadata_manager,
+            use_alias_expansion=True,
+            use_alias_filtering=True,
+            use_title_filtering=True,
+            use_source_priority_sorting=True,
+            progress_callback=None,
+            episode_info=episode_info,
+            alias_similarity_threshold=70,
         )
 
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 3. 相似度过滤（与WebUI相同的严格过滤逻辑）
-        logger.info(f"Webhook 任务: 开始相似度过滤，原始结果数: {len(all_search_results)}")
-
-        def normalize_for_filtering(title: str) -> str:
-            """标准化标题用于过滤"""
-            return title.lower().replace(" ", "").replace("：", ":").strip()
-
-        normalized_anime_title = normalize_for_filtering(animeTitle)
-        filtered_results = []
+        # 3. 根据标题关键词修正媒体类型（与 WebUI 一致）
+        def is_movie_by_title(title: str) -> bool:
+            if not title:
+                return False
+            # 关键词列表，不区分大小写
+            movie_keywords = ["剧场版", "劇場版", "movie", "映画"]
+            title_lower = title.lower()
+            return any(keyword in title_lower for keyword in movie_keywords)
 
         for item in all_search_results:
-            normalized_item_title = normalize_for_filtering(item.title)
-            if not normalized_item_title:
-                continue
+            if item.type == "tv_series" and is_movie_by_title(item.title):
+                logger.info(
+                    f"Webhook: 标题 '{item.title}' 包含电影关键词，类型从 'tv_series' 修正为 'movie'。"
+                )
+                item.type = "movie"
 
-            # 计算相似度
-            similarity = fuzz.partial_ratio(normalized_anime_title, normalized_item_title)
-            length_diff = abs(len(normalized_item_title) - len(normalized_anime_title))
+        # 4. 如果搜索词中明确指定了季度，对结果进行过滤（与 WebUI 一致）
+        if season_to_filter and season_to_filter > 0:
+            original_count = len(all_search_results)
+            # 当指定季度时，我们只关心电视剧类型
+            filtered_by_type = [item for item in all_search_results if item.type == "tv_series"]
 
-            # 严格过滤：相似度>=95% 或 相似度>=85%且长度差异<=30%
-            if similarity >= 95:
-                filtered_results.append(item)
-            elif similarity >= 85 and length_diff <= max(len(normalized_anime_title) * 0.3, 10):
-                filtered_results.append(item)
+            # 然后在电视剧类型中，我们按季度号过滤
+            filtered_by_season = [
+                item for item in filtered_by_type if item.season == season_to_filter
+            ]
 
-        logger.info(f"Webhook 任务: 相似度过滤完成，保留 {len(filtered_results)} 个结果（原始: {len(all_search_results)}）")
+            logger.info(
+                f"Webhook: 根据指定的季度 ({season_to_filter}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。"
+            )
+            all_search_results = filtered_by_season
 
-        # 如果过滤后没有结果，使用原始结果
-        if not filtered_results:
-            logger.warning(f"Webhook 任务: 相似度过滤后无结果，使用原始结果")
-            filtered_results = all_search_results
-
-        all_search_results = filtered_results
-
-        # 4. 使用与WebUI相同的智能匹配算法选择最佳匹配项
+        # 5. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
 
@@ -3137,7 +3187,7 @@ async def auto_search_and_import_task(
 
         logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
 
-        # 使用统一的搜索函数（不进行排序，后面自己处理）
+        # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         # 使用严格过滤模式和自定义别名
         # 外部控制API启用AI别名扩展（如果配置启用）
         all_results = await unified_search(
@@ -3151,10 +3201,28 @@ async def auto_search_and_import_task(
             use_source_priority_sorting=False,  # 不排序，后面自己处理
             strict_filtering=True,  # 使用严格过滤模式
             custom_aliases=aliases,  # 传入手动获取的别名
-            progress_callback=None
+            progress_callback=None,
+            episode_info=episode_info,  # 传递分集信息（与 WebUI 一致）
+            alias_similarity_threshold=70,  # 使用 70% 别名相似度阈值（与 WebUI 一致）
         )
 
         logger.info(f"搜索完成，共 {len(all_results)} 个结果")
+
+        # 根据标题关键词修正媒体类型（与 WebUI 一致）
+        def is_movie_by_title(title: str) -> bool:
+            if not title:
+                return False
+            # 关键词列表，不区分大小写
+            movie_keywords = ["剧场版", "劇場版", "movie", "映画"]
+            title_lower = title.lower()
+            return any(keyword in title_lower for keyword in movie_keywords)
+
+        for item in all_results:
+            if item.type == "tv_series" and is_movie_by_title(item.title):
+                logger.info(
+                    f"Control API: 标题 '{item.title}' 包含电影关键词，类型从 'tv_series' 修正为 'movie'。"
+                )
+                item.type = "movie"
 
         # 添加WebUI的季度过滤逻辑
         if season and season > 0:
