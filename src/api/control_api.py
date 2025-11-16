@@ -1523,13 +1523,6 @@ async def get_rate_limit_status(
     fallback_total = match_fallback_count + search_fallback_count
     fallback_limit = 50  # 固定50次
 
-    fallback_status = models.ControlRateLimitFallbackStatus(
-        totalCount=fallback_total,
-        totalLimit=fallback_limit,
-        matchFallbackCount=match_fallback_count,
-        searchFallbackCount=search_fallback_count
-    )
-
     provider_items = []
     all_scrapers_raw = await crud.get_all_scraper_settings(session)
     # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
@@ -1577,10 +1570,14 @@ async def get_rate_limit_status(
     return models.ControlRateLimitStatusResponse(
         globalEnabled=global_enabled,
         globalRequestCount=global_state.requestCount if global_state else 0,
-        globalLimit=global_limit, globalPeriod=global_period_str,
+        globalLimit=global_limit,
+        globalPeriod=global_period_str,
         secondsUntilReset=seconds_until_reset,
-        providers=provider_items,
-        fallback=fallback_status
+        fallbackTotalCount=fallback_total,
+        fallbackTotalLimit=fallback_limit,
+        fallbackMatchCount=match_fallback_count,
+        fallbackSearchCount=search_fallback_count,
+        providers=provider_items
     )
 
 
