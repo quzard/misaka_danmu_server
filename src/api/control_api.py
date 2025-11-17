@@ -1575,6 +1575,7 @@ async def _get_rate_limit_status_data(
 
 @router.get("/rate-limit/status", summary="获取流控状态")
 async def get_rate_limit_status(
+    request: Request,
     stream: bool = Query(False, description="是否使用SSE流式推送(每秒更新)"),
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
@@ -1611,17 +1612,20 @@ async def get_rate_limit_status(
     # SSE流式响应
     async def event_generator():
         """SSE事件生成器，每秒推送一次流控状态"""
+        session_factory = request.app.state.db_session_factory
         try:
             while True:
                 try:
-                    # 获取流控状态数据
-                    status_data = await _get_rate_limit_status_data(session, scraper_manager, rate_limiter)
+                    # 为每次循环创建新的session
+                    async with session_factory() as loop_session:
+                        # 获取流控状态数据
+                        status_data = await _get_rate_limit_status_data(loop_session, scraper_manager, rate_limiter)
 
-                    # 转换为字典并序列化为JSON (与普通JSON响应格式一致)
-                    status_dict = status_data.model_dump(mode='json')
+                        # 转换为字典并序列化为JSON (与普通JSON响应格式一致)
+                        status_dict = status_data.model_dump(mode='json')
 
-                    # 发送状态更新事件 (直接推送状态对象,不包装type字段)
-                    yield f"data: {json.dumps(status_dict, ensure_ascii=False)}\n\n"
+                        # 发送状态更新事件 (直接推送状态对象,不包装type字段)
+                        yield f"data: {json.dumps(status_dict, ensure_ascii=False)}\n\n"
 
                     # 等待1秒后再次推送
                     await asyncio.sleep(1)
