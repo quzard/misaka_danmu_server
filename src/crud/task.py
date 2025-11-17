@@ -5,6 +5,7 @@
 
 import logging
 import re
+import json
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -490,18 +491,22 @@ async def create_webhook_task(
     execute_time = now + delay if is_delayed else now
 
     try:
+        # 将payload字典序列化为JSON字符串
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
         new_task = WebhookTask(
             receptionTime=now,
             executeTime=execute_time,
             taskTitle=task_title,
             uniqueKey=unique_key,
-            payload=payload,
+            payload=payload_json,
             webhookSource=webhook_source,
             status="pending"
         )
         session.add(new_task)
         await session.commit()
     except Exception as e:
+        await session.rollback()
         logger.warning(f"检测到重复的 Webhook 请求 (unique_key: {unique_key}),已忽略。")
 
 

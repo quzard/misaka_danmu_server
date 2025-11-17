@@ -82,7 +82,7 @@ class BaseWebhook(ABC):
                     session, task_title, unique_key, payload, webhook_source,
                     True, timedelta(hours=delay_hours)
                 )
-                await session.commit()
+                # create_webhook_task 内部已经commit,这里不需要再次commit
                 self.logger.info(f"Webhook 任务 '{task_title}' 已加入延时队列。")
             else:
                 # 延时导入关闭：直接提交到 TaskManager

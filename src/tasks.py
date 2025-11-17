@@ -2488,7 +2488,8 @@ async def webhook_search_and_dispatch_task(
                 item.type = "movie"
 
         # 4. 如果搜索词中明确指定了季度，对结果进行过滤（与 WebUI 一致）
-        if season_to_filter and season_to_filter > 0:
+        # 注意：电影类型不进行季度过滤
+        if season_to_filter and season_to_filter > 0 and mediaType != "movie":
             original_count = len(all_search_results)
             # 当指定季度时，我们只关心电视剧类型
             filtered_by_type = [item for item in all_search_results if item.type == "tv_series"]
