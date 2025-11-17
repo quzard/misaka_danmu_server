@@ -4,11 +4,14 @@ import uuid
 import re
 import hashlib
 import ipaddress
+import json
+import asyncio
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable, Union
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Path
+from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyQuery
 from thefuzz import fuzz
 from pydantic import BaseModel, Field, model_validator
@@ -1473,14 +1476,13 @@ async def get_execution_task_id(
     execution_id, status = await crud.get_execution_task_id_from_scheduler_task(session, taskId)
     return ExecutionTaskResponse(schedulerTaskId=taskId, executionTaskId=execution_id, status=status)
 
-@router.get("/rate-limit/status", response_model=models.ControlRateLimitStatusResponse, summary="获取流控状态")
-async def get_rate_limit_status(
-    session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
-):
+async def _get_rate_limit_status_data(
+    session: AsyncSession,
+    scraper_manager: ScraperManager,
+    rate_limiter: RateLimiter
+) -> models.ControlRateLimitStatusResponse:
     """
-    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+    获取流控状态数据的核心逻辑（可被普通响应和SSE流复用）
     """
     # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
     try:
@@ -1568,6 +1570,79 @@ async def get_rate_limit_status(
         fallbackMatchCount=match_fallback_count,
         fallbackSearchCount=search_fallback_count,
         providers=provider_items
+    )
+
+
+@router.get("/rate-limit/status", summary="获取流控状态")
+async def get_rate_limit_status(
+    stream: bool = Query(False, description="是否使用SSE流式推送(每秒更新)"),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """
+    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+
+    ## 使用方式
+
+    ### 普通JSON响应 (默认)
+    - 请求: `GET /api/control/rate-limit/status`
+    - 响应: 单次JSON对象
+    - Content-Type: `application/json`
+
+    ### SSE流式推送
+    - 请求: `GET /api/control/rate-limit/status?stream=true`
+    - 响应: `text/event-stream`，每秒推送一次状态更新
+    - 事件格式: `data: {JSON对象}`
+    - 客户端断开连接时自动停止推送
+
+    ## 参数
+    - **stream**: 是否使用SSE流式推送。默认False返回JSON，True返回text/event-stream
+
+    ## 响应格式
+    两种模式返回的数据结构完全一致，只是传输方式不同:
+    - 普通模式: 一次性返回完整JSON
+    - SSE模式: 每秒推送一次相同格式的JSON数据
+    """
+    if not stream:
+        # 普通JSON响应
+        return await _get_rate_limit_status_data(session, scraper_manager, rate_limiter)
+
+    # SSE流式响应
+    async def event_generator():
+        """SSE事件生成器，每秒推送一次流控状态"""
+        try:
+            while True:
+                try:
+                    # 获取流控状态数据
+                    status_data = await _get_rate_limit_status_data(session, scraper_manager, rate_limiter)
+
+                    # 转换为字典并序列化为JSON (与普通JSON响应格式一致)
+                    status_dict = status_data.model_dump(mode='json')
+
+                    # 发送状态更新事件 (直接推送状态对象,不包装type字段)
+                    yield f"data: {json.dumps(status_dict, ensure_ascii=False)}\n\n"
+
+                    # 等待1秒后再次推送
+                    await asyncio.sleep(1)
+
+                except Exception as e:
+                    logger.error(f"SSE流控状态推送出错: {e}", exc_info=True)
+                    # 错误时推送空对象,避免客户端解析失败
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            logger.info("SSE流控状态推送已取消(客户端断开连接)")
+            raise
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
 
 
@@ -1662,7 +1737,6 @@ async def get_allowed_configs(
             if title_recognition_manager:
                 # 从数据库获取识别词配置
                 from ..orm_models import TitleRecognition
-                from sqlalchemy import select
                 result = await session.execute(select(TitleRecognition).limit(1))
                 title_recognition = result.scalar_one_or_none()
                 current_value = title_recognition.content if title_recognition else ""
