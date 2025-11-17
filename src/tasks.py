@@ -3185,7 +3185,9 @@ async def auto_search_and_import_task(
 
         # 3. 如果库中不存在，则进行全网搜索
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
-        episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
+        # 注意：搜索阶段不传递episode信息，因为scraper的search方法不需要具体集数
+        # 集数信息只在导入阶段使用
+        episode_info = {"season": season}
 
         # 使用WebUI相同的搜索逻辑：先获取元数据源别名，再进行全网搜索
         await progress_callback(30, "正在获取元数据源别名...")
@@ -3227,8 +3229,8 @@ async def auto_search_and_import_task(
                 if processed_season != season:
                     search_season = processed_season
                     logger.info(f"✓ 季度预处理: {season} -> {search_season}")
-                    # 更新episode_info中的季数
-                    episode_info = {"season": search_season, "episode": payload.episode} if payload.episode else {"season": search_season}
+                    # 更新episode_info中的季数（搜索阶段不传递episode）
+                    episode_info = {"season": search_season}
             else:
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
