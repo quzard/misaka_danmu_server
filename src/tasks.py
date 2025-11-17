@@ -36,6 +36,49 @@ from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
+def parse_episode_ranges(episode_str: str) -> List[int]:
+    """
+    解析集数范围字符串，支持多种格式：
+    - 单集: "1"
+    - 范围: "1-3"
+    - 混合: "1,3,5,7,9,11-13"
+
+    返回所有集数的列表
+    """
+    episodes = []
+
+    # 移除所有空格
+    episode_str = episode_str.replace(" ", "")
+
+    # 按逗号分割
+    parts = episode_str.split(",")
+
+    for part in parts:
+        if "-" in part:
+            # 处理范围，如 "1-3" 或 "31-39"
+            try:
+                start, end = part.split("-", 1)
+                start_num = int(start)
+                end_num = int(end)
+                episodes.extend(range(start_num, end_num + 1))
+            except (ValueError, IndexError) as e:
+                logger.warning(f"无法解析集数范围 '{part}': {e}")
+                continue
+        else:
+            # 处理单集，如 "6" 或 "8"
+            try:
+                episode_num = int(part)
+                episodes.append(episode_num)
+            except ValueError as e:
+                logger.warning(f"无法解析集数 '{part}': {e}")
+                continue
+
+    # 去重并排序
+    episodes = sorted(list(set(episodes)))
+    logger.info(f"解析集数范围 '{episode_str}' -> {episodes}")
+
+    return episodes
+
 def _extract_short_error_message(error: Exception) -> str:
     """
     从异常对象中提取简短的错误消息，用于任务管理器显示
@@ -3581,18 +3624,27 @@ async def auto_search_and_import_task(
         if payload.episode is not None:
             unique_key_parts.append(f"e{payload.episode}")
         unique_key = "-".join(unique_key_parts)
+
+        # 解析多集参数
+        selected_episodes = None
+        current_episode_index = None
+        if payload.episode is not None:
+            # 解析集数字符串为列表 (支持 "1,3,5,7,9,11-13" 格式)
+            selected_episodes = parse_episode_ranges(payload.episode)
+            logger.info(f"解析集数参数 '{payload.episode}' -> {selected_episodes}")
+
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=final_title, mediaType=best_match.type, season=final_season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
-            currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
+            currentEpisodeIndex=current_episode_index, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager,
-            is_fallback=True,  # 标识为后备任务
-            fallback_type="match",  # 匹配后备类型
-            preassignedAnimeId=payload.preassignedAnimeId  # 传递预分配的anime_id
+            is_fallback=False,  # 外部API自动导入使用普通流控
+            preassignedAnimeId=payload.preassignedAnimeId,  # 传递预分配的anime_id
+            selectedEpisodes=selected_episodes  # 传递解析后的集数列表
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -3606,7 +3658,8 @@ async def auto_search_and_import_task(
             if final_season is not None:
                 title_parts.append(f"S{final_season:02d}")
             if payload.episode is not None:
-                title_parts.append(f"E{payload.episode:02d}")
+                # 直接显示原始集数字符串
+                title_parts.append(f"E{payload.episode}")
         task_title = " ".join(title_parts)
 
         # 准备任务参数用于恢复
@@ -3617,7 +3670,8 @@ async def auto_search_and_import_task(
             "mediaType": best_match.type,
             "season": season,  # 使用用户请求的季度，而不是搜索结果的季度
             "year": best_match.year,
-            "currentEpisodeIndex": payload.episode,
+            "currentEpisodeIndex": current_episode_index,
+            "selectedEpisodes": selected_episodes,
             "imageUrl": image_url,
             "doubanId": douban_id,
             "tmdbId": tmdb_id,

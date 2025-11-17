@@ -286,7 +286,7 @@ class ControlAutoImportRequest(BaseModel):
     searchType: AutoImportSearchType
     searchTerm: str
     season: Optional[int] = None
-    episode: Optional[int] = None
+    episode: Optional[str] = None  # 支持单集(如"1")或多集(如"1,3,5,7,9,11-13")格式
     mediaType: Optional[AutoImportMediaType] = None
     preassignedAnimeId: Optional[int] = None  # 预分配的anime_id（用于匹配后备）
 
@@ -302,7 +302,7 @@ async def auto_import(
     searchType: AutoImportSearchType = Query(..., description="搜索类型。可选值: 'keyword', 'tmdb', 'tvdb', 'douban', 'imdb', 'bangumi'。"),
     searchTerm: str = Query(..., description="搜索内容。根据 searchType 的不同，这里应填入关键词或对应的平台ID。"),
     season: Optional[int] = Query(None, description="季度号。如果未提供，将自动推断或默认为1。"),
-    episode: Optional[int] = Query(None, description="集数。如果提供，将只导入单集（此时必须提供季度）。"),
+    episode: Optional[str] = Query(None, description="集数。支持单集(如'1')或多集(如'1,3,5,7,9,11-13')格式。如果提供，将只导入指定集数（此时必须提供季度）。"),
     mediaType: Optional[AutoImportMediaType] = Query(None, description="媒体类型。当 searchType 为 'keyword' 时必填。如果留空，将根据有无 'season' 参数自动推断。"),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
@@ -332,7 +332,7 @@ async def auto_import(
     -   `season` & `episode`:
         -   **电视剧/番剧**:
             -   提供 `season`，不提供 `episode`: 导入 `season` 指定的整季。
-            -   提供 `season` 和 `episode`: 只导入指定的单集。
+            -   提供 `season` 和 `episode`: 导入指定的集数。支持单集(如'1')或多集(如'1,3,5,7,9,11-13')格式。
         -   **电影**:
             -   `season` 和 `episode` 参数会被忽略。
     -   `mediaType`:
@@ -377,6 +377,7 @@ async def auto_import(
     if payload.season is not None:
         unique_key_parts.append(f"s{payload.season}")
     if payload.episode is not None:
+        # 对于多集格式，保留原始字符串作为 unique_key 的一部分
         unique_key_parts.append(f"e{payload.episode}")
     # 始终包含 mediaType 以区分同名但不同类型的作品，避免重复任务检测问题
     if payload.mediaType is not None:
@@ -410,21 +411,9 @@ async def auto_import(
             )
 
             if existing_anime and episode is not None:
-                # 对于单集导入，检查具体集数是否已存在（需要考虑识别词转换）
-                episode_to_check = episode
-                if title_recognition_manager:
-                    _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(searchTerm, episode, season, None)  # source参数暂时为None
-                    if converted_episode is not None:
-                        episode_to_check = converted_episode
-
-                anime_id = existing_anime.get('id')
-                if anime_id:
-                    episode_exists = await crud.find_episode_by_index(session, anime_id, episode_to_check)
-                    if episode_exists:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail=f"作品 '{searchTerm}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入"
-                        )
+                # 对于单集/多集导入，检查具体集数是否已存在（需要考虑识别词转换）
+                # 注意：这里不再拒绝请求，而是在任务执行时跳过已存在的集数
+                pass
             elif existing_anime and episode is None:
                 # 对于整季导入，如果作品已存在则拒绝
                 raise HTTPException(
@@ -437,7 +426,8 @@ async def auto_import(
     if payload.season is not None:
         title_parts.append(f"S{payload.season:02d}")
     if payload.episode is not None:
-        title_parts.append(f"E{payload.episode:02d}")
+        # 对于多集格式，直接显示原始字符串
+        title_parts.append(f"E{payload.episode}")
     task_title = " ".join(title_parts)
 
     try:
