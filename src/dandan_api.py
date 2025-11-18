@@ -287,7 +287,7 @@ async def _try_predownload_next_episode(
         # 1. 检查配置: 是否启用预下载
         predownload_enabled = (await config_manager.get("preDownloadNextEpisodeEnabled", "false")).lower() == 'true'
         if not predownload_enabled:
-            logger.debug(f"预下载跳过: 未启用预下载功能 (episodeId={current_episode_id})")
+            logger.info(f"预下载跳过: 未启用预下载功能 (episodeId={current_episode_id})")
             return
 
         # 2. 检查配置: 是否启用后备机制
@@ -323,12 +323,12 @@ async def _try_predownload_next_episode(
             next_episode = next_episode_result.scalar_one_or_none()
 
             if not next_episode:
-                logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在 (sourceId={current_episode.sourceId})")
+                logger.info(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在 (sourceId={current_episode.sourceId})")
                 return
 
             # 6. 检查下一集是否已有弹幕
             if next_episode.commentCount > 0:
-                logger.debug(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
+                logger.info(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
                 return
 
             # 7. 提交刷新任务 (使用unique_key防止重复)
@@ -351,7 +351,7 @@ async def _try_predownload_next_episode(
             logger.info(f"✓ 预下载任务已提交: episodeId={next_episode_id}, title='{next_episode_title}', taskId={task_id}")
         except HTTPException as e:
             if e.status_code == 409:
-                logger.debug(f"预下载跳过: 任务已在运行中 (episodeId={next_episode_id})")
+                logger.info(f"预下载跳过: 任务已在运行中 (episodeId={next_episode_id})")
             else:
                 logger.warning(f"预下载任务提交失败 (HTTP {e.status_code}): {e.detail}")
         except Exception as e:
