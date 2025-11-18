@@ -51,7 +51,7 @@ class IncrementalRefreshJob(BaseJob):
                 unique_key = f"incremental-refresh:{source_info['providerName']}:{source_info['mediaId']}:{source_info.get('season', 1)}:{next_episode_index}"
 
                 # 使用闭包捕获当前循环的变量
-                def create_task_coro_factory(info, next_ep):
+                def create_task_coro_factory(info, next_ep, src_id):
                     return lambda s, cb: generic_import_task(
                         provider=info["providerName"], mediaId=info["mediaId"], animeTitle=info["title"],
                         mediaType=info["type"], season=info.get("season", 1), year=info.get("year"),
@@ -60,11 +60,12 @@ class IncrementalRefreshJob(BaseJob):
                         bangumiId=info.get("bangumiId"), metadata_manager=self.metadata_manager,
                         progress_callback=cb, session=s, manager=self.scraper_manager,
                         task_manager=self.task_manager, rate_limiter=self.rate_limiter,
-                        config_manager=self.config_manager, title_recognition_manager=self.title_recognition_manager
+                        config_manager=self.config_manager, title_recognition_manager=self.title_recognition_manager,
+                        is_incremental_refresh=True, incremental_refresh_source_id=src_id
                     )
-                
+
                 try:
-                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index), task_title, unique_key=unique_key)
+                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index, source_id), task_title, unique_key=unique_key)
                     submitted_count += 1
                 except HTTPException as e:
                     if e.status_code == status.HTTP_409_CONFLICT:

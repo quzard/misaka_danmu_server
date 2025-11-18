@@ -1059,6 +1059,9 @@ async def generic_import_task(
     preassignedAnimeId: Optional[int] = None,
     # 新增: 媒体库整季导入时, 指定要导入的分集索引列表
     selectedEpisodes: Optional[List[int]] = None,
+    # 新增: 追更任务标识,用于失败计数
+    is_incremental_refresh: bool = False,
+    incremental_refresh_source_id: Optional[int] = None,
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -1366,6 +1369,46 @@ async def generic_import_task(
         is_fallback=is_fallback,  # 传递后备任务标识
         fallback_type=fallback_type  # 传递后备类型
     )
+
+    # 处理追更任务的失败计数
+    if is_incremental_refresh and incremental_refresh_source_id:
+        from sqlalchemy import update as sql_update
+
+        if not successful_episodes_indices and not skipped_episodes_indices and failed_episodes_count > 0:
+            # 追更失败,增加失败计数
+            stmt = sql_update(orm_models.AnimeSource).where(
+                orm_models.AnimeSource.id == incremental_refresh_source_id
+            ).values(
+                incrementalRefreshFailures=orm_models.AnimeSource.incrementalRefreshFailures + 1
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+            # 检查失败次数是否达到10次
+            source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == incremental_refresh_source_id)
+            source_result = await session.execute(source_stmt)
+            source_obj = source_result.scalar_one_or_none()
+
+            if source_obj and source_obj.incrementalRefreshFailures >= 10:
+                # 达到10次失败,自动禁用追更
+                disable_stmt = sql_update(orm_models.AnimeSource).where(
+                    orm_models.AnimeSource.id == incremental_refresh_source_id
+                ).values(
+                    incrementalRefreshEnabled=False
+                )
+                await session.execute(disable_stmt)
+                await session.commit()
+                logger.warning(f"源 ID {incremental_refresh_source_id} 追更失败次数达到10次,已自动禁用追更")
+        else:
+            # 追更成功,重置失败计数
+            stmt = sql_update(orm_models.AnimeSource).where(
+                orm_models.AnimeSource.id == incremental_refresh_source_id
+            ).values(
+                incrementalRefreshFailures=0
+            )
+            await session.execute(stmt)
+            await session.commit()
+            logger.info(f"源 ID {incremental_refresh_source_id} 追更成功,已重置失败计数")
 
     if not successful_episodes_indices and not skipped_episodes_indices and failed_episodes_count > 0:
         # 生成失败详情消息
