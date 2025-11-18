@@ -319,8 +319,8 @@ async def _try_predownload_next_episode(
                 return
 
             # 5. 获取source信息(需要provider和mediaId)
-            source_stmt = select(orm_models.Source).where(
-                orm_models.Source.id == current_episode.sourceId
+            source_stmt = select(orm_models.AnimeSource).where(
+                orm_models.AnimeSource.id == current_episode.sourceId
             )
             source_result = await session.execute(source_stmt)
             source = source_result.scalar_one_or_none()
@@ -344,7 +344,7 @@ async def _try_predownload_next_episode(
                 return
 
             # 8. 准备下载参数
-            provider = source.provider
+            provider = source.providerName
             media_id = source.mediaId
             anime_id = source.animeId
 
