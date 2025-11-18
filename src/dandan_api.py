@@ -280,8 +280,13 @@ async def _try_predownload_next_episode(
     触发条件:
     1. preDownloadNextEpisodeEnabled = true
     2. matchFallbackEnabled = true 或 searchFallbackEnabled = true
-    3. 下一集存在且没有弹幕
+    3. 下一集没有弹幕(无论是否存在记录)
     4. 没有正在运行的下载任务
+
+    逻辑:
+    - 如果下一集已有记录且有弹幕: 跳过
+    - 如果下一集已有记录但无弹幕: 刷新弹幕
+    - 如果下一集无记录: 从源站获取并创建记录+下载弹幕
     """
     try:
         # 1. 检查配置: 是否启用预下载
@@ -313,7 +318,18 @@ async def _try_predownload_next_episode(
                 logger.warning(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
                 return
 
-            # 5. 查询下一集
+            # 5. 获取source信息(需要provider和mediaId)
+            source_stmt = select(orm_models.Source).where(
+                orm_models.Source.id == current_episode.sourceId
+            )
+            source_result = await session.execute(source_stmt)
+            source = source_result.scalar_one_or_none()
+
+            if not source:
+                logger.warning(f"预下载跳过: 当前分集的源 {current_episode.sourceId} 不存在")
+                return
+
+            # 6. 查询下一集
             next_episode_index = current_episode.episodeIndex + 1
             next_episode_stmt = select(orm_models.Episode).where(
                 orm_models.Episode.sourceId == current_episode.sourceId,
@@ -322,36 +338,99 @@ async def _try_predownload_next_episode(
             next_episode_result = await session.execute(next_episode_stmt)
             next_episode = next_episode_result.scalar_one_or_none()
 
-            if not next_episode:
-                logger.info(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在 (sourceId={current_episode.sourceId})")
-                return
-
-            # 6. 检查下一集是否已有弹幕
-            if next_episode.commentCount > 0:
+            # 7. 如果下一集已存在且有弹幕,跳过
+            if next_episode and next_episode.commentCount > 0:
                 logger.info(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
                 return
 
-            # 7. 提交刷新任务 (使用unique_key防止重复)
-            unique_key = f"predownload_episode_{next_episode.id}"
-            next_episode_id = next_episode.id
-            next_episode_title = next_episode.title
+            # 8. 准备下载参数
+            provider = source.provider
+            media_id = source.mediaId
+            anime_id = source.animeId
 
-        # 8. 在session外提交任务
+            # 获取anime信息
+            anime_stmt = select(orm_models.Anime).where(orm_models.Anime.id == anime_id)
+            anime_result = await session.execute(anime_stmt)
+            anime = anime_result.scalar_one_or_none()
+
+            if not anime:
+                logger.warning(f"预下载跳过: anime {anime_id} 不存在")
+                return
+
+        # 9. 在session外提交预下载任务
+        logger.info(f"预下载: 准备下载下一集 (index={next_episode_index}, provider={provider}, mediaId={media_id})")
+
+        # 使用unique_key防止重复
+        unique_key = f"predownload_{provider}_{media_id}_{next_episode_index}"
+
         try:
-            from .tasks import refresh_episode_comments_task
+            # 导入必要的函数
+            from .tasks import _download_and_save_episode_comments
+
+            # 创建下载任务
+            async def predownload_task(session, progress_callback):
+                """预下载任务: 获取分集信息并下载弹幕"""
+                from . import scraper_manager as sm
+                scraper_manager = sm.get_scraper_manager()
+
+                # 获取分集列表
+                logger.info(f"预下载: 正在获取分集列表 (provider={provider}, mediaId={media_id})")
+                episodes_data = await scraper_manager.get_episodes(provider, media_id)
+
+                if not episodes_data or 'episodes' not in episodes_data:
+                    logger.warning(f"预下载失败: 无法获取分集列表 (provider={provider}, mediaId={media_id})")
+                    return
+
+                episodes = episodes_data['episodes']
+
+                # 查找下一集
+                target_episode = None
+                for ep in episodes:
+                    if ep.get('episode_number') == next_episode_index:
+                        target_episode = ep
+                        break
+
+                if not target_episode:
+                    logger.info(f"预下载跳过: 源站没有第 {next_episode_index} 集 (provider={provider}, mediaId={media_id})")
+                    return
+
+                provider_episode_id = target_episode.get('provider_episode_id')
+                episode_title = target_episode.get('title', f'第{next_episode_index}集')
+
+                if not provider_episode_id:
+                    logger.warning(f"预下载失败: 第 {next_episode_index} 集缺少 provider_episode_id")
+                    return
+
+                logger.info(f"预下载: 找到下一集 '{episode_title}' (provider_episode_id={provider_episode_id})")
+
+                # 下载并保存弹幕
+                await _download_and_save_episode_comments(
+                    session=session,
+                    progress_callback=progress_callback,
+                    anime_id=anime_id,
+                    anime_title=anime.title,
+                    source_id=source.id,
+                    provider=provider,
+                    media_id=media_id,
+                    episode_index=next_episode_index,
+                    episode_title=episode_title,
+                    provider_episode_id=provider_episode_id,
+                    config_manager=config_manager
+                )
+
+                logger.info(f"✓ 预下载完成: '{episode_title}' (index={next_episode_index})")
 
             task_id, _ = await task_manager.submit_task(
-                lambda s, cb: refresh_episode_comments_task(
-                    next_episode_id, s, cb, config_manager, task_manager
-                ),
-                f"预下载弹幕: {next_episode_title}",
+                predownload_task,
+                f"预下载弹幕: {anime.title} 第{next_episode_index}集",
                 unique_key=unique_key,
-                task_type="refresh_comments"
+                task_type="predownload"
             )
-            logger.info(f"✓ 预下载任务已提交: episodeId={next_episode_id}, title='{next_episode_title}', taskId={task_id}")
+            logger.info(f"✓ 预下载任务已提交: anime='{anime.title}', index={next_episode_index}, taskId={task_id}")
+
         except HTTPException as e:
             if e.status_code == 409:
-                logger.info(f"预下载跳过: 任务已在运行中 (episodeId={next_episode_id})")
+                logger.info(f"预下载跳过: 任务已在运行中 (unique_key={unique_key})")
             else:
                 logger.warning(f"预下载任务提交失败 (HTTP {e.status_code}): {e.detail}")
         except Exception as e:
