@@ -441,17 +441,18 @@ async def auto_import(
             api_key=api_key
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        # 注意: 搜索锁由任务内部的 finally 块负责释放,确保任务完成后才释放
         return {"message": "自动导入任务已提交", "taskId": task_id}
     except HTTPException as e:
         # 捕获已知的冲突错误并重新抛出
+        # 如果任务提交失败,需要释放锁
+        await manager.release_search_lock(api_key)
         raise e
     except Exception as e:
-        # 捕获任何在任务提交阶段发生的异常，并确保释放锁
+        # 捕获任何在任务提交阶段发生的异常,并确保释放锁
         logger.error(f"提交自动导入任务时发生未知错误: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
-    finally:
-        # 确保释放锁
         await manager.release_search_lock(api_key)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
