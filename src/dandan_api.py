@@ -270,7 +270,6 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
 
 async def _try_predownload_next_episode(
     current_episode_id: int,
-    session: AsyncSession,
     config_manager: ConfigManager,
     task_manager: TaskManager
 ):
@@ -297,53 +296,61 @@ async def _try_predownload_next_episode(
             logger.debug(f"预下载跳过: 未启用任何后备机制")
             return
 
-        # 3. 查询当前分集信息
-        current_episode_stmt = select(orm_models.Episode).where(
-            orm_models.Episode.id == current_episode_id
-        )
-        current_episode_result = await session.execute(current_episode_stmt)
-        current_episode = current_episode_result.scalar_one_or_none()
+        # 3. 创建新的数据库会话 (避免与主请求的session冲突)
+        from .database import get_session_factory
+        session_factory = get_session_factory()
 
-        if not current_episode:
-            logger.debug(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
-            return
+        async with session_factory() as session:
+            # 4. 查询当前分集信息
+            current_episode_stmt = select(orm_models.Episode).where(
+                orm_models.Episode.id == current_episode_id
+            )
+            current_episode_result = await session.execute(current_episode_stmt)
+            current_episode = current_episode_result.scalar_one_or_none()
 
-        # 4. 查询下一集
-        next_episode_index = current_episode.episodeIndex + 1
-        next_episode_stmt = select(orm_models.Episode).where(
-            orm_models.Episode.sourceId == current_episode.sourceId,
-            orm_models.Episode.episodeIndex == next_episode_index
-        )
-        next_episode_result = await session.execute(next_episode_stmt)
-        next_episode = next_episode_result.scalar_one_or_none()
+            if not current_episode:
+                logger.debug(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
+                return
 
-        if not next_episode:
-            logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在")
-            return
+            # 5. 查询下一集
+            next_episode_index = current_episode.episodeIndex + 1
+            next_episode_stmt = select(orm_models.Episode).where(
+                orm_models.Episode.sourceId == current_episode.sourceId,
+                orm_models.Episode.episodeIndex == next_episode_index
+            )
+            next_episode_result = await session.execute(next_episode_stmt)
+            next_episode = next_episode_result.scalar_one_or_none()
 
-        # 5. 检查下一集是否已有弹幕
-        if next_episode.commentCount > 0:
-            logger.debug(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
-            return
+            if not next_episode:
+                logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在")
+                return
 
-        # 6. 提交刷新任务 (使用unique_key防止重复)
-        unique_key = f"predownload_episode_{next_episode.id}"
+            # 6. 检查下一集是否已有弹幕
+            if next_episode.commentCount > 0:
+                logger.debug(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
+                return
 
+            # 7. 提交刷新任务 (使用unique_key防止重复)
+            unique_key = f"predownload_episode_{next_episode.id}"
+            next_episode_id = next_episode.id
+            next_episode_title = next_episode.title
+
+        # 8. 在session外提交任务
         try:
             from .tasks import refresh_episode_comments_task
 
             task_id, _ = await task_manager.submit_task(
                 lambda s, cb: refresh_episode_comments_task(
-                    next_episode.id, s, cb, config_manager, task_manager
+                    next_episode_id, s, cb, config_manager, task_manager
                 ),
-                f"预下载弹幕: {next_episode.title}",
+                f"预下载弹幕: {next_episode_title}",
                 unique_key=unique_key,
                 task_type="refresh_comments"
             )
-            logger.info(f"预下载任务已提交: episodeId={next_episode.id}, taskId={task_id}")
+            logger.info(f"预下载任务已提交: episodeId={next_episode_id}, taskId={task_id}")
         except HTTPException as e:
             if e.status_code == 409:
-                logger.debug(f"预下载跳过: 任务已在运行中 (episodeId={next_episode.id})")
+                logger.debug(f"预下载跳过: 任务已在运行中 (episodeId={next_episode_id})")
             else:
                 logger.warning(f"预下载任务提交失败: {e}")
         except Exception as e:
@@ -3251,7 +3258,7 @@ async def get_comments_for_dandan(
 
     # 预下载下一集弹幕 (异步,不阻塞当前响应)
     asyncio.create_task(_try_predownload_next_episode(
-        episodeId, session, config_manager, task_manager
+        episodeId, config_manager, task_manager
     ))
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
