@@ -270,6 +270,7 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
 
 async def _try_predownload_next_episode(
     current_episode_id: int,
+    session_factory,
     config_manager: ConfigManager,
     task_manager: TaskManager
 ):
@@ -297,9 +298,6 @@ async def _try_predownload_next_episode(
             return
 
         # 3. 创建新的数据库会话 (避免与主请求的session冲突)
-        from .database import get_session_factory
-        session_factory = get_session_factory()
-
         async with session_factory() as session:
             # 4. 查询当前分集信息
             current_episode_stmt = select(orm_models.Episode).where(
@@ -2443,6 +2441,7 @@ async def get_external_comments_from_url(
     summary="[dandanplay兼容] 获取弹幕"
 )
 async def get_comments_for_dandan(
+    request: Request,
     episodeId: int = Path(..., description="分集ID (来自 /search/episodes 响应中的 episodeId)"),
     chConvert: int = Query(0, description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
     # 'from' 是 Python 的关键字，所以我们必须使用别名
@@ -2459,6 +2458,12 @@ async def get_comments_for_dandan(
     模拟 dandanplay 的弹幕获取接口。
     优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
+    # 预下载下一集弹幕 (异步,不阻塞当前响应)
+    # 在函数开始时就提交,无论当前集是否有弹幕
+    asyncio.create_task(_try_predownload_next_episode(
+        episodeId, request.app.state.db_session_factory, config_manager, task_manager
+    ))
+
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
@@ -3255,11 +3260,6 @@ async def get_comments_for_dandan(
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
-
-    # 预下载下一集弹幕 (异步,不阻塞当前响应)
-    asyncio.create_task(_try_predownload_next_episode(
-        episodeId, config_manager, task_manager
-    ))
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
