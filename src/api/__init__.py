@@ -4,7 +4,7 @@ from .ui_api import router as ui_router, auth_router
 from .webhook_api import router as webhook_router
 from .control_api import router as control_router
 from .endpoints import (
-    config, auth, scraper, metadata_source, media_server,
+    auth, scraper, metadata_source, media_server,
     anime, source, episode, search, import_api, task,
     token, config_extra, settings, scheduled_task, webhook, system, auth_extra,
     local_danmaku, scraper_resources, parameters
@@ -44,8 +44,8 @@ api_router.include_router(webhook.router, prefix="/ui", tags=["Webhook"], includ
 api_router.include_router(system.router, prefix="/ui", tags=["System"], include_in_schema=False)
 api_router.include_router(auth_extra.auth_router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 
-# Config端点 - 必须放在最后,因为它有通配符路由 /{config_key}
-api_router.include_router(config.router, prefix="/ui", tags=["Config"], include_in_schema=False)
+# Config端点 - config_extra.router 已包含所有config路由,不再需要 config.router
+# config.router 的通配符路由 /{config_key} 会与其他路由冲突,已在 config_extra.router 中重新实现
 api_router.include_router(config_extra.router, prefix="/ui", tags=["Config"], include_in_schema=False)
 
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"], include_in_schema=False)
