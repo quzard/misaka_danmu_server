@@ -287,6 +287,7 @@ async def _try_predownload_next_episode(
         # 1. 检查配置: 是否启用预下载
         predownload_enabled = (await config_manager.get("preDownloadNextEpisodeEnabled", "false")).lower() == 'true'
         if not predownload_enabled:
+            logger.debug(f"预下载跳过: 未启用预下载功能 (episodeId={current_episode_id})")
             return
 
         # 2. 检查配置: 是否启用后备机制
@@ -294,8 +295,10 @@ async def _try_predownload_next_episode(
         search_fallback_enabled = (await config_manager.get("searchFallbackEnabled", "false")).lower() == 'true'
 
         if not match_fallback_enabled and not search_fallback_enabled:
-            logger.debug(f"预下载跳过: 未启用任何后备机制")
+            logger.info(f"预下载跳过: 未启用任何后备机制 (episodeId={current_episode_id}, matchFallback={match_fallback_enabled}, searchFallback={search_fallback_enabled})")
             return
+
+        logger.info(f"预下载检查开始: episodeId={current_episode_id}, predownload={predownload_enabled}, matchFallback={match_fallback_enabled}, searchFallback={search_fallback_enabled}")
 
         # 3. 创建新的数据库会话 (避免与主请求的session冲突)
         async with session_factory() as session:
@@ -307,7 +310,7 @@ async def _try_predownload_next_episode(
             current_episode = current_episode_result.scalar_one_or_none()
 
             if not current_episode:
-                logger.debug(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
+                logger.warning(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
                 return
 
             # 5. 查询下一集
@@ -320,7 +323,7 @@ async def _try_predownload_next_episode(
             next_episode = next_episode_result.scalar_one_or_none()
 
             if not next_episode:
-                logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在")
+                logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在 (sourceId={current_episode.sourceId})")
                 return
 
             # 6. 检查下一集是否已有弹幕
@@ -345,17 +348,17 @@ async def _try_predownload_next_episode(
                 unique_key=unique_key,
                 task_type="refresh_comments"
             )
-            logger.info(f"预下载任务已提交: episodeId={next_episode_id}, taskId={task_id}")
+            logger.info(f"✓ 预下载任务已提交: episodeId={next_episode_id}, title='{next_episode_title}', taskId={task_id}")
         except HTTPException as e:
             if e.status_code == 409:
                 logger.debug(f"预下载跳过: 任务已在运行中 (episodeId={next_episode_id})")
             else:
-                logger.warning(f"预下载任务提交失败: {e}")
+                logger.warning(f"预下载任务提交失败 (HTTP {e.status_code}): {e.detail}")
         except Exception as e:
-            logger.warning(f"预下载任务提交失败: {e}")
+            logger.warning(f"预下载任务提交失败: {e}", exc_info=True)
 
     except Exception as e:
-        logger.error(f"预下载处理异常: {e}", exc_info=True)
+        logger.error(f"预下载处理异常 (episodeId={current_episode_id}): {e}", exc_info=True)
 
 def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) -> int:
     """
@@ -2460,9 +2463,19 @@ async def get_comments_for_dandan(
     """
     # 预下载下一集弹幕 (异步,不阻塞当前响应)
     # 在函数开始时就提交,无论当前集是否有弹幕
-    asyncio.create_task(_try_predownload_next_episode(
+    # 添加异常处理回调，确保任何错误都能被记录
+    predownload_task = asyncio.create_task(_try_predownload_next_episode(
         episodeId, request.app.state.db_session_factory, config_manager, task_manager
     ))
+
+    # 添加异常处理回调
+    def handle_predownload_exception(task):
+        try:
+            task.result()  # 如果任务有异常，这里会抛出
+        except Exception as e:
+            logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+
+    predownload_task.add_done_callback(handle_predownload_exception)
 
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
