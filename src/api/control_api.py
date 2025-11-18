@@ -402,6 +402,8 @@ async def auto_import(
             if recent_task:
                 time_since_creation = get_now() - recent_task.createdAt
                 hours_ago = time_since_creation.total_seconds() / 3600
+                # 关键修复：抛出异常前释放搜索锁
+                await manager.release_search_lock(api_key)
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
 
             # 关键修复：外部API也应该检查库内是否已存在相同作品
@@ -419,6 +421,8 @@ async def auto_import(
                 pass
             elif existing_anime and episode is None:
                 # 对于整季导入，如果作品已存在则拒绝
+                # 关键修复：抛出异常前释放搜索锁
+                await manager.release_search_lock(api_key)
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"作品 '{searchTerm}' 已在媒体库中，无需重复导入整季"
