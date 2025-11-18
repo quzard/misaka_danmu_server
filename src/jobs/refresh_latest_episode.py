@@ -90,7 +90,6 @@ class RefreshLatestEpisodeJob(BaseJob):
                         session=s,
                         manager=self.scraper_manager,
                         rate_limiter=self.rate_limiter,
-                        config_manager=self.config_manager,
                         progress_callback=cb
                     )
                 
