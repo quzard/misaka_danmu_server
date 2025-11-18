@@ -268,6 +268,90 @@ async def _get_next_real_anime_id(session: AsyncSession) -> int:
     else:
         return max_id + 1
 
+async def _try_predownload_next_episode(
+    current_episode_id: int,
+    session: AsyncSession,
+    config_manager: ConfigManager,
+    task_manager: TaskManager
+):
+    """
+    尝试预下载下一集弹幕（异步，不阻塞当前请求）
+
+    触发条件:
+    1. preDownloadNextEpisodeEnabled = true
+    2. matchFallbackEnabled = true 或 searchFallbackEnabled = true
+    3. 下一集存在且没有弹幕
+    4. 没有正在运行的下载任务
+    """
+    try:
+        # 1. 检查配置: 是否启用预下载
+        predownload_enabled = (await config_manager.get("preDownloadNextEpisodeEnabled", "false")).lower() == 'true'
+        if not predownload_enabled:
+            return
+
+        # 2. 检查配置: 是否启用后备机制
+        match_fallback_enabled = (await config_manager.get("matchFallbackEnabled", "false")).lower() == 'true'
+        search_fallback_enabled = (await config_manager.get("searchFallbackEnabled", "false")).lower() == 'true'
+
+        if not match_fallback_enabled and not search_fallback_enabled:
+            logger.debug(f"预下载跳过: 未启用任何后备机制")
+            return
+
+        # 3. 查询当前分集信息
+        current_episode_stmt = select(orm_models.Episode).where(
+            orm_models.Episode.id == current_episode_id
+        )
+        current_episode_result = await session.execute(current_episode_stmt)
+        current_episode = current_episode_result.scalar_one_or_none()
+
+        if not current_episode:
+            logger.debug(f"预下载跳过: 当前分集 {current_episode_id} 不存在")
+            return
+
+        # 4. 查询下一集
+        next_episode_index = current_episode.episodeIndex + 1
+        next_episode_stmt = select(orm_models.Episode).where(
+            orm_models.Episode.sourceId == current_episode.sourceId,
+            orm_models.Episode.episodeIndex == next_episode_index
+        )
+        next_episode_result = await session.execute(next_episode_stmt)
+        next_episode = next_episode_result.scalar_one_or_none()
+
+        if not next_episode:
+            logger.debug(f"预下载跳过: 下一集 (index={next_episode_index}) 不存在")
+            return
+
+        # 5. 检查下一集是否已有弹幕
+        if next_episode.commentCount > 0:
+            logger.debug(f"预下载跳过: 下一集 {next_episode.id} 已有 {next_episode.commentCount} 条弹幕")
+            return
+
+        # 6. 提交刷新任务 (使用unique_key防止重复)
+        unique_key = f"predownload_episode_{next_episode.id}"
+
+        try:
+            from .tasks import refresh_episode_comments_task
+
+            task_id, _ = await task_manager.submit_task(
+                lambda s, cb: refresh_episode_comments_task(
+                    next_episode.id, s, cb, config_manager, task_manager
+                ),
+                f"预下载弹幕: {next_episode.title}",
+                unique_key=unique_key,
+                task_type="refresh_comments"
+            )
+            logger.info(f"预下载任务已提交: episodeId={next_episode.id}, taskId={task_id}")
+        except HTTPException as e:
+            if e.status_code == 409:
+                logger.debug(f"预下载跳过: 任务已在运行中 (episodeId={next_episode.id})")
+            else:
+                logger.warning(f"预下载任务提交失败: {e}")
+        except Exception as e:
+            logger.warning(f"预下载任务提交失败: {e}")
+
+    except Exception as e:
+        logger.error(f"预下载处理异常: {e}", exc_info=True)
+
 def _generate_episode_id(anime_id: int, source_order: int, episode_number: int) -> int:
     """
     生成episode ID，格式：25 + animeid（6位）+ 源顺序（2位）+ 集编号（4位）
@@ -3164,6 +3248,11 @@ async def get_comments_for_dandan(
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
+
+    # 预下载下一集弹幕 (异步,不阻塞当前响应)
+    asyncio.create_task(_try_predownload_next_episode(
+        episodeId, session, config_manager, task_manager
+    ))
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
