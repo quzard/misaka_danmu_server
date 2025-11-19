@@ -1955,11 +1955,11 @@ async def _get_match_for_item(
                             try:
                                 from .ai_matcher import AIMatcher
                                 ai_config = {
-                                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
-                                    "ai_match_api_key": await config_manager.get("aiMatchApiKey"),
-                                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl"),
-                                    "ai_match_model": await config_manager.get("aiMatchModel"),
-                                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                                    "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                                    "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                                    "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                                    "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                                    "ai_match_prompt": await config_manager.get("aiPrompt", ""),
                                     "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
                                 }
                                 ai_matcher = AIMatcher(ai_config)

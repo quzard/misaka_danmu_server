@@ -163,7 +163,7 @@ class SeasonMapper:
         """
         if not user:
             # 创建一个临时用户对象用于API调用
-            user = models.User(userId=0, username="system", isAdmin=True)
+            user = models.User(id=0, username="system", isAdmin=True)
 
         # 确定要搜索的源
         if sources is None:

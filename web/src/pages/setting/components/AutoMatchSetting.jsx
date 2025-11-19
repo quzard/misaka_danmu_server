@@ -7,17 +7,8 @@ import { getConfig, setConfig } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 
-const CustomSwitch = ({ checked, disabled, onChange, children, ...props }) => {
-  return (
-    <Switch
-      checked={checked}
-      disabled={disabled}
-      onChange={onChange}
-      {...props}
-    >
-      {children}
-    </Switch>
-  )
+const CustomSwitch = (props) => {
+  return <Switch {...props} />
 }
 
 const AutoMatchSetting = () => {
