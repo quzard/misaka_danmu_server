@@ -520,12 +520,25 @@ async def auto_search_and_import_task(
 
             # 然后在电视剧类型中，我们按季度号过滤
             filtered_by_season = []
+            filtered_out = []
             for item in filtered_by_type:
                 # 使用模型中已解析好的 season 字段进行比较
                 if item.season == season:
                     filtered_by_season.append(item)
+                else:
+                    filtered_out.append(item)
 
             logger.info(f"根据指定的季度 ({season}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。")
+
+            # 打印过滤详情
+            if filtered_out:
+                logger.info("季度过滤结果:")
+                for item in filtered_out:
+                    logger.info(f"  - 已过滤: {item.title} (Provider: {item.provider}, Season: {item.season})")
+            if filtered_by_season:
+                for item in filtered_by_season:
+                    logger.info(f"  - {item.title} (Provider: {item.provider}, Season: {item.season})")
+
             all_results = filtered_by_season
 
         if all_results:
