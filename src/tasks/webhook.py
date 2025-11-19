@@ -14,7 +14,7 @@ from ..metadata_manager import MetadataSourceManager
 from ..task_manager import TaskManager, TaskSuccess
 from ..rate_limiter import RateLimiter
 from ..title_recognition import TitleRecognitionManager
-from ..unified_search import unified_search
+from ..search_utils import unified_search
 from ..timezone import get_now
 from ..utils import parse_search_keyword
 
