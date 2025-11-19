@@ -711,7 +711,7 @@ async def auto_search_and_import_task(
                     raise ValueError(f"未找到 {best_match.provider} 的 scraper")
 
                 # 获取分集列表
-                episodes_list = await scraper.get_episodes(best_match.mediaId, api_key=api_key)
+                episodes_list = await scraper.get_episodes(best_match.mediaId, db_media_type=media_type)
 
                 # 应用识别词转换
                 current_episode_index = 1
@@ -781,7 +781,7 @@ async def auto_search_and_import_task(
                                 logger.warning(f"未找到 {candidate.provider} 的 scraper，跳过")
                                 continue
 
-                            episodes_list = await scraper.get_episodes(candidate.mediaId, api_key=api_key)
+                            episodes_list = await scraper.get_episodes(candidate.mediaId, db_media_type=media_type)
 
                             # 应用识别词转换
                             current_episode_index = 1
