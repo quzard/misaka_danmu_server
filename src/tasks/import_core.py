@@ -12,7 +12,7 @@ from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..metadata_manager import MetadataSourceManager
 from ..title_recognition import TitleRecognitionManager
 from ..image_utils import download_image
-from ..crud import sync_postgres_sequence
+from ..database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
