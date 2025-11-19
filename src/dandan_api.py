@@ -376,13 +376,11 @@ async def _try_predownload_next_episode(
                     # 获取分集列表
                     logger.info(f"预下载: 正在获取分集列表 (provider={provider}, mediaId={media_id})")
                     scraper = scraper_manager.get_scraper(provider)
-                    episodes_data = await scraper.get_episodes(media_id)
+                    episodes = await scraper.get_episodes(media_id)
 
-                    if not episodes_data or 'episodes' not in episodes_data:
+                    if not episodes or len(episodes) == 0:
                         logger.warning(f"预下载失败: 无法获取分集列表 (provider={provider}, mediaId={media_id})")
                         raise TaskSuccess("无法获取分集列表")
-
-                    episodes = episodes_data['episodes']
 
                     # 查找下一集
                     target_episode = None
