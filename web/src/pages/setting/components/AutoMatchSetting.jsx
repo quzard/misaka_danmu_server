@@ -450,9 +450,9 @@ const AutoMatchSetting = () => {
               </Row>
 
               {/* 季度映射配置 */}
-              <Row gutter={[16, 16]}>
-                <Col xs={24} sm={12}>
-                  <Card size="small" style={{ marginBottom: '16px' }}>
+              <Card size="small" style={{ marginBottom: '16px' }}>
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} sm={12}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div style={{ fontWeight: 500, marginBottom: '4px' }}>季度映射开关</div>
 
@@ -492,10 +492,8 @@ const AutoMatchSetting = () => {
                         </Form.Item>
                       </div>
                     </div>
-                  </Card>
-                </Col>
-                <Col xs={24} sm={12}>
-                  <Card size="small" style={{ marginBottom: '16px' }}>
+                  </Col>
+                  <Col xs={24} sm={12}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                         <span style={{ fontWeight: 500 }}>元数据源选择</span>
@@ -535,9 +533,9 @@ const AutoMatchSetting = () => {
                         </div>
                       </Form.Item>
                     </div>
-                  </Card>
-                </Col>
-              </Row>
+                  </Col>
+                </Row>
+              </Card>
 
               <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item

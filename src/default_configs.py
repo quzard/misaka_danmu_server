@@ -122,6 +122,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiAliasExpansionEnabled': ('false', '是否启用AI别名扩展。启用后，当元数据源返回非中文标题时，使用AI生成可能的别名用于搜索。'),
             'aiAliasExpansionPrompt': (ai_prompts.get('DEFAULT_AI_ALIAS_EXPANSION_PROMPT', ''), 'AI别名扩展提示词'),
             'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
+            'seasonMappingPrompt': (ai_prompts.get('DEFAULT_AI_SEASON_MAPPING_PROMPT', ''), 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。'),
         })
 
     return configs
