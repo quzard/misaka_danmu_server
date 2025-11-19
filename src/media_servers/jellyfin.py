@@ -159,7 +159,14 @@ class JellyfinMediaServer(BaseMediaServer):
     async def get_season_episodes(
         self,
         series_id: str,
-        season_number: int
+        season_number: int,
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
     ) -> List[MediaItem]:
         """获取某一季的所有集"""
         try:
