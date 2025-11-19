@@ -17,13 +17,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from . import crud, models, orm_models, tasks
+from . import crud, models, orm_models, tasks, scraper_manager as sm, rate_limiter as rl
 from .config_manager import ConfigManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
 from .rate_limiter import RateLimiter
-from .task_manager import TaskManager, TaskStatus
+from .task_manager import TaskManager, TaskStatus, TaskSuccess
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
@@ -364,61 +364,84 @@ async def _try_predownload_next_episode(
         unique_key = f"predownload_{provider}_{media_id}_{next_episode_index}"
 
         try:
-            # 导入必要的函数
-            from .tasks import _download_and_save_episode_comments
-
             # 创建下载任务
             async def predownload_task(session, progress_callback):
                 """预下载任务: 获取分集信息并下载弹幕"""
-                from . import scraper_manager as sm
-                scraper_manager = sm.get_scraper_manager()
+                try:
+                    scraper_manager = sm.get_scraper_manager()
+                    rate_limiter = rl.get_rate_limiter()
 
-                # 获取分集列表
-                logger.info(f"预下载: 正在获取分集列表 (provider={provider}, mediaId={media_id})")
-                episodes_data = await scraper_manager.get_episodes(provider, media_id)
+                    await progress_callback(10, "正在获取分集列表...")
 
-                if not episodes_data or 'episodes' not in episodes_data:
-                    logger.warning(f"预下载失败: 无法获取分集列表 (provider={provider}, mediaId={media_id})")
-                    return
+                    # 获取分集列表
+                    logger.info(f"预下载: 正在获取分集列表 (provider={provider}, mediaId={media_id})")
+                    scraper = scraper_manager.get_scraper(provider)
+                    episodes_data = await scraper.get_episodes(media_id)
 
-                episodes = episodes_data['episodes']
+                    if not episodes_data or 'episodes' not in episodes_data:
+                        logger.warning(f"预下载失败: 无法获取分集列表 (provider={provider}, mediaId={media_id})")
+                        raise TaskSuccess("无法获取分集列表")
 
-                # 查找下一集
-                target_episode = None
-                for ep in episodes:
-                    if ep.get('episode_number') == next_episode_index:
-                        target_episode = ep
-                        break
+                    episodes = episodes_data['episodes']
 
-                if not target_episode:
-                    logger.info(f"预下载跳过: 源站没有第 {next_episode_index} 集 (provider={provider}, mediaId={media_id})")
-                    return
+                    # 查找下一集
+                    target_episode = None
+                    for ep in episodes:
+                        if ep.episodeIndex == next_episode_index:
+                            target_episode = ep
+                            break
 
-                provider_episode_id = target_episode.get('provider_episode_id')
-                episode_title = target_episode.get('title', f'第{next_episode_index}集')
+                    if not target_episode:
+                        logger.info(f"预下载跳过: 源站没有第 {next_episode_index} 集 (provider={provider}, mediaId={media_id})")
+                        raise TaskSuccess(f"源站没有第 {next_episode_index} 集")
 
-                if not provider_episode_id:
-                    logger.warning(f"预下载失败: 第 {next_episode_index} 集缺少 provider_episode_id")
-                    return
+                    provider_episode_id = target_episode.episodeId
+                    episode_title = target_episode.title
 
-                logger.info(f"预下载: 找到下一集 '{episode_title}' (provider_episode_id={provider_episode_id})")
+                    logger.info(f"预下载: 找到下一集 '{episode_title}' (provider_episode_id={provider_episode_id})")
 
-                # 下载并保存弹幕
-                await _download_and_save_episode_comments(
-                    session=session,
-                    progress_callback=progress_callback,
-                    anime_id=anime_id,
-                    anime_title=anime.title,
-                    source_id=source.id,
-                    provider=provider,
-                    media_id=media_id,
-                    episode_index=next_episode_index,
-                    episode_title=episode_title,
-                    provider_episode_id=provider_episode_id,
-                    config_manager=config_manager
-                )
+                    await progress_callback(30, f"正在下载弹幕: {episode_title}...")
 
-                logger.info(f"✓ 预下载完成: '{episode_title}' (index={next_episode_index})")
+                    # 检查速率限制
+                    await rate_limiter.check(provider)
+
+                    # 下载弹幕
+                    comments = await scraper.get_comments(
+                        provider_episode_id,
+                        progress_callback=lambda p, msg: progress_callback(30 + int(p * 0.6), msg)
+                    )
+
+                    if not comments or len(comments) == 0:
+                        logger.warning(f"预下载: 第 {next_episode_index} 集没有弹幕")
+                        raise TaskSuccess("未找到弹幕")
+
+                    await rate_limiter.increment(provider)
+
+                    logger.info(f"预下载: 获取到 {len(comments)} 条弹幕")
+
+                    await progress_callback(90, "正在保存弹幕...")
+
+                    # 创建或获取Episode记录
+                    episode_db_id = await crud.create_episode_if_not_exists(
+                        session, anime_id, source.id, next_episode_index,
+                        episode_title, target_episode.url, provider_episode_id
+                    )
+
+                    # 保存弹幕
+                    added_count = await crud.save_danmaku_for_episode(
+                        session, episode_db_id, comments, config_manager
+                    )
+
+                    await session.commit()
+
+                    logger.info(f"✓ 预下载完成: '{episode_title}' (index={next_episode_index}, 新增{added_count}条弹幕)")
+                    raise TaskSuccess(f"预下载完成，新增 {added_count} 条弹幕")
+
+                except TaskSuccess:
+                    raise
+                except Exception as e:
+                    logger.error(f"预下载任务失败: {e}", exc_info=True)
+                    raise
 
             task_id, _ = await task_manager.submit_task(
                 predownload_task,
