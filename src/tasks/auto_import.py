@@ -804,7 +804,7 @@ async def auto_search_and_import_task(
                         raise ValueError("所有候选源均未找到第一集，无法导入")
 
                 # 获取第一集的弹幕
-                comments = await scraper.get_comments(best_match.mediaId, first_episode.episodeId, api_key=api_key)
+                comments = await scraper.get_comments(first_episode.episodeId)
                 if not comments:
                     logger.warning(f"第一集 (索引: {current_episode_index}) 没有弹幕，尝试下一个候选源...")
                     # 尝试下一个候选源
@@ -836,7 +836,7 @@ async def auto_search_and_import_task(
                                 logger.warning(f"候选源 {idx} 未找到第一集，跳过")
                                 continue
 
-                            comments = await scraper.get_comments(candidate.mediaId, first_episode.episodeId, api_key=api_key)
+                            comments = await scraper.get_comments(first_episode.episodeId)
                             if comments:
                                 logger.info(f"候选源 {idx} 找到第一集弹幕，使用该源")
                                 best_match = candidate
