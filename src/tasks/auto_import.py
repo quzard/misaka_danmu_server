@@ -3,7 +3,7 @@ import logging
 import traceback
 from typing import Callable, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from fuzzywuzzy import fuzz
+from thefuzz import fuzz
 
 from .. import crud, models
 from ..config_manager import ConfigManager

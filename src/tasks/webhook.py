@@ -4,7 +4,7 @@ import logging
 from typing import Callable, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from fuzzywuzzy import fuzz
+from thefuzz import fuzz
 
 from .. import crud, models, orm_models
 from ..orm_models import AnimeSource as AS
