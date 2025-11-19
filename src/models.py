@@ -586,13 +586,6 @@ class ControlRateLimitProviderStatus(BaseModel):
     requestCount: int = Field(0, description="总计数 (directCount + fallbackCount)")
     quota: Union[int, str]
 
-class ControlRateLimitFallbackStatus(BaseModel):
-    """后备流控状态"""
-    totalCount: int = Field(0, description="后备调用总计数")
-    totalLimit: int = Field(50, description="后备调用总限制")
-    matchFallbackCount: int = Field(0, description="匹配后备计数")
-    searchFallbackCount: int = Field(0, description="后备搜索计数")
-
 class ControlRateLimitStatusResponse(BaseModel):
     """用于外部API的流控状态响应模型"""
     globalEnabled: bool
@@ -600,5 +593,8 @@ class ControlRateLimitStatusResponse(BaseModel):
     globalLimit: int
     globalPeriod: str
     secondsUntilReset: int
+    fallbackTotalCount: int = Field(0, description="后备调用总计数")
+    fallbackTotalLimit: int = Field(50, description="后备调用总限制")
+    fallbackMatchCount: int = Field(0, description="匹配后备计数")
+    fallbackSearchCount: int = Field(0, description="后备搜索计数")
     providers: List[ControlRateLimitProviderStatus]
-    fallback: ControlRateLimitFallbackStatus

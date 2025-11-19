@@ -215,6 +215,14 @@ async def test_proxy_latency(
             except ValueError:
                 pass
 
+    # 添加 GitHub 相关的固定测试域名（用于资源下载）
+    github_domains = [
+        "https://github.com",
+        "https://api.github.com",
+        "https://raw.githubusercontent.com"
+    ]
+    test_domains.update(github_domains)
+
     # --- 步骤 3: 并发执行所有测试 ---
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
         try:

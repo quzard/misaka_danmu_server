@@ -233,7 +233,7 @@ async def get_resource_repo(
     return {"repoUrl": repo_url}
 
 
-async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3) -> Optional[str]:
+async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[str]:
     """
     带重试机制的版本获取函数
 
@@ -241,6 +241,7 @@ async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str,
         package_url: package.json 的 URL
         headers: HTTP 请求头
         max_retries: 最大重试次数（默认3次）
+        proxy: 代理URL（可选）
 
     Returns:
         版本号字符串，失败返回 None
@@ -249,7 +250,7 @@ async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str,
 
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True, proxy=proxy) as client:
                 response = await client.get(package_url)
                 if response.status_code == 200:
                     package_data = response.json()
@@ -300,6 +301,12 @@ async def get_versions(
             except Exception as e:
                 logger.warning(f"读取本地 package.json 失败: {e}")
 
+        # 获取代理配置
+        proxy_url = await config_manager.get("proxyUrl", "")
+        proxy_enabled_str = await config_manager.get("proxyEnabled", "false")
+        proxy_enabled = proxy_enabled_str.lower() == 'true'
+        proxy_to_use = proxy_url if proxy_enabled and proxy_url else None
+
         # 获取远程版本（当前配置的资源仓库）
         remote_version = None
         repo_url = await config_manager.get("scraper_resource_repo", "")
@@ -320,7 +327,7 @@ async def get_versions(
 
             base_url = _build_base_url(repo_info, repo_url)
             package_url = f"{base_url}/package.json"
-            remote_version = await _fetch_package_version_with_retry(package_url, headers)
+            remote_version = await _fetch_package_version_with_retry(package_url, headers, proxy=proxy_to_use)
 
         # 固定源仓库（官方仓库）版本
         official_version = None
@@ -334,7 +341,7 @@ async def get_versions(
 
             official_base_url = _build_base_url(official_repo_info, "https://github.com/l429609201/Misaka-Scraper-Resources")
             official_package_url = f"{official_base_url}/package.json"
-            official_version = await _fetch_package_version_with_retry(official_package_url, headers_official)
+            official_version = await _fetch_package_version_with_retry(official_package_url, headers_official, proxy=proxy_to_use)
         except Exception as e:
             logger.warning(f"获取官方资源仓库版本失败: {e}")
 
@@ -693,6 +700,16 @@ async def load_resources_stream(
 
                     base_url = _build_base_url(repo_info, repo_url)
 
+                    # 获取代理配置
+                    proxy_url = await config_manager.get("proxyUrl", "")
+                    proxy_enabled_str = await config_manager.get("proxyEnabled", "false")
+                    proxy_enabled = proxy_enabled_str.lower() == 'true'
+                    proxy_to_use = proxy_url if proxy_enabled and proxy_url else None
+
+                    if proxy_to_use:
+                        logger.info(f"GitHub资源下载将使用代理: {proxy_to_use}")
+                        yield f"data: {json.dumps({'type': 'info', 'message': f'使用代理: {proxy_to_use}'}, ensure_ascii=False)}\n\n"
+
                     # 下载 package.json
                     package_url = f"{base_url}/package.json"
                     logger.info(f"正在从 {package_url} 获取资源包信息...")
@@ -702,7 +719,7 @@ async def load_resources_stream(
                     timeout_config = httpx.Timeout(5.0, read=15.0)
 
                     try:
-                        async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True) as client:
+                        async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
                             response = await client.get(package_url)
                             if response.status_code != 200:
                                 logger.error(f"获取资源包信息失败: HTTP {response.status_code}")
@@ -760,7 +777,7 @@ async def load_resources_stream(
 
                     # 下载并替换文件
                     download_timeout = httpx.Timeout(3.0, read=15.0)
-                    async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True) as client:
+                    async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
                         for index, (scraper_name, scraper_info) in enumerate(resources.items(), 1):
                             await asyncio.sleep(0)
 

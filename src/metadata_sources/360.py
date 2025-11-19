@@ -569,12 +569,6 @@ class So360MetadataSource(BaseMetadataSource):
             cat_id = item.cat_id or ''
             cat_name = item.cat_name or ''
 
-            # 确定使用哪个ID
-            if cat_id == '3' or '综艺' in cat_name:
-                ent_id = item.id  # 综艺使用id
-            else:
-                ent_id = item.en_id or item.id  # 其他使用en_id
-
             # 确定使用哪个平台
             if target_site:
                 site = target_site
@@ -590,10 +584,12 @@ class So360MetadataSource(BaseMetadataSource):
             episode_urls: List[Tuple[int, str]] = []
 
             if cat_id == '3' or '综艺' in cat_name:
-                # 综艺使用episodeszongyi接口
+                # 综艺使用episodeszongyi接口,使用id
+                ent_id = item.id
                 episode_urls = await self._get_zongyi_episodes(ent_id, site, item)
             else:
-                # 其他使用episodesv2接口
+                # 其他使用episodesv2接口,优先使用en_id
+                ent_id = item.en_id or item.id
                 episode_urls = await self._get_episodes_v2(cat_id, ent_id, site)
 
             self.logger.info(f"360: 成功获取 {len(episode_urls)} 个分集URL")

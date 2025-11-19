@@ -4,11 +4,14 @@ import uuid
 import re
 import hashlib
 import ipaddress
+import json
+import asyncio
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable, Union
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Path
+from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyQuery
 from thefuzz import fuzz
 from pydantic import BaseModel, Field, model_validator
@@ -286,7 +289,7 @@ class ControlAutoImportRequest(BaseModel):
     searchType: AutoImportSearchType
     searchTerm: str
     season: Optional[int] = None
-    episode: Optional[int] = None
+    episode: Optional[str] = None  # 支持单集(如"1")或多集(如"1,3,5,7,9,11-13")格式
     mediaType: Optional[AutoImportMediaType] = None
     preassignedAnimeId: Optional[int] = None  # 预分配的anime_id（用于匹配后备）
 
@@ -302,7 +305,7 @@ async def auto_import(
     searchType: AutoImportSearchType = Query(..., description="搜索类型。可选值: 'keyword', 'tmdb', 'tvdb', 'douban', 'imdb', 'bangumi'。"),
     searchTerm: str = Query(..., description="搜索内容。根据 searchType 的不同，这里应填入关键词或对应的平台ID。"),
     season: Optional[int] = Query(None, description="季度号。如果未提供，将自动推断或默认为1。"),
-    episode: Optional[int] = Query(None, description="集数。如果提供，将只导入单集（此时必须提供季度）。"),
+    episode: Optional[str] = Query(None, description="集数。支持单集(如'1')或多集(如'1,3,5,7,9,11-13')格式。如果提供，将只导入指定集数（此时必须提供季度）。"),
     mediaType: Optional[AutoImportMediaType] = Query(None, description="媒体类型。当 searchType 为 'keyword' 时必填。如果留空，将根据有无 'season' 参数自动推断。"),
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
@@ -332,7 +335,7 @@ async def auto_import(
     -   `season` & `episode`:
         -   **电视剧/番剧**:
             -   提供 `season`，不提供 `episode`: 导入 `season` 指定的整季。
-            -   提供 `season` 和 `episode`: 只导入指定的单集。
+            -   提供 `season` 和 `episode`: 导入指定的集数。支持单集(如'1')或多集(如'1,3,5,7,9,11-13')格式。
         -   **电影**:
             -   `season` 和 `episode` 参数会被忽略。
     -   `mediaType`:
@@ -377,6 +380,7 @@ async def auto_import(
     if payload.season is not None:
         unique_key_parts.append(f"s{payload.season}")
     if payload.episode is not None:
+        # 对于多集格式，保留原始字符串作为 unique_key 的一部分
         unique_key_parts.append(f"e{payload.episode}")
     # 始终包含 mediaType 以区分同名但不同类型的作品，避免重复任务检测问题
     if payload.mediaType is not None:
@@ -398,6 +402,8 @@ async def auto_import(
             if recent_task:
                 time_since_creation = get_now() - recent_task.createdAt
                 hours_ago = time_since_creation.total_seconds() / 3600
+                # 关键修复：抛出异常前释放搜索锁
+                await manager.release_search_lock(api_key)
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
 
             # 关键修复：外部API也应该检查库内是否已存在相同作品
@@ -410,23 +416,13 @@ async def auto_import(
             )
 
             if existing_anime and episode is not None:
-                # 对于单集导入，检查具体集数是否已存在（需要考虑识别词转换）
-                episode_to_check = episode
-                if title_recognition_manager:
-                    _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(searchTerm, episode, season, None)  # source参数暂时为None
-                    if converted_episode is not None:
-                        episode_to_check = converted_episode
-
-                anime_id = existing_anime.get('id')
-                if anime_id:
-                    episode_exists = await crud.find_episode_by_index(session, anime_id, episode_to_check)
-                    if episode_exists:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail=f"作品 '{searchTerm}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入"
-                        )
+                # 对于单集/多集导入，检查具体集数是否已存在（需要考虑识别词转换）
+                # 注意：这里不再拒绝请求，而是在任务执行时跳过已存在的集数
+                pass
             elif existing_anime and episode is None:
                 # 对于整季导入，如果作品已存在则拒绝
+                # 关键修复：抛出异常前释放搜索锁
+                await manager.release_search_lock(api_key)
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"作品 '{searchTerm}' 已在媒体库中，无需重复导入整季"
@@ -437,7 +433,8 @@ async def auto_import(
     if payload.season is not None:
         title_parts.append(f"S{payload.season:02d}")
     if payload.episode is not None:
-        title_parts.append(f"E{payload.episode:02d}")
+        # 对于多集格式，直接显示原始字符串
+        title_parts.append(f"E{payload.episode}")
     task_title = " ".join(title_parts)
 
     try:
@@ -448,17 +445,18 @@ async def auto_import(
             api_key=api_key
         )
         task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        # 注意: 搜索锁由任务内部的 finally 块负责释放,确保任务完成后才释放
         return {"message": "自动导入任务已提交", "taskId": task_id}
     except HTTPException as e:
         # 捕获已知的冲突错误并重新抛出
+        # 如果任务提交失败,需要释放锁
+        await manager.release_search_lock(api_key)
         raise e
     except Exception as e:
-        # 捕获任何在任务提交阶段发生的异常，并确保释放锁
+        # 捕获任何在任务提交阶段发生的异常,并确保释放锁
         logger.error(f"提交自动导入任务时发生未知错误: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
-    finally:
-        # 确保释放锁
         await manager.release_search_lock(api_key)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
 
 @router.get("/search", response_model=ControlSearchResponse, summary="搜索媒体")
 async def search_media(
@@ -1483,14 +1481,13 @@ async def get_execution_task_id(
     execution_id, status = await crud.get_execution_task_id_from_scheduler_task(session, taskId)
     return ExecutionTaskResponse(schedulerTaskId=taskId, executionTaskId=execution_id, status=status)
 
-@router.get("/rate-limit/status", response_model=models.ControlRateLimitStatusResponse, summary="获取流控状态")
-async def get_rate_limit_status(
-    session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
-):
+async def _get_rate_limit_status_data(
+    session: AsyncSession,
+    scraper_manager: ScraperManager,
+    rate_limiter: RateLimiter
+) -> models.ControlRateLimitStatusResponse:
     """
-    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+    获取流控状态数据的核心逻辑（可被普通响应和SSE流复用）
     """
     # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
     try:
@@ -1522,13 +1519,6 @@ async def get_rate_limit_status(
     search_fallback_count = fallback_search_state.requestCount if fallback_search_state else 0
     fallback_total = match_fallback_count + search_fallback_count
     fallback_limit = 50  # 固定50次
-
-    fallback_status = models.ControlRateLimitFallbackStatus(
-        totalCount=fallback_total,
-        totalLimit=fallback_limit,
-        matchFallbackCount=match_fallback_count,
-        searchFallbackCount=search_fallback_count
-    )
 
     provider_items = []
     all_scrapers_raw = await crud.get_all_scraper_settings(session)
@@ -1577,10 +1567,91 @@ async def get_rate_limit_status(
     return models.ControlRateLimitStatusResponse(
         globalEnabled=global_enabled,
         globalRequestCount=global_state.requestCount if global_state else 0,
-        globalLimit=global_limit, globalPeriod=global_period_str,
+        globalLimit=global_limit,
+        globalPeriod=global_period_str,
         secondsUntilReset=seconds_until_reset,
-        providers=provider_items,
-        fallback=fallback_status
+        fallbackTotalCount=fallback_total,
+        fallbackTotalLimit=fallback_limit,
+        fallbackMatchCount=match_fallback_count,
+        fallbackSearchCount=search_fallback_count,
+        providers=provider_items
+    )
+
+
+@router.get("/rate-limit/status", summary="获取流控状态")
+async def get_rate_limit_status(
+    request: Request,
+    stream: bool = Query(False, description="是否使用SSE流式推送(每秒更新)"),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+):
+    """
+    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+
+    ## 使用方式
+
+    ### 普通JSON响应 (默认)
+    - 请求: `GET /api/control/rate-limit/status`
+    - 响应: 单次JSON对象
+    - Content-Type: `application/json`
+
+    ### SSE流式推送
+    - 请求: `GET /api/control/rate-limit/status?stream=true`
+    - 响应: `text/event-stream`，每秒推送一次状态更新
+    - 事件格式: `data: {JSON对象}`
+    - 客户端断开连接时自动停止推送
+
+    ## 参数
+    - **stream**: 是否使用SSE流式推送。默认False返回JSON，True返回text/event-stream
+
+    ## 响应格式
+    两种模式返回的数据结构完全一致，只是传输方式不同:
+    - 普通模式: 一次性返回完整JSON
+    - SSE模式: 每秒推送一次相同格式的JSON数据
+    """
+    if not stream:
+        # 普通JSON响应
+        return await _get_rate_limit_status_data(session, scraper_manager, rate_limiter)
+
+    # SSE流式响应
+    async def event_generator():
+        """SSE事件生成器，每秒推送一次流控状态"""
+        session_factory = request.app.state.db_session_factory
+        try:
+            while True:
+                try:
+                    # 为每次循环创建新的session
+                    async with session_factory() as loop_session:
+                        # 获取流控状态数据
+                        status_data = await _get_rate_limit_status_data(loop_session, scraper_manager, rate_limiter)
+
+                        # 转换为字典并序列化为JSON (与普通JSON响应格式一致)
+                        status_dict = status_data.model_dump(mode='json')
+
+                        # 发送状态更新事件 (直接推送状态对象,不包装type字段)
+                        yield f"data: {json.dumps(status_dict, ensure_ascii=False)}\n\n"
+
+                    # 等待1秒后再次推送
+                    await asyncio.sleep(1)
+
+                except Exception as e:
+                    logger.error(f"SSE流控状态推送出错: {e}", exc_info=True)
+                    # 错误时推送空对象,避免客户端解析失败
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            logger.info("SSE流控状态推送已取消(客户端断开连接)")
+            raise
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
 
 
@@ -1675,7 +1746,6 @@ async def get_allowed_configs(
             if title_recognition_manager:
                 # 从数据库获取识别词配置
                 from ..orm_models import TitleRecognition
-                from sqlalchemy import select
                 result = await session.execute(select(TitleRecognition).limit(1))
                 title_recognition = result.scalar_one_or_none()
                 current_value = title_recognition.content if title_recognition else ""

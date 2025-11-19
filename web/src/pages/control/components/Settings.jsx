@@ -64,7 +64,8 @@ export const Settings = () => {
     try {
       const response = await saveTmdbReverseLookupConfig({
         enabled: values.tmdbEnabled,
-        sources: values.tmdbSources,
+        // 当禁用TMDB反查时,sources可能为undefined,使用空数组作为默认值
+        sources: values.tmdbSources || [],
       })
       return response.data
     } catch (error) {

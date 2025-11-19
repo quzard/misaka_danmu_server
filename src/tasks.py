@@ -36,6 +36,49 @@ from .database import sync_postgres_sequence
 
 logger = logging.getLogger(__name__)
 
+def parse_episode_ranges(episode_str: str) -> List[int]:
+    """
+    解析集数范围字符串，支持多种格式：
+    - 单集: "1"
+    - 范围: "1-3"
+    - 混合: "1,3,5,7,9,11-13"
+
+    返回所有集数的列表
+    """
+    episodes = []
+
+    # 移除所有空格
+    episode_str = episode_str.replace(" ", "")
+
+    # 按逗号分割
+    parts = episode_str.split(",")
+
+    for part in parts:
+        if "-" in part:
+            # 处理范围，如 "1-3" 或 "31-39"
+            try:
+                start, end = part.split("-", 1)
+                start_num = int(start)
+                end_num = int(end)
+                episodes.extend(range(start_num, end_num + 1))
+            except (ValueError, IndexError) as e:
+                logger.warning(f"无法解析集数范围 '{part}': {e}")
+                continue
+        else:
+            # 处理单集，如 "6" 或 "8"
+            try:
+                episode_num = int(part)
+                episodes.append(episode_num)
+            except ValueError as e:
+                logger.warning(f"无法解析集数 '{part}': {e}")
+                continue
+
+    # 去重并排序
+    episodes = sorted(list(set(episodes)))
+    logger.info(f"解析集数范围 '{episode_str}' -> {episodes}")
+
+    return episodes
+
 def _extract_short_error_message(error: Exception) -> str:
     """
     从异常对象中提取简短的错误消息，用于任务管理器显示
@@ -1016,6 +1059,9 @@ async def generic_import_task(
     preassignedAnimeId: Optional[int] = None,
     # 新增: 媒体库整季导入时, 指定要导入的分集索引列表
     selectedEpisodes: Optional[List[int]] = None,
+    # 新增: 追更任务标识,用于失败计数
+    is_incremental_refresh: bool = False,
+    incremental_refresh_source_id: Optional[int] = None,
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -1323,6 +1369,46 @@ async def generic_import_task(
         is_fallback=is_fallback,  # 传递后备任务标识
         fallback_type=fallback_type  # 传递后备类型
     )
+
+    # 处理追更任务的失败计数
+    if is_incremental_refresh and incremental_refresh_source_id:
+        from sqlalchemy import update as sql_update
+
+        if not successful_episodes_indices and not skipped_episodes_indices and failed_episodes_count > 0:
+            # 追更失败,增加失败计数
+            stmt = sql_update(orm_models.AnimeSource).where(
+                orm_models.AnimeSource.id == incremental_refresh_source_id
+            ).values(
+                incrementalRefreshFailures=orm_models.AnimeSource.incrementalRefreshFailures + 1
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+            # 检查失败次数是否达到10次
+            source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == incremental_refresh_source_id)
+            source_result = await session.execute(source_stmt)
+            source_obj = source_result.scalar_one_or_none()
+
+            if source_obj and source_obj.incrementalRefreshFailures >= 10:
+                # 达到10次失败,自动禁用追更
+                disable_stmt = sql_update(orm_models.AnimeSource).where(
+                    orm_models.AnimeSource.id == incremental_refresh_source_id
+                ).values(
+                    incrementalRefreshEnabled=False
+                )
+                await session.execute(disable_stmt)
+                await session.commit()
+                logger.warning(f"源 ID {incremental_refresh_source_id} 追更失败次数达到10次,已自动禁用追更")
+        else:
+            # 追更成功,重置失败计数
+            stmt = sql_update(orm_models.AnimeSource).where(
+                orm_models.AnimeSource.id == incremental_refresh_source_id
+            ).values(
+                incrementalRefreshFailures=0
+            )
+            await session.execute(stmt)
+            await session.commit()
+            logger.info(f"源 ID {incremental_refresh_source_id} 追更成功,已重置失败计数")
 
     if not successful_episodes_indices and not skipped_episodes_indices and failed_episodes_count > 0:
         # 生成失败详情消息
@@ -2445,7 +2531,8 @@ async def webhook_search_and_dispatch_task(
                 item.type = "movie"
 
         # 4. 如果搜索词中明确指定了季度，对结果进行过滤（与 WebUI 一致）
-        if season_to_filter and season_to_filter > 0:
+        # 注意：电影类型不进行季度过滤
+        if season_to_filter and season_to_filter > 0 and mediaType != "movie":
             original_count = len(all_search_results)
             # 当指定季度时，我们只关心电视剧类型
             filtered_by_type = [item for item in all_search_results if item.type == "tv_series"]
@@ -3080,23 +3167,37 @@ async def auto_search_and_import_task(
                 session, main_title, season_for_check, year, title_recognition_manager, None  # source参数暂时为None，因为这里是查找现有条目
             )
 
-        # 关键修复：对于单集导入，需要使用经过识别词处理后的集数进行检查
+        # 关键修复：对于单集/多集导入，需要使用经过识别词处理后的集数进行检查
         if payload.episode is not None and existing_anime:
-            # 应用识别词转换获取实际的集数
-            episode_to_check = payload.episode
-            if title_recognition_manager:
-                _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(main_title, payload.episode, season_for_check)
-                if converted_episode is not None:
-                    episode_to_check = converted_episode
-                    logger.info(f"识别词转换: 原始集数 {payload.episode} -> 转换后集数 {episode_to_check}")
+            # 解析集数字符串为列表 (支持 "1,3,5,7,9,11-13" 格式)
+            requested_episodes = parse_episode_ranges(payload.episode)
+            logger.info(f"检查库内是否存在请求的集数: {requested_episodes}")
 
             anime_id_to_use = existing_anime.get('id') or existing_anime.get('animeId')
             if anime_id_to_use:
-                episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
-                if episode_exists:
-                    final_message = f"作品 '{main_title}' 的第 {episode_to_check} 集已在媒体库中，无需重复导入。"
-                    logger.info(f"自动导入任务检测到分集已存在（经识别词转换），任务成功结束: {final_message}")
+                # 检查所有请求的集数是否都已存在
+                all_exist = True
+                missing_episodes = []
+                for ep in requested_episodes:
+                    # 应用识别词转换获取实际的集数
+                    episode_to_check = ep
+                    if title_recognition_manager:
+                        _, converted_episode, _, _, _ = await title_recognition_manager.apply_title_recognition(main_title, ep, season_for_check)
+                        if converted_episode is not None:
+                            episode_to_check = converted_episode
+                            logger.info(f"识别词转换: 原始集数 {ep} -> 转换后集数 {episode_to_check}")
+
+                    episode_exists = await crud.find_episode_by_index(session, anime_id_to_use, episode_to_check)
+                    if not episode_exists:
+                        all_exist = False
+                        missing_episodes.append(ep)
+
+                if all_exist:
+                    final_message = f"作品 '{main_title}' 的所有请求集数 {requested_episodes} 已在媒体库中，无需重复导入。"
+                    logger.info(f"自动导入任务检测到所有分集已存在，任务成功结束: {final_message}")
                     raise TaskSuccess(final_message)
+                else:
+                    logger.info(f"作品 '{main_title}' 已存在，但部分集数不存在: {missing_episodes}。将继续执行导入流程。")
             # 如果分集不存在，即使作品存在，我们也要继续执行后续的搜索和导入逻辑。
         # 关键修复：仅当这是一个整季导入请求时，才在找到作品后立即停止。
         # 对于单集导入，即使作品存在，也需要继续执行以检查和导入缺失的单集。
@@ -3129,19 +3230,91 @@ async def auto_search_and_import_task(
                 else: source_to_use = None
 
             if source_to_use:
-                # 关键修复：如果这是一个单集导入，并且我们已经确认了该分集不存在，
-                # 那么我们应该继续执行导入，而不是在这里停止。
+                # 关键修复：如果这是一个单集/多集导入，并且我们已经确认了部分分集不存在，
+                # 那么我们应该使用库内已有的源继续执行导入，而不是在这里停止。
                 # 只有在整季导入时，我们才在这里停止。
                 if payload.episode is None:
                     final_message = f"作品 '{main_title}' 已在媒体库中，无需重复导入。"
                     logger.info(f"自动导入任务检测到作品已存在（整季导入），任务成功结束: {final_message}")
                     raise TaskSuccess(final_message)
                 else:
-                    logger.info(f"作品 '{main_title}' 已存在，但请求的分集不存在。将继续执行导入流程。")
+                    # 对于单集/多集导入，使用库内已有的源创建导入任务
+                    logger.info(f"作品 '{main_title}' 已存在，使用库内源 {source_to_use['providerName']} 导入缺失的集数。")
+
+                    # 解析多集参数
+                    selected_episodes = parse_episode_ranges(payload.episode)
+                    logger.info(f"解析集数参数 '{payload.episode}' -> {selected_episodes}")
+
+                    # 获取元数据ID
+                    douban_id = existing_anime.get('doubanId')
+                    tmdb_id = existing_anime.get('tmdbId')
+                    imdb_id = existing_anime.get('imdbId')
+                    tvdb_id = existing_anime.get('tvdbId')
+                    bangumi_id = existing_anime.get('bangumiId')
+                    image_url = existing_anime.get('imageUrl')
+
+                    task_coro = lambda s, cb: generic_import_task(
+                        provider=source_to_use['providerName'], mediaId=source_to_use['mediaId'],
+                        animeTitle=existing_anime['title'], mediaType=existing_anime.get('type', 'tv_series'),
+                        season=season_for_check, year=existing_anime.get('year'),
+                        config_manager=config_manager, metadata_manager=metadata_manager,
+                        currentEpisodeIndex=None, imageUrl=image_url,
+                        doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
+                        progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
+                        rate_limiter=rate_limiter,
+                        title_recognition_manager=title_recognition_manager,
+                        is_fallback=False,
+                        preassignedAnimeId=anime_id_to_use,
+                        selectedEpisodes=selected_episodes
+                    )
+
+                    # 构建任务标题
+                    title_parts = [f"自动导入 (库内): {existing_anime['title']}"]
+                    if season_for_check is not None:
+                        title_parts.append(f"S{season_for_check:02d}")
+                    title_parts.append(f"E{payload.episode}")
+                    task_title = " ".join(title_parts)
+
+                    # 构建unique_key
+                    unique_key_parts = ["import", source_to_use['providerName'], source_to_use['mediaId']]
+                    if season_for_check is not None:
+                        unique_key_parts.append(f"s{season_for_check}")
+                    unique_key_parts.append(f"e{payload.episode}")
+                    unique_key = "-".join(unique_key_parts)
+
+                    # 准备任务参数
+                    task_parameters = {
+                        "provider": source_to_use['providerName'],
+                        "mediaId": source_to_use['mediaId'],
+                        "animeTitle": existing_anime['title'],
+                        "mediaType": existing_anime.get('type', 'tv_series'),
+                        "season": season_for_check,
+                        "year": existing_anime.get('year'),
+                        "currentEpisodeIndex": None,
+                        "selectedEpisodes": selected_episodes,
+                        "imageUrl": image_url,
+                        "doubanId": douban_id,
+                        "tmdbId": tmdb_id,
+                        "imdbId": imdb_id,
+                        "tvdbId": tvdb_id,
+                        "bangumiId": bangumi_id
+                    }
+
+                    execution_task_id, _ = await task_manager.submit_task(
+                        task_coro,
+                        task_title,
+                        unique_key=unique_key,
+                        task_type="generic_import",
+                        task_parameters=task_parameters
+                    )
+                    final_message = f"已使用库内源创建导入任务。执行任务ID: {execution_task_id}"
+                    raise TaskSuccess(final_message)
 
         # 3. 如果库中不存在，则进行全网搜索
         await progress_callback(40, "媒体库未找到，开始全网搜索...")
-        episode_info = {"season": season, "episode": payload.episode} if payload.episode else {"season": season}
+        # 注意：搜索阶段不传递episode信息，因为scraper的search方法不需要具体集数
+        # 集数信息只在导入阶段使用
+        episode_info = {"season": season}
 
         # 使用WebUI相同的搜索逻辑：先获取元数据源别名，再进行全网搜索
         await progress_callback(30, "正在获取元数据源别名...")
@@ -3183,8 +3356,8 @@ async def auto_search_and_import_task(
                 if processed_season != season:
                     search_season = processed_season
                     logger.info(f"✓ 季度预处理: {season} -> {search_season}")
-                    # 更新episode_info中的季数
-                    episode_info = {"season": search_season, "episode": payload.episode} if payload.episode else {"season": search_season}
+                    # 更新episode_info中的季数（搜索阶段不传递episode）
+                    episode_info = {"season": search_season}
             else:
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
@@ -3581,18 +3754,27 @@ async def auto_search_and_import_task(
         if payload.episode is not None:
             unique_key_parts.append(f"e{payload.episode}")
         unique_key = "-".join(unique_key_parts)
+
+        # 解析多集参数
+        selected_episodes = None
+        current_episode_index = None
+        if payload.episode is not None:
+            # 解析集数字符串为列表 (支持 "1,3,5,7,9,11-13" 格式)
+            selected_episodes = parse_episode_ranges(payload.episode)
+            logger.info(f"解析集数参数 '{payload.episode}' -> {selected_episodes}")
+
         task_coro = lambda s, cb: generic_import_task(
             provider=best_match.provider, mediaId=best_match.mediaId,
             animeTitle=final_title, mediaType=best_match.type, season=final_season, year=best_match.year,
             config_manager=config_manager, metadata_manager=metadata_manager,
-            currentEpisodeIndex=payload.episode, imageUrl=image_url, # 现在 imageUrl 已被正确填充
+            currentEpisodeIndex=current_episode_index, imageUrl=image_url, # 现在 imageUrl 已被正确填充
             doubanId=douban_id, tmdbId=tmdb_id, imdbId=imdb_id, tvdbId=tvdb_id, bangumiId=bangumi_id,
             progress_callback=cb, session=s, manager=scraper_manager, task_manager=task_manager,
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager,
-            is_fallback=True,  # 标识为后备任务
-            fallback_type="match",  # 匹配后备类型
-            preassignedAnimeId=payload.preassignedAnimeId  # 传递预分配的anime_id
+            is_fallback=False,  # 外部API自动导入使用普通流控
+            preassignedAnimeId=payload.preassignedAnimeId,  # 传递预分配的anime_id
+            selectedEpisodes=selected_episodes  # 传递解析后的集数列表
         )
         # 修正：提交执行任务，并将其ID作为调度任务的结果
         # 修正：为任务标题添加季/集信息，以确保其唯一性，防止因任务名重复而提交失败。
@@ -3606,7 +3788,8 @@ async def auto_search_and_import_task(
             if final_season is not None:
                 title_parts.append(f"S{final_season:02d}")
             if payload.episode is not None:
-                title_parts.append(f"E{payload.episode:02d}")
+                # 直接显示原始集数字符串
+                title_parts.append(f"E{payload.episode}")
         task_title = " ".join(title_parts)
 
         # 准备任务参数用于恢复
@@ -3617,7 +3800,8 @@ async def auto_search_and_import_task(
             "mediaType": best_match.type,
             "season": season,  # 使用用户请求的季度，而不是搜索结果的季度
             "year": best_match.year,
-            "currentEpisodeIndex": payload.episode,
+            "currentEpisodeIndex": current_episode_index,
+            "selectedEpisodes": selected_episodes,
             "imageUrl": image_url,
             "doubanId": douban_id,
             "tmdbId": tmdb_id,

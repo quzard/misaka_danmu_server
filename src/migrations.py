@@ -582,6 +582,73 @@ async def _create_local_danmaku_items_table_task(conn: AsyncConnection, db_type:
 
     logger.info(f"local_danmaku_items 表及索引创建完成 ({db_name})")
 
+async def _add_latest_episode_refresh_fields_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 为 anime_sources 表添加刷新最新集弹幕相关字段,并添加全局配置"""
+    table_name = "anime_sources"
+
+    # 字段: last_refresh_latest_episode_at
+    field_name = "last_refresh_latest_episode_at"
+
+    if db_type == "mysql":
+        # 检查字段是否存在
+        check_field_sql = text(f"""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+            AND table_name = '{table_name}'
+            AND column_name = '{field_name}'
+        """)
+
+        # 添加字段的SQL
+        add_field_sql = text(f"""
+            ALTER TABLE `{table_name}`
+            ADD COLUMN `{field_name}` DATETIME NULL DEFAULT NULL
+            COMMENT '最后一次刷新最新集的时间'
+        """)
+    else:  # postgresql
+        # 检查字段是否存在
+        check_field_sql = text(f"""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = '{table_name}'
+            AND column_name = '{field_name}'
+        """)
+
+        # 添加字段的SQL
+        add_field_sql = text(f"""
+            ALTER TABLE "{table_name}"
+            ADD COLUMN "{field_name}" TIMESTAMP NULL DEFAULT NULL
+        """)
+
+    # 检查并添加字段
+    if not (await conn.execute(check_field_sql)).scalar_one_or_none():
+        await conn.execute(add_field_sql)
+        logger.info(f"已为 {table_name} 表添加字段: {field_name}")
+    else:
+        logger.info(f"{table_name} 表的字段 {field_name} 已存在，跳过。")
+
+    # 添加全局配置: latestEpisodeCommentThreshold
+    config_key = "latestEpisodeCommentThreshold"
+    config_value = "20000"
+    config_desc = "刷新最新集弹幕任务的弹幕数阈值。当最新一集的弹幕数低于此值时,会自动刷新该集的弹幕。"
+
+    # 检查配置是否已存在
+    check_config_sql = text("SELECT 1 FROM config WHERE config_key = :key")
+    config_exists = (await conn.execute(check_config_sql, {"key": config_key})).scalar_one_or_none()
+
+    if not config_exists:
+        # 插入新配置
+        insert_config_sql = text("""
+            INSERT INTO config (config_key, config_value, description)
+            VALUES (:key, :value, :desc)
+        """)
+        await conn.execute(insert_config_sql, {
+            "key": config_key,
+            "value": config_value,
+            "desc": config_desc
+        })
+        logger.info(f"已添加全局配置: {config_key} = {config_value}")
+    else:
+        logger.info(f"全局配置 {config_key} 已存在，跳过。")
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -608,6 +675,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_add_updated_at_to_media_items_v1", _add_updated_at_to_media_items_task, (db_type,)),
         ("migrate_rename_ai_config_keys_v1", _rename_ai_config_keys_task, ()),
         ("migrate_create_local_danmaku_items_table_v1", _create_local_danmaku_items_table_task, (db_type,)),
+        ("migrate_add_latest_episode_refresh_fields_v1", _add_latest_episode_refresh_fields_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

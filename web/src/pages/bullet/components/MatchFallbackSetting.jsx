@@ -18,13 +18,14 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes, preDownloadRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
         getMatchFallbackTokens(),
         getTokenList(),
         getSearchFallback(),
-        getConfig('externalApiFallbackEnabled')
+        getConfig('externalApiFallbackEnabled'),
+        getConfig('preDownloadNextEpisodeEnabled')
       ])
       setTokenList(tokenListRes.data || [])
 
@@ -41,7 +42,8 @@ export const MatchFallbackSetting = () => {
         matchFallbackBlacklist: blacklistRes.data.value || '',
         matchFallbackTokens: selectedTokens,
         searchFallbackEnabled: searchFallbackRes.data.value === 'true',
-        externalApiFallbackEnabled: externalApiFallbackRes.data?.value === 'true'
+        externalApiFallbackEnabled: externalApiFallbackRes.data?.value === 'true',
+        preDownloadNextEpisodeEnabled: preDownloadRes.data?.value === 'true'
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -79,6 +81,10 @@ export const MatchFallbackSetting = () => {
       if ('externalApiFallbackEnabled' in changedValues) {
         await setConfig('externalApiFallbackEnabled', String(changedValues.externalApiFallbackEnabled))
         messageApi.success('顺延机制已保存')
+      }
+      if ('preDownloadNextEpisodeEnabled' in changedValues) {
+        await setConfig('preDownloadNextEpisodeEnabled', String(changedValues.preDownloadNextEpisodeEnabled))
+        messageApi.success('预下载设置已保存')
       }
       // 黑名单不自动保存，需要点击保存按钮
     } catch (error) {
@@ -124,6 +130,7 @@ export const MatchFallbackSetting = () => {
           matchFallbackEnabled: false,
           searchFallbackEnabled: false,
           externalApiFallbackEnabled: false,
+          preDownloadNextEpisodeEnabled: false,
           matchFallbackBlacklist: '',
           matchFallbackTokens: []
         }}
@@ -166,20 +173,39 @@ export const MatchFallbackSetting = () => {
                   const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
 
                   return (
-                    <Form.Item
-                      name="externalApiFallbackEnabled"
-                      label={
-                        <div className="flex items-center gap-2">
-                          <span>启用顺延机制</span>
-                          <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </div>
-                      }
-                      valuePropName="checked"
-                    >
-                      <Switch disabled={isFallbackDisabled} />
-                    </Form.Item>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                      <Form.Item
+                        name="externalApiFallbackEnabled"
+                        label={
+                          <div className="flex items-center gap-2">
+                            <span>启用顺延机制</span>
+                            <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                        }
+                        valuePropName="checked"
+                        style={{ flex: 1 }}
+                      >
+                        <Switch disabled={isFallbackDisabled} />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="preDownloadNextEpisodeEnabled"
+                        label={
+                          <div className="flex items-center gap-2">
+                            <span>启用预下载</span>
+                            <Tooltip title="启用后，当播放当前集时，系统会自动在后台下载下一集的弹幕（如果下一集存在且没有弹幕）。需要启用匹配后备或后备搜索。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                        }
+                        valuePropName="checked"
+                        style={{ flex: 1 }}
+                      >
+                        <Switch disabled={isFallbackDisabled} />
+                      </Form.Item>
+                    </div>
                   )
                 }}
               </Form.Item>
@@ -225,6 +251,38 @@ export const MatchFallbackSetting = () => {
                         <div className="flex items-center gap-2">
                           <span>启用顺延机制</span>
                           <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                      }
+                      valuePropName="checked"
+                      style={isMobile ? {} : { flex: 1 }}
+                    >
+                      <Switch disabled={isFallbackDisabled} />
+                    </Form.Item>
+                  )
+                }}
+              </Form.Item>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+                  prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
+                }
+              >
+                {({ getFieldValue }) => {
+                  const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
+                  const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
+                  const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
+
+                  return (
+                    <Form.Item
+                      name="preDownloadNextEpisodeEnabled"
+                      label={
+                        <div className="flex items-center gap-2">
+                          <span>启用预下载</span>
+                          <Tooltip title="启用后，当播放当前集时，系统会自动在后台下载下一集的弹幕（如果下一集存在且没有弹幕）。需要启用匹配后备或后备搜索。">
                             <QuestionCircleOutlined />
                           </Tooltip>
                         </div>
