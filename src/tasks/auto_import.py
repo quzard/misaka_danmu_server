@@ -1,4 +1,5 @@
 """自动搜索和导入任务模块"""
+import asyncio
 import logging
 import traceback
 from typing import Callable, Optional, Dict, Any
@@ -412,68 +413,61 @@ async def auto_search_and_import_task(
             else:
                 logger.info(f"○ 搜索预处理未生效: '{main_title}'")
 
-        # 尝试通过TMDB获取季度名称(如果启用)
-        season_name_from_tmdb = None
+        # 创建季度映射任务(如果启用) - 与搜索并行运行
+        season_mapping_task = None
         auto_import_tmdb_enabled = await config_manager.get("autoImportEnableTmdbSeasonMapping", "false")
         if auto_import_tmdb_enabled.lower() == "true" and media_type != "movie" and search_season and search_season > 1:
-            try:
-                logger.info(f"全自动导入 TMDB季度映射: 尝试获取 '{search_title}' S{search_season:02d} 的季度名称...")
+            logger.info(f"○ 全自动导入 季度映射: 开始为 '{search_title}' S{search_season:02d} 获取季度名称(并行)...")
 
-                # 检查是否启用AI匹配
-                ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
-                ai_matcher = None
-                if ai_match_enabled.lower() == "true":
-                    try:
-                        from ..ai_matcher import AIMatcher
-                        ai_config = {
-                            "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                            "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                            "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                            "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                            "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                            "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
-                        }
-                        ai_matcher = AIMatcher(ai_config)
-                        logger.info("全自动导入 TMDB季度映射: AI匹配器已启用")
-                    except Exception as e:
-                        logger.warning(f"全自动导入 TMDB季度映射: AI匹配器初始化失败: {e}")
+            # 检查是否启用AI匹配
+            ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
+            ai_matcher = None
+            if ai_match_enabled.lower() == "true":
+                try:
+                    from ..ai_matcher import AIMatcher
+                    ai_config = {
+                        "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                        "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                        "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                        "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                        "ai_match_prompt": await config_manager.get("aiPrompt", ""),
+                        "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+                    }
+                    ai_matcher = AIMatcher(ai_config)
+                except Exception as e:
+                    logger.warning(f"全自动导入 季度映射: AI匹配器初始化失败: {e}")
 
-                # 获取元数据源和自定义提示词
-                metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-                custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-                sources = [metadata_source] if metadata_source else None
+            # 获取元数据源和自定义提示词
+            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+            sources = [metadata_source] if metadata_source else None
 
-                # 调用metadata_manager获取季度名称(通用方法,支持多个元数据源)
-                season_name_from_tmdb = await metadata_manager.get_season_name(
-                    title=search_title,
-                    season_number=search_season,
-                    year=year,
-                    sources=sources,
-                    ai_matcher=ai_matcher,
-                    user=None,
-                    custom_prompt=custom_prompt if custom_prompt else None
-                )
+            # 创建并行任务
+            async def get_season_mapping():
+                try:
+                    return await metadata_manager.get_season_name(
+                        title=search_title,
+                        season_number=search_season,
+                        year=year,
+                        sources=sources,
+                        ai_matcher=ai_matcher,
+                        user=None,
+                        custom_prompt=custom_prompt if custom_prompt else None
+                    )
+                except Exception as e:
+                    logger.warning(f"全自动导入 季度映射失败: {e}")
+                    return None
 
-                if season_name_from_tmdb:
-                    logger.info(f"✓ 全自动导入 TMDB季度映射成功: '{search_title}' S{search_season:02d} → '{season_name_from_tmdb}'")
-                    # 将季度名称添加到搜索标题中
-                    if season_name_from_tmdb not in search_title:
-                        search_title = f"{search_title} {season_name_from_tmdb}"
-                        logger.info(f"✓ 全自动导入 TMDB季度映射: 更新搜索标题为 '{search_title}'")
-                else:
-                    logger.info(f"○ 全自动导入 TMDB季度映射: 未找到季度名称")
-
-            except Exception as e:
-                logger.warning(f"全自动导入 TMDB季度映射失败: {e}")
+            season_mapping_task = asyncio.create_task(get_season_mapping())
         else:
             if auto_import_tmdb_enabled.lower() != "true":
-                logger.info("○ 全自动导入 TMDB季度映射: 功能未启用")
+                logger.info("○ 全自动导入 季度映射: 功能未启用")
             elif media_type == "movie":
-                logger.info("○ 全自动导入 TMDB季度映射: 电影类型,跳过")
+                logger.info("○ 全自动导入 季度映射: 电影类型,跳过")
             elif not search_season or search_season <= 1:
-                logger.info(f"○ 全自动导入 TMDB季度映射: 季度号为{search_season},跳过(仅处理S02及以上)")
+                logger.info(f"○ 全自动导入 季度映射: 季度号为{search_season},跳过(仅处理S02及以上)")
 
-        logger.info(f"将使用处理后的标题 '{search_title}' 进行全网搜索...")
+        logger.info(f"将使用标题 '{search_title}' 进行全网搜索...")
 
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         # 使用严格过滤模式和自定义别名
@@ -495,6 +489,34 @@ async def auto_search_and_import_task(
         )
 
         logger.info(f"搜索完成，共 {len(all_results)} 个结果")
+
+        # 等待季度映射任务完成(如果有)
+        season_name_from_mapping = None
+        if season_mapping_task:
+            try:
+                season_name_from_mapping = await season_mapping_task
+                if season_name_from_mapping:
+                    logger.info(f"✓ 全自动导入 季度映射成功: '{search_title}' S{search_season:02d} → '{season_name_from_mapping}'")
+                else:
+                    logger.info(f"○ 全自动导入 季度映射: 未找到季度名称")
+            except Exception as e:
+                logger.warning(f"全自动导入 季度映射任务失败: {e}")
+
+        # 根据季度映射结果调整搜索结果的 season 字段
+        if season_name_from_mapping and search_season and search_season > 1:
+            from ..season_mapper import title_contains_season_name
+
+            adjusted_count = 0
+            for item in all_results:
+                # 只处理电视剧类型且 season 为 None 或 1 的结果
+                if item.type == "tv_series" and (item.season is None or item.season == 1):
+                    if title_contains_season_name(item.title, season_name_from_mapping, threshold=60.0):
+                        logger.info(f"  ✓ 季度调整: '{item.title}' (Provider: {item.provider}) season: {item.season} → {search_season}")
+                        item.season = search_season
+                        adjusted_count += 1
+
+            if adjusted_count > 0:
+                logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
 
         # 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:

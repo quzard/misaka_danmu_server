@@ -1,11 +1,110 @@
 """季度映射模块 - 通过元数据源获取季度名称"""
 import logging
+import re
 from typing import Optional, List, Any
+from difflib import SequenceMatcher
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models, crud
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_similarity(str1: str, str2: str) -> float:
+    """
+    计算两个字符串的相似度 (0-100)
+    使用 thefuzz 库的多种算法综合评分
+
+    Args:
+        str1: 第一个字符串
+        str2: 第二个字符串
+
+    Returns:
+        相似度百分比 (0-100)
+    """
+    if not str1 or not str2:
+        return 0.0
+
+    from thefuzz import fuzz
+
+    # 转换为小写进行比较
+    s1 = str1.lower().strip()
+    s2 = str2.lower().strip()
+
+    # 使用多种算法计算相似度,取最高值
+    # 1. 简单相似度 - 适合完全匹配
+    simple_ratio = fuzz.ratio(s1, s2)
+
+    # 2. 部分相似度 - 适合子串匹配 (如 "无限列车篇" 在 "鬼灭之刃 无限列车篇" 中)
+    partial_ratio = fuzz.partial_ratio(s1, s2)
+
+    # 3. Token排序相似度 - 忽略词序 (如 "鬼灭之刃 无限列车篇" vs "无限列车篇 鬼灭之刃")
+    token_sort_ratio = fuzz.token_sort_ratio(s1, s2)
+
+    # 4. Token集合相似度 - 忽略重复词和词序
+    token_set_ratio = fuzz.token_set_ratio(s1, s2)
+
+    # 取最高分
+    max_similarity = max(simple_ratio, partial_ratio, token_sort_ratio, token_set_ratio)
+
+    return float(max_similarity)
+
+
+def title_contains_season_name(title: str, season_name: str, threshold: float = 60.0) -> bool:
+    """
+    判断标题是否包含季度名称
+    使用多种策略进行匹配,适合中文动漫标题
+
+    Args:
+        title: 搜索结果标题 (如 "鬼灭之刃 无限列车篇")
+        season_name: 季度名称 (如 "无限列车篇", "第2季 无限列车篇")
+        threshold: 相似度阈值 (默认60%)
+
+    Returns:
+        是否包含
+    """
+    if not title or not season_name:
+        return False
+
+    from thefuzz import fuzz
+
+    title_lower = title.lower().strip()
+    season_name_lower = season_name.lower().strip()
+
+    # 策略1: 直接子串包含 (最精确)
+    if season_name_lower in title_lower:
+        return True
+
+    # 策略2: 移除常见前缀后包含
+    # 移除 "第X季"、"Season X"、"S0X" 等前缀
+    season_name_cleaned = re.sub(r'^(第\d+季|season\s*\d+|s\d+)\s*', '', season_name_lower, flags=re.IGNORECASE)
+    if season_name_cleaned and season_name_cleaned in title_lower:
+        return True
+
+    # 策略3: 部分匹配 - 使用 thefuzz 的 partial_ratio
+    # 适合 "无限列车篇" 在 "鬼灭之刃 无限列车篇" 中的场景
+    partial_similarity = fuzz.partial_ratio(season_name_cleaned or season_name_lower, title_lower)
+    if partial_similarity >= 90:  # 部分匹配要求更高的相似度
+        return True
+
+    # 策略4: Token 集合匹配 - 检查季度名称的关键词是否都在标题中
+    # 例如: "无限列车篇" 的所有字符都在 "鬼灭之刃 无限列车篇" 中
+    token_set_similarity = fuzz.token_set_ratio(season_name_cleaned or season_name_lower, title_lower)
+    if token_set_similarity >= threshold:
+        return True
+
+    # 策略5: 分词匹配 - 检查季度名称的主要词汇是否在标题中
+    # 例如: "无限" "列车" "篇" 都在标题中
+    # 过滤掉单字和常见词
+    common_words = {'第', '季', 'season', 's', '的', '之', '与', '和', 'the', 'and', 'or'}
+    words = [w for w in re.split(r'\s+', season_name_cleaned or season_name_lower) if len(w) > 1 and w not in common_words]
+    if words:
+        # 至少70%的关键词在标题中
+        matched_words = sum(1 for word in words if word in title_lower)
+        if matched_words / len(words) >= 0.7:
+            return True
+
+    return False
 
 
 class SeasonInfo(models.BaseModel):

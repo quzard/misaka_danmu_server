@@ -1,4 +1,5 @@
 """Webhook任务模块"""
+import asyncio
 import json
 import logging
 from typing import Callable, Optional, List
@@ -146,65 +147,57 @@ async def webhook_search_and_dispatch_task(
         season_to_filter = parsed_keyword.get("season") or season
         episode_to_filter = parsed_keyword.get("episode") or currentEpisodeIndex
 
-        # 2.1 尝试通过TMDB获取季度名称(如果启用)
-        season_name_from_tmdb = None
+        # 2.1 创建季度映射任务(如果启用) - 与搜索并行运行
+        season_mapping_task = None
         webhook_tmdb_enabled = await config_manager.get("webhookEnableTmdbSeasonMapping", "true")
         if webhook_tmdb_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
-            try:
-                logger.info(f"Webhook TMDB季度映射: 尝试获取 '{original_title}' S{season_to_filter:02d} 的季度名称...")
+            logger.info(f"○ Webhook 季度映射: 开始为 '{original_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
 
-                # 检查是否启用AI匹配
-                ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
-                ai_matcher = None
-                if ai_match_enabled.lower() == "true":
-                    try:
-                        from ..ai_matcher import AIMatcher
-                        ai_config = {
-                            "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                            "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                            "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                            "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                            "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                            "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
-                        }
-                        ai_matcher = AIMatcher(ai_config)
-                        logger.info("Webhook TMDB季度映射: AI匹配器已启用")
-                    except Exception as e:
-                        logger.warning(f"Webhook TMDB季度映射: AI匹配器初始化失败: {e}")
+            # 检查是否启用AI匹配
+            ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
+            ai_matcher = None
+            if ai_match_enabled.lower() == "true":
+                try:
+                    from ..ai_matcher import AIMatcher
+                    ai_config = {
+                        "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
+                        "ai_match_api_key": await config_manager.get("aiApiKey", ""),
+                        "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
+                        "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
+                        "ai_match_prompt": await config_manager.get("aiPrompt", ""),
+                        "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+                    }
+                    ai_matcher = AIMatcher(ai_config)
+                except Exception as e:
+                    logger.warning(f"Webhook 季度映射: AI匹配器初始化失败: {e}")
 
-                # 获取元数据源和自定义提示词
-                metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-                custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-                sources = [metadata_source] if metadata_source else None
+            # 获取元数据源和自定义提示词
+            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+            sources = [metadata_source] if metadata_source else None
 
-                # 调用metadata_manager获取季度名称(通用方法,支持多个元数据源)
-                season_name_from_tmdb = await metadata_manager.get_season_name(
-                    title=original_title,
-                    season_number=season_to_filter,
-                    year=year,
-                    sources=sources,
-                    ai_matcher=ai_matcher,
-                    user=None,
-                    custom_prompt=custom_prompt if custom_prompt else None
-                )
+            # 创建并行任务
+            async def get_season_mapping():
+                try:
+                    return await metadata_manager.get_season_name(
+                        title=original_title,
+                        season_number=season_to_filter,
+                        year=year,
+                        sources=sources,
+                        ai_matcher=ai_matcher,
+                        user=None,
+                        custom_prompt=custom_prompt if custom_prompt else None
+                    )
+                except Exception as e:
+                    logger.warning(f"Webhook 季度映射失败: {e}")
+                    return None
 
-                if season_name_from_tmdb:
-                    logger.info(f"✓ Webhook TMDB季度映射成功: '{original_title}' S{season_to_filter:02d} → '{season_name_from_tmdb}'")
-                    # 将季度名称添加到搜索标题中
-                    # 例如: "鬼灭之刃" + "无限列车篇" → "鬼灭之刃 无限列车篇"
-                    if season_name_from_tmdb not in original_title:
-                        original_title = f"{original_title} {season_name_from_tmdb}"
-                        logger.info(f"✓ Webhook TMDB季度映射: 更新搜索标题为 '{original_title}'")
-                else:
-                    logger.info(f"○ Webhook TMDB季度映射: 未找到季度名称")
-
-            except Exception as e:
-                logger.warning(f"Webhook TMDB季度映射失败: {e}")
+            season_mapping_task = asyncio.create_task(get_season_mapping())
         else:
             if webhook_tmdb_enabled.lower() != "true":
-                logger.info("○ Webhook TMDB季度映射: 功能未启用")
+                logger.info("○ Webhook 季度映射: 功能未启用")
             elif not season_to_filter or season_to_filter <= 1:
-                logger.info(f"○ Webhook TMDB季度映射: 季度号为{season_to_filter},跳过(仅处理S02及以上)")
+                logger.info(f"○ Webhook 季度映射: 季度号为{season_to_filter},跳过(仅处理S02及以上)")
 
         # 应用与 WebUI 一致的标题预处理规则
         search_title = original_title
@@ -263,6 +256,34 @@ async def webhook_search_and_dispatch_task(
 
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
+
+        # 等待季度映射任务完成(如果有)
+        season_name_from_mapping = None
+        if season_mapping_task:
+            try:
+                season_name_from_mapping = await season_mapping_task
+                if season_name_from_mapping:
+                    logger.info(f"✓ Webhook 季度映射成功: '{original_title}' S{season_to_filter:02d} → '{season_name_from_mapping}'")
+                else:
+                    logger.info(f"○ Webhook 季度映射: 未找到季度名称")
+            except Exception as e:
+                logger.warning(f"Webhook 季度映射任务失败: {e}")
+
+        # 根据季度映射结果调整搜索结果的 season 字段
+        if season_name_from_mapping and season_to_filter and season_to_filter > 1:
+            from ..season_mapper import title_contains_season_name
+
+            adjusted_count = 0
+            for item in all_search_results:
+                # 只处理电视剧类型且 season 为 None 或 1 的结果
+                if item.type == "tv_series" and (item.season is None or item.season == 1):
+                    if title_contains_season_name(item.title, season_name_from_mapping, threshold=60.0):
+                        logger.info(f"  ✓ 季度调整: '{item.title}' (Provider: {item.provider}) season: {item.season} → {season_to_filter}")
+                        item.season = season_to_filter
+                        adjusted_count += 1
+
+            if adjusted_count > 0:
+                logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
 
         # 3. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:
