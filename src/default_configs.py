@@ -89,6 +89,13 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 预下载配置
         'preDownloadNextEpisodeEnabled': ('false', '是否启用预下载下一集弹幕。当播放当前集时，自动下载下一集的弹幕。需要启用匹配后备或后备搜索。'),
 
+        # 季度映射配置
+        'webhookEnableTmdbSeasonMapping': ('false', '是否启用Webhook TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'matchFallbackEnableTmdbSeasonMapping': ('false', '是否启用匹配后备 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'autoImportEnableTmdbSeasonMapping': ('false', '是否启用全自动导入 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'seasonMappingMetadataSource': ('tmdb', 'TMDB季度映射使用的元数据源。可选值: tmdb, tvdb, imdb, douban, bangumi。'),
+        'seasonMappingPrompt': ('', 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。留空使用默认提示词。'),
+
         # 媒体服务器配置
         'mediaServerAutoImport': ('false', '是否自动导入新扫描到的媒体项'),
         'mediaServerSyncInterval': ('3600', '媒体服务器同步间隔(秒)'),

@@ -1941,6 +1941,67 @@ async def _get_match_for_item(
                 # 电影不设置episode_number,保持为None
                 episode_number = None if is_movie else (parsed_info.get("episode") or 1)
 
+                # 步骤0.5: 尝试通过TMDB获取季度名称(如果启用)
+                season_name_from_tmdb = None
+                match_fallback_tmdb_enabled = await config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false")
+                if match_fallback_tmdb_enabled.lower() == "true" and not is_movie and season and season > 1:
+                    try:
+                        logger.info(f"匹配后备 TMDB季度映射: 尝试获取 '{base_title}' S{season:02d} 的季度名称...")
+
+                        # 检查是否启用AI匹配
+                        ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
+                        ai_matcher = None
+                        if ai_match_enabled.lower() == "true":
+                            try:
+                                from .ai_matcher import AIMatcher
+                                ai_config = {
+                                    "ai_match_provider": await config_manager.get("aiMatchProvider", "deepseek"),
+                                    "ai_match_api_key": await config_manager.get("aiMatchApiKey"),
+                                    "ai_match_base_url": await config_manager.get("aiMatchBaseUrl"),
+                                    "ai_match_model": await config_manager.get("aiMatchModel"),
+                                    "ai_match_prompt": await config_manager.get("aiMatchPrompt", ""),
+                                    "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+                                }
+                                ai_matcher = AIMatcher(ai_config)
+                                logger.info("匹配后备 TMDB季度映射: AI匹配器已启用")
+                            except Exception as e:
+                                logger.warning(f"匹配后备 TMDB季度映射: AI匹配器初始化失败: {e}")
+
+                        # 获取元数据源和自定义提示词
+                        metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+                        custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+                        sources = [metadata_source] if metadata_source else None
+
+                        # 调用metadata_manager获取季度名称(通用方法,支持多个元数据源)
+                        season_name_from_tmdb = await metadata_manager.get_season_name(
+                            title=base_title,
+                            season_number=season,
+                            year=None,  # 匹配后备通常没有年份信息
+                            sources=sources,
+                            ai_matcher=ai_matcher,
+                            user=None,
+                            custom_prompt=custom_prompt if custom_prompt else None
+                        )
+
+                        if season_name_from_tmdb:
+                            logger.info(f"✓ 匹配后备 TMDB季度映射成功: '{base_title}' S{season:02d} → '{season_name_from_tmdb}'")
+                            # 将季度名称添加到搜索标题中
+                            if season_name_from_tmdb not in base_title:
+                                base_title = f"{base_title} {season_name_from_tmdb}"
+                                logger.info(f"✓ 匹配后备 TMDB季度映射: 更新搜索标题为 '{base_title}'")
+                        else:
+                            logger.info(f"○ 匹配后备 TMDB季度映射: 未找到季度名称")
+
+                    except Exception as e:
+                        logger.warning(f"匹配后备 TMDB季度映射失败: {e}")
+                else:
+                    if match_fallback_tmdb_enabled.lower() != "true":
+                        logger.info("○ 匹配后备 TMDB季度映射: 功能未启用")
+                    elif is_movie:
+                        logger.info("○ 匹配后备 TMDB季度映射: 电影类型,跳过")
+                    elif not season or season <= 1:
+                        logger.info(f"○ 匹配后备 TMDB季度映射: 季度号为{season},跳过(仅处理S02及以上)")
+
                 # 步骤1：使用统一的搜索函数
                 logger.info(f"步骤1：全网搜索 '{base_title}'")
 

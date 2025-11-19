@@ -204,7 +204,8 @@ async def get_webhook_settings(
     # 使用 asyncio.gather 并发获取所有配置项
     (
         enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
-        filter_mode, filter_regex, log_raw_request_str, fallback_enabled_str
+        filter_mode, filter_regex, log_raw_request_str, fallback_enabled_str,
+        tmdb_season_mapping_str
     ) = await asyncio.gather(
         config.get("webhookEnabled", "true"),
         config.get("webhookDelayedImportEnabled", "false"),
@@ -213,7 +214,8 @@ async def get_webhook_settings(
         config.get("webhookFilterMode", "blacklist"),
         config.get("webhookFilterRegex", ""),
         config.get("webhookLogRawRequest", "false"),
-        config.get("webhookFallbackEnabled", "false")
+        config.get("webhookFallbackEnabled", "false"),
+        config.get("webhookEnableTmdbSeasonMapping", "false")
     )
     return WebhookSettings(
         webhookEnabled=enabled_str.lower() == 'true',
@@ -223,7 +225,8 @@ async def get_webhook_settings(
         webhookFilterMode=filter_mode,
         webhookFilterRegex=filter_regex,
         webhookLogRawRequest=log_raw_request_str.lower() == 'true',
-        webhookFallbackEnabled=fallback_enabled_str.lower() == 'true'
+        webhookFallbackEnabled=fallback_enabled_str.lower() == 'true',
+        webhookEnableTmdbSeasonMapping=tmdb_season_mapping_str.lower() == 'true'
     )
 
 
@@ -243,7 +246,8 @@ async def update_webhook_settings(
         config.setValue("webhookFilterMode", payload.webhookFilterMode),
         config.setValue("webhookFilterRegex", payload.webhookFilterRegex),
         config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower()),
-        config.setValue("webhookFallbackEnabled", str(payload.webhookFallbackEnabled).lower())
+        config.setValue("webhookFallbackEnabled", str(payload.webhookFallbackEnabled).lower()),
+        config.setValue("webhookEnableTmdbSeasonMapping", str(payload.webhookEnableTmdbSeasonMapping).lower())
     )
     return
 
