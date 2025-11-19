@@ -2151,12 +2151,12 @@ async def _get_match_for_item(
                     from .season_mapper import title_contains_season_name
 
                     adjusted_count = 0
-                    for item in all_results:
+                    for result_item in all_results:
                         # 只处理电视剧类型且 season 为 None 或 1 的结果
-                        if item.type == "tv_series" and (item.season is None or item.season == 1):
-                            if title_contains_season_name(item.title, season_name_from_mapping, threshold=60.0):
-                                logger.info(f"  ✓ 季度调整: '{item.title}' (Provider: {item.provider}) season: {item.season} → {season}")
-                                item.season = season
+                        if result_item.type == "tv_series" and (result_item.season is None or result_item.season == 1):
+                            if title_contains_season_name(result_item.title, season_name_from_mapping, threshold=60.0):
+                                logger.info(f"  ✓ 季度调整: '{result_item.title}' (Provider: {result_item.provider}) season: {result_item.season} → {season}")
+                                result_item.season = season
                                 adjusted_count += 1
 
                     if adjusted_count > 0:
