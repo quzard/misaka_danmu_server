@@ -272,7 +272,9 @@ async def _try_predownload_next_episode(
     current_episode_id: int,
     session_factory,
     config_manager: ConfigManager,
-    task_manager: TaskManager
+    task_manager: TaskManager,
+    scraper_manager: ScraperManager,
+    rate_limiter: RateLimiter
 ):
     """
     尝试预下载下一集弹幕（异步，不阻塞当前请求）
@@ -368,8 +370,6 @@ async def _try_predownload_next_episode(
             async def predownload_task(session, progress_callback):
                 """预下载任务: 获取分集信息并下载弹幕"""
                 try:
-                    scraper_manager = sm.get_scraper_manager()
-                    rate_limiter = rl.get_rate_limiter()
 
                     await progress_callback(10, "正在获取分集列表...")
 
@@ -2567,7 +2567,8 @@ async def get_comments_for_dandan(
     # 在函数开始时就提交,无论当前集是否有弹幕
     # 添加异常处理回调，确保任何错误都能被记录
     predownload_task = asyncio.create_task(_try_predownload_next_episode(
-        episodeId, request.app.state.db_session_factory, config_manager, task_manager
+        episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+        scraper_manager, rate_limiter
     ))
 
     # 添加异常处理回调
