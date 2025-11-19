@@ -19,6 +19,7 @@ from fastapi.routing import APIRoute
 
 from . import crud, models, orm_models, tasks, scraper_manager as sm, rate_limiter as rl
 from .config_manager import ConfigManager
+from .cache_manager import CacheManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
@@ -27,6 +28,7 @@ from .task_manager import TaskManager, TaskStatus, TaskSuccess
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
+from .api.dependencies import get_cache_manager
 from .search_utils import unified_search
 from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
@@ -44,25 +46,88 @@ DANDAN_TYPE_DESC_MAPPING = {
 }
 
 # 后备搜索状态管理
-fallback_search_cache = {}  # 存储搜索状态和结果
 FALLBACK_SEARCH_BANGUMI_ID = 999999999  # 搜索中的固定bangumiId
-
-# Token级别的搜索任务限制
-token_search_tasks = {}  # 格式：{token: search_key}
-
-# 弹幕获取缓存（避免重复获取）
-comments_fetch_cache = {}  # 存储已获取的弹幕数据
-
-# 弹幕采样结果缓存（避免重复采样）
-# 格式: {f"sampled_{episodeId}_{limit}": (sampled_comments, timestamp)}
-sampled_comments_cache: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
-SAMPLED_CACHE_TTL = 86400  # 缓存1天 (24小时)
-
-# 用户最后选择的虚拟bangumiId记录（用于确定使用哪个源）
-user_last_bangumi_choice = {}  # 格式：{search_key: last_bangumi_id}
+SAMPLED_CACHE_TTL = 86400  # 缓存1天 (24小时) - 保留用于兼容性
 
 # episodeId到源映射的缓存键前缀
 EPISODE_MAPPING_CACHE_PREFIX = "episode_mapping_"
+
+# 缓存键前缀定义
+FALLBACK_SEARCH_CACHE_PREFIX = "fallback_search_"
+TOKEN_SEARCH_TASKS_PREFIX = "token_search_task_"
+USER_LAST_BANGUMI_CHOICE_PREFIX = "user_last_bangumi_"
+COMMENTS_FETCH_CACHE_PREFIX = "comments_fetch_"
+SAMPLED_COMMENTS_CACHE_PREFIX = "sampled_comments_"
+
+# 缓存TTL定义
+FALLBACK_SEARCH_CACHE_TTL = 3600  # 后备搜索缓存1小时
+TOKEN_SEARCH_TASKS_TTL = 3600  # Token搜索任务1小时
+USER_LAST_BANGUMI_CHOICE_TTL = 86400  # 用户选择记录1天
+COMMENTS_FETCH_CACHE_TTL = 300  # 弹幕获取缓存5分钟(临时缓存)
+SAMPLED_COMMENTS_CACHE_TTL_DB = 86400  # 弹幕采样缓存1天
+
+# ==================== 缓存辅助函数(兼容层) ====================
+# 这些函数现在作为 CacheManager 的兼容包装器
+# 从 app.state 获取全局 CacheManager 实例
+
+def _get_cache_manager_from_request() -> Optional[CacheManager]:
+    """从当前请求上下文获取 CacheManager"""
+    try:
+        from starlette.requests import Request
+        from contextvars import ContextVar
+        # 这是一个简化的实现,实际使用时需要从依赖注入获取
+        return None
+    except:
+        return None
+
+async def _get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optional[Any]:
+    """
+    从数据库缓存中获取数据(兼容包装器)
+    """
+    cache_key = f"{prefix}{key}"
+    cached_data = await crud.get_cache(session, cache_key)
+
+    if cached_data:
+        try:
+            if isinstance(cached_data, str):
+                return json.loads(cached_data)
+            else:
+                return cached_data
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"解析缓存数据失败: {cache_key}, 错误: {e}")
+            return None
+    return None
+
+async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any, ttl_seconds: int):
+    """
+    设置数据库缓存(兼容包装器)
+    """
+    cache_key = f"{prefix}{key}"
+    try:
+        if not isinstance(value, str):
+            json_value = json.dumps(value, ensure_ascii=False)
+        else:
+            json_value = value
+        await crud.set_cache(session, cache_key, json_value, ttl_seconds)
+        logger.debug(f"设置缓存: {cache_key}")
+    except Exception as e:
+        logger.error(f"设置缓存失败: {cache_key}, 错误: {e}")
+
+async def _delete_db_cache(session: AsyncSession, prefix: str, key: str) -> bool:
+    """
+    删除数据库缓存(兼容包装器)
+    """
+    cache_key = f"{prefix}{key}"
+    try:
+        result = await crud.delete_cache(session, cache_key)
+        if result:
+            logger.debug(f"删除缓存: {cache_key}")
+        return result
+    except Exception as e:
+        logger.error(f"删除缓存失败: {cache_key}, 错误: {e}")
+        return False
+
+# ==================== 结束缓存辅助函数 ====================
 
 async def _store_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
     """
@@ -143,9 +208,9 @@ async def _find_existing_anime_by_bangumi_id(session: AsyncSession, bangumi_id: 
     根据bangumiId和搜索会话查找已存在的映射记录，返回anime信息
     使用bangumiId确保精确匹配，避免不同搜索结果被错误合并
     """
-    # 只在当前搜索会话的结果中查找
-    if search_key in fallback_search_cache:
-        search_info = fallback_search_cache[search_key]
+    # 从数据库缓存中查找当前搜索会话的结果
+    search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+    if search_info:
         if "bangumi_mapping" in search_info:
             if bangumi_id in search_info["bangumi_mapping"]:
                 mapping_info = search_info["bangumi_mapping"][bangumi_id]
@@ -160,26 +225,35 @@ async def _find_existing_anime_by_bangumi_id(session: AsyncSession, bangumi_id: 
   
 async def _update_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
     """
-    更新episodeId的映射关系（同时更新数据库缓存和内存缓存）
+    更新episodeId的映射关系（更新数据库缓存）
     """
     # 更新数据库缓存
     await _store_episode_mapping(session, episode_id, provider, media_id, episode_index, original_title)
 
-    # 同时更新内存缓存中的映射关系
     # 查找并更新fallback_search_cache中的real_anime_id映射
     real_anime_id = int(str(episode_id)[2:8])  # 从episodeId提取real_anime_id
 
-    for search_key, search_info in fallback_search_cache.items():
-        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                if mapping_info.get("real_anime_id") == real_anime_id:
-                    # 更新映射信息
-                    mapping_info["provider"] = provider
-                    mapping_info["media_id"] = media_id
-                    # 更新用户选择记录
-                    user_last_bangumi_choice[search_key] = bangumi_id
-                    logger.info(f"更新内存缓存映射: real_anime_id={real_anime_id}, provider={provider}")
-                    break
+    # 获取所有后备搜索缓存键（通过模式匹配）
+    try:
+        all_cache_keys = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+        for cache_key in all_cache_keys:
+            search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+            search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+
+            if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                    if mapping_info.get("real_anime_id") == real_anime_id:
+                        # 更新映射信息
+                        mapping_info["provider"] = provider
+                        mapping_info["media_id"] = media_id
+                        # 保存更新后的搜索信息
+                        await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
+                        # 更新用户选择记录
+                        await _set_db_cache(session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key, bangumi_id, USER_LAST_BANGUMI_CHOICE_TTL)
+                        logger.info(f"更新数据库缓存映射: real_anime_id={real_anime_id}, provider={provider}")
+                        break
+    except Exception as e:
+        logger.warning(f"更新缓存映射失败: {e}")
 
     logger.debug(f"更新episodeId映射: {episode_id} -> {provider}:{media_id}")
 
@@ -232,20 +306,27 @@ async def _check_related_match_fallback_task(session: AsyncSession, search_term:
 
     return None
 
-async def _get_next_virtual_anime_id() -> int:
+async def _get_next_virtual_anime_id(session: AsyncSession) -> int:
     """
     获取下一个虚拟animeId（6位数字，从900000开始）
     用于后备搜索结果显示
     """
     # 查找当前最大的虚拟animeId
     max_id = None
-    for search_key, search_info in fallback_search_cache.items():
-        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                anime_id = mapping_info.get("anime_id")
-                if anime_id and 900000 <= anime_id <= 999999:
-                    if max_id is None or anime_id > max_id:
-                        max_id = anime_id
+    try:
+        all_cache_keys = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+        for cache_key in all_cache_keys:
+            search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+            search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+
+            if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
+                    anime_id = mapping_info.get("anime_id")
+                    if anime_id and 900000 <= anime_id <= 999999:
+                        if max_id is None or anime_id > max_id:
+                            max_id = anime_id
+    except Exception as e:
+        logger.error(f"查找最大虚拟anime_id失败: {e}")
 
     if max_id is None:
         return 900000  # 如果没有找到，从900000开始
@@ -740,29 +821,28 @@ async def _handle_fallback_search(
     search_key = f"search_{hash(search_term + token)}"
 
     # 检查该token是否已有正在进行的搜索任务
-    if token in token_search_tasks:
-        existing_search_key = token_search_tasks[token]
-        if existing_search_key in fallback_search_cache:
-            existing_search = fallback_search_cache[existing_search_key]
-            if existing_search["status"] == "running":
-                # 返回正在进行的搜索状态
-                elapsed_time = time.time() - existing_search["start_time"]
-                progress = min(int((elapsed_time / 60) * 100), 95)
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=999999999,
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{existing_search['search_term']} 搜索正在运行",
-                        type="tvseries",
-                        typeDescription=f"{progress}%",
-                        imageUrl="/static/logo.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
+    existing_search_key = await _get_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
+    if existing_search_key:
+        existing_search = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, existing_search_key)
+        if existing_search and existing_search["status"] == "running":
+            # 返回正在进行的搜索状态
+            elapsed_time = time.time() - existing_search["start_time"]
+            progress = min(int((elapsed_time / 60) * 100), 95)
+            return DandanSearchAnimeResponse(animes=[
+                DandanSearchAnimeItem(
+                    animeId=999999999,
+                    bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                    animeTitle=f"{existing_search['search_term']} 搜索正在运行",
+                    type="tvseries",
+                    typeDescription=f"{progress}%",
+                    imageUrl="/static/logo.png",
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=1,
+                    rating=0.0,
+                    isFavorited=False
+                )
+            ])
 
     # 首先检查是否有相关的后备匹配任务正在进行
     match_fallback_task = await _check_related_match_fallback_task(session, search_term)
@@ -786,9 +866,8 @@ async def _handle_fallback_search(
         ])
 
     # 检查是否已有正在进行的搜索
-    if search_key in fallback_search_cache:
-        search_info = fallback_search_cache[search_key]
-
+    search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+    if search_info:
         # 如果搜索已完成，返回结果
         if search_info["status"] == "completed":
             return DandanSearchAnimeResponse(animes=search_info["results"])
@@ -846,10 +925,10 @@ async def _handle_fallback_search(
         "parsed_info": parsed_info,  # 保存解析信息
         "results": []
     }
-    fallback_search_cache[search_key] = search_info
+    await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
 
     # 记录该token正在执行的搜索任务
-    token_search_tasks[token] = search_key
+    await _set_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token, search_key, TOKEN_SEARCH_TASKS_TTL)
 
     # 通过任务管理器提交后备搜索任务
     async def fallback_search_coro_factory(session_inner: AsyncSession, progress_callback):
@@ -864,12 +943,15 @@ async def _handle_fallback_search(
         except Exception as e:
             logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
             # 更新缓存状态为失败
-            if search_key in fallback_search_cache:
-                fallback_search_cache[search_key]["status"] = "failed"
+            search_info_failed = await _get_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+            if search_info_failed:
+                search_info_failed["status"] = "failed"
+                await _set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_failed, FALLBACK_SEARCH_CACHE_TTL)
         finally:
             # 清理token搜索任务记录
-            if token in token_search_tasks and token_search_tasks[token] == search_key:
-                del token_search_tasks[token]
+            existing_token_key = await _get_db_cache(session_inner, TOKEN_SEARCH_TASKS_PREFIX, token)
+            if existing_token_key == search_key:
+                await _delete_db_cache(session_inner, TOKEN_SEARCH_TASKS_PREFIX, token)
 
     # 提交后备搜索任务(立即执行模式)
     try:
@@ -955,12 +1037,14 @@ async def _execute_fallback_search_task(
             logger.info("○ 未配置标题识别管理器，跳过后备搜索预处理。")
 
         # 3. 同步更新缓存中的 parsed_info，确保后续 /api/v2/bangumi 使用预处理后的季/集信息
-        if search_key in fallback_search_cache:
-            cached_parsed = fallback_search_cache[search_key].get("parsed_info") or {}
+        search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if search_info:
+            cached_parsed = search_info.get("parsed_info") or {}
             cached_parsed["season"] = season_to_filter
             cached_parsed["episode"] = episode_to_filter
             cached_parsed["title"] = search_title
-            fallback_search_cache[search_key]["parsed_info"] = cached_parsed
+            search_info["parsed_info"] = cached_parsed
+            await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
 
         # 4. 构造 episode_info，使后备搜索与 WebUI 搜索在分集维度保持一致
         episode_info = (
@@ -1027,7 +1111,7 @@ async def _execute_fallback_search_task(
         search_results = []
 
         # 获取下一个虚拟animeId（6位数字，用于显示）
-        next_virtual_anime_id = await _get_next_virtual_anime_id()
+        next_virtual_anime_id = await _get_next_virtual_anime_id(session)
 
         for i, result in enumerate(sorted_results):
             # 为每个搜索结果分配一个虚拟animeId
@@ -1041,16 +1125,18 @@ async def _execute_fallback_search_task(
             title_with_source = f"{result.title} （来源：{result.provider}{year_info}）"
 
             # 存储bangumiId到原始信息的映射
-            if search_key in fallback_search_cache:
-                if "bangumi_mapping" not in fallback_search_cache[search_key]:
-                    fallback_search_cache[search_key]["bangumi_mapping"] = {}
-                fallback_search_cache[search_key]["bangumi_mapping"][unique_bangumi_id] = {
+            search_info_mapping = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+            if search_info_mapping:
+                if "bangumi_mapping" not in search_info_mapping:
+                    search_info_mapping["bangumi_mapping"] = {}
+                search_info_mapping["bangumi_mapping"][unique_bangumi_id] = {
                     "provider": result.provider,
                     "media_id": result.mediaId,
                     "original_title": result.title,
                     "type": result.type,
                     "anime_id": current_virtual_anime_id,  # 存储虚拟animeId
                 }
+                await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
             # 检查库内是否已有相同标题的分集
             base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
@@ -1091,9 +1177,11 @@ async def _execute_fallback_search_task(
         await progress_callback(90, "整理搜索结果...")
 
         # 更新缓存状态为完成
-        if search_key in fallback_search_cache:
-            fallback_search_cache[search_key]["status"] = "completed"
-            fallback_search_cache[search_key]["results"] = search_results
+        search_info_complete = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if search_info_complete:
+            search_info_complete["status"] = "completed"
+            search_info_complete["results"] = search_results
+            await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_complete, FALLBACK_SEARCH_CACHE_TTL)
 
         # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
         try:
@@ -1125,12 +1213,15 @@ async def _execute_fallback_search_task(
     except Exception as e:
         logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
         # 更新缓存状态为失败
-        if search_key in fallback_search_cache:
-            fallback_search_cache[search_key]["status"] = "failed"
+        search_info_failed = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if search_info_failed:
+            search_info_failed["status"] = "failed"
+            await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_failed, FALLBACK_SEARCH_CACHE_TTL)
     finally:
         # 清理token搜索任务记录
-        if token in token_search_tasks and token_search_tasks[token] == search_key:
-            del token_search_tasks[token]
+        existing_token_key = await _get_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
+        if existing_token_key == search_key:
+            await _delete_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
 
 async def _search_implementation(
     search_term: str,
@@ -1541,144 +1632,165 @@ async def get_bangumi_details(
 
         # 检查是否是后备搜索的虚拟animeId范围（900000-999999）
         if 900000 <= anime_id_int < 1000000:
-            # 从所有搜索缓存中查找
-            for search_key, search_info in fallback_search_cache.items():
-                if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                    if bangumiId in search_info["bangumi_mapping"]:
-                        mapping_info = search_info["bangumi_mapping"][bangumiId]
-                        provider = mapping_info["provider"]
-                        media_id = mapping_info["media_id"]
-                        original_title = mapping_info["original_title"]
-                        anime_id = mapping_info["anime_id"]
+            # 从数据库缓存中查找所有搜索结果
+            try:
+                all_cache_keys = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                for cache_key in all_cache_keys:
+                    search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                    search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
 
-                        # 记录用户最后选择的虚拟bangumiId
-                        user_last_bangumi_choice[search_key] = bangumiId
-                        logger.info(f"记录用户选择: search_key={search_key}, bangumiId={bangumiId}, provider={provider}")
+                    if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                        if bangumiId in search_info["bangumi_mapping"]:
+                            mapping_info = search_info["bangumi_mapping"][bangumiId]
+                            provider = mapping_info["provider"]
+                            media_id = mapping_info["media_id"]
+                            original_title = mapping_info["original_title"]
+                            anime_id = mapping_info["anime_id"]
 
-                        # 获取原始搜索的季度和集数信息
-                        parsed_info = search_info.get("parsed_info", {})
-                        target_season = parsed_info.get("season")
-                        target_episode = parsed_info.get("episode")
+                            # 记录用户最后选择的虚拟bangumiId
+                            await _set_db_cache(session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key, bangumiId, USER_LAST_BANGUMI_CHOICE_TTL)
+                            logger.info(f"记录用户选择: search_key={search_key}, bangumiId={bangumiId}, provider={provider}")
 
-                        episodes = []
-                        try:
-                            # 完全按照WebUI的流程：调用scraper获取真实的分集信息
-                            scraper = scraper_manager.get_scraper(provider)
-                            if scraper:
-                                # 从映射信息中获取media_type
-                                media_type = None
-                                for search_key, search_info in fallback_search_cache.items():
-                                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                                        for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                                            if mapping_info.get("anime_id") == anime_id:
-                                                media_type = mapping_info.get("type")
-                                                break
-                                        if media_type:
-                                            break
+                            # 获取原始搜索的季度和集数信息
+                            parsed_info = search_info.get("parsed_info", {})
+                            target_season = parsed_info.get("season")
+                            target_episode = parsed_info.get("episode")
 
-                                # 使用与WebUI完全相同的调用方式
-                                actual_episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
-
-                                if actual_episodes:
-                                    # 检查是否已经有相同剧集的记录（源切换检测）
-                                    existing_anime = await _find_existing_anime_by_bangumi_id(session, bangumiId, search_key)
-
-                                    if existing_anime:
-                                        # 找到现有剧集，这是源切换行为
-                                        real_anime_id = existing_anime['animeId']
-                                        logger.info(f"检测到源切换: 剧集'{original_title}' 已存在 (anime_id={real_anime_id})，将更新映射到新源 {provider}")
-
-                                        # 更新现有episodeId的映射关系
-                                        for i, episode_data in enumerate(actual_episodes):
-                                            episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
-                                            await _update_episode_mapping(
-                                                session, episode_id, provider, media_id,
-                                                i + 1, original_title
-                                            )
-                                        logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
-                                    else:
-                                        # 新剧集，先检查数据库中是否已有相同标题的条目
-                                        # 解析搜索关键词，提取纯标题
-                                        parsed_info = parse_search_keyword(original_title)
-                                        base_title = parsed_info["title"]
-
-                                        # 直接在数据库中查找相同标题的条目
-                                        stmt = select(Anime.id, Anime.title).where(
-                                            Anime.title == base_title,
-                                            Anime.season == 1
-                                        )
-                                        result = await session.execute(stmt)
-                                        existing_db_anime = result.mappings().first()
-
-                                        if existing_db_anime:
-                                            # 如果数据库中已有相同标题的条目，使用已有的anime_id
-                                            real_anime_id = existing_db_anime['id']
-                                            logger.info(f"复用已存在的番剧: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
-                                        else:
-                                            # 如果数据库中没有，获取新的真实animeId
-                                            real_anime_id = await _get_next_real_anime_id(session)
-                                            logger.info(f"新剧集: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
-
-                                    # 清除缓存中所有使用这个real_anime_id的其他映射（避免冲突）
-                                    for sk, si in list(fallback_search_cache.items()):
-                                        if si.get("status") == "completed" and "bangumi_mapping" in si:
-                                            for bid, mi in list(si["bangumi_mapping"].items()):
-                                                # 如果是其他映射使用了相同的real_anime_id，清除它
-                                                if mi.get("real_anime_id") == real_anime_id and bid != bangumiId:
-                                                    del si["bangumi_mapping"][bid]
-                                                    logger.info(f"清除冲突的缓存映射: search_key={sk}, bangumiId={bid}, real_anime_id={real_anime_id}")
-
-                                    # 存储真实animeId到虚拟animeId的映射关系
-                                    mapping_info["real_anime_id"] = real_anime_id
-
-                                    for i, episode_data in enumerate(actual_episodes):
-                                        episode_index = i + 1
-
-                                        # 如果指定了特定集数，只返回该集数
-                                        if target_episode is not None and episode_index != target_episode:
-                                            continue
-
-                                        # 使用真实animeId生成标准的episodeId
-                                        episode_id = _generate_episode_id(real_anime_id, 1, episode_index)
-                                        # 直接使用原始分集标题
-                                        episode_title = episode_data.title
-
-                                        # 只有在新剧集时才存储映射关系（源切换时已经在上面更新了）
-                                        if not existing_anime:
-                                            await _store_episode_mapping(
-                                                session, episode_id, provider, media_id,
-                                                episode_index, original_title
-                                            )
-
-                                        episodes.append(BangumiEpisode(
-                                            episodeId=episode_id,
-                                            episodeTitle=episode_title,
-                                            episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else episode_index)
-                                        ))
-
-                                else:
-                                    logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
-                            else:
-                                logger.error(f"找不到 {provider} 的scraper")
-
-                        except Exception as e:
-                            logger.error(f"获取分集列表失败: {e}")
                             episodes = []
+                            try:
+                                # 完全按照WebUI的流程：调用scraper获取真实的分集信息
+                                scraper = scraper_manager.get_scraper(provider)
+                                if scraper:
+                                    # 从映射信息中获取media_type
+                                    media_type = None
+                                    all_cache_keys_inner = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                    for cache_key_inner in all_cache_keys_inner:
+                                        search_key_inner = cache_key_inner.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                        search_info_inner = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key_inner)
 
-                        bangumi_details = BangumiDetails(
-                            animeId=anime_id,  # 使用分配的animeId
-                            bangumiId=bangumiId,
-                            animeTitle=f"{original_title} （来源：{provider}）",
-                            imageUrl="/static/logo.png",
-                            searchKeyword=original_title,
-                            type="other",
-                            typeDescription="其他",
-                            episodes=episodes,
-                            year=2025,
-                            summary=f"来自后备搜索的结果 (源: {provider})",
-                        )
+                                        if search_info_inner and search_info_inner.get("status") == "completed" and "bangumi_mapping" in search_info_inner:
+                                            for bangumi_id_inner, mapping_info_inner in search_info_inner["bangumi_mapping"].items():
+                                                if mapping_info_inner.get("anime_id") == anime_id:
+                                                    media_type = mapping_info_inner.get("type")
+                                                    break
+                                            if media_type:
+                                                break
 
-                        return BangumiDetailsResponse(bangumi=bangumi_details)
+                                    # 使用与WebUI完全相同的调用方式
+                                    actual_episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
+
+                                    if actual_episodes:
+                                        # 检查是否已经有相同剧集的记录（源切换检测）
+                                        existing_anime = await _find_existing_anime_by_bangumi_id(session, bangumiId, search_key)
+
+                                        if existing_anime:
+                                            # 找到现有剧集，这是源切换行为
+                                            real_anime_id = existing_anime['animeId']
+                                            logger.info(f"检测到源切换: 剧集'{original_title}' 已存在 (anime_id={real_anime_id})，将更新映射到新源 {provider}")
+
+                                            # 更新现有episodeId的映射关系
+                                            for i, episode_data in enumerate(actual_episodes):
+                                                episode_id = _generate_episode_id(real_anime_id, 1, i + 1)
+                                                await _update_episode_mapping(
+                                                    session, episode_id, provider, media_id,
+                                                    i + 1, original_title
+                                                )
+                                            logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
+                                        else:
+                                            # 新剧集，先检查数据库中是否已有相同标题的条目
+                                            # 解析搜索关键词，提取纯标题
+                                            parsed_info = parse_search_keyword(original_title)
+                                            base_title = parsed_info["title"]
+
+                                            # 直接在数据库中查找相同标题的条目
+                                            stmt = select(Anime.id, Anime.title).where(
+                                                Anime.title == base_title,
+                                                Anime.season == 1
+                                            )
+                                            result = await session.execute(stmt)
+                                            existing_db_anime = result.mappings().first()
+
+                                            if existing_db_anime:
+                                                # 如果数据库中已有相同标题的条目，使用已有的anime_id
+                                                real_anime_id = existing_db_anime['id']
+                                                logger.info(f"复用已存在的番剧: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+                                            else:
+                                                # 如果数据库中没有，获取新的真实animeId
+                                                real_anime_id = await _get_next_real_anime_id(session)
+                                                logger.info(f"新剧集: '{base_title}' (ID={real_anime_id}) 共 {len(actual_episodes)} 集")
+
+                                        # 清除缓存中所有使用这个real_anime_id的其他映射（避免冲突）
+                                        all_cache_keys_conflict = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                        for cache_key_conflict in all_cache_keys_conflict:
+                                            sk = cache_key_conflict.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                            si = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, sk)
+                                            if si and si.get("status") == "completed" and "bangumi_mapping" in si:
+                                                for bid, mi in list(si["bangumi_mapping"].items()):
+                                                    # 如果是其他映射使用了相同的real_anime_id，清除它
+                                                    if mi.get("real_anime_id") == real_anime_id and bid != bangumiId:
+                                                        del si["bangumi_mapping"][bid]
+                                                        logger.info(f"清除冲突的缓存映射: search_key={sk}, bangumiId={bid}, real_anime_id={real_anime_id}")
+                                                # 保存更新后的缓存
+                                                await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, sk, si, FALLBACK_SEARCH_CACHE_TTL)
+
+                                        # 存储真实animeId到虚拟animeId的映射关系
+                                        mapping_info["real_anime_id"] = real_anime_id
+                                        # 更新缓存中的映射信息
+                                        search_info["bangumi_mapping"][bangumiId] = mapping_info
+                                        await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
+
+                                        for i, episode_data in enumerate(actual_episodes):
+                                            episode_index = i + 1
+
+                                            # 如果指定了特定集数，只返回该集数
+                                            if target_episode is not None and episode_index != target_episode:
+                                                continue
+
+                                            # 使用真实animeId生成标准的episodeId
+                                            episode_id = _generate_episode_id(real_anime_id, 1, episode_index)
+                                            # 直接使用原始分集标题
+                                            episode_title = episode_data.title
+
+                                            # 只有在新剧集时才存储映射关系（源切换时已经在上面更新了）
+                                            if not existing_anime:
+                                                await _store_episode_mapping(
+                                                    session, episode_id, provider, media_id,
+                                                    episode_index, original_title
+                                                )
+
+                                            episodes.append(BangumiEpisode(
+                                                episodeId=episode_id,
+                                                episodeTitle=episode_title,
+                                                episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else episode_index)
+                                            ))
+
+                                    else:
+                                        logger.warning(f"从 {provider} 获取分集列表为空: media_id={media_id}")
+                                else:
+                                    logger.error(f"找不到 {provider} 的scraper")
+
+                            except Exception as e:
+                                logger.error(f"获取分集列表失败: {e}")
+                                episodes = []
+
+                            bangumi_details = BangumiDetails(
+                                animeId=anime_id,  # 使用分配的animeId
+                                bangumiId=bangumiId,
+                                animeTitle=f"{original_title} （来源：{provider}）",
+                                imageUrl="/static/logo.png",
+                                searchKeyword=original_title,
+                                type="other",
+                                typeDescription="其他",
+                                episodes=episodes,
+                                year=2025,
+                                summary=f"来自后备搜索的结果 (源: {provider})",
+                            )
+
+                            return BangumiDetailsResponse(bangumi=bangumi_details)
+            except Exception as e:
+                logger.error(f"查找后备搜索缓存失败: {e}")
+                # 如果查找失败,继续执行后续逻辑
+                pass
 
             # 如果没找到对应的后备搜索ID，但在范围内，返回过期信息
             if 900000 <= anime_id_int < 1000000:
@@ -1911,11 +2023,12 @@ async def _get_match_for_item(
 
         # 方案C: 防重复机制 - 检查5分钟内是否已完成过相同的后备任务
         recent_fallback_key = f"recent_fallback_{parsed_info['title']}_{parsed_info.get('season')}_{parsed_info.get('episode')}"
-        if recent_fallback_key in fallback_search_cache:
-            cached_time = fallback_search_cache[recent_fallback_key].get("timestamp", 0)
+        recent_fallback_data = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, recent_fallback_key)
+        if recent_fallback_data:
+            cached_time = recent_fallback_data.get("timestamp", 0)
             if time.time() - cached_time < 300:  # 5分钟内
                 logger.info(f"检测到5分钟内已完成的后备任务，直接返回缓存结果")
-                cached_response = fallback_search_cache[recent_fallback_key].get("response")
+                cached_response = recent_fallback_data.get("response")
                 if cached_response:
                     return cached_response
 
@@ -2310,7 +2423,7 @@ async def _get_match_for_item(
                 logger.info(f"步骤5：分配虚拟animeId和真实episodeId")
 
                 # 分配虚拟animeId
-                virtual_anime_id = await _get_next_virtual_anime_id()
+                virtual_anime_id = await _get_next_virtual_anime_id(session_inner)
                 logger.info(f"  - 分配虚拟animeId: {virtual_anime_id}")
 
                 # 分配真实anime_id（用于生成episodeId）
@@ -2356,9 +2469,9 @@ async def _get_match_for_item(
                 real_episode_id = _generate_episode_id(real_anime_id, source_order, final_episode_number)
                 logger.info(f"  - 生成真实episodeId: {real_episode_id}")
 
-                # 步骤6：存储映射关系到缓存
+                # 步骤6：存储映射关系到数据库缓存
                 mapping_key = f"fallback_anime_{virtual_anime_id}"
-                fallback_search_cache[mapping_key] = {
+                mapping_data = {
                     "real_anime_id": real_anime_id,
                     "provider": best_match.provider,
                     "mediaId": best_match.mediaId,
@@ -2369,10 +2482,11 @@ async def _get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
+                await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, mapping_key, mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 # 存储episodeId映射
                 episode_mapping_key = f"fallback_episode_{real_episode_id}"
-                fallback_search_cache[episode_mapping_key] = {
+                episode_mapping_data = {
                     "virtual_anime_id": virtual_anime_id,
                     "real_anime_id": real_anime_id,
                     "provider": best_match.provider,
@@ -2385,6 +2499,7 @@ async def _get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
+                await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 logger.info(f"匹配后备完成: virtual_anime_id={virtual_anime_id}, real_anime_id={real_anime_id}, episodeId={real_episode_id}")
 
@@ -2457,10 +2572,11 @@ async def _get_match_for_item(
 
                 # 存储到防重复缓存
                 recent_fallback_key = f"recent_fallback_{parsed_info['title']}_{parsed_info.get('season')}_{parsed_info.get('episode')}"
-                fallback_search_cache[recent_fallback_key] = {
+                recent_fallback_data = {
                     "response": response,
                     "timestamp": time.time()
                 }
+                await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, recent_fallback_key, recent_fallback_data, 300)  # 5分钟TTL
 
                 match_fallback_result["response"] = response
             except Exception as e:
@@ -2690,11 +2806,11 @@ async def get_comments_for_dandan(
             fallback_info = await crud.get_cache(session, fallback_series_key)
             logger.debug(f"查找缓存: {fallback_series_key}, 找到: {fallback_info is not None}")
 
-        # 如果数据库缓存中没有,再从内存缓存中查找(兼容旧逻辑)
+        # 如果数据库缓存中没有,再从数据库缓存中查找(使用新的前缀)
         if not fallback_info:
             fallback_episode_cache_key = f"fallback_episode_{episodeId}"
-            if fallback_episode_cache_key in fallback_search_cache:
-                fallback_info = fallback_search_cache[fallback_episode_cache_key]
+            fallback_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, fallback_episode_cache_key)
+            if fallback_info:
                 episode_number = fallback_info.get("episode_number")
 
         if fallback_info:
@@ -2785,8 +2901,9 @@ async def get_comments_for_dandan(
                 cache_key = f"comments_{episodeId}"
                 for i in range(30):
                     await asyncio.sleep(1)
-                    if cache_key in comments_fetch_cache:
-                        logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                    cached_comments = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                    if cached_comments:
+                        logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments)} 条")
                         break
                 # 跳过任务提交，直接进入缓存读取逻辑
             else:
@@ -2828,9 +2945,9 @@ async def get_comments_for_dandan(
                         await current_rate_limiter.increment_fallback("match", current_provider)
                         logger.info(f"下载成功，共 {len(comments)} 条弹幕")
 
-                        # 立即存储到缓存中，让主接口能快速返回
+                        # 立即存储到数据库缓存中，让主接口能快速返回
                         cache_key = f"comments_{current_episodeId}"
-                        comments_fetch_cache[cache_key] = comments
+                        await _set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, comments, COMMENTS_FETCH_CACHE_TTL)
                         logger.info(f"弹幕已存入缓存: {cache_key}")
 
                         await progress_callback(60, "创建数据库条目...")
@@ -2914,10 +3031,9 @@ async def get_comments_for_dandan(
                         await task_session.commit()
                         logger.info(f"保存成功，共 {added_count} 条弹幕")
 
-                        # 清理内存缓存(兼容旧逻辑)
-                        if current_fallback_episode_cache_key in fallback_search_cache:
-                            del fallback_search_cache[current_fallback_episode_cache_key]
-                            logger.debug(f"清理内存缓存: {current_fallback_episode_cache_key}")
+                        # 清理数据库缓存
+                        await _delete_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, current_fallback_episode_cache_key)
+                        logger.debug(f"清理数据库缓存: {current_fallback_episode_cache_key}")
 
                         # 注意:不删除数据库缓存中的整部剧记录,保留3小时以支持连续播放
                         # 数据库缓存会自动过期
@@ -2946,8 +3062,9 @@ async def get_comments_for_dandan(
                         await asyncio.wait_for(done_event.wait(), timeout=30.0)
                         # 任务完成，检查缓存中是否有结果
                         cache_key = f"comments_{episodeId}"
-                        if cache_key in comments_fetch_cache:
-                            logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(comments_fetch_cache[cache_key])} 条弹幕")
+                        cached_comments_result = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                        if cached_comments_result:
+                            logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(cached_comments_result)} 条弹幕")
                             # 不删除缓存，让后续逻辑继续处理
                         else:
                             logger.warning(f"任务完成但缓存中未找到弹幕数据")
@@ -2964,8 +3081,9 @@ async def get_comments_for_dandan(
                         cache_key = f"comments_{episodeId}"
                         for i in range(30):
                             await asyncio.sleep(1)
-                            if cache_key in comments_fetch_cache:
-                                logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                            cached_comments_wait = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                            if cached_comments_wait:
+                                logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments_wait)} 条")
                                 break
                         # 继续执行后续逻辑，从缓存中获取弹幕
                     else:
@@ -2979,9 +3097,9 @@ async def get_comments_for_dandan(
 
         # 检查弹幕获取缓存
         cache_key = f"comments_{episodeId}"
-        if cache_key in comments_fetch_cache:
+        comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+        if comments_data:
             logger.info(f"从缓存中获取 episodeId={episodeId} 的弹幕")
-            comments_data = comments_fetch_cache[cache_key]
 
             # 即使从缓存获取，也需要保存到数据库和XML文件
             if comments_data and str(episodeId).startswith("25") and len(str(episodeId)) >= 13:
@@ -3078,14 +3196,18 @@ async def get_comments_for_dandan(
                 provider = mapping_data["provider"]
                 logger.info(f"从缓存获取episodeId映射: episodeId={episodeId}, provider={provider}, url={episode_url}")
             else:
-                # 如果缓存中没有，回退到原来的逻辑（兼容性）
+                # 如果缓存中没有，从数据库缓存中查找
                 # 首先尝试根据用户最后的选择来确定源
-                for search_key, search_info in fallback_search_cache.items():
-                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                        # 检查是否有用户最后的选择记录
-                        if search_key in user_last_bangumi_choice:
-                            last_bangumi_id = user_last_bangumi_choice[search_key]
-                            if last_bangumi_id in search_info["bangumi_mapping"]:
+                try:
+                    all_cache_keys = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                    for cache_key in all_cache_keys:
+                        search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                        search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+
+                        if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                            # 检查是否有用户最后的选择记录
+                            last_bangumi_id = await _get_db_cache(session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
+                            if last_bangumi_id and last_bangumi_id in search_info["bangumi_mapping"]:
                                 mapping_info = search_info["bangumi_mapping"][last_bangumi_id]
                                 # 检查真实animeId是否匹配
                                 if mapping_info.get("real_anime_id") == real_anime_id:
@@ -3093,20 +3215,29 @@ async def get_comments_for_dandan(
                                     provider = mapping_info["provider"]
                                     logger.info(f"根据用户最后选择找到映射: bangumiId={last_bangumi_id}, provider={provider}")
                                     break
+                except Exception as e:
+                    logger.error(f"查找用户选择映射失败: {e}")
 
                 # 如果没有找到用户最后的选择，则使用原来的逻辑
                 if not episode_url:
-                    for _, search_info in fallback_search_cache.items():
-                        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                            for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
-                                # 检查真实animeId是否匹配
-                                if mapping_info.get("real_anime_id") == real_anime_id:
-                                    episode_url = mapping_info["media_id"]
-                                    provider = mapping_info["provider"]
-                                    logger.info(f"根据真实animeId={real_anime_id}找到映射: bangumiId={bangumi_id}, provider={provider}")
+                    try:
+                        all_cache_keys_fallback = await crud.get_cache_keys_by_pattern(session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                        for cache_key_fallback in all_cache_keys_fallback:
+                            search_key_fallback = cache_key_fallback.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                            search_info_fallback = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key_fallback)
+
+                            if search_info_fallback and search_info_fallback.get("status") == "completed" and "bangumi_mapping" in search_info_fallback:
+                                for bangumi_id, mapping_info in search_info_fallback["bangumi_mapping"].items():
+                                    # 检查真实animeId是否匹配
+                                    if mapping_info.get("real_anime_id") == real_anime_id:
+                                        episode_url = mapping_info["media_id"]
+                                        provider = mapping_info["provider"]
+                                        logger.info(f"根据真实animeId={real_anime_id}找到映射: bangumiId={bangumi_id}, provider={provider}")
+                                        break
+                                if episode_url:
                                     break
-                            if episode_url:
-                                break
+                    except Exception as e:
+                        logger.error(f"查找真实animeId映射失败: {e}")
 
             if episode_url and provider:
                 logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")
@@ -3120,8 +3251,9 @@ async def get_comments_for_dandan(
                     cache_key = f"comments_{episodeId}"
                     for i in range(30):
                         await asyncio.sleep(1)
-                        if cache_key in comments_fetch_cache:
-                            logger.info(f"从缓存中获取到弹幕数据，共 {len(comments_fetch_cache[cache_key])} 条")
+                        cached_comments_existing = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                        if cached_comments_existing:
+                            logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments_existing)} 条")
                             break
                     # 继续执行后续逻辑，从缓存中获取弹幕
 
@@ -3145,16 +3277,22 @@ async def get_comments_for_dandan(
                             await progress_callback(30, "获取分集列表...")
                             # 查找映射信息（根据real_anime_id匹配）
                             mapping_info = None
-                            for search_key, search_info in fallback_search_cache.items():
-                                if search_key in user_last_bangumi_choice:
-                                    last_bangumi_id = user_last_bangumi_choice[search_key]
-                                    if last_bangumi_id in search_info.get("bangumi_mapping", {}):
-                                        temp_mapping = search_info["bangumi_mapping"][last_bangumi_id]
-                                        # 检查real_anime_id是否匹配
-                                        if temp_mapping.get("real_anime_id") == real_anime_id:
-                                            mapping_info = temp_mapping
-                                            logger.info(f"找到匹配的映射信息: search_key={search_key}, bangumiId={last_bangumi_id}, real_anime_id={real_anime_id}")
-                                            break
+                            try:
+                                all_cache_keys_mapping = await crud.get_cache_keys_by_pattern(task_session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                for cache_key_mapping in all_cache_keys_mapping:
+                                    search_key = cache_key_mapping.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                    last_bangumi_id = await _get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
+                                    if last_bangumi_id:
+                                        search_info = await _get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                                        if search_info and last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                            temp_mapping = search_info["bangumi_mapping"][last_bangumi_id]
+                                            # 检查real_anime_id是否匹配
+                                            if temp_mapping.get("real_anime_id") == real_anime_id:
+                                                mapping_info = temp_mapping
+                                                logger.info(f"找到匹配的映射信息: search_key={search_key}, bangumiId={last_bangumi_id}, real_anime_id={real_anime_id}")
+                                                break
+                            except Exception as e:
+                                logger.error(f"查找映射信息失败: {e}")
 
                             if not mapping_info:
                                 logger.error(f"无法找到real_anime_id={real_anime_id}的映射信息")
@@ -3222,22 +3360,28 @@ async def get_comments_for_dandan(
                                     year = None
                                     image_url = None
                                     search_keyword = None
-                                    for search_key, search_info in fallback_search_cache.items():
-                                        if search_key in user_last_bangumi_choice:
-                                            last_bangumi_id = user_last_bangumi_choice[search_key]
-                                            if last_bangumi_id in search_info.get("bangumi_mapping", {}):
-                                                # 获取搜索关键词（从search_key中提取）
-                                                if search_key.startswith("search_"):
-                                                    # 从fallback_search_cache中获取原始搜索词
-                                                    search_keyword = search_info.get("search_term")
+                                    try:
+                                        all_cache_keys_info = await crud.get_cache_keys_by_pattern(task_session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                        for cache_key_info in all_cache_keys_info:
+                                            search_key = cache_key_info.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                            last_bangumi_id = await _get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
+                                            if last_bangumi_id:
+                                                search_info = await _get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                                                if search_info and last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                    # 获取搜索关键词（从search_key中提取）
+                                                    if search_key.startswith("search_"):
+                                                        # 从数据库缓存中获取原始搜索词
+                                                        search_keyword = search_info.get("search_term")
 
-                                                for result in search_info.get("results", []):
-                                                    # result 是 DandanSearchAnimeItem 对象，使用属性访问
-                                                    if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
-                                                        year = getattr(result, 'year', None)
-                                                        image_url = getattr(result, 'imageUrl', None)
-                                                        break
-                                                break
+                                                    for result in search_info.get("results", []):
+                                                        # result 是 DandanSearchAnimeItem 对象，使用属性访问
+                                                        if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
+                                                            year = getattr(result, 'year', None)
+                                                            image_url = getattr(result, 'imageUrl', None)
+                                                            break
+                                                    break
+                                    except Exception as e:
+                                        logger.error(f"查找搜索缓存信息失败: {e}")
 
                                     # 解析搜索关键词，提取纯标题（如"天才基本法 S01E13" -> "天才基本法"）
                                     search_term = search_keyword or original_title
@@ -3331,21 +3475,30 @@ async def get_comments_for_dandan(
 
                                     # 清除缓存中所有使用这个real_anime_id的映射关系
                                     # 因为数据库中已经有了这个ID的记录，下次分配时不会再使用这个ID
-                                    for search_key, search_info in list(fallback_search_cache.items()):
-                                        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
-                                            for bangumi_id, mapping_info in list(search_info["bangumi_mapping"].items()):
-                                                if mapping_info.get("real_anime_id") == real_anime_id:
-                                                    # 从映射中移除这个条目
-                                                    del search_info["bangumi_mapping"][bangumi_id]
-                                                    logger.info(f"清除缓存映射: search_key={search_key}, bangumiId={bangumi_id}, real_anime_id={real_anime_id}")
+                                    try:
+                                        all_cache_keys_cleanup = await crud.get_cache_keys_by_pattern(task_session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                        for cache_key_cleanup in all_cache_keys_cleanup:
+                                            search_key = cache_key_cleanup.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                            search_info = await _get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+
+                                            if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                                for bangumi_id, mapping_info in list(search_info["bangumi_mapping"].items()):
+                                                    if mapping_info.get("real_anime_id") == real_anime_id:
+                                                        # 从映射中移除这个条目
+                                                        del search_info["bangumi_mapping"][bangumi_id]
+                                                        logger.info(f"清除缓存映射: search_key={search_key}, bangumiId={bangumi_id}, real_anime_id={real_anime_id}")
+                                                # 保存更新后的缓存
+                                                await _set_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
+                                    except Exception as e:
+                                        logger.error(f"清除缓存映射失败: {e}")
 
                                 except Exception as db_error:
                                     logger.error(f"创建数据库条目失败: {db_error}", exc_info=True)
                                     await task_session.rollback()
 
-                                # 存储到缓存中
+                                # 存储到数据库缓存中
                                 cache_key = f"comments_{current_episodeId}"
-                                comments_fetch_cache[cache_key] = raw_comments_data
+                                await _set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, raw_comments_data, COMMENTS_FETCH_CACHE_TTL)
 
                                 # 返回弹幕数据（无论数据库操作是否成功）
                                 return raw_comments_data
@@ -3372,8 +3525,8 @@ async def get_comments_for_dandan(
                         await asyncio.wait_for(done_event.wait(), timeout=30.0)
                         # 任务完成，检查缓存中是否有结果
                         cache_key = f"comments_{episodeId}"
-                        if cache_key in comments_fetch_cache:
-                            comments_data = comments_fetch_cache[cache_key]
+                        comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                        if comments_data:
                             logger.info(f"弹幕下载任务快速完成，获得 {len(comments_data)} 条弹幕")
                         else:
                             logger.warning(f"任务完成但缓存中未找到弹幕数据")
@@ -3389,8 +3542,8 @@ async def get_comments_for_dandan(
                             # 等待一段时间，看是否能从缓存中获取结果
                             await asyncio.sleep(5.0)  # 等待5秒
                             cache_key = f"comments_{episodeId}"
-                            if cache_key in comments_fetch_cache:
-                                comments_data = comments_fetch_cache[cache_key]
+                            comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                            if comments_data:
                                 logger.info(f"从缓存中获取到弹幕数据: {len(comments_data)} 条")
                             else:
                                 logger.info(f"等待5秒后仍未从缓存获取到数据，任务可能仍在进行中")
@@ -3419,18 +3572,12 @@ async def get_comments_for_dandan(
         cache_key = f"sampled_{episodeId}_{limit}"
         current_time = time.time()
 
-        # 清理过期缓存
-        expired_keys = [
-            key for key, (_, timestamp) in sampled_comments_cache.items()
-            if current_time - timestamp > SAMPLED_CACHE_TTL
-        ]
-        for key in expired_keys:
-            del sampled_comments_cache[key]
-            logger.debug(f"清理过期采样缓存: {key}")
-
-        # 尝试从缓存获取
-        if cache_key in sampled_comments_cache:
-            cached_comments, cached_time = sampled_comments_cache[cache_key]
+        # 尝试从数据库缓存获取
+        cached_data = await _get_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key)
+        if cached_data:
+            # 缓存格式: {"comments": [...], "timestamp": 123456.789}
+            cached_comments = cached_data.get("comments", [])
+            cached_time = cached_data.get("timestamp", 0)
             if current_time - cached_time <= SAMPLED_CACHE_TTL:
                 logger.info(f"使用缓存的采样结果: episodeId={episodeId}, limit={limit}, 缓存时间={int(current_time - cached_time)}秒前")
                 comments_data = cached_comments
@@ -3442,7 +3589,8 @@ async def get_comments_for_dandan(
                 logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
 
                 # 更新缓存
-                sampled_comments_cache[cache_key] = (comments_data, current_time)
+                cache_value = {"comments": comments_data, "timestamp": current_time}
+                await _set_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key, cache_value, SAMPLED_COMMENTS_CACHE_TTL_DB)
         else:
             # 无缓存,执行采样
             logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
@@ -3451,7 +3599,8 @@ async def get_comments_for_dandan(
             logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
 
             # 存入缓存
-            sampled_comments_cache[cache_key] = (comments_data, current_time)
+            cache_value = {"comments": comments_data, "timestamp": current_time}
+            await _set_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key, cache_value, SAMPLED_COMMENTS_CACHE_TTL_DB)
             logger.debug(f"采样结果已缓存: {cache_key}")
 
     # UA 已由 get_token_from_path 依赖项记录

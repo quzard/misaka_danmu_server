@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # 内部模块导入
 from .config_manager import ConfigManager
+from .cache_manager import CacheManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api import api_router, control_router
 from .dandan_api import dandan_router
@@ -141,6 +142,10 @@ async def lifespan(app: FastAPI):
 
     # 初始化 TransportManager
     app.state.transport_manager = TransportManager()
+
+    # 初始化 CacheManager
+    app.state.cache_manager = CacheManager(session_factory)
+    logger.info("缓存管理器已初始化")
 
     # --- 并行优化的初始化顺序 ---
     startup_start = time.time()
