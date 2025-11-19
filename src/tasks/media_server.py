@@ -9,7 +9,7 @@ from .. import crud
 from ..task_manager import TaskManager, TaskSuccess
 from ..config_manager import ConfigManager
 from ..scraper_manager import ScraperManager
-from ..metadata_source_manager import MetadataSourceManager
+from ..metadata_manager import MetadataSourceManager
 from ..rate_limiter import RateLimiter
 from ..title_recognition import TitleRecognitionManager
 
