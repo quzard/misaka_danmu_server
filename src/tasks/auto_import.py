@@ -697,6 +697,11 @@ async def auto_search_and_import_task(
         if not best_match:
             raise ValueError("未能选择合适的搜索结果")
 
+        # 如果没有从元数据获取到imageUrl,使用搜索结果的imageUrl
+        if not image_url and best_match.imageUrl:
+            image_url = best_match.imageUrl
+            logger.info(f"使用搜索结果的海报: {image_url}")
+
         # 顺延机制：如果启用，尝试验证第一集是否可用
         if fallback_enabled:
             logger.info("外部控制API顺延机制已启用，正在验证第一集可用性...")
