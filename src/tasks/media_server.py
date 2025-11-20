@@ -138,17 +138,13 @@ async def import_media_items(
         from ..main import metadata_manager as global_metadata_manager
         metadata_manager = global_metadata_manager
     if config_manager is None:
-        from ..main import config_manager as global_config_manager
-        config_manager = global_config_manager
+        raise ValueError("config_manager is required")
     if ai_matcher_manager is None:
-        from ..main import ai_matcher_manager as global_ai_matcher_manager
-        ai_matcher_manager = global_ai_matcher_manager
+        raise ValueError("ai_matcher_manager is required")
     if rate_limiter is None:
-        from ..main import rate_limiter as global_rate_limiter
-        rate_limiter = global_rate_limiter
+        raise ValueError("rate_limiter is required")
     if title_recognition_manager is None:
-        from ..main import title_recognition_manager as global_title_recognition_manager
-        title_recognition_manager = global_title_recognition_manager
+        raise ValueError("title_recognition_manager is required")
 
     await progress_callback(0, "开始导入媒体项...")
 
