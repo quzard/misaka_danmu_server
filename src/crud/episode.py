@@ -248,6 +248,17 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     existing_episode_result = await session.execute(existing_episode_stmt)
     existing_episode = existing_episode_result.scalar_one_or_none()
     if existing_episode:
+        # 如果episode已存在,更新标题和URL(如果新值不为空且与旧值不同)
+        needs_update = False
+        if title and existing_episode.title != title:
+            existing_episode.title = title
+            needs_update = True
+        if url and existing_episode.sourceUrl != url:
+            existing_episode.sourceUrl = url
+            needs_update = True
+        if needs_update:
+            await session.flush()
+            logger.info(f"更新已存在的episode: id={new_episode_id}, title='{title}', url='{url}'")
         return existing_episode.id
 
     # 3. 如果ID不存在，则创建新分集

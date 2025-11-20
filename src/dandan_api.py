@@ -3238,20 +3238,19 @@ async def get_comments_for_dandan(
             if episode_url and provider:
                 logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")
 
-                # 检查是否已有相同的弹幕下载任务正在进行
+                # 检查是否已有相同的弹幕下载任务正在进行或最近完成
                 task_unique_key = f"fallback_comments_{episodeId}"
                 existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
                 if existing_task:
-                    logger.info(f"弹幕下载任务已存在: {task_unique_key}，等待任务完成...")
-                    # 等待最多30秒，检查缓存中是否有结果
+                    logger.info(f"弹幕下载任务已存在: {task_unique_key}，从数据库缓存读取...")
+                    # 直接从数据库缓存表读取弹幕数据
                     cache_key = f"comments_{episodeId}"
-                    for i in range(30):
-                        await asyncio.sleep(1)
-                        cached_comments_existing = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
-                        if cached_comments_existing:
-                            logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments_existing)} 条")
-                            break
-                    # 继续执行后续逻辑，从缓存中获取弹幕
+                    comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                    if comments_data:
+                        logger.info(f"从数据库缓存获取到弹幕数据，共 {len(comments_data)} 条")
+                    else:
+                        logger.warning(f"任务已存在但数据库缓存中未找到弹幕数据")
+                    # 继续执行后续逻辑
 
                 # 3. 将弹幕下载包装成任务管理器任务
                 # 保存当前作用域的变量，避免闭包问题
@@ -3304,8 +3303,9 @@ async def get_comments_for_dandan(
                             # 获取对应集数的分集信息（episode_number是从1开始的）
                             target_episode = episodes_list[current_episode_number - 1]
                             provider_episode_id = target_episode.episodeId
-                            # 使用原生分集标题
+                            # 使用原生分集标题和URL
                             original_episode_title = target_episode.title
+                            original_episode_url = target_episode.url or ""
 
                             if provider_episode_id:
                                 episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
@@ -3316,7 +3316,7 @@ async def get_comments_for_dandan(
                                     episodeIndex=current_episode_number,
                                     title=original_episode_title,  # 使用原生标题
                                     episodeId=episode_id_for_comments,
-                                    url=""
+                                    url=original_episode_url  # 使用原生URL
                                 )
 
                                 # 使用并发下载获取弹幕（三线程模式）
@@ -3426,10 +3426,10 @@ async def get_comments_for_dandan(
                                     result_source = await task_session.execute(stmt_source)
                                     source_order = result_source.scalar_one()
 
-                                    # 3. 创建分集条目（使用原生标题）
+                                    # 3. 创建分集条目（使用原生标题和URL）
                                     episode_db_id = await crud.create_episode_if_not_exists(
                                         task_session, anime_id, source_id, current_episode_number,
-                                        original_episode_title, "", provider_episode_id
+                                        original_episode_title, original_episode_url, provider_episode_id
                                     )
 
                                     # 为整部剧创建一条缓存记录(不下载弹幕,不创建数据库记录)
