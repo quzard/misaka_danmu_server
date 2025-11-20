@@ -21,6 +21,7 @@ from sqlalchemy.orm import selectinload
 import httpx
 from ...rate_limiter import RateLimiter, RateLimitExceededError
 from ...config_manager import ConfigManager
+from ...ai_matcher_manager import AIMatcherManager
 from pydantic import BaseModel, Field, model_validator
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 from ..dependencies import (
     get_scraper_manager, get_task_manager, get_scheduler_manager,
     get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
+    get_ai_matcher_manager, get_rate_limiter, get_title_recognition_manager
 )
 
 from ..ui_models import (
@@ -105,6 +106,7 @@ async def run_webhook_tasks_now(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
 ):
@@ -120,6 +122,7 @@ async def run_webhook_tasks_now(
         scraper_manager=scraper_manager,
         metadata_manager=metadata_manager,
         config_manager=config_manager,
+        ai_matcher_manager=ai_matcher_manager,
         rate_limiter=rate_limiter,
         title_recognition_manager=title_recognition_manager
     )

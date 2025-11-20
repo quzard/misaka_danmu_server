@@ -21,6 +21,7 @@ from sqlalchemy import exc, select
 from .. import crud, models, tasks, utils, orm_models
 from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
+from ..ai_matcher_manager import AIMatcherManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scheduler import SchedulerManager
@@ -77,6 +78,10 @@ def get_rate_limiter(request: Request) -> RateLimiter:
 def get_title_recognition_manager(request: Request):
     """依赖项：从应用状态获取标题识别管理器"""
     return request.app.state.title_recognition_manager
+
+def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
+    """依赖项：从应用状态获取AI匹配管理器"""
+    return request.app.state.ai_matcher_manager
 
 # 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
 api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
@@ -312,6 +317,7 @@ async def auto_import(
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     title_recognition_manager = Depends(get_title_recognition_manager),
     api_key: str = Depends(verify_api_key)
 ):
@@ -440,6 +446,7 @@ async def auto_import(
     try:
         task_coro = lambda session, cb: tasks.auto_search_and_import_task(
             payload, cb, session, config_manager, manager, metadata_manager, task_manager,
+            ai_matcher_manager=ai_matcher_manager,
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager,
             api_key=api_key

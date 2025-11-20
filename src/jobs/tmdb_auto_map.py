@@ -13,7 +13,7 @@ from ..rate_limiter import RateLimiter
 from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
-from ..ai_matcher import AIMatcher
+from ..ai_matcher_manager import AIMatcherManager
 
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoScrape"
@@ -22,12 +22,13 @@ class TmdbAutoMapJob(BaseJob):
 
     # 修正：此任务不涉及弹幕下载，因此移除不必要的 rate_limiter 依赖
     # 修正：接收正确的依赖项
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, metadata_manager: MetadataSourceManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, metadata_manager: MetadataSourceManager, ai_matcher_manager: AIMatcherManager):
         # 由于此任务的依赖项与基类不同，我们不调用 super().__init__，
         # 而是直接初始化此任务所需的属性。
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.metadata_manager = metadata_manager
+        self.ai_matcher_manager = ai_matcher_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
 
@@ -50,7 +51,7 @@ class TmdbAutoMapJob(BaseJob):
         ai_recognition_enabled = False
         ai_alias_correction_enabled = False
         try:
-            ai_match_enabled = await crud.get_config_value(session, "aiMatchEnabled", "false") == "true"
+            ai_match_enabled = await self.ai_matcher_manager.is_enabled()
             ai_recognition_enabled = await crud.get_config_value(session, "aiRecognitionEnabled", "false") == "true"
             ai_alias_correction_enabled = await crud.get_config_value(session, "aiAliasCorrectionEnabled", "false") == "true"
 
@@ -67,24 +68,10 @@ class TmdbAutoMapJob(BaseJob):
                     "aiAliasValidationPrompt": (DEFAULT_AI_ALIAS_VALIDATION_PROMPT, "AI别名验证提示词")
                 })
 
-                # 读取提示词配置
-                # 注意: 此时数据库中一定存在这些键(上面已经初始化),直接读取即可
-                # 即使值为空字符串也会被读取,不会使用硬编码兜底
-                ai_match_prompt = await crud.get_config_value(session, "aiMatchPrompt", "")
-                ai_recognition_prompt = await crud.get_config_value(session, "aiRecognitionPrompt", "")
-                ai_alias_validation_prompt = await crud.get_config_value(session, "aiAliasValidationPrompt", "")
-
-                config = {
-                    "ai_match_provider": await crud.get_config_value(session, "aiProvider", "deepseek"),
-                    "ai_match_api_key": await crud.get_config_value(session, "aiApiKey", ""),
-                    "ai_match_base_url": await crud.get_config_value(session, "aiBaseUrl", ""),
-                    "ai_match_model": await crud.get_config_value(session, "aiModel", "deepseek-chat"),
-                    "ai_match_prompt": ai_match_prompt,
-                    "ai_recognition_prompt": ai_recognition_prompt,
-                    "ai_alias_validation_prompt": ai_alias_validation_prompt,
-                    "ai_log_raw_response": (await crud.get_config_value(session, "aiLogRawResponse", "false")).lower() == "true"
-                }
-                ai_matcher = AIMatcher(config)
+                # 使用AIMatcherManager获取matcher实例
+                ai_matcher = await self.ai_matcher_manager.get_matcher()
+                if not ai_matcher:
+                    self.logger.warning("AI匹配器初始化失败,将使用传统搜索")
         except Exception as e:
             self.logger.warning(f"初始化AI matcher失败: {e}, 将使用传统搜索")
 

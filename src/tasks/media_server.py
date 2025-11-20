@@ -121,12 +121,13 @@ async def import_media_items(
     scraper_manager=None,
     metadata_manager=None,
     config_manager=None,
+    ai_matcher_manager=None,
     rate_limiter=None,
     title_recognition_manager=None
 ):
     """导入媒体项(按季度导入电视剧,电影直接导入)"""
     from ..orm_models import MediaItem
-    
+
     webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
 
     # 如果没有传入manager,从全局获取
@@ -139,6 +140,9 @@ async def import_media_items(
     if config_manager is None:
         from ..main import config_manager as global_config_manager
         config_manager = global_config_manager
+    if ai_matcher_manager is None:
+        from ..main import ai_matcher_manager as global_ai_matcher_manager
+        ai_matcher_manager = global_ai_matcher_manager
     if rate_limiter is None:
         from ..main import rate_limiter as global_rate_limiter
         rate_limiter = global_rate_limiter
@@ -206,6 +210,7 @@ async def import_media_items(
                     task_manager=task_manager,
                     metadata_manager=metadata_manager,
                     config_manager=config_manager,
+                    ai_matcher_manager=ai_matcher_manager,
                     rate_limiter=rate_limiter,
                     title_recognition_manager=title_recognition_manager
                 ),
@@ -264,6 +269,7 @@ async def import_media_items(
                     task_manager=task_manager,
                     metadata_manager=metadata_manager,
                     config_manager=config_manager,
+                    ai_matcher_manager=ai_matcher_manager,
                     rate_limiter=rate_limiter,
                     title_recognition_manager=title_recognition_manager,
                     selectedEpisodes=selected_eps,

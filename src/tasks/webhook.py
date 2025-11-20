@@ -18,6 +18,7 @@ from ..title_recognition import TitleRecognitionManager
 from ..search_utils import unified_search
 from ..timezone import get_now
 from ..utils import parse_search_keyword
+from ..ai_matcher_manager import AIMatcherManager
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ async def run_webhook_tasks_directly_manual(
     scraper_manager: "ScraperManager",
     metadata_manager: "MetadataSourceManager",
     config_manager: "ConfigManager",
+    ai_matcher_manager: "AIMatcherManager",
     rate_limiter: "RateLimiter",
     title_recognition_manager: "TitleRecognitionManager"
 ) -> int:
@@ -53,6 +55,7 @@ async def run_webhook_tasks_directly_manual(
                 webhookSource=task.webhookSource, progress_callback=cb, session=s,
                 manager=scraper_manager, task_manager=task_manager,
                 metadata_manager=metadata_manager, config_manager=config_manager,
+                ai_matcher_manager=ai_matcher_manager,
                 rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager,
                 **payload
             )
@@ -85,6 +88,7 @@ async def webhook_search_and_dispatch_task(
     task_manager: TaskManager, # type: ignore
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
+    ai_matcher_manager: AIMatcherManager,
     rate_limiter: RateLimiter,
     title_recognition_manager: TitleRecognitionManager,
     # 媒体库整季导入时, 可选: 指定已在媒体库中选中的分集索引列表
@@ -153,23 +157,12 @@ async def webhook_search_and_dispatch_task(
         if webhook_tmdb_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
             logger.info(f"○ Webhook 季度映射: 开始为 '{original_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
 
-            # 检查是否启用AI匹配
-            ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
-            ai_matcher = None
-            if ai_match_enabled.lower() == "true":
-                try:
-                    from ..ai_matcher import AIMatcher
-                    ai_config = {
-                        "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                        "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                        "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                        "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                        "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                        "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
-                    }
-                    ai_matcher = AIMatcher(ai_config)
-                except Exception as e:
-                    logger.warning(f"Webhook 季度映射: AI匹配器初始化失败: {e}")
+            # 获取AI匹配器(如果启用)
+            ai_matcher = await ai_matcher_manager.get_matcher()
+            if ai_matcher:
+                logger.debug("Webhook 季度映射: 使用AI匹配器")
+            else:
+                logger.debug("Webhook 季度映射: AI匹配器未启用或初始化失败")
 
             # 获取元数据源和自定义提示词
             metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
@@ -366,62 +359,45 @@ async def webhook_search_and_dispatch_task(
         # 评估所有候选项 (不限制数量)
         logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
 
-        # 检查是否启用AI匹配
-        ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
+        # 使用AIMatcherManager进行AI匹配
         best_match = None
         ai_selected_index = None
 
-        if ai_match_enabled:
+        if await ai_matcher_manager.is_enabled():
             logger.info("Webhook 任务: AI匹配已启用")
             try:
-                # 获取AI配置 - 使用 AIMatcher 期望的键名
-                ai_config = {
-                    'ai_match_provider': await config_manager.get("aiProvider", "deepseek"),
-                    'ai_match_api_key': await config_manager.get("aiApiKey", ""),
-                    'ai_match_base_url': await config_manager.get("aiBaseUrl", ""),
-                    'ai_match_model': await config_manager.get("aiModel", ""),
-                    'ai_match_prompt': await config_manager.get("aiPrompt", ""),
-                    'ai_log_raw_response': (await config_manager.get("aiLogRawResponse", "false")).lower() == 'true'
+                # 构建查询信息
+                query_info = {
+                    'title': animeTitle,
+                    'season': season if mediaType == 'tv_series' else None,
+                    'episode': currentEpisodeIndex,
+                    'year': year,
+                    'type': mediaType
                 }
 
-                # 检查必要配置
-                if not ai_config['ai_match_api_key']:
-                    logger.warning("Webhook 任务: AI匹配已启用但未配置API密钥，降级到传统匹配")
-                else:
-                    # 构建查询信息
-                    query_info = {
-                        'title': animeTitle,
-                        'season': season if mediaType == 'tv_series' else None,
-                        'episode': currentEpisodeIndex,
-                        'year': year,
-                        'type': mediaType
-                    }
+                # 获取精确标记信息
+                favorited_info = {}
 
-                    # 获取精确标记信息
-                    favorited_info = {}
-
-                    for result in all_search_results:
-                        # 查找是否有相同provider和mediaId的源被标记
-                        stmt = (
-                            select(AS.isFavorited)
-                            .where(
-                                AS.providerName == result.provider,
-                                AS.mediaId == result.mediaId
-                            )
-                            .limit(1)
+                for result in all_search_results:
+                    # 查找是否有相同provider和mediaId的源被标记
+                    stmt = (
+                        select(AS.isFavorited)
+                        .where(
+                            AS.providerName == result.provider,
+                            AS.mediaId == result.mediaId
                         )
-                        result_row = await session.execute(stmt)
-                        is_favorited = result_row.scalar_one_or_none()
-                        if is_favorited:
-                            key = f"{result.provider}:{result.mediaId}"
-                            favorited_info[key] = True
-
-                    # 初始化AI匹配器并选择
-                    from ..ai_matcher import AIMatcher
-                    matcher = AIMatcher(ai_config)
-                    ai_selected_index = await matcher.select_best_match(
-                        query_info, all_search_results, favorited_info
+                        .limit(1)
                     )
+                    result_row = await session.execute(stmt)
+                    is_favorited = result_row.scalar_one_or_none()
+                    if is_favorited:
+                        key = f"{result.provider}:{result.mediaId}"
+                        favorited_info[key] = True
+
+                # 使用AIMatcherManager进行匹配
+                ai_selected_index = await ai_matcher_manager.select_best_match(
+                    query_info, all_search_results, favorited_info
+                )
 
                 if ai_selected_index is not None:
                     best_match = all_search_results[ai_selected_index]

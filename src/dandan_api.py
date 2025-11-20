@@ -20,6 +20,7 @@ from fastapi.routing import APIRoute
 from . import crud, models, orm_models, tasks, scraper_manager as sm, rate_limiter as rl
 from .config_manager import ConfigManager
 from .cache_manager import CacheManager
+from .ai_matcher_manager import AIMatcherManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
@@ -28,7 +29,7 @@ from .task_manager import TaskManager, TaskStatus, TaskSuccess
 from .metadata_manager import MetadataSourceManager
 from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
-from .api.dependencies import get_cache_manager
+from .api.dependencies import get_cache_manager, get_ai_matcher_manager
 from .search_utils import unified_search
 from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
@@ -146,6 +147,8 @@ async def _delete_db_cache(session: AsyncSession, prefix: str, key: str) -> bool
         return False
 
 # ==================== 结束缓存辅助函数 ====================
+
+# ==================== AI匹配辅助函数已移至 AIMatcherManager ====================
 
 async def _store_episode_mapping(session: AsyncSession, episode_id: int, provider: str, media_id: str, episode_index: int, original_title: str):
     """
@@ -1198,7 +1201,8 @@ async def _execute_fallback_search_task(
         search_info_complete = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
         if search_info_complete:
             search_info_complete["status"] = "completed"
-            search_info_complete["results"] = search_results
+            # 将 Pydantic 模型列表转换为字典列表
+            search_info_complete["results"] = [result.model_dump() for result in search_results]
             await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_complete, FALLBACK_SEARCH_CACHE_TTL)
 
         # 将搜索结果存储到数据库缓存中（与WebUI搜索一致）
@@ -1877,6 +1881,7 @@ async def _get_match_for_item(
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
+    ai_matcher_manager: AIMatcherManager,
     rate_limiter: RateLimiter,
     title_recognition_manager,
     current_token: Optional[str] = None
@@ -2078,23 +2083,12 @@ async def _get_match_for_item(
                 if match_fallback_tmdb_enabled.lower() == "true" and not is_movie and season and season > 1:
                     logger.info(f"○ 匹配后备 季度映射: 开始为 '{base_title}' S{season:02d} 获取季度名称(并行)...")
 
-                    # 检查是否启用AI匹配
-                    ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
-                    ai_matcher = None
-                    if ai_match_enabled.lower() == "true":
-                        try:
-                            from .ai_matcher import AIMatcher
-                            ai_config = {
-                                "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                                "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                                "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                                "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                                "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                                "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
-                            }
-                            ai_matcher = AIMatcher(ai_config)
-                        except Exception as e:
-                            logger.warning(f"匹配后备 季度映射: AI匹配器初始化失败: {e}")
+                    # 获取AI匹配器(如果启用)
+                    ai_matcher = await ai_matcher_manager.get_matcher()
+                    if ai_matcher:
+                        logger.debug("匹配后备 季度映射: 使用AI匹配器")
+                    else:
+                        logger.debug("匹配后备 季度映射: AI匹配器未启用或初始化失败")
 
                     # 获取元数据源和自定义提示词
                     metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
@@ -2257,45 +2251,27 @@ async def _get_match_for_item(
                             "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
                         })
 
-                        # 获取AI配置
-                        # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
-                        ai_config = {
-                            "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                            "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                            "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                            "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                            "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                            "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+                        # 构建查询信息
+                        query_info = {
+                            "title": base_title,
+                            "season": season,
+                            "episode": episode_number,
+                            "year": None,  # 匹配后备场景通常没有年份信息
+                            "type": "movie" if is_movie else "tv_series"
                         }
 
-                        # 检查必要配置
-                        if not ai_config["ai_match_api_key"]:
-                            logger.warning("AI匹配已启用但未配置API密钥，降级到传统匹配")
-                        else:
-                            # 构建查询信息
-                            query_info = {
-                                "title": base_title,
-                                "season": season,
-                                "episode": episode_number,
-                                "year": None,  # 匹配后备场景通常没有年份信息
-                                "type": "movie" if is_movie else "tv_series"
-                            }
+                        # 使用AIMatcherManager进行匹配
+                        ai_selected_index = await ai_matcher_manager.select_best_match(
+                            query_info, sorted_results, favorited_info
+                        )
 
-                            # 初始化AI匹配器并选择
-                            matcher = AIMatcher(ai_config)
-                            ai_selected_index = await matcher.select_best_match(
-                                query_info, sorted_results, favorited_info
-                            )
-
-                            if ai_selected_index is not None:
-                                logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                        if ai_selected_index is None:
+                            # 检查是否启用传统匹配兜底
+                            ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
+                            if ai_fallback_enabled:
+                                logger.info("AI匹配未找到合适结果，降级到传统匹配")
                             else:
-                                # 检查是否启用传统匹配兜底
-                                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
-                                if ai_fallback_enabled:
-                                    logger.info("AI匹配未找到合适结果，降级到传统匹配")
-                                else:
-                                    logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
+                                logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
 
                     except Exception as e:
                         # 检查是否启用传统匹配兜底
@@ -2647,6 +2623,7 @@ async def match_single_file(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
@@ -2656,7 +2633,7 @@ async def match_single_file(
     """
     return await _get_match_for_item(
         request, session, task_manager, scraper_manager,
-        metadata_manager, config_manager, rate_limiter, title_recognition_manager,
+        metadata_manager, config_manager, ai_matcher_manager, rate_limiter, title_recognition_manager,
         current_token=token
     )
 
@@ -2674,6 +2651,7 @@ async def match_batch_files(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
@@ -2685,7 +2663,7 @@ async def match_batch_files(
 
     tasks = [
         _get_match_for_item(
-            item, session, task_manager, scraper_manager, metadata_manager, config_manager, rate_limiter, title_recognition_manager,
+            item, session, task_manager, scraper_manager, metadata_manager, config_manager, ai_matcher_manager, rate_limiter, title_recognition_manager,
             current_token=token
         ) for item in request.requests
     ]

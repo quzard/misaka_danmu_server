@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # 内部模块导入
 from .config_manager import ConfigManager
 from .cache_manager import CacheManager
+from .ai_matcher_manager import AIMatcherManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api import api_router, control_router
 from .dandan_api import dandan_router
@@ -147,6 +148,10 @@ async def lifespan(app: FastAPI):
     app.state.cache_manager = CacheManager(session_factory)
     logger.info("缓存管理器已初始化")
 
+    # 初始化 AIMatcherManager
+    app.state.ai_matcher_manager = AIMatcherManager(app.state.config_manager)
+    logger.info("AI匹配管理器已初始化")
+
     # --- 并行优化的初始化顺序 ---
     startup_start = time.time()
 
@@ -229,7 +234,8 @@ async def lifespan(app: FastAPI):
     app.state.scheduler_manager = SchedulerManager(
         session_factory, app.state.task_manager, app.state.scraper_manager,
         app.state.rate_limiter, app.state.metadata_manager,
-        app.state.config_manager, app.state.title_recognition_manager
+        app.state.config_manager, app.state.ai_matcher_manager,
+        app.state.title_recognition_manager
     )
     await app.state.scheduler_manager.start()
 

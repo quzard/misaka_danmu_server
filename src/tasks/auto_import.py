@@ -8,6 +8,7 @@ from thefuzz import fuzz
 
 from .. import crud, models
 from ..config_manager import ConfigManager
+from ..ai_matcher_manager import AIMatcherManager
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
 from ..task_manager import TaskManager, TaskSuccess
@@ -48,6 +49,7 @@ async def auto_search_and_import_task(
     scraper_manager: ScraperManager,
     metadata_manager: MetadataSourceManager,
     task_manager: TaskManager,
+    ai_matcher_manager: AIMatcherManager,
     rate_limiter: Optional[RateLimiter] = None,
     api_key: Optional[str] = None,
     title_recognition_manager: Optional[TitleRecognitionManager] = None,
@@ -419,23 +421,12 @@ async def auto_search_and_import_task(
         if auto_import_tmdb_enabled.lower() == "true" and media_type != "movie" and search_season and search_season > 1:
             logger.info(f"○ 全自动导入 季度映射: 开始为 '{search_title}' S{search_season:02d} 获取季度名称(并行)...")
 
-            # 检查是否启用AI匹配
-            ai_match_enabled = await config_manager.get("aiMatchEnabled", "false")
-            ai_matcher = None
-            if ai_match_enabled.lower() == "true":
-                try:
-                    from ..ai_matcher import AIMatcher
-                    ai_config = {
-                        "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                        "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                        "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                        "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                        "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                        "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
-                    }
-                    ai_matcher = AIMatcher(ai_config)
-                except Exception as e:
-                    logger.warning(f"全自动导入 季度映射: AI匹配器初始化失败: {e}")
+            # 获取AI匹配器(如果启用)
+            ai_matcher = await ai_matcher_manager.get_matcher()
+            if ai_matcher:
+                logger.debug("全自动导入 季度映射: 使用AI匹配器")
+            else:
+                logger.debug("全自动导入 季度映射: AI匹配器未启用或初始化失败")
 
             # 获取元数据源和自定义提示词
             metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
@@ -621,82 +612,55 @@ async def auto_search_and_import_task(
         if not all_results:
             raise ValueError("没有找到合适的搜索结果")
 
-        # 检查是否启用AI匹配
-        ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == 'true'
-
-        # 如果启用AI匹配，尝试使用AI选择
+        # 使用AIMatcherManager进行AI匹配
         ai_selected_index = None
-        if ai_match_enabled:
+        if await ai_matcher_manager.is_enabled():
             try:
-                from ..ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
-
-                # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
-                async with scraper_manager._session_factory() as init_session:
-                    await crud.initialize_configs(init_session, {
-                        "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词")
-                    })
-
-                # 获取AI配置
-                # 注意: 此时数据库中一定存在这个键(上面已经初始化),直接读取即可
-                ai_config = {
-                    "ai_match_provider": await config_manager.get("aiProvider", "deepseek"),
-                    "ai_match_api_key": await config_manager.get("aiApiKey", ""),
-                    "ai_match_base_url": await config_manager.get("aiBaseUrl", ""),
-                    "ai_match_model": await config_manager.get("aiModel", "deepseek-chat"),
-                    "ai_match_prompt": await config_manager.get("aiPrompt", ""),
-                    "ai_log_raw_response": (await config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+                # 构建查询信息
+                query_info = {
+                    "title": main_title,
+                    "season": payload.season,
+                    "episode": payload.episode,
+                    "year": year,  # 修正：使用从元数据获取的year变量，而不是payload.year
+                    "type": media_type
                 }
 
-                # 检查必要配置
-                if not ai_config["ai_match_api_key"]:
-                    logger.warning("AI匹配已启用但未配置API密钥，降级到传统匹配")
-                else:
-                    # 构建查询信息
-                    query_info = {
-                        "title": main_title,
-                        "season": payload.season,
-                        "episode": payload.episode,
-                        "year": year,  # 修正：使用从元数据获取的year变量，而不是payload.year
-                        "type": media_type
-                    }
+                # 获取精确标记信息
+                favorited_info = {}
+                async with scraper_manager._session_factory() as ai_session:
+                    from ..orm_models import AnimeSource
+                    from sqlalchemy import select
 
-                    # 获取精确标记信息
-                    favorited_info = {}
-                    async with scraper_manager._session_factory() as ai_session:
-                        from ..orm_models import AnimeSource
-                        from sqlalchemy import select
-
-                        for result in all_results:
-                            # 查找是否有相同provider和mediaId的源被标记
-                            stmt = (
-                                select(AnimeSource.isFavorited)
-                                .where(
-                                    AnimeSource.providerName == result.provider,
-                                    AnimeSource.mediaId == result.mediaId
-                                )
-                                .limit(1)
+                    for result in all_results:
+                        # 查找是否有相同provider和mediaId的源被标记
+                        stmt = (
+                            select(AnimeSource.isFavorited)
+                            .where(
+                                AnimeSource.providerName == result.provider,
+                                AnimeSource.mediaId == result.mediaId
                             )
-                            result_row = await ai_session.execute(stmt)
-                            is_favorited = result_row.scalar_one_or_none()
-                            if is_favorited:
-                                key = f"{result.provider}:{result.mediaId}"
-                                favorited_info[key] = True
+                            .limit(1)
+                        )
+                        result_row = await ai_session.execute(stmt)
+                        is_favorited = result_row.scalar_one_or_none()
+                        if is_favorited:
+                            key = f"{result.provider}:{result.mediaId}"
+                            favorited_info[key] = True
 
-                    # 初始化AI匹配器并选择
-                    matcher = AIMatcher(ai_config)
-                    ai_selected_index = await matcher.select_best_match(
-                        query_info, all_results, favorited_info
-                    )
+                # 使用AIMatcherManager进行匹配
+                ai_selected_index = await ai_matcher_manager.select_best_match(
+                    query_info, all_results, favorited_info
+                )
 
-                    if ai_selected_index is not None:
-                        logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                if ai_selected_index is not None:
+                    logger.info(f"AI匹配成功选择: 索引 {ai_selected_index}")
+                else:
+                    # 检查是否启用传统匹配兜底
+                    ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
+                    if ai_fallback_enabled:
+                        logger.info("AI匹配未找到合适结果，降级到传统匹配")
                     else:
-                        # 检查是否启用传统匹配兜底
-                        ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
-                        if ai_fallback_enabled:
-                            logger.info("AI匹配未找到合适结果，降级到传统匹配")
-                        else:
-                            logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
+                        logger.warning("AI匹配未找到合适结果，且传统匹配兜底已禁用，将不使用任何结果")
 
             except Exception as e:
                 # 检查是否启用传统匹配兜底
@@ -716,8 +680,8 @@ async def auto_search_and_import_task(
         if ai_selected_index is not None:
             best_match = all_results[ai_selected_index]
             logger.info(f"使用AI选择的最佳匹配: {best_match.title} (Provider: {best_match.provider})")
-        # 否则，如果启用了传统匹配兜底，使用传统匹配
-        elif ai_match_enabled:
+        # 否则，如果启用了AI匹配，检查传统匹配兜底
+        elif await ai_matcher_manager.is_enabled():
             ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
             if ai_fallback_enabled:
                 best_match = all_results[0]
