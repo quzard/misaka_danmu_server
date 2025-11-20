@@ -546,20 +546,7 @@ const AutoMatchSetting = () => {
                 </Row>
               </Card>
 
-              <Card
-                size="small"
-                style={{ marginTop: '16px' }}
-                extra={
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => handleFillDefaultPrompt('aiPrompt')}
-                    disabled={matchMode !== 'ai'}
-                  >
-                    填充默认提示词
-                  </Button>
-                }
-              >
+              <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="aiPrompt"
                   label={
@@ -568,6 +555,14 @@ const AutoMatchSetting = () => {
                       <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
                         <QuestionCircleOutlined />
                       </Tooltip>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiPrompt')}
+                        disabled={matchMode !== 'ai'}
+                      >
+                        填充默认提示词
+                      </Button>
                     </Space>
                   }
                 >
@@ -580,20 +575,7 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card
-                size="small"
-                style={{ marginTop: '16px' }}
-                extra={
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => handleFillDefaultPrompt('seasonMappingPrompt')}
-                    disabled={matchMode !== 'ai'}
-                  >
-                    填充默认提示词
-                  </Button>
-                }
-              >
+              <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="seasonMappingPrompt"
                   label={
@@ -602,6 +584,14 @@ const AutoMatchSetting = () => {
                       <Tooltip title="用于指导AI从元数据源搜索结果中选择最佳匹配的提示词。留空使用默认提示词。">
                         <QuestionCircleOutlined />
                       </Tooltip>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('seasonMappingPrompt')}
+                        disabled={matchMode !== 'ai'}
+                      >
+                        填充默认提示词
+                      </Button>
                     </Space>
                   }
                 >
@@ -665,20 +655,7 @@ const AutoMatchSetting = () => {
                 </Col>
               </Row>
 
-              <Card
-                size="small"
-                style={{ marginTop: '16px' }}
-                extra={
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => handleFillDefaultPrompt('aiRecognitionPrompt')}
-                    disabled={matchMode !== 'ai' || !recognitionEnabled}
-                  >
-                    填充默认提示词
-                  </Button>
-                }
-              >
+              <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="aiRecognitionPrompt"
                   label={
@@ -687,6 +664,14 @@ const AutoMatchSetting = () => {
                       <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
                         <QuestionCircleOutlined />
                       </Tooltip>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiRecognitionPrompt')}
+                        disabled={matchMode !== 'ai' || !recognitionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
                     </Space>
                   }
                 >
@@ -699,20 +684,7 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card
-                size="small"
-                style={{ marginTop: '16px' }}
-                extra={
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => handleFillDefaultPrompt('aiAliasValidationPrompt')}
-                    disabled={matchMode !== 'ai' || !recognitionEnabled}
-                  >
-                    填充默认提示词
-                  </Button>
-                }
-              >
+              <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="aiAliasValidationPrompt"
                   label={
@@ -721,6 +693,14 @@ const AutoMatchSetting = () => {
                       <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
                         <QuestionCircleOutlined />
                       </Tooltip>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiAliasValidationPrompt')}
+                        disabled={matchMode !== 'ai' || !recognitionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
                     </Space>
                   }
                 >
@@ -733,20 +713,7 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card
-                size="small"
-                style={{ marginTop: '16px' }}
-                extra={
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => handleFillDefaultPrompt('aiAliasExpansionPrompt')}
-                    disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
-                  >
-                    填充默认提示词
-                  </Button>
-                }
-              >
+              <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="aiAliasExpansionPrompt"
                   label={
@@ -755,6 +722,14 @@ const AutoMatchSetting = () => {
                       <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
                         <QuestionCircleOutlined />
                       </Tooltip>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiAliasExpansionPrompt')}
+                        disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
                     </Space>
                   }
                 >
