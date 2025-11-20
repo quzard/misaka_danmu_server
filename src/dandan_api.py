@@ -3062,32 +3062,38 @@ async def get_comments_for_dandan(
                     # 等待任务完成，但设置较短的超时时间（30秒）
                     try:
                         await asyncio.wait_for(done_event.wait(), timeout=30.0)
-                        # 任务完成，检查缓存中是否有结果
-                        cache_key = f"comments_{episodeId}"
-                        cached_comments_result = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
-                        if cached_comments_result:
-                            logger.info(f"匹配后备弹幕下载任务快速完成，获得 {len(cached_comments_result)} 条弹幕")
-                            # 不删除缓存，让后续逻辑继续处理
+                        # 任务完成，刷新会话以看到任务会话的提交
+                        await session.commit()
+                        logger.info(f"匹配后备弹幕下载任务完成，从数据库重新读取弹幕")
+                        # 重新从数据库读取弹幕
+                        comments_data = await crud.fetch_comments(session, episodeId)
+                        if comments_data:
+                            logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
                         else:
-                            logger.warning(f"任务完成但缓存中未找到弹幕数据")
+                            logger.warning(f"任务完成但数据库中未找到弹幕数据")
                     except asyncio.TimeoutError:
                         logger.warning(f"匹配后备弹幕下载任务超时，任务将在后台继续执行")
                         # 超时后返回空结果，让用户稍后再试
                         return models.CommentResponse(count=0, comments=[])
 
                 except HTTPException as e:
-                    # 如果是409错误(任务已在运行中),等待一段时间后从缓存获取
+                    # 如果是409错误(任务已在运行中),等待一段时间
                     if e.status_code == 409:
                         logger.info(f"任务已在运行中，等待现有任务完成...")
-                        # 等待最多30秒，检查缓存中是否有结果
-                        cache_key = f"comments_{episodeId}"
-                        for i in range(30):
+                        # 等待最多30秒
+                        for _ in range(30):
                             await asyncio.sleep(1)
-                            cached_comments_wait = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
-                            if cached_comments_wait:
-                                logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments_wait)} 条")
-                                break
-                        # 继续执行后续逻辑，从缓存中获取弹幕
+                            # 尝试从数据库读取episode记录,检查是否已有弹幕文件
+                            try:
+                                stmt = select(Episode).where(Episode.id == episodeId)
+                                result = await session.execute(stmt)
+                                episode = result.scalar_one_or_none()
+                                if episode and episode.danmakuFilePath:
+                                    logger.info(f"检测到弹幕文件已创建: {episode.danmakuFilePath}")
+                                    break
+                            except Exception:
+                                pass
+                        # 继续执行后续逻辑，从数据库读取弹幕
                     else:
                         logger.error(f"提交匹配后备弹幕下载任务失败: {e}", exc_info=True)
                         await session.rollback()
@@ -3097,95 +3103,14 @@ async def get_comments_for_dandan(
                     await session.rollback()
                     return models.CommentResponse(count=0, comments=[])
 
-        # 检查弹幕获取缓存
-        cache_key = f"comments_{episodeId}"
-        comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
-        if comments_data:
-            logger.info(f"从缓存中获取 episodeId={episodeId} 的弹幕")
-
-            # 即使从缓存获取，也需要保存到数据库和XML文件
-            if comments_data and str(episodeId).startswith("25") and len(str(episodeId)) >= 13:
-                try:
-                    # 解析episodeId获取anime_id和episode_number
-                    episode_id_str = str(episodeId)
-                    real_anime_id = int(episode_id_str[2:8])
-                    episode_number = int(episode_id_str[10:14])
-
-                    # 获取映射信息
-                    mapping_data = await _get_episode_mapping(session, episodeId)
-                    if mapping_data:
-                        provider = mapping_data["provider"]
-                        media_id = mapping_data["media_id"]
-                        original_title = mapping_data["original_title"]
-
-                        # 复用现有的保存逻辑：查找或创建动画条目、源关联、分集条目，然后保存弹幕
-                        try:
-                            # 1. 首先尝试根据real_anime_id查找已存在的anime记录
-                            existing_anime_stmt = select(Anime).where(Anime.id == real_anime_id)
-                            existing_anime_result = await session.execute(existing_anime_stmt)
-                            existing_anime = existing_anime_result.scalar_one_or_none()
-
-                            if existing_anime:
-                                # 如果已存在，直接使用
-                                anime_id = existing_anime.id
-                                logger.info(f"找到已存在的番剧: ID={anime_id}, 标题='{existing_anime.title}', 季数={existing_anime.season}")
-                            else:
-                                # 如果不存在，解析标题并检查数据库中是否已有相同条目
-                                parsed_info = parse_search_keyword(original_title)
-                                base_title = parsed_info["title"]
-
-                                # 直接在数据库中查找相同标题的条目（不应用标题识别转换）
-                                stmt = select(Anime.id, Anime.title).where(
-                                    Anime.title == base_title,
-                                    Anime.season == 1
-                                )
-                                result = await session.execute(stmt)
-                                existing_anime_row = result.mappings().first()
-
-                                if existing_anime_row:
-                                    # 如果已存在，直接使用
-                                    anime_id = existing_anime_row['id']
-                                    logger.info(f"找到已存在的番剧（按标题）: ID={anime_id}, 标题='{base_title}'")
-                                else:
-                                    # 如果不存在，创建新的（使用解析后的纯标题）
-                                    anime_id = await crud.get_or_create_anime(
-                                        session, base_title, "tv_series", 1,
-                                        None, None, None, None, provider
-                                    )
-
-                            # 2. 创建源关联
-                            source_id = await crud.link_source_to_anime(
-                                session, anime_id, provider, media_id
-                            )
-
-                            # 3. 创建分集条目（使用原生标题）
-                            episode_title = f"第{episode_number}集"  # 缓存弹幕时暂时使用默认标题
-                            episode_db_id = await crud.create_episode_if_not_exists(
-                                session, anime_id, source_id, episode_number,
-                                episode_title, "", f"{provider}_{media_id}_{episode_number}"
-                            )
-
-                            # 4. 保存弹幕到数据库和XML文件
-                            added_count = await crud.save_danmaku_for_episode(
-                                session, episode_db_id, comments_data, config_manager
-                            )
-                            await session.commit()
-
-                            logger.info(f"缓存弹幕已保存到数据库和XML文件: anime_id={anime_id}, source_id={source_id}, episode_db_id={episode_db_id}, 保存了 {added_count} 条弹幕")
-                        except Exception as save_error:
-                            logger.error(f"保存缓存弹幕到数据库失败: {save_error}", exc_info=True)
-                            await session.rollback()
-                except Exception as e:
-                    logger.warning(f"处理缓存弹幕保存时发生错误: {e}")
-                    # 不影响弹幕返回，继续执行
-        else:
-            # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
-            if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
-                # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
-                episode_id_str = str(episodeId)
-                real_anime_id = int(episode_id_str[2:8])  # 提取真实animeId
-                _ = int(episode_id_str[8:10])  # 提取源顺序（暂时不使用）
-                episode_number = int(episode_id_str[10:14])  # 提取集编号
+        # 任务完成后,弹幕已经保存到数据库,不再从缓存读取
+        # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
+        if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
+            # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
+            episode_id_str = str(episodeId)
+            real_anime_id = int(episode_id_str[2:8])  # 提取真实animeId
+            _ = int(episode_id_str[8:10])  # 提取源顺序（暂时不使用）
+            episode_number = int(episode_id_str[10:14])  # 提取集编号
 
             # 查找对应的映射信息
             episode_url = None
@@ -3498,13 +3423,9 @@ async def get_comments_for_dandan(
                                         logger.error(f"创建数据库条目失败: {db_error}", exc_info=True)
                                         await task_session.rollback()
 
-                                    # 存储到数据库缓存中
-                                    cache_key = f"comments_{current_episodeId}"
-                                    await _set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, raw_comments_data, COMMENTS_FETCH_CACHE_TTL)
-                                    # 提交缓存写入
-                                    await task_session.commit()
-
-                                    # 返回弹幕数据（无论数据库操作是否成功）
+                                    # 不再写入缓存,弹幕已经保存到数据库和XML文件
+                                    # 外部会话会从数据库读取episode记录和弹幕文件
+                                    logger.info(f"弹幕已保存到数据库和文件,任务完成")
                                     return raw_comments_data
                             else:
                                 logger.warning(f"获取弹幕失败")
@@ -3527,14 +3448,15 @@ async def get_comments_for_dandan(
                         # 等待任务完成，但设置较短的超时时间（30秒）
                         try:
                             await asyncio.wait_for(done_event.wait(), timeout=30.0)
-                            # 任务完成，刷新会话并检查缓存中是否有结果
-                            await session.commit()  # 提交当前事务，确保能看到其他会话的提交
-                            cache_key = f"comments_{episodeId}"
-                            comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
+                            # 任务完成，刷新会话以看到任务会话的提交
+                            await session.commit()
+                            logger.info(f"后备搜索弹幕下载任务完成，从数据库重新读取弹幕")
+                            # 重新从数据库读取弹幕
+                            comments_data = await crud.fetch_comments(session, episodeId)
                             if comments_data:
-                                logger.info(f"弹幕下载任务快速完成，获得 {len(comments_data)} 条弹幕")
+                                logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
                             else:
-                                logger.warning(f"任务完成但缓存中未找到弹幕数据")
+                                logger.warning(f"任务完成但数据库中未找到弹幕数据")
                         except asyncio.TimeoutError:
                             logger.info(f"弹幕下载任务未在30秒内完成，任务将继续在后台运行")
                             # 任务继续在后台运行，下次访问时就能从数据库获取
@@ -3542,18 +3464,20 @@ async def get_comments_for_dandan(
                     except HTTPException as e:
                         if e.status_code == 409:  # 任务已在运行中
                             logger.info(f"弹幕下载任务已在运行中，等待现有任务完成...")
-                            # 尝试等待现有任务完成，但设置较短的超时时间
-                            try:
-                                # 等待一段时间，看是否能从缓存中获取结果
-                                await asyncio.sleep(5.0)  # 等待5秒
-                                cache_key = f"comments_{episodeId}"
-                                comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
-                                if comments_data:
-                                    logger.info(f"从缓存中获取到弹幕数据: {len(comments_data)} 条")
-                                else:
-                                    logger.info(f"等待5秒后仍未从缓存获取到数据，任务可能仍在进行中")
-                            except Exception as wait_error:
-                                logger.warning(f"等待现有任务时发生错误: {wait_error}")
+                            # 等待最多30秒
+                            for _ in range(30):
+                                await asyncio.sleep(1)
+                                # 尝试从数据库读取episode记录,检查是否已有弹幕文件
+                                try:
+                                    stmt = select(Episode).where(Episode.id == episodeId)
+                                    result = await session.execute(stmt)
+                                    episode = result.scalar_one_or_none()
+                                    if episode and episode.danmakuFilePath:
+                                        logger.info(f"检测到弹幕文件已创建: {episode.danmakuFilePath}")
+                                        break
+                                except Exception:
+                                    pass
+                            # 继续执行后续逻辑，从数据库读取弹幕
                         else:
                             logger.error(f"提交弹幕下载任务失败: {e}", exc_info=True)
                     except Exception as e:
