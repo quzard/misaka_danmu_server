@@ -3370,10 +3370,10 @@ async def get_comments_for_dandan(
                                                         search_keyword = search_info.get("search_term")
 
                                                     for result in search_info.get("results", []):
-                                                        # result 是 DandanSearchAnimeItem 对象，使用属性访问
-                                                        if hasattr(result, 'bangumiId') and result.bangumiId == last_bangumi_id:
-                                                            year = getattr(result, 'year', None)
-                                                            image_url = getattr(result, 'imageUrl', None)
+                                                        # result 是字典（从 model_dump() 转换而来）
+                                                        if isinstance(result, dict) and result.get('bangumiId') == last_bangumi_id:
+                                                            year = result.get('year')
+                                                            image_url = result.get('imageUrl')
                                                             break
                                                     break
                                     except Exception as e:
@@ -3521,7 +3521,8 @@ async def get_comments_for_dandan(
                     # 等待任务完成，但设置较短的超时时间（30秒）
                     try:
                         await asyncio.wait_for(done_event.wait(), timeout=30.0)
-                        # 任务完成，检查缓存中是否有结果
+                        # 任务完成，刷新会话并检查缓存中是否有结果
+                        await session.commit()  # 提交当前事务，确保能看到其他会话的提交
                         cache_key = f"comments_{episodeId}"
                         comments_data = await _get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
                         if comments_data:
