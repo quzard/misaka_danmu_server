@@ -88,14 +88,21 @@ async def _get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optiona
     cached_data = await crud.get_cache(session, cache_key)
 
     if cached_data:
-        try:
-            if isinstance(cached_data, str):
-                return json.loads(cached_data)
-            else:
-                return cached_data
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"解析缓存数据失败: {cache_key}, 错误: {e}")
+        # 如果不是字符串,直接返回
+        if not isinstance(cached_data, str):
+            return cached_data
+
+        # 如果是空字符串,返回None
+        if not cached_data.strip():
             return None
+
+        # 尝试解析JSON
+        try:
+            return json.loads(cached_data)
+        except (json.JSONDecodeError, TypeError):
+            # 如果不是JSON格式,直接返回字符串
+            # 这是为了兼容存储简单字符串的情况(如 token_search_task)
+            return cached_data
     return None
 
 async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any, ttl_seconds: int):
@@ -104,10 +111,21 @@ async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any
     """
     cache_key = f"{prefix}{key}"
     try:
-        if not isinstance(value, str):
-            json_value = json.dumps(value, ensure_ascii=False)
-        else:
+        if isinstance(value, str):
             json_value = value
+        else:
+            # 检查是否是 Pydantic 模型
+            if hasattr(value, 'model_dump'):
+                json_value = json.dumps(value.model_dump(), ensure_ascii=False)
+            elif hasattr(value, 'dict'):
+                json_value = json.dumps(value.dict(), ensure_ascii=False)
+            elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'model_dump'):
+                # 处理 Pydantic 模型列表
+                json_value = json.dumps([item.model_dump() for item in value], ensure_ascii=False)
+            elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'dict'):
+                json_value = json.dumps([item.dict() for item in value], ensure_ascii=False)
+            else:
+                json_value = json.dumps(value, ensure_ascii=False)
         await crud.set_cache(session, cache_key, json_value, ttl_seconds)
         logger.debug(f"设置缓存: {cache_key}")
     except Exception as e:
