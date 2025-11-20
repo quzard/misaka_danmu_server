@@ -537,6 +537,7 @@ export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tm
 /** 通用配置管理 */
 export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
 export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
+export const getDefaultAIPrompts = () => api.get('/api/ui/config/ai/default-prompts')
 
 /** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
 /** 获取所有媒体服务器 */
@@ -585,7 +586,7 @@ export const updateMediaItem = (itemId, data) => api.put(`/api/ui/media-items/${
 export const deleteMediaItem = (itemId) => api.delete(`/api/ui/media-items/${itemId}`)
 
 /** 批量删除媒体项 */
-export const batchDeleteMediaItems = (itemIds) => api.post('/api/ui/media-items/batch-delete', itemIds)
+export const batchDeleteMediaItems = (payload) => api.post('/api/ui/media-items/batch-delete', payload)
 
 /** 导入媒体项 */
 export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)

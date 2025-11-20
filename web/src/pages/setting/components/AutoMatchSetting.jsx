@@ -3,9 +3,9 @@ import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, 
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts } from '@/apis'
 import api from '@/apis/fetch'
-import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 
 const CustomSwitch = (props) => {
   return <Switch {...props} />
@@ -213,6 +213,24 @@ const AutoMatchSetting = () => {
       message.error(`测试失败: ${error?.response?.data?.message || error?.message || error?.detail || String(error) || '未知错误'}`)
     } finally {
       setTesting(false)
+    }
+  }
+
+  // 填充默认提示词
+  const handleFillDefaultPrompt = async (promptKey) => {
+    try {
+      const response = await getDefaultAIPrompts()
+      const defaultValue = response.data[promptKey]
+
+      if (defaultValue) {
+        form.setFieldValue(promptKey, defaultValue)
+        message.success('已填充默认提示词')
+      } else {
+        message.error('未找到默认提示词')
+      }
+    } catch (error) {
+      console.error('获取默认提示词失败:', error)
+      message.error(`获取默认提示词失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
     }
   }
 
@@ -528,7 +546,20 @@ const AutoMatchSetting = () => {
                 </Row>
               </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+              <Card
+                size="small"
+                style={{ marginTop: '16px' }}
+                extra={
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt('aiPrompt')}
+                    disabled={matchMode !== 'ai'}
+                  >
+                    填充默认提示词
+                  </Button>
+                }
+              >
                 <Form.Item
                   name="aiPrompt"
                   label={
@@ -549,7 +580,20 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+              <Card
+                size="small"
+                style={{ marginTop: '16px' }}
+                extra={
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt('seasonMappingPrompt')}
+                    disabled={matchMode !== 'ai'}
+                  >
+                    填充默认提示词
+                  </Button>
+                }
+              >
                 <Form.Item
                   name="seasonMappingPrompt"
                   label={
@@ -621,7 +665,20 @@ const AutoMatchSetting = () => {
                 </Col>
               </Row>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+              <Card
+                size="small"
+                style={{ marginTop: '16px' }}
+                extra={
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt('aiRecognitionPrompt')}
+                    disabled={matchMode !== 'ai' || !recognitionEnabled}
+                  >
+                    填充默认提示词
+                  </Button>
+                }
+              >
                 <Form.Item
                   name="aiRecognitionPrompt"
                   label={
@@ -642,7 +699,20 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+              <Card
+                size="small"
+                style={{ marginTop: '16px' }}
+                extra={
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt('aiAliasValidationPrompt')}
+                    disabled={matchMode !== 'ai' || !recognitionEnabled}
+                  >
+                    填充默认提示词
+                  </Button>
+                }
+              >
                 <Form.Item
                   name="aiAliasValidationPrompt"
                   label={
@@ -663,7 +733,20 @@ const AutoMatchSetting = () => {
                 </Form.Item>
               </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+              <Card
+                size="small"
+                style={{ marginTop: '16px' }}
+                extra={
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt('aiAliasExpansionPrompt')}
+                    disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
+                  >
+                    填充默认提示词
+                  </Button>
+                }
+              >
                 <Form.Item
                   name="aiAliasExpansionPrompt"
                   label={
