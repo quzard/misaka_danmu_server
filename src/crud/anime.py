@@ -408,13 +408,26 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
             Anime.id,
             Anime.title,
             Anime.season,
-            Anime.year
+            Anime.type,
+            Anime.year,
+            Anime.imageUrl,
+            Anime.localImagePath
         )
         .where(Anime.title == original_title, Anime.season == original_season)
         .limit(1)
     )
     if year:
         stmt = stmt.where(Anime.year == year)
+
+    # 左连接 AnimeMetadata 以获取元数据ID
+    stmt = stmt.outerjoin(AnimeMetadata, Anime.id == AnimeMetadata.animeId).add_columns(
+        AnimeMetadata.tmdbId,
+        AnimeMetadata.imdbId,
+        AnimeMetadata.tvdbId,
+        AnimeMetadata.doubanId,
+        AnimeMetadata.bangumiId
+    )
+
     result = await session.execute(stmt)
     row = result.mappings().first()
 
@@ -440,13 +453,26 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
                     Anime.id,
                     Anime.title,
                     Anime.season,
-                    Anime.year
+                    Anime.type,
+                    Anime.year,
+                    Anime.imageUrl,
+                    Anime.localImagePath
                 )
                 .where(Anime.title == converted_title, Anime.season == converted_season)
                 .limit(1)
             )
             if year:
                 stmt = stmt.where(Anime.year == year)
+
+            # 左连接 AnimeMetadata 以获取元数据ID
+            stmt = stmt.outerjoin(AnimeMetadata, Anime.id == AnimeMetadata.animeId).add_columns(
+                AnimeMetadata.tmdbId,
+                AnimeMetadata.imdbId,
+                AnimeMetadata.tvdbId,
+                AnimeMetadata.doubanId,
+                AnimeMetadata.bangumiId
+            )
+
             result = await session.execute(stmt)
             row = result.mappings().first()
 
@@ -464,9 +490,9 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
 
 
 async def find_anime_by_metadata_id_and_season(
-    session: AsyncSession, 
+    session: AsyncSession,
     id_type: str,
-    media_id: str, 
+    media_id: str,
     season: int
 ) -> Optional[Dict[str, Any]]:
     """
@@ -477,7 +503,20 @@ async def find_anime_by_metadata_id_and_season(
         raise ValueError(f"无效的元数据ID类型: {id_type}")
 
     stmt = (
-        select(Anime.id, Anime.title, Anime.season)
+        select(
+            Anime.id,
+            Anime.title,
+            Anime.season,
+            Anime.type,
+            Anime.year,
+            Anime.imageUrl,
+            Anime.localImagePath,
+            AnimeMetadata.tmdbId,
+            AnimeMetadata.imdbId,
+            AnimeMetadata.tvdbId,
+            AnimeMetadata.doubanId,
+            AnimeMetadata.bangumiId
+        )
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId)
         .where(id_column == media_id, Anime.season == season)
         .limit(1)
