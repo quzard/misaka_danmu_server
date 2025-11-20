@@ -3495,6 +3495,8 @@ async def get_comments_for_dandan(
                                 # 存储到数据库缓存中
                                 cache_key = f"comments_{current_episodeId}"
                                 await _set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, raw_comments_data, COMMENTS_FETCH_CACHE_TTL)
+                                # 提交缓存写入
+                                await task_session.commit()
 
                                 # 返回弹幕数据（无论数据库操作是否成功）
                                 return raw_comments_data
