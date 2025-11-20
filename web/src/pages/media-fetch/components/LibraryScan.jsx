@@ -213,8 +213,61 @@ const LibraryScan = () => {
       return;
     }
 
+    // 分类收集要删除的项目
+    const itemIds = [];
+    const shows = [];
+    const seasons = [];
+
+    // 解析选中的项目key
+    selectedMediaItems.forEach(key => {
+      // 如果key是数字,说明是电影的id
+      if (typeof key === 'number') {
+        itemIds.push(key);
+        return;
+      }
+
+      // 如果key是字符串
+      if (typeof key === 'string') {
+        if (key.startsWith('movie-') || key.startsWith('episode-')) {
+          // 直接删除的电影或剧集
+          itemIds.push(parseInt(key.split('-')[1]));
+        } else if (key.startsWith('show-')) {
+          // 整个剧集组
+          const title = key.substring(5); // 移除 'show-' 前缀
+          shows.push({
+            serverId: selectedServerId,
+            title: title
+          });
+        } else if (key.startsWith('season-')) {
+          // 某一季
+          // key格式: season-{title}-S{season}
+          const parts = key.substring(7); // 移除 'season-' 前缀
+          const lastDashIndex = parts.lastIndexOf('-S');
+          if (lastDashIndex > 0) {
+            const title = parts.substring(0, lastDashIndex);
+            const season = parseInt(parts.substring(lastDashIndex + 2));
+            seasons.push({
+              serverId: selectedServerId,
+              title: title,
+              season: season
+            });
+          }
+        }
+      }
+    });
+
+    if (itemIds.length === 0 && shows.length === 0 && seasons.length === 0) {
+      message.warning('没有可删除的项目');
+      return;
+    }
+
     try {
-      await batchDeleteMediaItems(selectedMediaItems);
+      const payload = {};
+      if (itemIds.length > 0) payload.itemIds = itemIds;
+      if (shows.length > 0) payload.shows = shows;
+      if (seasons.length > 0) payload.seasons = seasons;
+
+      await batchDeleteMediaItems(payload);
       message.success(`成功删除 ${selectedMediaItems.length} 个项目`);
       setSelectedMediaItems([]);
       // 触发列表刷新
@@ -237,31 +290,40 @@ const LibraryScan = () => {
     const shows = [];
     const seasons = [];
 
-    // 辅助函数:根据key查找item (需要从MediaItemList获取items,这里简化处理)
+    // 解析选中的项目key
     selectedMediaItems.forEach(key => {
-      if (key.startsWith('movie-') || key.startsWith('episode-')) {
-        // 直接导入的电影或剧集
-        itemIds.push(parseInt(key.split('-')[1]));
-      } else if (key.startsWith('show-')) {
-        // 整个剧集组
-        const title = key.substring(5); // 移除 'show-' 前缀
-        shows.push({
-          serverId: selectedServerId,
-          title: title
-        });
-      } else if (key.startsWith('season-')) {
-        // 某一季
-        // key格式: season-{title}-S{season}
-        const parts = key.substring(7); // 移除 'season-' 前缀
-        const lastDashIndex = parts.lastIndexOf('-S');
-        if (lastDashIndex > 0) {
-          const title = parts.substring(0, lastDashIndex);
-          const season = parseInt(parts.substring(lastDashIndex + 2));
-          seasons.push({
+      // 如果key是数字,说明是电影的id
+      if (typeof key === 'number') {
+        itemIds.push(key);
+        return;
+      }
+
+      // 如果key是字符串
+      if (typeof key === 'string') {
+        if (key.startsWith('movie-') || key.startsWith('episode-')) {
+          // 直接导入的电影或剧集
+          itemIds.push(parseInt(key.split('-')[1]));
+        } else if (key.startsWith('show-')) {
+          // 整个剧集组
+          const title = key.substring(5); // 移除 'show-' 前缀
+          shows.push({
             serverId: selectedServerId,
-            title: title,
-            season: season
+            title: title
           });
+        } else if (key.startsWith('season-')) {
+          // 某一季
+          // key格式: season-{title}-S{season}
+          const parts = key.substring(7); // 移除 'season-' 前缀
+          const lastDashIndex = parts.lastIndexOf('-S');
+          if (lastDashIndex > 0) {
+            const title = parts.substring(0, lastDashIndex);
+            const season = parseInt(parts.substring(lastDashIndex + 2));
+            seasons.push({
+              serverId: selectedServerId,
+              title: title,
+              season: season
+            });
+          }
         }
       }
     });
