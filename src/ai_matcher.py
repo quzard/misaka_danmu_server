@@ -46,6 +46,47 @@ DEFAULT_AI_MATCH_PROMPT = """你是一个专业的影视内容匹配专家。你
 
 **禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。"""
 
+# 默认季度映射提示词
+DEFAULT_AI_SEASON_MAPPING_PROMPT = """你是一个专业的影视元数据匹配专家。你的任务是从元数据源(TMDB/TVDB/IMDB/豆瓣/Bangumi)的搜索结果中选择最匹配用户查询的条目。
+
+**重要**: 你必须严格按照JSON格式返回结果,不要返回任何其他文本或解释。
+
+**输入格式**:
+- query: 用户查询信息
+  - title: 作品标题
+  - year: 年份 (可能为null)
+  - season: 季度号 (可能为null)
+- results: 元数据源搜索结果列表,每个结果包含:
+  - title: 标题
+  - year: 年份
+  - type: 类型 (tv/movie)
+  - overview: 简介 (可能为空)
+
+**匹配规则** (按优先级排序):
+1. **标题相似度**: 优先匹配标题相似度最高的条目 (考虑中文/英文/日文等多语言)
+2. **年份接近**: 优先选择年份接近的 (允许±2年误差)
+3. **类型匹配**: 如果查询指定了季度,优先匹配tv类型
+4. **简介相关性**: 如果有简介,可以作为辅助判断
+
+**特殊情况**:
+- 如果查询包含季度号但搜索结果中没有明确的季度信息,选择主系列(通常是第一个结果)
+- 如果标题包含"剧场版"/"Movie"等关键词,优先匹配movie类型
+- 如果有多个高度相似的结果,选择年份最接近的
+
+**输出格式** (必须是有效的JSON):
+{
+  "index": 最佳匹配结果在列表中的索引(整数,从0开始,无匹配则为-1),
+  "confidence": 匹配置信度(整数,0-100),
+  "reason": "选择理由(简短说明)"
+}
+
+**示例输出**:
+{"index": 0, "confidence": 95, "reason": "标题完全匹配且年份一致"}
+{"index": 2, "confidence": 80, "reason": "标题相似度高,年份接近"}
+{"index": -1, "confidence": 0, "reason": "无合适匹配"}
+
+**禁止**: 不要返回任何JSON之外的文本,不要返回道歉、解释或建议。"""
+
 # 默认识别提示词
 DEFAULT_AI_RECOGNITION_PROMPT = """你是一个专业的影视标题格式纠正与匹配选择专家。你的任务是:
 1. 将数据库中的标题信息标准化,生成最适合TMDB搜索的查询关键词
@@ -828,5 +869,121 @@ class AIMatcher:
         except Exception as e:
             logger.error(f"AI别名验证失败: {e}")
             return None
+
+    async def select_metadata_result(
+        self,
+        title: str,
+        year: Optional[int],
+        candidates: List[Dict[str, Any]],
+        season: Optional[int] = None,
+        custom_prompt: Optional[str] = None
+    ) -> Optional[int]:
+        """
+        使用AI从元数据搜索结果中选择最佳匹配(通用方法)
+
+        Args:
+            title: 查询标题
+            year: 年份(可选)
+            candidates: 元数据候选结果列表,每个包含:
+                - source: 元数据源 ('tmdb', 'tvdb', etc.)
+                - id: 源的ID
+                - title: 标题
+                - original_title: 原标题
+                - year: 年份
+                - overview: 简介
+            season: 季度号(可选)
+            custom_prompt: 自定义提示词(可选,优先级高于默认提示词)
+
+        Returns:
+            最佳匹配结果的索引,如果没有合适的匹配则返回None
+        """
+        if not candidates:
+            return None
+
+        if not self.client:
+            logger.warning("AI客户端未初始化,使用简单规则选择")
+            return 0  # 返回第一个结果
+
+        try:
+            # 使用自定义提示词或默认提示词
+            system_prompt = custom_prompt or DEFAULT_AI_SEASON_MAPPING_PROMPT
+
+            # 构建用户输入
+            input_data = {
+                "query": {
+                    "title": title,
+                    "year": year
+                },
+                "results": []
+            }
+
+            # 如果指定了季度,添加到查询中
+            if season is not None:
+                input_data["query"]["season"] = season
+
+            for idx, candidate in enumerate(candidates):
+                result_data = {
+                    "index": idx,
+                    "source": candidate.get("source", "unknown"),
+                    "id": candidate.get("id"),
+                    "title": candidate.get("title"),
+                    "year": candidate.get("year")
+                }
+
+                # 添加原标题(如果不同)
+                original_title = candidate.get("original_title")
+                if original_title and original_title != candidate.get("title"):
+                    result_data["original_title"] = original_title
+
+                # 添加简介(截取前150字符)
+                overview = candidate.get("overview")
+                if overview:
+                    result_data["overview"] = overview[:150] + ("..." if len(overview) > 150 else "")
+
+                input_data["results"].append(result_data)
+
+            logger.info(f"AI元数据匹配: 开始分析 {len(candidates)} 个候选结果")
+
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                timeout=30
+            )
+
+            content = response.choices[0].message.content
+
+            if self.log_raw_response:
+                ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
+
+            if not parsed_data:
+                logger.warning("AI元数据匹配: 未能解析响应")
+                return 0  # 返回第一个结果
+
+            # 解析结果
+            index = parsed_data.get("index", -1)
+            confidence = parsed_data.get("confidence", 0)
+            reason = parsed_data.get("reason", "")
+
+            if index < 0 or index >= len(candidates):
+                logger.info(f"AI元数据匹配: 未找到合适的匹配 (reason: {reason})")
+                return 0  # 返回第一个结果
+
+            selected = candidates[index]
+            logger.info(f"AI元数据匹配: 选择结果 #{index} - {selected.get('source')}:{selected.get('title')} (ID: {selected.get('id')}, 置信度: {confidence}%, 理由: {reason})")
+
+            return index
+
+        except Exception as e:
+            logger.error(f"AI元数据匹配过程中发生错误: {e}", exc_info=True)
+            return 0  # 返回第一个结果
 
 

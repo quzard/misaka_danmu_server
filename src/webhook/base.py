@@ -95,6 +95,7 @@ class BaseWebhook(ABC):
                     task_manager=self.task_manager,
                     metadata_manager=self.metadata_manager,
                     config_manager=self.config_manager,
+                    ai_matcher_manager=self.ai_matcher_manager,
                     rate_limiter=self.rate_limiter,
                     title_recognition_manager=self.title_recognition_manager,
                     **payload

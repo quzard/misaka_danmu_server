@@ -181,10 +181,15 @@ async def clear_all_caches(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ): #noqa
-    """清除数据库中存储的所有缓存数据（如搜索结果、分集列表）。"""
+    """清除数据库中存储的所有缓存数据（包括搜索结果、分集列表、后备搜索缓存、弹幕缓存等）。"""
+    # 清除数据库缓存（所有缓存现在都存储在数据库中）
     deleted_count = await crud.clear_all_cache(session)
-    logger.info(f"用户 '{current_user.username}' 清除了所有缓存，共 {deleted_count} 条。")
-    return {"message": f"成功清除了 {deleted_count} 条缓存记录。"}
+
+    logger.info(f"用户 '{current_user.username}' 清除了所有缓存: 数据库 {deleted_count} 条。")
+    return {
+        "message": f"成功清除缓存: 数据库 {deleted_count} 条。",
+        "database_cache": deleted_count
+    }
 
 
 

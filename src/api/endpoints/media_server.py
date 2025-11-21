@@ -18,6 +18,7 @@ from ..dependencies import (
     get_scraper_manager,
     get_metadata_manager,
     get_config_manager,
+    get_ai_matcher_manager,
     get_rate_limiter,
     get_title_recognition_manager
 )
@@ -27,6 +28,7 @@ from ...media_server_manager import get_media_server_manager
 from ...scraper_manager import ScraperManager
 from ...metadata_manager import MetadataSourceManager
 from ...config_manager import ConfigManager
+from ...ai_matcher_manager import AIMatcherManager
 from ...rate_limiter import RateLimiter
 
 router = APIRouter()
@@ -463,45 +465,65 @@ async def delete_media_item(
     await session.commit()
 
 
-class BatchDeleteRequest(BaseModel):
-    itemIds: Optional[List[int]] = None
-    shows: Optional[List[Dict[str, Any]]] = None  # [{"serverId": 1, "title": "剧名"}]
-    seasons: Optional[List[Dict[str, Any]]] = None  # [{"serverId": 1, "title": "剧名", "season": 1}]
-
-
 @router.post("/media-items/batch-delete", status_code=200, summary="批量删除媒体项")
 async def batch_delete_media_items(
-    payload: BatchDeleteRequest,
+    payload: Dict[str, Any],
     session: AsyncSession = Depends(get_db_session),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    """批量删除媒体项"""
+    """批量删除媒体项
+
+    支持三种删除方式:
+    1. 直接传 itemIds: List[int]
+    2. shows: [{"serverId": int, "title": str}]
+    3. seasons: [{"serverId": int, "title": str, "season": int}]
+    """
     from ...crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
 
-    all_item_ids = set()
+    all_item_ids: set[int] = set()
 
     # 收集直接指定的item IDs
-    if payload.itemIds:
-        all_item_ids.update(payload.itemIds)
+    item_ids = payload.get("itemIds") or []
+    if isinstance(item_ids, list):
+        for v in item_ids:
+            try:
+                all_item_ids.add(int(v))
+            except (TypeError, ValueError):
+                continue
 
     # 收集剧集组的所有episode IDs
-    if payload.shows:
-        for show in payload.shows:
+    shows = payload.get("shows") or []
+    if isinstance(shows, list):
+        for show in shows:
+            if not isinstance(show, dict):
+                continue
+            server_id = show.get("serverId")
+            title = show.get("title")
+            if server_id is None or not title:
+                continue
             episode_ids = await get_episode_ids_by_show(
                 session,
-                show['serverId'],
-                show['title']
+                int(server_id),
+                title
             )
             all_item_ids.update(episode_ids)
 
     # 收集季度的所有episode IDs
-    if payload.seasons:
-        for season in payload.seasons:
+    seasons = payload.get("seasons") or []
+    if isinstance(seasons, list):
+        for season in seasons:
+            if not isinstance(season, dict):
+                continue
+            server_id = season.get("serverId")
+            title = season.get("title")
+            season_no = season.get("season")
+            if server_id is None or not title or season_no is None:
+                continue
             episode_ids = await get_episode_ids_by_season(
                 session,
-                season['serverId'],
-                season['title'],
-                season['season']
+                int(server_id),
+                title,
+                int(season_no)
             )
             all_item_ids.update(episode_ids)
 
@@ -528,6 +550,7 @@ async def import_media_items(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
@@ -574,6 +597,7 @@ async def import_media_items(
             scraper_manager=scraper_manager,
             metadata_manager=metadata_manager,
             config_manager=config_manager,
+            ai_matcher_manager=ai_matcher_manager,
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager
         ),

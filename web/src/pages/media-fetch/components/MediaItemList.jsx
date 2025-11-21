@@ -67,10 +67,10 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
 
     for (const work of worksList) {
       if (work.type === 'movie') {
-        // 电影节点
+        // 电影节点 - 使用纯数字id作为key
         result.push({
           ...work,
-          key: `movie-${work.id}`,
+          key: work.id,
           isGroup: false,
         });
       } else if (work.type === 'tv_show') {
@@ -178,32 +178,39 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
     const seasons = [];
 
     selectedRowKeys.forEach(key => {
-      if (key.startsWith('movie-') || key.startsWith('episode-')) {
-        // 直接删除的电影或剧集
-        itemIds.push(parseInt(key.split('-')[1]));
-      } else {
-        // 查找对应的item
-        const item = findItemByKey(items, key);
-        if (!item) return;
+      // 如果key是数字,说明是电影的id
+      if (typeof key === 'number') {
+        itemIds.push(key);
+        return;
+      }
 
-        if (item.mediaType === 'tv_show') {
-          // 整个剧集组
-          shows.push({
+      // 如果key是字符串且以episode-开头,提取id
+      if (typeof key === 'string' && key.startsWith('episode-')) {
+        itemIds.push(parseInt(key.split('-')[1]));
+        return;
+      }
+
+      // 其他情况,查找对应的item
+      const item = findItemByKey(items, key);
+      if (!item) return;
+
+      if (item.mediaType === 'tv_show') {
+        // 整个剧集组
+        shows.push({
+          serverId: serverId,
+          title: item.title
+        });
+      } else if (item.mediaType === 'tv_season') {
+        // 某一季
+        // 需要找到父级的title
+        const parentKey = key.substring(0, key.lastIndexOf('-'));
+        const parent = findItemByKey(items, parentKey);
+        if (parent) {
+          seasons.push({
             serverId: serverId,
-            title: item.title
+            title: parent.title,
+            season: item.season
           });
-        } else if (item.mediaType === 'tv_season') {
-          // 某一季
-          // 需要找到父级的title
-          const parentKey = key.substring(0, key.lastIndexOf('-'));
-          const parent = findItemByKey(items, parentKey);
-          if (parent) {
-            seasons.push({
-              serverId: serverId,
-              title: parent.title,
-              season: item.season
-            });
-          }
         }
       }
     });

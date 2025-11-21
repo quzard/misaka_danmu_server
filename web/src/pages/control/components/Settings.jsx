@@ -88,7 +88,7 @@ export const Settings = () => {
         getTmdbConfig(),
         getFallbackConfig(),
       ])
-      
+
       form.setFieldsValue({
         tmdbEnabled: tmdbConfig.enabled,
         tmdbSources: tmdbConfig.sources,
@@ -105,13 +105,13 @@ export const Settings = () => {
     try {
       setSaving(true)
       const values = await form.validateFields()
-      
+
       // 保存 TMDB 反查配置
       await saveTmdbConfig(values)
-      
+
       // 保存顺延机制配置
       await saveFallbackConfig(values.externalApiFallbackEnabled)
-      
+
       messageApi.success('配置已保存')
     } catch (error) {
       messageApi.error('保存配置失败')

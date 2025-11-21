@@ -3,21 +3,12 @@ import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, 
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts } from '@/apis'
 import api from '@/apis/fetch'
-import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 
-const CustomSwitch = ({ checked, disabled, onChange, children, ...props }) => {
-  return (
-    <Switch
-      checked={checked}
-      disabled={disabled}
-      onChange={onChange}
-      {...props}
-    >
-      {children}
-    </Switch>
-  )
+const CustomSwitch = (props) => {
+  return <Switch {...props} />
 }
 
 const AutoMatchSetting = () => {
@@ -30,6 +21,7 @@ const AutoMatchSetting = () => {
   const [aliasExpansionEnabled, setAliasExpansionEnabled] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
+  const [selectedMetadataSource, setSelectedMetadataSource] = useState('tmdb')
 
   // 加载配置
   const loadSettings = async () => {
@@ -49,7 +41,12 @@ const AutoMatchSetting = () => {
         aliasCorrectionEnabledRes,
         aliasExpansionEnabledRes,
         aliasExpansionPromptRes,
-        logRawResponseRes
+        logRawResponseRes,
+        webhookSeasonMappingRes,
+        matchFallbackSeasonMappingRes,
+        autoImportSeasonMappingRes,
+        seasonMappingSourceRes,
+        seasonMappingPromptRes
       ] = await Promise.all([
         getConfig('aiMatchEnabled'),
         getConfig('aiFallbackEnabled'),
@@ -64,7 +61,12 @@ const AutoMatchSetting = () => {
         getConfig('aiAliasCorrectionEnabled'),
         getConfig('aiAliasExpansionEnabled'),
         getConfig('aiAliasExpansionPrompt'),
-        getConfig('aiLogRawResponse')
+        getConfig('aiLogRawResponse'),
+        getConfig('webhookEnableTmdbSeasonMapping'),
+        getConfig('matchFallbackEnableTmdbSeasonMapping'),
+        getConfig('autoImportEnableTmdbSeasonMapping'),
+        getConfig('seasonMappingMetadataSource'),
+        getConfig('seasonMappingPrompt')
       ])
 
       const enabled = enabledRes.data.value === 'true'
@@ -77,6 +79,7 @@ const AutoMatchSetting = () => {
       setFallbackEnabled(fallback)
       setRecognitionEnabled(recognition)
       setAliasExpansionEnabled(aliasExpansion)
+      setSelectedMetadataSource(seasonMappingSourceRes.data.value || 'tmdb')
 
       form.setFieldsValue({
         aiMatchEnabled: enabled,
@@ -92,7 +95,12 @@ const AutoMatchSetting = () => {
         aiAliasCorrectionEnabled: aliasCorrection,
         aiAliasExpansionEnabled: aliasExpansion,
         aiAliasExpansionPrompt: aliasExpansionPromptRes.data.value || '',
-        aiLogRawResponse: logRawResponse
+        aiLogRawResponse: logRawResponse,
+        webhookEnableTmdbSeasonMapping: webhookSeasonMappingRes.data.value === 'true',
+        matchFallbackEnableTmdbSeasonMapping: matchFallbackSeasonMappingRes.data.value === 'true',
+        autoImportEnableTmdbSeasonMapping: autoImportSeasonMappingRes.data.value === 'true',
+        seasonMappingMetadataSource: seasonMappingSourceRes.data.value || 'tmdb',
+        seasonMappingPrompt: seasonMappingPromptRes.data.value || ''
       })
     } catch (error) {
       console.error('加载配置失败:', error)
@@ -128,7 +136,12 @@ const AutoMatchSetting = () => {
         setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
         setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
         setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || ''),
-        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
+        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false'),
+        setConfig('webhookEnableTmdbSeasonMapping', values.webhookEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('matchFallbackEnableTmdbSeasonMapping', values.matchFallbackEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('autoImportEnableTmdbSeasonMapping', values.autoImportEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('seasonMappingMetadataSource', values.seasonMappingMetadataSource || 'tmdb'),
+        setConfig('seasonMappingPrompt', values.seasonMappingPrompt || '')
       ])
 
       message.success('保存成功')
@@ -200,6 +213,24 @@ const AutoMatchSetting = () => {
       message.error(`测试失败: ${error?.response?.data?.message || error?.message || error?.detail || String(error) || '未知错误'}`)
     } finally {
       setTesting(false)
+    }
+  }
+
+  // 填充默认提示词
+  const handleFillDefaultPrompt = async (promptKey) => {
+    try {
+      const response = await getDefaultAIPrompts()
+      const defaultValue = response.data[promptKey]
+
+      if (defaultValue) {
+        form.setFieldValue(promptKey, defaultValue)
+        message.success('已填充默认提示词')
+      } else {
+        message.error('未找到默认提示词')
+      }
+    } catch (error) {
+      console.error('获取默认提示词失败:', error)
+      message.error(`获取默认提示词失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
     }
   }
 
@@ -427,16 +458,145 @@ const AutoMatchSetting = () => {
                 </Col>
               </Row>
 
+              {/* 季度映射配置 */}
+              <Card size="small" style={{ marginBottom: '16px' }}>
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} sm={12}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ fontWeight: 500, marginBottom: '4px' }}>季度映射开关</div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>Webhook季度映射</span>
+                          <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                        <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                          <CustomSwitch size="small" />
+                        </Form.Item>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>后备匹配季度映射</span>
+                          <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                        <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                          <CustomSwitch size="small" />
+                        </Form.Item>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>全自动导入季度映射</span>
+                          <Tooltip title="启用后，全自动导入时会通过元数据源获取季度名称">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                        <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                          <CustomSwitch size="small" />
+                        </Form.Item>
+                      </div>
+                    </div>
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: 500 }}>元数据源选择</span>
+                        <Tooltip title="选择用于季度映射的元数据源。只能选择一个源。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </div>
+                      <Form.Item name="seasonMappingMetadataSource" noStyle>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                          {[
+                            { value: 'tmdb', label: 'TMDB' },
+                            { value: 'tvdb', label: 'TVDB' },
+                            { value: 'imdb', label: 'IMDB' },
+                            { value: 'douban', label: '豆瓣' },
+                            { value: 'bangumi', label: 'Bangumi' }
+                          ].map(source => (
+                            <div
+                              key={source.value}
+                              onClick={() => {
+                                setSelectedMetadataSource(source.value)
+                                form.setFieldValue('seasonMappingMetadataSource', source.value)
+                              }}
+                              style={{
+                                border: '1px solid #d9d9d9',
+                                borderRadius: '4px',
+                                padding: '12px',
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                                backgroundColor: selectedMetadataSource === source.value ? '#1890ff' : 'transparent',
+                                color: selectedMetadataSource === source.value ? '#fff' : 'inherit',
+                                transition: 'all 0.3s'
+                              }}
+                            >
+                              {source.label}
+                            </div>
+                          ))}
+                        </div>
+                      </Form.Item>
+                    </div>
+                  </Col>
+                </Row>
+              </Card>
+
               <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item
                   name="aiPrompt"
                   label={
-                    <Space>
-                      <span>AI匹配提示词</span>
-                      <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </Space>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Space>
+                        <span>AI匹配提示词</span>
+                        <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiPrompt')}
+                        disabled={matchMode !== 'ai'}
+                      >
+                        填充默认提示词
+                      </Button>
+                    </div>
+                  }
+                >
+                  <TextArea
+                    rows={6}
+                    placeholder="留空使用默认提示词..."
+                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    disabled={matchMode !== 'ai'}
+                  />
+                </Form.Item>
+              </Card>
+
+              <Card size="small" style={{ marginTop: '16px' }}>
+                <Form.Item
+                  name="seasonMappingPrompt"
+                  label={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Space>
+                        <span>AI季度映射提示词</span>
+                        <Tooltip title="用于指导AI从元数据源搜索结果中选择最佳匹配的提示词。留空使用默认提示词。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('seasonMappingPrompt')}
+                        disabled={matchMode !== 'ai'}
+                      >
+                        填充默认提示词
+                      </Button>
+                    </div>
                   }
                 >
                   <TextArea
@@ -503,12 +663,22 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiRecognitionPrompt"
                   label={
-                    <Space>
-                      <span>AI识别提示词</span>
-                      <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </Space>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Space>
+                        <span>AI识别提示词</span>
+                        <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiRecognitionPrompt')}
+                        disabled={matchMode !== 'ai' || !recognitionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
+                    </div>
                   }
                 >
                   <TextArea
@@ -524,12 +694,22 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiAliasValidationPrompt"
                   label={
-                    <Space>
-                      <span>AI别名验证提示词</span>
-                      <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </Space>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Space>
+                        <span>AI别名验证提示词</span>
+                        <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiAliasValidationPrompt')}
+                        disabled={matchMode !== 'ai' || !recognitionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
+                    </div>
                   }
                 >
                   <TextArea
@@ -545,12 +725,22 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiAliasExpansionPrompt"
                   label={
-                    <Space>
-                      <span>AI别名扩展提示词</span>
-                      <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </Space>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Space>
+                        <span>AI别名扩展提示词</span>
+                        <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleFillDefaultPrompt('aiAliasExpansionPrompt')}
+                        disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
+                      >
+                        填充默认提示词
+                      </Button>
+                    </div>
                   }
                 >
                   <TextArea

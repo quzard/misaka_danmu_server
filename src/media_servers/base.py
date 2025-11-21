@@ -125,14 +125,28 @@ class BaseMediaServer(ABC):
     async def get_season_episodes(
         self,
         series_id: str,
-        season_number: int
+        season_number: int,
+        library_id: Optional[str] = None,
+        series_name: Optional[str] = None,
+        series_year: Optional[int] = None,
+        series_tmdb_id: Optional[str] = None,
+        series_tvdb_id: Optional[str] = None,
+        series_imdb_id: Optional[str] = None,
+        series_poster: Optional[str] = None
     ) -> List[MediaItem]:
         """
         获取某一季的所有集
-        
+
         Args:
             series_id: 剧集ID
             season_number: 季度号
+            library_id: 媒体库ID (可选)
+            series_name: 剧集名称 (可选)
+            series_year: 剧集年份 (可选)
+            series_tmdb_id: TMDB ID (可选)
+            series_tvdb_id: TVDB ID (可选)
+            series_imdb_id: IMDB ID (可选)
+            series_poster: 海报URL (可选)
         """
         pass
     

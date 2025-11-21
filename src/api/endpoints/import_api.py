@@ -299,10 +299,10 @@ async def import_from_url(
     if not media_id_for_scraper:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法从URL '{url}' 中为提供商 '{provider}' 解析出媒体ID。")
 
-    task_coro = lambda session, callback: generic_import_task(
-        provider=provider, media_id=media_id_for_scraper, anime_title=title, # type: ignore
-        media_type=request_data.media_type, season=request_data.season,
-        current_episode_index=None, image_url=None, douban_id=None, tmdb_id=None, imdb_id=None, tvdb_id=None, bangumi_id=None,
+    task_coro = lambda session, callback: tasks.generic_import_task(
+        provider=provider, mediaId=media_id_for_scraper, animeTitle=title, # type: ignore
+        mediaType=request_data.media_type, season=request_data.season, year=None,
+        currentEpisodeIndex=None, imageUrl=None, doubanId=None, tmdbId=None, imdbId=None, tvdbId=None, bangumiId=None,
         metadata_manager=metadata_manager,
         progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
         config_manager=config_manager,

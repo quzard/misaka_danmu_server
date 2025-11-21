@@ -602,6 +602,33 @@ async def test_ai_connection(
 # --- Media Server API ---
 
 
+@router.get("/config/ai/default-prompts", response_model=Dict[str, str], summary="获取AI默认提示词")
+async def get_default_ai_prompts(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取所有AI提示词的硬编码默认值
+
+    Returns:
+        包含所有默认提示词的字典
+    """
+    from ...ai_matcher import (
+        DEFAULT_AI_MATCH_PROMPT,
+        DEFAULT_AI_RECOGNITION_PROMPT,
+        DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
+        DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
+        DEFAULT_AI_SEASON_MAPPING_PROMPT
+    )
+
+    return {
+        "aiPrompt": DEFAULT_AI_MATCH_PROMPT,
+        "aiRecognitionPrompt": DEFAULT_AI_RECOGNITION_PROMPT,
+        "aiAliasValidationPrompt": DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
+        "aiAliasExpansionPrompt": DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
+        "seasonMappingPrompt": DEFAULT_AI_SEASON_MAPPING_PROMPT
+    }
+
+
 
 
 

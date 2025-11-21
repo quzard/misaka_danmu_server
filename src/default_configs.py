@@ -89,6 +89,13 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 预下载配置
         'preDownloadNextEpisodeEnabled': ('false', '是否启用预下载下一集弹幕。当播放当前集时，自动下载下一集的弹幕。需要启用匹配后备或后备搜索。'),
 
+        # 季度映射配置
+        'webhookEnableTmdbSeasonMapping': ('false', '是否启用Webhook TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'matchFallbackEnableTmdbSeasonMapping': ('false', '是否启用匹配后备 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'autoImportEnableTmdbSeasonMapping': ('false', '是否启用全自动导入 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'seasonMappingMetadataSource': ('tmdb', 'TMDB季度映射使用的元数据源。可选值: tmdb, tvdb, imdb, douban, bangumi。'),
+        'seasonMappingPrompt': ('', 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。留空使用默认提示词。'),
+
         # 媒体服务器配置
         'mediaServerAutoImport': ('false', '是否自动导入新扫描到的媒体项'),
         'mediaServerSyncInterval': ('3600', '媒体服务器同步间隔(秒)'),
@@ -115,6 +122,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiAliasExpansionEnabled': ('false', '是否启用AI别名扩展。启用后，当元数据源返回非中文标题时，使用AI生成可能的别名用于搜索。'),
             'aiAliasExpansionPrompt': (ai_prompts.get('DEFAULT_AI_ALIAS_EXPANSION_PROMPT', ''), 'AI别名扩展提示词'),
             'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
+            'seasonMappingPrompt': (ai_prompts.get('DEFAULT_AI_SEASON_MAPPING_PROMPT', ''), 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。'),
         })
 
     return configs

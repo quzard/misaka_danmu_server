@@ -17,6 +17,7 @@ from .metadata_sources.base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
 import httpx
+
 class MetadataSourceManager:
     """
     通过动态加载来管理元数据源的状态和状态。
@@ -45,12 +46,24 @@ class MetadataSourceManager:
         self.scraper_manager = scraper_manager
         # 新增：为所有元数据源创建一个父级路由器
         self.router = APIRouter()
+        # 季度映射器(延迟初始化)
+        self._season_mapper = None
 
     async def initialize(self):
         """在应用启动时加载并同步元数据源，并构建其API路由。"""
         await self.load_and_sync_sources()
         self._build_source_routers()
+        # 初始化季度映射器
+        from .season_mapper import SeasonMapper
+        self._season_mapper = SeasonMapper(self, self._session_factory)
         logger.info("元数据源管理器已初始化。")
+
+    @property
+    def season_mapper(self):
+        """获取季度映射器实例"""
+        if self._season_mapper is None:
+            raise RuntimeError("SeasonMapper未初始化,请先调用initialize()")
+        return self._season_mapper
 
     def get_source(self, provider_name: str) -> Any:
         """
@@ -560,6 +573,11 @@ class MetadataSourceManager:
             await tmdb_source.update_tmdb_mappings(tmdb_tv_id, group_id, user)
         else:
             self.logger.warning("TMDB 元数据源未加载或不支持 `update_tmdb_mappings` 方法。")
+
+    # 季度映射相关方法委托给 SeasonMapper
+    async def get_season_name(self, *args, **kwargs):
+        """委托给 SeasonMapper.get_season_name()"""
+        return await self.season_mapper.get_season_name(*args, **kwargs)
 
     async def close_all(self):
         """在应用关闭时关闭所有元数据源客户端。"""

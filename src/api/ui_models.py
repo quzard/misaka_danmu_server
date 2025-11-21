@@ -175,6 +175,7 @@ class WebhookSettings(BaseModel):
     webhookFilterRegex: str
     webhookLogRawRequest: bool
     webhookFallbackEnabled: bool
+    webhookEnableTmdbSeasonMapping: bool
 
 
 class WebhookTaskItem(BaseModel):
