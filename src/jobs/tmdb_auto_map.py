@@ -13,7 +13,8 @@ from ..rate_limiter import RateLimiter
 from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
-from ..ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
 
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoScrape"
@@ -61,7 +62,6 @@ class TmdbAutoMapJob(BaseJob):
                     self.logger.info("AI别名修正已启用")
 
                 # 动态注册AI提示词配置(如果不存在则创建,使用硬编码默认值)
-                from ..ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
                 await crud.initialize_configs(session, {
                     "aiMatchPrompt": (DEFAULT_AI_MATCH_PROMPT, "AI智能匹配提示词"),
                     "aiRecognitionPrompt": (DEFAULT_AI_RECOGNITION_PROMPT, "AI辅助识别提示词"),

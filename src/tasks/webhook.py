@@ -18,7 +18,7 @@ from ..title_recognition import TitleRecognitionManager
 from ..search_utils import unified_search
 from ..timezone import get_now
 from ..utils import parse_search_keyword
-from ..ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher_manager import AIMatcherManager
 
 logger = logging.getLogger(__name__)
 

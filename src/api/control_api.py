@@ -21,7 +21,7 @@ from sqlalchemy import exc, select
 from .. import crud, models, tasks, utils, orm_models
 from ..rate_limiter import RateLimiter, RateLimitExceededError
 from ..config_manager import ConfigManager
-from ..ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher_manager import AIMatcherManager
 from ..database import get_db_session
 from ..metadata_manager import MetadataSourceManager
 from ..scheduler import SchedulerManager
