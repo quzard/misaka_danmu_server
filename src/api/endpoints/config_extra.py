@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 from ..dependencies import (
     get_scraper_manager, get_task_manager, get_scheduler_manager,
     get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
+    get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
 
 from ..ui_models import (
@@ -631,7 +631,8 @@ async def get_default_ai_prompts(
 @router.get("/config/ai/metrics", summary="获取AI调用统计")
 async def get_ai_metrics(
     hours: int = 24,
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    ai_matcher_manager = Depends(get_ai_matcher_manager)
 ):
     """
     获取AI调用的统计信息
@@ -642,8 +643,6 @@ async def get_ai_metrics(
     Returns:
         AI调用统计数据
     """
-    from ...main import ai_matcher_manager
-
     matcher = await ai_matcher_manager.get_matcher()
     if not matcher:
         return {
@@ -666,7 +665,8 @@ async def get_ai_metrics(
 
 @router.post("/config/ai/cache/clear", summary="清空AI缓存")
 async def clear_ai_cache(
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    ai_matcher_manager = Depends(get_ai_matcher_manager)
 ):
     """
     清空AI响应缓存
@@ -674,8 +674,6 @@ async def clear_ai_cache(
     Returns:
         操作结果
     """
-    from ...main import ai_matcher_manager
-
     matcher = await ai_matcher_manager.get_matcher()
     if not matcher:
         raise HTTPException(status_code=400, detail="AI匹配器未初始化或未启用")
@@ -689,6 +687,69 @@ async def clear_ai_cache(
         "success": True,
         "message": "AI缓存已清空"
     }
+
+
+@router.get("/config/ai/balance", summary="获取AI账户余额")
+async def get_ai_balance(
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager = Depends(get_ai_matcher_manager)
+):
+    """
+    获取AI账户余额 (通用接口,根据 aiProvider 自动选择)
+
+    Returns:
+        {
+            "supported": true/false,  # 是否支持余额查询
+            "provider": "deepseek",   # 当前提供商
+            "data": {                 # 仅当 supported=true 时存在
+                "currency": "CNY",
+                "total_balance": "110.00",
+                "granted_balance": "10.00",
+                "topped_up_balance": "100.00"
+            },
+            "error": null             # 错误信息 (如果有)
+        }
+    """
+    # 获取当前 AI 提供商
+    provider = config_manager.get_config("aiProvider", "deepseek")
+
+    # 检查是否支持余额查询
+    if provider != "deepseek":
+        return {
+            "supported": False,
+            "provider": provider,
+            "data": None,
+            "error": f"{provider} 不支持余额查询"
+        }
+
+    # 获取 matcher
+    matcher = await ai_matcher_manager.get_matcher()
+    if not matcher:
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": None,
+            "error": "AI匹配器未初始化或未启用"
+        }
+
+    # 调用 DeepSeek balance API
+    try:
+        balance_data = await matcher.get_balance()
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": balance_data,
+            "error": None
+        }
+    except Exception as e:
+        logger.error(f"获取AI余额失败: {e}")
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": None,
+            "error": str(e)
+        }
 
 
 

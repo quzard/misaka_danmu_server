@@ -4,6 +4,7 @@
 
 import json
 import logging
+import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..models import ProviderSearchInfo
@@ -500,6 +501,68 @@ class AIMatcher:
             self.alias_validation_prompt = prompt_config["alias_validation_prompt"]
 
         logger.info("AI匹配器提示词已更新")
+
+    async def get_balance(self) -> Optional[Dict[str, Any]]:
+        """
+        获取账户余额 (仅 DeepSeek 支持)
+
+        Returns:
+            余额信息字典,包含:
+            - currency: 货币类型 (CNY/USD)
+            - total_balance: 总余额
+            - granted_balance: 赠金余额
+            - topped_up_balance: 充值余额
+
+        Raises:
+            ValueError: 如果提供商不支持余额查询
+            Exception: 如果API调用失败
+        """
+        if self.provider != "deepseek":
+            raise ValueError(f"{self.provider} 不支持余额查询")
+
+        if not OPENAI_AVAILABLE:
+            raise ImportError("OpenAI SDK 未安装")
+
+        try:
+            # 调用 DeepSeek balance API
+            url = f"{self.base_url}/user/balance"
+            headers = {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, timeout=10.0)
+                response.raise_for_status()
+
+                data = response.json()
+
+                # 解析返回数据
+                if not data.get("is_available"):
+                    raise Exception("账户余额不足或不可用")
+
+                balance_infos = data.get("balance_infos", [])
+                if not balance_infos:
+                    raise Exception("未返回余额信息")
+
+                # 返回第一个货币的余额信息
+                balance_info = balance_infos[0]
+                return {
+                    "currency": balance_info.get("currency", "CNY"),
+                    "total_balance": balance_info.get("total_balance", "0.00"),
+                    "granted_balance": balance_info.get("granted_balance", "0.00"),
+                    "topped_up_balance": balance_info.get("topped_up_balance", "0.00")
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"DeepSeek 余额查询失败: HTTP {e.response.status_code}")
+            raise Exception(f"API调用失败: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"DeepSeek 余额查询网络错误: {e}")
+            raise Exception(f"网络错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"DeepSeek 余额查询异常: {e}")
+            raise
     
     def _initialize_client(self):
         """根据提供商初始化客户端 (仅支持OpenAI兼容接口)"""

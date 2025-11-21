@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert } from 'antd'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic } from 'antd'
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig, getDefaultAIPrompts } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import AIMetrics from './AIMetrics'
 
 const CustomSwitch = (props) => {
   return <Switch {...props} />
@@ -22,6 +23,8 @@ const AutoMatchSetting = () => {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [selectedMetadataSource, setSelectedMetadataSource] = useState('tmdb')
+  const [balanceInfo, setBalanceInfo] = useState(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
 
   // 加载配置
   const loadSettings = async () => {
@@ -112,7 +115,22 @@ const AutoMatchSetting = () => {
 
   useEffect(() => {
     loadSettings()
+    fetchBalance()
   }, [])
+
+  // 获取余额
+  const fetchBalance = async () => {
+    try {
+      setBalanceLoading(true)
+      const res = await getAIBalance()
+      setBalanceInfo(res.data)
+    } catch (error) {
+      console.error('获取余额失败:', error)
+      // 不显示错误消息,因为可能是提供商不支持
+    } finally {
+      setBalanceLoading(false)
+    }
+  }
 
   // 保存配置
   const handleSave = async () => {
@@ -391,9 +409,70 @@ const AutoMatchSetting = () => {
                     </div>
                   </Card>
 
-                  <div style={{ fontSize: '12px', color: '#666' }}>
+                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '16px' }}>
                     启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。
                   </div>
+
+                  {/* 余额卡片 - 仅当支持时显示 */}
+                  {balanceInfo?.supported && (
+                    <Card size="small" style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 500 }}>💰 账户余额</span>
+                          <Tooltip title={`查询 ${balanceInfo.provider} 账户余额`}>
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                        <Button
+                          size="small"
+                          onClick={fetchBalance}
+                          loading={balanceLoading}
+                          icon={<ReloadOutlined />}
+                        >
+                          刷新
+                        </Button>
+                      </div>
+
+                      {balanceInfo.error ? (
+                        <Alert
+                          type="error"
+                          message={balanceInfo.error}
+                          showIcon
+                        />
+                      ) : balanceInfo.data ? (
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Statistic
+                              title="总余额"
+                              value={balanceInfo.data.total_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                          <Col span={8}>
+                            <Statistic
+                              title="赠金余额"
+                              value={balanceInfo.data.granted_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                          <Col span={8}>
+                            <Statistic
+                              title="充值余额"
+                              value={balanceInfo.data.topped_up_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                        </Row>
+                      ) : (
+                        <div style={{ color: '#999', textAlign: 'center' }}>
+                          点击刷新按钮查询余额
+                        </div>
+                      )}
+                    </Card>
+                  )}
 
                   {testResult && (
                     <Alert
@@ -415,8 +494,8 @@ const AutoMatchSetting = () => {
               </Form.Item>
             </TabPane>
 
-            {/* 标签页2: 自动匹配 */}
-            <TabPane tab="自动匹配" key="match">
+            {/* 标签页2: AI自动匹配 */}
+            <TabPane tab="AI自动匹配" key="match">
               <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12}>
                   <Card size="small" style={{ marginBottom: '16px' }}>
@@ -751,6 +830,11 @@ const AutoMatchSetting = () => {
                   />
                 </Form.Item>
               </Card>
+            </TabPane>
+
+            {/* 标签页4: AI使用统计 */}
+            <TabPane tab="AI使用统计" key="metrics">
+              <AIMetrics />
             </TabPane>
           </Tabs>
         </Form>
