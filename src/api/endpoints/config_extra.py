@@ -50,7 +50,6 @@ from ...ai.ai_matcher import (
     DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
     DEFAULT_AI_SEASON_MAPPING_PROMPT
 )
-from ...main import ai_matcher_manager
 from src.path_template import DanmakuPathTemplate
 
 logger = logging.getLogger(__name__)
@@ -643,6 +642,8 @@ async def get_ai_metrics(
     Returns:
         AI调用统计数据
     """
+    from ...main import ai_matcher_manager
+
     matcher = await ai_matcher_manager.get_matcher()
     if not matcher:
         return {
@@ -673,6 +674,8 @@ async def clear_ai_cache(
     Returns:
         操作结果
     """
+    from ...main import ai_matcher_manager
+
     matcher = await ai_matcher_manager.get_matcher()
     if not matcher:
         raise HTTPException(status_code=400, detail="AI匹配器未初始化或未启用")
