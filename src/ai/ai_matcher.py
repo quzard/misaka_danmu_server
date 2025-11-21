@@ -5,7 +5,10 @@
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from .models import ProviderSearchInfo
+from datetime import datetime
+from ..models import ProviderSearchInfo
+from .ai_metrics import AIMetricsCollector, AICallMetrics
+from .ai_cache import AIResponseCache
 
 logger = logging.getLogger(__name__)
 ai_responses_logger = logging.getLogger("ai_responses")
@@ -435,7 +438,7 @@ except ImportError:
 
 class AIMatcher:
     """AI智能匹配器"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         """
         初始化AI匹配器
@@ -450,6 +453,8 @@ class AIMatcher:
                 - ai_recognition_prompt: 自定义识别提示词 (可选)
                 - ai_alias_validation_prompt: 自定义别名验证提示词 (可选)
                 - ai_log_raw_response: 是否记录原始AI响应 (可选,默认False)
+                - ai_cache_enabled: 是否启用缓存 (可选,默认True)
+                - ai_cache_ttl: 缓存过期时间(秒) (可选,默认3600)
         """
         self.provider = config.get("ai_match_provider", "deepseek").lower()
         self.api_key = config.get("ai_match_api_key")
@@ -463,15 +468,38 @@ class AIMatcher:
         self.match_prompt = config.get("ai_match_prompt", "")
         self.recognition_prompt = config.get("ai_recognition_prompt", "")
         self.alias_validation_prompt = config.get("ai_alias_validation_prompt", "")
-        
+
         if not self.api_key:
             raise ValueError("AI Matcher: API Key 未配置")
-        
+
         if not self.model:
             raise ValueError("AI Matcher: 模型名称未配置")
-        
+
+        # 初始化监控和缓存
+        self.metrics = AIMetricsCollector()
+
+        cache_enabled = config.get("ai_cache_enabled", True)
+        cache_ttl = config.get("ai_cache_ttl", 3600)
+        self.cache = AIResponseCache(ttl_seconds=cache_ttl) if cache_enabled else None
+
         self.client = None
         self._initialize_client()
+
+    def update_prompts(self, prompt_config: Dict[str, str]):
+        """
+        更新提示词配置(热更新)
+
+        Args:
+            prompt_config: 提示词配置字典
+        """
+        if "match_prompt" in prompt_config:
+            self.match_prompt = prompt_config["match_prompt"]
+        if "recognition_prompt" in prompt_config:
+            self.recognition_prompt = prompt_config["recognition_prompt"]
+        if "alias_validation_prompt" in prompt_config:
+            self.alias_validation_prompt = prompt_config["alias_validation_prompt"]
+
+        logger.info("AI匹配器提示词已更新")
     
     def _initialize_client(self):
         """根据提供商初始化客户端 (仅支持OpenAI兼容接口)"""
@@ -504,18 +532,21 @@ class AIMatcher:
     ) -> Optional[int]:
         """
         使用AI从搜索结果中选择最佳匹配
-        
+
         Args:
             query: 查询信息,包含 title, season, episode, year 等
             results: 搜索结果列表
             favorited_info: 精确标记信息 {provider:mediaId -> isFavorited}
-        
+
         Returns:
             最佳匹配结果的索引,如果没有合适的匹配则返回None
         """
         if not results:
             return None
-        
+
+        start_time = datetime.now()
+        cache_hit = False
+
         try:
             # 构建输入数据
             results_data = []
@@ -525,7 +556,7 @@ class AIMatcher:
                 if favorited_info:
                     key = f"{result.provider}:{result.mediaId}"
                     is_favorited = favorited_info.get(key, False)
-                
+
                 results_data.append({
                     "index": idx,
                     "provider": result.provider,
@@ -536,15 +567,40 @@ class AIMatcher:
                     "episodeCount": result.episodeCount,
                     "isFavorited": is_favorited
                 })
-            
+
+            # 尝试从缓存获取
+            if self.cache:
+                cached_result = self.cache.get(
+                    "select_best_match",
+                    query=query,
+                    results=results_data,
+                    favorited=favorited_info
+                )
+                if cached_result is not None:
+                    cache_hit = True
+                    duration = (datetime.now() - start_time).total_seconds() * 1000
+
+                    # 记录缓存命中
+                    self.metrics.record(AICallMetrics(
+                        timestamp=datetime.now(),
+                        method="select_best_match",
+                        success=True,
+                        duration_ms=int(duration),
+                        tokens_used=0,
+                        model=self.model,
+                        cache_hit=True
+                    ))
+
+                    return cached_result.get("index", -1) if isinstance(cached_result, dict) else cached_result
+
             input_data = {
                 "query": query,
                 "results": results_data
             }
-            
+
             logger.info(f"AI匹配: 开始分析 {len(results)} 个搜索结果")
             logger.debug(f"查询信息: {query}")
-            
+
             # 调用AI (仅支持OpenAI兼容接口)
             response_data = await self._match_openai(input_data)
 
@@ -564,14 +620,47 @@ class AIMatcher:
 
             if index < 0 or index >= len(results):
                 logger.info(f"AI匹配: 未找到合适的匹配 (reason: {reason})")
+                # 缓存负结果
+                if self.cache:
+                    self.cache.set(
+                        response_data,
+                        "select_best_match",
+                        query=query,
+                        results=results_data,
+                        favorited=favorited_info
+                    )
                 return None
 
             selected = results[index]
             logger.info(f"AI匹配: 选择结果 #{index} - {selected.provider}:{selected.title} (置信度: {confidence}%, 理由: {reason})")
 
+            # 缓存结果
+            if self.cache:
+                self.cache.set(
+                    response_data,
+                    "select_best_match",
+                    query=query,
+                    results=results_data,
+                    favorited=favorited_info
+                )
+
             return index
-        
+
         except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+
+            # 记录失败
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="select_best_match",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=cache_hit
+            ))
+
             logger.error(f"AI匹配过程中发生错误: {e}", exc_info=True)
             return None
     
@@ -579,6 +668,8 @@ class AIMatcher:
         """使用OpenAI兼容接口进行匹配"""
         if not self.client:
             return None
+
+        start_time = datetime.now()
 
         try:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
@@ -601,9 +692,34 @@ class AIMatcher:
             if parsed_data:
                 logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
 
+            # 记录成功调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="select_best_match",
+                success=True,
+                duration_ms=int(duration),
+                tokens_used=response.usage.total_tokens if hasattr(response, 'usage') else 0,
+                model=self.model,
+                cache_hit=False
+            ))
+
             return parsed_data
 
         except Exception as e:
+            # 记录失败调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="select_best_match",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=False
+            ))
+
             logger.error(f"OpenAI匹配调用失败: {e}")
             return None
 
@@ -623,7 +739,35 @@ class AIMatcher:
         if not title:
             return None
 
+        start_time = datetime.now()
+        cache_hit = False
+
         try:
+            # 尝试从缓存获取
+            if self.cache:
+                cached_result = self.cache.get(
+                    "recognize_title",
+                    title=title,
+                    year=year,
+                    anime_type=anime_type
+                )
+                if cached_result is not None:
+                    cache_hit = True
+                    duration = (datetime.now() - start_time).total_seconds() * 1000
+
+                    # 记录缓存命中
+                    self.metrics.record(AICallMetrics(
+                        timestamp=datetime.now(),
+                        method="recognize_title",
+                        success=True,
+                        duration_ms=int(duration),
+                        tokens_used=0,
+                        model=self.model,
+                        cache_hit=True
+                    ))
+
+                    return cached_result
+
             input_data = {
                 "title": title,
                 "year": year,
@@ -649,9 +793,34 @@ class AIMatcher:
                 return None
 
             logger.info(f"AI识别: 标准化成功 - {response_data}")
+
+            # 缓存结果
+            if self.cache:
+                self.cache.set(
+                    response_data,
+                    "recognize_title",
+                    title=title,
+                    year=year,
+                    anime_type=anime_type
+                )
+
             return response_data
 
         except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+
+            # 记录失败
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="recognize_title",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=cache_hit
+            ))
+
             logger.error(f"AI识别过程中发生错误: {e}", exc_info=True)
             return None
 
@@ -659,6 +828,8 @@ class AIMatcher:
         """使用OpenAI兼容接口进行识别"""
         if not self.client:
             return None
+
+        start_time = datetime.now()
 
         try:
             import json
@@ -682,9 +853,34 @@ class AIMatcher:
             if parsed_data:
                 logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
 
+            # 记录成功调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="recognize_title",
+                success=True,
+                duration_ms=int(duration),
+                tokens_used=response.usage.total_tokens if hasattr(response, 'usage') else 0,
+                model=self.model,
+                cache_hit=False
+            ))
+
             return parsed_data
 
         except Exception as e:
+            # 记录失败调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="recognize_title",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=False
+            ))
+
             logger.error(f"OpenAI识别调用失败: {e}")
             return None
 
@@ -869,6 +1065,52 @@ class AIMatcher:
         except Exception as e:
             logger.error(f"AI别名验证失败: {e}")
             return None
+
+    async def batch_recognize_titles(
+        self,
+        items: List[Dict[str, Any]],
+        max_concurrent: int = 5
+    ) -> List[Optional[Dict[str, Any]]]:
+        """
+        批量识别标题(并发调用)
+
+        Args:
+            items: 待识别的项目列表,每个包含 {"title": "...", "year": 2023, "type": "tv_series"}
+            max_concurrent: 最大并发数
+
+        Returns:
+            识别结果列表,与输入顺序对应
+        """
+        import asyncio
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def recognize_with_limit(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            async with semaphore:
+                return await self.recognize_title(
+                    item.get("title", ""),
+                    item.get("year"),
+                    item.get("type", "tv_series")
+                )
+
+        self.logger.info(f"批量识别: 开始处理 {len(items)} 个标题 (最大并发: {max_concurrent})")
+
+        tasks = [recognize_with_limit(item) for item in items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理异常
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"批量识别: 第 {i} 个项目失败: {result}")
+                processed_results.append(None)
+            else:
+                processed_results.append(result)
+
+        success_count = sum(1 for r in processed_results if r is not None)
+        self.logger.info(f"批量识别: 完成 {success_count}/{len(items)} 个标题")
+
+        return processed_results
 
     async def select_metadata_result(
         self,

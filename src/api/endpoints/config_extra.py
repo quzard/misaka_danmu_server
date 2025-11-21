@@ -43,6 +43,15 @@ from ...config import settings
 from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
+from ...ai.ai_matcher import (
+    DEFAULT_AI_MATCH_PROMPT,
+    DEFAULT_AI_RECOGNITION_PROMPT,
+    DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
+    DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
+    DEFAULT_AI_SEASON_MAPPING_PROMPT
+)
+from ...main import ai_matcher_manager
+from src.path_template import DanmakuPathTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +286,6 @@ async def set_custom_danmaku_path(
     # 验证模板格式
     if request.enabled.lower() == 'true' and request.template:
         try:
-            from src.path_template import DanmakuPathTemplate
             # 尝试创建模板对象来验证格式
             DanmakuPathTemplate(request.template)
             logger.info(f"模板验证成功: {request.template}")
@@ -612,20 +620,71 @@ async def get_default_ai_prompts(
     Returns:
         包含所有默认提示词的字典
     """
-    from ...ai_matcher import (
-        DEFAULT_AI_MATCH_PROMPT,
-        DEFAULT_AI_RECOGNITION_PROMPT,
-        DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
-        DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
-        DEFAULT_AI_SEASON_MAPPING_PROMPT
-    )
-
     return {
         "aiPrompt": DEFAULT_AI_MATCH_PROMPT,
         "aiRecognitionPrompt": DEFAULT_AI_RECOGNITION_PROMPT,
         "aiAliasValidationPrompt": DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
         "aiAliasExpansionPrompt": DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
         "seasonMappingPrompt": DEFAULT_AI_SEASON_MAPPING_PROMPT
+    }
+
+
+@router.get("/config/ai/metrics", summary="获取AI调用统计")
+async def get_ai_metrics(
+    hours: int = 24,
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取AI调用的统计信息
+
+    Args:
+        hours: 统计最近多少小时的数据,默认24小时
+
+    Returns:
+        AI调用统计数据
+    """
+    matcher = await ai_matcher_manager.get_matcher()
+    if not matcher:
+        return {
+            "error": "AI匹配器未初始化或未启用",
+            "stats": None
+        }
+
+    stats = matcher.metrics.get_stats(hours)
+
+    # 添加缓存统计
+    cache_stats = None
+    if matcher.cache:
+        cache_stats = matcher.cache.get_stats()
+
+    return {
+        "ai_stats": stats,
+        "cache_stats": cache_stats
+    }
+
+
+@router.post("/config/ai/cache/clear", summary="清空AI缓存")
+async def clear_ai_cache(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    清空AI响应缓存
+
+    Returns:
+        操作结果
+    """
+    matcher = await ai_matcher_manager.get_matcher()
+    if not matcher:
+        raise HTTPException(status_code=400, detail="AI匹配器未初始化或未启用")
+
+    if not matcher.cache:
+        raise HTTPException(status_code=400, detail="AI缓存未启用")
+
+    matcher.cache.clear()
+
+    return {
+        "success": True,
+        "message": "AI缓存已清空"
     }
 
 

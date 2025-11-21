@@ -123,6 +123,8 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiAliasExpansionPrompt': (ai_prompts.get('DEFAULT_AI_ALIAS_EXPANSION_PROMPT', ''), 'AI别名扩展提示词'),
             'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
             'seasonMappingPrompt': (ai_prompts.get('DEFAULT_AI_SEASON_MAPPING_PROMPT', ''), 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。'),
+            'aiCacheEnabled': ('true', '是否启用AI响应缓存。启用后，相同查询将直接返回缓存结果，降低API调用成本。'),
+            'aiCacheTtl': ('3600', 'AI缓存过期时间(秒)。默认3600秒(1小时)。'),
         })
 
     return configs

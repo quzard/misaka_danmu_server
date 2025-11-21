@@ -2,6 +2,9 @@
 本地弹幕扫描相关API端点
 """
 import logging
+import os
+import stat
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -87,9 +90,6 @@ async def browse_directory(
     - 目录下的子目录和文件列表
     """
     try:
-        from pathlib import Path
-        import stat
-
         # 获取路径
         path = fileitem.path if fileitem.path else "/"
 
@@ -162,9 +162,6 @@ async def create_folder(
     支持Windows和Linux路径格式
     """
     try:
-        from pathlib import Path
-        import os
-
         parent_path = payload.parentPath
         folder_name = payload.folderName.strip()
 
@@ -241,9 +238,6 @@ async def delete_folder(
     注意：此操作不可逆，请谨慎使用
     """
     try:
-        from pathlib import Path
-        import shutil
-
         # folder_path = payload.folderPath
 
         # 防止路径遍历攻击

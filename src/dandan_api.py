@@ -20,7 +20,7 @@ from fastapi.routing import APIRoute
 from . import crud, models, orm_models, tasks, scraper_manager as sm, rate_limiter as rl
 from .config_manager import ConfigManager
 from .cache_manager import CacheManager
-from .ai_matcher_manager import AIMatcherManager
+from .ai.ai_matcher_manager import AIMatcherManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
@@ -31,7 +31,7 @@ from .scraper_manager import ScraperManager
 from .api.control_api import ControlAutoImportRequest, get_title_recognition_manager
 from .api.dependencies import get_cache_manager, get_ai_matcher_manager
 from .search_utils import unified_search
-from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
+from .ai.ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
 from .models import ProviderEpisodeInfo
 

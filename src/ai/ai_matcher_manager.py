@@ -7,16 +7,16 @@ AI匹配管理器
 import logging
 from typing import Optional, Dict, Any, List
 from .ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
-from .config_manager import ConfigManager
+from ..config_manager import ConfigManager
 
 
 class AIMatcherManager:
     """AI匹配管理器"""
-    
+
     def __init__(self, config_manager: ConfigManager):
         """
         初始化AI匹配管理器
-        
+
         Args:
             config_manager: 配置管理器实例
         """
@@ -24,6 +24,7 @@ class AIMatcherManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self._matcher_cache: Optional[AIMatcher] = None
         self._last_config_hash: Optional[str] = None
+        self._last_core_config_hash: Optional[str] = None
     
     async def is_enabled(self) -> bool:
         """
@@ -38,7 +39,7 @@ class AIMatcherManager:
     async def _get_config(self) -> Dict[str, Any]:
         """
         获取AI匹配配置
-        
+
         Returns:
             配置字典
         """
@@ -48,7 +49,44 @@ class AIMatcherManager:
             "ai_match_base_url": await self.config_manager.get("aiBaseUrl", ""),
             "ai_match_model": await self.config_manager.get("aiModel", "deepseek-chat"),
             "ai_match_prompt": await self.config_manager.get("aiPrompt", ""),
-            "ai_log_raw_response": (await self.config_manager.get("aiLogRawResponse", "false")).lower() == "true"
+            "ai_recognition_prompt": await self.config_manager.get("aiRecognitionPrompt", ""),
+            "ai_alias_validation_prompt": await self.config_manager.get("aiAliasValidationPrompt", ""),
+            "ai_log_raw_response": (await self.config_manager.get("aiLogRawResponse", "false")).lower() == "true",
+            "ai_cache_enabled": (await self.config_manager.get("aiCacheEnabled", "true")).lower() == "true",
+            "ai_cache_ttl": int(await self.config_manager.get("aiCacheTtl", "3600"))
+        }
+
+    def _get_core_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        提取核心配置(影响客户端创建的配置)
+
+        Args:
+            config: 完整配置
+
+        Returns:
+            核心配置
+        """
+        return {
+            "ai_match_provider": config["ai_match_provider"],
+            "ai_match_api_key": config["ai_match_api_key"],
+            "ai_match_base_url": config["ai_match_base_url"],
+            "ai_match_model": config["ai_match_model"]
+        }
+
+    def _get_prompt_config(self, config: Dict[str, Any]) -> Dict[str, str]:
+        """
+        提取提示词配置
+
+        Args:
+            config: 完整配置
+
+        Returns:
+            提示词配置
+        """
+        return {
+            "match_prompt": config["ai_match_prompt"],
+            "recognition_prompt": config["ai_recognition_prompt"],
+            "alias_validation_prompt": config["ai_alias_validation_prompt"]
         }
     
     def _config_hash(self, config: Dict[str, Any]) -> str:
@@ -69,9 +107,10 @@ class AIMatcherManager:
     async def get_matcher(self) -> Optional[AIMatcher]:
         """
         获取AI匹配器实例
-        
+
         如果配置未变化,返回缓存的实例;否则创建新实例
-        
+        优化: 只有核心配置变化才重建客户端,提示词变化只热更新
+
         Returns:
             AIMatcher实例,如果配置不完整或创建失败则返回None
         """
@@ -80,26 +119,44 @@ class AIMatcherManager:
             if not await self.is_enabled():
                 self.logger.debug("AI匹配未启用")
                 return None
-            
+
             # 获取配置
             config = await self._get_config()
-            
+
             # 检查必要配置
             if not config["ai_match_api_key"]:
                 self.logger.warning("AI匹配已启用但未配置API密钥")
                 return None
-            
-            # 检查配置是否变化
+
+            # 分离核心配置和提示词配置
+            core_config = self._get_core_config(config)
+            prompt_config = self._get_prompt_config(config)
+
+            core_hash = self._config_hash(core_config)
             config_hash = self._config_hash(config)
-            if self._matcher_cache and self._last_config_hash == config_hash:
-                self.logger.debug("使用缓存的AI匹配器实例")
-                return self._matcher_cache
-            
+
+            # 如果有缓存实例
+            if self._matcher_cache:
+                # 核心配置未变化
+                if self._last_core_config_hash == core_hash:
+                    # 检查提示词是否变化
+                    if self._last_config_hash != config_hash:
+                        self.logger.info("提示词配置已变化,热更新提示词")
+                        self._matcher_cache.update_prompts(prompt_config)
+                        self._last_config_hash = config_hash
+                    else:
+                        self.logger.debug("使用缓存的AI匹配器实例")
+
+                    return self._matcher_cache
+                else:
+                    self.logger.info("核心配置已变化,重建AI匹配器")
+
             # 创建新实例
             self.logger.info("创建新的AI匹配器实例")
             self._matcher_cache = AIMatcher(config)
             self._last_config_hash = config_hash
-            
+            self._last_core_config_hash = core_hash
+
             return self._matcher_cache
         except Exception as e:
             self.logger.error(f"创建AI匹配器失败: {e}", exc_info=True)
