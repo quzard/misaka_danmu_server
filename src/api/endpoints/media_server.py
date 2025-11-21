@@ -28,7 +28,7 @@ from ...media_server_manager import get_media_server_manager
 from ...scraper_manager import ScraperManager
 from ...metadata_manager import MetadataSourceManager
 from ...config_manager import ConfigManager
-from ...ai_matcher_manager import AIMatcherManager
+from ...ai.ai_matcher_manager import AIMatcherManager
 from ...rate_limiter import RateLimiter
 
 router = APIRouter()
