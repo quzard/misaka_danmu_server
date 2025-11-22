@@ -547,9 +547,6 @@ async def test_ai_connection(
 
                 latency = (time.time() - start_time) * 1000
 
-                logger.info(f"Gemini 响应: {response}")
-                logger.info(f"Gemini 响应文本: {response.text if hasattr(response, 'text') else 'No text attribute'}")
-
                 # 检查响应
                 if hasattr(response, 'text') and response.text:
                     return AITestResponse(
