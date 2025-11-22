@@ -149,28 +149,36 @@ class AIMatcher:
 
     async def get_balance(self) -> Optional[Dict[str, Any]]:
         """
-        获取账户余额 (仅 DeepSeek 支持)
+        获取账户余额 (根据提供商动态查询)
 
         Returns:
             余额信息字典,包含:
             - currency: 货币类型 (CNY/USD)
             - total_balance: 总余额
-            - granted_balance: 赠金余额
-            - topped_up_balance: 充值余额
+            - granted_balance: 赠金余额 (如果提供商支持)
+            - topped_up_balance: 充值余额 (如果提供商支持)
 
         Raises:
             ValueError: 如果提供商不支持余额查询
             Exception: 如果API调用失败
         """
-        if self.provider != "deepseek":
-            raise ValueError(f"{self.provider} 不支持余额查询")
+        # 获取提供商配置
+        provider_config = get_provider_config(self.provider)
+        if not provider_config:
+            raise ValueError(f"无法获取提供商配置: {self.provider}")
+
+        # 检查是否支持余额查询
+        if not provider_config.get("supportBalance"):
+            raise ValueError(f"提供商 {self.provider} 不支持余额查询")
 
         if not OPENAI_AVAILABLE:
             raise ImportError("OpenAI SDK 未安装")
 
         try:
-            # 调用 DeepSeek balance API
-            url = f"{self.base_url}/user/balance"
+            # 获取余额API路径
+            balance_api_path = provider_config.get("balanceApiPath", "/user/balance")
+            url = f"{self.base_url}{balance_api_path}"
+
             headers = {
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.api_key}"
@@ -182,32 +190,68 @@ class AIMatcher:
 
                 data = response.json()
 
-                # 解析返回数据
-                if not data.get("is_available"):
-                    raise Exception("账户余额不足或不可用")
-
-                balance_infos = data.get("balance_infos", [])
-                if not balance_infos:
-                    raise Exception("未返回余额信息")
-
-                # 返回第一个货币的余额信息
-                balance_info = balance_infos[0]
-                return {
-                    "currency": balance_info.get("currency", "CNY"),
-                    "total_balance": balance_info.get("total_balance", "0.00"),
-                    "granted_balance": balance_info.get("granted_balance", "0.00"),
-                    "topped_up_balance": balance_info.get("topped_up_balance", "0.00")
-                }
+                # 根据提供商类型解析响应
+                parser_type = provider_config.get("balanceResponseParser", "deepseek")
+                return self._parse_balance_response(data, parser_type)
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"DeepSeek 余额查询失败: HTTP {e.response.status_code}")
+            logger.error(f"{self.provider} 余额查询失败: HTTP {e.response.status_code}")
             raise Exception(f"API调用失败: {e.response.status_code}")
         except httpx.RequestError as e:
-            logger.error(f"DeepSeek 余额查询网络错误: {e}")
+            logger.error(f"{self.provider} 余额查询网络错误: {e}")
             raise Exception(f"网络错误: {str(e)}")
         except Exception as e:
-            logger.error(f"DeepSeek 余额查询异常: {e}")
+            logger.error(f"{self.provider} 余额查询异常: {e}")
             raise
+
+    def _parse_balance_response(self, data: Dict[str, Any], parser_type: str) -> Dict[str, Any]:
+        """
+        解析余额响应数据
+
+        Args:
+            data: API响应数据
+            parser_type: 解析器类型 (deepseek/siliconflow)
+
+        Returns:
+            标准化的余额信息字典
+        """
+        if parser_type == "deepseek":
+            # DeepSeek 响应格式
+            if not data.get("is_available"):
+                raise Exception("账户余额不足或不可用")
+
+            balance_infos = data.get("balance_infos", [])
+            if not balance_infos:
+                raise Exception("未返回余额信息")
+
+            balance_info = balance_infos[0]
+            return {
+                "currency": balance_info.get("currency", "CNY"),
+                "total_balance": balance_info.get("total_balance", "0.00"),
+                "granted_balance": balance_info.get("granted_balance", "0.00"),
+                "topped_up_balance": balance_info.get("topped_up_balance", "0.00")
+            }
+
+        elif parser_type == "siliconflow":
+            # SiliconFlow 响应格式
+            # 根据文档: GET /user/info 返回用户信息包括余额和状态
+            # 具体字段需要根据实际API响应调整
+            balance = data.get("balance", {})
+            return {
+                "currency": "CNY",  # SiliconFlow 默认使用人民币
+                "total_balance": str(balance.get("total", 0.00)),
+                "granted_balance": str(balance.get("granted", 0.00)),
+                "topped_up_balance": str(balance.get("topped_up", 0.00))
+            }
+
+        else:
+            # 默认解析器 - 尝试通用格式
+            return {
+                "currency": data.get("currency", "CNY"),
+                "total_balance": str(data.get("total_balance", "0.00")),
+                "granted_balance": str(data.get("granted_balance", "0.00")),
+                "topped_up_balance": str(data.get("topped_up_balance", "0.00"))
+            }
     
     def _initialize_client(self):
         """根据提供商初始化客户端 (仅支持OpenAI兼容接口)"""

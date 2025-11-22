@@ -17,6 +17,8 @@ AI_PROVIDERS = {
         "modelPlaceholder": "deepseek-chat",
         "baseUrlPlaceholder": "https://api.deepseek.com (默认)",
         "supportBalance": True,  # 是否支持余额查询
+        "balanceApiPath": "/user/balance",  # 余额查询API路径
+        "balanceResponseParser": "deepseek",  # 余额响应解析器类型
         "apiKeyPrefix": "sk-",
         "website": "https://platform.deepseek.com",
         "order": 1
@@ -30,7 +32,9 @@ AI_PROVIDERS = {
         "defaultModel": "Qwen/Qwen2.5-7B-Instruct",
         "modelPlaceholder": "Qwen/Qwen2.5-7B-Instruct, deepseek-ai/DeepSeek-V2.5",
         "baseUrlPlaceholder": "https://api.siliconflow.cn/v1 (默认)",
-        "supportBalance": False,
+        "supportBalance": True,  # 支持余额查询
+        "balanceApiPath": "/user/info",  # 余额查询API路径
+        "balanceResponseParser": "siliconflow",  # 余额响应解析器类型
         "apiKeyPrefix": "sk-",
         "website": "https://siliconflow.cn",
         "order": 2
