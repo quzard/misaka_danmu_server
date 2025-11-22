@@ -57,11 +57,11 @@ AI_PROVIDERS = {
         "id": "gemini",
         "name": "Google Gemini",
         "displayName": "Google Gemini",
-        "description": "Google Gemini - Google 的多模态 AI 模型",
-        "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "description": "Google Gemini - Google 的多模态 AI 模型 (使用 OpenAI 兼容接口)",
+        "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "defaultModel": "gemini-1.5-flash",
         "modelPlaceholder": "gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp",
-        "baseUrlPlaceholder": "https://generativelanguage.googleapis.com/v1beta (默认)",
+        "baseUrlPlaceholder": "https://generativelanguage.googleapis.com/v1beta/openai/ (默认)",
         "supportBalance": False,  # Gemini 不支持余额查询
         "apiKeyPrefix": "AI",  # Gemini API Key 通常以 AI 开头
         "website": "https://ai.google.dev",

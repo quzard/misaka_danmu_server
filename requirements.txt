@@ -36,6 +36,5 @@ brotli
 requests
 # dandanplay scraper dependency
 aiohttp
-# AI匹配功能依赖 (支持OpenAI兼容接口: DeepSeek, OpenAI, SiliconFlow 和 Google Gemini)
+# AI匹配功能依赖 (支持OpenAI兼容接口: DeepSeek, OpenAI, SiliconFlow, Google Gemini)
 openai>=1.0.0
-google-generativeai
