@@ -34,8 +34,6 @@ export function BangumiConfig({ form }) {
   const [authInfo, setAuthInfo] = useState({})
   const [showPassword, setShowPassword] = useState(false)
   const [showToken, setShowToken] = useState(false)
-  const [showAuthIframe, setShowAuthIframe] = useState(false)
-  const [authUrl, setAuthUrl] = useState('')
   const oauthPopupRef = useRef(null)
 
   // 加载配置
@@ -48,8 +46,6 @@ export function BangumiConfig({ form }) {
         if (oauthPopupRef.current) {
           oauthPopupRef.current.close()
         }
-        setShowAuthIframe(false)
-        setAuthUrl('')
         loadConfig()
       }
     }
@@ -102,22 +98,46 @@ export function BangumiConfig({ form }) {
 
   const handleOAuthLogin = async () => {
     try {
-      console.log('handleOAuthLogin called')
+      // 如果弹窗已存在且未关闭,聚焦到弹窗
+      if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
+        oauthPopupRef.current.focus()
+        return
+      }
+
       const res = await getBangumiAuthUrl()
-      console.log('getBangumiAuthUrl response:', res)
-      const url = res.data?.url || res.url
-      console.log('Extracted URL:', url)
-      if (!url) {
+      const authUrl = res.data?.url || res.url
+      if (!authUrl) {
         showMessage('error', '获取授权链接失败: 返回的URL为空')
         return
       }
-      console.log('Setting authUrl:', url)
-      console.log('Setting showAuthIframe: true')
-      setAuthUrl(url)
-      setShowAuthIframe(true)
-      console.log('State updated, authUrl:', url, 'showAuthIframe:', true)
+
+      // 计算弹窗位置 (居中)
+      const width = 600
+      const height = 700
+      const left = window.screen.width / 2 - width / 2
+      const top = window.screen.height / 2 - height / 2
+
+      // 打开弹窗
+      oauthPopupRef.current = window.open(
+        authUrl,
+        'BangumiAuth',
+        `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes`
+      )
+
+      // 检测弹窗是否被拦截
+      if (!oauthPopupRef.current || oauthPopupRef.current.closed) {
+        showMessage('error', '弹窗被浏览器拦截，请允许弹窗后重试')
+        return
+      }
+
+      // 定期检查弹窗是否被关闭
+      const checkInterval = setInterval(() => {
+        if (oauthPopupRef.current && oauthPopupRef.current.closed) {
+          clearInterval(checkInterval)
+          oauthPopupRef.current = null
+        }
+      }, 500)
     } catch (error) {
-      console.error('handleOAuthLogin error:', error)
       showMessage('error', `获取授权链接失败: ${error.message}`)
     }
   }
@@ -339,35 +359,6 @@ export function BangumiConfig({ form }) {
               <Button type="primary" onClick={handleOAuthLogin}>
                 重新授权
               </Button>
-            </div>
-          ) : showAuthIframe ? (
-            <div className="py-4" style={{ border: '2px solid red' }}>
-              <div className="mb-3 text-center">
-                <div className="mb-2 text-sm text-gray-600">请在下方完成 Bangumi 授权 (DEBUG: showAuthIframe={String(showAuthIframe)})</div>
-                <div className="mb-2 text-xs text-gray-500">authUrl: {authUrl}</div>
-                <Button size="small" onClick={() => {
-                  console.log('Cancel button clicked')
-                  setShowAuthIframe(false)
-                  setAuthUrl('')
-                }}>
-                  取消授权
-                </Button>
-              </div>
-              <div className="border rounded bg-white" style={{ height: '500px', overflow: 'auto' }}>
-                {authUrl ? (
-                  <iframe
-                    src={authUrl}
-                    style={{ width: '100%', height: '100%', border: 'none' }}
-                    title="Bangumi OAuth"
-                    onLoad={() => console.log('iframe loaded')}
-                    onError={(e) => console.error('iframe error:', e)}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500">
-                    加载中... (authUrl is empty)
-                  </div>
-                )}
-              </div>
             </div>
           ) : (
             <div className="text-center py-4">

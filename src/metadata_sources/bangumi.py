@@ -291,21 +291,21 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
                 <div class="container">
                     <div class="success-icon">✅</div>
                     <h1>授权成功</h1>
-                    <p>Bangumi 授权已完成，页面将自动刷新...</p>
+                    <p>Bangumi 授权已完成，窗口将自动关闭...</p>
                 </div>
                 <script type="text/javascript">
                     try {
-                        // 尝试通知父窗口 (弹窗模式)
+                        // 通知父窗口
                         if (window.opener) {
                             window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
                             setTimeout(() => window.close(), 1000);
-                        }
-                        // 尝试通知父页面 (iframe 模式)
-                        else if (window.parent && window.parent !== window) {
-                            window.parent.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
+                        } else {
+                            // 如果没有 opener,显示提示
+                            document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
                         }
                     } catch(e) {
                         console.error('Failed to notify parent:', e);
+                        document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
                     }
                 </script>
             </body>
