@@ -712,7 +712,7 @@ async def get_ai_balance(
         }
     """
     # 获取当前 AI 提供商
-    provider = config_manager.get_config("aiProvider", "deepseek")
+    provider = await config_manager.get("aiProvider", "deepseek")
 
     # 检查是否支持余额查询
     if provider != "deepseek":
