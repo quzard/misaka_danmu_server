@@ -81,6 +81,13 @@ except ImportError:
     OPENAI_AVAILABLE = False
     logger.debug("OpenAI SDK 未安装")
 
+try:
+    from google import genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    logger.debug("Google GenAI SDK 未安装")
+
 
 class AIMatcher:
     """AI智能匹配器"""
@@ -237,14 +244,21 @@ class AIMatcher:
 
         elif parser_type == "siliconflow":
             # SiliconFlow 响应格式
-            # 根据文档: GET /user/info 返回用户信息包括余额和状态
-            # 具体字段需要根据实际API响应调整
-            balance = data.get("balance", {})
+            # 根据官方文档: GET /user/info 返回格式为:
+            # {
+            #   "code": 20000,
+            #   "data": {
+            #     "balance": "0.88",           // 赠金余额
+            #     "chargeBalance": "88.00",    // 充值余额
+            #     "totalBalance": "88.88"      // 总余额
+            #   }
+            # }
+            user_data = data.get("data", {})
             return {
                 "currency": "CNY",  # SiliconFlow 默认使用人民币
-                "total_balance": str(balance.get("total", 0.00)),
-                "granted_balance": str(balance.get("granted", 0.00)),
-                "topped_up_balance": str(balance.get("topped_up", 0.00))
+                "total_balance": user_data.get("totalBalance", "0.00"),
+                "granted_balance": user_data.get("balance", "0.00"),  # balance 字段是赠金
+                "topped_up_balance": user_data.get("chargeBalance", "0.00")  # chargeBalance 是充值余额
             }
 
         else:
@@ -257,7 +271,7 @@ class AIMatcher:
             }
     
     def _initialize_client(self):
-        """根据提供商初始化客户端 (所有提供商使用 OpenAI 兼容接口)"""
+        """根据提供商初始化客户端"""
         try:
             # 检查提供商是否支持
             if not is_provider_supported(self.provider):
@@ -268,21 +282,30 @@ class AIMatcher:
             if not provider_config:
                 raise ValueError(f"无法获取提供商配置: {self.provider}")
 
-            # 检查OpenAI SDK
-            if not OPENAI_AVAILABLE:
-                raise ImportError("OpenAI SDK 未安装,请运行: pip install openai")
+            # Gemini 使用官方 SDK
+            if self.provider == "gemini":
+                if not GEMINI_AVAILABLE:
+                    raise ImportError("Google GenAI SDK 未安装,请运行: pip install google-genai")
 
-            # 如果用户未配置Base URL,使用提供商的默认Base URL
-            if not self.base_url:
-                self.base_url = provider_config.get("defaultBaseUrl")
-                logger.debug(f"使用提供商默认Base URL: {self.base_url}")
+                self.client = genai.Client(api_key=self.api_key)
+                logger.info(f"AI匹配器初始化成功: Gemini ({self.model}) - 使用官方 SDK")
 
-            # 初始化 OpenAI 兼容客户端 (所有提供商: deepseek, siliconflow, openai, gemini)
-            self.client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url if self.base_url else None
-            )
-            logger.info(f"AI匹配器初始化成功: {self.provider} ({self.model}) - {self.base_url}")
+            # 其他提供商使用 OpenAI 兼容接口
+            else:
+                if not OPENAI_AVAILABLE:
+                    raise ImportError("OpenAI SDK 未安装,请运行: pip install openai")
+
+                # 如果用户未配置Base URL,使用提供商的默认Base URL
+                if not self.base_url:
+                    self.base_url = provider_config.get("defaultBaseUrl")
+                    logger.debug(f"使用提供商默认Base URL: {self.base_url}")
+
+                # 初始化 OpenAI 兼容客户端 (deepseek, siliconflow, openai)
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url if self.base_url else None
+                )
+                logger.info(f"AI匹配器初始化成功: {self.provider} ({self.model}) - {self.base_url}")
 
         except Exception as e:
             logger.error(f"AI匹配器初始化失败: {e}")
@@ -365,8 +388,12 @@ class AIMatcher:
             logger.info(f"AI匹配: 开始分析 {len(results)} 个搜索结果")
             logger.debug(f"查询信息: {query}")
 
-            # 所有提供商使用 OpenAI 兼容接口
-            response_data = await self._match_openai(input_data)
+            # 根据提供商选择不同的调用方法
+            if self.provider == "gemini":
+                response_data = await self._match_gemini(input_data)
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response_data = await self._match_openai(input_data)
 
             if not response_data:
                 logger.warning("AI匹配: 未能获取有效响应")
@@ -487,6 +514,64 @@ class AIMatcher:
             logger.error(f"OpenAI匹配调用失败: {e}")
             return None
 
+    async def _match_gemini(self, input_data: Dict[str, Any]) -> Optional[Dict]:
+        """使用Gemini官方SDK进行匹配"""
+        if not self.client:
+            return None
+
+        start_time = datetime.now()
+
+        try:
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+            full_prompt = f"{self.match_prompt}\n\n{user_prompt}"
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
+                config={
+                    "temperature": 0.0,
+                    "response_mime_type": "application/json"
+                }
+            )
+
+            content = response.text
+            logger.debug(f"Gemini原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            # 记录成功调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="select_best_match",
+                success=True,
+                duration_ms=int(duration),
+                tokens_used=0,  # Gemini SDK 不直接提供 token 统计
+                model=self.model,
+                cache_hit=False
+            ))
+
+            return parsed_data
+
+        except Exception as e:
+            # 记录失败调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="select_best_match",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=False
+            ))
+
+            logger.error(f"Gemini匹配调用失败: {e}")
+            return None
+
     async def recognize_title(self, title: str, year: Optional[int] = None, anime_type: str = "tv_series") -> Optional[Dict[str, Any]]:
         """
         使用AI将标题信息标准化,生成适合TMDB搜索的查询关键词
@@ -539,8 +624,12 @@ class AIMatcher:
             }
             logger.info(f"AI识别: 开始标准化标题 - {input_data}")
 
-            # 所有提供商使用 OpenAI 兼容接口
-            response_data = await self._recognize_openai(input_data)
+            # 根据提供商选择不同的调用方法
+            if self.provider == "gemini":
+                response_data = await self._recognize_gemini(input_data)
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response_data = await self._recognize_openai(input_data)
 
             if not response_data:
                 logger.warning("AI识别: 未能获取有效响应")
@@ -648,6 +737,65 @@ class AIMatcher:
             logger.error(f"OpenAI识别调用失败: {e}")
             return None
 
+    async def _recognize_gemini(self, input_data: Dict[str, Any]) -> Optional[Dict]:
+        """使用Gemini官方SDK进行识别"""
+        if not self.client:
+            return None
+
+        start_time = datetime.now()
+
+        try:
+            import json
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+            full_prompt = f"{self.recognition_prompt}\n\n{user_prompt}"
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
+                config={
+                    "temperature": 0.0,
+                    "response_mime_type": "application/json"
+                }
+            )
+
+            content = response.text
+            logger.debug(f"Gemini识别原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            # 记录成功调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="recognize_title",
+                success=True,
+                duration_ms=int(duration),
+                tokens_used=0,  # Gemini SDK 不直接提供 token 统计
+                model=self.model,
+                cache_hit=False
+            ))
+
+            return parsed_data
+
+        except Exception as e:
+            # 记录失败调用
+            duration = (datetime.now() - start_time).total_seconds() * 1000
+            self.metrics.record(AICallMetrics(
+                timestamp=datetime.now(),
+                method="recognize_title",
+                success=False,
+                duration_ms=int(duration),
+                tokens_used=0,
+                model=self.model,
+                error=str(e),
+                cache_hit=False
+            ))
+
+            logger.error(f"Gemini识别调用失败: {e}")
+            return None
+
     async def expand_aliases(
         self,
         title: str,
@@ -685,8 +833,12 @@ class AIMatcher:
 
             logger.info(f"AI别名扩展: 开始生成别名 - {input_data}")
 
-            # 所有提供商使用 OpenAI 兼容接口
-            response_data = await self._expand_aliases_openai(input_data)
+            # 根据提供商选择不同的调用方法
+            if self.provider == "gemini":
+                response_data = await self._expand_aliases_gemini(input_data)
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response_data = await self._expand_aliases_openai(input_data)
 
             if not response_data:
                 logger.warning("AI别名扩展: 未获取到有效响应")
@@ -748,6 +900,44 @@ class AIMatcher:
             logger.error(f"OpenAI别名扩展调用失败: {e}")
             return None
 
+    async def _expand_aliases_gemini(self, input_data: Dict[str, Any]) -> Optional[Dict]:
+        """使用Gemini官方SDK进行别名扩展"""
+        if not self.client:
+            return None
+
+        try:
+            import json
+
+            # 获取别名扩展提示词
+            alias_expansion_prompt = self.config.get("ai_alias_expansion_prompt", "")
+            if not alias_expansion_prompt:
+                alias_expansion_prompt = DEFAULT_AI_ALIAS_EXPANSION_PROMPT
+
+            user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
+            full_prompt = f"{alias_expansion_prompt}\n\n{user_prompt}"
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
+                config={
+                    "temperature": 0.0,
+                    "response_mime_type": "application/json"
+                }
+            )
+
+            content = response.text
+            logger.debug(f"Gemini别名扩展原始响应: {content}")
+
+            parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
+            if parsed_data:
+                logger.debug(f"解析后的数据类型: {type(parsed_data).__name__}, 内容: {parsed_data}")
+
+            return parsed_data
+
+        except Exception as e:
+            logger.error(f"Gemini别名扩展调用失败: {e}")
+            return None
+
     def validate_aliases(
         self,
         title: str,
@@ -798,20 +988,33 @@ class AIMatcher:
             logger.info(f"正在使用AI验证别名: title='{title}', aliases={len(aliases)}个")
             logger.debug(f"AI别名验证输入: {input_data}")
 
-            # 所有提供商使用 OpenAI 兼容接口
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": validation_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                timeout=30
-            )
-            content = response.choices[0].message.content
+            # 根据提供商选择不同的调用方法
+            if self.provider == "gemini":
+                full_prompt = f"{validation_prompt}\n\n{user_prompt}"
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=full_prompt,
+                    config={
+                        "temperature": 0.0,
+                        "response_mime_type": "application/json"
+                    }
+                )
+                content = response.text
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": validation_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                    timeout=30
+                )
+                content = response.choices[0].message.content
 
             logger.debug(f"AI别名验证原始响应: {content}")
 
@@ -948,18 +1151,31 @@ class AIMatcher:
 
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-            # 所有提供商使用 OpenAI 兼容接口
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                timeout=30
-            )
-            content = response.choices[0].message.content
+            # 根据提供商选择不同的调用方法
+            if self.provider == "gemini":
+                full_prompt = f"{system_prompt}\n\n{user_prompt}"
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=full_prompt,
+                    config={
+                        "temperature": 0.0,
+                        "response_mime_type": "application/json"
+                    }
+                )
+                content = response.text
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                    timeout=30
+                )
+                content = response.choices[0].message.content
 
             if self.log_raw_response:
                 ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
