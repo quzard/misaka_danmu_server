@@ -9,6 +9,7 @@ from httpx import HTTPStatusError
 from .. import models
 from ..config_manager import ConfigManager
 from ..scraper_manager import ScraperManager
+from ..cache_manager import CacheManager
 
 class BaseMetadataSource(ABC):
     """所有元数据源插件的抽象基类。"""
@@ -20,10 +21,11 @@ class BaseMetadataSource(ABC):
     # 新增：是否支持获取分集URL (用于补充源功能)
     supports_episode_urls: bool = False
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
         self._session_factory = session_factory
         self.config_manager = config_manager
         self.scraper_manager = scraper_manager
+        self.cache_manager = cache_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod

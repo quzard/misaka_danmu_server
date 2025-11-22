@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .. import models
 from ..config_manager import ConfigManager
+from ..cache_manager import CacheManager
 from .base import BaseMetadataSource
 from ..scrapers.base import get_season_from_title
 
@@ -190,6 +191,12 @@ class So360MetadataSource(BaseMetadataSource):
                     media_type = "other"
 
                 media_id = item.get('en_id') or item.get('id', '')
+
+                # 缓存原始搜索结果到数据库 - 用于后续获取分集时使用
+                try:
+                    await self.cache_manager.set("360_search_item_", str(media_id), item, ttl_seconds=10800)  # 3小时
+                except Exception as e:
+                    self.logger.warning(f"360: 缓存搜索结果失败 (media_id={media_id}): {e}")
 
                 results.append(models.MetadataDetailsResponse(
                     id=str(media_id),
@@ -543,23 +550,40 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.error(f"360: 获取条目信息失败: {e}", exc_info=True)
             return None
 
-    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None) -> List[Tuple[int, str]]:
+    async def get_episode_urls(self, metadata_id: str, target_provider: Optional[str] = None, item_data: Optional[dict] = None) -> List[Tuple[int, str]]:
         """
         获取分集URL列表 (补充源功能)。
 
         Args:
             metadata_id: 360影视条目ID
             target_provider: 目标平台 (tencent/iqiyi/youku/bilibili/mgtv), 如果为None则返回所有平台
+            item_data: 可选的搜索结果原始数据,如果提供则直接使用,避免重新查询
 
         Returns:
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
         try:
-            # 1. 获取条目信息
-            item = await self._get_item_info_by_id(metadata_id)
-            if not item:
-                self.logger.warning(f"360: 无法获取条目信息 (metadata_id={metadata_id})")
-                return []
+            # 1. 获取条目信息 - 优先级: item_data > 数据库缓存 > 重新查询
+            if item_data:
+                self.logger.info(f"360: 使用传入的原始数据")
+                item = So360SearchResultItem(**item_data)
+            else:
+                # 尝试从数据库缓存读取
+                cached_item = None
+                try:
+                    cached_item = await self.cache_manager.get("360_search_item_", metadata_id)
+                except Exception as e:
+                    self.logger.warning(f"360: 读取缓存失败: {e}")
+
+                if cached_item:
+                    self.logger.info(f"360: 使用数据库缓存的搜索结果")
+                    item = So360SearchResultItem(**cached_item)
+                else:
+                    self.logger.info(f"360: 缓存未命中,通过ID查询条目信息")
+                    item = await self._get_item_info_by_id(metadata_id)
+                    if not item:
+                        self.logger.warning(f"360: 无法获取条目信息 (metadata_id={metadata_id})")
+                        return []
 
             # 2. 转换provider名称到360的site名称
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }

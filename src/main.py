@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
     startup_start = time.time()
 
     # 1-3. 创建管理器实例（不阻塞）
-    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None)
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None, app.state.cache_manager)
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager, app.state.transport_manager)
     app.state.metadata_manager.scraper_manager = app.state.scraper_manager
 
