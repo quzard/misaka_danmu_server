@@ -50,10 +50,19 @@ export function BangumiConfig({ form }) {
       }
     }
     window.addEventListener('message', handleMessage)
+
+    // 定期检查授权状态并自动刷新 (每5分钟检查一次)
+    const checkAuthInterval = setInterval(() => {
+      if (authMode === 'oauth' && authInfo.isAuthenticated) {
+        loadConfig()
+      }
+    }, 5 * 60 * 1000) // 5分钟
+
     return () => {
       window.removeEventListener('message', handleMessage)
+      clearInterval(checkAuthInterval)
     }
-  }, [])
+  }, [authMode, authInfo.isAuthenticated])
 
   const loadConfig = async () => {
     try {
@@ -93,12 +102,17 @@ export function BangumiConfig({ form }) {
         oauthPopupRef.current.focus()
       } else {
         const res = await getBangumiAuthUrl()
+        const authUrl = res.data?.url || res.url
+        if (!authUrl) {
+          showMessage('error', '获取授权链接失败: 返回的URL为空')
+          return
+        }
         const width = 600
         const height = 700
         const left = window.screen.width / 2 - width / 2
         const top = window.screen.height / 2 - height / 2
         oauthPopupRef.current = window.open(
-          res.url,
+          authUrl,
           'BangumiAuth',
           `width=${width},height=${height},top=${top},left=${left}`
         )

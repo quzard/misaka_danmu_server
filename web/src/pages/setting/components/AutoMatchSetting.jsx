@@ -113,6 +113,12 @@ const AutoMatchSetting = () => {
 
       // 设置当前选中的提供商配置
       updateSelectedProvider(providerValue)
+
+      // 加载完成后,如果提供商支持余额查询,自动刷新余额
+      const provider = aiProviders.find(p => p.id === providerValue)
+      if (provider?.supportBalance) {
+        fetchBalance()
+      }
     } catch (error) {
       console.error('加载配置失败:', error)
       message.error(`加载配置失败: ${error?.response?.data?.message || error?.message || error?.detail || String(error) || '未知错误'}`)
@@ -159,9 +165,12 @@ const AutoMatchSetting = () => {
   }
 
   useEffect(() => {
-    loadAIProviders()
-    loadSettings()
-    fetchBalance()
+    const init = async () => {
+      await loadAIProviders()
+      await loadSettings()
+      // fetchBalance() 会在 loadSettings() 中根据提供商配置自动调用
+    }
+    init()
   }, [])
 
   // 更新选中的提供商配置

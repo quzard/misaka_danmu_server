@@ -310,6 +310,27 @@ class BangumiMetadataSource(BaseMetadataSource):
         else:
             async with self._session_factory() as session:
                 auth_info = await _get_bangumi_auth(session, user.id)
+
+                # 自动刷新token (参考ani-rss: 剩余天数<=3天时刷新)
+                if auth_info.get("isAuthenticated") and auth_info.get("daysLeft", 999) <= 3:
+                    # 构造回调URL
+                    base_url = await self.config_manager.get("webhookCustomDomain", "")
+                    if not base_url:
+                        base_url = "http://localhost:7768"  # 默认值
+                    redirect_uri = f"{base_url}/api/metadata/bangumi/auth/callback"
+
+                    config = {
+                        "client_id": await self.config_manager.get("bangumiClientId", ""),
+                        "client_secret": await self.config_manager.get("bangumiClientSecret", ""),
+                        "redirect_uri": redirect_uri
+                    }
+                    refreshed = await _refresh_bangumi_token(session, user.id, config)
+                    if refreshed:
+                        await session.commit()
+                        # 重新获取授权信息
+                        auth_info = await _get_bangumi_auth(session, user.id)
+                        self.logger.info(f"Bangumi token已自动刷新 (用户ID: {user.id})")
+
             if auth_info and auth_info.get("isAuthenticated") and auth_info.get("accessToken"):
                 self.logger.debug("Bangumi: 正在使用 OAuth Access Token 进行认证。")
                 headers["Authorization"] = f"Bearer {auth_info['accessToken']}"
