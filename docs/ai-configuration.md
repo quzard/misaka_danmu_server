@@ -139,10 +139,10 @@
 
 ## ⚙️ 在系统中配置 AI
 
-### 方式 1: Web UI 配置 (推荐)
+###  Web UI 配置 
 
 1. 登录 Web UI
-2. 进入 "设置" → "AI 自动匹配"
+2. 进入 "设置" → "AI辅助增强" → "AI连接配置"
 3. 在 "AI 连接配置" 卡片中:
    - 选择 **AI 提供商**
    - 填写 **API Key**
@@ -151,18 +151,7 @@
 4. 点击 "测试 AI 连接" 验证配置
 5. 点击 "保存 AI 连接配置"
 
-### 方式 2: 环境变量配置
 
-在 `docker-compose.yml` 中添加:
-
-```yaml
-environment:
-  # AI 配置
-  - DANMUAPI_AI__AI_PROVIDER=deepseek              # AI 提供商: deepseek, siliconflow, openai, gemini
-  - DANMUAPI_AI__AI_API_KEY=sk-your-api-key-here  # AI API Key
-  - DANMUAPI_AI__AI_BASE_URL=                      # Base URL (可选,留空使用默认值)
-  - DANMUAPI_AI__AI_MODEL=deepseek-chat            # 模型名称
-```
 
 ---
 
@@ -173,7 +162,7 @@ environment:
 **功能**: 当搜索结果有多个相似项时,使用 AI 选择最佳匹配。
 
 **启用方式**:
-- Web UI → "设置" → "AI 自动匹配"
+- Web UI → "设置" → "AI辅助增强" →  "AI 自动匹配"
 - 将 "匹配模式" 设置为 "AI 智能匹配"
 
 **使用场景**:
@@ -192,7 +181,7 @@ environment:
 **功能**: 从元数据源搜索结果中选择正确的季度。
 
 **启用方式**:
-- Web UI → "设置" → "搜索源"
+- Web UI → "设置" → "AI辅助增强" →  "AI 自动匹配"
 - 启用对应场景的 "TMDB 季度映射":
   - Webhook TMDB 季度映射
   - 匹配后备 TMDB 季度映射
@@ -214,7 +203,7 @@ environment:
 **功能**: 从文件名中提取结构化信息(标题、季度、集数等)。
 
 **启用方式**:
-- Web UI → "设置" → "AI 自动匹配"
+- Web UI → "设置" → "AI辅助增强" → "AI 自动匹配"
 - 启用 "AI 识别增强"
 
 **使用场景**:
@@ -233,7 +222,7 @@ environment:
 **功能**: 验证和分类别名,识别语言类型。
 
 **启用方式**:
-- Web UI → "设置" → "AI 自动匹配"
+- Web UI → "设置" → "AI辅助增强" → "AI 自动匹配"
 - 启用 "AI 别名验证"
 
 **使用场景**:
@@ -248,7 +237,7 @@ environment:
 **功能**: 生成可能的别名用于搜索。
 
 **启用方式**:
-- Web UI → "设置" → "AI 自动匹配"
+- Web UI → "设置" → "AI辅助增强" → "AI 自动匹配"
 - 启用 "AI 别名扩展"
 
 **使用场景**:
@@ -313,7 +302,7 @@ A: 请检查:
 A: 不可以。系统同时只能配置一个 AI 提供商。
 
 ### Q: Gemini 在国内无法访问怎么办?
-A: 需要配置代理。在 "设置" → "网络" 中配置全局代理,所有 AI 请求都会通过代理。
+A: 需要配置代理。在 "设置" → "代理设置" 中配置全局代理,所有 AI 请求都会通过代理。
 
 ---
 
