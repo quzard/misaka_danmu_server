@@ -521,7 +521,8 @@ async def set_provider_settings(
 @router.post("/config/ai/test", response_model=AITestResponse, summary="测试AI连接可用性")
 async def test_ai_connection(
     request: AITestRequest,
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """测试AI连接配置是否可用"""
     try:
@@ -532,8 +533,7 @@ async def test_ai_connection(
             base_url = request.baseUrl.rstrip('/')
         else:
             # 1. 先从数据库读取用户保存的配置
-            config_manager = ConfigManager()
-            saved_base_url = config_manager.get("aiBaseUrl")
+            saved_base_url = await config_manager.get("aiBaseUrl")
 
             if saved_base_url:
                 base_url = saved_base_url.rstrip('/')
