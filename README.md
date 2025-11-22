@@ -83,12 +83,21 @@
 
 ## 📚 文档导航
 
+### 快速入门
 - **[🚀 快速开始](docs/quick-start.md)** - Docker Compose 一键部署指南
 - **[📱 客户端配置](docs/client-configuration.md)** - 播放器弹幕接口配置
+
+### 功能配置
+- **[🎬 元数据源配置](docs/metadata-sources.md)** - TMDB, TVDB, Bangumi 等 API 密钥配置
+- **[🤖 AI 功能配置](docs/ai-configuration.md)** - AI 智能匹配和识别增强配置
 - **[🔗 Webhook 配置](docs/webhook-configuration.md)** - Emby/Jellyfin/Plex 自动化配置
 - **[🤖 Telegram Bot](docs/telegram-bot.md)** - 机器人集成指南
+
+### 高级功能
 - **[🔍 智能搜索](docs/smart-search.md)** - 后备搜索与匹配功能
 - **[🔧 弹幕源管理](docs/scraper-management.md)** - 弹幕源加载、备份与恢复
+
+### 运维与优化
 - **[⚡ MySQL 优化](docs/mysql-optimization.md)** - 内存优化配置指南
 - **[❓ 常见问题](docs/faq.md)** - 故障排除与解决方案
 
@@ -102,10 +111,18 @@
 
 ## 参考项目
 
- - [dandanplayapi](https://api.dandanplay.net/swagger/index.html) 
+ - [dandanplayapi](https://api.dandanplay.net/swagger/index.html)
  - [danmuku](https://github.com/lyz05/danmaku)
- - [emby-toolkit](https://github.com/hbq0405/emby-toolkit) 
+ - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
  - [swagger-ui](https://github.com/swagger-api/swagger-ui)
  - [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
  - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
  - [MoviePilot](https://github.com/jxxghp/MoviePilot)
+
+---
+
+## 📈 项目 Star 数增长趋势
+
+### Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=l429609201/misaka_danmu_server&type=Date)](https://www.star-history.com/#l429609201/misaka_danmu_server&Date)

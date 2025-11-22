@@ -164,4 +164,72 @@ networks:
 - **初始登录**:
   - 用户名: `admin` (或您在环境变量中设置的值)。
   - 密码: 首次启动时会在容器的日志中生成一个随机密码。请使用 `docker logs misaka-danmu-server` 查看。
-- **开始使用**: 登录后，请先在 "设置" -> "账户安全" 中修改您的密码，然后在 "搜索源" 和 "设置" 页面中配置您的API密钥。
+- **开始使用**: 登录后，请先在 "设置" -> "账户安全" 中修改您的密码，然后配置以下内容:
+  - **元数据源**: 在 "设置" -> "搜索源" 中配置 TMDB, TVDB 等 API 密钥 (参考 [元数据源配置指南](metadata-sources.md))
+  - **AI 功能** (可选): 在 "设置" -> "AI 自动匹配" 中配置 AI 提供商和 API Key (参考 [AI 功能配置指南](ai-configuration.md))
+  - **弹幕源**: 在 "弹幕源" 页面加载或上传弹幕源离线包
+
+## 步骤 4: 环境变量说明
+
+### 数据库配置
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| `DANMUAPI_DATABASE__TYPE` | 数据库类型 (`mysql` 或 `postgresql`) | - |
+| `DANMUAPI_DATABASE__HOST` | 数据库主机地址 | - |
+| `DANMUAPI_DATABASE__PORT` | 数据库端口 | `3306` (MySQL) / `5432` (PostgreSQL) |
+| `DANMUAPI_DATABASE__NAME` | 数据库名称 | - |
+| `DANMUAPI_DATABASE__USER` | 数据库用户名 | - |
+| `DANMUAPI_DATABASE__PASSWORD` | 数据库密码 | - |
+
+### 管理员配置
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| `DANMUAPI_ADMIN__INITIAL_USER` | 初始管理员用户名 | `admin` |
+
+### 弹幕存储路径配置
+
+> **注意**: 弹幕存储路径配置只能通过 Web UI 进行设置,不支持环境变量配置。
+
+**配置方式**:
+1. 登录 Web UI
+2. 进入 "设置" → "弹幕文件路径"
+3. 启用 "自定义弹幕文件保存路径"
+4. 配置电影和电视节目的存储路径和文件命名模板
+
+**文件命名模板支持的变量**:
+- `${title}` - 作品标题
+- `${season}` - 季度编号
+- `${episode}` - 集数编号
+- `${year}` - 年份
+- `${provider}` - 弹幕源提供商
+- `${animeId}` - 作品 ID
+- `${episodeId}` - 分集 ID
+- `${sourceId}` - 源 ID
+
+**默认配置**:
+- 电影弹幕路径: `/app/config/danmaku/movies`
+- 电影文件命名: `${title}/${episodeId}.xml`
+- 电视节目弹幕路径: `/app/config/danmaku/tv`
+- 电视节目文件命名: `${animeId}/${episodeId}.xml`
+
+### 其他配置
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| `PUID` | 运行容器的用户 ID | `1000` |
+| `PGID` | 运行容器的组 ID | `1000` |
+| `UMASK` | 文件权限掩码 | `0022` |
+| `TZ` | 时区 | `Asia/Shanghai` |
+
+
+---
+
+## 📚 下一步
+
+- **[📱 客户端配置](client-configuration.md)** - 配置播放器弹幕接口
+- **[🎬 元数据源配置](metadata-sources.md)** - 配置 TMDB, TVDB 等 API 密钥
+- **[🤖 AI 功能配置](ai-configuration.md)** - 配置 AI 智能匹配功能
+- **[🔗 Webhook 配置](webhook-configuration.md)** - 配置 Emby/Jellyfin/Plex 自动化
+- **[🔧 弹幕源管理](scraper-management.md)** - 加载和管理弹幕源

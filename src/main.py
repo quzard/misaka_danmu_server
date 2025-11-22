@@ -209,7 +209,8 @@ async def lifespan(app: FastAPI):
     app.state.webhook_manager = WebhookManager(
         session_factory, app.state.task_manager, app.state.scraper_manager,
         app.state.rate_limiter, app.state.metadata_manager,
-        app.state.config_manager, app.state.title_recognition_manager
+        app.state.config_manager, app.state.title_recognition_manager,
+        app.state.ai_matcher_manager
     )
 
     init_time = time.time() - init_start
