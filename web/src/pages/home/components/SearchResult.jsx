@@ -631,7 +631,9 @@ export const SearchResult = () => {
         const selectedKey = Object.keys(supplementMap).find(k =>
           k.startsWith(mainKey + '_')
         )
-        const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
+        // key格式: provider_mediaId_supplementProvider_supplementMediaId
+        // 提取 supplementProvider_supplementMediaId 作为 value
+        const selectedProvider = selectedKey ? selectedKey.substring(mainKey.length + 1) : undefined
         const isEnabled = selectedKey ? (supplementMap[selectedKey]?.enabled || false) : false
 
         return (
@@ -645,9 +647,10 @@ export const SearchResult = () => {
               onChange={value => {
                 // 如果选择了补充源
                 if (value) {
-                  const supplement = matching_supplements.find(s => s.provider === value)
+                  // 使用唯一key来查找补充源
+                  const supplement = matching_supplements.find(s => `${s.provider}_${s.mediaId}` === value)
                   if (supplement) {
-                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}_${supplement.mediaId}`
                     // 选择补充源时,不自动启用,需要用户勾选checkbox
                     setSupplementMap(prev => {
                       const newMap = { ...prev }
@@ -684,7 +687,7 @@ export const SearchResult = () => {
               style={{ minWidth: 200 }}
               options={matching_supplements.map(supplement => ({
                 label: `${supplement.provider} - ${supplement.title}`,
-                value: supplement.provider
+                value: `${supplement.provider}_${supplement.mediaId}`
               }))}
             />
             {selectedProvider && (
@@ -692,9 +695,10 @@ export const SearchResult = () => {
                 checked={isEnabled}
                 onChange={e => {
                   e.stopPropagation()
-                  const supplement = matching_supplements.find(s => s.provider === selectedProvider)
+                  // 使用唯一key来查找补充源
+                  const supplement = matching_supplements.find(s => `${s.provider}_${s.mediaId}` === selectedProvider)
                   if (supplement) {
-                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}_${supplement.mediaId}`
                     handleSupplementToggle(item, supplement, e.target.checked, key)
                   }
                 }}

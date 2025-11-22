@@ -589,34 +589,43 @@ class So360MetadataSource(BaseMetadataSource):
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
             target_site = provider_map.get(target_provider) if target_provider else None
 
-            # 3. 优先使用搜索结果中的seriesPlaylinks
-            if item.seriesPlaylinks:
-                self.logger.info(f"360: 使用搜索结果中的seriesPlaylinks (共 {len(item.seriesPlaylinks)} 个分集)")
-                episode_urls = []
-                for i, episode in enumerate(item.seriesPlaylinks):
-                    if isinstance(episode, dict):
-                        episode_url = episode.get('url', '')
-                    elif isinstance(episode, str):
-                        episode_url = episode
-                    else:
-                        continue
-                    if episode_url:
-                        episode_urls.append((i + 1, episode_url))
+            # 2. 转换provider名称到360的site名称
+            provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
+            target_site = provider_map.get(target_provider) if target_provider else None
 
-                self.logger.info(f"360: 从seriesPlaylinks提取到 {len(episode_urls)} 个分集URL")
-                return episode_urls
+            # 3. 优先使用搜索结果中的seriesPlaylinks (仅当平台匹配时)
+            if item.seriesPlaylinks and item.seriesSite:
+                # 检查seriesSite是否匹配target_site
+                if target_site and item.seriesSite == target_site:
+                    self.logger.info(f"360: 使用搜索结果中的seriesPlaylinks (平台={item.seriesSite}, 共 {len(item.seriesPlaylinks)} 个分集)")
+                    episode_urls = []
+                    for i, episode in enumerate(item.seriesPlaylinks):
+                        if isinstance(episode, dict):
+                            episode_url = episode.get('url', '')
+                        elif isinstance(episode, str):
+                            episode_url = episode
+                        else:
+                            continue
+                        if episode_url:
+                            episode_urls.append((i + 1, episode_url))
 
-            # 4. 如果没有seriesPlaylinks,使用360 API获取分集列表
+                    self.logger.info(f"360: 从seriesPlaylinks提取到 {len(episode_urls)} 个分集URL")
+                    return episode_urls
+                else:
+                    self.logger.info(f"360: seriesPlaylinks平台不匹配 (seriesSite={item.seriesSite}, target_site={target_site}), 使用API获取")
+            elif item.seriesPlaylinks:
+                # 有seriesPlaylinks但没有seriesSite,或者没有指定target_site
+                self.logger.info(f"360: seriesPlaylinks可用但无法确定平台匹配 (seriesSite={item.seriesSite}, target_site={target_site}), 使用API获取")
+
+            # 4. 使用360 API获取分集列表
             cat_id = item.cat_id or ''
             cat_name = item.cat_name or ''
 
             # 确定使用哪个平台
-            if target_site:
-                site = target_site
-            else:
+            if not target_site:
                 # 如果没有指定平台,使用第一个可用平台
                 if item.playlinks:
-                    site = list(item.playlinks.keys())[0]
+                    target_site = list(item.playlinks.keys())[0]
                 else:
                     self.logger.warning(f"360: 没有可用的播放平台 (metadata_id={metadata_id})")
                     return []
@@ -627,11 +636,11 @@ class So360MetadataSource(BaseMetadataSource):
             if cat_id == '3' or '综艺' in cat_name:
                 # 综艺使用episodeszongyi接口,使用id
                 ent_id = item.id
-                episode_urls = await self._get_zongyi_episodes(ent_id, site, item)
+                episode_urls = await self._get_zongyi_episodes(ent_id, target_site, item)
             else:
                 # 其他使用episodesv2接口,优先使用en_id
                 ent_id = item.en_id or item.id
-                episode_urls = await self._get_episodes_v2(cat_id, ent_id, site)
+                episode_urls = await self._get_episodes_v2(cat_id, ent_id, target_site)
 
             self.logger.info(f"360: 成功获取 {len(episode_urls)} 个分集URL")
             return episode_urls
