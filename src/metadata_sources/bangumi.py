@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .. import crud, models, orm_models, security
 from ..config import settings
 from ..config_manager import ConfigManager
+from ..cache_manager import CacheManager
 from ..database import get_db_session
 from ..utils import parse_search_keyword
 from ..timezone import get_app_timezone, get_now
@@ -268,9 +269,9 @@ class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
     test_url = "https://bgm.tv"
-    
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
-        super().__init__(session_factory, config_manager, scraper_manager)
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
+        super().__init__(session_factory, config_manager, scraper_manager, cache_manager)
         self.api_base_url = "https://api.bgm.tv"
         self._token: Optional[str] = None
         self._config_loaded = False
