@@ -198,6 +198,40 @@ class So360MetadataSource(BaseMetadataSource):
                 except Exception as e:
                     self.logger.warning(f"360: 缓存搜索结果失败 (media_id={media_id}): {e}")
 
+                # 分析seriesPlaylinks中的链接,判断支持哪些平台
+                supported_providers = set()
+                series_playlinks = item.get('seriesPlaylinks', [])
+                series_site = item.get('seriesSite', '')
+
+                if series_site:
+                    # 如果有seriesSite,直接使用
+                    provider_reverse_map = {"qq": "tencent", "qiyi": "iqiyi", "youku": "youku", "bilibili": "bilibili", "imgo": "mgtv"}
+                    if series_site in provider_reverse_map:
+                        supported_providers.add(provider_reverse_map[series_site])
+                elif series_playlinks:
+                    # 如果没有seriesSite,分析链接
+                    for ep in series_playlinks:
+                        url = ep.get('url', '') if isinstance(ep, dict) else (ep if isinstance(ep, str) else '')
+                        if not url:
+                            continue
+                        # 根据URL判断平台
+                        if 'youku.com' in url:
+                            supported_providers.add('youku')
+                        elif 'bilibili.com' in url:
+                            supported_providers.add('bilibili')
+                        elif 'qq.com' in url or 'v.qq.com' in url:
+                            supported_providers.add('tencent')
+                        elif 'iqiyi.com' in url:
+                            supported_providers.add('iqiyi')
+                        elif 'mgtv.com' in url:
+                            supported_providers.add('mgtv')
+
+                # 将支持的平台列表存储到extra中
+                extra_data = {"item_data": item}
+                if supported_providers:
+                    extra_data["supported_providers"] = list(supported_providers)
+                    self.logger.debug(f"360: {title} 支持的平台: {supported_providers}")
+
                 results.append(models.MetadataDetailsResponse(
                     id=str(media_id),
                     provider=self.provider_name,
@@ -206,8 +240,8 @@ class So360MetadataSource(BaseMetadataSource):
                     imageUrl=item.get('cover'),
                     year=int(item['year']) if item.get('year') and str(item['year']).isdigit() else None,
                     aliasesCn=item.get('alias', []),
-                    extra={"item_data": item},  # 保存原始数据用于后续处理
-                    supportsEpisodeUrls=True  # 360源支持获取分集URL
+                    extra=extra_data,
+                    supportsEpisodeUrls=bool(supported_providers)  # 只有当有支持的平台时才为True
                 ))
 
             self.logger.info(f"360搜索: 过滤后返回 {len(results)} 个结果")

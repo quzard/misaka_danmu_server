@@ -616,12 +616,24 @@ export const SearchResult = () => {
         )
       }
 
-      // 查找所有匹配的补充源(相似度>80且支持分集URL)
+      // 查找所有匹配的补充源(相似度>80且支持分集URL且支持当前主源平台)
       const matching_supplements = supplementalResults.filter(
-        sup =>
-          sup.provider !== item.provider &&
-          calculateSimilarity(item.title, sup.title) > 80 &&
-          sup.supportsEpisodeUrls === true
+        sup => {
+          // 基本条件: 不是同一个provider, 标题相似度>80, 支持分集URL
+          if (sup.provider === item.provider) return false
+          if (calculateSimilarity(item.title, sup.title) <= 80) return false
+          if (sup.supportsEpisodeUrls !== true) return false
+
+          // 检查补充源是否支持当前主源的平台
+          const supportedProviders = sup.extra?.supported_providers || []
+          if (supportedProviders.length === 0) {
+            // 如果没有supported_providers信息,保持兼容性,允许显示
+            return true
+          }
+
+          // 只有当补充源支持当前主源平台时才显示
+          return supportedProviders.includes(item.provider)
+        }
       )
 
       if (matching_supplements.length > 0) {
