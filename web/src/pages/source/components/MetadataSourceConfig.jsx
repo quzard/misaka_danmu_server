@@ -341,13 +341,20 @@ export function BangumiConfig({ form }) {
                   取消授权
                 </Button>
               </div>
-              <div className="border rounded" style={{ height: '500px', overflow: 'hidden' }}>
-                <iframe
-                  src={authUrl}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title="Bangumi OAuth"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation"
-                />
+              <div className="border rounded bg-white" style={{ height: '500px', overflow: 'auto' }}>
+                {authUrl ? (
+                  <iframe
+                    src={authUrl}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title="Bangumi OAuth"
+                    onLoad={() => console.log('iframe loaded')}
+                    onError={(e) => console.error('iframe error:', e)}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500">
+                    加载中...
+                  </div>
+                )}
               </div>
             </div>
           ) : (
