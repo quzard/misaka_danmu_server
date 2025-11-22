@@ -43,13 +43,14 @@ from ...config import settings
 from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
-from ...ai.ai_matcher import (
+from ...ai.ai_prompts import (
     DEFAULT_AI_MATCH_PROMPT,
+    DEFAULT_AI_SEASON_MAPPING_PROMPT,
     DEFAULT_AI_RECOGNITION_PROMPT,
     DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
     DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
-    DEFAULT_AI_SEASON_MAPPING_PROMPT
 )
+from ...ai.ai_providers import get_all_providers, supports_balance_query
 from src.path_template import DanmakuPathTemplate
 
 logger = logging.getLogger(__name__)
@@ -715,7 +716,7 @@ async def get_ai_balance(
     provider = await config_manager.get("aiProvider", "deepseek")
 
     # 检查是否支持余额查询
-    if provider != "deepseek":
+    if not supports_balance_query(provider):
         return {
             "supported": False,
             "provider": provider,
@@ -750,6 +751,34 @@ async def get_ai_balance(
             "data": None,
             "error": str(e)
         }
+
+
+@router.get("/config/ai/providers", summary="获取AI提供商列表")
+async def get_ai_providers(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取所有可用的AI提供商配置列表
+
+    Returns:
+        [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "displayName": "DeepSeek (推荐)",
+                "description": "DeepSeek AI - 性价比高的国产大模型",
+                "defaultBaseUrl": "https://api.deepseek.com",
+                "defaultModel": "deepseek-chat",
+                "modelPlaceholder": "deepseek-chat",
+                "baseUrlPlaceholder": "https://api.deepseek.com (默认)",
+                "supportBalance": true,
+                "apiKeyPrefix": "sk-",
+                "website": "https://platform.deepseek.com"
+            },
+            ...
+        ]
+    """
+    return get_all_providers()
 
 
 

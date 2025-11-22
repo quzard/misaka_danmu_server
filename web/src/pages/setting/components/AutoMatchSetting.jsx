@@ -25,6 +25,8 @@ const AutoMatchSetting = () => {
   const [selectedMetadataSource, setSelectedMetadataSource] = useState('tmdb')
   const [balanceInfo, setBalanceInfo] = useState(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
+  const [aiProviders, setAiProviders] = useState([])
+  const [providersLoading, setProvidersLoading] = useState(false)
 
   // 加载配置
   const loadSettings = async () => {
@@ -113,7 +115,45 @@ const AutoMatchSetting = () => {
     }
   }
 
+  // 加载AI提供商列表
+  const loadAIProviders = async () => {
+    try {
+      setProvidersLoading(true)
+      const res = await api.get('/api/ui/config/ai/providers')
+      setAiProviders(res.data || [])
+    } catch (error) {
+      console.error('加载AI提供商列表失败:', error)
+      // 使用默认配置
+      setAiProviders([
+        {
+          id: 'deepseek',
+          displayName: 'DeepSeek (推荐)',
+          defaultModel: 'deepseek-chat',
+          modelPlaceholder: 'deepseek-chat',
+          baseUrlPlaceholder: 'https://api.deepseek.com (默认)'
+        },
+        {
+          id: 'siliconflow',
+          displayName: 'SiliconFlow 硅基流动',
+          defaultModel: 'Qwen/Qwen2.5-7B-Instruct',
+          modelPlaceholder: 'Qwen/Qwen2.5-7B-Instruct, deepseek-ai/DeepSeek-V2.5',
+          baseUrlPlaceholder: 'https://api.siliconflow.cn/v1 (默认)'
+        },
+        {
+          id: 'openai',
+          displayName: 'OpenAI (兼容接口)',
+          defaultModel: 'gpt-4-turbo',
+          modelPlaceholder: 'gpt-4, gpt-4-turbo, gpt-3.5-turbo',
+          baseUrlPlaceholder: 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
+        }
+      ])
+    } finally {
+      setProvidersLoading(false)
+    }
+  }
+
   useEffect(() => {
+    loadAIProviders()
     loadSettings()
     fetchBalance()
   }, [])
@@ -173,26 +213,14 @@ const AutoMatchSetting = () => {
 
   // 获取模型名称占位符
   const getModelPlaceholder = (provider) => {
-    switch (provider) {
-      case 'deepseek':
-        return 'deepseek-chat'
-      case 'openai':
-        return 'gpt-4, gpt-4-turbo, gpt-3.5-turbo'
-      default:
-        return '请输入模型名称'
-    }
+    const providerConfig = aiProviders.find(p => p.id === provider)
+    return providerConfig?.modelPlaceholder || '请输入模型名称'
   }
 
   // 获取Base URL占位符
   const getBaseUrlPlaceholder = (provider) => {
-    switch (provider) {
-      case 'deepseek':
-        return 'https://api.deepseek.com (默认)'
-      case 'openai':
-        return 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
-      default:
-        return '可选,用于自定义接口地址'
-    }
+    const providerConfig = aiProviders.find(p => p.id === provider)
+    return providerConfig?.baseUrlPlaceholder || '可选,用于自定义接口地址'
   }
 
   // 测试AI连接
@@ -299,16 +327,19 @@ const AutoMatchSetting = () => {
                 label={
                   <Space>
                     <span>AI提供商</span>
-                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
+                    <Tooltip title="选择AI服务提供商。不同提供商支持不同的模型和功能。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
                 }
                 rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
               >
-                <Select>
-                  <Option value="deepseek">DeepSeek (推荐)</Option>
-                  <Option value="openai">OpenAI (兼容接口)</Option>
+                <Select loading={providersLoading}>
+                  {aiProviders.map(provider => (
+                    <Option key={provider.id} value={provider.id}>
+                      {provider.displayName}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
 

@@ -14,7 +14,7 @@ from ..task_manager import TaskManager, TaskSuccess
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
 from ..ai.ai_matcher_manager import AIMatcherManager
-from ..ai.ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+from ..ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
 
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoScrape"

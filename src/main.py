@@ -30,7 +30,7 @@ from . import crud, security, orm_models
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
-from .ai.ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
+from .ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
 from .title_recognition import TitleRecognitionManager
 from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs

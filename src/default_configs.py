@@ -110,10 +110,10 @@ def get_default_configs(settings=None, ai_prompts=None):
         configs.update({
             'aiMatchEnabled': ('false', '是否启用AI智能匹配。启用后，在自动匹配场景(外部API、Webhook、匹配后备)中使用AI选择最佳搜索结果。'),
             'aiFallbackEnabled': ('true', '是否启用传统匹配兜底。当AI匹配失败时，自动降级到传统匹配算法。'),
-            'aiProvider': ('deepseek', 'AI提供商: deepseek, openai, gemini'),
+            'aiProvider': ('deepseek', 'AI提供商: deepseek, siliconflow, openai'),
             'aiApiKey': ('', 'AI服务的API密钥'),
             'aiBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
-            'aiModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, gpt-4, gemini-pro'),
+            'aiModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, Qwen/Qwen2.5-7B-Instruct, gpt-4'),
             'aiPrompt': (ai_prompts.get('DEFAULT_AI_MATCH_PROMPT', ''), 'AI智能匹配提示词'),
             'aiRecognitionEnabled': ('false', '是否启用AI辅助识别。启用后，在TMDB自动刮削任务中使用AI识别标题和季度信息。'),
             'aiRecognitionPrompt': (ai_prompts.get('DEFAULT_AI_RECOGNITION_PROMPT', ''), 'AI辅助识别提示词'),
