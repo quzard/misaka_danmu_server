@@ -106,6 +106,32 @@ async def _get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optiona
             return cached_data
     return None
 
+def _convert_to_serializable(obj: Any) -> Any:
+    """
+    递归转换对象为可JSON序列化的格式
+
+    Args:
+        obj: 要转换的对象
+
+    Returns:
+        可JSON序列化的对象
+    """
+    # Pydantic v2 模型
+    if hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+    # Pydantic v1 模型
+    elif hasattr(obj, 'dict'):
+        return obj.dict()
+    # 字典 - 递归处理值
+    elif isinstance(obj, dict):
+        return {k: _convert_to_serializable(v) for k, v in obj.items()}
+    # 列表 - 递归处理元素
+    elif isinstance(obj, list):
+        return [_convert_to_serializable(item) for item in obj]
+    # 其他类型直接返回
+    else:
+        return obj
+
 async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any, ttl_seconds: int):
     """
     设置数据库缓存(兼容包装器)
@@ -115,18 +141,9 @@ async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any
         if isinstance(value, str):
             json_value = value
         else:
-            # 检查是否是 Pydantic 模型
-            if hasattr(value, 'model_dump'):
-                json_value = json.dumps(value.model_dump(), ensure_ascii=False)
-            elif hasattr(value, 'dict'):
-                json_value = json.dumps(value.dict(), ensure_ascii=False)
-            elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'model_dump'):
-                # 处理 Pydantic 模型列表
-                json_value = json.dumps([item.model_dump() for item in value], ensure_ascii=False)
-            elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'dict'):
-                json_value = json.dumps([item.dict() for item in value], ensure_ascii=False)
-            else:
-                json_value = json.dumps(value, ensure_ascii=False)
+            # 递归转换为可序列化对象
+            serializable_value = _convert_to_serializable(value)
+            json_value = json.dumps(serializable_value, ensure_ascii=False)
         await crud.set_cache(session, cache_key, json_value, ttl_seconds)
         logger.debug(f"设置缓存: {cache_key}")
     except Exception as e:
