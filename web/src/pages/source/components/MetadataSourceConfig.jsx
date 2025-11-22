@@ -102,15 +102,22 @@ export function BangumiConfig({ form }) {
 
   const handleOAuthLogin = async () => {
     try {
+      console.log('handleOAuthLogin called')
       const res = await getBangumiAuthUrl()
+      console.log('getBangumiAuthUrl response:', res)
       const url = res.data?.url || res.url
+      console.log('Extracted URL:', url)
       if (!url) {
         showMessage('error', '获取授权链接失败: 返回的URL为空')
         return
       }
+      console.log('Setting authUrl:', url)
+      console.log('Setting showAuthIframe: true')
       setAuthUrl(url)
       setShowAuthIframe(true)
+      console.log('State updated, authUrl:', url, 'showAuthIframe:', true)
     } catch (error) {
+      console.error('handleOAuthLogin error:', error)
       showMessage('error', `获取授权链接失败: ${error.message}`)
     }
   }
@@ -334,10 +341,15 @@ export function BangumiConfig({ form }) {
               </Button>
             </div>
           ) : showAuthIframe ? (
-            <div className="py-4">
+            <div className="py-4" style={{ border: '2px solid red' }}>
               <div className="mb-3 text-center">
-                <div className="mb-2 text-sm text-gray-600">请在下方完成 Bangumi 授权</div>
-                <Button size="small" onClick={() => { setShowAuthIframe(false); setAuthUrl('') }}>
+                <div className="mb-2 text-sm text-gray-600">请在下方完成 Bangumi 授权 (DEBUG: showAuthIframe={String(showAuthIframe)})</div>
+                <div className="mb-2 text-xs text-gray-500">authUrl: {authUrl}</div>
+                <Button size="small" onClick={() => {
+                  console.log('Cancel button clicked')
+                  setShowAuthIframe(false)
+                  setAuthUrl('')
+                }}>
                   取消授权
                 </Button>
               </div>
@@ -352,7 +364,7 @@ export function BangumiConfig({ form }) {
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-500">
-                    加载中...
+                    加载中... (authUrl is empty)
                   </div>
                 )}
               </div>
