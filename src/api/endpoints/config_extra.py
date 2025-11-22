@@ -528,6 +528,50 @@ async def test_ai_connection(
     try:
         start_time = time.time()
 
+        # Gemini 使用官方 SDK 测试
+        if request.provider == "gemini":
+            try:
+                from google import genai
+
+                client = genai.Client(api_key=request.apiKey)
+                response = client.models.generate_content(
+                    model=request.model,
+                    contents="Hello",
+                    config={
+                        "temperature": 0.0,
+                        "max_output_tokens": 10
+                    }
+                )
+
+                latency = (time.time() - start_time) * 1000
+
+                if response.text:
+                    return AITestResponse(
+                        success=True,
+                        message="AI连接测试成功",
+                        latency=round(latency, 2)
+                    )
+                else:
+                    return AITestResponse(
+                        success=False,
+                        message="Gemini API 返回空响应",
+                        error="响应内容为空"
+                    )
+
+            except ImportError:
+                return AITestResponse(
+                    success=False,
+                    message="Gemini SDK 未安装",
+                    error="请运行: pip install google-genai"
+                )
+            except Exception as e:
+                return AITestResponse(
+                    success=False,
+                    message="Gemini API 调用失败",
+                    error=str(e)
+                )
+
+        # 其他提供商使用 OpenAI 兼容接口测试
         # 根据provider确定base_url
         if request.baseUrl:
             base_url = request.baseUrl.rstrip('/')
