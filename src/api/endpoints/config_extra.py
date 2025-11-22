@@ -50,7 +50,7 @@ from ...ai.ai_prompts import (
     DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
     DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
 )
-from ...ai.ai_providers import get_all_providers, supports_balance_query
+from ...ai.ai_providers import get_all_providers, supports_balance_query, get_provider_config
 from src.path_template import DanmakuPathTemplate
 
 logger = logging.getLogger(__name__)
@@ -531,16 +531,22 @@ async def test_ai_connection(
         if request.baseUrl:
             base_url = request.baseUrl.rstrip('/')
         else:
-            if request.provider == 'deepseek':
-                base_url = 'https://api.deepseek.com'
-            elif request.provider == 'openai':
-                base_url = 'https://api.openai.com/v1'
+            # 1. 先从数据库读取用户保存的配置
+            config_manager = ConfigManager()
+            saved_base_url = config_manager.get("aiBaseUrl")
+
+            if saved_base_url:
+                base_url = saved_base_url.rstrip('/')
             else:
-                return AITestResponse(
-                    success=False,
-                    message="不支持的AI提供商",
-                    error=f"未知的provider: {request.provider}"
-                )
+                # 2. 从 ai_providers.py 获取默认值
+                provider_config = get_provider_config(request.provider)
+                if not provider_config:
+                    return AITestResponse(
+                        success=False,
+                        message="不支持的AI提供商",
+                        error=f"未知的provider: {request.provider}"
+                    )
+                base_url = provider_config.get('defaultBaseUrl', '').rstrip('/')
 
         # 构建API URL
         api_url = f"{base_url}/chat/completions"
