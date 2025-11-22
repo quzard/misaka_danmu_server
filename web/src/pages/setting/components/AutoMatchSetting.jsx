@@ -452,43 +452,11 @@ const AutoMatchSetting = () => {
                 )}
               </Form.Item>
 
-              {/* AI连接测试与调试 */}
-              <Form.Item label="连接测试与调试">
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-                    <Button
-                      icon={<ThunderboltOutlined />}
-                      onClick={handleTestConnection}
-                      loading={testing}
-                      style={{
-                        width: '100%',
-                        maxWidth: '200px'
-                      }}
-                    >
-                      测试AI连接
-                    </Button>
-                  </div>
-
-                  <Card size="small" style={{ marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 500 }}>记录AI原始响应</span>
-                        <Tooltip title="启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </div>
-                      <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
-                        <CustomSwitch />
-                      </Form.Item>
-                    </div>
-                  </Card>
-
-                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '16px' }}>
-                    启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。
-                  </div>
-
-                  {/* 余额卡片 - 根据选中的提供商配置决定是否显示 */}
-                  {selectedProvider?.supportBalance && (
+              {/* 余额卡片 - 根据选中的提供商配置决定是否显示 */}
+              {selectedProvider?.supportBalance && (
+                <Form.Item label="账户余额">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {/* 余额卡片 */}
                     <Card size="small" style={{ marginBottom: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -546,36 +514,61 @@ const AutoMatchSetting = () => {
                         </div>
                       )}
                     </Card>
-                  )}
+                  </Space>
+                </Form.Item>
+              )}
 
-                  {testResult && (
-                    <Alert
-                      type={testResult.success ? 'success' : 'error'}
-                      message={
-                        <Space>
-                          {testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-                          <span>{testResult.message}</span>
-                          {testResult.latency && <span>({testResult.latency}ms)</span>}
-                        </Space>
-                      }
-                      description={testResult.error}
-                      showIcon={false}
-                      closable
-                      onClose={() => setTestResult(null)}
+              {/* 测试结果 */}
+              {testResult && (
+                <Alert
+                  type={testResult.success ? 'success' : 'error'}
+                  message={
+                    <Space>
+                      {testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                      <span>{testResult.message}</span>
+                      {testResult.latency && <span>({testResult.latency}ms)</span>}
+                    </Space>
+                  }
+                  description={testResult.error}
+                  showIcon={false}
+                  closable
+                  onClose={() => setTestResult(null)}
+                  style={{ marginBottom: '16px' }}
+                />
+              )}
+
+              {/* 测试、记录开关和保存按钮 */}
+              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+                <Button
+                  icon={<ThunderboltOutlined />}
+                  onClick={handleTestConnection}
+                  loading={testing}
+                  size="large"
+                  style={{ minWidth: '150px' }}
+                >
+                  测试 AI 连接
+                </Button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px' }}>
+                  <span style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>记录响应</span>
+                  <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
+                    <CustomSwitch
+                      checkedChildren="记录"
+                      unCheckedChildren="不记录"
                     />
-                  )}
-                </Space>
-              </Form.Item>
+                  </Form.Item>
+                  <Tooltip title="启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。">
+                    <QuestionCircleOutlined style={{ color: '#999' }} />
+                  </Tooltip>
+                </div>
 
-              {/* 保存按钮 */}
-              <div style={{ marginTop: '24px', textAlign: 'center' }}>
                 <Button
                   type="primary"
                   icon={<SaveOutlined />}
                   onClick={handleSaveConnectionConfig}
                   loading={saving}
                   size="large"
-                  style={{ minWidth: '200px' }}
+                  style={{ minWidth: '150px' }}
                 >
                   保存 AI 连接配置
                 </Button>
