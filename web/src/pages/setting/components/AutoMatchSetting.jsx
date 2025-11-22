@@ -710,13 +710,15 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiPrompt"
                   label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI匹配提示词</span>
-                        <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
+                    <Space>
+                      <span>AI匹配提示词</span>
+                      <Tooltip title="用于指导AI如何选择最佳匹配结果的提示词。留空使用默认提示词。高级用户可自定义以优化匹配效果。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </Space>
+                  }
+                  extra={
+                    <div style={{ textAlign: 'right', marginTop: '-8px' }}>
                       <Button
                         size="small"
                         icon={<ReloadOutlined />}
@@ -741,13 +743,15 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="seasonMappingPrompt"
                   label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI季度映射提示词</span>
-                        <Tooltip title="用于指导AI从元数据源搜索结果中选择最佳匹配的提示词。留空使用默认提示词。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
+                    <Space>
+                      <span>AI季度映射提示词</span>
+                      <Tooltip title="用于指导AI从元数据源搜索结果中选择最佳匹配的提示词。留空使用默认提示词。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </Space>
+                  }
+                  extra={
+                    <div style={{ textAlign: 'right', marginTop: '-8px' }}>
                       <Button
                         size="small"
                         icon={<ReloadOutlined />}
@@ -837,13 +841,15 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiRecognitionPrompt"
                   label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI识别提示词</span>
-                        <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
+                    <Space>
+                      <span>AI识别提示词</span>
+                      <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </Space>
+                  }
+                  extra={
+                    <div style={{ textAlign: 'right', marginTop: '-8px' }}>
                       <Button
                         size="small"
                         icon={<ReloadOutlined />}
@@ -868,13 +874,15 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiAliasValidationPrompt"
                   label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI别名验证提示词</span>
-                        <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
+                    <Space>
+                      <span>AI别名验证提示词</span>
+                      <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </Space>
+                  }
+                  extra={
+                    <div style={{ textAlign: 'right', marginTop: '-8px' }}>
                       <Button
                         size="small"
                         icon={<ReloadOutlined />}
@@ -899,13 +907,15 @@ const AutoMatchSetting = () => {
                 <Form.Item
                   name="aiAliasExpansionPrompt"
                   label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI别名扩展提示词</span>
-                        <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
+                    <Space>
+                      <span>AI别名扩展提示词</span>
+                      <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </Space>
+                  }
+                  extra={
+                    <div style={{ textAlign: 'right', marginTop: '-8px' }}>
                       <Button
                         size="small"
                         icon={<ReloadOutlined />}
