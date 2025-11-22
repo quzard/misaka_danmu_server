@@ -204,7 +204,7 @@ async def upload_scraper_package(
                     file_count += 1
                     logger.info(f"已复制文件: {file.name}")
 
-            # 复制 versions.json (必需)
+            # 复制 versions.json (必需,包含哈希值)
             versions_file = extract_dir / "versions.json"
             if versions_file.exists():
                 shutil.copy2(versions_file, scrapers_dir / "versions.json")
