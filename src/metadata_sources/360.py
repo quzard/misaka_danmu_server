@@ -589,7 +589,24 @@ class So360MetadataSource(BaseMetadataSource):
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
             target_site = provider_map.get(target_provider) if target_provider else None
 
-            # 3. 使用360 API获取分集列表
+            # 3. 优先使用搜索结果中的seriesPlaylinks
+            if item.seriesPlaylinks:
+                self.logger.info(f"360: 使用搜索结果中的seriesPlaylinks (共 {len(item.seriesPlaylinks)} 个分集)")
+                episode_urls = []
+                for i, episode in enumerate(item.seriesPlaylinks):
+                    if isinstance(episode, dict):
+                        episode_url = episode.get('url', '')
+                    elif isinstance(episode, str):
+                        episode_url = episode
+                    else:
+                        continue
+                    if episode_url:
+                        episode_urls.append((i + 1, episode_url))
+
+                self.logger.info(f"360: 从seriesPlaylinks提取到 {len(episode_urls)} 个分集URL")
+                return episode_urls
+
+            # 4. 如果没有seriesPlaylinks,使用360 API获取分集列表
             cat_id = item.cat_id or ''
             cat_name = item.cat_name or ''
 
@@ -604,7 +621,7 @@ class So360MetadataSource(BaseMetadataSource):
                     self.logger.warning(f"360: 没有可用的播放平台 (metadata_id={metadata_id})")
                     return []
 
-            # 4. 调用API获取分集
+            # 5. 调用API获取分集
             episode_urls: List[Tuple[int, str]] = []
 
             if cat_id == '3' or '综艺' in cat_name:
