@@ -499,13 +499,13 @@ const AutoMatchSetting = () => {
                         </Button>
                       </div>
 
-                      {balanceInfo.error ? (
+                      {balanceInfo?.error ? (
                         <Alert
                           type="error"
                           message={balanceInfo.error}
                           showIcon
                         />
-                      ) : balanceInfo.data ? (
+                      ) : balanceInfo?.data ? (
                         <Row gutter={16}>
                           <Col span={8}>
                             <Statistic

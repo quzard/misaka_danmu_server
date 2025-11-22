@@ -90,32 +90,32 @@ const AIMetrics = () => {
       <Card title="📞 调用统计" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="总调用次数" 
-              value={ai_stats?.total_calls || 0} 
+            <Statistic
+              title="总调用次数"
+              value={ai_stats?.total_calls || 0}
             />
           </Col>
           <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="成功次数" 
-              value={ai_stats?.successful_calls || 0} 
+            <Statistic
+              title="成功次数"
+              value={Math.round((ai_stats?.total_calls || 0) * (ai_stats?.success_rate || 0))}
               valueStyle={{ color: '#3f8600' }}
             />
           </Col>
           <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="失败次数" 
-              value={ai_stats?.failed_calls || 0} 
+            <Statistic
+              title="失败次数"
+              value={Math.round((ai_stats?.total_calls || 0) * (1 - (ai_stats?.success_rate || 0)))}
               valueStyle={{ color: '#cf1322' }}
             />
           </Col>
           <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="成功率" 
-              value={ai_stats?.success_rate || 0} 
+            <Statistic
+              title="成功率"
+              value={(ai_stats?.success_rate || 0) * 100}
               precision={1}
-              suffix="%" 
-              valueStyle={{ color: (ai_stats?.success_rate || 0) >= 90 ? '#3f8600' : '#faad14' }}
+              suffix="%"
+              valueStyle={{ color: ((ai_stats?.success_rate || 0) * 100) >= 90 ? '#3f8600' : '#faad14' }}
             />
           </Col>
         </Row>
@@ -124,30 +124,26 @@ const AIMetrics = () => {
       {/* Token 统计 */}
       <Card title="📝 Token 统计" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="总 Token 数" 
-              value={ai_stats?.total_tokens || 0} 
+          <Col xs={24} sm={12} md={8}>
+            <Statistic
+              title="总 Token 数"
+              value={ai_stats?.total_tokens || 0}
             />
           </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="输入 Token" 
-              value={ai_stats?.total_prompt_tokens || 0} 
+          <Col xs={24} sm={12} md={8}>
+            <Statistic
+              title="平均响应时间"
+              value={((ai_stats?.avg_duration_ms || 0) / 1000).toFixed(2)}
+              suffix="s"
             />
           </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="输出 Token" 
-              value={ai_stats?.total_completion_tokens || 0} 
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic 
-              title="平均响应时间" 
-              value={ai_stats?.average_duration || 0} 
-              precision={2}
-              suffix="s" 
+          <Col xs={24} sm={12} md={8}>
+            <Statistic
+              title="缓存命中率"
+              value={(ai_stats?.cache_hit_rate || 0) * 100}
+              precision={1}
+              suffix="%"
+              valueStyle={{ color: ((ai_stats?.cache_hit_rate || 0) * 100) >= 30 ? '#3f8600' : '#faad14' }}
             />
           </Col>
         </Row>
