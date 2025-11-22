@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .. import crud, models, orm_models, security
 from ..config import settings
 from ..config_manager import ConfigManager
+from ..cache_manager import CacheManager
 from ..database import get_db_session
 from ..utils import parse_search_keyword
 from ..timezone import get_app_timezone, get_now
@@ -252,10 +253,63 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
         return HTMLResponse("""
-            <html><head><title>授权处理中...</title></head><body><script type="text/javascript">
-              try { window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); } catch(e) { console.error(e); }
-              window.close();
-            </script><p>授权成功，请关闭此窗口。</p></body></html>
+            <html>
+            <head>
+                <title>授权成功</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    }
+                    .container {
+                        text-align: center;
+                        background: white;
+                        padding: 40px;
+                        border-radius: 10px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .success-icon {
+                        font-size: 64px;
+                        margin-bottom: 20px;
+                    }
+                    h1 {
+                        color: #333;
+                        margin-bottom: 10px;
+                    }
+                    p {
+                        color: #666;
+                        margin-bottom: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">✅</div>
+                    <h1>授权成功</h1>
+                    <p>Bangumi 授权已完成，窗口将自动关闭...</p>
+                </div>
+                <script type="text/javascript">
+                    try {
+                        // 通知父窗口
+                        if (window.opener) {
+                            window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
+                            setTimeout(() => window.close(), 1000);
+                        } else {
+                            // 如果没有 opener,显示提示
+                            document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
+                        }
+                    } catch(e) {
+                        console.error('Failed to notify parent:', e);
+                        document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
+                    }
+                </script>
+            </body>
+            </html>
             """)
     except httpx.HTTPStatusError as e:
         logger.error(f"Bangumi token exchange failed: {e.response.text}", exc_info=True)
@@ -268,9 +322,9 @@ class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
     test_url = "https://bgm.tv"
-    
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
-        super().__init__(session_factory, config_manager, scraper_manager)
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
+        super().__init__(session_factory, config_manager, scraper_manager, cache_manager)
         self.api_base_url = "https://api.bgm.tv"
         self._token: Optional[str] = None
         self._config_loaded = False
@@ -309,6 +363,27 @@ class BangumiMetadataSource(BaseMetadataSource):
         else:
             async with self._session_factory() as session:
                 auth_info = await _get_bangumi_auth(session, user.id)
+
+                # 自动刷新token (参考ani-rss: 剩余天数<=3天时刷新)
+                if auth_info.get("isAuthenticated") and auth_info.get("daysLeft", 999) <= 3:
+                    # 构造回调URL
+                    base_url = await self.config_manager.get("webhookCustomDomain", "")
+                    if not base_url:
+                        base_url = "http://localhost:7768"  # 默认值
+                    redirect_uri = f"{base_url}/api/metadata/bangumi/auth/callback"
+
+                    config = {
+                        "client_id": await self.config_manager.get("bangumiClientId", ""),
+                        "client_secret": await self.config_manager.get("bangumiClientSecret", ""),
+                        "redirect_uri": redirect_uri
+                    }
+                    refreshed = await _refresh_bangumi_token(session, user.id, config)
+                    if refreshed:
+                        await session.commit()
+                        # 重新获取授权信息
+                        auth_info = await _get_bangumi_auth(session, user.id)
+                        self.logger.info(f"Bangumi token已自动刷新 (用户ID: {user.id})")
+
             if auth_info and auth_info.get("isAuthenticated") and auth_info.get("accessToken"):
                 self.logger.debug("Bangumi: 正在使用 OAuth Access Token 进行认证。")
                 headers["Authorization"] = f"Bearer {auth_info['accessToken']}"

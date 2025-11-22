@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert } from 'antd'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic } from 'antd'
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig, getDefaultAIPrompts } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import AIMetrics from './AIMetrics'
 
 const CustomSwitch = (props) => {
   return <Switch {...props} />
@@ -22,9 +23,14 @@ const AutoMatchSetting = () => {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [selectedMetadataSource, setSelectedMetadataSource] = useState('tmdb')
+  const [balanceInfo, setBalanceInfo] = useState(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
+  const [aiProviders, setAiProviders] = useState([])
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
 
   // 加载配置
-  const loadSettings = async () => {
+  const loadSettings = async (providers) => {
     try {
       setLoading(true)
       const [
@@ -81,10 +87,12 @@ const AutoMatchSetting = () => {
       setAliasExpansionEnabled(aliasExpansion)
       setSelectedMetadataSource(seasonMappingSourceRes.data.value || 'tmdb')
 
+      const providerValue = providerRes.data.value || 'deepseek'
+
       form.setFieldsValue({
         aiMatchEnabled: enabled,
         aiFallbackEnabled: fallback,
-        aiProvider: providerRes.data.value || 'deepseek',
+        aiProvider: providerValue,
         aiApiKey: apiKeyRes.data.value || '',
         aiBaseUrl: baseUrlRes.data.value || '',
         aiModel: modelRes.data.value || 'deepseek-chat',
@@ -102,6 +110,26 @@ const AutoMatchSetting = () => {
         seasonMappingMetadataSource: seasonMappingSourceRes.data.value || 'tmdb',
         seasonMappingPrompt: seasonMappingPromptRes.data.value || ''
       })
+
+      // 设置当前选中的提供商配置
+      if (providers && Array.isArray(providers) && providers.length > 0) {
+        const provider = providers.find(p => p.id === providerValue)
+        setSelectedProvider(provider)
+
+        // 加载完成后,如果提供商支持余额查询,自动刷新余额
+        if (provider?.supportBalance) {
+          fetchBalance()
+        }
+      } else {
+        // 如果 providers 为空,尝试从 aiProviders state 中查找
+        const provider = aiProviders.find(p => p.id === providerValue)
+        if (provider) {
+          setSelectedProvider(provider)
+          if (provider.supportBalance) {
+            fetchBalance()
+          }
+        }
+      }
     } catch (error) {
       console.error('加载配置失败:', error)
       message.error(`加载配置失败: ${error?.response?.data?.message || error?.message || error?.detail || String(error) || '未知错误'}`)
@@ -110,33 +138,124 @@ const AutoMatchSetting = () => {
     }
   }
 
+  // 加载AI提供商列表
+  const loadAIProviders = async () => {
+    try {
+      setProvidersLoading(true)
+      const res = await api.get('/api/ui/config/ai/providers')
+      const providers = res.data || []
+      setAiProviders(providers)
+      return providers
+    } catch (error) {
+      console.error('加载AI提供商列表失败:', error)
+      // 使用默认配置
+      const defaultProviders = [
+        {
+          id: 'deepseek',
+          displayName: 'DeepSeek (推荐)',
+          defaultModel: 'deepseek-chat',
+          modelPlaceholder: 'deepseek-chat',
+          baseUrlPlaceholder: 'https://api.deepseek.com (默认)'
+        },
+        {
+          id: 'siliconflow',
+          displayName: 'SiliconFlow 硅基流动',
+          defaultModel: 'Qwen/Qwen2.5-7B-Instruct',
+          modelPlaceholder: 'Qwen/Qwen2.5-7B-Instruct, deepseek-ai/DeepSeek-V2.5',
+          baseUrlPlaceholder: 'https://api.siliconflow.cn/v1 (默认)'
+        },
+        {
+          id: 'openai',
+          displayName: 'OpenAI (兼容接口)',
+          defaultModel: 'gpt-4-turbo',
+          modelPlaceholder: 'gpt-4, gpt-4-turbo, gpt-3.5-turbo',
+          baseUrlPlaceholder: 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
+        }
+      ]
+      setAiProviders(defaultProviders)
+      return defaultProviders
+    } finally {
+      setProvidersLoading(false)
+    }
+  }
+
   useEffect(() => {
-    loadSettings()
+    const init = async () => {
+      const providers = await loadAIProviders()
+      await loadSettings(providers || aiProviders)
+      // fetchBalance() 会在 loadSettings() 中根据提供商配置自动调用
+    }
+    init()
   }, [])
 
-  // 保存配置
-  const handleSave = async () => {
+  // 更新选中的提供商配置
+  const updateSelectedProvider = (providerId) => {
+    const provider = aiProviders.find(p => p.id === providerId)
+    setSelectedProvider(provider)
+
+    // 如果提供商支持余额查询,自动刷新余额
+    if (provider?.supportBalance) {
+      fetchBalance()
+    }
+  }
+
+  // 监听提供商变化
+  const handleProviderChange = (providerId) => {
+    updateSelectedProvider(providerId)
+  }
+
+  // 获取余额
+  const fetchBalance = async () => {
+    try {
+      setBalanceLoading(true)
+      const res = await getAIBalance()
+      setBalanceInfo(res.data)
+    } catch (error) {
+      console.error('获取余额失败:', error)
+      // 不显示错误消息,因为可能是提供商不支持
+    } finally {
+      setBalanceLoading(false)
+    }
+  }
+
+  // 保存 Tab 1: AI连接配置
+  const handleSaveConnectionConfig = async () => {
     try {
       setSaving(true)
-      const values = matchMode === 'ai'
-        ? await form.validateFields()
-        : form.getFieldsValue()
+      const values = form.getFieldsValue()
 
       await Promise.all([
-        setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
-        setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiProvider', values.aiProvider || ''),
         setConfig('aiApiKey', values.aiApiKey || ''),
         setConfig('aiBaseUrl', values.aiBaseUrl || ''),
         setConfig('aiModel', values.aiModel || ''),
+        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
+      ])
+
+      message.success('AI连接配置保存成功')
+
+      // 保存成功后重新加载余额
+      if (selectedProvider?.supportBalance) {
+        fetchBalance()
+      }
+    } catch (error) {
+      console.error('保存配置失败:', error)
+      message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 保存 Tab 2: AI自动匹配
+  const handleSaveMatchConfig = async () => {
+    try {
+      setSaving(true)
+      const values = form.getFieldsValue()
+
+      await Promise.all([
+        setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
+        setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiPrompt', values.aiPrompt || ''),
-        setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
-        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
-        setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
-        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
-        setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
-        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || ''),
-        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false'),
         setConfig('webhookEnableTmdbSeasonMapping', values.webhookEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('matchFallbackEnableTmdbSeasonMapping', values.matchFallbackEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('autoImportEnableTmdbSeasonMapping', values.autoImportEnableTmdbSeasonMapping ? 'true' : 'false'),
@@ -144,7 +263,31 @@ const AutoMatchSetting = () => {
         setConfig('seasonMappingPrompt', values.seasonMappingPrompt || '')
       ])
 
-      message.success('保存成功')
+      message.success('AI自动匹配配置保存成功')
+    } catch (error) {
+      console.error('保存配置失败:', error)
+      message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 保存 Tab 3: AI识别增强
+  const handleSaveRecognitionConfig = async () => {
+    try {
+      setSaving(true)
+      const values = form.getFieldsValue()
+
+      await Promise.all([
+        setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
+        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
+        setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
+        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || '')
+      ])
+
+      message.success('AI识别增强配置保存成功')
     } catch (error) {
       console.error('保存配置失败:', error)
       message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
@@ -155,26 +298,14 @@ const AutoMatchSetting = () => {
 
   // 获取模型名称占位符
   const getModelPlaceholder = (provider) => {
-    switch (provider) {
-      case 'deepseek':
-        return 'deepseek-chat'
-      case 'openai':
-        return 'gpt-4, gpt-4-turbo, gpt-3.5-turbo'
-      default:
-        return '请输入模型名称'
-    }
+    const providerConfig = aiProviders.find(p => p.id === provider)
+    return providerConfig?.modelPlaceholder || '请输入模型名称'
   }
 
   // 获取Base URL占位符
   const getBaseUrlPlaceholder = (provider) => {
-    switch (provider) {
-      case 'deepseek':
-        return 'https://api.deepseek.com (默认)'
-      case 'openai':
-        return 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
-      default:
-        return '可选,用于自定义接口地址'
-    }
+    const providerConfig = aiProviders.find(p => p.id === provider)
+    return providerConfig?.baseUrlPlaceholder || '可选,用于自定义接口地址'
   }
 
   // 测试AI连接
@@ -236,25 +367,7 @@ const AutoMatchSetting = () => {
 
   return (
     <Spin spinning={loading}>
-      <Card
-        title="AI辅助增强"
-        extra={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              loading={saving}
-              style={{
-                minWidth: '100px',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              保存设置
-            </Button>
-          </div>
-        }
-      >
+      <Card>
         <Form
           form={form}
           layout="vertical"
@@ -281,16 +394,19 @@ const AutoMatchSetting = () => {
                 label={
                   <Space>
                     <span>AI提供商</span>
-                    <Tooltip title="选择AI服务提供商。DeepSeek性价比高,OpenAI兼容各种第三方接口。">
+                    <Tooltip title="选择AI服务提供商。不同提供商支持不同的模型和功能。">
                       <QuestionCircleOutlined />
                     </Tooltip>
                   </Space>
                 }
                 rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
               >
-                <Select>
-                  <Option value="deepseek">DeepSeek (推荐)</Option>
-                  <Option value="openai">OpenAI (兼容接口)</Option>
+                <Select loading={providersLoading} onChange={handleProviderChange}>
+                  {aiProviders.map(provider => (
+                    <Option key={provider.id} value={provider.id}>
+                      {provider.displayName}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
 
@@ -360,63 +476,131 @@ const AutoMatchSetting = () => {
                 )}
               </Form.Item>
 
-              {/* AI连接测试与调试 */}
-              <Form.Item label="连接测试与调试">
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-                    <Button
-                      icon={<ThunderboltOutlined />}
-                      onClick={handleTestConnection}
-                      loading={testing}
-                      style={{
-                        width: '100%',
-                        maxWidth: '200px'
-                      }}
-                    >
-                      测试AI连接
-                    </Button>
-                  </div>
-
-                  <Card size="small" style={{ marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 500 }}>记录AI原始响应</span>
-                        <Tooltip title="启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
+              {/* 余额卡片 - 根据选中的提供商配置决定是否显示 */}
+              {selectedProvider?.supportBalance && (
+                <Form.Item label="账户余额">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {/* 余额卡片 */}
+                    <Card size="small" style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 500 }}>💰 账户余额</span>
+                          <Tooltip title={`查询 ${selectedProvider.displayName} 账户余额`}>
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                        <Button
+                          size="small"
+                          onClick={fetchBalance}
+                          loading={balanceLoading}
+                          icon={<ReloadOutlined />}
+                        >
+                          刷新
+                        </Button>
                       </div>
-                      <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
-                        <CustomSwitch />
-                      </Form.Item>
-                    </div>
-                  </Card>
 
-                  <div style={{ fontSize: '12px', color: '#666' }}>
-                    启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。
-                  </div>
+                      {balanceInfo?.error ? (
+                        <Alert
+                          type="error"
+                          message={balanceInfo.error}
+                          showIcon
+                        />
+                      ) : balanceInfo?.data ? (
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Statistic
+                              title="总余额"
+                              value={balanceInfo.data.total_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                          <Col span={8}>
+                            <Statistic
+                              title="赠金余额"
+                              value={balanceInfo.data.granted_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                          <Col span={8}>
+                            <Statistic
+                              title="充值余额"
+                              value={balanceInfo.data.topped_up_balance}
+                              prefix={balanceInfo.data.currency === 'CNY' ? '¥' : '$'}
+                              precision={2}
+                            />
+                          </Col>
+                        </Row>
+                      ) : (
+                        <div style={{ color: '#999', textAlign: 'center' }}>
+                          点击刷新按钮查询余额
+                        </div>
+                      )}
+                    </Card>
+                  </Space>
+                </Form.Item>
+              )}
 
-                  {testResult && (
-                    <Alert
-                      type={testResult.success ? 'success' : 'error'}
-                      message={
-                        <Space>
-                          {testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-                          <span>{testResult.message}</span>
-                          {testResult.latency && <span>({testResult.latency}ms)</span>}
-                        </Space>
-                      }
-                      description={testResult.error}
-                      showIcon={false}
-                      closable
-                      onClose={() => setTestResult(null)}
+              {/* 测试结果 */}
+              {testResult && (
+                <Alert
+                  type={testResult.success ? 'success' : 'error'}
+                  message={
+                    <Space>
+                      {testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                      <span>{testResult.message}</span>
+                      {testResult.latency && <span>({testResult.latency}ms)</span>}
+                    </Space>
+                  }
+                  description={testResult.error}
+                  showIcon={false}
+                  closable
+                  onClose={() => setTestResult(null)}
+                  style={{ marginBottom: '16px' }}
+                />
+              )}
+
+              {/* 测试、记录开关和保存按钮 */}
+              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+                <Button
+                  icon={<ThunderboltOutlined />}
+                  onClick={handleTestConnection}
+                  loading={testing}
+                  size="large"
+                  style={{ minWidth: '150px' }}
+                >
+                  测试 AI 连接
+                </Button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px' }}>
+                  <span style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>记录响应</span>
+                  <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
+                    <CustomSwitch
+                      checkedChildren="记录"
+                      unCheckedChildren="不记录"
                     />
-                  )}
-                </Space>
-              </Form.Item>
+                  </Form.Item>
+                  <Tooltip title="启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。">
+                    <QuestionCircleOutlined style={{ color: '#999' }} />
+                  </Tooltip>
+                </div>
+
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveConnectionConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '150px' }}
+                >
+                  保存 AI 连接配置
+                </Button>
+              </div>
             </TabPane>
 
-            {/* 标签页2: 自动匹配 */}
-            <TabPane tab="自动匹配" key="match">
+            {/* 标签页2: AI自动匹配 */}
+            <TabPane tab="AI自动匹配" key="match">
               <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12}>
                   <Card size="small" style={{ marginBottom: '16px' }}>
@@ -567,6 +751,8 @@ const AutoMatchSetting = () => {
                       </Button>
                     </div>
                   }
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                 >
                   <TextArea
                     rows={6}
@@ -598,6 +784,8 @@ const AutoMatchSetting = () => {
                       </Button>
                     </div>
                   }
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                 >
                   <TextArea
                     rows={6}
@@ -607,6 +795,20 @@ const AutoMatchSetting = () => {
                   />
                 </Form.Item>
               </Card>
+
+              {/* 保存按钮 */}
+              <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveMatchConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '200px' }}
+                >
+                  保存 AI 自动匹配配置
+                </Button>
+              </div>
             </TabPane>
 
             {/* 标签页3: AI识别增强 */}
@@ -680,6 +882,8 @@ const AutoMatchSetting = () => {
                       </Button>
                     </div>
                   }
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                 >
                   <TextArea
                     rows={6}
@@ -711,6 +915,8 @@ const AutoMatchSetting = () => {
                       </Button>
                     </div>
                   }
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                 >
                   <TextArea
                     rows={6}
@@ -742,6 +948,8 @@ const AutoMatchSetting = () => {
                       </Button>
                     </div>
                   }
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                 >
                   <TextArea
                     rows={6}
@@ -751,6 +959,25 @@ const AutoMatchSetting = () => {
                   />
                 </Form.Item>
               </Card>
+
+              {/* 保存按钮 */}
+              <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveRecognitionConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '200px' }}
+                >
+                  保存 AI 识别增强配置
+                </Button>
+              </div>
+            </TabPane>
+
+            {/* 标签页4: AI使用统计 */}
+            <TabPane tab="AI使用统计" key="metrics">
+              <AIMetrics />
             </TabPane>
           </Tabs>
         </Form>

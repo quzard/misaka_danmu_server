@@ -98,6 +98,7 @@ export const Webhook = () => {
         webhookFilterRegex: values.webhookFilterRegex ?? '',
         webhookLogRawRequest: values.webhookLogRawRequest ?? false,
         webhookFallbackEnabled: values.webhookFallbackEnabled ?? false,
+        webhookEnableTmdbSeasonMapping: values.webhookEnableTmdbSeasonMapping ?? false,
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')

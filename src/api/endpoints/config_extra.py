@@ -43,6 +43,15 @@ from ...config import settings
 from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
+from ...ai.ai_prompts import (
+    DEFAULT_AI_MATCH_PROMPT,
+    DEFAULT_AI_SEASON_MAPPING_PROMPT,
+    DEFAULT_AI_RECOGNITION_PROMPT,
+    DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
+    DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
+)
+from ...ai.ai_providers import get_all_providers, supports_balance_query, get_provider_config
+from src.path_template import DanmakuPathTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +59,7 @@ logger = logging.getLogger(__name__)
 from ..dependencies import (
     get_scraper_manager, get_task_manager, get_scheduler_manager,
     get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
+    get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
 
 from ..ui_models import (
@@ -277,7 +286,6 @@ async def set_custom_danmaku_path(
     # 验证模板格式
     if request.enabled.lower() == 'true' and request.template:
         try:
-            from src.path_template import DanmakuPathTemplate
             # 尝试创建模板对象来验证格式
             DanmakuPathTemplate(request.template)
             logger.info(f"模板验证成功: {request.template}")
@@ -513,26 +521,85 @@ async def set_provider_settings(
 @router.post("/config/ai/test", response_model=AITestResponse, summary="测试AI连接可用性")
 async def test_ai_connection(
     request: AITestRequest,
-    current_user: models.User = Depends(security.get_current_user)
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """测试AI连接配置是否可用"""
     try:
         start_time = time.time()
 
+        # Gemini 使用官方 SDK 测试
+        if request.provider == "gemini":
+            try:
+                from google import genai
+
+                logger.info(f"测试 Gemini 连接: model={request.model}")
+
+                client = genai.Client(api_key=request.apiKey)
+                response = client.models.generate_content(
+                    model=request.model,
+                    contents="Hello, please respond with a greeting.",
+                    config={
+                        "temperature": 0.0,
+                        "max_output_tokens": 50
+                    }
+                )
+
+                latency = (time.time() - start_time) * 1000
+
+                # 检查响应
+                if hasattr(response, 'text') and response.text:
+                    return AITestResponse(
+                        success=True,
+                        message=f"AI连接测试成功 (响应: {response.text[:50]}...)",
+                        latency=round(latency, 2)
+                    )
+                else:
+                    # 尝试获取更多响应信息
+                    error_detail = f"响应对象: {type(response).__name__}"
+                    if hasattr(response, '__dict__'):
+                        error_detail += f", 属性: {list(response.__dict__.keys())}"
+
+                    return AITestResponse(
+                        success=False,
+                        message="Gemini API 返回空响应",
+                        error=error_detail
+                    )
+
+            except ImportError:
+                return AITestResponse(
+                    success=False,
+                    message="Gemini SDK 未安装",
+                    error="请运行: pip install google-genai"
+                )
+            except Exception as e:
+                logger.error(f"Gemini 测试失败: {e}", exc_info=True)
+                return AITestResponse(
+                    success=False,
+                    message="Gemini API 调用失败",
+                    error=f"{type(e).__name__}: {str(e)}"
+                )
+
+        # 其他提供商使用 OpenAI 兼容接口测试
         # 根据provider确定base_url
         if request.baseUrl:
             base_url = request.baseUrl.rstrip('/')
         else:
-            if request.provider == 'deepseek':
-                base_url = 'https://api.deepseek.com'
-            elif request.provider == 'openai':
-                base_url = 'https://api.openai.com/v1'
+            # 1. 先从数据库读取用户保存的配置
+            saved_base_url = await config_manager.get("aiBaseUrl")
+
+            if saved_base_url:
+                base_url = saved_base_url.rstrip('/')
             else:
-                return AITestResponse(
-                    success=False,
-                    message="不支持的AI提供商",
-                    error=f"未知的provider: {request.provider}"
-                )
+                # 2. 从 ai_providers.py 获取默认值
+                provider_config = get_provider_config(request.provider)
+                if not provider_config:
+                    return AITestResponse(
+                        success=False,
+                        message="不支持的AI提供商",
+                        error=f"未知的provider: {request.provider}"
+                    )
+                base_url = provider_config.get('defaultBaseUrl', '').rstrip('/')
 
         # 构建API URL
         api_url = f"{base_url}/chat/completions"
@@ -612,14 +679,6 @@ async def get_default_ai_prompts(
     Returns:
         包含所有默认提示词的字典
     """
-    from ...ai_matcher import (
-        DEFAULT_AI_MATCH_PROMPT,
-        DEFAULT_AI_RECOGNITION_PROMPT,
-        DEFAULT_AI_ALIAS_VALIDATION_PROMPT,
-        DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
-        DEFAULT_AI_SEASON_MAPPING_PROMPT
-    )
-
     return {
         "aiPrompt": DEFAULT_AI_MATCH_PROMPT,
         "aiRecognitionPrompt": DEFAULT_AI_RECOGNITION_PROMPT,
@@ -627,6 +686,234 @@ async def get_default_ai_prompts(
         "aiAliasExpansionPrompt": DEFAULT_AI_ALIAS_EXPANSION_PROMPT,
         "seasonMappingPrompt": DEFAULT_AI_SEASON_MAPPING_PROMPT
     }
+
+
+@router.get("/config/ai/metrics", summary="获取AI调用统计")
+async def get_ai_metrics(
+    hours: int = 24,
+    current_user: models.User = Depends(security.get_current_user),
+    ai_matcher_manager = Depends(get_ai_matcher_manager)
+):
+    """
+    获取AI调用的统计信息
+
+    Args:
+        hours: 统计最近多少小时的数据,默认24小时
+
+    Returns:
+        AI调用统计数据
+    """
+    matcher = await ai_matcher_manager.get_matcher()
+    if not matcher:
+        return {
+            "error": "AI匹配器未初始化或未启用",
+            "stats": None
+        }
+
+    stats = matcher.metrics.get_stats(hours)
+
+    # 添加缓存统计
+    cache_stats = None
+    if matcher.cache:
+        cache_stats = matcher.cache.get_stats()
+
+    return {
+        "ai_stats": stats,
+        "cache_stats": cache_stats
+    }
+
+
+@router.post("/config/ai/cache/clear", summary="清空AI缓存")
+async def clear_ai_cache(
+    current_user: models.User = Depends(security.get_current_user),
+    ai_matcher_manager = Depends(get_ai_matcher_manager)
+):
+    """
+    清空AI响应缓存
+
+    Returns:
+        操作结果
+    """
+    matcher = await ai_matcher_manager.get_matcher()
+    if not matcher:
+        raise HTTPException(status_code=400, detail="AI匹配器未初始化或未启用")
+
+    if not matcher.cache:
+        raise HTTPException(status_code=400, detail="AI缓存未启用")
+
+    matcher.cache.clear()
+
+    return {
+        "success": True,
+        "message": "AI缓存已清空"
+    }
+
+
+@router.get("/config/ai/balance", summary="获取AI账户余额")
+async def get_ai_balance(
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    获取AI账户余额 (通用接口,根据 aiProvider 自动选择)
+
+    注意: 此接口不依赖 AI 匹配是否启用,只要配置了 API Key 就可以查询余额
+
+    Returns:
+        {
+            "supported": true/false,  # 是否支持余额查询
+            "provider": "deepseek",   # 当前提供商
+            "data": {                 # 仅当 supported=true 时存在
+                "currency": "CNY",
+                "total_balance": "110.00",
+                "granted_balance": "10.00",
+                "topped_up_balance": "100.00"
+            },
+            "error": null             # 错误信息 (如果有)
+        }
+    """
+    # 获取当前 AI 提供商
+    provider = await config_manager.get("aiProvider", "deepseek")
+
+    # 检查是否支持余额查询
+    if not supports_balance_query(provider):
+        return {
+            "supported": False,
+            "provider": provider,
+            "data": None,
+            "error": f"{provider} 不支持余额查询"
+        }
+
+    # 获取 API 配置
+    api_key = await config_manager.get("aiApiKey", "")
+    base_url = await config_manager.get("aiBaseUrl", "")
+
+    if not api_key:
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": None,
+            "error": "未配置 API Key"
+        }
+
+    # 获取提供商配置
+    provider_config = get_provider_config(provider)
+    if not provider_config:
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": None,
+            "error": f"无法获取提供商配置: {provider}"
+        }
+
+    # 如果未配置 base_url,使用默认值
+    if not base_url:
+        base_url = provider_config.get("defaultBaseUrl", "")
+
+    # 直接调用余额 API
+    try:
+        balance_api_path = provider_config.get("balanceApiPath", "/user/balance")
+        url = f"{base_url}{balance_api_path}"
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # 根据提供商类型解析响应
+            parser_type = provider_config.get("balanceResponseParser", "deepseek")
+            balance_data = _parse_balance_response(data, parser_type)
+
+            return {
+                "supported": True,
+                "provider": provider,
+                "data": balance_data,
+                "error": None
+            }
+    except Exception as e:
+        logger.error(f"获取AI余额失败: {e}")
+        return {
+            "supported": True,
+            "provider": provider,
+            "data": None,
+            "error": str(e)
+        }
+
+
+def _parse_balance_response(data: Dict[str, Any], parser_type: str) -> Dict[str, Any]:
+    """
+    解析余额响应数据
+
+    Args:
+        data: API响应数据
+        parser_type: 解析器类型 (deepseek/siliconflow)
+
+    Returns:
+        标准化的余额信息字典
+    """
+    if parser_type == "deepseek":
+        # DeepSeek 响应格式
+        if not data.get("is_available"):
+            raise Exception("账户余额不足或不可用")
+
+        balance_infos = data.get("balance_infos", [])
+        if not balance_infos:
+            raise Exception("未返回余额信息")
+
+        balance_info = balance_infos[0]
+        return {
+            "currency": balance_info.get("currency", "CNY"),
+            "total_balance": balance_info.get("total_balance", "0.00"),
+            "granted_balance": balance_info.get("granted_balance", "0.00"),
+            "topped_up_balance": balance_info.get("topped_up_balance", "0.00")
+        }
+
+    elif parser_type == "siliconflow":
+        # SiliconFlow 响应格式
+        user_data = data.get("data", {})
+        return {
+            "currency": "CNY",
+            "total_balance": user_data.get("totalBalance", "0.00"),
+            "granted_balance": user_data.get("balance", "0.00"),
+            "topped_up_balance": user_data.get("chargeBalance", "0.00")
+        }
+
+    else:
+        raise ValueError(f"不支持的解析器类型: {parser_type}")
+
+
+@router.get("/config/ai/providers", summary="获取AI提供商列表")
+async def get_ai_providers(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取所有可用的AI提供商配置列表
+
+    Returns:
+        [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "displayName": "DeepSeek (推荐)",
+                "description": "DeepSeek AI - 性价比高的国产大模型",
+                "defaultBaseUrl": "https://api.deepseek.com",
+                "defaultModel": "deepseek-chat",
+                "modelPlaceholder": "deepseek-chat",
+                "baseUrlPlaceholder": "https://api.deepseek.com (默认)",
+                "supportBalance": true,
+                "apiKeyPrefix": "sk-",
+                "website": "https://platform.deepseek.com"
+            },
+            ...
+        ]
+    """
+    return get_all_providers()
 
 
 

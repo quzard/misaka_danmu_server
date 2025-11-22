@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # 内部模块导入
 from .config_manager import ConfigManager
 from .cache_manager import CacheManager
-from .ai_matcher_manager import AIMatcherManager
+from .ai.ai_matcher_manager import AIMatcherManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
 from .api import api_router, control_router
 from .dandan_api import dandan_router
@@ -30,7 +30,7 @@ from . import crud, security, orm_models
 from .log_manager import setup_logging
 from .rate_limiter import RateLimiter
 from ._version import APP_VERSION
-from .ai_matcher import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
+from .ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
 from .title_recognition import TitleRecognitionManager
 from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs
@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
     startup_start = time.time()
 
     # 1-3. 创建管理器实例（不阻塞）
-    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None)
+    app.state.metadata_manager = MetadataSourceManager(session_factory, app.state.config_manager, None, app.state.cache_manager)
     app.state.scraper_manager = ScraperManager(session_factory, app.state.config_manager, app.state.metadata_manager, app.state.transport_manager)
     app.state.metadata_manager.scraper_manager = app.state.scraper_manager
 
@@ -209,7 +209,8 @@ async def lifespan(app: FastAPI):
     app.state.webhook_manager = WebhookManager(
         session_factory, app.state.task_manager, app.state.scraper_manager,
         app.state.rate_limiter, app.state.metadata_manager,
-        app.state.config_manager, app.state.title_recognition_manager
+        app.state.config_manager, app.state.title_recognition_manager,
+        app.state.ai_matcher_manager
     )
 
     init_time = time.time() - init_start

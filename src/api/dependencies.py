@@ -11,7 +11,7 @@ from ..webhook_manager import WebhookManager
 from ..metadata_manager import MetadataSourceManager
 from ..config_manager import ConfigManager
 from ..cache_manager import CacheManager
-from ..ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher_manager import AIMatcherManager
 from ..rate_limiter import RateLimiter
 
 

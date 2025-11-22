@@ -13,6 +13,7 @@ from fastapi import HTTPException, status, Request, APIRouter
 from . import crud, models, orm_models
 from .config_manager import ConfigManager
 from .scraper_manager import ScraperManager
+from .cache_manager import CacheManager
 from .metadata_sources.base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class MetadataSourceManager:
     此类发现、初始化并协调位于 `src/metadata_sources` 目录中的元数据源插件。
     """
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
         """
         初始化管理器。
 
@@ -32,11 +33,13 @@ class MetadataSourceManager:
             session_factory: 用于数据库访问的异步会话工厂。
             config_manager: 应用的配置管理器。
             scraper_manager: 应用的弹幕抓取器管理器。
+            cache_manager: 应用的缓存管理器。
         """
         self._session_factory = session_factory
         self._config_manager = config_manager
+        self.cache_manager = cache_manager
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         # 按 provider_name 存储实例化的源对象。
         self.sources: Dict[str, Any] = {}
         # 在实例化之前存储发现的源类。
@@ -169,7 +172,7 @@ class MetadataSourceManager:
         self.source_settings = {s['providerName']: s for s in settings_list}
 
         for provider_name, source_class in self._source_classes.items():
-            self.sources[provider_name] = source_class(self._session_factory, self._config_manager, self.scraper_manager)
+            self.sources[provider_name] = source_class(self._session_factory, self._config_manager, self.scraper_manager, self.cache_manager)
             self.logger.info(f"已加载元数据源 '{provider_name}'。")
 
     async def search_aliases_from_enabled_sources(self, keyword: str, user: models.User) -> Set[str]:
@@ -231,14 +234,16 @@ class MetadataSourceManager:
                     
                     # 如果是 'douban' 或 '360'，则将其结果添加到补充列表中
                     if provider_name in ['douban', '360']:
-                        supplemental_results.append(models.ProviderSearchInfo(
+                        # 构建补充结果,包含extra字段用于传递原始数据
+                        supp_info = models.ProviderSearchInfo(
                             provider=provider_name, mediaId=item.id, title=item.title,
                             type=item.type if hasattr(item, 'type') and item.type else 'unknown',
                             season=1,
                             year=item.year if hasattr(item, 'year') else None,
                             imageUrl=item.imageUrl,
                             supportsEpisodeUrls=item.supportsEpisodeUrls  # 传递是否支持分集URL的标志
-                        ))
+                        )
+                        supplemental_results.append(supp_info)
             elif isinstance(res, Exception):
                 if isinstance(res, httpx.ConnectError):
                     self.logger.warning(f"无法连接到元数据源 '{provider_name}'。请检查网络连接或代理设置。")

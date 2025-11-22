@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 import httpx
 from ...rate_limiter import RateLimiter, RateLimitExceededError
 from ...config_manager import ConfigManager
-from ...ai_matcher_manager import AIMatcherManager
+from ...ai.ai_matcher_manager import AIMatcherManager
 from pydantic import BaseModel, Field, model_validator
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status, Response
 from fastapi.security import OAuth2PasswordRequestForm

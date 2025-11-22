@@ -616,12 +616,24 @@ export const SearchResult = () => {
         )
       }
 
-      // 查找所有匹配的补充源(相似度>80且支持分集URL)
+      // 查找所有匹配的补充源(相似度>80且支持分集URL且支持当前主源平台)
       const matching_supplements = supplementalResults.filter(
-        sup =>
-          sup.provider !== item.provider &&
-          calculateSimilarity(item.title, sup.title) > 80 &&
-          sup.supportsEpisodeUrls === true
+        sup => {
+          // 基本条件: 不是同一个provider, 标题相似度>80, 支持分集URL
+          if (sup.provider === item.provider) return false
+          if (calculateSimilarity(item.title, sup.title) <= 80) return false
+          if (sup.supportsEpisodeUrls !== true) return false
+
+          // 检查补充源是否支持当前主源的平台
+          const supportedProviders = sup.extra?.supported_providers || []
+          if (supportedProviders.length === 0) {
+            // 如果没有supported_providers信息,保持兼容性,允许显示
+            return true
+          }
+
+          // 只有当补充源支持当前主源平台时才显示
+          return supportedProviders.includes(item.provider)
+        }
       )
 
       if (matching_supplements.length > 0) {
@@ -631,7 +643,9 @@ export const SearchResult = () => {
         const selectedKey = Object.keys(supplementMap).find(k =>
           k.startsWith(mainKey + '_')
         )
-        const selectedProvider = selectedKey ? selectedKey.split('_')[2] : undefined
+        // key格式: provider_mediaId_supplementProvider_supplementMediaId
+        // 提取 supplementProvider_supplementMediaId 作为 value
+        const selectedProvider = selectedKey ? selectedKey.substring(mainKey.length + 1) : undefined
         const isEnabled = selectedKey ? (supplementMap[selectedKey]?.enabled || false) : false
 
         return (
@@ -645,9 +659,10 @@ export const SearchResult = () => {
               onChange={value => {
                 // 如果选择了补充源
                 if (value) {
-                  const supplement = matching_supplements.find(s => s.provider === value)
+                  // 使用唯一key来查找补充源
+                  const supplement = matching_supplements.find(s => `${s.provider}_${s.mediaId}` === value)
                   if (supplement) {
-                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}_${supplement.mediaId}`
                     // 选择补充源时,不自动启用,需要用户勾选checkbox
                     setSupplementMap(prev => {
                       const newMap = { ...prev }
@@ -684,7 +699,7 @@ export const SearchResult = () => {
               style={{ minWidth: 200 }}
               options={matching_supplements.map(supplement => ({
                 label: `${supplement.provider} - ${supplement.title}`,
-                value: supplement.provider
+                value: `${supplement.provider}_${supplement.mediaId}`
               }))}
             />
             {selectedProvider && (
@@ -692,9 +707,10 @@ export const SearchResult = () => {
                 checked={isEnabled}
                 onChange={e => {
                   e.stopPropagation()
-                  const supplement = matching_supplements.find(s => s.provider === selectedProvider)
+                  // 使用唯一key来查找补充源
+                  const supplement = matching_supplements.find(s => `${s.provider}_${s.mediaId}` === selectedProvider)
                   if (supplement) {
-                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}`
+                    const key = `${item.provider}_${item.mediaId}_${supplement.provider}_${supplement.mediaId}`
                     handleSupplementToggle(item, supplement, e.target.checked, key)
                   }
                 }}

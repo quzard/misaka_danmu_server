@@ -681,6 +681,7 @@ async def load_resources_stream(
 
                     # 获取平台信息
                     platform_key = get_platform_key()
+                    platform_info = get_platform_info()
                     last_heartbeat = asyncio.get_event_loop().time()
                     yield f"data: {json.dumps({'type': 'info', 'message': f'当前平台: {platform_key}'}, ensure_ascii=False)}\n\n"
 
@@ -772,8 +773,10 @@ async def load_resources_stream(
                     # 下载并替换文件
                     scrapers_dir = _get_scrapers_dir()
                     download_count = 0
+                    skip_count = 0  # 跳过的文件数(哈希值相同)
                     failed_downloads = []
                     versions_data = {}  # 用于保存版本信息
+                    hashes_data = {}  # 用于保存哈希值
 
                     # 下载并替换文件
                     download_timeout = httpx.Timeout(3.0, read=15.0)
@@ -800,6 +803,40 @@ async def load_resources_stream(
 
                                 # 从路径中提取文件名
                                 filename = Path(file_path).name
+                                target_path = scrapers_dir / filename
+
+                                # 获取远程文件的哈希值
+                                remote_hashes = scraper_info.get('hashes', {})
+                                remote_hash = remote_hashes.get(platform_key)
+
+                                # 检查是否需要下载(只对比 JSON 中的哈希值)
+                                should_download = True
+                                if remote_hash:
+                                    # 远程有哈希值,从本地 versions.json 读取哈希值
+                                    local_hash = None
+                                    if SCRAPERS_VERSIONS_FILE.exists():
+                                        try:
+                                            local_versions = json.loads(await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.read_text))
+                                            local_hashes = local_versions.get('hashes', {})
+                                            local_hash = local_hashes.get(scraper_name)
+                                        except Exception as e:
+                                            logger.debug(f"读取本地版本文件失败: {e}")
+
+                                    # 比较哈希值
+                                    if local_hash and local_hash == remote_hash:
+                                        # 哈希值相同,跳过下载
+                                        should_download = False
+                                        skip_count += 1
+                                        version = scraper_info.get('version', 'unknown')
+                                        versions_data[scraper_name] = version
+                                        hashes_data[scraper_name] = remote_hash
+
+                                        logger.info(f"\t跳过下载 {scraper_name} ({filename}) - 哈希值相同 [{index}/{total_count}]")
+                                        last_heartbeat = asyncio.get_event_loop().time()
+                                        yield f"data: {json.dumps({'type': 'skip_hash', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count}, ensure_ascii=False)}\n\n"
+
+                                if not should_download:
+                                    continue
 
                                 # 推送下载进度
                                 progress = int((index / total_count) * 100)
@@ -820,10 +857,14 @@ async def load_resources_stream(
                                         response = await asyncio.wait_for(client.get(file_url), timeout=18.0)
 
                                         if response.status_code == 200:
-                                            target_path = scrapers_dir / filename
+                                            # 写入文件
                                             await asyncio.to_thread(target_path.write_bytes, response.content)
-                                            download_count += 1
 
+                                            # 保存远程哈希值(如果有)
+                                            if remote_hash:
+                                                hashes_data[scraper_name] = remote_hash
+
+                                            download_count += 1
                                             version = scraper_info.get('version', 'unknown')
                                             versions_data[scraper_name] = version
 
@@ -849,17 +890,31 @@ async def load_resources_stream(
                                 logger.error(f"\t下载 {scraper_name} 失败: {e}")
                                 yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
 
-                    # 保存版本信息
+                    # 保存版本信息和哈希值
                     if versions_data:
                         try:
-                            versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+                            # 构建完整的版本信息
+                            full_versions_data = {
+                                "platform": platform_info['platform'],
+                                "type": platform_info['arch'],
+                                "version": package_data.get("version", "unknown"),
+                                "scrapers": versions_data
+                            }
+
+                            # 只有当有哈希值数据时才添加 hashes 字段(兼容旧版本)
+                            if hashes_data:
+                                full_versions_data["hashes"] = hashes_data
+                                logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息和 {len(hashes_data)} 个哈希值")
+                            else:
+                                logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息(无哈希值)")
+
+                            versions_json_str = json.dumps(full_versions_data, indent=2, ensure_ascii=False)
                             await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
-                            logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息")
                         except Exception as e:
                             logger.warning(f"保存版本信息失败: {e}")
 
                     # 检查下载结果
-                    if download_count == 0:
+                    if download_count == 0 and skip_count == 0:
                         logger.error("没有成功下载任何弹幕源,取消重载")
                         yield f"data: {json.dumps({'type': 'error', 'message': '没有成功下载任何弹幕源,已取消重载。请检查网络连接或更换CDN节点'}, ensure_ascii=False)}\n\n"
                         try:
@@ -870,8 +925,8 @@ async def load_resources_stream(
                         return
 
                     # 推送完成信息
-                    logger.info(f"下载完成: 成功 {download_count} 个, 失败 {len(failed_downloads)} 个")
-                    yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
+                    logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
+                    yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
 
                     # 后台重载任务
                     async def reload_scrapers_background():

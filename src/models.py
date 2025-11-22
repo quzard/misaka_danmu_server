@@ -124,6 +124,8 @@ class MetadataDetailsResponse(BaseModel):
     year: Optional[int] = None
     supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
     seasons: Optional[List[TMDBSeasonInfo]] = Field(None, description="TMDB TV系列的季度信息列表")
+    extra: Optional[Dict[str, Any]] = Field(None, description="额外数据,用于存储原始搜索结果等信息")
+    provider: Optional[str] = Field(None, description="数据源提供方名称")
 
 class AnimeCreate(BaseModel):
     """Model for creating a new anime entry manually."""

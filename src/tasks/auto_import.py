@@ -8,7 +8,7 @@ from thefuzz import fuzz
 
 from .. import crud, models
 from ..config_manager import ConfigManager
-from ..ai_matcher_manager import AIMatcherManager
+from ..ai.ai_matcher_manager import AIMatcherManager
 from ..scraper_manager import ScraperManager
 from ..metadata_manager import MetadataSourceManager
 from ..task_manager import TaskManager, TaskSuccess

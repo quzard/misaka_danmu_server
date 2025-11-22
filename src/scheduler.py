@@ -22,7 +22,7 @@ from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
 from .config_manager import ConfigManager
-from .ai_matcher_manager import AIMatcherManager
+from .ai.ai_matcher_manager import AIMatcherManager
 
 logger = logging.getLogger(__name__)
 

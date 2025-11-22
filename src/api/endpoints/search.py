@@ -167,12 +167,20 @@ async def search_anime_provider(
         if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
-            # 修正：变量名统一
+            # 修正:变量名统一
             all_results = await manager.search_all([search_title], episode_info=episode_info)
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
             filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
         else:
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
+
+            # 检查是否有启用的弹幕源
+            if not manager.has_enabled_scrapers:
+                logger.warning("辅助搜索已启用，但没有启用的弹幕搜索源")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='没有启用的弹幕搜索源，请在"搜索源-弹幕搜索源"页面下中至少启用一个，如果没有弹幕源就从资源仓库中加载弹幕源。'
+                )
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
             # 优化：并行执行辅助搜索和主搜索
             logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")

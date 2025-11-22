@@ -50,10 +50,19 @@ export function BangumiConfig({ form }) {
       }
     }
     window.addEventListener('message', handleMessage)
+
+    // 定期检查授权状态并自动刷新 (每5分钟检查一次)
+    const checkAuthInterval = setInterval(() => {
+      if (authMode === 'oauth' && authInfo.isAuthenticated) {
+        loadConfig()
+      }
+    }, 5 * 60 * 1000) // 5分钟
+
     return () => {
       window.removeEventListener('message', handleMessage)
+      clearInterval(checkAuthInterval)
     }
-  }, [])
+  }, [authMode, authInfo.isAuthenticated])
 
   const loadConfig = async () => {
     try {
@@ -89,20 +98,45 @@ export function BangumiConfig({ form }) {
 
   const handleOAuthLogin = async () => {
     try {
+      // 如果弹窗已存在且未关闭,聚焦到弹窗
       if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
         oauthPopupRef.current.focus()
-      } else {
-        const res = await getBangumiAuthUrl()
-        const width = 600
-        const height = 700
-        const left = window.screen.width / 2 - width / 2
-        const top = window.screen.height / 2 - height / 2
-        oauthPopupRef.current = window.open(
-          res.url,
-          'BangumiAuth',
-          `width=${width},height=${height},top=${top},left=${left}`
-        )
+        return
       }
+
+      const res = await getBangumiAuthUrl()
+      const authUrl = res.data?.url || res.url
+      if (!authUrl) {
+        showMessage('error', '获取授权链接失败: 返回的URL为空')
+        return
+      }
+
+      // 计算弹窗位置 (居中)
+      const width = 600
+      const height = 700
+      const left = window.screen.width / 2 - width / 2
+      const top = window.screen.height / 2 - height / 2
+
+      // 打开弹窗
+      oauthPopupRef.current = window.open(
+        authUrl,
+        'BangumiAuth',
+        `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes`
+      )
+
+      // 检测弹窗是否被拦截
+      if (!oauthPopupRef.current || oauthPopupRef.current.closed) {
+        showMessage('error', '弹窗被浏览器拦截，请允许弹窗后重试')
+        return
+      }
+
+      // 定期检查弹窗是否被关闭
+      const checkInterval = setInterval(() => {
+        if (oauthPopupRef.current && oauthPopupRef.current.closed) {
+          clearInterval(checkInterval)
+          oauthPopupRef.current = null
+        }
+      }, 500)
     } catch (error) {
       showMessage('error', `获取授权链接失败: ${error.message}`)
     }
