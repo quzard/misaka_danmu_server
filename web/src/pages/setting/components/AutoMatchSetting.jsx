@@ -112,12 +112,23 @@ const AutoMatchSetting = () => {
       })
 
       // 设置当前选中的提供商配置
-      const provider = providers.find(p => p.id === providerValue)
-      setSelectedProvider(provider)
+      if (providers && Array.isArray(providers) && providers.length > 0) {
+        const provider = providers.find(p => p.id === providerValue)
+        setSelectedProvider(provider)
 
-      // 加载完成后,如果提供商支持余额查询,自动刷新余额
-      if (provider?.supportBalance) {
-        fetchBalance()
+        // 加载完成后,如果提供商支持余额查询,自动刷新余额
+        if (provider?.supportBalance) {
+          fetchBalance()
+        }
+      } else {
+        // 如果 providers 为空,尝试从 aiProviders state 中查找
+        const provider = aiProviders.find(p => p.id === providerValue)
+        if (provider) {
+          setSelectedProvider(provider)
+          if (provider.supportBalance) {
+            fetchBalance()
+          }
+        }
       }
     } catch (error) {
       console.error('加载配置失败:', error)
