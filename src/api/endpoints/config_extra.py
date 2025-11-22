@@ -533,29 +533,40 @@ async def test_ai_connection(
             try:
                 from google import genai
 
+                logger.info(f"测试 Gemini 连接: model={request.model}")
+
                 client = genai.Client(api_key=request.apiKey)
                 response = client.models.generate_content(
                     model=request.model,
-                    contents="Hello",
+                    contents="Hello, please respond with a greeting.",
                     config={
                         "temperature": 0.0,
-                        "max_output_tokens": 10
+                        "max_output_tokens": 50
                     }
                 )
 
                 latency = (time.time() - start_time) * 1000
 
-                if response.text:
+                logger.info(f"Gemini 响应: {response}")
+                logger.info(f"Gemini 响应文本: {response.text if hasattr(response, 'text') else 'No text attribute'}")
+
+                # 检查响应
+                if hasattr(response, 'text') and response.text:
                     return AITestResponse(
                         success=True,
-                        message="AI连接测试成功",
+                        message=f"AI连接测试成功 (响应: {response.text[:50]}...)",
                         latency=round(latency, 2)
                     )
                 else:
+                    # 尝试获取更多响应信息
+                    error_detail = f"响应对象: {type(response).__name__}"
+                    if hasattr(response, '__dict__'):
+                        error_detail += f", 属性: {list(response.__dict__.keys())}"
+
                     return AITestResponse(
                         success=False,
                         message="Gemini API 返回空响应",
-                        error="响应内容为空"
+                        error=error_detail
                     )
 
             except ImportError:
@@ -565,10 +576,11 @@ async def test_ai_connection(
                     error="请运行: pip install google-genai"
                 )
             except Exception as e:
+                logger.error(f"Gemini 测试失败: {e}", exc_info=True)
                 return AITestResponse(
                     success=False,
                     message="Gemini API 调用失败",
-                    error=str(e)
+                    error=f"{type(e).__name__}: {str(e)}"
                 )
 
         # 其他提供商使用 OpenAI 兼容接口测试
@@ -743,11 +755,12 @@ async def clear_ai_cache(
 @router.get("/config/ai/balance", summary="获取AI账户余额")
 async def get_ai_balance(
     current_user: models.User = Depends(security.get_current_user),
-    config_manager: ConfigManager = Depends(get_config_manager),
-    ai_matcher_manager = Depends(get_ai_matcher_manager)
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     获取AI账户余额 (通用接口,根据 aiProvider 自动选择)
+
+    注意: 此接口不依赖 AI 匹配是否启用,只要配置了 API Key 就可以查询余额
 
     Returns:
         {
@@ -774,25 +787,58 @@ async def get_ai_balance(
             "error": f"{provider} 不支持余额查询"
         }
 
-    # 获取 matcher
-    matcher = await ai_matcher_manager.get_matcher()
-    if not matcher:
+    # 获取 API 配置
+    api_key = await config_manager.get("aiApiKey", "")
+    base_url = await config_manager.get("aiBaseUrl", "")
+
+    if not api_key:
         return {
             "supported": True,
             "provider": provider,
             "data": None,
-            "error": "AI匹配器未初始化或未启用"
+            "error": "未配置 API Key"
         }
 
-    # 调用 DeepSeek balance API
-    try:
-        balance_data = await matcher.get_balance()
+    # 获取提供商配置
+    provider_config = get_provider_config(provider)
+    if not provider_config:
         return {
             "supported": True,
             "provider": provider,
-            "data": balance_data,
-            "error": None
+            "data": None,
+            "error": f"无法获取提供商配置: {provider}"
         }
+
+    # 如果未配置 base_url,使用默认值
+    if not base_url:
+        base_url = provider_config.get("defaultBaseUrl", "")
+
+    # 直接调用余额 API
+    try:
+        balance_api_path = provider_config.get("balanceApiPath", "/user/balance")
+        url = f"{base_url}{balance_api_path}"
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # 根据提供商类型解析响应
+            parser_type = provider_config.get("balanceResponseParser", "deepseek")
+            balance_data = _parse_balance_response(data, parser_type)
+
+            return {
+                "supported": True,
+                "provider": provider,
+                "data": balance_data,
+                "error": None
+            }
     except Exception as e:
         logger.error(f"获取AI余额失败: {e}")
         return {
@@ -801,6 +847,48 @@ async def get_ai_balance(
             "data": None,
             "error": str(e)
         }
+
+
+def _parse_balance_response(data: Dict[str, Any], parser_type: str) -> Dict[str, Any]:
+    """
+    解析余额响应数据
+
+    Args:
+        data: API响应数据
+        parser_type: 解析器类型 (deepseek/siliconflow)
+
+    Returns:
+        标准化的余额信息字典
+    """
+    if parser_type == "deepseek":
+        # DeepSeek 响应格式
+        if not data.get("is_available"):
+            raise Exception("账户余额不足或不可用")
+
+        balance_infos = data.get("balance_infos", [])
+        if not balance_infos:
+            raise Exception("未返回余额信息")
+
+        balance_info = balance_infos[0]
+        return {
+            "currency": balance_info.get("currency", "CNY"),
+            "total_balance": balance_info.get("total_balance", "0.00"),
+            "granted_balance": balance_info.get("granted_balance", "0.00"),
+            "topped_up_balance": balance_info.get("topped_up_balance", "0.00")
+        }
+
+    elif parser_type == "siliconflow":
+        # SiliconFlow 响应格式
+        user_data = data.get("data", {})
+        return {
+            "currency": "CNY",
+            "total_balance": user_data.get("totalBalance", "0.00"),
+            "granted_balance": user_data.get("balance", "0.00"),
+            "topped_up_balance": user_data.get("chargeBalance", "0.00")
+        }
+
+    else:
+        raise ValueError(f"不支持的解析器类型: {parser_type}")
 
 
 @router.get("/config/ai/providers", summary="获取AI提供商列表")

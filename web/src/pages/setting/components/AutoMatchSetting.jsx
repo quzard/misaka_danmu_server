@@ -27,6 +27,7 @@ const AutoMatchSetting = () => {
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [aiProviders, setAiProviders] = useState([])
   const [providersLoading, setProvidersLoading] = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
 
   // 加载配置
   const loadSettings = async () => {
@@ -86,10 +87,12 @@ const AutoMatchSetting = () => {
       setAliasExpansionEnabled(aliasExpansion)
       setSelectedMetadataSource(seasonMappingSourceRes.data.value || 'tmdb')
 
+      const providerValue = providerRes.data.value || 'deepseek'
+
       form.setFieldsValue({
         aiMatchEnabled: enabled,
         aiFallbackEnabled: fallback,
-        aiProvider: providerRes.data.value || 'deepseek',
+        aiProvider: providerValue,
         aiApiKey: apiKeyRes.data.value || '',
         aiBaseUrl: baseUrlRes.data.value || '',
         aiModel: modelRes.data.value || 'deepseek-chat',
@@ -107,6 +110,9 @@ const AutoMatchSetting = () => {
         seasonMappingMetadataSource: seasonMappingSourceRes.data.value || 'tmdb',
         seasonMappingPrompt: seasonMappingPromptRes.data.value || ''
       })
+
+      // 设置当前选中的提供商配置
+      updateSelectedProvider(providerValue)
     } catch (error) {
       console.error('加载配置失败:', error)
       message.error(`加载配置失败: ${error?.response?.data?.message || error?.message || error?.detail || String(error) || '未知错误'}`)
@@ -158,6 +164,22 @@ const AutoMatchSetting = () => {
     fetchBalance()
   }, [])
 
+  // 更新选中的提供商配置
+  const updateSelectedProvider = (providerId) => {
+    const provider = aiProviders.find(p => p.id === providerId)
+    setSelectedProvider(provider)
+
+    // 如果提供商支持余额查询,自动刷新余额
+    if (provider?.supportBalance) {
+      fetchBalance()
+    }
+  }
+
+  // 监听提供商变化
+  const handleProviderChange = (providerId) => {
+    updateSelectedProvider(providerId)
+  }
+
   // 获取余额
   const fetchBalance = async () => {
     try {
@@ -172,29 +194,44 @@ const AutoMatchSetting = () => {
     }
   }
 
-  // 保存配置
-  const handleSave = async () => {
+  // 保存 Tab 1: AI连接配置
+  const handleSaveConnectionConfig = async () => {
     try {
       setSaving(true)
-      const values = matchMode === 'ai'
-        ? await form.validateFields()
-        : form.getFieldsValue()
+      const values = form.getFieldsValue()
 
       await Promise.all([
-        setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
-        setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiProvider', values.aiProvider || ''),
         setConfig('aiApiKey', values.aiApiKey || ''),
         setConfig('aiBaseUrl', values.aiBaseUrl || ''),
         setConfig('aiModel', values.aiModel || ''),
+        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
+      ])
+
+      message.success('AI连接配置保存成功')
+
+      // 保存成功后重新加载余额
+      if (selectedProvider?.supportBalance) {
+        fetchBalance()
+      }
+    } catch (error) {
+      console.error('保存配置失败:', error)
+      message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 保存 Tab 2: AI自动匹配
+  const handleSaveMatchConfig = async () => {
+    try {
+      setSaving(true)
+      const values = form.getFieldsValue()
+
+      await Promise.all([
+        setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
+        setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiPrompt', values.aiPrompt || ''),
-        setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
-        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
-        setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
-        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
-        setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
-        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || ''),
-        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false'),
         setConfig('webhookEnableTmdbSeasonMapping', values.webhookEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('matchFallbackEnableTmdbSeasonMapping', values.matchFallbackEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('autoImportEnableTmdbSeasonMapping', values.autoImportEnableTmdbSeasonMapping ? 'true' : 'false'),
@@ -202,7 +239,31 @@ const AutoMatchSetting = () => {
         setConfig('seasonMappingPrompt', values.seasonMappingPrompt || '')
       ])
 
-      message.success('保存成功')
+      message.success('AI自动匹配配置保存成功')
+    } catch (error) {
+      console.error('保存配置失败:', error)
+      message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 保存 Tab 3: AI识别增强
+  const handleSaveRecognitionConfig = async () => {
+    try {
+      setSaving(true)
+      const values = form.getFieldsValue()
+
+      await Promise.all([
+        setConfig('aiRecognitionEnabled', values.aiRecognitionEnabled ? 'true' : 'false'),
+        setConfig('aiRecognitionPrompt', values.aiRecognitionPrompt || ''),
+        setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
+        setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
+        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || '')
+      ])
+
+      message.success('AI识别增强配置保存成功')
     } catch (error) {
       console.error('保存配置失败:', error)
       message.error(`保存失败: ${error?.response?.data?.message || error?.message || '未知错误'}`)
@@ -282,25 +343,7 @@ const AutoMatchSetting = () => {
 
   return (
     <Spin spinning={loading}>
-      <Card
-        title="AI辅助增强"
-        extra={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              loading={saving}
-              style={{
-                minWidth: '100px',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              保存设置
-            </Button>
-          </div>
-        }
-      >
+      <Card>
         <Form
           form={form}
           layout="vertical"
@@ -334,7 +377,7 @@ const AutoMatchSetting = () => {
                 }
                 rules={[{ required: matchMode === 'ai', message: '请选择AI提供商' }]}
               >
-                <Select loading={providersLoading}>
+                <Select loading={providersLoading} onChange={handleProviderChange}>
                   {aiProviders.map(provider => (
                     <Option key={provider.id} value={provider.id}>
                       {provider.displayName}
@@ -444,13 +487,13 @@ const AutoMatchSetting = () => {
                     启用后，AI的所有原始响应将被记录到 config/logs/ai_responses.log 文件中，用于调试。
                   </div>
 
-                  {/* 余额卡片 - 仅当支持时显示 */}
-                  {balanceInfo?.supported && (
+                  {/* 余额卡片 - 根据选中的提供商配置决定是否显示 */}
+                  {selectedProvider?.supportBalance && (
                     <Card size="small" style={{ marginBottom: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontWeight: 500 }}>💰 账户余额</span>
-                          <Tooltip title={`查询 ${balanceInfo.provider} 账户余额`}>
+                          <Tooltip title={`查询 ${selectedProvider.displayName} 账户余额`}>
                             <QuestionCircleOutlined />
                           </Tooltip>
                         </div>
@@ -523,6 +566,20 @@ const AutoMatchSetting = () => {
                   )}
                 </Space>
               </Form.Item>
+
+              {/* 保存按钮 */}
+              <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveConnectionConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '200px' }}
+                >
+                  保存 AI 连接配置
+                </Button>
+              </div>
             </TabPane>
 
             {/* 标签页2: AI自动匹配 */}
@@ -717,6 +774,20 @@ const AutoMatchSetting = () => {
                   />
                 </Form.Item>
               </Card>
+
+              {/* 保存按钮 */}
+              <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveMatchConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '200px' }}
+                >
+                  保存 AI 自动匹配配置
+                </Button>
+              </div>
             </TabPane>
 
             {/* 标签页3: AI识别增强 */}
@@ -861,6 +932,20 @@ const AutoMatchSetting = () => {
                   />
                 </Form.Item>
               </Card>
+
+              {/* 保存按钮 */}
+              <div style={{ marginTop: '24px', textAlign: 'center' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSaveRecognitionConfig}
+                  loading={saving}
+                  size="large"
+                  style={{ minWidth: '200px' }}
+                >
+                  保存 AI 识别增强配置
+                </Button>
+              </div>
             </TabPane>
 
             {/* 标签页4: AI使用统计 */}
