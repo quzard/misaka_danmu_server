@@ -34,6 +34,8 @@ export function BangumiConfig({ form }) {
   const [authInfo, setAuthInfo] = useState({})
   const [showPassword, setShowPassword] = useState(false)
   const [showToken, setShowToken] = useState(false)
+  const [showAuthIframe, setShowAuthIframe] = useState(false)
+  const [authUrl, setAuthUrl] = useState('')
   const oauthPopupRef = useRef(null)
 
   // 加载配置
@@ -46,6 +48,8 @@ export function BangumiConfig({ form }) {
         if (oauthPopupRef.current) {
           oauthPopupRef.current.close()
         }
+        setShowAuthIframe(false)
+        setAuthUrl('')
         loadConfig()
       }
     }
@@ -98,25 +102,14 @@ export function BangumiConfig({ form }) {
 
   const handleOAuthLogin = async () => {
     try {
-      if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
-        oauthPopupRef.current.focus()
-      } else {
-        const res = await getBangumiAuthUrl()
-        const authUrl = res.data?.url || res.url
-        if (!authUrl) {
-          showMessage('error', '获取授权链接失败: 返回的URL为空')
-          return
-        }
-        const width = 600
-        const height = 700
-        const left = window.screen.width / 2 - width / 2
-        const top = window.screen.height / 2 - height / 2
-        oauthPopupRef.current = window.open(
-          authUrl,
-          'BangumiAuth',
-          `width=${width},height=${height},top=${top},left=${left}`
-        )
+      const res = await getBangumiAuthUrl()
+      const url = res.data?.url || res.url
+      if (!url) {
+        showMessage('error', '获取授权链接失败: 返回的URL为空')
+        return
       }
+      setAuthUrl(url)
+      setShowAuthIframe(true)
     } catch (error) {
       showMessage('error', `获取授权链接失败: ${error.message}`)
     }
@@ -339,6 +332,23 @@ export function BangumiConfig({ form }) {
               <Button type="primary" onClick={handleOAuthLogin}>
                 重新授权
               </Button>
+            </div>
+          ) : showAuthIframe ? (
+            <div className="py-4">
+              <div className="mb-3 text-center">
+                <div className="mb-2 text-sm text-gray-600">请在下方完成 Bangumi 授权</div>
+                <Button size="small" onClick={() => { setShowAuthIframe(false); setAuthUrl('') }}>
+                  取消授权
+                </Button>
+              </div>
+              <div className="border rounded" style={{ height: '500px', overflow: 'hidden' }}>
+                <iframe
+                  src={authUrl}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title="Bangumi OAuth"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation"
+                />
+              </div>
             </div>
           ) : (
             <div className="text-center py-4">

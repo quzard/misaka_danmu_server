@@ -253,10 +253,63 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
         return HTMLResponse("""
-            <html><head><title>授权处理中...</title></head><body><script type="text/javascript">
-              try { window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); } catch(e) { console.error(e); }
-              window.close();
-            </script><p>授权成功，请关闭此窗口。</p></body></html>
+            <html>
+            <head>
+                <title>授权成功</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    }
+                    .container {
+                        text-align: center;
+                        background: white;
+                        padding: 40px;
+                        border-radius: 10px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .success-icon {
+                        font-size: 64px;
+                        margin-bottom: 20px;
+                    }
+                    h1 {
+                        color: #333;
+                        margin-bottom: 10px;
+                    }
+                    p {
+                        color: #666;
+                        margin-bottom: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">✅</div>
+                    <h1>授权成功</h1>
+                    <p>Bangumi 授权已完成，页面将自动刷新...</p>
+                </div>
+                <script type="text/javascript">
+                    try {
+                        // 尝试通知父窗口 (弹窗模式)
+                        if (window.opener) {
+                            window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
+                            setTimeout(() => window.close(), 1000);
+                        }
+                        // 尝试通知父页面 (iframe 模式)
+                        else if (window.parent && window.parent !== window) {
+                            window.parent.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
+                        }
+                    } catch(e) {
+                        console.error('Failed to notify parent:', e);
+                    }
+                </script>
+            </body>
+            </html>
             """)
     except httpx.HTTPStatusError as e:
         logger.error(f"Bangumi token exchange failed: {e.response.text}", exc_info=True)
