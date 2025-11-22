@@ -52,6 +52,20 @@ AI_PROVIDERS = {
         "apiKeyPrefix": "sk-",
         "website": "https://platform.openai.com",
         "order": 3
+    },
+    "gemini": {
+        "id": "gemini",
+        "name": "Google Gemini",
+        "displayName": "Google Gemini",
+        "description": "Google Gemini - Google 的多模态 AI 模型",
+        "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "defaultModel": "gemini-1.5-flash",
+        "modelPlaceholder": "gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp",
+        "baseUrlPlaceholder": "https://generativelanguage.googleapis.com/v1beta (默认)",
+        "supportBalance": False,  # Gemini 不支持余额查询
+        "apiKeyPrefix": "AI",  # Gemini API Key 通常以 AI 开头
+        "website": "https://ai.google.dev",
+        "order": 4
     }
 }
 
