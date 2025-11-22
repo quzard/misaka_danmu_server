@@ -30,7 +30,7 @@ const AutoMatchSetting = () => {
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
 
   // 加载配置
-  const loadSettings = async () => {
+  const loadSettings = async (providers) => {
     try {
       setLoading(true)
       const [
@@ -112,10 +112,10 @@ const AutoMatchSetting = () => {
       })
 
       // 设置当前选中的提供商配置
-      updateSelectedProvider(providerValue)
+      const provider = providers.find(p => p.id === providerValue)
+      setSelectedProvider(provider)
 
       // 加载完成后,如果提供商支持余额查询,自动刷新余额
-      const provider = aiProviders.find(p => p.id === providerValue)
       if (provider?.supportBalance) {
         fetchBalance()
       }
@@ -132,11 +132,13 @@ const AutoMatchSetting = () => {
     try {
       setProvidersLoading(true)
       const res = await api.get('/api/ui/config/ai/providers')
-      setAiProviders(res.data || [])
+      const providers = res.data || []
+      setAiProviders(providers)
+      return providers
     } catch (error) {
       console.error('加载AI提供商列表失败:', error)
       // 使用默认配置
-      setAiProviders([
+      const defaultProviders = [
         {
           id: 'deepseek',
           displayName: 'DeepSeek (推荐)',
@@ -158,7 +160,9 @@ const AutoMatchSetting = () => {
           modelPlaceholder: 'gpt-4, gpt-4-turbo, gpt-3.5-turbo',
           baseUrlPlaceholder: 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
         }
-      ])
+      ]
+      setAiProviders(defaultProviders)
+      return defaultProviders
     } finally {
       setProvidersLoading(false)
     }
@@ -166,8 +170,8 @@ const AutoMatchSetting = () => {
 
   useEffect(() => {
     const init = async () => {
-      await loadAIProviders()
-      await loadSettings()
+      const providers = await loadAIProviders()
+      await loadSettings(providers || aiProviders)
       // fetchBalance() 会在 loadSettings() 中根据提供商配置自动调用
     }
     init()
