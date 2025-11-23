@@ -153,7 +153,11 @@ async def search_anime_provider(
         } if episode_to_filter is not None else None
 
         logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
+
+        # 第一次检查:在所有搜索之前检查是否有弹幕源
         if not manager.has_enabled_scrapers:
+            logger.warning("❌ 没有启用的弹幕搜索源，终止本次搜索")
+            logger.info("请在'搜索源-弹幕搜索源'页面中至少启用一个弹幕源，如果没有弹幕源请从资源仓库中加载")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
