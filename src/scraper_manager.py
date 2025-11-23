@@ -260,8 +260,12 @@ class ScraperManager:
 
     @property
     def has_enabled_scrapers(self) -> bool:
-        """检查是否有任何已启用的搜索源。"""
-        return any(s.get('isEnabled') for s in self.scraper_settings.values())
+        """检查是否有任何已启用的弹幕搜索源(排除虚拟的custom源)。"""
+        return any(
+            s.get('isEnabled')
+            for provider_name, s in self.scraper_settings.items()
+            if provider_name != 'custom'
+        )
 
     async def search_all(self, keywords: List[str], episode_info: Optional[Dict[str, Any]] = None, max_results_per_source: Optional[int] = None) -> List[ProviderSearchInfo]:
         """
