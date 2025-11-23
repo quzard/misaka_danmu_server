@@ -37,9 +37,8 @@ body:
     id: other-environment
     attributes:
       label: 其他运行环境
-      description: |
-        如果您选择了"其他",请在此填写具体的运行环境
-      placeholder: 例如: Windows 11, Ubuntu 22.04, 群晖 DSM 7.0 等
+      description: 如果您选择了"其他",请在此填写具体的运行环境
+      placeholder: 例如 Windows 11, Ubuntu 22.04, 群晖 DSM 7.0 等
 
   - type: input
     id: version
