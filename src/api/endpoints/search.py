@@ -153,7 +153,11 @@ async def search_anime_provider(
         } if episode_to_filter is not None else None
 
         logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
+
+        # 第一次检查:在所有搜索之前检查是否有弹幕源
         if not manager.has_enabled_scrapers:
+            logger.warning("❌ 没有启用的弹幕搜索源，终止本次搜索")
+            logger.info("请在'搜索源-弹幕搜索源'页面中至少启用一个弹幕源，如果没有弹幕源请从资源仓库中加载")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
@@ -172,15 +176,16 @@ async def search_anime_provider(
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
             filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
         else:
-            logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
-
-            # 检查是否有启用的弹幕源
+            # 检查是否有启用的弹幕源 - 在辅助搜索之前先检查
             if not manager.has_enabled_scrapers:
-                logger.warning("辅助搜索已启用，但没有启用的弹幕搜索源")
+                logger.warning("❌ 辅助搜索已启用，但没有启用的弹幕搜索源，终止本次搜索")
+                logger.info("请在'搜索源-弹幕搜索源'页面中至少启用一个弹幕源，如果没有弹幕源请从资源仓库中加载")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='没有启用的弹幕搜索源，请在"搜索源-弹幕搜索源"页面下中至少启用一个，如果没有弹幕源就从资源仓库中加载弹幕源。'
                 )
+
+            logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
             # 优化：并行执行辅助搜索和主搜索
             logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
