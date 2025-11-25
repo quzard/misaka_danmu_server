@@ -522,7 +522,6 @@ const AutoMatchSetting = () => {
               >
                 {({ getFieldValue }) => (
                   <Form.Item
-                    name="aiModel"
                     label={
                       <Space>
                         <span>模型名称</span>
@@ -531,17 +530,22 @@ const AutoMatchSetting = () => {
                         </Tooltip>
                       </Space>
                     }
-                    rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
                   >
                     <Space.Compact style={{ width: '100%' }}>
-                      <AutoComplete
-                        style={{ flex: 1 }}
-                        options={getAvailableModels(getFieldValue('aiProvider'))}
-                        placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
-                        filterOption={(inputValue, option) =>
-                          option.value.toLowerCase().includes(inputValue.toLowerCase())
-                        }
-                      />
+                      <Form.Item
+                        name="aiModel"
+                        noStyle
+                        rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
+                      >
+                        <AutoComplete
+                          style={{ flex: 1 }}
+                          options={getAvailableModels(getFieldValue('aiProvider'))}
+                          placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
+                          filterOption={(inputValue, option) =>
+                            option.value.toLowerCase().includes(inputValue.toLowerCase())
+                          }
+                        />
+                      </Form.Item>
                       <Tooltip title="从AI提供商API获取最新模型列表">
                         <Button
                           icon={<ReloadOutlined />}
