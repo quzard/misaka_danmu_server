@@ -1002,6 +1002,9 @@ async def _handle_fallback_search(
     while time.time() - start_time < max_wait_time:
         await asyncio.sleep(check_interval)
 
+        # 刷新会话以读取最新数据（解决事务隔离问题）
+        await session.commit()
+
         # 检查搜索状态
         current_search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
         if current_search_info:
