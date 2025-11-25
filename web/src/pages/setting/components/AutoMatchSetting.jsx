@@ -3,7 +3,7 @@ import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, 
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance, getAIModels } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import AIMetrics from './AIMetrics'
@@ -30,6 +30,8 @@ const AutoMatchSetting = () => {
   const [aiProviders, setAiProviders] = useState([])
   const [providersLoading, setProvidersLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
+  const [dynamicModels, setDynamicModels] = useState({}) // 动态获取的模型列表，按提供商ID存储
+  const [refreshingModels, setRefreshingModels] = useState(false) // 是否正在刷新模型列表
   const isMobile = useAtomValue(isMobileAtom)
 
   // 加载配置
@@ -305,15 +307,57 @@ const AutoMatchSetting = () => {
     return providerConfig?.modelPlaceholder || '请输入模型名称'
   }
 
+  // 刷新模型列表
+  const handleRefreshModels = async () => {
+    const currentProvider = form.getFieldValue('aiProvider')
+    if (!currentProvider) {
+      message.warning('请先选择AI提供商')
+      return
+    }
+
+    try {
+      setRefreshingModels(true)
+      const response = await getAIModels(currentProvider, true)
+
+      if (response.data.error) {
+        message.warning(response.data.error)
+      } else {
+        // 更新动态模型列表
+        setDynamicModels(prev => ({
+          ...prev,
+          [currentProvider]: response.data.models
+        }))
+
+        const newCount = response.data.newCount || 0
+        if (newCount > 0) {
+          message.success(`刷新成功！发现 ${newCount} 个新模型`)
+        } else {
+          message.success('刷新成功！模型列表已是最新')
+        }
+      }
+    } catch (error) {
+      console.error('刷新模型列表失败:', error)
+      message.error('刷新失败: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setRefreshingModels(false)
+    }
+  }
+
   // 获取可选模型列表
   const getAvailableModels = (provider) => {
     const providerConfig = aiProviders.find(p => p.id === provider)
-    const models = providerConfig?.availableModels || []
+
+    // 优先使用动态获取的模型列表，否则使用硬编码列表
+    const models = dynamicModels[provider] || providerConfig?.availableModels || []
+
     return models.map(model => ({
       value: model.value,
       label: (
         <div>
-          <div style={{ fontWeight: 500 }}>{model.label}</div>
+          <div style={{ fontWeight: 500 }}>
+            {model.label}
+            {model.isNew && <span style={{ marginLeft: '8px', color: '#52c41a', fontSize: '12px' }}>新</span>}
+          </div>
           {model.description && (
             <div style={{ fontSize: '12px', color: '#999' }}>{model.description}</div>
           )}
@@ -489,13 +533,26 @@ const AutoMatchSetting = () => {
                     }
                     rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
                   >
-                    <AutoComplete
-                      options={getAvailableModels(getFieldValue('aiProvider'))}
-                      placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
-                      filterOption={(inputValue, option) =>
-                        option.value.toLowerCase().includes(inputValue.toLowerCase())
-                      }
-                    />
+                    <Space.Compact style={{ width: '100%' }}>
+                      <AutoComplete
+                        style={{ flex: 1 }}
+                        options={getAvailableModels(getFieldValue('aiProvider'))}
+                        placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
+                        filterOption={(inputValue, option) =>
+                          option.value.toLowerCase().includes(inputValue.toLowerCase())
+                        }
+                      />
+                      <Tooltip title="从AI提供商API获取最新模型列表">
+                        <Button
+                          icon={<ReloadOutlined />}
+                          loading={refreshingModels}
+                          onClick={handleRefreshModels}
+                          disabled={!getFieldValue('aiProvider')}
+                        >
+                          刷新
+                        </Button>
+                      </Tooltip>
+                    </Space.Compact>
                   </Form.Item>
                 )}
               </Form.Item>

@@ -548,6 +548,9 @@ export const getAIMetrics = (hours = 24) => api.get(`/api/ui/config/ai/metrics?h
 /** 清空 AI 缓存 */
 export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
 
+/** 获取 AI 模型列表 */
+export const getAIModels = (provider, refresh = false) => api.get(`/api/ui/config/ai/models?provider=${provider}&refresh=${refresh}`)
+
 /** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
 /** 获取所有媒体服务器 */
 export const getMediaServers = () => api.get('/api/ui/media-servers')

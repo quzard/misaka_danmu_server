@@ -23,6 +23,7 @@ AI_PROVIDERS = {
         "supportBalance": True,  # 是否支持余额查询
         "balanceApiPath": "/user/balance",  # 余额查询API路径
         "balanceResponseParser": "deepseek",  # 余额响应解析器类型
+        "modelsApiPath": "/models",  # 模型列表API路径
         "apiKeyPrefix": "sk-",
         "website": "https://platform.deepseek.com",
         "order": 1
@@ -38,23 +39,16 @@ AI_PROVIDERS = {
         "availableModels": [
             {"value": "Qwen/Qwen3-8B", "label": "Qwen3-8B (推荐免费)", "description": "通义千问3代 8B 模型 - 免费"},
             {"value": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", "label": "DeepSeek-R1-Distill-Qwen-7B (免费)", "description": "DeepSeek R1 蒸馏版 7B - 免费"},
-            {"value": "Qwen/Qwen2.5-7B-Instruct", "label": "Qwen2.5-7B-Instruct (免费)", "description": "通义千问 2.5代 7B - 免费"},
-            {"value": "Qwen/Qwen3-14B", "label": "Qwen3-14B", "description": "通义千问3代 14B 模型"},
             {"value": "Qwen/Qwen3-32B", "label": "Qwen3-32B", "description": "通义千问3代 32B 模型"},
-            {"value": "Qwen/Qwen3-VL-8B-Instruct", "label": "Qwen3-VL-8B (多模态)", "description": "通义千问3代 8B 视觉模型"},
-            {"value": "Qwen/Qwen3-VL-32B-Instruct", "label": "Qwen3-VL-32B (多模态)", "description": "通义千问3代 32B 视觉模型"},
-            {"value": "Qwen/Qwen3-235B-A22B", "label": "Qwen3-235B-A22B", "description": "通义千问3代 235B 激活22B 模型"},
-            {"value": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "label": "Qwen3-Coder-480B (代码)", "description": "通义千问3代 480B 代码模型"},
             {"value": "deepseek-ai/DeepSeek-V3.2-Exp", "label": "DeepSeek-V3.2-Exp (付费推荐版)", "description": "DeepSeek V3.2 实验版"},
             {"value": "deepseek-ai/DeepSeek-V3", "label": "DeepSeek-V3", "description": "DeepSeek V3 模型"},
-            {"value": "deepseek-ai/DeepSeek-R1", "label": "DeepSeek-R1", "description": "DeepSeek R1 推理模型"},
-            {"value": "moonshotai/Kimi-K2-Instruct-0905", "label": "Kimi-K2-Instruct", "description": "Kimi K2 指令模型"},
-            {"value": "THUDM/GLM-Z1-32B-0414", "label": "GLM-Z1-32B", "description": "智谱 GLM-Z1 32B 模型"}
+            {"value": "deepseek-ai/DeepSeek-R1", "label": "DeepSeek-R1", "description": "DeepSeek R1 推理模型"}
         ],
         "baseUrlPlaceholder": "https://api.siliconflow.cn/v1 (默认)",
         "supportBalance": True,  # 支持余额查询
         "balanceApiPath": "/user/info",  # 余额查询API路径
         "balanceResponseParser": "siliconflow",  # 余额响应解析器类型
+        "modelsApiPath": "/models",  # 模型列表API路径
         "apiKeyPrefix": "sk-",
         "website": "https://siliconflow.cn",
         "order": 2
@@ -76,6 +70,7 @@ AI_PROVIDERS = {
         ],
         "baseUrlPlaceholder": "https://api.openai.com/v1 (默认) 或自定义兼容接口",
         "supportBalance": False,
+        "modelsApiPath": "/models",  # 模型列表API路径
         "apiKeyPrefix": "sk-",
         "website": "https://platform.openai.com",
         "order": 3
@@ -91,15 +86,11 @@ AI_PROVIDERS = {
         "availableModels": [
             {"value": "gemini-3-pro-preview", "label": "Gemini 3 Pro Preview (最新)", "description": "最智能的模型，支持多模态理解"},
             {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (推荐)", "description": "第三代工作马模型，1M上下文"},
-            {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "description": "超快速模型，成本效率高"},
-            {"value": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "description": "第二代工作马模型"},
-            {"value": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash-Lite", "description": "第二代快速模型"},
-            {"value": "gemini-1.5-flash", "label": "Gemini 1.5 Flash", "description": "速度快，适合大部分场景"},
-            {"value": "gemini-1.5-flash-8b", "label": "Gemini 1.5 Flash-8B", "description": "更快的轻量版本"},
-            {"value": "gemini-1.5-pro", "label": "Gemini 1.5 Pro", "description": "更强大，适合复杂任务"}
+            {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "description": "超快速模型，成本效率高"}
         ],
         "baseUrlPlaceholder": "留空 (使用官方 SDK)",
         "supportBalance": False,  # Gemini 不支持余额查询
+        "modelsApiPath": "https://generativelanguage.googleapis.com/v1/models",  # Gemini 使用完整URL
         "apiKeyPrefix": "AI",  # Gemini API Key 通常以 AI 开头
         "website": "https://ai.google.dev",
         "order": 4

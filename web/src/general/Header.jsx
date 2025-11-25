@@ -166,6 +166,13 @@ const MobileHeader = ({ activeKey }) => {
     { key: 'user', label: '我的', icon: 'user', children: navItems.slice(3) }, // 其余的放在"我的"菜单下
   ]
   const navigate = useNavigate()
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [passwordForm] = Form.useForm()
+  const [passwordLoading, setPasswordLoading] = useState(false)
+  const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
+  const [newPasswordVisible, setNewPasswordVisible] = useState(false)
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false)
+  const { showMessage } = useMessage()
 
   const onLogout = async () => {
     await logout()
@@ -173,9 +180,25 @@ const MobileHeader = ({ activeKey }) => {
     navigate(RoutePaths.LOGIN)
   }
 
+  const handleChangePassword = async (values) => {
+    try {
+      setPasswordLoading(true)
+      await changePassword(values)
+      showMessage('success', '密码修改成功')
+      setIsPasswordModalOpen(false)
+      passwordForm.resetFields()
+    } catch (error) {
+      showMessage('error', error.response?.data?.detail || '密码修改失败')
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
   const handleMenuItemClick = (item) => {
     if (item.key === 'logout') {
       onLogout()
+    } else if (item.key === 'change-password') {
+      setIsPasswordModalOpen(true)
     } else {
       navigate(item.key)
     }
@@ -187,63 +210,172 @@ const MobileHeader = ({ activeKey }) => {
   const userMenuLabel = activeChildItem ? activeChildItem.label : '我的'
 
   return (
-    <div className="fixed bottom-0 left-0 w-full shadow-box z-50 py-2 overflow-hidden bg-base-bg">
-      <div className="flex justify-evenly items-center">
-        {mobileNavItems.map(it => (
-          <>
-            {!it.children?.length ? (
-              <div
-                key={it.key}
-                className={classNames(
-                  'text-center flex-1',
-                  it.key === activeKey && 'text-primary'
-                )}
+    <>
+      <div className="fixed bottom-0 left-0 w-full shadow-box z-50 py-2 overflow-hidden bg-base-bg">
+        <div className="flex justify-evenly items-center">
+          {mobileNavItems.map(it => (
+            <>
+              {!it.children?.length ? (
+                <div
+                  key={it.key}
+                  className={classNames(
+                    'text-center flex-1',
+                    it.key === activeKey && 'text-primary'
+                  )}
+                  onClick={() => {
+                    navigate(it.key)
+                  }}
+                >
+                  <div>
+                    <MyIcon icon={it.icon} size={26} />
+                  </div>
+                  <div className="text-xs">{it.label}</div>
+                </div>
+              ) : (
+                <FloatingMenu
+                  key={it.key}
+                  trigger={
+                    <div
+                      className={classNames(
+                        'text-center flex-1',
+                        it.children.map(o => o.key).includes(activeKey) &&
+                          'text-primary'
+                      )}
+                    >
+                      <div>
+                        <MyIcon icon={it.icon} size={26} />
+                      </div>
+                      <div className="text-xs">{userMenuLabel}</div>
+                    </div>
+                  }
+                  items={[
+                    ...it.children.map(o => ({
+                      key: o.key,
+                      label: o.label,
+                      icon: o.icon,
+                    })),
+                    {
+                      key: 'change-password',
+                      label: '修改密码',
+                      icon: 'lock',
+                    },
+                    {
+                      key: 'logout',
+                      label: '退出登录',
+                      icon: 'user',
+                    },
+                  ]}
+                  onItemClick={handleMenuItemClick}
+                  activeKey={activeKey}
+                />
+              )}
+            </>
+          ))}
+        </div>
+      </div>
+
+      {/* 修改密码弹框 */}
+      <Modal
+        title="修改密码"
+        open={isPasswordModalOpen}
+        onCancel={() => {
+          setIsPasswordModalOpen(false)
+          passwordForm.resetFields()
+        }}
+        footer={null}
+        width={500}
+      >
+        <Form
+          form={passwordForm}
+          layout="vertical"
+          onFinish={handleChangePassword}
+        >
+          <Form.Item
+            name="currentPassword"
+            label="当前密码"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请输入当前密码"
+              iconRender={(visible) =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+              visibilityToggle={{
+                visible: currentPasswordVisible,
+                onVisibleChange: setCurrentPasswordVisible,
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="newPassword"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 6, message: '密码长度至少6位' },
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请输入新密码"
+              iconRender={(visible) =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+              visibilityToggle={{
+                visible: newPasswordVisible,
+                onVisibleChange: setNewPasswordVisible,
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="confirmPassword"
+            label="确认新密码"
+            dependencies={['newPassword']}
+            rules={[
+              { required: true, message: '请确认新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('newPassword') === value) {
+                    return Promise.resolve()
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'))
+                },
+              }),
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请再次输入新密码"
+              iconRender={(visible) =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+              visibilityToggle={{
+                visible: confirmPasswordVisible,
+                onVisibleChange: setConfirmPasswordVisible,
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button
                 onClick={() => {
-                  navigate(it.key)
+                  setIsPasswordModalOpen(false)
+                  passwordForm.resetFields()
                 }}
               >
-                <div>
-                  <MyIcon icon={it.icon} size={26} />
-                </div>
-                <div className="text-xs">{it.label}</div>
-              </div>
-            ) : (
-              <FloatingMenu
-                key={it.key}
-                trigger={
-                  <div
-                    className={classNames(
-                      'text-center flex-1',
-                      it.children.map(o => o.key).includes(activeKey) &&
-                        'text-primary'
-                    )}
-                  >
-                    <div>
-                      <MyIcon icon={it.icon} size={26} />
-                    </div>
-                    <div className="text-xs">{userMenuLabel}</div>
-                  </div>
-                }
-                items={[
-                  ...it.children.map(o => ({
-                    key: o.key,
-                    label: o.label,
-                    icon: o.icon,
-                  })),
-                  {
-                    key: 'logout',
-                    label: '退出登录',
-                    icon: 'user',
-                  },
-                ]}
-                onItemClick={handleMenuItemClick}
-                activeKey={activeKey}
-              />
-            )}
-          </>
-        ))}
-      </div>
-    </div>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={passwordLoading}>
+                确认修改
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   )
 }
 
