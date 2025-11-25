@@ -683,15 +683,44 @@ async def auto_search_and_import_task(
         # 否则，如果启用了AI匹配，检查传统匹配兜底
         elif await ai_matcher_manager.is_enabled():
             ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == 'true'
-            if ai_fallback_enabled:
-                best_match = all_results[0]
-                logger.info(f"AI匹配未选择结果，使用传统匹配的最佳匹配: {best_match.title} (Provider: {best_match.provider})")
+            if ai_fallback_enabled and all_results:
+                # 传统匹配：验证第一个结果是否满足条件
+                first_result = all_results[0]
+                type_matched = first_result.type == media_type.value if hasattr(media_type, 'value') else first_result.type == str(media_type)
+                similarity = fuzz.token_set_ratio(main_title, first_result.title)
+
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
+                    best_match = first_result
+                    logger.info(f"AI匹配未选择结果，使用传统匹配: {first_result.title} (Provider: {first_result.provider}, "
+                               f"类型匹配: ✓, 相似度: {similarity}%)")
+                else:
+                    best_match = None
+                    logger.warning(f"传统匹配失败: 第一个结果不满足条件 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                 f"相似度: {similarity}%, 要求: ≥70%)")
             else:
                 logger.warning("AI匹配未选择结果，且传统匹配兜底已禁用，将不使用任何结果")
+                best_match = None
         # 如果未启用AI匹配，直接使用传统匹配
         else:
-            best_match = all_results[0]
-            logger.info(f"使用传统匹配的最佳匹配: {best_match.title} (Provider: {best_match.provider})")
+            if all_results:
+                # 传统匹配：验证第一个结果是否满足条件
+                first_result = all_results[0]
+                type_matched = first_result.type == media_type.value if hasattr(media_type, 'value') else first_result.type == str(media_type)
+                similarity = fuzz.token_set_ratio(main_title, first_result.title)
+
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
+                    best_match = first_result
+                    logger.info(f"使用传统匹配: {first_result.title} (Provider: {first_result.provider}, "
+                               f"类型匹配: ✓, 相似度: {similarity}%)")
+                else:
+                    best_match = None
+                    logger.warning(f"传统匹配失败: 第一个结果不满足条件 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                 f"相似度: {similarity}%, 要求: ≥70%)")
+            else:
+                best_match = None
+                logger.warning("传统匹配失败: 没有搜索结果")
 
         # 如果没有选择任何结果，抛出错误
         if not best_match:

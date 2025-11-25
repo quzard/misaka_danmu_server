@@ -462,8 +462,9 @@ async def webhook_search_and_dispatch_task(
                 success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
             raise TaskSuccess(success_message)
 
-        # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+        # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
         favorited_match = None
+        target_type = "movie" if mediaType == "movie" else "tv_series"
 
         for result in all_search_results:
             # 查找是否有相同provider和mediaId的源被标记
@@ -478,17 +479,20 @@ async def webhook_search_and_dispatch_task(
             result_row = await session.execute(stmt)
             is_favorited = result_row.scalar_one_or_none()
             if is_favorited:
-                # 验证标题相似度,避免错误匹配
+                # 验证类型匹配和标题相似度
+                type_matched = result.type == target_type
                 similarity = fuzz.token_set_ratio(animeTitle, result.title)
-                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} "
+                           f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                # 只有相似度 >= 60% 才使用精确标记源
-                if similarity >= 60:
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
                     favorited_match = result
-                    logger.info(f"Webhook 任务: 标题相似度验证通过 ({similarity}% >= 60%)")
+                    logger.info(f"Webhook 任务: 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                     break
                 else:
-                    logger.warning(f"Webhook 任务: 标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
+                    logger.warning(f"Webhook 任务: 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                 f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
         # 检查是否启用顺延机制
         fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
@@ -497,12 +501,24 @@ async def webhook_search_and_dispatch_task(
             best_match = favorited_match
             logger.info(f"Webhook 任务: 使用精确标记源: {best_match.provider} - {best_match.title}")
         elif not fallback_enabled:
-            # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+            # 顺延机制关闭，验证第一个结果是否满足条件
             if all_search_results:
-                best_match = all_search_results[0]
-                logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                first_result = all_search_results[0]
+                type_matched = first_result.type == target_type
+                similarity = fuzz.token_set_ratio(animeTitle, first_result.title)
+
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
+                    best_match = first_result
+                    logger.info(f"Webhook 任务: 传统匹配成功: {first_result.provider} - {first_result.title} "
+                               f"(类型匹配: ✓, 相似度: {similarity}%)")
+                else:
+                    best_match = None
+                    logger.warning(f"Webhook 任务: 传统匹配失败: 第一个结果不满足条件 "
+                                 f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
             else:
-                logger.warning(f"Webhook 任务: 顺延机制已关闭，但搜索结果为空，无法选择结果")
+                best_match = None
+                logger.warning(f"Webhook 任务: 传统匹配失败: 没有搜索结果")
 
         if best_match is not None:
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")

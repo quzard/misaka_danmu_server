@@ -2358,56 +2358,94 @@ async def _get_match_for_item(
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+                    # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            # 验证标题相似度,避免错误匹配
+                            # 验证类型匹配和标题相似度
+                            type_matched = result.type == target_type
                             similarity = fuzz.token_set_ratio(base_title, result.title)
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} "
+                                       f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                            # 只有相似度 >= 80% 才使用精确标记源
-                            if similarity >= 80:
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
                                 favorited_match = result
-                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                logger.info(f"  - 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                                 break
                             else:
-                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
+                                logger.warning(f"  - 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                             f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
                     if favorited_match:
                         best_match = favorited_match
                         logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
                     elif not fallback_enabled:
-                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                        best_match = sorted_results[0]
-                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                        # 顺延机制关闭，验证第一个结果是否满足条件
+                        if sorted_results:
+                            first_result = sorted_results[0]
+                            type_matched = first_result.type == target_type
+                            similarity = fuzz.token_set_ratio(base_title, first_result.title)
+                            score = calculate_match_score(first_result)
+
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
+                                best_match = first_result
+                                logger.info(f"  - 传统匹配成功: {first_result.provider} - {first_result.title} "
+                                           f"(类型匹配: ✓, 相似度: {similarity}%, 总分: {score})")
+                            else:
+                                best_match = None
+                                logger.warning(f"  - 传统匹配失败: 第一个结果不满足条件 "
+                                             f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
+                        else:
+                            best_match = None
+                            logger.warning("  - 传统匹配失败: 没有搜索结果")
                 else:
                     # AI未启用，使用传统匹配
-                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+                    # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            # 验证标题相似度,避免错误匹配
+                            # 验证类型匹配和标题相似度
+                            type_matched = result.type == target_type
                             similarity = fuzz.token_set_ratio(base_title, result.title)
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} "
+                                       f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                            # 只有相似度 >= 80% 才使用精确标记源
-                            if similarity >= 80:
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
                                 favorited_match = result
-                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                logger.info(f"  - 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                                 break
                             else:
-                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
+                                logger.warning(f"  - 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                             f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
                     if favorited_match:
                         best_match = favorited_match
                         logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
                     elif not fallback_enabled:
-                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                        best_match = sorted_results[0]
-                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                        # 顺延机制关闭，验证第一个结果是否满足条件
+                        if sorted_results:
+                            first_result = sorted_results[0]
+                            type_matched = first_result.type == target_type
+                            similarity = fuzz.token_set_ratio(base_title, first_result.title)
+                            score = calculate_match_score(first_result)
+
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
+                                best_match = first_result
+                                logger.info(f"  - 传统匹配成功: {first_result.provider} - {first_result.title} "
+                                           f"(类型匹配: ✓, 相似度: {similarity}%, 总分: {score})")
+                            else:
+                                best_match = None
+                                logger.warning(f"  - 传统匹配失败: 第一个结果不满足条件 "
+                                             f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
+                        else:
+                            best_match = None
+                            logger.warning("  - 传统匹配失败: 没有搜索结果")
 
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
