@@ -53,8 +53,11 @@ const AutoMatchSetting = () => {
         aliasExpansionEnabledRes,
         aliasExpansionPromptRes,
         logRawResponseRes,
+        homeSearchSeasonMappingRes,
+        fallbackSearchSeasonMappingRes,
         webhookSeasonMappingRes,
         matchFallbackSeasonMappingRes,
+        externalSearchSeasonMappingRes,
         autoImportSeasonMappingRes,
         seasonMappingSourceRes,
         seasonMappingPromptRes
@@ -73,8 +76,11 @@ const AutoMatchSetting = () => {
         getConfig('aiAliasExpansionEnabled'),
         getConfig('aiAliasExpansionPrompt'),
         getConfig('aiLogRawResponse'),
+        getConfig('homeSearchEnableTmdbSeasonMapping'),
+        getConfig('fallbackSearchEnableTmdbSeasonMapping'),
         getConfig('webhookEnableTmdbSeasonMapping'),
         getConfig('matchFallbackEnableTmdbSeasonMapping'),
+        getConfig('externalSearchEnableTmdbSeasonMapping'),
         getConfig('autoImportEnableTmdbSeasonMapping'),
         getConfig('seasonMappingMetadataSource'),
         getConfig('seasonMappingPrompt')
@@ -109,8 +115,11 @@ const AutoMatchSetting = () => {
         aiAliasExpansionEnabled: aliasExpansion,
         aiAliasExpansionPrompt: aliasExpansionPromptRes.data.value || '',
         aiLogRawResponse: logRawResponse,
+        homeSearchEnableTmdbSeasonMapping: homeSearchSeasonMappingRes.data.value === 'true',
+        fallbackSearchEnableTmdbSeasonMapping: fallbackSearchSeasonMappingRes.data.value === 'true',
         webhookEnableTmdbSeasonMapping: webhookSeasonMappingRes.data.value === 'true',
         matchFallbackEnableTmdbSeasonMapping: matchFallbackSeasonMappingRes.data.value === 'true',
+        externalSearchEnableTmdbSeasonMapping: externalSearchSeasonMappingRes.data.value === 'true',
         autoImportEnableTmdbSeasonMapping: autoImportSeasonMappingRes.data.value === 'true',
         seasonMappingMetadataSource: seasonMappingSourceRes.data.value || 'tmdb',
         seasonMappingPrompt: seasonMappingPromptRes.data.value || ''
@@ -261,8 +270,11 @@ const AutoMatchSetting = () => {
         setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
         setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiPrompt', values.aiPrompt || ''),
+        setConfig('homeSearchEnableTmdbSeasonMapping', values.homeSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('fallbackSearchEnableTmdbSeasonMapping', values.fallbackSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('webhookEnableTmdbSeasonMapping', values.webhookEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('matchFallbackEnableTmdbSeasonMapping', values.matchFallbackEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('externalSearchEnableTmdbSeasonMapping', values.externalSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('autoImportEnableTmdbSeasonMapping', values.autoImportEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('seasonMappingMetadataSource', values.seasonMappingMetadataSource || 'tmdb'),
         setConfig('seasonMappingPrompt', values.seasonMappingPrompt || '')
@@ -742,50 +754,96 @@ const AutoMatchSetting = () => {
               </Row>
 
               {/* 季度映射配置 */}
-              <Card size="small" style={{ marginBottom: '16px' }}>
-                <Row gutter={[16, 16]}>
-                  <Col xs={24} sm={12}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div style={{ fontWeight: 500, marginBottom: '4px' }}>季度映射开关</div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>Webhook季度映射</span>
-                          <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
+              <Row gutter={[16, 16]}>
+                <Col xs={24} sm={12}>
+                  <div style={{ fontWeight: 500, marginBottom: '12px' }}>季度映射开关</div>
+                  <Row gutter={[16, 16]}>
+                    <Col xs={24} sm={12}>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>主页搜索</span>
+                            <Tooltip title="启用后，主页搜索时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="homeSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
                         </div>
-                        <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>后备匹配季度映射</span>
-                          <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
+                      </Card>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>后备搜索</span>
+                            <Tooltip title="启用后，后备搜索时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="fallbackSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
                         </div>
-                        <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>全自动导入季度映射</span>
-                          <Tooltip title="启用后，全自动导入时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
+                      </Card>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>后备匹配</span>
+                            <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
                         </div>
-                        <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col xs={24} sm={12}>
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>Webhook</span>
+                            <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
+                        </div>
+                      </Card>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>外部控制-搜索媒体</span>
+                            <Tooltip title="启用后，外部控制搜索媒体时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="externalSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
+                        </div>
+                      </Card>
+                      <Card size="small" style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 500 }}>外部控制-全自动导入</span>
+                            <Tooltip title="启用后，外部控制全自动导入时会通过元数据源获取季度名称">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                          <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                          </Form.Item>
+                        </div>
+                      </Card>
+                    </Col>
+                  </Row>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <Card size="small" style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                         <span style={{ fontWeight: 500 }}>元数据源选择</span>
@@ -825,9 +883,9 @@ const AutoMatchSetting = () => {
                         </div>
                       </Form.Item>
                     </div>
-                  </Col>
-                </Row>
-              </Card>
+                  </Card>
+                </Col>
+              </Row>
 
               <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item

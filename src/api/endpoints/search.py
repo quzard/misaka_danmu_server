@@ -50,8 +50,10 @@ logger = logging.getLogger(__name__)
 from ..dependencies import (
     get_scraper_manager, get_task_manager, get_scheduler_manager,
     get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
+    get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
+from ...ai.ai_matcher import AIMatcherManager
+from ...season_mapper import title_contains_season_name
 
 from ..ui_models import (
     UITaskResponse, UIProviderSearchResponse, RefreshPosterRequest,
@@ -91,7 +93,8 @@ async def search_anime_provider(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -146,6 +149,44 @@ async def search_anime_provider(
         
         logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
         # --- 缓存逻辑结束 ---
+
+        # 创建季度映射任务(如果启用) - 与搜索并行运行
+        season_mapping_task = None
+        season_name = None
+        home_search_season_mapping_enabled = await config_manager.get("homeSearchEnableTmdbSeasonMapping", "false")
+        if home_search_season_mapping_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
+            logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
+
+            # 获取AI匹配器(如果启用)
+            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
+            ai_matcher = await ai_matcher_manager.get_matcher()
+            if ai_matcher:
+                logger.debug("主页搜索 季度映射: 使用AI匹配器")
+            else:
+                logger.debug("主页搜索 季度映射: AI匹配器未启用或初始化失败")
+
+            # 获取元数据源和自定义提示词
+            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+            sources = [metadata_source] if metadata_source else None
+
+            # 创建并行任务
+            async def get_season_mapping():
+                try:
+                    return await metadata_manager.get_season_name(
+                        title=search_title,
+                        season_number=season_to_filter,
+                        year=None,
+                        sources=sources,
+                        ai_matcher=ai_matcher,
+                        user=current_user,
+                        custom_prompt=custom_prompt if custom_prompt else None
+                    )
+                except Exception as e:
+                    logger.warning(f"主页搜索 季度映射失败: {e}")
+                    return None
+
+            season_mapping_task = asyncio.create_task(get_season_mapping())
 
         episode_info = {
             "season": season_to_filter,
@@ -314,6 +355,24 @@ async def search_anime_provider(
     if supplemental_results:
         await crud.set_cache(session, supplemental_cache_key, [item.model_dump() for item in supplemental_results], ttl_seconds=10800)
     # --- 缓存逻辑结束 ---
+
+    # 等待季度映射任务完成并应用结果
+    if season_mapping_task:
+        try:
+            season_name = await season_mapping_task
+            if season_name:
+                logger.info(f"✓ 主页搜索 季度映射成功: S{season_to_filter:02d} → {season_name}")
+                # 应用季度名称到搜索结果中
+                for item in sorted_results:
+                    if item.type == 'tv_series' and item.season == season_to_filter:
+                        if title_contains_season_name(item.title, season_name):
+                            logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
+                        else:
+                            logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+            else:
+                logger.info(f"○ 主页搜索 季度映射: 未获取到季度名称")
+        except Exception as e:
+            logger.warning(f"主页搜索 季度映射任务执行失败: {e}")
 
     return UIProviderSearchResponse(
         results=[item.model_dump() for item in sorted_results],

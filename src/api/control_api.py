@@ -28,6 +28,9 @@ from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..search_utils import unified_search
+from ..ai.ai_matcher import AIMatcher
+from ..ai.ai_matcher_manager import AIMatcherManager
+from ..season_mapper import title_contains_season_name
 
 from ..timezone import get_now
 logger = logging.getLogger(__name__)
@@ -75,13 +78,15 @@ def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
 
+def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
+    """依赖项：从应用状态获取AI匹配器管理器"""
+    return request.app.state.ai_matcher_manager
+
 def get_title_recognition_manager(request: Request):
     """依赖项：从应用状态获取标题识别管理器"""
     return request.app.state.title_recognition_manager
 
-def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
-    """依赖项：从应用状态获取AI匹配管理器"""
-    return request.app.state.ai_matcher_manager
+
 
 # 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
 api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
@@ -473,6 +478,7 @@ async def search_media(
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -521,6 +527,44 @@ async def search_media(
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
             )
 
+        # 创建季度映射任务(如果启用) - 与搜索并行运行
+        season_mapping_task = None
+        season_name = None
+        external_search_season_mapping_enabled = await config_manager.get("externalSearchEnableTmdbSeasonMapping", "false")
+        if external_search_season_mapping_enabled.lower() == "true" and final_season and final_season > 1:
+            logger.info(f"○ 外部控制-搜索媒体 季度映射: 开始为 '{search_title}' S{final_season:02d} 获取季度名称(并行)...")
+
+            # 获取AI匹配器(如果启用)
+            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
+            ai_matcher = await ai_matcher_manager.get_matcher()
+            if ai_matcher:
+                logger.debug("外部控制-搜索媒体 季度映射: 使用AI匹配器")
+            else:
+                logger.debug("外部控制-搜索媒体 季度映射: AI匹配器未启用或初始化失败")
+
+            # 获取元数据源和自定义提示词
+            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+            sources = [metadata_source] if metadata_source else None
+
+            # 创建并行任务
+            async def get_season_mapping():
+                try:
+                    return await metadata_manager.get_season_name(
+                        title=search_title,
+                        season_number=final_season,
+                        year=None,
+                        sources=sources,
+                        ai_matcher=ai_matcher,
+                        user=user,
+                        custom_prompt=custom_prompt if custom_prompt else None
+                    )
+                except Exception as e:
+                    logger.warning(f"外部控制-搜索媒体 季度映射失败: {e}")
+                    return None
+
+            season_mapping_task = asyncio.create_task(get_season_mapping())
+
         # 使用统一的搜索函数（不进行排序，后面自己处理）
         results = await unified_search(
             search_term=search_title,
@@ -558,6 +602,24 @@ async def search_media(
             return (source_order_map.get(item.provider, 999), -fuzz.token_set_ratio(keyword, item.title))
 
         sorted_results = sorted(results, key=sort_key)
+
+        # 等待季度映射任务完成并应用结果
+        if season_mapping_task:
+            try:
+                season_name = await season_mapping_task
+                if season_name:
+                    logger.info(f"✓ 外部控制-搜索媒体 季度映射成功: S{final_season:02d} → {season_name}")
+                    # 应用季度名称到搜索结果中
+                    for item in sorted_results:
+                        if item.type == 'tv_series' and item.season == final_season:
+                            if title_contains_season_name(item.title, season_name):
+                                logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
+                            else:
+                                logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+                else:
+                    logger.info(f"○ 外部控制-搜索媒体 季度映射: 未获取到季度名称")
+            except Exception as e:
+                logger.warning(f"外部控制-搜索媒体 季度映射任务执行失败: {e}")
 
         search_id = str(uuid.uuid4())
         indexed_results = [ControlSearchResultItem(**r.model_dump(), resultIndex=i) for i, r in enumerate(sorted_results)]

@@ -33,6 +33,7 @@ from .api.dependencies import get_cache_manager, get_ai_matcher_manager
 from .search_utils import unified_search
 from .ai.ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
+from .season_mapper import title_contains_season_name
 from .models import ProviderEpisodeInfo
 from .commands import handle_command
 
@@ -1113,6 +1114,44 @@ async def _execute_fallback_search_task(
             else None
         )
 
+        # 创建季度映射任务(如果启用) - 与搜索并行运行
+        season_mapping_task = None
+        season_name = None
+        fallback_search_season_mapping_enabled = await config_manager.get("fallbackSearchEnableTmdbSeasonMapping", "false")
+        if fallback_search_season_mapping_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
+            logger.info(f"○ 后备搜索 季度映射: 开始为 '{search_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
+
+            # 获取AI匹配器(如果启用)
+            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
+            ai_matcher = await ai_matcher_manager.get_matcher()
+            if ai_matcher:
+                logger.debug("后备搜索 季度映射: 使用AI匹配器")
+            else:
+                logger.debug("后备搜索 季度映射: AI匹配器未启用或初始化失败")
+
+            # 获取元数据源和自定义提示词
+            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
+            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
+            sources = [metadata_source] if metadata_source else None
+
+            # 创建并行任务
+            async def get_season_mapping():
+                try:
+                    return await metadata_manager.get_season_name(
+                        title=search_title,
+                        season_number=season_to_filter,
+                        year=None,
+                        sources=sources,
+                        ai_matcher=ai_matcher,
+                        user=None,
+                        custom_prompt=custom_prompt if custom_prompt else None
+                    )
+                except Exception as e:
+                    logger.warning(f"后备搜索 季度映射失败: {e}")
+                    return None
+
+            season_mapping_task = asyncio.create_task(get_season_mapping())
+
         # 更新进度
         await progress_callback(10, "开始搜索...")
 
@@ -1165,6 +1204,24 @@ async def _execute_fallback_search_task(
                 f"根据指定的季度 ({season_to_filter}) 进行过滤，从 {original_count} 个结果中保留了 {len(filtered_by_season)} 个。"
             )
             sorted_results = filtered_by_season
+
+        # 等待季度映射任务完成并应用结果
+        if season_mapping_task:
+            try:
+                season_name = await season_mapping_task
+                if season_name:
+                    logger.info(f"✓ 后备搜索 季度映射成功: S{season_to_filter:02d} → {season_name}")
+                    # 应用季度名称到搜索结果中
+                    for item in sorted_results:
+                        if item.type == 'tv_series' and item.season == season_to_filter:
+                            if title_contains_season_name(item.title, season_name):
+                                logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
+                            else:
+                                logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+                else:
+                    logger.info(f"○ 后备搜索 季度映射: 未获取到季度名称")
+            except Exception as e:
+                logger.warning(f"后备搜索 季度映射任务执行失败: {e}")
 
         # 7. 转换为DandanSearchAnimeItem格式
         await progress_callback(80, "转换搜索结果...")
