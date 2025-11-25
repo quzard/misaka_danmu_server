@@ -1682,7 +1682,8 @@ async def get_bangumi_details(
     bangumiId: str = Path(..., description="作品ID, A开头的备用ID, 或真实的Bangumi ID"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager)
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     模拟 dandanplay 的 /api/v2/bangumi/{bangumiId} 接口。
