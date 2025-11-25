@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { changePassword, logout } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { useNavigate } from 'react-router-dom'
-import { RoutePaths } from '../../../general/constants'
+import { RoutePaths } from '../../../general/RoutePaths'
 import Cookies from 'js-cookie'
 
 export const Security = () => {
