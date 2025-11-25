@@ -13,16 +13,11 @@ import { isMobileAtom } from '../../../store/index.js'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
-  const key = searchParams.get('key') || 'security'
+  const key = searchParams.get('key') || 'parameters'
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
 
   const tabItems = [
-    {
-      label: '账户安全',
-      key: 'security',
-      children: <Security />,
-    },
     {
       label: '参数配置',
       key: 'parameters',
@@ -52,6 +47,11 @@ export const Setting = () => {
       label: 'AI辅助增强',
       key: 'automatch',
       children: <AutoMatchSetting />,
+    },
+    {
+      label: '账户安全',
+      key: 'security',
+      children: <Security />,
     },
   ]
 

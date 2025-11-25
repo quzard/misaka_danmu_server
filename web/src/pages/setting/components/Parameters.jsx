@@ -6,6 +6,7 @@ import {
   saveGithubToken,
   verifyGithubToken,
 } from '../../../apis'
+import { TrustedProxies } from './TrustedProxies'
 
 export const Parameters = () => {
   const [form] = Form.useForm()
@@ -103,7 +104,7 @@ export const Parameters = () => {
         </Form>
       </Card>
 
-
+      <TrustedProxies />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic } from 'antd'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic, AutoComplete } from 'antd'
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
@@ -7,6 +7,8 @@ import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import AIMetrics from './AIMetrics'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store/index.js'
 
 const CustomSwitch = (props) => {
   return <Switch {...props} />
@@ -28,6 +30,7 @@ const AutoMatchSetting = () => {
   const [aiProviders, setAiProviders] = useState([])
   const [providersLoading, setProvidersLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
+  const isMobile = useAtomValue(isMobileAtom)
 
   // 加载配置
   const loadSettings = async (providers) => {
@@ -302,6 +305,23 @@ const AutoMatchSetting = () => {
     return providerConfig?.modelPlaceholder || '请输入模型名称'
   }
 
+  // 获取可选模型列表
+  const getAvailableModels = (provider) => {
+    const providerConfig = aiProviders.find(p => p.id === provider)
+    const models = providerConfig?.availableModels || []
+    return models.map(model => ({
+      value: model.value,
+      label: (
+        <div>
+          <div style={{ fontWeight: 500 }}>{model.label}</div>
+          {model.description && (
+            <div style={{ fontSize: '12px', color: '#999' }}>{model.description}</div>
+          )}
+        </div>
+      )
+    }))
+  }
+
   // 获取Base URL占位符
   const getBaseUrlPlaceholder = (provider) => {
     const providerConfig = aiProviders.find(p => p.id === provider)
@@ -462,15 +482,19 @@ const AutoMatchSetting = () => {
                     label={
                       <Space>
                         <span>模型名称</span>
-                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
+                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。可从下拉列表选择或自定义输入。">
                           <QuestionCircleOutlined />
                         </Tooltip>
                       </Space>
                     }
                     rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
                   >
-                    <Input
+                    <AutoComplete
+                      options={getAvailableModels(getFieldValue('aiProvider'))}
                       placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
+                      filterOption={(inputValue, option) =>
+                        option.value.toLowerCase().includes(inputValue.toLowerCase())
+                      }
                     />
                   </Form.Item>
                 )}
@@ -562,18 +586,32 @@ const AutoMatchSetting = () => {
               )}
 
               {/* 测试、记录开关和保存按钮 */}
-              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+              <div style={{
+                marginTop: '24px',
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '16px'
+              }}>
                 <Button
                   icon={<ThunderboltOutlined />}
                   onClick={handleTestConnection}
                   loading={testing}
                   size="large"
-                  style={{ minWidth: '150px' }}
+                  style={{ minWidth: '150px', width: isMobile ? '100%' : 'auto' }}
                 >
                   测试 AI 连接
                 </Button>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: isMobile ? '0' : '0 16px',
+                  width: isMobile ? '100%' : 'auto',
+                  justifyContent: isMobile ? 'center' : 'flex-start'
+                }}>
                   <span style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>记录响应</span>
                   <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
                     <CustomSwitch
@@ -592,7 +630,7 @@ const AutoMatchSetting = () => {
                   onClick={handleSaveConnectionConfig}
                   loading={saving}
                   size="large"
-                  style={{ minWidth: '150px' }}
+                  style={{ minWidth: '150px', width: isMobile ? '100%' : 'auto' }}
                 >
                   保存 AI 连接配置
                 </Button>

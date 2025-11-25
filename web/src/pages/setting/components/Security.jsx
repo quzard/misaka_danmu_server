@@ -5,9 +5,11 @@ import {
 } from '@ant-design/icons'
 import { Button, Card, Form, Input, message } from 'antd'
 import { useState } from 'react'
-import { changePassword } from '../../../apis'
+import { changePassword, logout } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
-import { TrustedProxies } from './TrustedProxies'
+import { useNavigate } from 'react-router-dom'
+import { RoutePaths } from '../../../general/constants'
+import Cookies from 'js-cookie'
 
 export const Security = () => {
   const [form] = Form.useForm()
@@ -16,6 +18,7 @@ export const Security = () => {
   const [showPassword3, setShowPassword3] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const messageApi = useMessage()
+  const navigate = useNavigate()
 
   const onSave = async () => {
     try {
@@ -31,9 +34,15 @@ export const Security = () => {
     }
   }
 
+  const onLogout = async () => {
+    await logout()
+    Cookies.remove('danmu_token', { path: '/' })
+    navigate(RoutePaths.LOGIN)
+  }
+
   return (
     <div className="my-6">
-      <Card title="修改密码">
+      <Card title="修改密码" className="mb-4">
         <div className="mb-4">
           如果您是使用初始随机密码登录的，建议您在此修改为自己的密码。
         </div>
@@ -119,7 +128,17 @@ export const Security = () => {
           </Form.Item>
         </Form>
       </Card>
-      <TrustedProxies />
+
+      <Card title="退出登录">
+        <div className="mb-4">
+          退出当前账户，返回登录页面。
+        </div>
+        <div className="px-6 pb-6">
+          <Button type="primary" danger onClick={onLogout}>
+            退出登录
+          </Button>
+        </div>
+      </Card>
     </div>
   )
 }
