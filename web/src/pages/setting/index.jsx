@@ -1,5 +1,4 @@
 import { Tabs } from 'antd'
-import { Security } from './components/Security'
 import { Webhook } from './components/Webhook'
 import { Proxy } from './components/Proxy'
 import { Parameters } from './components/Parameters'
@@ -47,11 +46,6 @@ export const Setting = () => {
       label: 'AI辅助增强',
       key: 'automatch',
       children: <AutoMatchSetting />,
-    },
-    {
-      label: '账户安全',
-      key: 'security',
-      children: <Security />,
     },
   ]
 

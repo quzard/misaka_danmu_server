@@ -6,9 +6,11 @@ import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
-import { Tag, Dropdown } from 'antd';
-import { logout } from '../apis/index.js'
+import { Tag, Dropdown, Modal, Form, Input, Button } from 'antd';
+import { logout, changePassword } from '../apis/index.js'
 import Cookies from 'js-cookie'
+import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
+import { useMessage } from '../MessageContext'
 import {
   useFloating,
   autoUpdate,
@@ -248,58 +250,191 @@ const MobileHeader = ({ activeKey }) => {
 const DesktopHeader = ({ activeKey, version }) => {
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
+  const messageApi = useMessage()
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [form] = Form.useForm()
+  const [showPassword1, setShowPassword1] = useState(false)
+  const [showPassword2, setShowPassword2] = useState(false)
+  const [showPassword3, setShowPassword3] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
 
   const onLogout = async () => {
     await logout()
     Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
   }
+
+  const handleChangePassword = async () => {
+    try {
+      setIsLoading(true)
+      const values = await form.validateFields()
+      await changePassword(values)
+      form.resetFields()
+      messageApi.success('修改成功')
+      setIsPasswordModalOpen(false)
+    } catch (error) {
+      messageApi.error('修改失败')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
-    <div className="fixed top-0 left-0 w-full shadow-box z-50 py-2 bg-base-bg">
-      <div className="flex justify-start items-center max-w-[1200px] mx-auto w-full px-6 gap-4">
-        <div onClick={() => navigate(RoutePaths.HOME)}>
-          <img src="/images/logo.png" className="h-12 cursor-pointer" />
-        </div>
-        <div className="flex items-center justify-center">
-          {navItems.map(it => (
-            <div
-              key={it.key}
-              className={classNames(
-                'text-base font-semibold cursor-pointer mx-3',
-                {
-                  'text-primary': activeKey === it.key,
-                }
-              )}
-              onClick={() => navigate(it.key)}
+    <>
+      <div className="fixed top-0 left-0 w-full shadow-box z-50 py-2 bg-base-bg">
+        <div className="flex justify-start items-center max-w-[1200px] mx-auto w-full px-6 gap-4">
+          <div onClick={() => navigate(RoutePaths.HOME)}>
+            <img src="/images/logo.png" className="h-12 cursor-pointer" />
+          </div>
+          <div className="flex items-center justify-center">
+            {navItems.map(it => (
+              <div
+                key={it.key}
+                className={classNames(
+                  'text-base font-semibold cursor-pointer mx-3',
+                  {
+                    'text-primary': activeKey === it.key,
+                  }
+                )}
+                onClick={() => navigate(it.key)}
+              >
+                {it.label}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-center gap-6 ml-auto">
+            <Tag>{version}</Tag>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'changePassword',
+                    label: (
+                      <div onClick={() => setIsPasswordModalOpen(true)} className="text-base">
+                        修改密码
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'logout',
+                    label: (
+                      <div onClick={onLogout} className="text-base">
+                        退出登录
+                      </div>
+                    ),
+                  },
+                ],
+              }}
             >
-              {it.label}
-            </div>
-          ))}
-        </div>
-        <div className="flex items-center justify-center gap-6 ml-auto">
-          <Tag>{version}</Tag>
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'logout',
-                  label: (
-                    <div onClick={onLogout} className="text-base">
-                      退出登录
-                    </div>
-                  ),
-                },
-              ],
-            }}
-          >
-            <div className="text-primary font-medium cursor-pointer flex items-center gap-1">
-              <MyIcon icon="user" size={18} />
-              {userinfo?.username}
-            </div>
-          </Dropdown>
-          <DarkModeToggle />
+              <div className="text-primary font-medium cursor-pointer flex items-center gap-1">
+                <MyIcon icon="user" size={18} />
+                {userinfo?.username}
+              </div>
+            </Dropdown>
+            <DarkModeToggle />
+          </div>
         </div>
       </div>
-    </div>
+
+      <Modal
+        title="修改密码"
+        open={isPasswordModalOpen}
+        onCancel={() => {
+          setIsPasswordModalOpen(false)
+          form.resetFields()
+        }}
+        footer={null}
+        width={500}
+      >
+        <div className="mb-4">
+          如果您是使用初始随机密码登录的，建议您在此修改为自己的密码。
+        </div>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleChangePassword}
+        >
+          <Form.Item
+            name="oldPassword"
+            label="当前密码"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined className="text-gray-400" />}
+              placeholder="请输入当前密码"
+              visibilityToggle={{
+                visible: showPassword1,
+                onVisibleChange: setShowPassword1,
+              }}
+              iconRender={visible =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            name="newPassword"
+            label="新密码"
+            rules={[{ required: true, message: '请输入新密码' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined className="text-gray-400" />}
+              placeholder="请输入新密码"
+              visibilityToggle={{
+                visible: showPassword2,
+                onVisibleChange: setShowPassword2,
+              }}
+              iconRender={visible =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            name="checkPassword"
+            label="确认新密码"
+            dependencies={['newPassword']}
+            rules={[
+              {
+                required: true,
+                message: '请输入新密码',
+              },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('newPassword') === value) {
+                    return Promise.resolve()
+                  }
+                  return Promise.reject(new Error('新密码不匹配'))
+                },
+              }),
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined className="text-gray-400" />}
+              placeholder="请输入新密码"
+              visibilityToggle={{
+                visible: showPassword3,
+                onVisibleChange: setShowPassword3,
+              }}
+              iconRender={visible =>
+                visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
+              }
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => {
+                setIsPasswordModalOpen(false)
+                form.resetFields()
+              }}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={isLoading}>
+                确认修改
+              </Button>
+            </div>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   )
 }
