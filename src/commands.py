@@ -21,7 +21,11 @@ async def _get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optiona
     cache_key = f"{prefix}{key}"
     cache_entry = await crud.get_cache(session, cache_key)
     if cache_entry:
-        return cache_entry.value
+        # cache_entry 可能是对象（有 .value 属性）或直接是值
+        if hasattr(cache_entry, 'value'):
+            return cache_entry.value
+        else:
+            return cache_entry
     return None
 
 
