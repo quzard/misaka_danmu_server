@@ -4,18 +4,31 @@
 """
 import time
 import logging
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .dandan_api import (
-    DandanSearchAnimeResponse, 
-    DandanSearchAnimeItem,
-    _get_db_cache,
-    _set_db_cache
-)
 from . import crud
 
+if TYPE_CHECKING:
+    from .dandan_api import DandanSearchAnimeResponse
+
 logger = logging.getLogger(__name__)
+
+
+# 数据库缓存辅助函数（避免循环导入）
+async def _get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optional[Any]:
+    """从数据库缓存中获取数据"""
+    cache_key = f"{prefix}{key}"
+    cache_entry = await crud.get_cache(session, cache_key)
+    if cache_entry:
+        return cache_entry.value
+    return None
+
+
+async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any, ttl: int):
+    """设置数据库缓存"""
+    cache_key = f"{prefix}{key}"
+    await crud.set_cache(session, cache_key, value, ttl)
 
 
 def parse_command(search_term: str) -> Optional[Tuple[str, List[str]]]:
@@ -79,18 +92,18 @@ class CommandHandler:
         
         return (True, None)
     
-    async def execute(self, token: str, args: List[str], session: AsyncSession, 
-                     config_manager, **kwargs) -> DandanSearchAnimeResponse:
+    async def execute(self, token: str, args: List[str], session: AsyncSession,
+                     config_manager, **kwargs):
         """
         执行指令，子类需要实现
-        
+
         Args:
             token: 用户token
             args: 指令参数
             session: 数据库会话
             config_manager: 配置管理器
             **kwargs: 其他依赖
-            
+
         Returns:
             DandanSearchAnimeResponse
         """
@@ -120,27 +133,30 @@ class ClearCacheCommand(CommandHandler):
         )
     
     async def execute(self, token: str, args: List[str], session: AsyncSession,
-                     config_manager, **kwargs) -> DandanSearchAnimeResponse:
+                     config_manager, **kwargs):
         """执行清理缓存"""
+        # 运行时导入，避免循环依赖
+        from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+
         # 获取自定义域名
         custom_domain = await config_manager.get("customApiDomain", "")
         image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
-        
+
         try:
             # 获取cache_manager
             cache_manager = kwargs.get('cache_manager')
-            
+
             # 清理内存缓存
             config_manager.clear_cache()
-            
+
             # 清理数据库缓存
             await crud.clear_all_cache(session)
-            
+
             # 记录执行时间
             await self.record_execution(token, session)
-            
+
             logger.info(f"指令 @{self.name} 执行成功，token={token}")
-            
+
             return DandanSearchAnimeResponse(animes=[
                 DandanSearchAnimeItem(
                     animeId=999999998,  # 指令响应专用ID
@@ -185,7 +201,7 @@ COMMAND_HANDLERS: Dict[str, CommandHandler] = {
 
 
 async def handle_command(search_term: str, token: str, session: AsyncSession,
-                        config_manager, cache_manager, **kwargs) -> Optional[DandanSearchAnimeResponse]:
+                        config_manager, cache_manager, **kwargs):
     """
     处理指令
 
@@ -200,6 +216,9 @@ async def handle_command(search_term: str, token: str, session: AsyncSession,
     Returns:
         指令响应 或 None（不是指令）
     """
+    # 运行时导入，避免循环依赖
+    from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+
     parsed = parse_command(search_term)
     if not parsed:
         return None
