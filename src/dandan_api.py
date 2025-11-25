@@ -34,6 +34,7 @@ from .search_utils import unified_search
 from .ai.ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
 from .models import ProviderEpisodeInfo
+from .commands import handle_command
 
 logger = logging.getLogger(__name__)
 
@@ -858,6 +859,10 @@ async def _handle_fallback_search(
     # 生成搜索任务的唯一标识
     search_key = f"search_{hash(search_term + token)}"
 
+    # 获取自定义域名（用于拼接imageUrl）
+    custom_domain = await config_manager.get("customApiDomain", "")
+    image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
     # 检查该token是否已有正在进行的搜索任务
     existing_search_key = await _get_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
     if existing_search_key:
@@ -873,7 +878,7 @@ async def _handle_fallback_search(
                     animeTitle=f"{existing_search['search_term']} 搜索正在运行",
                     type="tvseries",
                     typeDescription=f"{progress}%",
-                    imageUrl="/static/logo.png",
+                    imageUrl=image_url,
                     startDate="2025-01-01T00:00:00+08:00",
                     year=2025,
                     episodeCount=1,
@@ -894,7 +899,7 @@ async def _handle_fallback_search(
                 animeTitle=f"{search_term} 匹配后备正在运行",
                 type="tvseries",
                 typeDescription=f"{progress}%",
-                imageUrl="/static/logo.png",
+                imageUrl=image_url,
                 startDate="2025-01-01T00:00:00+08:00",
                 year=2025,
                 episodeCount=1,
@@ -917,40 +922,22 @@ async def _handle_fallback_search(
         # 如果搜索正在进行中，返回搜索状态
         if search_info["status"] == "running":
             elapsed_time = time.time() - search_info["start_time"]
-            if elapsed_time >= 5:  # 5秒后返回搜索中状态
-                progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=999999999,  # 使用特定的不会冲突的数字
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{search_term} 搜索正在运行",
-                        type="tvseries",
-                        typeDescription=f"{progress}%",
-                        imageUrl="/static/logo.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
-            else:
-                # 5秒内返回搜索启动状态
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=999999999,
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{search_term} 搜索正在启动",
-                        type="tvseries",
-                        typeDescription="搜索正在启动",
-                        imageUrl="/static/logo.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
+            progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
+            return DandanSearchAnimeResponse(animes=[
+                DandanSearchAnimeItem(
+                    animeId=999999999,  # 使用特定的不会冲突的数字
+                    bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                    animeTitle=f"{search_term} 搜索正在运行",
+                    type="tvseries",
+                    typeDescription=f"{progress}%",
+                    imageUrl=image_url,
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=1,
+                    rating=0.0,
+                    isFavorited=False
+                )
+            ])
 
     # 解析搜索词，提取季度和集数信息
     parsed_info = parse_search_keyword(search_term)
@@ -1006,15 +993,47 @@ async def _handle_fallback_search(
         search_info["status"] = "failed"
         return DandanSearchAnimeResponse(animes=[])
 
-    # 立即返回"搜索中"状态，让用户知道搜索正在进行
+    # ===== 15秒等待机制 =====
+    # 等待最多15秒，如果期间完成就直接返回结果
+    max_wait_time = 15.0
+    start_time = time.time()
+    check_interval = 0.5  # 每0.5秒检查一次
+
+    while time.time() - start_time < max_wait_time:
+        await asyncio.sleep(check_interval)
+
+        # 检查搜索状态
+        current_search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if current_search_info:
+            if current_search_info["status"] == "completed":
+                # 搜索完成，直接返回结果
+                logger.info(f"后备搜索在 {time.time() - start_time:.2f} 秒内完成，直接返回结果")
+                return DandanSearchAnimeResponse(animes=current_search_info["results"])
+            elif current_search_info["status"] == "failed":
+                # 搜索失败
+                logger.warning(f"后备搜索在 {time.time() - start_time:.2f} 秒内失败")
+                return DandanSearchAnimeResponse(animes=[])
+
+    # 超过15秒仍未完成，返回进度状态
+    logger.info(f"后备搜索超过15秒未完成，返回进度状态")
+
+    # 获取自定义域名
+    custom_domain = await config_manager.get("customApiDomain", "")
+    image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
+    # 获取当前进度
+    final_search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+    elapsed_time = time.time() - search_info["start_time"]
+    progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
+
     return DandanSearchAnimeResponse(animes=[
         DandanSearchAnimeItem(
             animeId=999999999,  # 使用特定的不会冲突的数字
             bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-            animeTitle=f"{search_term} 搜索正在启动",
+            animeTitle=f"{search_term} 搜索正在运行",
             type="tvseries",
-            typeDescription="0%",
-            imageUrl="/static/logo.png",
+            typeDescription=f"{progress}%",
+            imageUrl=image_url,
             startDate="2025-01-01T00:00:00+08:00",
             year=2025,
             episodeCount=1,
@@ -1516,6 +1535,7 @@ async def search_anime_for_dandan(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    cache_manager: CacheManager = Depends(get_cache_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -1525,6 +1545,7 @@ async def search_anime_for_dandan(
     它会搜索 **本地弹幕库** 中的番剧信息，不包含分集列表。
     新增：支持后备搜索功能，当库内无结果或指定集数不存在时，触发全网搜索。
     支持SXXEXX格式的季度和集数搜索。
+    支持指令功能：以@开头的搜索词作为指令。
     """
     search_term = keyword or anime
     if not search_term:
@@ -1532,6 +1553,19 @@ async def search_anime_for_dandan(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Missing required query parameter: 'keyword' or 'anime'"
         )
+
+    # ===== 指令处理 =====
+    command_response = await handle_command(
+        search_term, token, session, config_manager, cache_manager,
+        scraper_manager=scraper_manager,
+        metadata_manager=metadata_manager,
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager,
+        task_manager=task_manager
+    )
+    if command_response:
+        return command_response
+    # ===== 指令处理结束 =====
 
     # 解析搜索关键词，提取标题、季数和集数
     parsed_info = parse_search_keyword(search_term)
@@ -1812,11 +1846,15 @@ async def get_bangumi_details(
                                 logger.error(f"获取分集列表失败: {e}")
                                 episodes = []
 
+                            # 获取自定义域名
+                            custom_domain = await config_manager.get("customApiDomain", "")
+                            image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
                             bangumi_details = BangumiDetails(
                                 animeId=anime_id,  # 使用分配的animeId
                                 bangumiId=bangumiId,
                                 animeTitle=f"{original_title} （来源：{provider}）",
-                                imageUrl="/static/logo.png",
+                                imageUrl=image_url,
                                 searchKeyword=original_title,
                                 type="other",
                                 typeDescription="其他",
