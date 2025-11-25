@@ -52,7 +52,7 @@ from ..dependencies import (
     get_webhook_manager, get_metadata_manager, get_config_manager,
     get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
-from ...ai.ai_matcher import AIMatcherManager
+from ...ai.ai_matcher_manager import AIMatcherManager
 from ...season_mapper import title_contains_season_name
 
 from ..ui_models import (

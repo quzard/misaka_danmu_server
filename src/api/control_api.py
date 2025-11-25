@@ -29,7 +29,6 @@ from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..search_utils import unified_search
 from ..ai.ai_matcher import AIMatcher
-from ..ai.ai_matcher_manager import AIMatcherManager
 from ..season_mapper import title_contains_season_name
 
 from ..timezone import get_now
