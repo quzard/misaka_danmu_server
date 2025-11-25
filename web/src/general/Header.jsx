@@ -257,7 +257,7 @@ const MobileHeader = ({ activeKey }) => {
                     {
                       key: 'change-password',
                       label: '修改密码',
-                      icon: 'lock',
+                      icon: 'key',
                     },
                     {
                       key: 'logout',
