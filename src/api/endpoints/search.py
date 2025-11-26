@@ -96,7 +96,8 @@ async def search_anime_provider(
     session: AsyncSession = Depends(get_db_session),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
@@ -172,7 +173,6 @@ async def search_anime_provider(
                 season_to_map = 2  # 默认从第2季开始检查
 
             # 获取AI匹配器(如果启用)
-            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager(request)
             ai_matcher = await ai_matcher_manager.get_matcher()
             if ai_matcher:
                 logger.debug("主页搜索 季度映射: 使用AI匹配器")
