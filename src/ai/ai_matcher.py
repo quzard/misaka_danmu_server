@@ -1121,18 +1121,18 @@ class AIMatcher:
             import re
             match = re.search(r'\d+', ai_response)
             if match:
-                selected_season = int(match.group(1))
+                selected_season = int(match.group(0))
                 # 验证选择的季度是否在选项中
                 for option in season_options:
                     if option.get("season_number") == selected_season:
-                        logger.info(f"AI季度匹配: '{title}' → S{selected_season}")
+                        self.logger.info(f"AI季度匹配: '{title}' → S{selected_season}")
                         return selected_season
 
-            logger.debug(f"AI季度匹配: '{title}' → 无法解析响应: {ai_response}")
+            self.logger.debug(f"AI季度匹配: '{title}' → 无法解析响应: {ai_response}")
             return None
 
         except Exception as e:
-            logger.error(f"AI季度匹配失败: {e}")
+            self.logger.error(f"AI季度匹配失败: {e}")
             return None
 
     async def select_metadata_result(
