@@ -853,7 +853,8 @@ async def _handle_fallback_search(
     config_manager: ConfigManager,
     rate_limiter: RateLimiter,
     title_recognition_manager,
-    task_manager: TaskManager
+    task_manager: TaskManager,
+    ai_matcher_manager: AIMatcherManager
 ) -> DandanSearchAnimeResponse:
     """
     处理后备搜索逻辑
@@ -961,11 +962,14 @@ async def _handle_fallback_search(
     async def fallback_search_coro_factory(session_inner: AsyncSession, progress_callback):
         """后备搜索任务的协程工厂"""
         try:
+            # 获取AI匹配器
+            ai_matcher_manager_local = AIMatcherManager(session_factory=session_inner.session_factory, config_manager=config_manager)
+
             # 执行搜索任务
             await _execute_fallback_search_task(
                 search_term, search_key, token, session_inner, progress_callback,
                 scraper_manager, metadata_manager, config_manager,
-                rate_limiter, title_recognition_manager
+                rate_limiter, title_recognition_manager, ai_matcher_manager_local
             )
         except Exception as e:
             logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
@@ -1057,7 +1061,8 @@ async def _execute_fallback_search_task(
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
     rate_limiter: RateLimiter,
-    title_recognition_manager
+    title_recognition_manager,
+    ai_matcher_manager: AIMatcherManager
 ):
     """执行后备搜索任务。"""
     try:
@@ -1176,9 +1181,8 @@ async def _execute_fallback_search_task(
         # 使用统一的AI类型和季度映射修正函数
         if fallback_search_season_mapping_enabled.lower() == "true":
             try:
-                # 获取AI匹配器
-                ai_matcher_manager_local: AIMatcherManager = get_ai_matcher_manager()
-                ai_matcher = await ai_matcher_manager_local.get_matcher()
+                # 获取AI匹配器（使用函数参数）
+                ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
                     logger.info(f"○ 后备搜索 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
 
@@ -1708,10 +1712,13 @@ async def search_anime_for_dandan(
         elif season_to_search is not None:
             search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}"
 
+        # 创建一个临时的ai_matcher_manager用于传递（实际会在协程工厂中重新创建）
+        ai_matcher_manager_local = AIMatcherManager(session_factory=session.session_factory, config_manager=config_manager)
+
         return await _handle_fallback_search(
             search_title_for_fallback, token, session, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager,
-            task_manager
+            task_manager, ai_matcher_manager_local
         )
 
     # 本地库无结果且未启用后备搜索，返回空结果

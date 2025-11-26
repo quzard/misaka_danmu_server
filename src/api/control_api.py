@@ -479,6 +479,7 @@ async def search_media(
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -573,9 +574,8 @@ async def search_media(
         # 使用统一的AI类型和季度映射修正函数
         if external_search_season_mapping_enabled.lower() == "true":
             try:
-                # 获取AI匹配器
-                ai_matcher_manager_local: AIMatcherManager = get_ai_matcher_manager()
-                ai_matcher = await ai_matcher_manager_local.get_matcher()
+                # 获取AI匹配器（使用依赖注入的实例）
+                ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
                     logger.info(f"○ 外部控制-搜索媒体 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
 

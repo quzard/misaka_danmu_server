@@ -89,6 +89,7 @@ async def search_anime_local(
 
 @router.get("/search/provider", response_model=UIProviderSearchResponse, summary="从外部数据源搜索节目")
 async def search_anime_provider(
+    request: Request,
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
@@ -171,7 +172,7 @@ async def search_anime_provider(
                 season_to_map = 2  # 默认从第2季开始检查
 
             # 获取AI匹配器(如果启用)
-            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
+            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager(request)
             ai_matcher = await ai_matcher_manager.get_matcher()
             if ai_matcher:
                 logger.debug("主页搜索 季度映射: 使用AI匹配器")
