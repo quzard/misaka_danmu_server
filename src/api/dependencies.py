@@ -50,6 +50,11 @@ async def get_rate_limiter(request: Request) -> RateLimiter:
     return request.app.state.rate_limiter
 
 
+async def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
+    """依赖项：从应用状态获取AI匹配器管理器"""
+    return request.app.state.ai_matcher_manager
+
+
 async def get_title_recognition_manager(request: Request):
     """依赖项：从应用状态获取标题识别管理器"""
     return request.app.state.title_recognition_manager

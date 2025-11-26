@@ -153,54 +153,10 @@ async def search_anime_provider(
         logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
         # --- 缓存逻辑结束 ---
 
-        # 创建季度映射任务(如果启用) - 与搜索并行运行
-        season_mapping_task = None
-        season_name = None
-        home_search_season_mapping_enabled = await config_manager.get("homeSearchEnableTmdbSeasonMapping", "false")
+        # V2.1.6: 使用统一的ai_type_and_season_mapping_and_correction函数
 
-        # 季度映射：启用时，使用统一逻辑进行季度映射
-        season_mapping_task = None
-        if home_search_season_mapping_enabled.lower() == "true":
-            # 确定要映射的季度
-            season_to_map = season_to_filter if season_to_filter and season_to_filter > 1 else None
-
-            if season_to_map:
-                # 用户明确指定季度：获取该季度的准确名称
-                logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' S{season_to_map:02d} 获取季度名称(并行)...")
-            else:
-                # 用户未指定季度：智能识别可能的季度
-                logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' 进行智能季度识别(并行)...")
-                season_to_map = 2  # 默认从第2季开始检查
-
-            # 获取AI匹配器(如果启用)
-            ai_matcher = await ai_matcher_manager.get_matcher()
-            if ai_matcher:
-                logger.debug("主页搜索 季度映射: 使用AI匹配器")
-            else:
-                logger.debug("主页搜索 季度映射: AI匹配器未启用或初始化失败")
-
-            # 获取元数据源和自定义提示词
-            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-            sources = [metadata_source] if metadata_source else None
-
-            # 创建并行任务：使用统一的季度映射逻辑
-            async def get_season_mapping():
-                try:
-                    return await metadata_manager.get_season_name(
-                        title=search_title,
-                        season_number=season_to_map,
-                        year=None,
-                        sources=sources,
-                        ai_matcher=ai_matcher,
-                        user=current_user,
-                        custom_prompt=custom_prompt if custom_prompt else None
-                    )
-                except Exception as e:
-                    logger.warning(f"主页搜索 季度映射失败: {e}")
-                    return None
-
-            season_mapping_task = asyncio.create_task(get_season_mapping())
+        # 获取AI匹配器用于统一的季度映射
+        ai_matcher = await ai_matcher_manager.get_matcher() if ai_matcher_manager else None
 
         episode_info = {
             "season": season_to_filter,
@@ -398,20 +354,6 @@ async def search_anime_provider(
 
         except Exception as e:
             logger.warning(f"主页搜索 统一AI映射任务执行失败: {e}")
-    elif season_mapping_task:
-        # 兼容旧逻辑（如果存在）
-        try:
-            corrected_results = await season_mapping_task
-            if corrected_results:
-                logger.info(f"✓ 主页搜索 季度映射成功: 修正了 {len(corrected_results)} 个结果的季度信息")
-                for correction in corrected_results:
-                    item = correction['item']
-                    item.season = correction['corrected_season']
-                    logger.info(f"  ✓ 季度修正: '{item.title}' → S{item.season}")
-            else:
-                logger.info(f"○ 主页搜索 季度映射: 未找到需要修正的季度信息")
-        except Exception as e:
-            logger.warning(f"主页搜索 季度映射任务执行失败: {e}")
 
     return UIProviderSearchResponse(
         results=[item.model_dump() for item in sorted_results],

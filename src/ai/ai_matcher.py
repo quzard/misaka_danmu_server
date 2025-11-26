@@ -1081,7 +1081,7 @@ class AIMatcher:
         season_options: List[Dict[str, Any]]
     ) -> Optional[int]:
         """
-        使用AI从季度选项中选择最匹配的季度
+        使用AI从季度选项中选择最匹配的季度（V2.1.6混合策略）
 
         Args:
             title: 标题
@@ -1094,12 +1094,43 @@ class AIMatcher:
             return None
 
         try:
+            # V2.1.6: 先使用算法相似度匹配
+            from ..season_mapper import title_contains_season_name
+
+            best_confidence = 0.0
+            best_season = None
+            best_season_name = ""
+
+            # 遍历所有季度选项，使用算法计算相似度
+            for option in season_options:
+                season_num = option.get("season_number", 0)
+                season_name = option.get("name", f"第{season_num}季")
+                season_aliases = option.get("aliases", [])
+
+                # 使用算法相似度计算
+                confidence = title_contains_season_name(title, season_num, season_name, season_aliases)
+
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_season = season_num
+                    best_season_name = season_name
+
+            # 如果算法相似度达到阈值(60%)，直接返回结果
+            if best_confidence >= 60.0:
+                self.logger.info(f"算法季度匹配: '{title}' → S{best_season} ({best_season_name}) (置信度: {best_confidence:.1f}%)")
+                return best_season
+
+            # 算法相似度不足，使用AI兜底
+            self.logger.debug(f"算法相似度不足: '{title}' (最高相似度: {best_confidence:.1f}% < 60.0%), 使用AI兜底")
+
             # 构建季度选项描述
             options_text = ""
             for i, option in enumerate(season_options):
                 season_num = option.get("season_number", 0)
                 season_name = option.get("name", f"第{season_num}季")
-                options_text += f"{i+1}. 第{season_num}季: {season_name}\n"
+                season_aliases = option.get("aliases", [])
+                alias_text = f" (别名: {', '.join(season_aliases)})" if season_aliases else ""
+                options_text += f"{i+1}. 第{season_num}季: {season_name}{alias_text}\n"
 
             # 使用公共AI季度匹配提示词
             from .ai_prompts import DEFAULT_AI_SEASON_MATCH_PROMPT
