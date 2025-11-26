@@ -414,13 +414,43 @@ async def ai_season_mapping_and_correction(
         list: 修正结果列表，每个元素包含修正信息
     """
     try:
-        # 1. 获取TMDB完整季度信息（带缓存）
+        # 1. 通过标题搜索TMDB获取季度信息（用于映射修正）
         tmdb_results = await _get_cached_tmdb_search(search_title, metadata_manager, logger)
         if not tmdb_results:
             logger.info(f"○ AI季度映射: 未找到 '{search_title}' 的TMDB信息")
             return []
 
-        best_tmdb_match = tmdb_results[0]
+        # 2. 如果TMDB返回多个结果，使用AI选择最佳TMDB匹配
+        if len(tmdb_results) == 1:
+            best_tmdb_match = tmdb_results[0]
+            logger.info(f"○ AI季度映射: 唯一TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.media_type})")
+        else:
+            # 多个TMDB结果时，AI选择最佳匹配
+            try:
+                query_info = {
+                    "title": search_title,
+                    "season": None,
+                    "episode": None,
+                    "year": None,
+                    "type": None
+                }
+
+                selected_index = await ai_matcher.select_best_match(
+                    query_info, tmdb_results, {}
+                )
+
+                if selected_index is not None and 0 <= selected_index < len(tmdb_results):
+                    best_tmdb_match = tmdb_results[selected_index]
+                    logger.info(f"✓ AI季度映射: AI选择TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.media_type}, ID: {best_tmdb_match.id})")
+                else:
+                    logger.error(f"⚠ AI季度映射: AI选择TMDB匹配失败，使用第一个结果")
+                    best_tmdb_match = tmdb_results[0]
+
+            except Exception as e:
+                logger.error(f"⚠ AI季度映射: TMDB匹配选择失败，使用第一个结果: {e}")
+                best_tmdb_match = tmdb_results[0]
+
+        # 3. 获取TMDB季度信息用于后续修正
         seasons_info = await metadata_manager.get_seasons("tmdb", best_tmdb_match.id)
         if not seasons_info or len(seasons_info) <= 1:
             logger.info(f"○ AI季度映射: '{search_title}' 只有1个季度或无季度信息，跳过")
@@ -430,48 +460,50 @@ async def ai_season_mapping_and_correction(
         for season in seasons_info:
             season_name = season.name or f"第{season.season_number}季"
             logger.info(f"  - 第{season.season_number}季: {season_name}")
-
-        # 2. 过滤需要检查的TV结果（优化：只检查可能需要修正的）
+        # 4. 对所有搜索结果进行AI季度修正（不是选择最佳匹配）
         tv_results = [item for item in search_results if item.type == 'tv_series']
-        # 优化：只检查未指定季度或默认第1季的结果，减少计算量
-        tv_results_to_check = [item for item in tv_results
-                              if item.season is None or item.season == 1]
-
-        if not tv_results_to_check:
-            logger.info(f"○ AI季度映射: 没有需要检查的TV结果（所有结果已指定正确季度）")
+        if not tv_results:
+            logger.info(f"○ AI季度映射: 没有TV结果需要修正")
             return []
 
-        logger.info(f"○ 开始AI季度修正，检查 {len(tv_results_to_check)} 个TV结果（已过滤优化）...")
+        logger.info(f"○ 开始AI季度修正，检查 {len(tv_results)} 个TV结果...")
 
-        # 3. 并行计算相似度和修正
+        # 5. 并行计算每个结果的季度修正
         async def calculate_best_season_for_item(item):
             """并行计算单个项目的最佳季度"""
             item_title = item.title
-            best_season = 1  # 默认第1季
+            best_season = item.season or 1  # 保持原有季度或默认第1季
             best_confidence = 0.0
             best_season_name = ""
 
-            # 并行计算与所有季度的相似度
+            # 并行计算与所有TMDB季度的相似度
             similarity_tasks = []
-            for season_info in seasons_info:
-                season_name = season_info.name or f"第{season.season_number}季"
+            for season in seasons_info:
+                season_name = season.name or f"第{season.season_number}季"
                 # 使用 asyncio.to_thread 将CPU密集型计算移到线程池
                 task = asyncio.to_thread(
                     calculate_similarity,
                     item_title.lower(),
                     season_name.lower()
                 )
-                similarity_tasks.append((task, season_info, season_name))
+                similarity_tasks.append((task, season, season_name))
 
             # 等待所有相似度计算完成
-            for task, season_info, season_name in similarity_tasks:
+            similarities = []
+            for task, season, season_name in similarity_tasks:
                 similarity = await task
-                if similarity > best_confidence:
+                similarities.append((season_name, similarity))
+                # 只有当相似度更高且达到阈值时才更新
+                if similarity > best_confidence and similarity >= similarity_threshold:
                     best_confidence = similarity
-                    best_season = season_info.season_number
+                    best_season = season.season_number
                     best_season_name = season_name
 
-            # 返回修正信息
+            # 调试：显示所有相似度比较
+            similarities_str = ", ".join([f"{name}:{sim:.1f}%" for name, sim in similarities])
+            logger.debug(f"  ○ '{item_title}' 相似度详情: {similarities_str} -> 最佳: {best_season_name} ({best_confidence:.1f}%)")
+
+            # 返回修正信息（只有需要修正的）
             if best_confidence >= similarity_threshold and item.season != best_season:
                 return {
                     'item': item,
@@ -484,11 +516,11 @@ async def ai_season_mapping_and_correction(
                 logger.debug(f"  ○ 无需修正: '{item_title}' 已是正确季度 S{best_season} (置信度: {best_confidence:.1f}%)")
                 return None
             else:
-                logger.debug(f"  ○ 相似度不足: '{item_title}' → S{best_season} (置信度: {best_confidence:.1f}% < {similarity_threshold}%)")
+                logger.debug(f"  ○ 相似度不足: '{item_title}' 保持原季度 S{item.season or '?'} (最高相似度: {best_confidence:.1f}% < {similarity_threshold}%)")
                 return None
 
         # 并行处理所有TV结果
-        tasks = [calculate_best_season_for_item(item) for item in tv_results_to_check]
+        tasks = [calculate_best_season_for_item(item) for item in tv_results]
         results = await asyncio.gather(*tasks)
 
         # 过滤有效的修正结果
@@ -503,7 +535,7 @@ async def ai_season_mapping_and_correction(
             tmdb_season_name = correction.get('tmdb_season_name', '')
             logger.info(f"  ✓ AI修正: '{item.title}' S{original_season or '?'} → S{corrected_season} ({tmdb_season_name}) (置信度: {confidence:.1f}%)")
 
-        logger.info(f"✓ AI季度映射完成: 修正了 {len(corrected_results)} 个结果的季度信息（并行优化）")
+        logger.info(f"✓ AI季度映射完成: 修正了 {len(corrected_results)} 个结果的季度信息")
         return corrected_results
 
     except Exception as e:
@@ -658,4 +690,7 @@ async def _get_cached_tmdb_search(search_title: str, metadata_manager, logger) -
     except Exception as e:
         logger.error(f"TMDB搜索失败: {search_title}, 错误: {e}")
         return []
+
+
+
 
