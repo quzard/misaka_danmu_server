@@ -101,6 +101,7 @@ class TMDBSeasonInfo(BaseModel):
     name: str
     season_number: int = Field(..., alias="seasonNumber")
     poster_path: Optional[str] = Field(None, alias="posterPath")
+    aliases: Optional[List[str]] = Field(default=[], description="季度别名列表")
 
     class Config:
         populate_by_name = True

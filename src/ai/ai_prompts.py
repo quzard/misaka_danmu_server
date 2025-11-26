@@ -367,3 +367,77 @@ DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名�
 }
 (丢弃: "Weathering with You"是另一部作品)"""
 
+# 季度识别关键词配置
+SEASON_KEYWORDS = {
+    1: [
+        '第1季', '第一季', 'season 1', 's1', '第一部',
+        'part 1', '第一部', 'series 1', 'season i', 'season ⅰ'
+    ],
+    2: [
+        '第2季', '第二季', 'season 2', 's2', '第二部',
+        'part 2', '第二部', 'series 2', 'season ii', 'season ⅱ',
+        'ii', 'ⅱ'
+    ],
+    3: [
+        '第3季', '第三季', 'season 3', 's3', '第三部',
+        'part 3', '第三部', 'series 3', 'season iii', 'season ⅲ',
+        'iii', 'ⅲ'
+    ],
+    4: [
+        '第4季', '第四季', 'season 4', 's4', '第四部',
+        'part 4', '第四部', 'series 4', 'season iv', 'season ⅳ',
+        'iv', 'ⅳ'
+    ],
+    5: [
+        '第5季', '第五季', 'season 5', 's5', '第五部',
+        'part 5', '第五部', 'series 5', 'season v', 'season ⅴ',
+        'v', 'ⅴ'
+    ],
+    6: [
+        '第6季', '第六季', 'season 6', 's6', '第六部',
+        'part 6', '第六部', 'series 6', 'season vi', 'season ⅵ',
+        'vi', 'ⅵ'
+    ]
+}
+
+# 特殊季度关键词
+SPECIAL_SEASON_KEYWORDS = {
+    'final': ['最终季', '最终季', 'final season', 'last season', '完结季'],
+    'special': ['特别篇', 'special', 'sp', 'ova', 'oad', '特别篇'],
+    'movie': ['剧场版', 'movie', '电影', '剧场版', 'the movie']
+}
+
+# AI季度匹配提示词
+DEFAULT_AI_SEASON_MATCH_PROMPT = """你是一个专业的季度识别助手，擅长分析动漫标题中的季度信息。
+
+请根据标题选择最合适的季度：
+
+标题：{title}
+
+季度选项：
+{options_text}
+
+**分析规则**:
+1. 优先识别标题中明确的季度关键词：
+   - 中文：第1季、第2季、第一季、第二季等
+   - 英文：Season 1、Season 2、S1、S2等
+   - 罗马数字：I=1, II=2, III=3, IV=4, V=5, VI=6
+   - 特殊表达：最终季=最后一季，特别篇=第0季
+
+2. 别名匹配：
+   - 注意每个季度选项都有别名，标题中的任何别名都应该匹配对应季度
+   - 例如："刀剑神域 Alicization篇" 应该匹配包含"Alicization"别名的季度
+   - 例如："刀剑神域 爱丽丝篇" 应该匹配包含"爱丽丝篇"别名的季度
+
+3. 语义理解：
+   - "刀剑神域 Sword Art Online 第二季" 应该匹配第2季
+   - "鬼灭之刃 锻刀村篇" 需要根据作品实际季度判断
+   - "进击的巨人 最终季" 匹配最后一季
+
+4. 如果标题中没有明确的季度信息，请选择None
+
+**输出格式**:
+只返回季度数字（如：1, 2, 3, 4），如果无法确定则返回：None
+
+不要返回任何解释或其他文本。"""
+

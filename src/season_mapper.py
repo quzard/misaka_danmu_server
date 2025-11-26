@@ -5,7 +5,9 @@ import logging
 import re
 from typing import Optional, List, Any
 
+from pydantic import Field
 from . import models, crud
+from .ai.ai_prompts import SEASON_KEYWORDS, SPECIAL_SEASON_KEYWORDS, DEFAULT_AI_SEASON_MATCH_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,7 @@ class SeasonInfo(models.BaseModel):
     episode_count: int = 0
     air_date: Optional[str] = None
     overview: Optional[str] = None
+    aliases: Optional[List[str]] = Field(default=[], description="季度别名列表")
 
 
 class MetadataSearchCandidate(models.BaseModel):
@@ -380,15 +383,103 @@ class SeasonMapper:
                 if season_number == 0:
                     continue
 
+                # 获取季度别名
+                season_aliases = await self._get_season_aliases(
+                    tmdb_id, season_number, season_data.get("name", "")
+                )
+
                 seasons.append(SeasonInfo(
                     season_number=season_number,
                     name=season_data.get("name"),
                     episode_count=season_data.get("episode_count", 0),
                     air_date=season_data.get("air_date"),
-                    overview=season_data.get("overview")
+                    overview=season_data.get("overview"),
+                    aliases=season_aliases
                 ))
 
             return seasons
+
+    async def _get_season_aliases(
+        self,
+        tmdb_id: str,
+        season_number: int,
+        season_name: str
+    ) -> List[str]:
+        """
+        获取季度别名，包括常见的中英文表达
+
+        Args:
+            tmdb_id: TMDB ID
+            season_number: 季度号
+            season_name: 季度名称
+
+        Returns:
+            季度别名列表
+        """
+        aliases = set()
+
+        # 添加原始名称
+        if season_name:
+            aliases.add(season_name)
+
+        # 基于季度号生成常见别名
+        season_aliases_map = {
+            1: ["第一季", "第1季", "Season 1", "S1", "第一部", "Part 1"],
+            2: ["第二季", "第2季", "Season 2", "S2", "第二部", "Part 2", "II", "ⅱ"],
+            3: ["第三季", "第3季", "Season 3", "S3", "第三部", "Part 3", "III", "ⅲ"],
+            4: ["第四季", "第4季", "Season 4", "S4", "第四部", "Part 4", "IV", "ⅳ"],
+            5: ["第五季", "第5季", "Season 5", "S5", "第五部", "Part 5", "V", "ⅴ"],
+            6: ["第六季", "第6季", "Season 6", "S6", "第六部", "Part 6", "VI", "ⅵ"],
+        }
+
+        # 添加基于季度号的别名
+        if season_number in season_aliases_map:
+            aliases.update(season_aliases_map[season_number])
+
+        # 基于季度名称生成特殊别名
+        if season_name:
+            # 刀剑神域特殊处理
+            if "刀剑神域" in season_name or "Sword Art Online" in season_name:
+                if season_number == 3:
+                    aliases.update([
+                        "刀剑神域 Alicization篇",
+                        "刀剑神域 爱丽丝篇",
+                        "Sword Art Online Alicization",
+                        "SAO Alicization"
+                    ])
+                elif season_number == 4:
+                    aliases.update([
+                        "刀剑神域 Alicization War of Underworld",
+                        "刀剑神域 爱丽丝篇 异界战争",
+                        "Sword Art Online Alicization War of Underworld",
+                        "SAO War of Underworld"
+                    ])
+
+            # 进击的巨人特殊处理
+            elif "进击的巨人" in season_name or "Attack on Titan" in season_name:
+                if season_number == 4:
+                    aliases.update([
+                        "进击的巨人 最终季",
+                        "进击的巨人 The Final Season",
+                        "Attack on Titan The Final Season"
+                    ])
+
+            # 鬼灭之刃特殊处理
+            elif "鬼灭之刃" in season_name or "Demon Slayer" in season_name:
+                if season_number == 2:
+                    aliases.update([
+                        "鬼灭之刃 无限列车篇",
+                        "鬼灭之刃 锻刀村篇",
+                        "Demon Slayer Entertainment District Arc",
+                        "Demon Slayer Mugen Train Arc"
+                    ])
+                elif season_number == 3:
+                    aliases.update([
+                        "鬼灭之刃 锻刀村篇",
+                        "Demon Slayer Swordsmith Village Arc"
+                    ])
+
+        return list(aliases)
 
 
 async def ai_season_mapping_and_correction(
@@ -512,32 +603,83 @@ async def ai_season_mapping_and_correction(
             best_confidence = 0.0
             best_season_name = ""
 
-            # 并行计算与所有TMDB季度的相似度
-            similarity_tasks = []
-            for season in seasons_info:
-                season_name = season.name or f"第{season.season_number}季"
-                # 使用 asyncio.to_thread 将CPU密集型计算移到线程池
-                task = asyncio.to_thread(
-                    calculate_similarity,
-                    item_title.lower(),
-                    season_name.lower()
-                )
-                similarity_tasks.append((task, season, season_name))
+            # 首先检查标题中是否包含明确的季度关键词
+            title_lower = item_title.lower()
+            detected_season = None
 
-            # 等待所有相似度计算完成
-            similarities = []
-            for task, season, season_name in similarity_tasks:
-                similarity = await task
-                similarities.append((season_name, similarity))
-                # 只有当相似度更高且达到阈值时才更新
-                if similarity > best_confidence and similarity >= similarity_threshold:
-                    best_confidence = similarity
-                    best_season = season.season_number
-                    best_season_name = season_name
+            # 使用公共季度关键词配置
+            season_keywords = SEASON_KEYWORDS
 
-            # 调试：显示所有相似度比较
-            similarities_str = ", ".join([f"{name}:{sim:.1f}%" for name, sim in similarities])
-            logger.debug(f"  ○ '{item_title}' 相似度详情: {similarities_str} -> 最佳: {best_season_name} ({best_confidence:.1f}%)")
+            # 检查标题中的季度关键词
+            for season_num, keywords in season_keywords.items():
+                for keyword in keywords:
+                    if keyword in title_lower:
+                        detected_season = season_num
+                        break
+                if detected_season:
+                    break
+
+            # 如果检测到明确的季度关键词，优先使用
+            if detected_season:
+                # 检查TMDB是否有对应的季度
+                for season in seasons_info:
+                    if season.season_number == detected_season:
+                        season_name = season.name or f"第{season.season_number}季"
+                        # 计算相似度作为验证
+                        similarity = await asyncio.to_thread(
+                            calculate_similarity,
+                            item_title.lower(),
+                            season_name.lower()
+                        )
+                        logger.debug(f"  ○ '{item_title}' 检测到季度关键词 S{detected_season}，匹配TMDB: {season_name} (相似度: {similarity:.1f}%)")
+
+                        # 如果相似度达到阈值，使用检测到的季度
+                        if similarity >= similarity_threshold:
+                            best_season = detected_season
+                            best_confidence = similarity
+                            best_season_name = season_name
+                            break
+                else:
+                    # TMDB没有对应季度，回退到相似度匹配
+                    logger.debug(f"  ○ '{item_title}' 检测到季度关键词 S{detected_season}，但TMDB无此季度，回退到相似度匹配")
+
+            # 如果没有检测到季度关键词或相似度不足，使用AI计算相似度
+            if best_confidence < similarity_threshold:
+                # 使用AI计算与所有TMDB季度的相似度
+                try:
+                    # 构建AI比较的选项，包含别名
+                    season_options = []
+                    for season in seasons_info:
+                        season_name = season.name or f"第{season.season_number}季"
+                        season_options.append({
+                            "season_number": season.season_number,
+                            "name": season_name,
+                            "aliases": season.aliases or []
+                        })
+
+                    # 使用AI计算最佳季度匹配
+                    ai_selected_season = await ai_matcher.select_best_season_for_title(
+                        item_title, season_options
+                    )
+
+                    if ai_selected_season is not None:
+                        best_season = ai_selected_season
+                        best_confidence = 95.0  # AI选择给予高置信度
+                        # 找到对应的季度名称
+                        for season in seasons_info:
+                            if season.season_number == ai_selected_season:
+                                best_season_name = season.name or f"第{season.season_number}季"
+                                break
+                        logger.debug(f"  ○ '{item_title}' AI选择季度: S{best_season} ({best_season_name})")
+                    else:
+                        logger.debug(f"  ○ '{item_title}' AI未能确定季度，保持原季度 S{item.season or '?'}")
+
+                except Exception as e:
+                    logger.debug(f"  ○ '{item_title}' AI季度计算失败: {e}，保持原季度")
+
+            # 调试：显示最终选择
+            if best_confidence >= similarity_threshold:
+                logger.debug(f"  ○ '{item_title}' 最终选择: S{best_season} ({best_season_name}) (置信度: {best_confidence:.1f}%)")
 
             # 返回修正信息（只有需要修正的）
             if best_confidence >= similarity_threshold and item.season != best_season:
