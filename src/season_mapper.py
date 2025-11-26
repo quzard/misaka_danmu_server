@@ -423,10 +423,24 @@ async def ai_season_mapping_and_correction(
         # 2. 如果TMDB返回多个结果，使用AI选择最佳TMDB匹配
         if len(tmdb_results) == 1:
             best_tmdb_match = tmdb_results[0]
-            logger.info(f"○ AI季度映射: 唯一TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.media_type})")
+            logger.info(f"○ AI季度映射: 唯一TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.type})")
         else:
             # 多个TMDB结果时，AI选择最佳匹配
             try:
+                # 转换MetadataDetailsResponse为ProviderSearchInfo格式供AI使用
+                provider_results = []
+                for r in tmdb_results:
+                    provider_results.append(models.ProviderSearchInfo(
+                        provider="tmdb",
+                        mediaId=r.tmdbId or r.id,
+                        title=r.title,
+                        type=r.type or "unknown",
+                        season=1,  # TMDB搜索结果没有季度信息，默认为1
+                        year=r.year,
+                        imageUrl=r.imageUrl,
+                        episodeCount=None
+                    ))
+
                 query_info = {
                     "title": search_title,
                     "season": None,
@@ -436,12 +450,12 @@ async def ai_season_mapping_and_correction(
                 }
 
                 selected_index = await ai_matcher.select_best_match(
-                    query_info, tmdb_results, {}
+                    query_info, provider_results, {}
                 )
 
                 if selected_index is not None and 0 <= selected_index < len(tmdb_results):
                     best_tmdb_match = tmdb_results[selected_index]
-                    logger.info(f"✓ AI季度映射: AI选择TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.media_type}, ID: {best_tmdb_match.id})")
+                    logger.info(f"✓ AI季度映射: AI选择TMDB匹配: {best_tmdb_match.title} (类型: {best_tmdb_match.type}, ID: {best_tmdb_match.id})")
                 else:
                     logger.error(f"⚠ AI季度映射: AI选择TMDB匹配失败，使用第一个结果")
                     best_tmdb_match = tmdb_results[0]
@@ -451,7 +465,29 @@ async def ai_season_mapping_and_correction(
                 best_tmdb_match = tmdb_results[0]
 
         # 3. 获取TMDB季度信息用于后续修正
-        seasons_info = await metadata_manager.get_seasons("tmdb", best_tmdb_match.id)
+        # 确保选择的是TV类型，否则无法获取季度信息
+        if best_tmdb_match.type != 'tv':
+            logger.warning(f"⚠ AI季度映射: 选择的TMDB结果不是TV类型 ({best_tmdb_match.type})，无法获取季度信息")
+            # 尝试从TMDB结果中找到TV类型的结果
+            tv_result = None
+            for result in tmdb_results:
+                if result.type == 'tv':
+                    tv_result = result
+                    logger.info(f"✓ AI季度映射: 找到TV类型结果: {tv_result.title} (ID: {tv_result.id})")
+                    break
+
+            if not tv_result:
+                logger.error(f"⚠ AI季度映射: TMDB结果中没有TV类型，无法获取季度信息")
+                return []
+
+            best_tmdb_match = tv_result
+
+        try:
+            seasons_info = await metadata_manager.get_seasons("tmdb", best_tmdb_match.id)
+        except Exception as e:
+            logger.error(f"获取tmdb季度信息失败: {best_tmdb_match.id}, 错误: {e}")
+            return []
+
         if not seasons_info or len(seasons_info) <= 1:
             logger.info(f"○ AI季度映射: '{search_title}' 只有1个季度或无季度信息，跳过")
             return []
