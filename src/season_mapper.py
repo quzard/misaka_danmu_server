@@ -7,7 +7,7 @@ from typing import Optional, List, Any
 
 from pydantic import Field
 from . import models, crud
-from .ai.ai_prompts import SEASON_KEYWORDS, SPECIAL_SEASON_KEYWORDS, DEFAULT_AI_SEASON_MATCH_PROMPT
+from .ai.ai_prompts import SEASON_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -52,48 +52,53 @@ def calculate_similarity(str1: str, str2: str) -> float:
     return float(max_similarity)
 
 
-def title_contains_season_name(title: str, season_name: str, threshold: float = 60.0) -> bool:
+def title_contains_season_name(title: str, season_number: int, season_name: str, season_aliases: List[str] = None, threshold: float = 60.0) -> float:
     """
-    判断标题是否包含季度名称
+    判断标题是否包含季度名称并计算相似度
     使用多种策略进行匹配,适合中文动漫标题
 
     Args:
         title: 搜索结果标题 (如 "鬼灭之刃 无限列车篇")
+        season_number: 季度编号 (如 2)
         season_name: 季度名称 (如 "无限列车篇", "第2季 无限列车篇")
+        season_aliases: 季度别名列表 (如 ["无限列车篇", "Mugen Train Arc"])
         threshold: 相似度阈值 (默认60%)
 
     Returns:
-        是否包含
+        相似度百分比 (0-100), 如果不匹配返回0.0
     """
     if not title or not season_name:
-        return False
+        return 0.0
 
     from thefuzz import fuzz
 
     title_lower = title.lower().strip()
     season_name_lower = season_name.lower().strip()
 
+    # 初始化最高相似度
+    max_similarity = 0.0
+
     # 策略1: 直接子串包含 (最精确)
     if season_name_lower in title_lower:
-        return True
+        max_similarity = max(max_similarity, 95.0)
 
     # 策略2: 移除常见前缀后包含
     # 移除 "第X季"、"Season X"、"S0X" 等前缀
     season_name_cleaned = re.sub(r'^(第\d+季|season\s*\d+|s\d+)\s*', '', season_name_lower, flags=re.IGNORECASE)
     if season_name_cleaned and season_name_cleaned in title_lower:
-        return True
+        max_similarity = max(max_similarity, 90.0)
 
     # 策略3: 部分匹配 - 使用 thefuzz 的 partial_ratio
     # 适合 "无限列车篇" 在 "鬼灭之刃 无限列车篇" 中的场景
     partial_similarity = fuzz.partial_ratio(season_name_cleaned or season_name_lower, title_lower)
     if partial_similarity >= 90:  # 部分匹配要求更高的相似度
-        return True
+        max_similarity = max(max_similarity, float(partial_similarity))
 
     # 策略4: Token 集合匹配 - 检查季度名称的关键词是否都在标题中
     # 例如: "无限列车篇" 的所有字符都在 "鬼灭之刃 无限列车篇" 中
     token_set_similarity = fuzz.token_set_ratio(season_name_cleaned or season_name_lower, title_lower)
     if token_set_similarity >= threshold:
-        return True
+        max_similarity = max(max_similarity, float(token_set_similarity))
 
     # 策略5: 分词匹配 - 检查季度名称的主要词汇是否在标题中
     # 例如: "无限" "列车" "篇" 都在标题中
@@ -103,10 +108,31 @@ def title_contains_season_name(title: str, season_name: str, threshold: float = 
     if words:
         # 至少70%的关键词在标题中
         matched_words = sum(1 for word in words if word in title_lower)
-        if matched_words / len(words) >= 0.7:
-            return True
+        word_similarity = (matched_words / len(words)) * 100
+        if word_similarity >= 70:
+            max_similarity = max(max_similarity, word_similarity)
 
-    return False
+    # 策略6: 季度号直接匹配
+    season_patterns = [
+        rf'第{season_number}季',
+        rf'season\s*{season_number}',
+        rf's{season_number}\b',
+        rf'第{season_number}部',
+        rf'part\s*{season_number}'
+    ]
+    for pattern in season_patterns:
+        if re.search(pattern, title_lower, flags=re.IGNORECASE):
+            max_similarity = max(max_similarity, 85.0)
+            break
+
+    # 策略7: 别名匹配
+    if season_aliases:
+        for alias in season_aliases:
+            alias_similarity = fuzz.token_set_ratio(alias.lower(), title_lower)
+            if alias_similarity >= threshold:
+                max_similarity = max(max_similarity, float(alias_similarity))
+
+    return max_similarity
 
 
 class SeasonInfo(models.BaseModel):
@@ -627,9 +653,11 @@ async def ai_season_mapping_and_correction(
                         season_name = season.name or f"第{season.season_number}季"
                         # 计算相似度作为验证
                         similarity = await asyncio.to_thread(
-                            calculate_similarity,
-                            item_title.lower(),
-                            season_name.lower()
+                            title_contains_season_name,
+                            item_title,
+                            detected_season,
+                            season_name,
+                            season.aliases or []
                         )
                         logger.debug(f"  ○ '{item_title}' 检测到季度关键词 S{detected_season}，匹配TMDB: {season_name} (相似度: {similarity:.1f}%)")
 
