@@ -24,6 +24,7 @@ from .ai.ai_matcher_manager import AIMatcherManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
+from .season_mapper import ai_type_and_season_mapping_and_correction
 from .rate_limiter import RateLimiter
 from .task_manager import TaskManager, TaskStatus, TaskSuccess
 from .metadata_manager import MetadataSourceManager
@@ -1114,43 +1115,10 @@ async def _execute_fallback_search_task(
             else None
         )
 
-        # 创建季度映射任务(如果启用) - 与搜索并行运行
-        season_mapping_task = None
-        season_name = None
+        # 后备搜索 AI映射配置检查
         fallback_search_season_mapping_enabled = await config_manager.get("fallbackSearchEnableTmdbSeasonMapping", "false")
-        if fallback_search_season_mapping_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
-            logger.info(f"○ 后备搜索 季度映射: 开始为 '{search_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
-
-            # 获取AI匹配器(如果启用)
-            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
-            ai_matcher = await ai_matcher_manager.get_matcher()
-            if ai_matcher:
-                logger.debug("后备搜索 季度映射: 使用AI匹配器")
-            else:
-                logger.debug("后备搜索 季度映射: AI匹配器未启用或初始化失败")
-
-            # 获取元数据源和自定义提示词
-            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-            sources = [metadata_source] if metadata_source else None
-
-            # 创建并行任务
-            async def get_season_mapping():
-                try:
-                    return await metadata_manager.get_season_name(
-                        title=search_title,
-                        season_number=season_to_filter,
-                        year=None,
-                        sources=sources,
-                        ai_matcher=ai_matcher,
-                        user=None,
-                        custom_prompt=custom_prompt if custom_prompt else None
-                    )
-                except Exception as e:
-                    logger.warning(f"后备搜索 季度映射失败: {e}")
-                    return None
-
-            season_mapping_task = asyncio.create_task(get_season_mapping())
+        if fallback_search_season_mapping_enabled.lower() != "true":
+            logger.info("○ 后备搜索 统一AI映射: 功能未启用")
 
         # 更新进度
         await progress_callback(10, "开始搜索...")
@@ -1205,23 +1173,42 @@ async def _execute_fallback_search_task(
             )
             sorted_results = filtered_by_season
 
-        # 等待季度映射任务完成并应用结果
-        if season_mapping_task:
+        # 使用统一的AI类型和季度映射修正函数
+        if fallback_search_season_mapping_enabled.lower() == "true":
             try:
-                season_name = await season_mapping_task
-                if season_name:
-                    logger.info(f"✓ 后备搜索 季度映射成功: S{season_to_filter:02d} → {season_name}")
-                    # 应用季度名称到搜索结果中
-                    for item in sorted_results:
-                        if item.type == 'tv_series' and item.season == season_to_filter:
-                            if title_contains_season_name(item.title, season_name):
-                                logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
-                            else:
-                                logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+                # 获取AI匹配器
+                ai_matcher_manager_local: AIMatcherManager = get_ai_matcher_manager()
+                ai_matcher = await ai_matcher_manager_local.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ 后备搜索 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=search_title,
+                        search_results=sorted_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ 后备搜索 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了sorted_results）
+                        sorted_results = mapping_result['corrected_results']
+                    else:
+                        logger.info(f"○ 后备搜索 统一AI映射: 未找到需要修正的信息")
                 else:
-                    logger.info(f"○ 后备搜索 季度映射: 未获取到季度名称")
+                    logger.warning("○ 后备搜索 AI映射: AI匹配器未启用或初始化失败")
+
             except Exception as e:
-                logger.warning(f"后备搜索 季度映射任务执行失败: {e}")
+                logger.warning(f"后备搜索 统一AI映射任务执行失败: {e}")
+        else:
+            logger.info("○ 后备搜索 统一AI映射: 功能未启用")
 
         # 7. 转换为DandanSearchAnimeItem格式
         await progress_callback(80, "转换搜索结果...")
@@ -2193,48 +2180,10 @@ async def _get_match_for_item(
                 # 电影不设置episode_number,保持为None
                 episode_number = None if is_movie else (parsed_info.get("episode") or 1)
 
-                # 步骤0.5: 创建季度映射任务(如果启用) - 与搜索并行运行
-                season_mapping_task = None
+                # 匹配后备 AI映射配置检查
                 match_fallback_tmdb_enabled = await config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false")
-                if match_fallback_tmdb_enabled.lower() == "true" and not is_movie and season and season > 1:
-                    logger.info(f"○ 匹配后备 季度映射: 开始为 '{base_title}' S{season:02d} 获取季度名称(并行)...")
-
-                    # 获取AI匹配器(如果启用)
-                    ai_matcher = await ai_matcher_manager.get_matcher()
-                    if ai_matcher:
-                        logger.debug("匹配后备 季度映射: 使用AI匹配器")
-                    else:
-                        logger.debug("匹配后备 季度映射: AI匹配器未启用或初始化失败")
-
-                    # 获取元数据源和自定义提示词
-                    metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-                    custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-                    sources = [metadata_source] if metadata_source else None
-
-                    # 创建并行任务
-                    async def get_season_mapping():
-                        try:
-                            return await metadata_manager.get_season_name(
-                                title=base_title,
-                                season_number=season,
-                                year=None,  # 匹配后备通常没有年份信息
-                                sources=sources,
-                                ai_matcher=ai_matcher,
-                                user=None,
-                                custom_prompt=custom_prompt if custom_prompt else None
-                            )
-                        except Exception as e:
-                            logger.warning(f"匹配后备 季度映射失败: {e}")
-                            return None
-
-                    season_mapping_task = asyncio.create_task(get_season_mapping())
-                else:
-                    if match_fallback_tmdb_enabled.lower() != "true":
-                        logger.info("○ 匹配后备 季度映射: 功能未启用")
-                    elif is_movie:
-                        logger.info("○ 匹配后备 季度映射: 电影类型,跳过")
-                    elif not season or season <= 1:
-                        logger.info(f"○ 匹配后备 季度映射: 季度号为{season},跳过(仅处理S02及以上)")
+                if match_fallback_tmdb_enabled.lower() != "true":
+                    logger.info("○ 匹配后备 统一AI映射: 功能未启用")
 
                 # 步骤1：使用统一的搜索函数
                 logger.info(f"步骤1：全网搜索 '{base_title}'")
@@ -2262,33 +2211,41 @@ async def _get_match_for_item(
 
                 logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
-                # 等待季度映射任务完成(如果有)
-                season_name_from_mapping = None
-                if season_mapping_task:
+                # 使用统一的AI类型和季度映射修正函数
+                if match_fallback_tmdb_enabled.lower() == "true":
                     try:
-                        season_name_from_mapping = await season_mapping_task
-                        if season_name_from_mapping:
-                            logger.info(f"✓ 匹配后备 季度映射成功: '{base_title}' S{season:02d} → '{season_name_from_mapping}'")
+                        # 获取AI匹配器
+                        ai_matcher = await ai_matcher_manager.get_matcher()
+                        if ai_matcher:
+                            logger.info(f"○ 匹配后备 开始统一AI映射修正: '{base_title}' ({len(all_results)} 个结果)")
+
+                            # 使用新的统一函数进行类型和季度修正
+                            mapping_result = await ai_type_and_season_mapping_and_correction(
+                                search_title=base_title,
+                                search_results=all_results,
+                                metadata_manager=metadata_manager,
+                                ai_matcher=ai_matcher,
+                                logger=logger,
+                                similarity_threshold=60.0
+                            )
+
+                            # 应用修正结果
+                            if mapping_result['total_corrections'] > 0:
+                                logger.info(f"✓ 匹配后备 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                                logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                                logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                                # 更新搜索结果（已经直接修改了all_results）
+                                all_results = mapping_result['corrected_results']
+                            else:
+                                logger.info(f"○ 匹配后备 统一AI映射: 未找到需要修正的信息")
                         else:
-                            logger.info(f"○ 匹配后备 季度映射: 未找到季度名称")
+                            logger.warning("○ 匹配后备 AI映射: AI匹配器未启用或初始化失败")
+
                     except Exception as e:
-                        logger.warning(f"匹配后备 季度映射任务失败: {e}")
-
-                # 根据季度映射结果调整搜索结果的 season 字段
-                if season_name_from_mapping and season and season > 1:
-                    from .season_mapper import title_contains_season_name
-
-                    adjusted_count = 0
-                    for result_item in all_results:
-                        # 只处理电视剧类型且 season 为 None 或 1 的结果
-                        if result_item.type == "tv_series" and (result_item.season is None or result_item.season == 1):
-                            if title_contains_season_name(result_item.title, season_name_from_mapping, threshold=60.0):
-                                logger.info(f"  ✓ 季度调整: '{result_item.title}' (Provider: {result_item.provider}) season: {result_item.season} → {season}")
-                                result_item.season = season
-                                adjusted_count += 1
-
-                    if adjusted_count > 0:
-                        logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
+                        logger.warning(f"匹配后备 统一AI映射任务执行失败: {e}")
+                else:
+                    logger.info("○ 匹配后备 统一AI映射: 功能未启用")
 
                 # 步骤2：智能排序 (类型匹配优先)
                 logger.info(f"步骤2：智能排序 (类型匹配优先)")

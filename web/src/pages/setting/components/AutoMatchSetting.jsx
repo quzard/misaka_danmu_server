@@ -754,138 +754,143 @@ const AutoMatchSetting = () => {
               </Row>
 
               {/* 季度映射配置 */}
-              <Row gutter={[16, 16]}>
-                <Col xs={24} sm={12}>
-                  <div style={{ fontWeight: 500, marginBottom: '12px' }}>季度映射开关</div>
-                  <Row gutter={[16, 16]}>
-                    <Col xs={24} sm={12}>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>主页搜索</span>
-                            <Tooltip title="启用后，主页搜索时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="homeSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>后备搜索</span>
-                            <Tooltip title="启用后，后备搜索时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="fallbackSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>后备匹配</span>
-                            <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12}>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>Webhook</span>
-                            <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>外部控制-搜索媒体</span>
-                            <Tooltip title="启用后，外部控制搜索媒体时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="externalSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                      <Card size="small" style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: 500 }}>外部控制-全自动导入</span>
-                            <Tooltip title="启用后，外部控制全自动导入时会通过元数据源获取季度名称">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                          <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                            <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
-                          </Form.Item>
-                        </div>
-                      </Card>
-                    </Col>
-                  </Row>
-                </Col>
-                <Col xs={24} sm={12}>
-                  <Card size="small" style={{ marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ fontWeight: 500 }}>元数据源选择</span>
-                        <Tooltip title="选择用于季度映射的元数据源。只能选择一个源。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </div>
-                      <Form.Item name="seasonMappingMetadataSource" noStyle>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                          {[
-                            { value: 'tmdb', label: 'TMDB' },
-                            { value: 'tvdb', label: 'TVDB' },
-                            { value: 'imdb', label: 'IMDB' },
-                            { value: 'douban', label: '豆瓣' },
-                            { value: 'bangumi', label: 'Bangumi' }
-                          ].map(source => (
-                            <div
-                              key={source.value}
-                              onClick={() => {
-                                setSelectedMetadataSource(source.value)
-                                form.setFieldValue('seasonMappingMetadataSource', source.value)
-                              }}
-                              style={{
-                                border: '1px solid #d9d9d9',
-                                borderRadius: '4px',
-                                padding: '12px',
-                                textAlign: 'center',
-                                cursor: 'pointer',
-                                backgroundColor: selectedMetadataSource === source.value ? '#1890ff' : 'transparent',
-                                color: selectedMetadataSource === source.value ? '#fff' : 'inherit',
-                                transition: 'all 0.3s'
-                              }}
-                            >
-                              {source.label}
+              <Card
+                title="季度映射"
+                size="small"
+                style={{ marginBottom: '16px' }}
+              >
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} sm={12}>
+                    <Row gutter={[16, 16]}>
+                      <Col xs={24} sm={12}>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>主页搜索</span>
+                              <Tooltip title="启用后，主页搜索时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
                             </div>
-                          ))}
+                            <Form.Item name="homeSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>后备搜索</span>
+                              <Tooltip title="启用后，后备搜索时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="fallbackSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>后备匹配</span>
+                              <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                      </Col>
+                      <Col xs={24} sm={12}>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>Webhook</span>
+                              <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>外部控制-搜索媒体</span>
+                              <Tooltip title="启用后，外部控制搜索媒体时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="externalSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>外部控制-全自动导入</span>
+                              <Tooltip title="启用后，外部控制全自动导入时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                      </Col>
+                    </Row>
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <Card size="small" style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                          <span style={{ fontWeight: 500 }}>元数据源选择</span>
+                          <Tooltip title="选择用于季度映射的元数据源。只能选择一个源。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
                         </div>
-                      </Form.Item>
-                    </div>
-                  </Card>
-                </Col>
-              </Row>
+                        <Form.Item name="seasonMappingMetadataSource" noStyle>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                            {[
+                              { value: 'tmdb', label: 'TMDB' },
+                              { value: 'tvdb', label: 'TVDB' },
+                              { value: 'imdb', label: 'IMDB' },
+                              { value: 'douban', label: '豆瓣' },
+                              { value: 'bangumi', label: 'Bangumi' }
+                            ].map(source => (
+                              <div
+                                key={source.value}
+                                onClick={() => {
+                                  setSelectedMetadataSource(source.value)
+                                  form.setFieldValue('seasonMappingMetadataSource', source.value)
+                                }}
+                                style={{
+                                  border: '1px solid #d9d9d9',
+                                  borderRadius: '4px',
+                                  padding: '12px',
+                                  textAlign: 'center',
+                                  cursor: 'pointer',
+                                  backgroundColor: selectedMetadataSource === source.value ? '#1890ff' : 'transparent',
+                                  color: selectedMetadataSource === source.value ? '#fff' : 'inherit',
+                                  transition: 'all 0.3s'
+                                }}
+                              >
+                                {source.label}
+                              </div>
+                            ))}
+                          </div>
+                        </Form.Item>
+                      </div>
+                    </Card>
+                  </Col>
+                </Row>
+              </Card>
 
               <Card size="small" style={{ marginTop: '16px' }}>
                 <Form.Item

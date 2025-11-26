@@ -19,6 +19,7 @@ from ..search_utils import unified_search
 from ..timezone import get_now
 from ..utils import parse_search_keyword
 from ..ai.ai_matcher_manager import AIMatcherManager
+from ..season_mapper import ai_type_and_season_mapping_and_correction
 
 logger = logging.getLogger(__name__)
 
@@ -151,46 +152,10 @@ async def webhook_search_and_dispatch_task(
         season_to_filter = parsed_keyword.get("season") or season
         episode_to_filter = parsed_keyword.get("episode") or currentEpisodeIndex
 
-        # 2.1 创建季度映射任务(如果启用) - 与搜索并行运行
-        season_mapping_task = None
+        # 2.1 Webhook AI映射配置检查
         webhook_tmdb_enabled = await config_manager.get("webhookEnableTmdbSeasonMapping", "true")
-        if webhook_tmdb_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
-            logger.info(f"○ Webhook 季度映射: 开始为 '{original_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
-
-            # 获取AI匹配器(如果启用)
-            ai_matcher = await ai_matcher_manager.get_matcher()
-            if ai_matcher:
-                logger.debug("Webhook 季度映射: 使用AI匹配器")
-            else:
-                logger.debug("Webhook 季度映射: AI匹配器未启用或初始化失败")
-
-            # 获取元数据源和自定义提示词
-            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-            sources = [metadata_source] if metadata_source else None
-
-            # 创建并行任务
-            async def get_season_mapping():
-                try:
-                    return await metadata_manager.get_season_name(
-                        title=original_title,
-                        season_number=season_to_filter,
-                        year=year,
-                        sources=sources,
-                        ai_matcher=ai_matcher,
-                        user=None,
-                        custom_prompt=custom_prompt if custom_prompt else None
-                    )
-                except Exception as e:
-                    logger.warning(f"Webhook 季度映射失败: {e}")
-                    return None
-
-            season_mapping_task = asyncio.create_task(get_season_mapping())
-        else:
-            if webhook_tmdb_enabled.lower() != "true":
-                logger.info("○ Webhook 季度映射: 功能未启用")
-            elif not season_to_filter or season_to_filter <= 1:
-                logger.info(f"○ Webhook 季度映射: 季度号为{season_to_filter},跳过(仅处理S02及以上)")
+        if webhook_tmdb_enabled.lower() != "true":
+            logger.info("○ Webhook 统一AI映射: 功能未启用")
 
         # 应用与 WebUI 一致的标题预处理规则
         search_title = original_title
@@ -250,33 +215,41 @@ async def webhook_search_and_dispatch_task(
         if not all_search_results:
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 等待季度映射任务完成(如果有)
-        season_name_from_mapping = None
-        if season_mapping_task:
+        # 使用统一的AI类型和季度映射修正函数
+        if webhook_tmdb_enabled.lower() == "true":
             try:
-                season_name_from_mapping = await season_mapping_task
-                if season_name_from_mapping:
-                    logger.info(f"✓ Webhook 季度映射成功: '{original_title}' S{season_to_filter:02d} → '{season_name_from_mapping}'")
+                # 获取AI匹配器
+                ai_matcher = await ai_matcher_manager.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ Webhook 开始统一AI映射修正: '{original_title}' ({len(all_search_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=original_title,
+                        search_results=all_search_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ Webhook 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了all_search_results）
+                        all_search_results = mapping_result['corrected_results']
+                    else:
+                        logger.info(f"○ Webhook 统一AI映射: 未找到需要修正的信息")
                 else:
-                    logger.info(f"○ Webhook 季度映射: 未找到季度名称")
+                    logger.warning("○ Webhook AI映射: AI匹配器未启用或初始化失败")
+
             except Exception as e:
-                logger.warning(f"Webhook 季度映射任务失败: {e}")
-
-        # 根据季度映射结果调整搜索结果的 season 字段
-        if season_name_from_mapping and season_to_filter and season_to_filter > 1:
-            from ..season_mapper import title_contains_season_name
-
-            adjusted_count = 0
-            for item in all_search_results:
-                # 只处理电视剧类型且 season 为 None 或 1 的结果
-                if item.type == "tv_series" and (item.season is None or item.season == 1):
-                    if title_contains_season_name(item.title, season_name_from_mapping, threshold=60.0):
-                        logger.info(f"  ✓ 季度调整: '{item.title}' (Provider: {item.provider}) season: {item.season} → {season_to_filter}")
-                        item.season = season_to_filter
-                        adjusted_count += 1
-
-            if adjusted_count > 0:
-                logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
+                logger.warning(f"Webhook 统一AI映射任务执行失败: {e}")
+        else:
+            logger.info("○ Webhook 统一AI映射: 功能未启用")
 
         # 3. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:

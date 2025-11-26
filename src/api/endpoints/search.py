@@ -33,6 +33,7 @@ from ...metadata_manager import MetadataSourceManager
 from ...scraper_manager import ScraperManager
 from ... import tasks
 from ...utils import parse_search_keyword
+from ...season_mapper import ai_type_and_season_mapping_and_correction
 from ...webhook_manager import WebhookManager
 from ...image_utils import download_image
 from ...scheduler import SchedulerManager
@@ -53,7 +54,7 @@ from ..dependencies import (
     get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
 from ...ai.ai_matcher_manager import AIMatcherManager
-from ...season_mapper import title_contains_season_name
+from ...season_mapper import title_contains_season_name, ai_season_mapping_and_correction
 
 from ..ui_models import (
     UITaskResponse, UIProviderSearchResponse, RefreshPosterRequest,
@@ -154,8 +155,20 @@ async def search_anime_provider(
         season_mapping_task = None
         season_name = None
         home_search_season_mapping_enabled = await config_manager.get("homeSearchEnableTmdbSeasonMapping", "false")
-        if home_search_season_mapping_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
-            logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
+
+        # 季度映射：启用时，使用统一逻辑进行季度映射
+        season_mapping_task = None
+        if home_search_season_mapping_enabled.lower() == "true":
+            # 确定要映射的季度
+            season_to_map = season_to_filter if season_to_filter and season_to_filter > 1 else None
+
+            if season_to_map:
+                # 用户明确指定季度：获取该季度的准确名称
+                logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' S{season_to_map:02d} 获取季度名称(并行)...")
+            else:
+                # 用户未指定季度：智能识别可能的季度
+                logger.info(f"○ 主页搜索 季度映射: 开始为 '{search_title}' 进行智能季度识别(并行)...")
+                season_to_map = 2  # 默认从第2季开始检查
 
             # 获取AI匹配器(如果启用)
             ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
@@ -170,12 +183,12 @@ async def search_anime_provider(
             custom_prompt = await config_manager.get("seasonMappingPrompt", "")
             sources = [metadata_source] if metadata_source else None
 
-            # 创建并行任务
+            # 创建并行任务：使用统一的季度映射逻辑
             async def get_season_mapping():
                 try:
                     return await metadata_manager.get_season_name(
                         title=search_title,
-                        season_number=season_to_filter,
+                        season_number=season_to_map,
                         year=None,
                         sources=sources,
                         ai_matcher=ai_matcher,
@@ -356,21 +369,46 @@ async def search_anime_provider(
         await crud.set_cache(session, supplemental_cache_key, [item.model_dump() for item in supplemental_results], ttl_seconds=10800)
     # --- 缓存逻辑结束 ---
 
-    # 等待季度映射任务完成并应用结果
-    if season_mapping_task:
+
+
+    # 使用统一的AI类型和季度映射修正函数
+    if ai_matcher and metadata_manager:
         try:
-            season_name = await season_mapping_task
-            if season_name:
-                logger.info(f"✓ 主页搜索 季度映射成功: S{season_to_filter:02d} → {season_name}")
-                # 应用季度名称到搜索结果中
-                for item in sorted_results:
-                    if item.type == 'tv_series' and item.season == season_to_filter:
-                        if title_contains_season_name(item.title, season_name):
-                            logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
-                        else:
-                            logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+            # 使用新的统一函数进行类型和季度修正
+            mapping_result = await ai_type_and_season_mapping_and_correction(
+                search_title=search_title,
+                search_results=sorted_results,
+                metadata_manager=metadata_manager,
+                ai_matcher=ai_matcher,
+                logger=logger,
+                similarity_threshold=60.0
+            )
+
+            # 应用修正结果
+            if mapping_result['total_corrections'] > 0:
+                logger.info(f"✓ 主页搜索 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                # 更新搜索结果（已经直接修改了sorted_results）
+                sorted_results = mapping_result['corrected_results']
             else:
-                logger.info(f"○ 主页搜索 季度映射: 未获取到季度名称")
+                logger.info(f"○ 主页搜索 统一AI映射: 未找到需要修正的信息")
+
+        except Exception as e:
+            logger.warning(f"主页搜索 统一AI映射任务执行失败: {e}")
+    elif season_mapping_task:
+        # 兼容旧逻辑（如果存在）
+        try:
+            corrected_results = await season_mapping_task
+            if corrected_results:
+                logger.info(f"✓ 主页搜索 季度映射成功: 修正了 {len(corrected_results)} 个结果的季度信息")
+                for correction in corrected_results:
+                    item = correction['item']
+                    item.season = correction['corrected_season']
+                    logger.info(f"  ✓ 季度修正: '{item.title}' → S{item.season}")
+            else:
+                logger.info(f"○ 主页搜索 季度映射: 未找到需要修正的季度信息")
         except Exception as e:
             logger.warning(f"主页搜索 季度映射任务执行失败: {e}")
 

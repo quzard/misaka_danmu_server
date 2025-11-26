@@ -28,6 +28,7 @@ from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..search_utils import unified_search
+from ..season_mapper import ai_type_and_season_mapping_and_correction
 from ..ai.ai_matcher import AIMatcher
 from ..season_mapper import title_contains_season_name
 
@@ -526,43 +527,10 @@ async def search_media(
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
             )
 
-        # 创建季度映射任务(如果启用) - 与搜索并行运行
-        season_mapping_task = None
-        season_name = None
+        # 外部控制搜索 AI映射配置检查
         external_search_season_mapping_enabled = await config_manager.get("externalSearchEnableTmdbSeasonMapping", "false")
-        if external_search_season_mapping_enabled.lower() == "true" and final_season and final_season > 1:
-            logger.info(f"○ 外部控制-搜索媒体 季度映射: 开始为 '{search_title}' S{final_season:02d} 获取季度名称(并行)...")
-
-            # 获取AI匹配器(如果启用)
-            ai_matcher_manager: AIMatcherManager = get_ai_matcher_manager()
-            ai_matcher = await ai_matcher_manager.get_matcher()
-            if ai_matcher:
-                logger.debug("外部控制-搜索媒体 季度映射: 使用AI匹配器")
-            else:
-                logger.debug("外部控制-搜索媒体 季度映射: AI匹配器未启用或初始化失败")
-
-            # 获取元数据源和自定义提示词
-            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-            sources = [metadata_source] if metadata_source else None
-
-            # 创建并行任务
-            async def get_season_mapping():
-                try:
-                    return await metadata_manager.get_season_name(
-                        title=search_title,
-                        season_number=final_season,
-                        year=None,
-                        sources=sources,
-                        ai_matcher=ai_matcher,
-                        user=user,
-                        custom_prompt=custom_prompt if custom_prompt else None
-                    )
-                except Exception as e:
-                    logger.warning(f"外部控制-搜索媒体 季度映射失败: {e}")
-                    return None
-
-            season_mapping_task = asyncio.create_task(get_season_mapping())
+        if external_search_season_mapping_enabled.lower() != "true":
+            logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
 
         # 使用统一的搜索函数（不进行排序，后面自己处理）
         results = await unified_search(
@@ -602,23 +570,42 @@ async def search_media(
 
         sorted_results = sorted(results, key=sort_key)
 
-        # 等待季度映射任务完成并应用结果
-        if season_mapping_task:
+        # 使用统一的AI类型和季度映射修正函数
+        if external_search_season_mapping_enabled.lower() == "true":
             try:
-                season_name = await season_mapping_task
-                if season_name:
-                    logger.info(f"✓ 外部控制-搜索媒体 季度映射成功: S{final_season:02d} → {season_name}")
-                    # 应用季度名称到搜索结果中
-                    for item in sorted_results:
-                        if item.type == 'tv_series' and item.season == final_season:
-                            if title_contains_season_name(item.title, season_name):
-                                logger.debug(f"  ✓ 标题 '{item.title}' 包含季度名称 '{season_name}'")
-                            else:
-                                logger.debug(f"  ○ 标题 '{item.title}' 不包含季度名称 '{season_name}'")
+                # 获取AI匹配器
+                ai_matcher_manager_local: AIMatcherManager = get_ai_matcher_manager()
+                ai_matcher = await ai_matcher_manager_local.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ 外部控制-搜索媒体 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=search_title,
+                        search_results=sorted_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ 外部控制-搜索媒体 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了sorted_results）
+                        sorted_results = mapping_result['corrected_results']
+                    else:
+                        logger.info(f"○ 外部控制-搜索媒体 统一AI映射: 未找到需要修正的信息")
                 else:
-                    logger.info(f"○ 外部控制-搜索媒体 季度映射: 未获取到季度名称")
+                    logger.warning("○ 外部控制-搜索媒体 AI映射: AI匹配器未启用或初始化失败")
+
             except Exception as e:
-                logger.warning(f"外部控制-搜索媒体 季度映射任务执行失败: {e}")
+                logger.warning(f"外部控制-搜索媒体 统一AI映射任务执行失败: {e}")
+        else:
+            logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
 
         search_id = str(uuid.uuid4())
         indexed_results = [ControlSearchResultItem(**r.model_dump(), resultIndex=i) for i, r in enumerate(sorted_results)]
