@@ -12,7 +12,8 @@ from ... import models, security
 from ...database import get_db_session
 from ...crud import user as user_crud
 from ...crud import session as session_crud
-from ...config_manager import ConfigManager, get_config_manager
+from ...config_manager import ConfigManager
+from ..dependencies import get_config_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
