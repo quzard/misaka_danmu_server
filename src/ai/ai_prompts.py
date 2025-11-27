@@ -367,7 +367,7 @@ DEFAULT_AI_ALIAS_VALIDATION_PROMPT = """你是一个专业的动漫作品别名�
 }
 (丢弃: "Weathering with You"是另一部作品)"""
 
-# 季度识别关键词配置
+# 季度识别关键词配置（通用版）
 SEASON_KEYWORDS = {
     1: [
         '第1季', '第一季', 'season 1', 's1', '第一部',
@@ -400,11 +400,15 @@ SEASON_KEYWORDS = {
     ]
 }
 
-# 特殊季度关键词
+# 特殊季度关键词（通用版）
 SPECIAL_SEASON_KEYWORDS = {
-    'final': ['最终季', '最终季', 'final season', 'last season', '完结季'],
-    'special': ['特别篇', 'special', 'sp', 'ova', 'oad', '特别篇'],
-    'movie': ['剧场版', 'movie', '电影', '剧场版', 'the movie']
+    'final': ['最终季', 'final season', 'last season', '完结季', '最终章', '完结章'],
+    'special': ['特别篇', 'special', 'sp', 'ova', 'oad', '特典', 'extra edition'],
+    'movie': ['剧场版', 'movie', '电影', 'the movie'],
+    'spinoff': ['外传', 'spinoff', '番外篇', 'alternative', 'ggo', 'gun gale online'],
+    'prequel': ['前传', 'prequel', '序章', 'prologue'],
+    'sequel': ['后传', 'sequel', '续章', 'epilogue'],
+    'side_story': ['侧传', 'side story', 'if线', 'if story']
 }
 
 # AI季度匹配提示词
