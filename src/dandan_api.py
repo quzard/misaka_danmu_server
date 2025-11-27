@@ -37,6 +37,7 @@ from .orm_models import Anime, AnimeSource, Episode
 from .season_mapper import title_contains_season_name
 from .models import ProviderEpisodeInfo
 from .commands import handle_command
+from .search_timer import SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH, SEARCH_TYPE_FALLBACK_MATCH
 
 logger = logging.getLogger(__name__)
 
@@ -1065,7 +1066,11 @@ async def _execute_fallback_search_task(
     ai_matcher_manager: AIMatcherManager
 ):
     """执行后备搜索任务。"""
+    # 初始化计时器
+    timer = SearchTimer(SEARCH_TYPE_FALLBACK_SEARCH, search_term, logger)
+
     try:
+        timer.step_start("关键词解析与预处理")
         # 1. 解析搜索词，提取基础标题 / 季度 / 集数信息
         parsed_info = parse_search_keyword(search_term)
         original_title = parsed_info["title"]
@@ -1125,9 +1130,12 @@ async def _execute_fallback_search_task(
         if fallback_search_season_mapping_enabled.lower() != "true":
             logger.info("○ 后备搜索 统一AI映射: 功能未启用")
 
+        timer.step_end()
+
         # 更新进度
         await progress_callback(10, "开始搜索...")
 
+        timer.step_start("弹幕源搜索")
         # 4. 使用统一的搜索函数
         #    - 使用预处理后的 search_title
         #    - 传入 episode_info
@@ -1145,6 +1153,7 @@ async def _execute_fallback_search_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
+        timer.step_end(details=f"{len(sorted_results)}个结果")
 
         # 5. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:
@@ -1181,6 +1190,7 @@ async def _execute_fallback_search_task(
         # 使用统一的AI类型和季度映射修正函数
         if fallback_search_season_mapping_enabled.lower() == "true":
             try:
+                timer.step_start("AI映射修正")
                 # 获取AI匹配器（使用函数参数）
                 ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
@@ -1204,16 +1214,21 @@ async def _execute_fallback_search_task(
 
                         # 更新搜索结果（已经直接修改了sorted_results）
                         sorted_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                     else:
                         logger.info(f"○ 后备搜索 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
                 else:
                     logger.warning("○ 后备搜索 AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
 
             except Exception as e:
                 logger.warning(f"后备搜索 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
         else:
             logger.info("○ 后备搜索 统一AI映射: 功能未启用")
 
+        timer.step_start("结果转换与缓存")
         # 7. 转换为DandanSearchAnimeItem格式
         await progress_callback(80, "转换搜索结果...")
         search_results = []
@@ -1317,10 +1332,13 @@ async def _execute_fallback_search_task(
         except Exception as e:
             logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
 
+        timer.step_end(details=f"{len(search_results)}个结果")
         await progress_callback(100, "搜索完成")
+        timer.finish()  # 打印计时报告
 
     except Exception as e:
         logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
+        timer.finish()  # 即使失败也打印计时报告
         # 更新缓存状态为失败
         search_info_failed = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
         if search_info_failed:
@@ -2172,7 +2190,11 @@ async def _get_match_for_item(
 
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
+            # 初始化计时器
+            match_timer = SearchTimer(SEARCH_TYPE_FALLBACK_MATCH, item.fileName, logger)
+
             try:
+                match_timer.step_start("初始化与解析")
                 # 构造 auto_search_and_import_task 需要的 payload
                 # 根据 is_movie 标记判断媒体类型
                 media_type_for_fallback = "movie" if parsed_info.get("is_movie") else "tv_series"
@@ -2191,8 +2213,10 @@ async def _get_match_for_item(
                 match_fallback_tmdb_enabled = await config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false")
                 if match_fallback_tmdb_enabled.lower() != "true":
                     logger.info("○ 匹配后备 统一AI映射: 功能未启用")
+                match_timer.step_end()
 
                 # 步骤1：使用统一的搜索函数
+                match_timer.step_start("弹幕源搜索")
                 logger.info(f"步骤1：全网搜索 '{base_title}'")
 
                 # 使用统一的搜索函数（与 WebUI 搜索保持一致的过滤策略）
@@ -2212,15 +2236,19 @@ async def _get_match_for_item(
 
                 if not all_results:
                     logger.warning(f"匹配后备失败：没有找到任何搜索结果")
+                    match_timer.step_end(details="无结果")
+                    match_timer.finish()  # 打印计时报告
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
 
+                match_timer.step_end(details=f"{len(all_results)}个结果")
                 logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
                 # 使用统一的AI类型和季度映射修正函数
                 if match_fallback_tmdb_enabled.lower() == "true":
                     try:
+                        match_timer.step_start("AI映射修正")
                         # 获取AI匹配器
                         ai_matcher = await ai_matcher_manager.get_matcher()
                         if ai_matcher:
@@ -2244,17 +2272,22 @@ async def _get_match_for_item(
 
                                 # 更新搜索结果（已经直接修改了all_results）
                                 all_results = mapping_result['corrected_results']
+                                match_timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                             else:
                                 logger.info(f"○ 匹配后备 统一AI映射: 未找到需要修正的信息")
+                                match_timer.step_end(details="无修正")
                         else:
                             logger.warning("○ 匹配后备 AI映射: AI匹配器未启用或初始化失败")
+                            match_timer.step_end(details="匹配器未启用")
 
                     except Exception as e:
                         logger.warning(f"匹配后备 统一AI映射任务执行失败: {e}")
+                        match_timer.step_end(details=f"失败: {e}")
                 else:
                     logger.info("○ 匹配后备 统一AI映射: 功能未启用")
 
                 # 步骤2：智能排序 (类型匹配优先)
+                match_timer.step_start("智能排序与匹配")
                 logger.info(f"步骤2：智能排序 (类型匹配优先)")
 
                 # 确定目标类型
@@ -2514,6 +2547,8 @@ async def _get_match_for_item(
 
                 if not best_match:
                     logger.warning(f"匹配后备失败：所有候选源都无法提供有效分集")
+                    match_timer.step_end(details="无有效分集")
+                    match_timer.finish()  # 打印计时报告
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
@@ -2690,9 +2725,13 @@ async def _get_match_for_item(
                 }
                 await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, recent_fallback_key, recent_fallback_data, 300)  # 5分钟TTL
 
+                match_timer.step_end(details="匹配成功")
+                match_timer.finish()  # 打印计时报告
                 match_fallback_result["response"] = response
             except Exception as e:
                 logger.error(f"匹配后备失败: {e}", exc_info=True)
+                match_timer.step_end(details=f"失败: {e}")
+                match_timer.finish()  # 打印计时报告
                 response = DandanMatchResponse(isMatched=False, matches=[])
                 match_fallback_result["response"] = response
 

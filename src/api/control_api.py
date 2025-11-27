@@ -33,6 +33,7 @@ from ..ai.ai_matcher import AIMatcher
 from ..season_mapper import title_contains_season_name
 
 from ..timezone import get_now
+from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_SEARCH
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
@@ -508,7 +509,12 @@ async def search_media(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
+
+    # 初始化计时器
+    timer = SearchTimer(SEARCH_TYPE_CONTROL_SEARCH, keyword, logger)
+
     try:
+        timer.step_start("关键词解析")
         # --- Start of new logic, copied and adapted from ui_api.py ---
         parsed_keyword = utils.parse_search_keyword(keyword)
         search_title = parsed_keyword["title"]
@@ -522,6 +528,8 @@ async def search_media(
         user = models.User(id=0, username="control_api")
 
         logger.info(f"Control API 正在搜索: '{keyword}' (解析为: title='{search_title}', season={final_season}, episode={final_episode})")
+        timer.step_end()
+
         if not manager.has_enabled_scrapers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -533,6 +541,7 @@ async def search_media(
         if external_search_season_mapping_enabled.lower() != "true":
             logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
 
+        timer.step_start("弹幕源搜索")
         # 使用统一的搜索函数（不进行排序，后面自己处理）
         results = await unified_search(
             search_term=search_title,
@@ -545,6 +554,7 @@ async def search_media(
             use_source_priority_sorting=False,  # 不排序，后面自己处理
             progress_callback=None
         )
+        timer.step_end(details=f"{len(results)}个结果")
 
         logger.info(f"搜索完成，共 {len(results)} 个结果")
 
@@ -574,6 +584,7 @@ async def search_media(
         # 使用统一的AI类型和季度映射修正函数
         if external_search_season_mapping_enabled.lower() == "true":
             try:
+                timer.step_start("AI映射修正")
                 # 获取AI匹配器（使用依赖注入的实例）
                 ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
@@ -597,19 +608,27 @@ async def search_media(
 
                         # 更新搜索结果（已经直接修改了sorted_results）
                         sorted_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                     else:
                         logger.info(f"○ 外部控制-搜索媒体 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
                 else:
                     logger.warning("○ 外部控制-搜索媒体 AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
 
             except Exception as e:
                 logger.warning(f"外部控制-搜索媒体 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
         else:
             logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
 
+        timer.step_start("结果缓存")
         search_id = str(uuid.uuid4())
         indexed_results = [ControlSearchResultItem(**r.model_dump(), resultIndex=i) for i, r in enumerate(sorted_results)]
         await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in sorted_results], 600)
+        timer.step_end()
+
+        timer.finish()  # 打印计时报告
         return ControlSearchResponse(searchId=search_id, results=indexed_results)
     finally:
         await manager.release_search_lock(api_key)

@@ -20,6 +20,7 @@ from ..timezone import get_now
 from ..utils import parse_search_keyword
 from ..ai.ai_matcher_manager import AIMatcherManager
 from ..season_mapper import ai_type_and_season_mapping_and_correction
+from ..search_timer import SearchTimer, SEARCH_TYPE_WEBHOOK
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +100,16 @@ async def webhook_search_and_dispatch_task(
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
     """
     generic_import_task = _get_generic_import_task()
-    
+
+    # 🚀 V2.1.6: 创建搜索计时器
+    timer = SearchTimer(SEARCH_TYPE_WEBHOOK, f"{animeTitle} S{season:02d}E{currentEpisodeIndex:02d}", logger)
+    timer.start()
+
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
         await progress_callback(5, "正在检查已收藏的源...")
+
+        timer.step_start("查找收藏源")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
         logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
@@ -136,6 +143,8 @@ async def webhook_search_and_dispatch_task(
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+                timer.step_end(details="找到收藏源")
+                timer.finish()  # 打印计时报告
                 # 根据来源动态生成成功消息
                 if webhookSource == "media_server":
                     success_message = f"已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
@@ -143,10 +152,13 @@ async def webhook_search_and_dispatch_task(
                     success_message = f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
                 raise TaskSuccess(success_message)
 
+        timer.step_end(details="无收藏源")
+
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
         await progress_callback(20, "并发搜索所有源...")
 
+        timer.step_start("关键词解析与预处理")
         parsed_keyword = parse_search_keyword(searchKeyword)
         original_title = parsed_keyword["title"]
         season_to_filter = parsed_keyword.get("season") or season
@@ -196,7 +208,9 @@ async def webhook_search_and_dispatch_task(
         )
 
         logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title}' 进行搜索。")
+        timer.step_end()
 
+        timer.step_start("统一搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         all_search_results = await unified_search(
             search_term=search_title,
@@ -211,13 +225,16 @@ async def webhook_search_and_dispatch_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
+        timer.step_end(details=f"{len(all_search_results)}个结果")
 
         if not all_search_results:
+            timer.finish()  # 打印计时报告
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
         # 使用统一的AI类型和季度映射修正函数
         if webhook_tmdb_enabled.lower() == "true":
             try:
+                timer.step_start("AI映射修正")
                 # 获取AI匹配器
                 ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
@@ -241,13 +258,17 @@ async def webhook_search_and_dispatch_task(
 
                         # 更新搜索结果（已经直接修改了all_search_results）
                         all_search_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                     else:
                         logger.info(f"○ Webhook 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
                 else:
                     logger.warning("○ Webhook AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
 
             except Exception as e:
                 logger.warning(f"Webhook 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
         else:
             logger.info("○ Webhook 统一AI映射: 功能未启用")
 
@@ -284,6 +305,7 @@ async def webhook_search_and_dispatch_task(
             )
             all_search_results = filtered_by_season
 
+        timer.step_start("结果排序与匹配")
         # 5. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
@@ -428,6 +450,8 @@ async def webhook_search_and_dispatch_task(
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+            timer.step_end(details="AI匹配成功")
+            timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
                 success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -525,6 +549,8 @@ async def webhook_search_and_dispatch_task(
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+            timer.step_end(details="传统匹配成功")
+            timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
                 success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -610,6 +636,8 @@ async def webhook_search_and_dispatch_task(
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+        timer.step_end(details="顺延匹配成功")
+        timer.finish()  # 打印计时报告
         # 根据来源动态生成成功消息
         if webhookSource == "media_server":
             success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -619,6 +647,7 @@ async def webhook_search_and_dispatch_task(
     except TaskSuccess:
         raise
     except Exception as e:
+        timer.finish()  # 打印计时报告（即使失败也打印）
         logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise
 

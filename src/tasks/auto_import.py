@@ -16,6 +16,7 @@ from ..rate_limiter import RateLimiter
 from ..title_recognition import TitleRecognitionManager
 from ..search_utils import unified_search
 from ..season_mapper import ai_type_and_season_mapping_and_correction
+from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,9 @@ async def auto_search_and_import_task(
     _reverse_lookup_tmdb_chinese_title = _get_reverse_lookup_tmdb_chinese_title()
     generic_import_task = _get_generic_import_task()
     
+    # 初始化计时器
+    timer = SearchTimer(SEARCH_TYPE_CONTROL_AUTO_IMPORT, payload.searchTerm, logger)
+
     try:
         # 防御性检查：确保 rate_limiter 已被正确传递。
         if rate_limiter is None:
@@ -448,6 +452,7 @@ async def auto_search_and_import_task(
 
         logger.info(f"将使用标题 '{search_title}' 进行全网搜索...")
 
+        timer.step_start("弹幕源搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         # 使用严格过滤模式和自定义别名
         # 外部控制API启用AI别名扩展（如果配置启用）
@@ -466,12 +471,14 @@ async def auto_search_and_import_task(
             episode_info=episode_info,  # 传递分集信息（与 WebUI 一致）
             alias_similarity_threshold=70,  # 使用 70% 别名相似度阈值（与 WebUI 一致）
         )
+        timer.step_end(details=f"{len(all_results)}个结果")
 
         logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
         # 使用统一的AI类型和季度映射修正函数
         if auto_import_tmdb_enabled.lower() == "true" and media_type != "movie":
             try:
+                timer.step_start("AI映射修正")
                 # 获取AI匹配器
                 ai_matcher = await ai_matcher_manager.get_matcher()
                 if ai_matcher:
@@ -495,13 +502,17 @@ async def auto_search_and_import_task(
 
                         # 更新搜索结果（已经直接修改了all_results）
                         all_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                     else:
                         logger.info(f"○ 全自动导入 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
                 else:
                     logger.warning("○ 全自动导入 AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
 
             except Exception as e:
                 logger.warning(f"全自动导入 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
         else:
             if auto_import_tmdb_enabled.lower() != "true":
                 logger.info("○ 全自动导入 统一AI映射: 功能未启用")
@@ -926,6 +937,7 @@ async def auto_search_and_import_task(
             task_type="generic_import",
             task_parameters=task_parameters
         )
+        timer.finish()  # 打印计时报告
         final_message = f"已为最佳匹配源创建导入任务。执行任务ID: {execution_task_id}"
         raise TaskSuccess(final_message)
     finally:

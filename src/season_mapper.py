@@ -12,6 +12,63 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# 外传/衍生作品检测 (V2.1.6新增)
+# ============================================================================
+
+# 外传/衍生作品的识别关键词
+SPINOFF_KEYWORDS = [
+    # 中文
+    "外传", "番外", "特别篇", "剧场版", "OVA", "OAD", "SP",
+    # 日文
+    "外伝", "番外編", "特別編",
+    # 英文
+    "spin-off", "spinoff", "side story", "gaiden",
+    "special", "movie", "film", "ova", "oad",
+]
+
+# 预编译的外传检测正则（不区分大小写）
+SPINOFF_PATTERN = re.compile(
+    r'(?:' + '|'.join(re.escape(kw) for kw in SPINOFF_KEYWORDS) + r')',
+    re.IGNORECASE
+)
+
+
+def is_spinoff_title(title: str, base_title: str) -> bool:
+    """
+    检测标题是否为外传/衍生作品
+
+    Args:
+        title: 要检测的标题
+        base_title: 原作基础标题
+
+    Returns:
+        True 如果是外传/衍生作品
+    """
+    if not title:
+        return False
+
+    title_lower = title.lower()
+
+    # 1. 检查是否包含外传关键词
+    if SPINOFF_PATTERN.search(title):
+        return True
+
+    # 2. 检查是否为 "XXX外传：YYY" 格式
+    if base_title:
+        base_lower = base_title.lower()
+        # 如果标题包含基础标题，但后面有额外内容且不是季度标识
+        if base_lower in title_lower:
+            suffix = title_lower.replace(base_lower, "").strip()
+            # 排除纯季度标识（如 "第二季"、"II"、"2"）
+            if suffix and not re.match(r'^[:\s]*(?:第?\d+季|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+|[ivx]+|season\s*\d+|\d+)$', suffix, re.IGNORECASE):
+                # 检查后缀是否看起来像外传标题（有冒号后跟不同名称）
+                if re.match(r'^[:\s：]+[^第季\d]+', suffix):
+                    return True
+
+    return False
+
+
+# ============================================================================
 # 核心相似度计算函数 (V2.1.6风格，不依赖thefuzz)
 # ============================================================================
 
@@ -667,12 +724,20 @@ async def ai_season_mapping_and_correction(
         # 构建标题别名等价映射
         title_alias_mapping = _build_title_alias_equivalence_map(tv_results, seasons_info, logger)
 
+        # 获取基础标题（用于外传检测）
+        base_title = search_title
+
         for item in tv_results:
             item_title = item.title
             best_season = item.season or 1
             best_confidence = 0.0
             best_season_name = ""
             best_method = "原始"
+
+            # V2.1.6新增: 外传/衍生作品检测 - 跳过外传作品的季度映射
+            if is_spinoff_title(item_title, base_title):
+                logger.debug(f"  ○ 跳过外传作品: '{item_title}' (保持原季度 S{best_season})")
+                continue
 
             logger.debug(f"  ○ 检查 '{item_title}' 的季度匹配...")
 
