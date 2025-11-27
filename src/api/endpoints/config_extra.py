@@ -916,6 +916,192 @@ async def get_ai_providers(
     return get_all_providers()
 
 
+async def _fetch_models_from_provider(
+    provider_id: str,
+    api_key: str,
+    base_url: str = None
+) -> List[Dict[str, Any]]:
+    """
+    从AI提供商API获取模型列表
+
+    Args:
+        provider_id: 提供商ID
+        api_key: API密钥
+        base_url: 自定义Base URL (可选)
+
+    Returns:
+        模型列表，格式: [{"id": "model-name", "name": "Model Name", ...}, ...]
+    """
+    provider_config = get_provider_config(provider_id)
+    if not provider_config:
+        return []
+
+    models_api_path = provider_config.get("modelsApiPath")
+    if not models_api_path:
+        return []
+
+    # 构建完整的API URL
+    if models_api_path.startswith("http"):
+        # Gemini 使用完整URL
+        api_url = models_api_path
+    else:
+        # 其他提供商使用相对路径
+        if not base_url:
+            base_url = provider_config.get("defaultBaseUrl", "")
+        api_url = f"{base_url.rstrip('/')}{models_api_path}"
+
+    # 构建请求头
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    # Gemini 使用不同的认证方式
+    if provider_id == "gemini":
+        api_url = f"{api_url}?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(api_url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+            # 解析不同提供商的响应格式
+            models = []
+            if provider_id == "gemini":
+                # Gemini 返回格式: {"models": [{"name": "models/gemini-...", ...}]}
+                for model in data.get("models", []):
+                    model_name = model.get("name", "")
+                    # 移除 "models/" 前缀
+                    if model_name.startswith("models/"):
+                        model_name = model_name[7:]
+                    models.append({
+                        "id": model_name,
+                        "name": model.get("displayName", model_name)
+                    })
+            else:
+                # OpenAI 兼容格式: {"data": [{"id": "model-name", ...}]}
+                for model in data.get("data", []):
+                    models.append({
+                        "id": model.get("id", ""),
+                        "name": model.get("id", "")
+                    })
+
+            return models
+    except Exception as e:
+        logger.warning(f"从 {provider_id} 获取模型列表失败: {e}")
+        return []
+
+
+def _merge_model_lists(
+    hardcoded_models: List[Dict[str, Any]],
+    dynamic_models: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    合并硬编码模型列表和动态获取的模型列表
+
+    Args:
+        hardcoded_models: 硬编码的模型列表 (带描述和标签)
+        dynamic_models: 从API动态获取的模型列表
+
+    Returns:
+        合并后的模型列表，硬编码模型在前，新模型在后
+    """
+    # 提取硬编码模型的ID集合
+    hardcoded_ids = {m["value"] for m in hardcoded_models}
+
+    # 过滤出新模型（不在硬编码列表中的）
+    new_models = []
+    for model in dynamic_models:
+        model_id = model.get("id", "")
+        if model_id and model_id not in hardcoded_ids:
+            new_models.append({
+                "value": model_id,
+                "label": model.get("name", model_id),
+                "description": "官方模型",
+                "isNew": True  # 标记为新模型
+            })
+
+    # 合并：硬编码模型 + 新模型（按字母排序）
+    new_models.sort(key=lambda x: x["value"])
+    return hardcoded_models + new_models
+
+
+@router.get("/config/ai/models", summary="获取AI模型列表")
+async def get_ai_models(
+    provider: str = Query(..., description="AI提供商ID"),
+    refresh: bool = Query(False, description="是否刷新动态模型列表"),
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    获取指定AI提供商的模型列表
+
+    返回硬编码模型列表 + 动态获取的模型列表（如果启用refresh）
+
+    Args:
+        provider: AI提供商ID (deepseek, siliconflow, openai, gemini)
+        refresh: 是否从API动态获取最新模型列表
+
+    Returns:
+        {
+            "models": [
+                {
+                    "value": "deepseek-chat",
+                    "label": "deepseek-chat (推荐)",
+                    "description": "DeepSeek V3.2 对话模型",
+                    "isNew": false
+                },
+                ...
+            ],
+            "source": "hardcoded" | "merged"
+        }
+    """
+    # 获取提供商配置
+    provider_config = get_provider_config(provider)
+    if not provider_config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到提供商: {provider}"
+        )
+
+    # 获取硬编码的模型列表
+    hardcoded_models = provider_config.get("availableModels", [])
+
+    # 如果不需要刷新，直接返回硬编码列表
+    if not refresh:
+        return {
+            "models": hardcoded_models,
+            "source": "hardcoded"
+        }
+
+    # 获取API配置
+    api_key = await config_manager.get("aiApiKey", "")
+    if not api_key:
+        # 没有API Key，返回硬编码列表
+        return {
+            "models": hardcoded_models,
+            "source": "hardcoded",
+            "error": "未配置API Key"
+        }
+
+    base_url = await config_manager.get("aiBaseUrl", "")
+
+    # 从API获取动态模型列表
+    dynamic_models = await _fetch_models_from_provider(provider, api_key, base_url)
+
+    # 合并模型列表
+    merged_models = _merge_model_lists(hardcoded_models, dynamic_models)
+
+    return {
+        "models": merged_models,
+        "source": "merged",
+        "dynamicCount": len(dynamic_models),
+        "newCount": len(merged_models) - len(hardcoded_models)
+    }
+
+
 
 
 

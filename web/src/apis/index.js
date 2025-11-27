@@ -29,6 +29,17 @@ export const changePassword = data =>
     })
   )
 
+/** 获取当前用户所有会话 */
+export const getUserSessions = () => api.get('/api/ui/auth/sessions')
+
+/** 踢出指定会话 */
+export const revokeSession = sessionId =>
+  api.delete(`/api/ui/auth/sessions/${sessionId}`)
+
+/** 踢出所有其他会话 */
+export const revokeOtherSessions = () =>
+  api.delete('/api/ui/auth/sessions/others/all')
+
 /** ---------------------------------------------------首页接口------------------------------------------------ */
 /** 获取日志 */
 export const getLogs = (options = {}) =>
@@ -255,6 +266,9 @@ export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
 /** 批量删除webhook任务 */
 export const deleteWebhookTasks = data =>
   api.post('/api/ui/webhook-tasks/delete-bulk', data)
+/** 清空所有webhook任务 */
+export const clearAllWebhookTasks = () =>
+  api.delete('/api/ui/webhook-tasks/clear-all')
 /** 立即执行webhook任务 */
 export const runWebhookTasksNow = data =>
   api.post('/api/ui/webhook-tasks/run-now', data)
@@ -334,6 +348,14 @@ export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
 export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
 /** 重载弹幕源 */
 export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
+/** 删除弹幕源备份 */
+export const deleteScraperBackup = () => api.delete('/api/ui/scrapers/backup')
+/** 删除当前弹幕源 */
+export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current')
+/** 获取自动更新配置 */
+export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
+/** 保存自动更新配置 */
+export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-update', data)
 /** 获取GitHub Token */
 export const getGithubToken = () => api.get('/api/ui/config/github-token')
 /** 保存GitHub Token */
@@ -548,6 +570,9 @@ export const getAIMetrics = (hours = 24) => api.get(`/api/ui/config/ai/metrics?h
 /** 清空 AI 缓存 */
 export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
 
+/** 获取 AI 模型列表 */
+export const getAIModels = (provider, refresh = false) => api.get(`/api/ui/config/ai/models?provider=${provider}&refresh=${refresh}`)
+
 /** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
 /** 获取所有媒体服务器 */
 export const getMediaServers = () => api.get('/api/ui/media-servers')
@@ -655,3 +680,23 @@ export const batchDeleteLocalItems = (itemIds) => api.post('/api/ui/local-items/
 
 /** 导入本地弹幕项 */
 export const importLocalItems = (data) => api.post('/api/ui/local-items/import', data)
+
+// ==================== 弹幕存储批量操作 ====================
+
+/** 预览批量迁移 */
+export const previewMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-migrate', data)
+
+/** 批量迁移弹幕文件 */
+export const batchMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-migrate', data)
+
+/** 预览批量重命名 */
+export const previewRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-rename', data)
+
+/** 批量重命名弹幕文件 */
+export const batchRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-rename', data)
+
+/** 预览应用模板 */
+export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/preview-template', data)
+
+/** 应用新模板 */
+export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)

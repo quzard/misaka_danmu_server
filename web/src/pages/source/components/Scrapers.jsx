@@ -2,6 +2,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Dropdown,
   Form,
   Input,
   List,
@@ -37,6 +38,10 @@ import {
   restoreScrapers,
   reloadScrapers,
   uploadScraperPackage,
+  deleteScraperBackup,
+  deleteCurrentScrapers,
+  getScraperAutoUpdate,
+  saveScraperAutoUpdate,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -194,6 +199,11 @@ export const Scrapers = () => {
   const [uploadingPackage, setUploadingPackage] = useState(false)
   const [sseConnected, setSseConnected] = useState(false)
 
+  // 自动更新相关
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false)
+  const [autoUpdateLoading, setAutoUpdateLoading] = useState(false)
+  const autoUpdateIntervalRef = useRef(null)
+
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
     visible: false,
@@ -226,6 +236,7 @@ export const Scrapers = () => {
   useEffect(() => {
     getInfo()
     loadResourceRepoConfig()
+    loadAutoUpdateConfig()
 
     // 建立 SSE 日志流, 根据相关事件自动刷新版本信息
     const token = Cookies.get('danmu_token')
@@ -283,6 +294,11 @@ export const Scrapers = () => {
         downloadAbortController.current.abort()
         downloadAbortController.current = null
       }
+      // 清除自动更新轮询
+      if (autoUpdateIntervalRef.current) {
+        clearInterval(autoUpdateIntervalRef.current)
+        autoUpdateIntervalRef.current = null
+      }
     }
   }, [])
 
@@ -320,10 +336,80 @@ export const Scrapers = () => {
         officialVersion: res.data?.officialVersion || null,
         hasUpdate: res.data?.hasUpdate || false
       })
+      return res.data
     } catch (error) {
       console.error('加载版本信息失败:', error)
+      return null
     } finally {
       setLoadingVersions(false)
+    }
+  }
+
+  // 加载自动更新配置
+  const loadAutoUpdateConfig = async () => {
+    try {
+      const res = await getScraperAutoUpdate()
+      const enabled = res.data?.enabled || false
+      setAutoUpdateEnabled(enabled)
+      if (enabled) {
+        startAutoUpdatePolling()
+      }
+    } catch (error) {
+      console.error('加载自动更新配置失败:', error)
+    }
+  }
+
+  // 启动自动更新轮询
+  const startAutoUpdatePolling = () => {
+    // 清除之前的轮询
+    if (autoUpdateIntervalRef.current) {
+      clearInterval(autoUpdateIntervalRef.current)
+    }
+    // 15分钟轮询一次
+    autoUpdateIntervalRef.current = setInterval(async () => {
+      await checkAndAutoUpdate()
+    }, 15 * 60 * 1000)
+  }
+
+  // 停止自动更新轮询
+  const stopAutoUpdatePolling = () => {
+    if (autoUpdateIntervalRef.current) {
+      clearInterval(autoUpdateIntervalRef.current)
+      autoUpdateIntervalRef.current = null
+    }
+  }
+
+  // 检查并自动更新
+  const checkAndAutoUpdate = async () => {
+    try {
+      const versionData = await loadVersionInfo()
+      if (versionData?.hasUpdate && resourceRepoUrl) {
+        console.log('检测到新版本，自动加载资源...')
+        // 自动触发加载资源
+        handleLoadResources()
+      }
+    } catch (error) {
+      console.error('自动更新检查失败:', error)
+    }
+  }
+
+  // 切换自动更新状态
+  const handleAutoUpdateToggle = async (checked) => {
+    try {
+      setAutoUpdateLoading(true)
+      await saveScraperAutoUpdate({ enabled: checked, interval: 15 })
+      setAutoUpdateEnabled(checked)
+      if (checked) {
+        startAutoUpdatePolling()
+        messageApi.success('已启用自动更新，每15分钟检查一次')
+      } else {
+        stopAutoUpdatePolling()
+        messageApi.success('已关闭自动更新')
+      }
+    } catch (error) {
+      messageApi.error('保存自动更新配置失败')
+    } finally {
+      setAutoUpdateLoading(false)
     }
   }
 
@@ -1088,7 +1174,17 @@ export const Scrapers = () => {
                         <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
                         <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
                       </div>
-                      {sseConnected && <Tag color="default">自动监听</Tag>}
+                      <div className="flex items-center gap-2">
+                        <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
+                        <Switch
+                          size="small"
+                          checked={autoUpdateEnabled}
+                          loading={autoUpdateLoading}
+                          checkedChildren="启用"
+                          unCheckedChildren="关闭"
+                          onChange={handleAutoUpdateToggle}
+                        />
+                      </div>
                       <Button
                         type="text"
                         onClick={loadVersionInfo}
@@ -1114,11 +1210,16 @@ export const Scrapers = () => {
                           </>
                         ) : '刷新'}
                       </Button>
+                      {/* PC端：更新提示显示在刷新按钮右边 */}
+                      {versionInfo.hasUpdate && (
+                        <Typography.Text type="warning" style={{ marginLeft: 8 }}>🆙 有更新可用</Typography.Text>
+                      )}
                     </div>
                   )}
-                  {versionInfo.hasUpdate && (
+                  {/* 移动端：更新提示显示在下一行 */}
+                  {isMobile && versionInfo.hasUpdate && (
                     <div className="flex items-center gap-2">
-                      <Typography.Text type="warning">有更新可用</Typography.Text>
+                      <Typography.Text type="warning">🆙 有更新可用</Typography.Text>
                     </div>
                   )}
                 </div>
@@ -1127,62 +1228,125 @@ export const Scrapers = () => {
               {/* 右侧：操作按钮组 —— 仅在 PC 端显示 */}
               {!isMobile && (
                 <div className="flex gap-2">
-                  <Button
-                    onClick={async () => {
-                      try {
-                        const res = await backupScrapers()
-                        messageApi.success(res.data?.message || '备份成功')
-                      } catch (error) {
-                        messageApi.error(error.response?.data?.detail || '备份失败')
-                      }
-                    }}
-                  >
-                    备份当前弹幕源
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      modalApi.confirm({
-                        title: '还原弹幕源',
-                        content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
-                        okText: '确认',
-                        cancelText: '取消',
-                        onOk: async () => {
-                          try {
-                            const res = await restoreScrapers()
-                            messageApi.success(res.data?.message || '还原成功，正在后台重载...')
-                            setTimeout(() => {
-                              getInfo()
-                              loadVersionInfo()
-                            }, 2500)
-                          } catch (error) {
-                            messageApi.error(error.response?.data?.detail || '还原失败')
+                  <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'backup',
+                          label: '备份弹幕源',
+                          onClick: async () => {
+                            try {
+                              const res = await backupScrapers()
+                              messageApi.success(res.data?.message || '备份成功')
+                            } catch (error) {
+                              messageApi.error(error.response?.data?.detail || '备份失败')
+                            }
                           }
                         },
-                      })
+                        {
+                          key: 'restore',
+                          label: '备份还原',
+                          onClick: () => {
+                            modalApi.confirm({
+                              title: '还原弹幕源',
+                              content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                              okText: '确认',
+                              cancelText: '取消',
+                              onOk: async () => {
+                                try {
+                                  const res = await restoreScrapers()
+                                  messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+                                  setTimeout(() => {
+                                    getInfo()
+                                    loadVersionInfo()
+                                  }, 2500)
+                                } catch (error) {
+                                  messageApi.error(error.response?.data?.detail || '还原失败')
+                                }
+                              },
+                            })
+                          }
+                        },
+                        {
+                          key: 'deleteBackup',
+                          label: '删除备份',
+                          danger: true,
+                          onClick: () => {
+                            modalApi.confirm({
+                              title: '删除备份',
+                              content: '确定要删除所有备份文件吗？此操作不可恢复。',
+                              okText: '确认删除',
+                              cancelText: '取消',
+                              okButtonProps: { danger: true },
+                              onOk: async () => {
+                                try {
+                                  const res = await deleteScraperBackup()
+                                  messageApi.success(res.data?.message || '删除备份成功')
+                                } catch (error) {
+                                  messageApi.error(error.response?.data?.detail || '删除备份失败')
+                                }
+                              },
+                            })
+                          }
+                        },
+                      ]
                     }}
                   >
-                    从备份还原
-                  </Button>
-                  <Button
-                    type="primary"
-                    onClick={async () => {
-                      try {
-                        setLoading(true)
-                        const res = await reloadScrapers()
-                        messageApi.success(res.data?.message || '重载成功，正在后台重载...')
-                        setTimeout(() => {
-                          getInfo()
-                          loadVersionInfo()
-                        }, 2500)
-                      } catch (error) {
-                        messageApi.error(error.response?.data?.detail || '重载失败')
-                      } finally {
-                        setLoading(false)
-                      }
+                    <Button>备份</Button>
+                  </Dropdown>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'reload',
+                          label: '重载当前源',
+                          onClick: async () => {
+                            try {
+                              setLoading(true)
+                              const res = await reloadScrapers()
+                              messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+                              setTimeout(() => {
+                                getInfo()
+                                loadVersionInfo()
+                              }, 2500)
+                            } catch (error) {
+                              messageApi.error(error.response?.data?.detail || '重载失败')
+                            } finally {
+                              setLoading(false)
+                            }
+                          }
+                        },
+                        {
+                          key: 'deleteCurrent',
+                          label: '删除当前源',
+                          danger: true,
+                          onClick: () => {
+                            modalApi.confirm({
+                              title: '删除当前弹幕源',
+                              content: '确定要删除所有当前弹幕源文件吗？此操作不可恢复。',
+                              okText: '确认删除',
+                              cancelText: '取消',
+                              okButtonProps: { danger: true },
+                              onOk: async () => {
+                                try {
+                                  const res = await deleteCurrentScrapers()
+                                  messageApi.success(res.data?.message || '删除成功')
+                                  setTimeout(() => {
+                                    getInfo()
+                                    loadVersionInfo()
+                                  }, 2500)
+                                } catch (error) {
+                                  messageApi.error(error.response?.data?.detail || '删除失败')
+                                }
+                              },
+                            })
+                          }
+                        },
+                      ]
                     }}
                   >
-                    重载弹幕源
-                  </Button>
+                    <Button type="primary">当前源</Button>
+                  </Dropdown>
                 </div>
               )}
             </div>
@@ -1193,68 +1357,125 @@ export const Scrapers = () => {
           {
             isMobile && (
               <div className="flex gap-2 flex-wrap mb-4">
-                <Button
-                  onClick={async () => {
-                    try {
-                      const res = await backupScrapers()
-                      messageApi.success(res.data?.message || '备份成功')
-                    } catch (error) {
-                      messageApi.error(error.response?.data?.detail || '备份失败')
-                    }
-                  }}
-                  className="flex-1 min-w-0"
-                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
-                >
-                  备份
-                </Button>
-                <Button
-                  onClick={() => {
-                    modalApi.confirm({
-                      title: '还原弹幕源',
-                      content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
-                      okText: '确认',
-                      cancelText: '取消',
-                      onOk: async () => {
-                        try {
-                          const res = await restoreScrapers()
-                          messageApi.success(res.data?.message || '还原成功，正在后台重载...')
-                          setTimeout(() => {
-                            getInfo()
-                            loadVersionInfo()
-                          }, 2500)
-                        } catch (error) {
-                          messageApi.error(error.response?.data?.detail || '还原失败')
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'backup',
+                        label: '备份弹幕源',
+                        onClick: async () => {
+                          try {
+                            const res = await backupScrapers()
+                            messageApi.success(res.data?.message || '备份成功')
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '备份失败')
+                          }
                         }
                       },
-                    })
+                      {
+                        key: 'restore',
+                        label: '备份还原',
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '还原弹幕源',
+                            content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                            okText: '确认',
+                            cancelText: '取消',
+                            onOk: async () => {
+                              try {
+                                const res = await restoreScrapers()
+                                messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '还原失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                      {
+                        key: 'deleteBackup',
+                        label: '删除备份',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除备份',
+                            content: '确定要删除所有备份文件吗？此操作不可恢复。',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteScraperBackup()
+                                messageApi.success(res.data?.message || '删除备份成功')
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除备份失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                    ]
                   }}
-                  className="flex-1 min-w-0"
-                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
                 >
-                  还原
-                </Button>
-                <Button
-                  type="primary"
-                  onClick={async () => {
-                    try {
-                      setLoading(true)
-                      const res = await reloadScrapers()
-                      messageApi.success(res.data?.message || '重载成功，正在后台重载...')
-                      setTimeout(() => {
-                        getInfo()
-                        loadVersionInfo()
-                      }, 2500)
-                    } catch (error) {
-                      messageApi.error(error.response?.data?.detail || '重载失败')
-                    } finally {
-                      setLoading(false)
-                    }
+                  <Button className="flex-1 min-w-0">备份</Button>
+                </Dropdown>
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'reload',
+                        label: '重载当前源',
+                        onClick: async () => {
+                          try {
+                            setLoading(true)
+                            const res = await reloadScrapers()
+                            messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+                            setTimeout(() => {
+                              getInfo()
+                              loadVersionInfo()
+                            }, 2500)
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '重载失败')
+                          } finally {
+                            setLoading(false)
+                          }
+                        }
+                      },
+                      {
+                        key: 'deleteCurrent',
+                        label: '删除当前源',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除当前弹幕源',
+                            content: '确定要删除所有当前弹幕源文件吗？此操作不可恢复。',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteCurrentScrapers()
+                                messageApi.success(res.data?.message || '删除成功')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                    ]
                   }}
-                  className="flex-1 min-w-0"
-                  style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
                 >
-                  重载
-                </Button>
+                  <Button type="primary" className="flex-1 min-w-0">当前源</Button>
+                </Dropdown>
               </div>
             )
           }

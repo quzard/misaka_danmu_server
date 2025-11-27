@@ -198,33 +198,8 @@ class So360MetadataSource(BaseMetadataSource):
                 except Exception as e:
                     self.logger.warning(f"360: 缓存搜索结果失败 (media_id={media_id}): {e}")
 
-                # 分析seriesPlaylinks中的链接,判断支持哪些平台
-                supported_providers = set()
-                series_playlinks = item.get('seriesPlaylinks', [])
-                series_site = item.get('seriesSite', '')
-
-                if series_site:
-                    # 如果有seriesSite,直接使用
-                    provider_reverse_map = {"qq": "tencent", "qiyi": "iqiyi", "youku": "youku", "bilibili": "bilibili", "imgo": "mgtv"}
-                    if series_site in provider_reverse_map:
-                        supported_providers.add(provider_reverse_map[series_site])
-                elif series_playlinks:
-                    # 如果没有seriesSite,分析链接
-                    for ep in series_playlinks:
-                        url = ep.get('url', '') if isinstance(ep, dict) else (ep if isinstance(ep, str) else '')
-                        if not url:
-                            continue
-                        # 根据URL判断平台
-                        if 'youku.com' in url:
-                            supported_providers.add('youku')
-                        elif 'bilibili.com' in url:
-                            supported_providers.add('bilibili')
-                        elif 'qq.com' in url or 'v.qq.com' in url:
-                            supported_providers.add('tencent')
-                        elif 'iqiyi.com' in url:
-                            supported_providers.add('iqiyi')
-                        elif 'mgtv.com' in url:
-                            supported_providers.add('mgtv')
+                # 通过获取第一集分集URL来探测实际支持的平台
+                supported_providers = await self._probe_supported_providers(item, media_id, title)
 
                 # 将支持的平台列表存储到extra中
                 extra_data = {"item_data": item}
@@ -803,6 +778,92 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.error(f"360获取剧集分集失败: {e}")
 
         return []
+
+    async def _probe_supported_providers(self, item: dict, media_id: str, title: str) -> Set[str]:
+        """
+        通过获取第一集分集URL来探测实际支持的平台。
+
+        Args:
+            item: 360搜索结果的原始数据
+            media_id: 媒体ID
+            title: 标题(用于日志)
+
+        Returns:
+            Set[str]: 实际支持的平台列表 (tencent, iqiyi, youku, bilibili, mgtv)
+        """
+        supported_providers: Set[str] = set()
+
+        # 平台映射: 360内部名称 -> 标准名称
+        provider_reverse_map = {"qq": "tencent", "qiyi": "iqiyi", "youku": "youku", "bilibili": "bilibili", "imgo": "mgtv"}
+
+        cat_id = item.get('cat_id', '')
+        cat_name = item.get('cat_name', '')
+        ent_id = item.get('id', '')
+        en_id = item.get('en_id', '')
+        playlinks = item.get('playlinks', {})
+
+        # 只检查 playlinks 中存在的平台
+        all_platforms = ['qq', 'qiyi', 'youku', 'bilibili', 'imgo']
+        platforms_to_check = [site for site in all_platforms if site in playlinks]
+
+        if not platforms_to_check:
+            self.logger.debug(f"360探测: {title} 没有可用平台")
+            return supported_providers
+
+        self.logger.debug(f"360探测: {title} 检查平台: {platforms_to_check}")
+
+        for site in platforms_to_check:
+            try:
+                # 尝试获取第一集URL
+                if cat_id == '3' or '综艺' in cat_name:
+                    episodes = await self._get_zongyi_episodes(ent_id, site, item)
+                else:
+                    episodes = await self._get_series_episodes(cat_id, en_id or ent_id, site)
+
+                if episodes and len(episodes) > 0:
+                    # 获取第一集URL
+                    first_ep = episodes[0]
+                    if isinstance(first_ep, dict):
+                        url = first_ep.get('url', '')
+                    elif isinstance(first_ep, str):
+                        url = first_ep
+                    else:
+                        continue
+
+                    if url:
+                        # 根据URL确定实际平台
+                        detected_provider = self._detect_provider_from_url(url)
+                        if detected_provider:
+                            supported_providers.add(detected_provider)
+                            self.logger.debug(f"360探测: {title} - {site} 平台 -> 实际平台: {detected_provider}")
+                        else:
+                            # 如果无法从URL检测,使用360的平台映射
+                            if site in provider_reverse_map:
+                                supported_providers.add(provider_reverse_map[site])
+                                self.logger.debug(f"360探测: {title} - {site} 平台 (使用默认映射)")
+            except Exception as e:
+                self.logger.debug(f"360探测: {title} - {site} 平台获取失败: {e}")
+                continue
+
+        self.logger.info(f"360探测完成: {title} 支持的平台: {supported_providers}")
+        return supported_providers
+
+    def _detect_provider_from_url(self, url: str) -> Optional[str]:
+        """根据URL检测实际平台"""
+        if not url:
+            return None
+        url_lower = url.lower()
+        if 'youku.com' in url_lower:
+            return 'youku'
+        elif 'bilibili.com' in url_lower:
+            return 'bilibili'
+        elif 'qq.com' in url_lower or 'v.qq.com' in url_lower:
+            return 'tencent'
+        elif 'iqiyi.com' in url_lower:
+            return 'iqiyi'
+        elif 'mgtv.com' in url_lower or 'hunantv.com' in url_lower:
+            return 'mgtv'
+        return None
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
         search_results = await self.search(keyword, user)

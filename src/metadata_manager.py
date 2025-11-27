@@ -584,6 +584,10 @@ class MetadataSourceManager:
         """委托给 SeasonMapper.get_season_name()"""
         return await self.season_mapper.get_season_name(*args, **kwargs)
 
+    async def get_seasons(self, *args, **kwargs):
+        """委托给 SeasonMapper.get_seasons_from_source()"""
+        return await self.season_mapper.get_seasons_from_source(*args, **kwargs)
+
     async def close_all(self):
         """在应用关闭时关闭所有元数据源客户端。"""
         self.logger.info("正在关闭所有元数据源...")

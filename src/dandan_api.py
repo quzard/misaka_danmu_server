@@ -24,6 +24,7 @@ from .ai.ai_matcher_manager import AIMatcherManager
 from .timezone import get_now, get_app_timezone
 from .database import get_db_session, sync_postgres_sequence
 from .utils import parse_search_keyword, sample_comments_evenly
+from .season_mapper import ai_type_and_season_mapping_and_correction
 from .rate_limiter import RateLimiter
 from .task_manager import TaskManager, TaskStatus, TaskSuccess
 from .metadata_manager import MetadataSourceManager
@@ -33,7 +34,10 @@ from .api.dependencies import get_cache_manager, get_ai_matcher_manager
 from .search_utils import unified_search
 from .ai.ai_matcher import AIMatcher, DEFAULT_AI_MATCH_PROMPT
 from .orm_models import Anime, AnimeSource, Episode
+from .season_mapper import title_contains_season_name
 from .models import ProviderEpisodeInfo
+from .commands import handle_command
+from .search_timer import SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH, SEARCH_TYPE_FALLBACK_MATCH
 
 logger = logging.getLogger(__name__)
 
@@ -850,13 +854,18 @@ async def _handle_fallback_search(
     config_manager: ConfigManager,
     rate_limiter: RateLimiter,
     title_recognition_manager,
-    task_manager: TaskManager
+    task_manager: TaskManager,
+    ai_matcher_manager: AIMatcherManager
 ) -> DandanSearchAnimeResponse:
     """
     处理后备搜索逻辑
     """
     # 生成搜索任务的唯一标识
     search_key = f"search_{hash(search_term + token)}"
+
+    # 获取自定义域名（用于拼接imageUrl）
+    custom_domain = await config_manager.get("customApiDomain", "")
+    image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
 
     # 检查该token是否已有正在进行的搜索任务
     existing_search_key = await _get_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
@@ -873,7 +882,7 @@ async def _handle_fallback_search(
                     animeTitle=f"{existing_search['search_term']} 搜索正在运行",
                     type="tvseries",
                     typeDescription=f"{progress}%",
-                    imageUrl="/static/logo.png",
+                    imageUrl=image_url,
                     startDate="2025-01-01T00:00:00+08:00",
                     year=2025,
                     episodeCount=1,
@@ -894,7 +903,7 @@ async def _handle_fallback_search(
                 animeTitle=f"{search_term} 匹配后备正在运行",
                 type="tvseries",
                 typeDescription=f"{progress}%",
-                imageUrl="/static/logo.png",
+                imageUrl=image_url,
                 startDate="2025-01-01T00:00:00+08:00",
                 year=2025,
                 episodeCount=1,
@@ -917,40 +926,22 @@ async def _handle_fallback_search(
         # 如果搜索正在进行中，返回搜索状态
         if search_info["status"] == "running":
             elapsed_time = time.time() - search_info["start_time"]
-            if elapsed_time >= 5:  # 5秒后返回搜索中状态
-                progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=999999999,  # 使用特定的不会冲突的数字
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{search_term} 搜索正在运行",
-                        type="tvseries",
-                        typeDescription=f"{progress}%",
-                        imageUrl="/static/logo.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
-            else:
-                # 5秒内返回搜索启动状态
-                return DandanSearchAnimeResponse(animes=[
-                    DandanSearchAnimeItem(
-                        animeId=999999999,
-                        bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                        animeTitle=f"{search_term} 搜索正在启动",
-                        type="tvseries",
-                        typeDescription="搜索正在启动",
-                        imageUrl="/static/logo.png",
-                        startDate="2025-01-01T00:00:00+08:00",
-                        year=2025,
-                        episodeCount=1,
-                        rating=0.0,
-                        isFavorited=False
-                    )
-                ])
+            progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
+            return DandanSearchAnimeResponse(animes=[
+                DandanSearchAnimeItem(
+                    animeId=999999999,  # 使用特定的不会冲突的数字
+                    bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
+                    animeTitle=f"{search_term} 搜索正在运行",
+                    type="tvseries",
+                    typeDescription=f"{progress}%",
+                    imageUrl=image_url,
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=1,
+                    rating=0.0,
+                    isFavorited=False
+                )
+            ])
 
     # 解析搜索词，提取季度和集数信息
     parsed_info = parse_search_keyword(search_term)
@@ -972,11 +963,14 @@ async def _handle_fallback_search(
     async def fallback_search_coro_factory(session_inner: AsyncSession, progress_callback):
         """后备搜索任务的协程工厂"""
         try:
+            # 获取AI匹配器
+            ai_matcher_manager_local = AIMatcherManager(session_factory=session_inner.session_factory, config_manager=config_manager)
+
             # 执行搜索任务
             await _execute_fallback_search_task(
                 search_term, search_key, token, session_inner, progress_callback,
                 scraper_manager, metadata_manager, config_manager,
-                rate_limiter, title_recognition_manager
+                rate_limiter, title_recognition_manager, ai_matcher_manager_local
             )
         except Exception as e:
             logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
@@ -1006,15 +1000,50 @@ async def _handle_fallback_search(
         search_info["status"] = "failed"
         return DandanSearchAnimeResponse(animes=[])
 
-    # 立即返回"搜索中"状态，让用户知道搜索正在进行
+    # ===== 15秒等待机制 =====
+    # 等待最多15秒，如果期间完成就直接返回结果
+    max_wait_time = 15.0
+    start_time = time.time()
+    check_interval = 0.5  # 每0.5秒检查一次
+
+    while time.time() - start_time < max_wait_time:
+        await asyncio.sleep(check_interval)
+
+        # 刷新会话以读取最新数据（解决事务隔离问题）
+        await session.commit()
+
+        # 检查搜索状态
+        current_search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if current_search_info:
+            if current_search_info["status"] == "completed":
+                # 搜索完成，直接返回结果
+                logger.info(f"后备搜索在 {time.time() - start_time:.2f} 秒内完成，直接返回结果")
+                return DandanSearchAnimeResponse(animes=current_search_info["results"])
+            elif current_search_info["status"] == "failed":
+                # 搜索失败
+                logger.warning(f"后备搜索在 {time.time() - start_time:.2f} 秒内失败")
+                return DandanSearchAnimeResponse(animes=[])
+
+    # 超过15秒仍未完成，返回进度状态
+    logger.info(f"后备搜索超过15秒未完成，返回进度状态")
+
+    # 获取自定义域名
+    custom_domain = await config_manager.get("customApiDomain", "")
+    image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
+    # 获取当前进度
+    final_search_info = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+    elapsed_time = time.time() - search_info["start_time"]
+    progress = min(int((elapsed_time / 60) * 100), 95)  # 假设最多1分钟完成，最高95%
+
     return DandanSearchAnimeResponse(animes=[
         DandanSearchAnimeItem(
             animeId=999999999,  # 使用特定的不会冲突的数字
             bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-            animeTitle=f"{search_term} 搜索正在启动",
+            animeTitle=f"{search_term} 搜索正在运行",
             type="tvseries",
-            typeDescription="0%",
-            imageUrl="/static/logo.png",
+            typeDescription=f"{progress}%",
+            imageUrl=image_url,
             startDate="2025-01-01T00:00:00+08:00",
             year=2025,
             episodeCount=1,
@@ -1033,10 +1062,16 @@ async def _execute_fallback_search_task(
     metadata_manager: MetadataSourceManager,
     config_manager: ConfigManager,
     rate_limiter: RateLimiter,
-    title_recognition_manager
+    title_recognition_manager,
+    ai_matcher_manager: AIMatcherManager
 ):
     """执行后备搜索任务。"""
+    # 初始化计时器并开始计时
+    timer = SearchTimer(SEARCH_TYPE_FALLBACK_SEARCH, search_term, logger)
+    timer.start()
+
     try:
+        timer.step_start("关键词解析与预处理")
         # 1. 解析搜索词，提取基础标题 / 季度 / 集数信息
         parsed_info = parse_search_keyword(search_term)
         original_title = parsed_info["title"]
@@ -1091,9 +1126,17 @@ async def _execute_fallback_search_task(
             else None
         )
 
+        # 后备搜索 AI映射配置检查
+        fallback_search_season_mapping_enabled = await config_manager.get("fallbackSearchEnableTmdbSeasonMapping", "false")
+        if fallback_search_season_mapping_enabled.lower() != "true":
+            logger.info("○ 后备搜索 统一AI映射: 功能未启用")
+
+        timer.step_end()
+
         # 更新进度
         await progress_callback(10, "开始搜索...")
 
+        timer.step_start("弹幕源搜索")
         # 4. 使用统一的搜索函数
         #    - 使用预处理后的 search_title
         #    - 传入 episode_info
@@ -1111,6 +1154,7 @@ async def _execute_fallback_search_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
+        timer.step_end(details=f"{len(sorted_results)}个结果")
 
         # 5. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:
@@ -1144,6 +1188,48 @@ async def _execute_fallback_search_task(
             )
             sorted_results = filtered_by_season
 
+        # 使用统一的AI类型和季度映射修正函数
+        if fallback_search_season_mapping_enabled.lower() == "true":
+            try:
+                timer.step_start("AI映射修正")
+                # 获取AI匹配器（使用函数参数）
+                ai_matcher = await ai_matcher_manager.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ 后备搜索 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=search_title,
+                        search_results=sorted_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ 后备搜索 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了sorted_results）
+                        sorted_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+                    else:
+                        logger.info(f"○ 后备搜索 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
+                else:
+                    logger.warning("○ 后备搜索 AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
+
+            except Exception as e:
+                logger.warning(f"后备搜索 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
+        else:
+            logger.info("○ 后备搜索 统一AI映射: 功能未启用")
+
+        timer.step_start("结果转换与缓存")
         # 7. 转换为DandanSearchAnimeItem格式
         await progress_callback(80, "转换搜索结果...")
         search_results = []
@@ -1247,10 +1333,13 @@ async def _execute_fallback_search_task(
         except Exception as e:
             logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
 
+        timer.step_end(details=f"{len(search_results)}个结果")
         await progress_callback(100, "搜索完成")
+        timer.finish()  # 打印计时报告
 
     except Exception as e:
         logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
+        timer.finish()  # 即使失败也打印计时报告
         # 更新缓存状态为失败
         search_info_failed = await _get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
         if search_info_failed:
@@ -1324,8 +1413,13 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     使用正则表达式从文件名中解析出番剧标题和集数。
     这是一个简化的实现，用于 dandanplay 兼容接口。
     """
-    # 移除文件扩展名
-    name_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    # 移除文件扩展名 - 只有当后缀是真正的视频扩展名时才移除
+    VIDEO_EXTENSIONS = {'mkv', 'mp4', 'avi', 'wmv', 'flv', 'ts', 'm2ts', 'rmvb', 'rm', 'mov', 'webm', 'mpg', 'mpeg', 'vob', 'iso', 'bdmv'}
+    name_without_ext = filename
+    if '.' in filename:
+        parts = filename.rsplit('.', 1)
+        if len(parts) == 2 and parts[1].lower() in VIDEO_EXTENSIONS:
+            name_without_ext = parts[0]
 
     # 模式1: SXXEXX 格式 (e.g., "Some.Anime.S01E02.1080p.mkv")
     s_e_pattern = re.compile(
@@ -1516,6 +1610,7 @@ async def search_anime_for_dandan(
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    cache_manager: CacheManager = Depends(get_cache_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -1525,6 +1620,7 @@ async def search_anime_for_dandan(
     它会搜索 **本地弹幕库** 中的番剧信息，不包含分集列表。
     新增：支持后备搜索功能，当库内无结果或指定集数不存在时，触发全网搜索。
     支持SXXEXX格式的季度和集数搜索。
+    支持指令功能：以@开头的搜索词作为指令。
     """
     search_term = keyword or anime
     if not search_term:
@@ -1532,6 +1628,19 @@ async def search_anime_for_dandan(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Missing required query parameter: 'keyword' or 'anime'"
         )
+
+    # ===== 指令处理 =====
+    command_response = await handle_command(
+        search_term, token, session, config_manager, cache_manager,
+        scraper_manager=scraper_manager,
+        metadata_manager=metadata_manager,
+        rate_limiter=rate_limiter,
+        title_recognition_manager=title_recognition_manager,
+        task_manager=task_manager
+    )
+    if command_response:
+        return command_response
+    # ===== 指令处理结束 =====
 
     # 解析搜索关键词，提取标题、季数和集数
     parsed_info = parse_search_keyword(search_term)
@@ -1627,10 +1736,13 @@ async def search_anime_for_dandan(
         elif season_to_search is not None:
             search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}"
 
+        # 创建一个临时的ai_matcher_manager用于传递（实际会在协程工厂中重新创建）
+        ai_matcher_manager_local = AIMatcherManager(session_factory=session.session_factory, config_manager=config_manager)
+
         return await _handle_fallback_search(
             search_title_for_fallback, token, session, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager,
-            task_manager
+            task_manager, ai_matcher_manager_local
         )
 
     # 本地库无结果且未启用后备搜索，返回空结果
@@ -1645,7 +1757,8 @@ async def get_bangumi_details(
     bangumiId: str = Path(..., description="作品ID, A开头的备用ID, 或真实的Bangumi ID"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager)
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     模拟 dandanplay 的 /api/v2/bangumi/{bangumiId} 接口。
@@ -1812,11 +1925,15 @@ async def get_bangumi_details(
                                 logger.error(f"获取分集列表失败: {e}")
                                 episodes = []
 
+                            # 获取自定义域名
+                            custom_domain = await config_manager.get("customApiDomain", "")
+                            image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
                             bangumi_details = BangumiDetails(
                                 animeId=anime_id,  # 使用分配的animeId
                                 bangumiId=bangumiId,
                                 animeTitle=f"{original_title} （来源：{provider}）",
-                                imageUrl="/static/logo.png",
+                                imageUrl=image_url,
                                 searchKeyword=original_title,
                                 type="other",
                                 typeDescription="其他",
@@ -2079,7 +2196,12 @@ async def _get_match_for_item(
 
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
+            # 初始化计时器并开始计时
+            match_timer = SearchTimer(SEARCH_TYPE_FALLBACK_MATCH, item.fileName, logger)
+            match_timer.start()
+
             try:
+                match_timer.step_start("初始化与解析")
                 # 构造 auto_search_and_import_task 需要的 payload
                 # 根据 is_movie 标记判断媒体类型
                 media_type_for_fallback = "movie" if parsed_info.get("is_movie") else "tv_series"
@@ -2094,50 +2216,14 @@ async def _get_match_for_item(
                 # 电影不设置episode_number,保持为None
                 episode_number = None if is_movie else (parsed_info.get("episode") or 1)
 
-                # 步骤0.5: 创建季度映射任务(如果启用) - 与搜索并行运行
-                season_mapping_task = None
+                # 匹配后备 AI映射配置检查
                 match_fallback_tmdb_enabled = await config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false")
-                if match_fallback_tmdb_enabled.lower() == "true" and not is_movie and season and season > 1:
-                    logger.info(f"○ 匹配后备 季度映射: 开始为 '{base_title}' S{season:02d} 获取季度名称(并行)...")
-
-                    # 获取AI匹配器(如果启用)
-                    ai_matcher = await ai_matcher_manager.get_matcher()
-                    if ai_matcher:
-                        logger.debug("匹配后备 季度映射: 使用AI匹配器")
-                    else:
-                        logger.debug("匹配后备 季度映射: AI匹配器未启用或初始化失败")
-
-                    # 获取元数据源和自定义提示词
-                    metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-                    custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-                    sources = [metadata_source] if metadata_source else None
-
-                    # 创建并行任务
-                    async def get_season_mapping():
-                        try:
-                            return await metadata_manager.get_season_name(
-                                title=base_title,
-                                season_number=season,
-                                year=None,  # 匹配后备通常没有年份信息
-                                sources=sources,
-                                ai_matcher=ai_matcher,
-                                user=None,
-                                custom_prompt=custom_prompt if custom_prompt else None
-                            )
-                        except Exception as e:
-                            logger.warning(f"匹配后备 季度映射失败: {e}")
-                            return None
-
-                    season_mapping_task = asyncio.create_task(get_season_mapping())
-                else:
-                    if match_fallback_tmdb_enabled.lower() != "true":
-                        logger.info("○ 匹配后备 季度映射: 功能未启用")
-                    elif is_movie:
-                        logger.info("○ 匹配后备 季度映射: 电影类型,跳过")
-                    elif not season or season <= 1:
-                        logger.info(f"○ 匹配后备 季度映射: 季度号为{season},跳过(仅处理S02及以上)")
+                if match_fallback_tmdb_enabled.lower() != "true":
+                    logger.info("○ 匹配后备 统一AI映射: 功能未启用")
+                match_timer.step_end()
 
                 # 步骤1：使用统一的搜索函数
+                match_timer.step_start("弹幕源搜索")
                 logger.info(f"步骤1：全网搜索 '{base_title}'")
 
                 # 使用统一的搜索函数（与 WebUI 搜索保持一致的过滤策略）
@@ -2157,41 +2243,58 @@ async def _get_match_for_item(
 
                 if not all_results:
                     logger.warning(f"匹配后备失败：没有找到任何搜索结果")
+                    match_timer.step_end(details="无结果")
+                    match_timer.finish()  # 打印计时报告
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
 
+                match_timer.step_end(details=f"{len(all_results)}个结果")
                 logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
-                # 等待季度映射任务完成(如果有)
-                season_name_from_mapping = None
-                if season_mapping_task:
+                # 使用统一的AI类型和季度映射修正函数
+                if match_fallback_tmdb_enabled.lower() == "true":
                     try:
-                        season_name_from_mapping = await season_mapping_task
-                        if season_name_from_mapping:
-                            logger.info(f"✓ 匹配后备 季度映射成功: '{base_title}' S{season:02d} → '{season_name_from_mapping}'")
+                        match_timer.step_start("AI映射修正")
+                        # 获取AI匹配器
+                        ai_matcher = await ai_matcher_manager.get_matcher()
+                        if ai_matcher:
+                            logger.info(f"○ 匹配后备 开始统一AI映射修正: '{base_title}' ({len(all_results)} 个结果)")
+
+                            # 使用新的统一函数进行类型和季度修正
+                            mapping_result = await ai_type_and_season_mapping_and_correction(
+                                search_title=base_title,
+                                search_results=all_results,
+                                metadata_manager=metadata_manager,
+                                ai_matcher=ai_matcher,
+                                logger=logger,
+                                similarity_threshold=60.0
+                            )
+
+                            # 应用修正结果
+                            if mapping_result['total_corrections'] > 0:
+                                logger.info(f"✓ 匹配后备 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                                logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                                logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                                # 更新搜索结果（已经直接修改了all_results）
+                                all_results = mapping_result['corrected_results']
+                                match_timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+                            else:
+                                logger.info(f"○ 匹配后备 统一AI映射: 未找到需要修正的信息")
+                                match_timer.step_end(details="无修正")
                         else:
-                            logger.info(f"○ 匹配后备 季度映射: 未找到季度名称")
+                            logger.warning("○ 匹配后备 AI映射: AI匹配器未启用或初始化失败")
+                            match_timer.step_end(details="匹配器未启用")
+
                     except Exception as e:
-                        logger.warning(f"匹配后备 季度映射任务失败: {e}")
-
-                # 根据季度映射结果调整搜索结果的 season 字段
-                if season_name_from_mapping and season and season > 1:
-                    from .season_mapper import title_contains_season_name
-
-                    adjusted_count = 0
-                    for result_item in all_results:
-                        # 只处理电视剧类型且 season 为 None 或 1 的结果
-                        if result_item.type == "tv_series" and (result_item.season is None or result_item.season == 1):
-                            if title_contains_season_name(result_item.title, season_name_from_mapping, threshold=60.0):
-                                logger.info(f"  ✓ 季度调整: '{result_item.title}' (Provider: {result_item.provider}) season: {result_item.season} → {season}")
-                                result_item.season = season
-                                adjusted_count += 1
-
-                    if adjusted_count > 0:
-                        logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
+                        logger.warning(f"匹配后备 统一AI映射任务执行失败: {e}")
+                        match_timer.step_end(details=f"失败: {e}")
+                else:
+                    logger.info("○ 匹配后备 统一AI映射: 功能未启用")
 
                 # 步骤2：智能排序 (类型匹配优先)
+                match_timer.step_start("智能排序与匹配")
                 logger.info(f"步骤2：智能排序 (类型匹配优先)")
 
                 # 确定目标类型
@@ -2316,56 +2419,94 @@ async def _get_match_for_item(
                         return DandanMatchResponse(isMatched=False, matches=[])
                     # 允许降级，继续使用传统匹配
                     logger.info("AI匹配失败，使用传统匹配兜底")
-                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+                    # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            # 验证标题相似度,避免错误匹配
+                            # 验证类型匹配和标题相似度
+                            type_matched = result.type == target_type
                             similarity = fuzz.token_set_ratio(base_title, result.title)
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} "
+                                       f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                            # 只有相似度 >= 80% 才使用精确标记源
-                            if similarity >= 80:
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
                                 favorited_match = result
-                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                logger.info(f"  - 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                                 break
                             else:
-                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
+                                logger.warning(f"  - 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                             f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
                     if favorited_match:
                         best_match = favorited_match
                         logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
                     elif not fallback_enabled:
-                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                        best_match = sorted_results[0]
-                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                        # 顺延机制关闭，验证第一个结果是否满足条件
+                        if sorted_results:
+                            first_result = sorted_results[0]
+                            type_matched = first_result.type == target_type
+                            similarity = fuzz.token_set_ratio(base_title, first_result.title)
+                            score = calculate_match_score(first_result)
+
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
+                                best_match = first_result
+                                logger.info(f"  - 传统匹配成功: {first_result.provider} - {first_result.title} "
+                                           f"(类型匹配: ✓, 相似度: {similarity}%, 总分: {score})")
+                            else:
+                                best_match = None
+                                logger.warning(f"  - 传统匹配失败: 第一个结果不满足条件 "
+                                             f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
+                        else:
+                            best_match = None
+                            logger.warning("  - 传统匹配失败: 没有搜索结果")
                 else:
                     # AI未启用，使用传统匹配
-                    # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+                    # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
                     favorited_match = None
                     for result in sorted_results:
                         key = f"{result.provider}:{result.mediaId}"
                         if favorited_info.get(key):
-                            # 验证标题相似度,避免错误匹配
+                            # 验证类型匹配和标题相似度
+                            type_matched = result.type == target_type
                             similarity = fuzz.token_set_ratio(base_title, result.title)
-                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                            logger.info(f"  - 找到精确标记源: {result.provider} - {result.title} "
+                                       f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                            # 只有相似度 >= 80% 才使用精确标记源
-                            if similarity >= 80:
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
                                 favorited_match = result
-                                logger.info(f"  - 标题相似度验证通过 ({similarity}% >= 80%)")
+                                logger.info(f"  - 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                                 break
                             else:
-                                logger.warning(f"  - 标题相似度过低 ({similarity}% < 80%)，跳过此精确标记源")
+                                logger.warning(f"  - 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                             f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
                     if favorited_match:
                         best_match = favorited_match
                         logger.info(f"  - 使用精确标记源: {best_match.provider} - {best_match.title}")
                     elif not fallback_enabled:
-                        # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
-                        best_match = sorted_results[0]
-                        logger.info(f"  - 顺延机制关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                        # 顺延机制关闭，验证第一个结果是否满足条件
+                        if sorted_results:
+                            first_result = sorted_results[0]
+                            type_matched = first_result.type == target_type
+                            similarity = fuzz.token_set_ratio(base_title, first_result.title)
+                            score = calculate_match_score(first_result)
+
+                            # 必须满足：类型匹配 AND 相似度 >= 70%
+                            if type_matched and similarity >= 70:
+                                best_match = first_result
+                                logger.info(f"  - 传统匹配成功: {first_result.provider} - {first_result.title} "
+                                           f"(类型匹配: ✓, 相似度: {similarity}%, 总分: {score})")
+                            else:
+                                best_match = None
+                                logger.warning(f"  - 传统匹配失败: 第一个结果不满足条件 "
+                                             f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
+                        else:
+                            best_match = None
+                            logger.warning("  - 传统匹配失败: 没有搜索结果")
 
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
@@ -2413,6 +2554,8 @@ async def _get_match_for_item(
 
                 if not best_match:
                     logger.warning(f"匹配后备失败：所有候选源都无法提供有效分集")
+                    match_timer.step_end(details="无有效分集")
+                    match_timer.finish()  # 打印计时报告
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
@@ -2589,9 +2732,13 @@ async def _get_match_for_item(
                 }
                 await _set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, recent_fallback_key, recent_fallback_data, 300)  # 5分钟TTL
 
+                match_timer.step_end(details="匹配成功")
+                match_timer.finish()  # 打印计时报告
                 match_fallback_result["response"] = response
             except Exception as e:
                 logger.error(f"匹配后备失败: {e}", exc_info=True)
+                match_timer.step_end(details=f"失败: {e}")
+                match_timer.finish()  # 打印计时报告
                 response = DandanMatchResponse(isMatched=False, matches=[])
                 match_fallback_result["response"] = response
 
@@ -3039,7 +3186,7 @@ async def get_comments_for_dandan(
 
                         # 保存弹幕
                         added_count = await crud.save_danmaku_for_episode(
-                            task_session, current_episodeId, comments, None
+                            task_session, current_episodeId, comments, config_manager
                         )
                         await task_session.commit()
                         logger.info(f"保存成功，共 {added_count} 条弹幕")

@@ -124,7 +124,7 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
         raise
 
 
-async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter, progress_callback: Callable):
+async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter, progress_callback: Callable, config_manager = None):
     """后台任务：刷新单个分集的弹幕"""
     logger.info(f"开始刷新分集 ID: {episodeId}")
     try:
@@ -204,7 +204,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         # 获取 animeId 用于文件路径
         anime_id = info["animeId"]
-        added_count = await crud.save_danmaku_for_episode(session, episodeId, all_comments_from_source, None)
+        added_count = await crud.save_danmaku_for_episode(session, episodeId, all_comments_from_source, config_manager)
 
         await session.commit()
         raise TaskSuccess(f"刷新完成，新增 {added_count} 条弹幕。")
@@ -216,7 +216,7 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
         raise # Re-raise so the task manager catches it and marks as FAILED
 
 
-async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter, progress_callback: Callable):
+async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, manager: ScraperManager, rate_limiter: RateLimiter, progress_callback: Callable, config_manager = None):
     """后台任务：批量刷新多个分集的弹幕"""
     total = len(episodeIds)
     logger.info(f"开始批量刷新 {total} 个分集")
@@ -328,7 +328,7 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 await rate_limiter.increment(provider_name)
 
                 # 4. 保存弹幕
-                added_count = await crud.save_danmaku_for_episode(session, episode_id, all_comments_from_source, None)
+                added_count = await crud.save_danmaku_for_episode(session, episode_id, all_comments_from_source, config_manager)
                 total_added_comments += added_count
                 success_episodes.append((episode_index, episode_id))
 

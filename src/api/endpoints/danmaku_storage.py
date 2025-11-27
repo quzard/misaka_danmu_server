@@ -1,0 +1,202 @@
+"""
+弹幕存储管理API - 批量迁移、重命名、模板转换
+"""
+
+import logging
+from typing import List, Optional
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ... import models, security
+from ...database import get_db_session
+from ..dependencies import get_config_manager
+from ...config_manager import ConfigManager
+from ...crud import danmaku_storage as crud
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+# ==================== 请求/响应模型 ====================
+
+class BatchMigrateRequest(BaseModel):
+    """批量迁移请求"""
+    animeIds: List[int]
+    targetPath: str
+    keepStructure: bool = True
+    conflictAction: str = "skip"  # skip, overwrite, rename
+
+
+class BatchRenameRequest(BaseModel):
+    """批量重命名请求"""
+    animeIds: List[int]
+    mode: str  # prefix, regex
+    prefix: Optional[str] = ""
+    suffix: Optional[str] = ""
+    regexPattern: Optional[str] = ""
+    regexReplace: Optional[str] = ""
+
+
+class ApplyTemplateRequest(BaseModel):
+    """应用模板请求"""
+    animeIds: List[int]
+    templateType: str  # tv, movie, id
+
+
+class BatchOperationResult(BaseModel):
+    """批量操作结果"""
+    success: bool
+    totalCount: int
+    successCount: int
+    failedCount: int
+    skippedCount: int
+    details: List[dict]
+
+
+class MigratePreviewRequest(BaseModel):
+    """迁移预览请求"""
+    animeIds: List[int]
+    targetPath: str
+    keepStructure: bool = True
+
+
+class MigratePreviewResult(BaseModel):
+    """迁移预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
+class TemplatePreviewRequest(BaseModel):
+    """模板预览请求"""
+    animeIds: List[int]
+    templateType: str  # tv, movie, id
+
+
+class TemplatePreviewResult(BaseModel):
+    """模板预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
+class RenamePreviewRequest(BaseModel):
+    """重命名预览请求"""
+    animeIds: List[int]
+    mode: str  # prefix, regex
+    prefix: Optional[str] = ""
+    suffix: Optional[str] = ""
+    regexPattern: Optional[str] = ""
+    regexReplace: Optional[str] = ""
+
+
+class RenamePreviewResult(BaseModel):
+    """重命名预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
+# ==================== API端点 ====================
+
+@router.post("/preview-migrate", response_model=MigratePreviewResult, summary="预览批量迁移")
+async def preview_migrate(
+    request: MigratePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """预览迁移结果，不实际执行"""
+    result = await crud.preview_migrate_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        target_path=request.targetPath,
+        keep_structure=request.keepStructure
+    )
+    return MigratePreviewResult(**result)
+
+@router.post("/batch-migrate", response_model=BatchOperationResult, summary="批量迁移弹幕文件")
+async def batch_migrate(
+    request: BatchMigrateRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """将选中条目的弹幕文件迁移到新目录"""
+    result = await crud.batch_migrate_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        target_path=request.targetPath,
+        keep_structure=request.keepStructure,
+        conflict_action=request.conflictAction
+    )
+    return BatchOperationResult(**result)
+
+
+@router.post("/preview-rename", response_model=RenamePreviewResult, summary="预览批量重命名")
+async def preview_rename(
+    request: RenamePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """预览重命名结果，不实际执行"""
+    result = await crud.preview_rename_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        mode=request.mode,
+        prefix=request.prefix or "",
+        suffix=request.suffix or "",
+        regex_pattern=request.regexPattern or "",
+        regex_replace=request.regexReplace or ""
+    )
+    return RenamePreviewResult(**result)
+
+
+@router.post("/batch-rename", response_model=BatchOperationResult, summary="批量重命名弹幕文件")
+async def batch_rename(
+    request: BatchRenameRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """批量重命名选中条目的弹幕文件"""
+    result = await crud.batch_rename_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        mode=request.mode,
+        prefix=request.prefix or "",
+        suffix=request.suffix or "",
+        regex_pattern=request.regexPattern or "",
+        regex_replace=request.regexReplace or ""
+    )
+    return BatchOperationResult(**result)
+
+
+@router.post("/preview-template", response_model=TemplatePreviewResult, summary="预览应用模板")
+async def preview_template(
+    request: TemplatePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """预览模板应用结果，不实际执行"""
+    result = await crud.preview_apply_template(
+        session,
+        anime_ids=request.animeIds,
+        template_type=request.templateType,
+        config_manager=config_manager
+    )
+    return TemplatePreviewResult(**result)
+
+
+@router.post("/apply-template", response_model=BatchOperationResult, summary="应用新模板")
+async def apply_template(
+    request: ApplyTemplateRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """按新的存储模板重新组织弹幕文件"""
+    result = await crud.apply_danmaku_template(
+        session,
+        anime_ids=request.animeIds,
+        template_type=request.templateType,
+        config_manager=config_manager
+    )
+    return BatchOperationResult(**result)
+

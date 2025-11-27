@@ -66,9 +66,9 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 弹幕文件路径配置
         'customDanmakuPathEnabled': ('false', '是否启用自定义弹幕文件保存路径。'),
         'movieDanmakuDirectoryPath': ('/app/config/danmaku/movies', '电影/剧场版弹幕文件存储的根目录。'),
-        'movieDanmakuFilenameTemplate': ('${title}/${episodeId}', '电影/剧场版弹幕文件命名模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}, ${sourceId}。支持子目录。.xml后缀会自动添加。'),
+        'movieDanmakuFilenameTemplate': ('${title}/${episodeId}', '电影/剧场版弹幕文件命名模板。支持变量：${title}, ${titleBase}(标准化标题，去除季度信息), ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}, ${sourceId}。支持子目录。.xml后缀会自动添加。'),
         'tvDanmakuDirectoryPath': ('/app/config/danmaku/tv', '电视节目弹幕文件存储的根目录。'),
-        'tvDanmakuFilenameTemplate': ('${animeId}/${episodeId}', '电视节目弹幕文件命名模板。支持变量：${title}, ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}, ${sourceId}。支持子目录。.xml后缀会自动添加。'),
+        'tvDanmakuFilenameTemplate': ('${animeId}/${episodeId}', '电视节目弹幕文件命名模板。支持变量：${title}, ${titleBase}(标准化标题，去除季度信息), ${season}, ${episode}, ${year}, ${provider}, ${animeId}, ${episodeId}, ${sourceId}。支持子目录。.xml后缀会自动添加。'),
 
         'iqiyiUseProtobuf': ('false', '（爱奇艺）是否使用新的Protobuf弹幕接口（实验性）。'),
         'gamerUserAgent': ('', '用于访问巴哈姆特动画疯的User-Agent。'),
@@ -90,8 +90,11 @@ def get_default_configs(settings=None, ai_prompts=None):
         'preDownloadNextEpisodeEnabled': ('false', '是否启用预下载下一集弹幕。当播放当前集时，自动下载下一集的弹幕。需要启用匹配后备或后备搜索。'),
 
         # 季度映射配置
+        'homeSearchEnableTmdbSeasonMapping': ('false', '是否启用主页搜索 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'fallbackSearchEnableTmdbSeasonMapping': ('false', '是否启用后备搜索 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
         'webhookEnableTmdbSeasonMapping': ('false', '是否启用Webhook TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
         'matchFallbackEnableTmdbSeasonMapping': ('false', '是否启用匹配后备 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
+        'externalSearchEnableTmdbSeasonMapping': ('false', '是否启用外部控制-搜索媒体 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
         'autoImportEnableTmdbSeasonMapping': ('false', '是否启用全自动导入 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
         'seasonMappingMetadataSource': ('tmdb', 'TMDB季度映射使用的元数据源。可选值: tmdb, tvdb, imdb, douban, bangumi。'),
         'seasonMappingPrompt': ('', 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。留空使用默认提示词。'),

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic } from 'antd'
+import { Form, Input, Select, Switch, Button, message, Spin, Card, Tabs, Space, Tooltip, Row, Col, Alert, Statistic, AutoComplete } from 'antd'
 const { TextArea } = Input
 const { TabPane } = Tabs
 const { Option } = Select
-import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance } from '@/apis'
+import { getConfig, setConfig, getDefaultAIPrompts, getAIBalance, getAIModels } from '@/apis'
 import api from '@/apis/fetch'
 import { QuestionCircleOutlined, SaveOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import AIMetrics from './AIMetrics'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store/index.js'
 
 const CustomSwitch = (props) => {
   return <Switch {...props} />
@@ -28,6 +30,9 @@ const AutoMatchSetting = () => {
   const [aiProviders, setAiProviders] = useState([])
   const [providersLoading, setProvidersLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
+  const [dynamicModels, setDynamicModels] = useState({}) // 动态获取的模型列表，按提供商ID存储
+  const [refreshingModels, setRefreshingModels] = useState(false) // 是否正在刷新模型列表
+  const isMobile = useAtomValue(isMobileAtom)
 
   // 加载配置
   const loadSettings = async (providers) => {
@@ -48,8 +53,11 @@ const AutoMatchSetting = () => {
         aliasExpansionEnabledRes,
         aliasExpansionPromptRes,
         logRawResponseRes,
+        homeSearchSeasonMappingRes,
+        fallbackSearchSeasonMappingRes,
         webhookSeasonMappingRes,
         matchFallbackSeasonMappingRes,
+        externalSearchSeasonMappingRes,
         autoImportSeasonMappingRes,
         seasonMappingSourceRes,
         seasonMappingPromptRes
@@ -68,8 +76,11 @@ const AutoMatchSetting = () => {
         getConfig('aiAliasExpansionEnabled'),
         getConfig('aiAliasExpansionPrompt'),
         getConfig('aiLogRawResponse'),
+        getConfig('homeSearchEnableTmdbSeasonMapping'),
+        getConfig('fallbackSearchEnableTmdbSeasonMapping'),
         getConfig('webhookEnableTmdbSeasonMapping'),
         getConfig('matchFallbackEnableTmdbSeasonMapping'),
+        getConfig('externalSearchEnableTmdbSeasonMapping'),
         getConfig('autoImportEnableTmdbSeasonMapping'),
         getConfig('seasonMappingMetadataSource'),
         getConfig('seasonMappingPrompt')
@@ -104,8 +115,11 @@ const AutoMatchSetting = () => {
         aiAliasExpansionEnabled: aliasExpansion,
         aiAliasExpansionPrompt: aliasExpansionPromptRes.data.value || '',
         aiLogRawResponse: logRawResponse,
+        homeSearchEnableTmdbSeasonMapping: homeSearchSeasonMappingRes.data.value === 'true',
+        fallbackSearchEnableTmdbSeasonMapping: fallbackSearchSeasonMappingRes.data.value === 'true',
         webhookEnableTmdbSeasonMapping: webhookSeasonMappingRes.data.value === 'true',
         matchFallbackEnableTmdbSeasonMapping: matchFallbackSeasonMappingRes.data.value === 'true',
+        externalSearchEnableTmdbSeasonMapping: externalSearchSeasonMappingRes.data.value === 'true',
         autoImportEnableTmdbSeasonMapping: autoImportSeasonMappingRes.data.value === 'true',
         seasonMappingMetadataSource: seasonMappingSourceRes.data.value || 'tmdb',
         seasonMappingPrompt: seasonMappingPromptRes.data.value || ''
@@ -256,8 +270,11 @@ const AutoMatchSetting = () => {
         setConfig('aiMatchEnabled', values.aiMatchEnabled ? 'true' : 'false'),
         setConfig('aiFallbackEnabled', values.aiFallbackEnabled ? 'true' : 'false'),
         setConfig('aiPrompt', values.aiPrompt || ''),
+        setConfig('homeSearchEnableTmdbSeasonMapping', values.homeSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('fallbackSearchEnableTmdbSeasonMapping', values.fallbackSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('webhookEnableTmdbSeasonMapping', values.webhookEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('matchFallbackEnableTmdbSeasonMapping', values.matchFallbackEnableTmdbSeasonMapping ? 'true' : 'false'),
+        setConfig('externalSearchEnableTmdbSeasonMapping', values.externalSearchEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('autoImportEnableTmdbSeasonMapping', values.autoImportEnableTmdbSeasonMapping ? 'true' : 'false'),
         setConfig('seasonMappingMetadataSource', values.seasonMappingMetadataSource || 'tmdb'),
         setConfig('seasonMappingPrompt', values.seasonMappingPrompt || '')
@@ -300,6 +317,65 @@ const AutoMatchSetting = () => {
   const getModelPlaceholder = (provider) => {
     const providerConfig = aiProviders.find(p => p.id === provider)
     return providerConfig?.modelPlaceholder || '请输入模型名称'
+  }
+
+  // 刷新模型列表
+  const handleRefreshModels = async () => {
+    const currentProvider = form.getFieldValue('aiProvider')
+    if (!currentProvider) {
+      message.warning('请先选择AI提供商')
+      return
+    }
+
+    try {
+      setRefreshingModels(true)
+      const response = await getAIModels(currentProvider, true)
+
+      if (response.data.error) {
+        message.warning(response.data.error)
+      } else {
+        // 更新动态模型列表
+        setDynamicModels(prev => ({
+          ...prev,
+          [currentProvider]: response.data.models
+        }))
+
+        const newCount = response.data.newCount || 0
+        if (newCount > 0) {
+          message.success(`刷新成功！发现 ${newCount} 个新模型`)
+        } else {
+          message.success('刷新成功！模型列表已是最新')
+        }
+      }
+    } catch (error) {
+      console.error('刷新模型列表失败:', error)
+      message.error('刷新失败: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setRefreshingModels(false)
+    }
+  }
+
+  // 获取可选模型列表
+  const getAvailableModels = (provider) => {
+    const providerConfig = aiProviders.find(p => p.id === provider)
+
+    // 优先使用动态获取的模型列表，否则使用硬编码列表
+    const models = dynamicModels[provider] || providerConfig?.availableModels || []
+
+    return models.map(model => ({
+      value: model.value,
+      label: (
+        <div>
+          <div style={{ fontWeight: 500 }}>
+            {model.label}
+            {model.isNew && <span style={{ marginLeft: '8px', color: '#52c41a', fontSize: '12px' }}>新</span>}
+          </div>
+          {model.description && (
+            <div style={{ fontSize: '12px', color: '#999' }}>{model.description}</div>
+          )}
+        </div>
+      )
+    }))
   }
 
   // 获取Base URL占位符
@@ -458,20 +534,41 @@ const AutoMatchSetting = () => {
               >
                 {({ getFieldValue }) => (
                   <Form.Item
-                    name="aiModel"
                     label={
                       <Space>
                         <span>模型名称</span>
-                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。">
+                        <Tooltip title="AI模型的名称。不同模型有不同的性能和价格。可从下拉列表选择或自定义输入。">
                           <QuestionCircleOutlined />
                         </Tooltip>
                       </Space>
                     }
-                    rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
                   >
-                    <Input
-                      placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
-                    />
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Form.Item
+                        name="aiModel"
+                        noStyle
+                        rules={[{ required: matchMode === 'ai', message: '请输入模型名称' }]}
+                      >
+                        <AutoComplete
+                          style={{ flex: 1 }}
+                          options={getAvailableModels(getFieldValue('aiProvider'))}
+                          placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
+                          filterOption={(inputValue, option) =>
+                            option.value.toLowerCase().includes(inputValue.toLowerCase())
+                          }
+                        />
+                      </Form.Item>
+                      <Tooltip title="从AI提供商API获取最新模型列表">
+                        <Button
+                          icon={<ReloadOutlined />}
+                          loading={refreshingModels}
+                          onClick={handleRefreshModels}
+                          disabled={!getFieldValue('aiProvider')}
+                        >
+                          刷新
+                        </Button>
+                      </Tooltip>
+                    </Space.Compact>
                   </Form.Item>
                 )}
               </Form.Item>
@@ -562,18 +659,32 @@ const AutoMatchSetting = () => {
               )}
 
               {/* 测试、记录开关和保存按钮 */}
-              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+              <div style={{
+                marginTop: '24px',
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '16px'
+              }}>
                 <Button
                   icon={<ThunderboltOutlined />}
                   onClick={handleTestConnection}
                   loading={testing}
                   size="large"
-                  style={{ minWidth: '150px' }}
+                  style={{ minWidth: '150px', width: isMobile ? '100%' : 'auto' }}
                 >
                   测试 AI 连接
                 </Button>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: isMobile ? '0' : '0 16px',
+                  width: isMobile ? '100%' : 'auto',
+                  justifyContent: isMobile ? 'center' : 'flex-start'
+                }}>
                   <span style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>记录响应</span>
                   <Form.Item name="aiLogRawResponse" valuePropName="checked" noStyle>
                     <CustomSwitch
@@ -592,7 +703,7 @@ const AutoMatchSetting = () => {
                   onClick={handleSaveConnectionConfig}
                   loading={saving}
                   size="large"
-                  style={{ minWidth: '150px' }}
+                  style={{ minWidth: '150px', width: isMobile ? '100%' : 'auto' }}
                 >
                   保存 AI 连接配置
                 </Button>
@@ -643,89 +754,140 @@ const AutoMatchSetting = () => {
               </Row>
 
               {/* 季度映射配置 */}
-              <Card size="small" style={{ marginBottom: '16px' }}>
+              <Card
+                title="季度映射"
+                size="small"
+                style={{ marginBottom: '16px' }}
+              >
                 <Row gutter={[16, 16]}>
                   <Col xs={24} sm={12}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div style={{ fontWeight: 500, marginBottom: '4px' }}>季度映射开关</div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>Webhook季度映射</span>
-                          <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </div>
-                        <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>后备匹配季度映射</span>
-                          <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </div>
-                        <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>全自动导入季度映射</span>
-                          <Tooltip title="启用后，全自动导入时会通过元数据源获取季度名称">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </div>
-                        <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
-                          <CustomSwitch size="small" />
-                        </Form.Item>
-                      </div>
-                    </div>
+                    <Row gutter={[16, 16]}>
+                      <Col xs={24} sm={12}>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>主页搜索</span>
+                              <Tooltip title="启用后，主页搜索时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="homeSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>后备搜索</span>
+                              <Tooltip title="启用后，后备搜索时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="fallbackSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>后备匹配</span>
+                              <Tooltip title="启用后，匹配后备时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="matchFallbackEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                      </Col>
+                      <Col xs={24} sm={12}>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>Webhook</span>
+                              <Tooltip title="启用后，Webhook导入时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="webhookEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>外部控制-搜索媒体</span>
+                              <Tooltip title="启用后，外部控制搜索媒体时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="externalSearchEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                        <Card size="small" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 500 }}>外部控制-全自动导入</span>
+                              <Tooltip title="启用后，外部控制全自动导入时会通过元数据源获取季度名称">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                            <Form.Item name="autoImportEnableTmdbSeasonMapping" valuePropName="checked" noStyle>
+                              <CustomSwitch checkedChildren="启用" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          </div>
+                        </Card>
+                      </Col>
+                    </Row>
                   </Col>
                   <Col xs={24} sm={12}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ fontWeight: 500 }}>元数据源选择</span>
-                        <Tooltip title="选择用于季度映射的元数据源。只能选择一个源。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </div>
-                      <Form.Item name="seasonMappingMetadataSource" noStyle>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                          {[
-                            { value: 'tmdb', label: 'TMDB' },
-                            { value: 'tvdb', label: 'TVDB' },
-                            { value: 'imdb', label: 'IMDB' },
-                            { value: 'douban', label: '豆瓣' },
-                            { value: 'bangumi', label: 'Bangumi' }
-                          ].map(source => (
-                            <div
-                              key={source.value}
-                              onClick={() => {
-                                setSelectedMetadataSource(source.value)
-                                form.setFieldValue('seasonMappingMetadataSource', source.value)
-                              }}
-                              style={{
-                                border: '1px solid #d9d9d9',
-                                borderRadius: '4px',
-                                padding: '12px',
-                                textAlign: 'center',
-                                cursor: 'pointer',
-                                backgroundColor: selectedMetadataSource === source.value ? '#1890ff' : 'transparent',
-                                color: selectedMetadataSource === source.value ? '#fff' : 'inherit',
-                                transition: 'all 0.3s'
-                              }}
-                            >
-                              {source.label}
-                            </div>
-                          ))}
+                    <Card size="small" style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                          <span style={{ fontWeight: 500 }}>元数据源选择</span>
+                          <Tooltip title="选择用于季度映射的元数据源。只能选择一个源。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
                         </div>
-                      </Form.Item>
-                    </div>
+                        <Form.Item name="seasonMappingMetadataSource" noStyle>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                            {[
+                              { value: 'tmdb', label: 'TMDB' },
+                              { value: 'tvdb', label: 'TVDB' },
+                              { value: 'imdb', label: 'IMDB' },
+                              { value: 'douban', label: '豆瓣' },
+                              { value: 'bangumi', label: 'Bangumi' }
+                            ].map(source => (
+                              <div
+                                key={source.value}
+                                onClick={() => {
+                                  setSelectedMetadataSource(source.value)
+                                  form.setFieldValue('seasonMappingMetadataSource', source.value)
+                                }}
+                                style={{
+                                  border: '1px solid #d9d9d9',
+                                  borderRadius: '4px',
+                                  padding: '12px',
+                                  textAlign: 'center',
+                                  cursor: 'pointer',
+                                  backgroundColor: selectedMetadataSource === source.value ? '#1890ff' : 'transparent',
+                                  color: selectedMetadataSource === source.value ? '#fff' : 'inherit',
+                                  transition: 'all 0.3s'
+                                }}
+                              >
+                                {source.label}
+                              </div>
+                            ))}
+                          </div>
+                        </Form.Item>
+                      </div>
+                    </Card>
                   </Col>
                 </Row>
               </Card>

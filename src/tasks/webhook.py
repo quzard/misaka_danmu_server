@@ -19,6 +19,8 @@ from ..search_utils import unified_search
 from ..timezone import get_now
 from ..utils import parse_search_keyword
 from ..ai.ai_matcher_manager import AIMatcherManager
+from ..season_mapper import ai_type_and_season_mapping_and_correction
+from ..search_timer import SearchTimer, SEARCH_TYPE_WEBHOOK
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +100,16 @@ async def webhook_search_and_dispatch_task(
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
     """
     generic_import_task = _get_generic_import_task()
-    
+
+    # 🚀 V2.1.6: 创建搜索计时器
+    timer = SearchTimer(SEARCH_TYPE_WEBHOOK, f"{animeTitle} S{season:02d}E{currentEpisodeIndex:02d}", logger)
+    timer.start()
+
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
         await progress_callback(5, "正在检查已收藏的源...")
+
+        timer.step_start("查找收藏源")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
         logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
@@ -135,6 +143,8 @@ async def webhook_search_and_dispatch_task(
                 )
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+                timer.step_end(details="找到收藏源")
+                timer.finish()  # 打印计时报告
                 # 根据来源动态生成成功消息
                 if webhookSource == "media_server":
                     success_message = f"已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
@@ -142,55 +152,22 @@ async def webhook_search_and_dispatch_task(
                     success_message = f"Webhook: 已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
                 raise TaskSuccess(success_message)
 
+        timer.step_end(details="无收藏源")
+
         # 2. 如果没有收藏源，则并发搜索所有启用的源
         logger.info(f"Webhook 任务: 未找到收藏源，开始并发搜索所有启用的源...")
         await progress_callback(20, "并发搜索所有源...")
 
+        timer.step_start("关键词解析与预处理")
         parsed_keyword = parse_search_keyword(searchKeyword)
         original_title = parsed_keyword["title"]
         season_to_filter = parsed_keyword.get("season") or season
         episode_to_filter = parsed_keyword.get("episode") or currentEpisodeIndex
 
-        # 2.1 创建季度映射任务(如果启用) - 与搜索并行运行
-        season_mapping_task = None
+        # 2.1 Webhook AI映射配置检查
         webhook_tmdb_enabled = await config_manager.get("webhookEnableTmdbSeasonMapping", "true")
-        if webhook_tmdb_enabled.lower() == "true" and season_to_filter and season_to_filter > 1:
-            logger.info(f"○ Webhook 季度映射: 开始为 '{original_title}' S{season_to_filter:02d} 获取季度名称(并行)...")
-
-            # 获取AI匹配器(如果启用)
-            ai_matcher = await ai_matcher_manager.get_matcher()
-            if ai_matcher:
-                logger.debug("Webhook 季度映射: 使用AI匹配器")
-            else:
-                logger.debug("Webhook 季度映射: AI匹配器未启用或初始化失败")
-
-            # 获取元数据源和自定义提示词
-            metadata_source = await config_manager.get("seasonMappingMetadataSource", "tmdb")
-            custom_prompt = await config_manager.get("seasonMappingPrompt", "")
-            sources = [metadata_source] if metadata_source else None
-
-            # 创建并行任务
-            async def get_season_mapping():
-                try:
-                    return await metadata_manager.get_season_name(
-                        title=original_title,
-                        season_number=season_to_filter,
-                        year=year,
-                        sources=sources,
-                        ai_matcher=ai_matcher,
-                        user=None,
-                        custom_prompt=custom_prompt if custom_prompt else None
-                    )
-                except Exception as e:
-                    logger.warning(f"Webhook 季度映射失败: {e}")
-                    return None
-
-            season_mapping_task = asyncio.create_task(get_season_mapping())
-        else:
-            if webhook_tmdb_enabled.lower() != "true":
-                logger.info("○ Webhook 季度映射: 功能未启用")
-            elif not season_to_filter or season_to_filter <= 1:
-                logger.info(f"○ Webhook 季度映射: 季度号为{season_to_filter},跳过(仅处理S02及以上)")
+        if webhook_tmdb_enabled.lower() != "true":
+            logger.info("○ Webhook 统一AI映射: 功能未启用")
 
         # 应用与 WebUI 一致的标题预处理规则
         search_title = original_title
@@ -231,7 +208,9 @@ async def webhook_search_and_dispatch_task(
         )
 
         logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title}' 进行搜索。")
+        timer.step_end()
 
+        timer.step_start("统一搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         all_search_results = await unified_search(
             search_term=search_title,
@@ -246,37 +225,52 @@ async def webhook_search_and_dispatch_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
+        timer.step_end(details=f"{len(all_search_results)}个结果")
 
         if not all_search_results:
+            timer.finish()  # 打印计时报告
             raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
 
-        # 等待季度映射任务完成(如果有)
-        season_name_from_mapping = None
-        if season_mapping_task:
+        # 使用统一的AI类型和季度映射修正函数
+        if webhook_tmdb_enabled.lower() == "true":
             try:
-                season_name_from_mapping = await season_mapping_task
-                if season_name_from_mapping:
-                    logger.info(f"✓ Webhook 季度映射成功: '{original_title}' S{season_to_filter:02d} → '{season_name_from_mapping}'")
+                timer.step_start("AI映射修正")
+                # 获取AI匹配器
+                ai_matcher = await ai_matcher_manager.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ Webhook 开始统一AI映射修正: '{original_title}' ({len(all_search_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=original_title,
+                        search_results=all_search_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ Webhook 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了all_search_results）
+                        all_search_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+                    else:
+                        logger.info(f"○ Webhook 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
                 else:
-                    logger.info(f"○ Webhook 季度映射: 未找到季度名称")
+                    logger.warning("○ Webhook AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
+
             except Exception as e:
-                logger.warning(f"Webhook 季度映射任务失败: {e}")
-
-        # 根据季度映射结果调整搜索结果的 season 字段
-        if season_name_from_mapping and season_to_filter and season_to_filter > 1:
-            from ..season_mapper import title_contains_season_name
-
-            adjusted_count = 0
-            for item in all_search_results:
-                # 只处理电视剧类型且 season 为 None 或 1 的结果
-                if item.type == "tv_series" and (item.season is None or item.season == 1):
-                    if title_contains_season_name(item.title, season_name_from_mapping, threshold=60.0):
-                        logger.info(f"  ✓ 季度调整: '{item.title}' (Provider: {item.provider}) season: {item.season} → {season_to_filter}")
-                        item.season = season_to_filter
-                        adjusted_count += 1
-
-            if adjusted_count > 0:
-                logger.info(f"✓ 根据季度映射调整了 {adjusted_count} 个结果的 season 字段")
+                logger.warning(f"Webhook 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
+        else:
+            logger.info("○ Webhook 统一AI映射: 功能未启用")
 
         # 3. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:
@@ -311,6 +305,7 @@ async def webhook_search_and_dispatch_task(
             )
             all_search_results = filtered_by_season
 
+        timer.step_start("结果排序与匹配")
         # 5. 使用与WebUI相同的智能匹配算法选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
@@ -455,6 +450,8 @@ async def webhook_search_and_dispatch_task(
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+            timer.step_end(details="AI匹配成功")
+            timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
                 success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -462,8 +459,9 @@ async def webhook_search_and_dispatch_task(
                 success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
             raise TaskSuccess(success_message)
 
-        # 传统匹配: 优先查找精确标记源 (需验证标题相似度)
+        # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
         favorited_match = None
+        target_type = "movie" if mediaType == "movie" else "tv_series"
 
         for result in all_search_results:
             # 查找是否有相同provider和mediaId的源被标记
@@ -478,17 +476,20 @@ async def webhook_search_and_dispatch_task(
             result_row = await session.execute(stmt)
             is_favorited = result_row.scalar_one_or_none()
             if is_favorited:
-                # 验证标题相似度,避免错误匹配
+                # 验证类型匹配和标题相似度
+                type_matched = result.type == target_type
                 similarity = fuzz.token_set_ratio(animeTitle, result.title)
-                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} (相似度: {similarity}%)")
+                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} "
+                           f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                # 只有相似度 >= 60% 才使用精确标记源
-                if similarity >= 60:
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
                     favorited_match = result
-                    logger.info(f"Webhook 任务: 标题相似度验证通过 ({similarity}% >= 60%)")
+                    logger.info(f"Webhook 任务: 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
                     break
                 else:
-                    logger.warning(f"Webhook 任务: 标题相似度过低 ({similarity}% < 60%)，跳过此精确标记源")
+                    logger.warning(f"Webhook 任务: 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                 f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
 
         # 检查是否启用顺延机制
         fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
@@ -497,12 +498,24 @@ async def webhook_search_and_dispatch_task(
             best_match = favorited_match
             logger.info(f"Webhook 任务: 使用精确标记源: {best_match.provider} - {best_match.title}")
         elif not fallback_enabled:
-            # 顺延机制关闭，使用第一个结果 (已经是分数最高的)
+            # 顺延机制关闭，验证第一个结果是否满足条件
             if all_search_results:
-                best_match = all_search_results[0]
-                logger.info(f"Webhook 任务: 顺延机制已关闭，选择第一个结果: {best_match.provider} - {best_match.title}")
+                first_result = all_search_results[0]
+                type_matched = first_result.type == target_type
+                similarity = fuzz.token_set_ratio(animeTitle, first_result.title)
+
+                # 必须满足：类型匹配 AND 相似度 >= 70%
+                if type_matched and similarity >= 70:
+                    best_match = first_result
+                    logger.info(f"Webhook 任务: 传统匹配成功: {first_result.provider} - {first_result.title} "
+                               f"(类型匹配: ✓, 相似度: {similarity}%)")
+                else:
+                    best_match = None
+                    logger.warning(f"Webhook 任务: 传统匹配失败: 第一个结果不满足条件 "
+                                 f"(类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%, 要求: ≥70%)")
             else:
-                logger.warning(f"Webhook 任务: 顺延机制已关闭，但搜索结果为空，无法选择结果")
+                best_match = None
+                logger.warning(f"Webhook 任务: 传统匹配失败: 没有搜索结果")
 
         if best_match is not None:
             await progress_callback(50, f"在 {best_match.provider} 中找到最佳匹配项")
@@ -536,6 +549,8 @@ async def webhook_search_and_dispatch_task(
             )
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+            timer.step_end(details="传统匹配成功")
+            timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
                 success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -621,6 +636,8 @@ async def webhook_search_and_dispatch_task(
         )
         await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
+        timer.step_end(details="顺延匹配成功")
+        timer.finish()  # 打印计时报告
         # 根据来源动态生成成功消息
         if webhookSource == "media_server":
             success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -630,6 +647,7 @@ async def webhook_search_and_dispatch_task(
     except TaskSuccess:
         raise
     except Exception as e:
+        timer.finish()  # 打印计时报告（即使失败也打印）
         logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise
 

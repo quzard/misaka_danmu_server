@@ -168,7 +168,8 @@ class TmdbMetadataSource(BaseMetadataSource):
                                 id=season.get('id'),
                                 name=season.get('name', ''),
                                 seasonNumber=season.get('season_number', 0),
-                                posterPath=season.get('poster_path')
+                                posterPath=season.get('poster_path'),
+                                aliases=[]  # TMDB API不直接提供季度别名，留空给后续填充
                             ))
                         except Exception as e:
                             self.logger.warning(f"解析season信息失败: {e}")

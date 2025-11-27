@@ -938,6 +938,14 @@ async def load_resources_stream(
                             logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
                             _version_cache = None
                             _version_cache_time = None
+
+                            # 重载成功后，自动备份新下载的资源
+                            try:
+                                logger.info("正在备份新下载的资源...")
+                                await backup_scrapers(current_user)
+                                logger.info("新资源备份完成")
+                            except Exception as backup_error:
+                                logger.warning(f"备份新资源失败: {backup_error}")
                         except Exception as e:
                             logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
                             try:
@@ -965,3 +973,119 @@ async def load_resources_stream(
         }
     )
 
+
+@router.get("/scrapers/auto-update", summary="获取自动更新配置")
+async def get_auto_update_config(
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """获取弹幕源自动更新配置"""
+    enabled = await config_manager.get("scraperAutoUpdateEnabled", "false")
+    interval = await config_manager.get("scraperAutoUpdateInterval", "15")
+    return {
+        "enabled": enabled.lower() == "true",
+        "interval": int(interval)
+    }
+
+
+@router.put("/scrapers/auto-update", status_code=status.HTTP_204_NO_CONTENT, summary="保存自动更新配置")
+async def save_auto_update_config(
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """保存弹幕源自动更新配置"""
+    enabled = payload.get("enabled", False)
+    interval = payload.get("interval", 15)
+
+    await config_manager.setValue("scraperAutoUpdateEnabled", str(enabled).lower())
+    await config_manager.setValue("scraperAutoUpdateInterval", str(interval))
+
+    logger.info(f"用户 '{current_user.username}' 更新了自动更新配置: enabled={enabled}, interval={interval}分钟")
+
+
+@router.delete("/scrapers/backup", summary="删除弹幕源备份")
+async def delete_backup(
+    current_user: models.User = Depends(get_current_user)
+):
+    """删除持久化备份目录中的所有备份文件"""
+    try:
+        if not BACKUP_DIR.exists():
+            raise HTTPException(status_code=404, detail="未找到备份目录")
+
+        # 统计并删除备份文件
+        deleted_count = 0
+        for file in BACKUP_DIR.glob("*"):
+            if file.is_file():
+                file.unlink()
+                deleted_count += 1
+
+        # 删除备份目录（如果为空）
+        try:
+            BACKUP_DIR.rmdir()
+        except OSError:
+            pass  # 目录不为空或其他原因无法删除，忽略
+
+        logger.info(f"用户 '{current_user.username}' 删除了 {deleted_count} 个备份文件")
+        return {"message": f"成功删除 {deleted_count} 个备份文件"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除备份失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除备份失败: {str(e)}")
+
+
+@router.delete("/scrapers/current", summary="删除当前弹幕源")
+async def delete_current_scrapers(
+    current_user: models.User = Depends(get_current_user),
+    manager = Depends(get_scraper_manager)
+):
+    """删除当前 scrapers 目录下的所有编译文件（.so/.pyd）"""
+    try:
+        scrapers_dir = _get_scrapers_dir()
+
+        if not scrapers_dir.exists():
+            raise HTTPException(status_code=404, detail="未找到弹幕源目录")
+
+        # 删除 .so 和 .pyd 文件
+        deleted_count = 0
+        for file in scrapers_dir.glob("*"):
+            if file.suffix in ['.so', '.pyd']:
+                file.unlink()
+                deleted_count += 1
+
+        # 删除 package.json 和 versions.json
+        if SCRAPERS_PACKAGE_FILE.exists():
+            SCRAPERS_PACKAGE_FILE.unlink()
+            logger.info("已删除 package.json")
+
+        if SCRAPERS_VERSIONS_FILE.exists():
+            SCRAPERS_VERSIONS_FILE.unlink()
+            logger.info("已删除 versions.json")
+
+        # 清除版本缓存
+        global _version_cache, _version_cache_time
+        _version_cache = None
+        _version_cache_time = None
+
+        logger.info(f"用户 '{current_user.username}' 删除了 {deleted_count} 个弹幕源文件")
+
+        # 创建后台任务重新加载 scrapers（此时应该是空的）
+        async def reload_scrapers_background():
+            await asyncio.sleep(1)
+            try:
+                await manager.load_and_sync_scrapers()
+                logger.info(f"用户 '{current_user.username}' 删除弹幕源后已重载")
+            except Exception as e:
+                logger.error(f"后台重载弹幕源失败: {e}", exc_info=True)
+
+        asyncio.create_task(reload_scrapers_background())
+
+        return {"message": f"成功删除 {deleted_count} 个弹幕源文件，正在后台重载..."}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除当前弹幕源失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")

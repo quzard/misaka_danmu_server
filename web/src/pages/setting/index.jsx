@@ -1,5 +1,4 @@
 import { Tabs } from 'antd'
-import { Security } from './components/Security'
 import { Webhook } from './components/Webhook'
 import { Proxy } from './components/Proxy'
 import { Parameters } from './components/Parameters'
@@ -13,16 +12,11 @@ import { isMobileAtom } from '../../../store/index.js'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
-  const key = searchParams.get('key') || 'security'
+  const key = searchParams.get('key') || 'parameters'
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
 
   const tabItems = [
-    {
-      label: '账户安全',
-      key: 'security',
-      children: <Security />,
-    },
     {
       label: '参数配置',
       key: 'parameters',

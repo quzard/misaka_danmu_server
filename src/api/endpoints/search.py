@@ -33,6 +33,7 @@ from ...metadata_manager import MetadataSourceManager
 from ...scraper_manager import ScraperManager
 from ... import tasks
 from ...utils import parse_search_keyword
+from ...season_mapper import ai_type_and_season_mapping_and_correction
 from ...webhook_manager import WebhookManager
 from ...image_utils import download_image
 from ...scheduler import SchedulerManager
@@ -43,6 +44,7 @@ from ...config import settings
 from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
+from ...search_timer import SearchTimer, SEARCH_TYPE_HOME
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,10 @@ logger = logging.getLogger(__name__)
 from ..dependencies import (
     get_scraper_manager, get_task_manager, get_scheduler_manager,
     get_webhook_manager, get_metadata_manager, get_config_manager,
-    get_rate_limiter, get_title_recognition_manager
+    get_rate_limiter, get_title_recognition_manager, get_ai_matcher_manager
 )
+from ...ai.ai_matcher_manager import AIMatcherManager
+from ...season_mapper import title_contains_season_name, ai_season_mapping_and_correction
 
 from ..ui_models import (
     UITaskResponse, UIProviderSearchResponse, RefreshPosterRequest,
@@ -86,24 +90,34 @@ async def search_anime_local(
 
 @router.get("/search/provider", response_model=UIProviderSearchResponse, summary="从外部数据源搜索节目")
 async def search_anime_provider(
+    request: Request,
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
-    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager)
+    title_recognition_manager: TitleRecognitionManager = Depends(get_title_recognition_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager)
 ):
     """
     从所有已配置的数据源（如腾讯、B站等）搜索节目信息。
     此接口实现了智能的按季缓存机制，并保留了原有的别名搜索、过滤和排序逻辑。
     """
+    # 🚀 V2.1.6: 创建搜索计时器
+    timer = SearchTimer(SEARCH_TYPE_HOME, keyword, logger)
+    timer.start()
+
     try:
+        timer.step_start("关键词解析")
         parsed_keyword = parse_search_keyword(keyword)
         original_title = parsed_keyword["title"]
         season_to_filter = parsed_keyword["season"]
         episode_to_filter = parsed_keyword["episode"]
+        timer.step_end()
 
         # 应用搜索预处理规则
+        timer.step_start("预处理规则应用")
         search_title = original_title
         search_season = season_to_filter
         if title_recognition_manager:
@@ -122,8 +136,10 @@ async def search_anime_provider(
                     logger.info(f"✓ WebUI季度预处理: {parsed_keyword['season']} -> {season_to_filter}")
             else:
                 logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
+        timer.step_end()
 
         # --- 新增：按季缓存逻辑 ---
+        timer.step_start("缓存检查")
         # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
         cache_key = f"provider_search_{search_title}_{season_to_filter or 'all'}"
         supplemental_cache_key = f"supplemental_search_{search_title}"
@@ -132,20 +148,28 @@ async def search_anime_provider(
 
         if cached_results_data is not None and cached_supplemental_results is not None:
             logger.info(f"搜索缓存命中: '{cache_key}'")
+            timer.step_end(details="缓存命中")
             # 缓存数据已排序和过滤，只需更新当前请求的集数信息
             results = [models.ProviderSearchInfo.model_validate(item) for item in cached_results_data]
             for item in results:
                 item.currentEpisodeIndex = episode_to_filter
-            
+
+            timer.finish()  # 打印计时报告
             return UIProviderSearchResponse(
                 results=[item.model_dump() for item in results],
                 supplemental_results=[models.ProviderSearchInfo.model_validate(item).model_dump() for item in cached_supplemental_results],
                 search_season=season_to_filter,
                 search_episode=episode_to_filter
             )
-        
+
+        timer.step_end(details="缓存未命中")
         logger.info(f"搜索缓存未命中: '{cache_key}'，正在执行完整搜索流程...")
         # --- 缓存逻辑结束 ---
+
+        # V2.1.6: 使用统一的ai_type_and_season_mapping_and_correction函数
+
+        # 获取AI匹配器用于统一的季度映射
+        ai_matcher = await ai_matcher_manager.get_matcher() if ai_matcher_manager else None
 
         episode_info = {
             "season": season_to_filter,
@@ -153,6 +177,8 @@ async def search_anime_provider(
         } if episode_to_filter is not None else None
 
         logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
+
+        
 
         # 第一次检查:在所有搜索之前检查是否有弹幕源
         if not manager.has_enabled_scrapers:
@@ -168,11 +194,24 @@ async def search_anime_provider(
         # 修正：检查是否有任何启用的辅助源或强制辅助源
         has_any_aux_source = await metadata_manager.has_any_enabled_aux_source()
 
+        # 🚀 V2.1.6优化: 提前启动元数据查询，与搜索并行
+        metadata_prefetch_task = None
+        if ai_matcher and metadata_manager:
+            async def prefetch_metadata():
+                try:
+                    from ...season_mapper import _get_cached_metadata_search
+                    return await _get_cached_metadata_search(search_title, metadata_manager, logger)
+                except Exception:
+                    return None
+            metadata_prefetch_task = asyncio.create_task(prefetch_metadata())
+
         if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
             # 修正:变量名统一
+            timer.step_start("弹幕源搜索")
             all_results = await manager.search_all([search_title], episode_info=episode_info)
+            timer.step_end(details=f"{len(all_results)}个结果")
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
             filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
         else:
@@ -190,6 +229,7 @@ async def search_anime_provider(
             # 优化：并行执行辅助搜索和主搜索
             logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
 
+            timer.step_start("并行搜索(弹幕源+辅助源)")
             # 1. 并行启动两个任务
             main_task = asyncio.create_task(
                 manager.search_all([search_title], episode_info=episode_info)
@@ -203,7 +243,9 @@ async def search_anime_provider(
             all_results, (all_possible_aliases, supplemental_results) = await asyncio.gather(
                 main_task, supp_task
             )
+            timer.step_end(details=f"弹幕{len(all_results)}个+辅助{len(supplemental_results)}个")
 
+            timer.step_start("别名验证与过滤")
             # 3. 验证每个别名与原始搜索词的相似度
             validated_aliases = set()
             for alias in all_possible_aliases:
@@ -243,6 +285,7 @@ async def search_anime_provider(
                     filtered_results.append(item)
 
             logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+            timer.step_end(details=f"保留{len(filtered_results)}个")
             results = filtered_results
 
     except httpx.RequestError as e:
@@ -298,9 +341,12 @@ async def search_anime_provider(
         # 主排序键：源顺序（升序）；次排序键：相似度（降序）
         return (provider_order, -similarity_score)
 
+    timer.step_start("结果排序")
     sorted_results = sorted(results, key=sort_key)
+    timer.step_end(details=f"{len(sorted_results)}个结果")
 
     # --- 新增：在返回前缓存最终结果 ---
+    timer.step_start("结果缓存")
     # 我们缓存的是整季的结果，所以在存入前清除特定集数的信息
     results_to_cache = []
     for item in sorted_results:
@@ -313,8 +359,52 @@ async def search_anime_provider(
     # 缓存补充结果
     if supplemental_results:
         await crud.set_cache(session, supplemental_cache_key, [item.model_dump() for item in supplemental_results], ttl_seconds=10800)
+    timer.step_end()
     # --- 缓存逻辑结束 ---
 
+
+
+    # 🚀 V2.1.6: 使用统一的AI类型和季度映射修正函数
+    if ai_matcher and metadata_manager:
+        try:
+            timer.step_start("AI映射修正")
+            logger.info("🔄 开始AI映射修正...")
+            # 获取预取的元数据结果（如果有）
+            prefetched_metadata = None
+            if metadata_prefetch_task:
+                try:
+                    prefetched_metadata = await metadata_prefetch_task
+                except Exception:
+                    pass
+
+            mapping_result = await ai_type_and_season_mapping_and_correction(
+                search_title=search_title,
+                search_results=sorted_results,
+                metadata_manager=metadata_manager,
+                ai_matcher=ai_matcher,
+                logger=logger,
+                similarity_threshold=60.0,
+                prefetched_metadata_results=prefetched_metadata
+            )
+
+            # 应用修正结果
+            if mapping_result['total_corrections'] > 0:
+                logger.info(f"✓ 主页搜索 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                # 更新搜索结果（已经直接修改了sorted_results）
+                sorted_results = mapping_result['corrected_results']
+                timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+            else:
+                logger.info(f"○ 主页搜索 统一AI映射: 未找到需要修正的信息")
+                timer.step_end(details="无修正")
+
+        except Exception as e:
+            logger.warning(f"主页搜索 统一AI映射任务执行失败: {e}")
+            timer.step_end(details=f"失败: {e}")
+
+    timer.finish()  # 打印搜索计时报告
     return UIProviderSearchResponse(
         results=[item.model_dump() for item in sorted_results],
         supplemental_results=[item.model_dump() for item in supplemental_results] if supplemental_results else [],

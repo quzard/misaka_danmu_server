@@ -100,6 +100,27 @@ class User(Base):
     tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", NaiveDateTime)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
 
+    # 关联会话
+    sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    """用户会话表，用于多端登录管理"""
+    __tablename__ = "user_sessions"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    userId: Mapped[int] = mapped_column("user_id", BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    jti: Mapped[str] = mapped_column(String(36), unique=True, index=True)  # JWT ID
+    ipAddress: Mapped[Optional[str]] = mapped_column("ip_address", String(50))
+    userAgent: Mapped[Optional[str]] = mapped_column("user_agent", String(500))
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    lastUsedAt: Mapped[Optional[datetime]] = mapped_column("last_used_at", NaiveDateTime)
+    expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", NaiveDateTime)
+    isRevoked: Mapped[bool] = mapped_column("is_revoked", Boolean, default=False)
+
+    # 关联用户
+    user: Mapped["User"] = relationship(back_populates="sessions")
+
+
 class Scraper(Base):
     __tablename__ = "scrapers"
     providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)

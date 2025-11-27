@@ -238,6 +238,8 @@ async def create_initial_admin_user(app: FastAPI):
 
 async def init_db_tables(app: FastAPI):
     """初始化数据库和表"""
+    from .db_maintainer import sync_database_schema
+
     await _create_db_if_not_exists()
     await create_db_engine_and_session(app)
 
@@ -249,6 +251,9 @@ async def init_db_tables(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         logger.info("数据库模型同步完成。")
 
-        # 2. 然后，在已存在的表结构上运行统一的迁移任务。
+        # 2. 数据库维护管理器：自动补充缺失的字段和安全扩展字段类型
+        await sync_database_schema(conn, settings.database.type.lower())
+
+        # 3. 然后，在已存在的表结构上运行统一的迁移任务。
         await run_migrations(conn, settings.database.type.lower(), settings.database.name)
     logger.info("数据库初始化完成。")

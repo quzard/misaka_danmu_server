@@ -97,6 +97,12 @@ async def delete_bulk_webhook_tasks(payload: Dict[str, List[int]], session: Asyn
     return {"message": f"成功删除 {deleted_count} 个任务。"}
 
 
+@router.delete("/webhook-tasks/clear-all", summary="清空所有Webhook任务")
+async def clear_all_webhook_tasks(session: AsyncSession = Depends(get_db_session)):
+    """一键清空所有待处理的 Webhook 任务，用于处理大量任务堆积的情况。"""
+    deleted_count = await crud.delete_all_webhook_tasks(session)
+    return {"message": f"已清空 {deleted_count} 个任务。", "deletedCount": deleted_count}
+
 
 @router.post("/webhook-tasks/run-now", summary="立即执行选中的Webhook任务")
 async def run_webhook_tasks_now(

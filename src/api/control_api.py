@@ -28,8 +28,12 @@ from ..scheduler import SchedulerManager
 from ..scraper_manager import ScraperManager
 from ..task_manager import TaskManager, TaskSuccess, TaskStatus
 from ..search_utils import unified_search
+from ..season_mapper import ai_type_and_season_mapping_and_correction
+from ..ai.ai_matcher import AIMatcher
+from ..season_mapper import title_contains_season_name
 
 from ..timezone import get_now
+from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_SEARCH
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
@@ -75,13 +79,15 @@ def get_rate_limiter(request: Request) -> RateLimiter:
     """依赖项：从应用状态获取速率限制器"""
     return request.app.state.rate_limiter
 
+def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
+    """依赖项：从应用状态获取AI匹配器管理器"""
+    return request.app.state.ai_matcher_manager
+
 def get_title_recognition_manager(request: Request):
     """依赖项：从应用状态获取标题识别管理器"""
     return request.app.state.title_recognition_manager
 
-def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
-    """依赖项：从应用状态获取AI匹配管理器"""
-    return request.app.state.ai_matcher_manager
+
 
 # 新增：定义API Key的安全方案，这将自动在Swagger UI中生成“Authorize”按钮
 api_key_scheme = APIKeyQuery(name="api_key", auto_error=False, description="用于所有外部控制API的访问密钥。")
@@ -473,6 +479,8 @@ async def search_media(
     session: AsyncSession = Depends(get_db_session),
     manager: ScraperManager = Depends(get_scraper_manager),
     metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -501,7 +509,13 @@ async def search_media(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
+
+    # 初始化计时器并开始计时
+    timer = SearchTimer(SEARCH_TYPE_CONTROL_SEARCH, keyword, logger)
+    timer.start()
+
     try:
+        timer.step_start("关键词解析")
         # --- Start of new logic, copied and adapted from ui_api.py ---
         parsed_keyword = utils.parse_search_keyword(keyword)
         search_title = parsed_keyword["title"]
@@ -515,12 +529,20 @@ async def search_media(
         user = models.User(id=0, username="control_api")
 
         logger.info(f"Control API 正在搜索: '{keyword}' (解析为: title='{search_title}', season={final_season}, episode={final_episode})")
+        timer.step_end()
+
         if not manager.has_enabled_scrapers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="没有启用的弹幕搜索源，请在“搜索源”页面中启用至少一个。"
             )
 
+        # 外部控制搜索 AI映射配置检查
+        external_search_season_mapping_enabled = await config_manager.get("externalSearchEnableTmdbSeasonMapping", "false")
+        if external_search_season_mapping_enabled.lower() != "true":
+            logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
+
+        timer.step_start("弹幕源搜索")
         # 使用统一的搜索函数（不进行排序，后面自己处理）
         results = await unified_search(
             search_term=search_title,
@@ -533,6 +555,7 @@ async def search_media(
             use_source_priority_sorting=False,  # 不排序，后面自己处理
             progress_callback=None
         )
+        timer.step_end(details=f"{len(results)}个结果")
 
         logger.info(f"搜索完成，共 {len(results)} 个结果")
 
@@ -559,9 +582,54 @@ async def search_media(
 
         sorted_results = sorted(results, key=sort_key)
 
+        # 使用统一的AI类型和季度映射修正函数
+        if external_search_season_mapping_enabled.lower() == "true":
+            try:
+                timer.step_start("AI映射修正")
+                # 获取AI匹配器（使用依赖注入的实例）
+                ai_matcher = await ai_matcher_manager.get_matcher()
+                if ai_matcher:
+                    logger.info(f"○ 外部控制-搜索媒体 开始统一AI映射修正: '{search_title}' ({len(sorted_results)} 个结果)")
+
+                    # 使用新的统一函数进行类型和季度修正
+                    mapping_result = await ai_type_and_season_mapping_and_correction(
+                        search_title=search_title,
+                        search_results=sorted_results,
+                        metadata_manager=metadata_manager,
+                        ai_matcher=ai_matcher,
+                        logger=logger,
+                        similarity_threshold=60.0
+                    )
+
+                    # 应用修正结果
+                    if mapping_result['total_corrections'] > 0:
+                        logger.info(f"✓ 外部控制-搜索媒体 统一AI映射成功: 总计修正了 {mapping_result['total_corrections']} 个结果")
+                        logger.info(f"  - 类型修正: {len(mapping_result['type_corrections'])} 个")
+                        logger.info(f"  - 季度修正: {len(mapping_result['season_corrections'])} 个")
+
+                        # 更新搜索结果（已经直接修改了sorted_results）
+                        sorted_results = mapping_result['corrected_results']
+                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+                    else:
+                        logger.info(f"○ 外部控制-搜索媒体 统一AI映射: 未找到需要修正的信息")
+                        timer.step_end(details="无修正")
+                else:
+                    logger.warning("○ 外部控制-搜索媒体 AI映射: AI匹配器未启用或初始化失败")
+                    timer.step_end(details="匹配器未启用")
+
+            except Exception as e:
+                logger.warning(f"外部控制-搜索媒体 统一AI映射任务执行失败: {e}")
+                timer.step_end(details=f"失败: {e}")
+        else:
+            logger.info("○ 外部控制-搜索媒体 统一AI映射: 功能未启用")
+
+        timer.step_start("结果缓存")
         search_id = str(uuid.uuid4())
         indexed_results = [ControlSearchResultItem(**r.model_dump(), resultIndex=i) for i, r in enumerate(sorted_results)]
         await crud.set_cache(session, f"control_search_{search_id}", [r.model_dump() for r in sorted_results], 600)
+        timer.step_end()
+
+        timer.finish()  # 打印计时报告
         return ControlSearchResponse(searchId=search_id, results=indexed_results)
     finally:
         await manager.release_search_lock(api_key)
@@ -1178,12 +1246,13 @@ async def refresh_episode(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    config_manager: ConfigManager = Depends(get_config_manager),
 ):
     """提交一个后台任务，为单个分集重新从其源网站获取最新的弹幕。"""
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb),
+        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb, config_manager),
         f"外部API刷新分集: {info['title']}"
     )
     return {"message": "刷新分集任务已提交", "taskId": task_id}
@@ -1214,13 +1283,18 @@ async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_ses
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
 
 @router.post("/danmaku/{episodeId}", status_code=202, summary="覆盖弹幕", response_model=ControlTaskResponse)
-async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
+async def overwrite_danmaku(
+    episodeId: int,
+    payload: models.DanmakuUpdateRequest,
+    task_manager: TaskManager = Depends(get_task_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
     """提交一个后台任务，用请求体中提供的弹幕列表完全覆盖指定分集的现有弹幕。"""
     async def overwrite_task(session: AsyncSession, cb: Callable):
         await cb(10, "清空中...")
         await crud.clear_episode_comments(session, episodeId)
         await cb(50, f"插入 {len(payload.comments)} 条新弹幕...")
-        
+
         comments_to_insert = []
         for c in payload.comments:
             comment_dict = c.model_dump()
@@ -1232,7 +1306,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
                 comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
             comments_to_insert.append(comment_dict)
 
-        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, None)
+        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, config_manager)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")

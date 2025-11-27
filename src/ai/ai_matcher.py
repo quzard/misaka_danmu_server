@@ -1075,6 +1075,97 @@ class AIMatcher:
 
         return processed_results
 
+    async def select_best_season_for_title(
+        self,
+        title: str,
+        season_options: List[Dict[str, Any]]
+    ) -> Optional[int]:
+        """
+        使用AI从季度选项中选择最匹配的季度（V2.1.6混合策略）
+
+        Args:
+            title: 标题
+            season_options: 季度选项列表，每个包含 season_number 和 name
+
+        Returns:
+            最佳季度号，如果无法确定则返回None
+        """
+        if not season_options or not self.client:
+            return None
+
+        try:
+            # V2.1.6: 先使用算法相似度匹配
+            from ..season_mapper import title_contains_season_name
+
+            best_confidence = 0.0
+            best_season = None
+            best_season_name = ""
+
+            # 遍历所有季度选项，使用算法计算相似度
+            for option in season_options:
+                season_num = option.get("season_number", 0)
+                season_name = option.get("name", f"第{season_num}季")
+                season_aliases = option.get("aliases", [])
+
+                # 使用算法相似度计算
+                confidence = title_contains_season_name(title, season_num, season_name, season_aliases)
+
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_season = season_num
+                    best_season_name = season_name
+
+            # 如果算法相似度达到阈值(60%)，直接返回结果
+            if best_confidence >= 60.0:
+                self.logger.info(f"算法季度匹配: '{title}' → S{best_season} ({best_season_name}) (置信度: {best_confidence:.1f}%)")
+                return best_season
+
+            # 算法相似度不足，使用AI兜底
+            self.logger.debug(f"算法相似度不足: '{title}' (最高相似度: {best_confidence:.1f}% < 60.0%), 使用AI兜底")
+
+            # 构建季度选项描述
+            options_text = ""
+            for i, option in enumerate(season_options):
+                season_num = option.get("season_number", 0)
+                season_name = option.get("name", f"第{season_num}季")
+                season_aliases = option.get("aliases", [])
+                alias_text = f" (别名: {', '.join(season_aliases)})" if season_aliases else ""
+                options_text += f"{i+1}. 第{season_num}季: {season_name}{alias_text}\n"
+
+            # 使用公共AI季度匹配提示词
+            from .ai_prompts import DEFAULT_AI_SEASON_MATCH_PROMPT
+            prompt = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
+                title=title,
+                options_text=options_text
+            )
+
+            # 调用AI
+            response_data = await self._season_match_universal({"title": title, "options": season_options})
+
+            if not response_data:
+                return None
+
+            # 解析AI响应
+            ai_response = response_data.get("response", "").strip()
+
+            # 尝试提取数字
+            import re
+            match = re.search(r'\d+', ai_response)
+            if match:
+                selected_season = int(match.group(0))
+                # 验证选择的季度是否在选项中
+                for option in season_options:
+                    if option.get("season_number") == selected_season:
+                        self.logger.info(f"AI季度匹配: '{title}' → S{selected_season}")
+                        return selected_season
+
+            self.logger.debug(f"AI季度匹配: '{title}' → 无法解析响应: {ai_response}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"AI季度匹配失败: {e}")
+            return None
+
     async def select_metadata_result(
         self,
         title: str,
@@ -1203,5 +1294,55 @@ class AIMatcher:
         except Exception as e:
             logger.error(f"AI元数据匹配过程中发生错误: {e}", exc_info=True)
             return 0  # 返回第一个结果
+
+    async def _season_match_universal(self, input_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """通用季度匹配函数，支持所有AI提供商"""
+        try:
+            title = input_data.get("title", "")
+            options = input_data.get("options", [])
+
+            # 构建季度选项描述，包含别名
+            options_text = ""
+            for i, option in enumerate(options):
+                season_num = option.get("season_number", 0)
+                season_name = option.get("name", f"第{season_num}季")
+                season_aliases = option.get("aliases", [])
+
+                # 构建包含别名的描述
+                alias_text = f" (别名: {', '.join(season_aliases)})" if season_aliases else ""
+                options_text += f"{i+1}. 第{season_num}季: {season_name}{alias_text}\n"
+
+            # 使用公共AI季度匹配提示词
+            from .ai_prompts import DEFAULT_AI_SEASON_MATCH_PROMPT
+            prompt = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
+                title=title,
+                options_text=options_text
+            )
+
+            # 根据提供商调用不同的API
+            if self.provider == "gemini":
+                response = await self.client.generate_content(
+                    model=self.model,
+                    contents=prompt
+                )
+                ai_response = response.text.strip()
+            else:
+                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "你是一个专业的季度识别助手，擅长分析动漫标题中的季度信息。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=50
+                )
+                ai_response = response.choices[0].message.content.strip()
+
+            return {"response": ai_response}
+
+        except Exception as e:
+            self.logger.error(f"季度匹配失败 ({self.provider}): {e}")
+            return None
 
 
