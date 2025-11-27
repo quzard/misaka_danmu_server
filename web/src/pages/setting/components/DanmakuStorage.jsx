@@ -941,23 +941,23 @@ const DanmakuStorage = () => {
           </div>
         </Form.Item>
 
-        <Button
-          type="primary"
-          icon={<CheckCircleOutlined />}
-          onClick={handleSave}
-          loading={loading}
-          size="large"
-          block
-          style={{
-            marginTop: '24px',
-            height: '48px',
-            fontSize: '16px',
-            fontWeight: 500
-          }}
-        >
-          保存配置
-        </Button>
-        </Form>
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              onClick={handleSave}
+              loading={loading}
+              size="large"
+              block
+              style={{
+                marginTop: '24px',
+                height: '48px',
+                fontSize: '16px',
+                fontWeight: 500
+              }}
+            >
+              保存配置
+            </Button>
+          </Form>
         </TabPane>
 
         {/* 迁移与重命名 Tab */}
