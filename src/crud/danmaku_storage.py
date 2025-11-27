@@ -6,6 +6,7 @@
 import logging
 import shutil
 import re
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +14,36 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ..orm_models import Anime, AnimeSource, Episode
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# 弹幕文件基础目录
-DANMAKU_BASE_DIR = Path(settings.config_path) / "danmaku"
+
+def _is_docker_environment():
+    """检测是否在Docker容器中运行"""
+    # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
+    if Path("/.dockerenv").exists():
+        return True
+    # 方法2: 检查环境变量
+    if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
+        return True
+    # 方法3: 检查当前工作目录是否为 /app
+    if Path.cwd() == Path("/app"):
+        return True
+    return False
+
+
+def _get_base_dir():
+    """获取基础目录，根据运行环境自动调整"""
+    if _is_docker_environment():
+        return Path("/app")
+    else:
+        # 源码运行环境，使用当前工作目录
+        return Path(".")
+
+
+BASE_DIR = _get_base_dir()
+CONFIG_DIR = BASE_DIR / "config"
+DANMAKU_BASE_DIR = CONFIG_DIR / "danmaku"
 
 
 def get_fs_path_from_web_path(web_path: str) -> Optional[Path]:
@@ -29,7 +54,7 @@ def get_fs_path_from_web_path(web_path: str) -> Optional[Path]:
     # 实际路径: {config_path}/danmaku/xxx/yyy.xml
     if web_path.startswith("/app/config/"):
         relative_path = web_path[len("/app/config/"):]
-        return Path(settings.config_path) / relative_path
+        return CONFIG_DIR / relative_path
     return None
 
 
@@ -62,7 +87,7 @@ async def batch_migrate_danmaku(
         "details": []
     }
     
-    target_base = Path(target_path.replace("/app/config/", str(settings.config_path) + "/"))
+    target_base = Path(target_path.replace("/app/config/", str(CONFIG_DIR) + "/"))
     target_base.mkdir(parents=True, exist_ok=True)
     
     for anime_id in anime_ids:
@@ -122,7 +147,7 @@ async def batch_migrate_danmaku(
                 shutil.move(str(old_path), str(new_path))
                 
                 # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(Path(settings.config_path)))
+                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
@@ -235,7 +260,7 @@ async def batch_rename_danmaku(
                 old_path.rename(new_path)
 
                 # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(Path(settings.config_path)))
+                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
@@ -296,7 +321,7 @@ async def apply_danmaku_template(
 
     # 转换base_dir为实际路径
     if base_dir.startswith("/app/config/"):
-        base_path = Path(settings.config_path) / base_dir[len("/app/config/"):]
+        base_path = CONFIG_DIR / base_dir[len("/app/config/"):]
     else:
         base_path = Path(base_dir)
     base_path.mkdir(parents=True, exist_ok=True)
@@ -365,7 +390,7 @@ async def apply_danmaku_template(
                 shutil.move(str(old_path), str(new_path))
 
                 # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(Path(settings.config_path)))
+                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
