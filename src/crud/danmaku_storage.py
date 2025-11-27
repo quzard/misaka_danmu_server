@@ -227,6 +227,84 @@ async def batch_migrate_danmaku(
     return results
 
 
+async def preview_rename_danmaku(
+    session: AsyncSession,
+    anime_ids: List[int],
+    mode: str,
+    prefix: str = "",
+    suffix: str = "",
+    regex_pattern: str = "",
+    regex_replace: str = ""
+) -> Dict[str, Any]:
+    """预览批量重命名结果（不实际执行）"""
+    results = {
+        "totalCount": 0,
+        "previewItems": []
+    }
+
+    for anime_id in anime_ids:
+        episodes = await get_episodes_for_anime(session, anime_id)
+        if not episodes:
+            continue
+
+        anime = episodes[0].source.anime
+
+        for episode in episodes:
+            if not episode.danmakuFilePath:
+                continue
+
+            old_path = episode.danmakuFilePath
+            old_fs_path = get_fs_path_from_web_path(old_path)
+            exists = old_fs_path and old_fs_path.exists()
+
+            # 提取文件名
+            old_name = old_path.rsplit('/', 1)[-1] if '/' in old_path else old_path
+            old_stem = old_name.rsplit('.', 1)[0] if '.' in old_name else old_name
+            extension = '.' + old_name.rsplit('.', 1)[1] if '.' in old_name else ''
+
+            # 计算新文件名
+            try:
+                if mode == "prefix":
+                    new_name = f"{prefix}{old_stem}{suffix}{extension}"
+                elif mode == "regex":
+                    new_name = re.sub(regex_pattern, regex_replace, old_stem) + extension
+                else:
+                    new_name = old_name
+
+                # 构建新路径
+                dir_path = old_path.rsplit('/', 1)[0] if '/' in old_path else ''
+                new_path = f"{dir_path}/{new_name}" if dir_path else new_name
+
+                results["totalCount"] += 1
+                results["previewItems"].append({
+                    "animeId": anime.id,
+                    "animeTitle": anime.title,
+                    "episodeId": episode.id,
+                    "episodeIndex": episode.episodeIndex,
+                    "oldName": old_name,
+                    "newName": new_name,
+                    "oldPath": old_path,
+                    "newPath": new_path,
+                    "exists": exists
+                })
+            except re.error as e:
+                results["totalCount"] += 1
+                results["previewItems"].append({
+                    "animeId": anime.id,
+                    "animeTitle": anime.title,
+                    "episodeId": episode.id,
+                    "episodeIndex": episode.episodeIndex,
+                    "oldName": old_name,
+                    "newName": f"[正则错误: {e}]",
+                    "oldPath": old_path,
+                    "newPath": "",
+                    "exists": exists,
+                    "error": True
+                })
+
+    return results
+
+
 async def batch_rename_danmaku(
     session: AsyncSession,
     anime_ids: List[int],

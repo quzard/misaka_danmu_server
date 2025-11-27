@@ -675,6 +675,9 @@ export const previewMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage
 /** 批量迁移弹幕文件 */
 export const batchMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-migrate', data)
 
+/** 预览批量重命名 */
+export const previewRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-rename', data)
+
 /** 批量重命名弹幕文件 */
 export const batchRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-rename', data)
 

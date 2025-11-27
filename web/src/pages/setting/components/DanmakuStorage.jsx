@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, RocketOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, browseDirectory, createFolder, deleteFolder, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
+import { getConfig, setConfig, browseDirectory, createFolder, deleteFolder, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 import Cookies from 'js-cookie';
 import {
@@ -152,6 +152,8 @@ const DanmakuStorage = () => {
   const [renameSuffix, setRenameSuffix] = useState('');
   const [renameRegexPattern, setRenameRegexPattern] = useState('');
   const [renameRegexReplace, setRenameRegexReplace] = useState('');
+  const [renamePreviewData, setRenamePreviewData] = useState(null);
+  const [renamePreviewLoading, setRenamePreviewLoading] = useState(false);
   // 模板转换配置
   const [templateTarget, setTemplateTarget] = useState('tv');
   const [templatePreviewData, setTemplatePreviewData] = useState(null);
@@ -473,23 +475,59 @@ const DanmakuStorage = () => {
     }
   };
 
+  // 重命名预览函数
+  const fetchRenamePreview = async (mode, prefix, suffix, regexPattern, regexReplace) => {
+    setRenamePreviewLoading(true);
+    try {
+      const response = await previewRenameDanmaku({
+        animeIds: selectedRowKeys,
+        mode,
+        prefix: prefix || '',
+        suffix: suffix || '',
+        regexPattern: regexPattern || '',
+        regexReplace: regexReplace || '',
+      });
+      setRenamePreviewData(response.data);
+    } catch (error) {
+      message.error('预览失败: ' + (error.message || '未知错误'));
+    } finally {
+      setRenamePreviewLoading(false);
+    }
+  };
+
   // 打开重命名Modal
-  const handleOpenRenameModal = () => {
+  const handleOpenRenameModal = async () => {
     if (selectedRows.length === 0) {
       message.warning('请先选择要重命名的条目');
       return;
     }
+    setRenamePreviewData(null);
     setRenameModalVisible(true);
+    // 打开时自动预览（显示原始文件名）
+    await fetchRenamePreview(renameMode, renamePrefix, renameSuffix, renameRegexPattern, renameRegexReplace);
   };
 
   // 打开模板转换Modal
-  const handleOpenTemplateModal = () => {
+  const handleOpenTemplateModal = async () => {
     if (selectedRows.length === 0) {
       message.warning('请先选择要转换的条目');
       return;
     }
-    setTemplatePreviewData(null); // 清空预览数据
+    setTemplatePreviewData(null);
     setTemplateModalVisible(true);
+    // 打开时自动预览
+    setTemplatePreviewLoading(true);
+    try {
+      const response = await previewDanmakuTemplate({
+        animeIds: selectedRowKeys,
+        templateType: templateTarget,
+      });
+      setTemplatePreviewData(response.data);
+    } catch (error) {
+      message.error('预览失败: ' + (error.message || '未知错误'));
+    } finally {
+      setTemplatePreviewLoading(false);
+    }
   };
 
   // 预览应用模板
@@ -628,7 +666,7 @@ const DanmakuStorage = () => {
   };
 
   // 选择目录
-  const handleSelectDirectory = (path) => {
+  const handleSelectDirectory = async (path) => {
     if (browserTarget === 'movie') {
       setMovieDanmakuDirectoryPath(path);
       form.setFieldValue('movieDanmakuDirectoryPath', path);
@@ -637,6 +675,25 @@ const DanmakuStorage = () => {
       setTvDanmakuDirectoryPath(path);
       form.setFieldValue('tvDanmakuDirectoryPath', path);
       message.success(`已选择电视存储目录: ${path}`);
+    } else if (browserTarget === 'migrate') {
+      // 迁移目录选择后自动预览
+      setMigrateTargetPath(path);
+      setBrowserVisible(false);
+      // 自动执行预览
+      setPreviewLoading(true);
+      try {
+        const response = await previewMigrateDanmaku({
+          animeIds: selectedRowKeys,
+          targetPath: path,
+          keepStructure: migrateKeepStructure,
+        });
+        setMigratePreviewData(response.data);
+      } catch (error) {
+        message.error('预览失败: ' + (error.message || '未知错误'));
+      } finally {
+        setPreviewLoading(false);
+      }
+      return; // 提前返回，不再执行下面的 setBrowserVisible
     }
     setBrowserVisible(false);
   };
@@ -1286,10 +1343,10 @@ const DanmakuStorage = () => {
                 />
                 <Button
                   type="primary"
-                  onClick={handlePreviewMigrate}
-                  loading={previewLoading}
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => handleBrowseDirectory('migrate')}
                 >
-                  预览
+                  浏览
                 </Button>
               </div>
             </div>
@@ -1367,11 +1424,19 @@ const DanmakuStorage = () => {
             onOk={handleExecuteRename}
             confirmLoading={operationLoading}
             okText="确认重命名"
-            width={600}
+            width={700}
           >
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>重命名规则:</div>
-              <Radio.Group value={renameMode} onChange={(e) => setRenameMode(e.target.value)}>
+              <Radio.Group
+                value={renameMode}
+                onChange={(e) => {
+                  const newMode = e.target.value;
+                  setRenameMode(newMode);
+                  // 切换模式时重新预览
+                  fetchRenamePreview(newMode, renamePrefix, renameSuffix, renameRegexPattern, renameRegexReplace);
+                }}
+              >
                 <Radio value="prefix">添加前后缀</Radio>
                 <Radio value="regex">正则替换</Radio>
               </Radio.Group>
@@ -1381,13 +1446,19 @@ const DanmakuStorage = () => {
                 <Input
                   addonBefore="添加前缀"
                   value={renamePrefix}
-                  onChange={(e) => setRenamePrefix(e.target.value)}
+                  onChange={(e) => {
+                    setRenamePrefix(e.target.value);
+                    fetchRenamePreview(renameMode, e.target.value, renameSuffix, renameRegexPattern, renameRegexReplace);
+                  }}
                   placeholder="例如: 弹幕_"
                 />
                 <Input
                   addonBefore="添加后缀"
                   value={renameSuffix}
-                  onChange={(e) => setRenameSuffix(e.target.value)}
+                  onChange={(e) => {
+                    setRenameSuffix(e.target.value);
+                    fetchRenamePreview(renameMode, renamePrefix, e.target.value, renameRegexPattern, renameRegexReplace);
+                  }}
                   placeholder="例如: _backup (在.xml之前)"
                 />
               </Space>
@@ -1396,21 +1467,53 @@ const DanmakuStorage = () => {
                 <Input
                   addonBefore="匹配模式"
                   value={renameRegexPattern}
-                  onChange={(e) => setRenameRegexPattern(e.target.value)}
-                  placeholder="正则表达式，例如: (\d+)\.xml"
+                  onChange={(e) => {
+                    setRenameRegexPattern(e.target.value);
+                    fetchRenamePreview(renameMode, renamePrefix, renameSuffix, e.target.value, renameRegexReplace);
+                  }}
+                  placeholder="正则表达式，例如: (\d+)"
                 />
                 <Input
                   addonBefore="替换为"
                   value={renameRegexReplace}
-                  onChange={(e) => setRenameRegexReplace(e.target.value)}
-                  placeholder="例如: Episode_$1.xml"
+                  onChange={(e) => {
+                    setRenameRegexReplace(e.target.value);
+                    fetchRenamePreview(renameMode, renamePrefix, renameSuffix, renameRegexPattern, e.target.value);
+                  }}
+                  placeholder="例如: Episode_$1"
                 />
               </Space>
             )}
-            <Divider />
-            <div style={{ color: '#666' }}>
-              将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
-            </div>
+
+            {/* 预览区域 */}
+            <Divider orientation="left">重命名预览</Divider>
+            {renamePreviewLoading ? (
+              <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
+                正在加载预览...
+              </div>
+            ) : renamePreviewData ? (
+              <>
+                <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                  {renamePreviewData.previewItems.map((item, index) => (
+                    <div key={index} style={{ marginBottom: 8, padding: 6, background: '#fafafa', borderRadius: 4 }}>
+                      <div style={{ fontSize: 12 }}>
+                        <Text code style={{ fontSize: 11 }}>{item.oldName}</Text>
+                        <span style={{ margin: '0 8px', color: '#999' }}>→</span>
+                        <Text code style={{ fontSize: 11, color: item.error ? '#ff4d4f' : '#52c41a' }}>{item.newName}</Text>
+                        {!item.exists && <Tag color="warning" style={{ marginLeft: 8 }}>文件不存在</Tag>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, color: '#666' }}>
+                  共 <strong>{renamePreviewData.totalCount}</strong> 个文件将被重命名
+                </div>
+              </>
+            ) : (
+              <div style={{ color: '#666' }}>
+                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+              </div>
+            )}
           </Modal>
 
           {/* 模板转换Modal */}
@@ -1428,24 +1531,31 @@ const DanmakuStorage = () => {
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>目标模板:</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Select
-                  value={templateTarget}
-                  onChange={(v) => { setTemplateTarget(v); setTemplatePreviewData(null); }}
-                  style={{ flex: 1 }}
-                >
-                  <Option value="tv">电视节目模板: {'${title}/Season ${season}/${title} - S${season}E${episode}.xml'}</Option>
-                  <Option value="movie">电影模板: {'${title}/${title}.xml'}</Option>
-                  <Option value="id">ID模板: {'${animeId}/${episodeId}.xml'}</Option>
-                </Select>
-                <Button
-                  type="primary"
-                  onClick={handlePreviewTemplate}
-                  loading={templatePreviewLoading}
-                >
-                  预览
-                </Button>
-              </div>
+              <Select
+                value={templateTarget}
+                onChange={async (v) => {
+                  setTemplateTarget(v);
+                  // 选择模板后自动预览
+                  setTemplatePreviewLoading(true);
+                  try {
+                    const response = await previewDanmakuTemplate({
+                      animeIds: selectedRowKeys,
+                      templateType: v,
+                    });
+                    setTemplatePreviewData(response.data);
+                  } catch (error) {
+                    message.error('预览失败: ' + (error.message || '未知错误'));
+                  } finally {
+                    setTemplatePreviewLoading(false);
+                  }
+                }}
+                style={{ width: '100%' }}
+                loading={templatePreviewLoading}
+              >
+                <Option value="tv">电视节目模板: {'${title}/Season ${season}/${title} - S${season}E${episode}.xml'}</Option>
+                <Option value="movie">电影模板: {'${title}/${title}.xml'}</Option>
+                <Option value="id">ID模板: {'${animeId}/${episodeId}.xml'}</Option>
+              </Select>
             </div>
 
             {/* 预览区域 */}
@@ -1480,16 +1590,21 @@ const DanmakuStorage = () => {
               </>
             )}
 
-            {!templatePreviewData && (
+            {!templatePreviewData && !templatePreviewLoading && (
               <>
                 <Divider />
                 <div style={{ color: '#666' }}>
                   将转换 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
                   <div style={{ marginTop: 8, fontSize: 12 }}>
-                    <Text type="secondary">点击"预览"按钮查看详细转换路径</Text>
+                    <Text type="secondary">选择模板后将自动显示预览</Text>
                   </div>
                 </div>
               </>
+            )}
+            {templatePreviewLoading && (
+              <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
+                正在加载预览...
+              </div>
             )}
           </Modal>
         </TabPane>

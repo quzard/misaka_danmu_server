@@ -79,6 +79,22 @@ class TemplatePreviewResult(BaseModel):
     previewItems: List[dict]
 
 
+class RenamePreviewRequest(BaseModel):
+    """重命名预览请求"""
+    animeIds: List[int]
+    mode: str  # prefix, regex
+    prefix: Optional[str] = ""
+    suffix: Optional[str] = ""
+    regexPattern: Optional[str] = ""
+    regexReplace: Optional[str] = ""
+
+
+class RenamePreviewResult(BaseModel):
+    """重命名预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
 # ==================== API端点 ====================
 
 @router.post("/preview-migrate", response_model=MigratePreviewResult, summary="预览批量迁移")
@@ -111,6 +127,25 @@ async def batch_migrate(
         conflict_action=request.conflictAction
     )
     return BatchOperationResult(**result)
+
+
+@router.post("/preview-rename", response_model=RenamePreviewResult, summary="预览批量重命名")
+async def preview_rename(
+    request: RenamePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """预览重命名结果，不实际执行"""
+    result = await crud.preview_rename_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        mode=request.mode,
+        prefix=request.prefix or "",
+        suffix=request.suffix or "",
+        regex_pattern=request.regexPattern or "",
+        regex_replace=request.regexReplace or ""
+    )
+    return RenamePreviewResult(**result)
 
 
 @router.post("/batch-rename", response_model=BatchOperationResult, summary="批量重命名弹幕文件")
