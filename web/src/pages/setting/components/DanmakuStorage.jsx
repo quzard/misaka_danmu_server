@@ -1,82 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, RocketOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, browseDirectory, createFolder, deleteFolder, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
-import Cookies from 'js-cookie';
-import {
-  FullFileBrowser,
-  setChonkyDefaults,
-  ChonkyActions,
-  FileHelper,
-  defineFileAction
-} from 'chonky';
-import { ChonkyIconFA } from 'chonky-icon-fontawesome';
 
 const { Text } = Typography;
 const { Option } = Select;
 const { TabPane } = Tabs;
-
-// 设置Chonky默认配置
-setChonkyDefaults({
-  iconComponent: ChonkyIconFA,
-});
-
-// 中文化的文件操作
-const ChineseActions = {
-  EnableListView: defineFileAction({
-    ...ChonkyActions.EnableListView,
-    button: {
-      name: '列表视图',
-      toolbar: true,
-      contextMenu: false,
-    },
-  }),
-  EnableGridView: defineFileAction({
-    ...ChonkyActions.EnableGridView,
-    button: {
-      name: '网格视图',
-      toolbar: true,
-      contextMenu: false,
-    },
-  }),
-  SortFilesByName: defineFileAction({
-    ...ChonkyActions.SortFilesByName,
-    button: {
-      name: '按名称排序',
-      toolbar: true,
-      contextMenu: false,
-    },
-  }),
-  SortFilesByDate: defineFileAction({
-    ...ChonkyActions.SortFilesByDate,
-    button: {
-      name: '按日期排序',
-      toolbar: true,
-      contextMenu: false,
-    },
-  }),
-  CreateFolder: defineFileAction({
-    ...ChonkyActions.CreateFolder,
-    button: {
-      name: '新建文件夹',
-      toolbar: false,
-      contextMenu: true,
-      icon: 'folder',
-    },
-  }),
-  DeleteFolder: defineFileAction({
-    id: 'delete_folder',
-    requiresSelection: true,
-    fileFilter: (file) => FileHelper.isDirectory(file),
-    button: {
-      name: '删除文件夹',
-      toolbar: false,
-      contextMenu: true,
-      icon: 'trash',
-    },
-  }),
-};
 
 // 模板定义
 const TEMPLATES = {
@@ -116,13 +46,8 @@ const DanmakuStorage = () => {
   const [browserVisible, setBrowserVisible] = useState(false);
   const [browserTarget, setBrowserTarget] = useState(''); // 'movie' or 'tv'
 
-  // 文件管理状态
+  // Tab状态
   const [activeTab, setActiveTab] = useState('config');
-  const [fileManagerPath, setFileManagerPath] = useState('/app/config/danmaku');
-  const [fileManagerFiles, setFileManagerFiles] = useState([]);
-  const [fileManagerLoading, setFileManagerLoading] = useState(false);
-  const [createFolderVisible, setCreateFolderVisible] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
   const [isMobile, setIsMobile] = useState(false);
 
   // 迁移与重命名状态
@@ -713,174 +638,6 @@ const DanmakuStorage = () => {
     }
     setBrowserVisible(false);
   };
-
-  // ==================== 文件管理功能 ====================
-
-  // 转换文件列表为Chonky格式
-  const convertToChonkyFiles = (files) => {
-    return files.map(file => ({
-      id: file.path,
-      name: file.name,
-      isDir: file.type === 'dir',
-      modDate: file.modify_time ? new Date(file.modify_time) : null,
-      size: file.size || 0,
-    }));
-  };
-
-  // 创建文件夹链（面包屑导航）
-  const createFolderChain = (path) => {
-    const parts = path.split('/').filter(Boolean);
-    const chain = [{ id: '/', name: '根目录', isDir: true }];
-    let currentPath = '';
-    for (const part of parts) {
-      currentPath += '/' + part;
-      chain.push({ id: currentPath, name: part, isDir: true });
-    }
-    return chain;
-  };
-
-  // 加载目录内容
-  const loadFileManagerDirectory = async (path) => {
-    setFileManagerLoading(true);
-    try {
-      const token = Cookies.get('danmu_token');
-      if (!token) {
-        message.error('请先登录');
-        return;
-      }
-      const normalizedPath = path.replace(/^\/+/, '/');
-      const requestData = {
-        id: normalizedPath || 'root',
-        storage: 'local',
-        type: 'dir',
-        path: normalizedPath,
-        name: ''
-      };
-      const response = await browseDirectory(requestData, 'name');
-      const chonkyFiles = convertToChonkyFiles(response.data);
-      setFileManagerFiles(chonkyFiles);
-    } catch (error) {
-      console.error('加载目录失败:', error);
-      message.error('加载目录失败：' + (error.response?.data?.detail || error.message));
-    } finally {
-      setFileManagerLoading(false);
-    }
-  };
-
-  // 当切换到文件管理Tab或路径变化时加载目录
-  useEffect(() => {
-    if (activeTab === 'files') {
-      loadFileManagerDirectory(fileManagerPath);
-    }
-  }, [activeTab, fileManagerPath]);
-
-  // 文件夹链
-  const folderChain = useMemo(() => createFolderChain(fileManagerPath), [fileManagerPath]);
-
-  // 创建文件夹
-  const handleCreateFolder = async () => {
-    if (!newFolderName.trim()) {
-      message.warning('请输入文件夹名称');
-      return;
-    }
-    try {
-      await createFolder({ parentPath: fileManagerPath, folderName: newFolderName.trim() });
-      message.success('文件夹创建成功');
-      setCreateFolderVisible(false);
-      setNewFolderName('');
-      loadFileManagerDirectory(fileManagerPath);
-    } catch (error) {
-      message.error('创建文件夹失败：' + (error.response?.data?.detail || error.message));
-    }
-  };
-
-  // 删除文件夹
-  const handleDeleteFolder = async (folderPath) => {
-    try {
-      await deleteFolder({ folderPath });
-      message.success('文件夹删除成功');
-      loadFileManagerDirectory(fileManagerPath);
-    } catch (error) {
-      message.error('删除文件夹失败：' + (error.response?.data?.detail || error.message));
-    }
-  };
-
-  // 处理文件操作
-  const handleFileAction = (data) => {
-    // 处理选择文件/文件夹
-    if (data.id === ChonkyActions.ChangeSelection.id) {
-      // 不需要特殊处理
-    }
-    // 处理双击进入文件夹
-    if (data.id === ChonkyActions.OpenFiles.id) {
-      const { targetFile } = data.payload;
-      if (targetFile && FileHelper.isDirectory(targetFile)) {
-        const normalizedPath = targetFile.id.replace(/^\/+/, '/');
-        setFileManagerPath(normalizedPath);
-      }
-    }
-    // 处理点击面包屑导航
-    else if (data.id === ChonkyActions.OpenParentFolder.id) {
-      const { targetFile } = data.payload;
-      if (targetFile) {
-        const normalizedPath = targetFile.id.replace(/^\/+/, '/');
-        setFileManagerPath(normalizedPath);
-      }
-    }
-    // 处理创建文件夹
-    else if (data.id === ChineseActions.CreateFolder.id) {
-      setCreateFolderVisible(true);
-    }
-    // 处理删除文件夹
-    else if (data.id === 'delete_folder') {
-      const selectedFiles = data.state.selectedFilesForAction;
-      if (selectedFiles && selectedFiles.length > 0) {
-        const folder = selectedFiles[0];
-        if (FileHelper.isDirectory(folder)) {
-          handleDeleteFolder(folder.id);
-        }
-      }
-    }
-  };
-
-  // 中文国际化
-  const createChineseI18n = () => ({
-    locale: 'zh-CN',
-    formatters: {
-      formatFileModDate: (_, file) => {
-        if (!file || !file.modDate) return '未知';
-        const date = new Date(file.modDate);
-        return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-      },
-      formatFileSize: (_, file) => {
-        if (!file || file.size === undefined || file.size === null) return '';
-        if (file.isDir) return '';
-        const size = file.size;
-        if (size < 1024) return size + ' B';
-        if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
-        if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(1) + ' MB';
-        return (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-      },
-    },
-    messages: {
-      // 内置操作翻译
-      'chonky.actionOpen': '打开所选',
-      'chonky.actionSelectAll': '全选文件',
-      'chonky.actionClearSelection': '清除选择',
-      'chonky.actionOpenSelection': '打开所选',
-      'chonky.actionSelectAllFiles': '全选文件',
-      // 工具栏和状态文本
-      'chonky.toolbar.searchPlaceholder': '搜索文件...',
-      'chonky.toolbar.visibleFileCount': '{fileCount} 个文件',
-      'chonky.toolbar.selectedFileCount': '已选择 {fileCount} 个',
-      'chonky.toolbar.hiddenFileCount': '{fileCount} 个隐藏文件',
-      // 文件浏览器菜单
-      'chonky.contextMenu.browserMenuShortcut': '浏览器菜单: Alt + 右键',
-      // 空文件夹提示
-      'chonky.folderEmpty': '文件夹为空',
-      'chonky.loading': '加载中...',
-    },
-  });
 
   return (
     <Card>
@@ -1540,7 +1297,7 @@ const DanmakuStorage = () => {
             onOk={handleExecuteTemplate}
             confirmLoading={operationLoading}
             okText="确认应用"
-            width={600}
+            width={isMobile ? '95%' : 900}
           >
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
               <Text type="secondary">💡 将选中条目的弹幕文件按新的存储模板重新组织命名</Text>
@@ -1623,83 +1380,6 @@ const DanmakuStorage = () => {
               </div>
             )}
           </Modal>
-        </TabPane>
-
-        {/* 文件管理 Tab */}
-        <TabPane tab="文件管理" key="files">
-          <div style={{
-            height: 'calc(100vh - 280px)',
-            minHeight: '500px',
-            position: 'relative',
-            overflow: 'hidden',
-            border: '1px solid var(--color-border)',
-            borderRadius: '8px'
-          }}>
-            {fileManagerLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <span>加载中...</span>
-              </div>
-            ) : (
-              <FullFileBrowser
-                files={fileManagerFiles}
-                folderChain={folderChain}
-                fileActions={[
-                  ...(isMobile ? [
-                    ChonkyActions.OpenFiles,
-                    ChineseActions.CreateFolder,
-                    ChineseActions.DeleteFolder,
-                  ] : [
-                    ChineseActions.EnableListView,
-                    ChineseActions.EnableGridView,
-                    ChineseActions.SortFilesByName,
-                    ChineseActions.SortFilesByDate,
-                    ChineseActions.CreateFolder,
-                    ChineseActions.DeleteFolder,
-                  ]),
-                ]}
-                onFileAction={handleFileAction}
-                i18n={createChineseI18n()}
-                defaultFileViewActionId={ChonkyActions.EnableListView.id}
-                disableSelection={false}
-                disableDragAndDrop={true}
-              />
-            )}
-          </div>
-
-          {/* 创建文件夹对话框 */}
-          <div style={{ display: createFolderVisible ? 'block' : 'none' }}>
-            <Card
-              title="新建文件夹"
-              size="small"
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 1000,
-                width: '300px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-              }}
-              extra={
-                <Button size="small" onClick={() => { setCreateFolderVisible(false); setNewFolderName(''); }}>
-                  关闭
-                </Button>
-              }
-            >
-              <Input
-                placeholder="请输入文件夹名称"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onPressEnter={handleCreateFolder}
-              />
-              <div style={{ marginTop: '12px', textAlign: 'right' }}>
-                <Space>
-                  <Button onClick={() => { setCreateFolderVisible(false); setNewFolderName(''); }}>取消</Button>
-                  <Button type="primary" onClick={handleCreateFolder}>创建</Button>
-                </Space>
-              </div>
-            </Card>
-          </div>
         </TabPane>
       </Tabs>
 
