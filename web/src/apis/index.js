@@ -29,6 +29,17 @@ export const changePassword = data =>
     })
   )
 
+/** 获取当前用户所有会话 */
+export const getUserSessions = () => api.get('/api/ui/auth/sessions')
+
+/** 踢出指定会话 */
+export const revokeSession = sessionId =>
+  api.delete(`/api/ui/auth/sessions/${sessionId}`)
+
+/** 踢出所有其他会话 */
+export const revokeOtherSessions = () =>
+  api.delete('/api/ui/auth/sessions/others/all')
+
 /** ---------------------------------------------------首页接口------------------------------------------------ */
 /** 获取日志 */
 export const getLogs = (options = {}) =>

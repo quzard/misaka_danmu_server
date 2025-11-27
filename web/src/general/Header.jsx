@@ -11,6 +11,7 @@ import { logout, changePassword } from '../apis/index.js'
 import Cookies from 'js-cookie'
 import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
 import { Tooltip } from 'antd'
+import SessionManager from '@/components/SessionManager'
 
 // GitHub 图标 (Simple Icons 标准)
 const GithubIcon = () => (
@@ -202,6 +203,7 @@ const MobileHeader = ({ activeKey }) => {
   ]
   const navigate = useNavigate()
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [passwordForm] = Form.useForm()
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
@@ -234,6 +236,8 @@ const MobileHeader = ({ activeKey }) => {
       onLogout()
     } else if (item.key === 'change-password') {
       setIsPasswordModalOpen(true)
+    } else if (item.key === 'session-manager') {
+      setIsSessionModalOpen(true)
     } else {
       navigate(item.key)
     }
@@ -289,6 +293,11 @@ const MobileHeader = ({ activeKey }) => {
                       label: o.label,
                       icon: o.icon,
                     })),
+                    {
+                      key: 'session-manager',
+                      label: '会话管理',
+                      icon: 'desktop',
+                    },
                     {
                       key: 'change-password',
                       label: '修改密码',
@@ -410,6 +419,12 @@ const MobileHeader = ({ activeKey }) => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 会话管理弹窗 */}
+      <SessionManager
+        open={isSessionModalOpen}
+        onClose={() => setIsSessionModalOpen(false)}
+      />
     </>
   )
 }
@@ -419,6 +434,7 @@ const DesktopHeader = ({ activeKey, version }) => {
   const userinfo = useAtomValue(userinfoAtom)
   const messageApi = useMessage()
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [form] = Form.useForm()
   const [showPassword1, setShowPassword1] = useState(false)
   const [showPassword2, setShowPassword2] = useState(false)
@@ -494,6 +510,14 @@ const DesktopHeader = ({ activeKey, version }) => {
             <Dropdown
               menu={{
                 items: [
+                  {
+                    key: 'sessionManager',
+                    label: (
+                      <div onClick={() => setIsSessionModalOpen(true)} className="text-base">
+                        会话管理
+                      </div>
+                    ),
+                  },
                   {
                     key: 'changePassword',
                     label: (
@@ -622,6 +646,12 @@ const DesktopHeader = ({ activeKey, version }) => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 会话管理弹窗 */}
+      <SessionManager
+        open={isSessionModalOpen}
+        onClose={() => setIsSessionModalOpen(false)}
+      />
     </>
   )
 }
