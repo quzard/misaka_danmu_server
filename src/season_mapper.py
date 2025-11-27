@@ -741,7 +741,7 @@ async def _batch_alias_season_mapping(
 
         try:
             # 调用AI进行批量映射
-            response = await ai_matcher.client.chat.completions.create(
+            response = ai_matcher.client.chat.completions.create(
                 model=ai_matcher.model,
                 messages=[{"role": "user", "content": batch_prompt}],
                 temperature=0.1,
