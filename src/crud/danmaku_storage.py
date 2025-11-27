@@ -432,18 +432,20 @@ async def preview_apply_template(
     }
 
     # 根据模板类型确定目标目录和命名模板
+    # 注意：这里使用固定的预设模板，而不是用户配置的模板
+    # 因为"应用新模板"功能的目的是让用户选择一个预设模板来重新组织文件
     if template_type == "tv":
-        base_dir = "/app/config/danmaku/tv"
+        base_dir = "/app/config/danmaku"
         template = "${title}/Season ${season}/${title} - S${season}E${episode}"
+        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
-            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "movie":
-        base_dir = "/app/config/danmaku/movies"
+        base_dir = "/app/config/danmaku"
         template = "${title}/${title}"
+        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
-            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
     else:  # id
         base_dir = "/app/config/danmaku"
         template = "${animeId}/${episodeId}"
@@ -478,7 +480,10 @@ async def preview_apply_template(
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)
 
-                new_path = f"{base_dir}/{relative_path}.xml"
+                # 确保路径拼接不会出现双斜杠
+                base_dir_clean = base_dir.rstrip('/')
+                relative_path_clean = relative_path.lstrip('/')
+                new_path = f"{base_dir_clean}/{relative_path_clean}.xml"
 
                 results["totalCount"] += 1
                 results["previewItems"].append({
@@ -513,18 +518,20 @@ async def apply_danmaku_template(
     }
 
     # 根据模板类型确定目标目录和命名模板
+    # 注意：这里使用固定的预设模板，而不是用户配置的模板
+    # 因为"应用新模板"功能的目的是让用户选择一个预设模板来重新组织文件
     if template_type == "tv":
-        base_dir = "/app/config/danmaku/tv"
+        base_dir = "/app/config/danmaku"
         template = "${title}/Season ${season}/${title} - S${season}E${episode}"
+        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
-            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "movie":
-        base_dir = "/app/config/danmaku/movies"
+        base_dir = "/app/config/danmaku"
         template = "${title}/${title}"
+        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
-            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
     else:  # id
         base_dir = "/app/config/danmaku"
         template = "${animeId}/${episodeId}"

@@ -3,6 +3,7 @@
 
 支持的变量：
 - ${title}: 作品标题
+- ${titleBase}: 标准化标题（去除季度信息，如"第X季"、"第X期"等）
 - ${season}: 季度号
 - ${episode}: 分集号
 - ${year}: 年份
@@ -25,6 +26,59 @@ from typing import Dict, Any, Optional
 from string import Template
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_title(title: str) -> str:
+    """
+    标准化标题，去除季度相关信息
+
+    Args:
+        title: 原始标题
+
+    Returns:
+        去除季度信息后的标准化标题
+
+    Examples:
+        "Re：从零开始的异世界生活 第三季" → "Re：从零开始的异世界生活"
+        "葬送的芙莉莲 第2期" → "葬送的芙莉莲"
+        "无职转生 第二季 Part 2" → "无职转生"
+        "鬼灭之刃 柱训练篇" → "鬼灭之刃"
+    """
+    if not title:
+        return title
+
+    # 需要移除的季度相关模式（按优先级排序）
+    patterns = [
+        # 中文季度表达
+        r'\s*第[一二三四五六七八九十\d]+季.*$',  # 第X季（及其后面的所有内容）
+        r'\s*第[一二三四五六七八九十\d]+期.*$',  # 第X期
+        r'\s*第[一二三四五六七八九十\d]+部.*$',  # 第X部
+        r'\s*第[一二三四五六七八九十\d]+章.*$',  # 第X章
+        r'\s*第[一二三四五六七八九十\d]+篇.*$',  # 第X篇
+        # 英文季度表达
+        r'\s*Season\s*\d+.*$',  # Season X
+        r'\s*S\d+.*$',  # S1, S2 等
+        r'\s*Part\s*\d+.*$',  # Part 1, Part 2
+        # 特殊篇章名（常见的）
+        r'\s*[：:]\s*\S+篇\s*$',  # ：XX篇（如"柱训练篇"）
+        r'\s*\S+篇\s*$',  # XX篇（末尾的篇章名）
+        # 罗马数字
+        r'\s+[IVX]+\s*$',  # II, III, IV 等
+    ]
+
+    result = title.strip()
+
+    for pattern in patterns:
+        result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+
+    # 清理末尾的标点符号和空格
+    result = re.sub(r'[\s\-_：:]+$', '', result)
+
+    # 如果处理后为空，返回原标题
+    if not result.strip():
+        return title.strip()
+
+    return result.strip()
 
 
 class DanmakuPathTemplate:
@@ -153,13 +207,13 @@ class DanmakuPathTemplate:
 
 
 
-def create_danmaku_context(anime_title: str, season: int, episode_index: int, 
+def create_danmaku_context(anime_title: str, season: int, episode_index: int,
                           year: Optional[int] = None, provider: Optional[str] = None,
                           anime_id: Optional[int] = None, episode_id: Optional[int] = None,
                           source_id: Optional[int] = None) -> Dict[str, Any]:
     """
     创建弹幕路径模板的上下文变量
-    
+
     Args:
         anime_title: 作品标题
         season: 季度号
@@ -169,12 +223,13 @@ def create_danmaku_context(anime_title: str, season: int, episode_index: int,
         anime_id: 作品ID
         episode_id: 分集ID
         source_id: 数据源ID
-        
+
     Returns:
         上下文字典
     """
     return {
         'title': anime_title,
+        'titleBase': normalize_title(anime_title),  # 标准化标题（去除季度信息）
         'season': season,
         'episode': episode_index,
         'year': year,

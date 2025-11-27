@@ -445,13 +445,29 @@ const DanmakuStorage = () => {
   ];
 
   // 打开迁移Modal
-  const handleOpenMigrateModal = () => {
+  const handleOpenMigrateModal = async () => {
     if (selectedRows.length === 0) {
       message.warning('请先选择要迁移的条目');
       return;
     }
     setMigratePreviewData(null); // 清空预览数据
     setMigrateModalVisible(true);
+    // 打开时自动预览
+    if (migrateTargetPath) {
+      setPreviewLoading(true);
+      try {
+        const response = await previewMigrateDanmaku({
+          animeIds: selectedRowKeys,
+          targetPath: migrateTargetPath,
+          keepStructure: migrateKeepStructure,
+        });
+        setMigratePreviewData(response.data);
+      } catch (error) {
+        message.error('预览失败: ' + (error.message || '未知错误'));
+      } finally {
+        setPreviewLoading(false);
+      }
+    }
   };
 
   // 预览迁移
@@ -1381,14 +1397,14 @@ const DanmakuStorage = () => {
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
                         {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
                       </div>
-                      <div style={{ fontSize: 12, color: '#666' }}>
-                        <div style={{ marginBottom: 2 }}>
+                      <div style={{ fontSize: 13, color: '#666' }}>
+                        <div style={{ marginBottom: 4 }}>
                           <Text type="secondary">原路径: </Text>
-                          <Text code style={{ fontSize: 11 }}>{item.oldPath}</Text>
+                          <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
                         </div>
                         <div>
                           <Text type="secondary">新路径: </Text>
-                          <Text code style={{ fontSize: 11, color: '#52c41a' }}>{item.newPath}</Text>
+                          <Text code style={{ fontSize: 13, color: '#52c41a' }}>{item.newPath}</Text>
                         </div>
                         {!item.exists && (
                           <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
@@ -1496,10 +1512,10 @@ const DanmakuStorage = () => {
                 <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
                   {renamePreviewData.previewItems.map((item, index) => (
                     <div key={index} style={{ marginBottom: 8, padding: 6, background: '#fafafa', borderRadius: 4 }}>
-                      <div style={{ fontSize: 12 }}>
-                        <Text code style={{ fontSize: 11 }}>{item.oldName}</Text>
+                      <div style={{ fontSize: 13 }}>
+                        <Text code style={{ fontSize: 13 }}>{item.oldName}</Text>
                         <span style={{ margin: '0 8px', color: '#999' }}>→</span>
-                        <Text code style={{ fontSize: 11, color: item.error ? '#ff4d4f' : '#52c41a' }}>{item.newName}</Text>
+                        <Text code style={{ fontSize: 13, color: item.error ? '#ff4d4f' : '#52c41a' }}>{item.newName}</Text>
                         {!item.exists && <Tag color="warning" style={{ marginLeft: 8 }}>文件不存在</Tag>}
                       </div>
                     </div>
@@ -1568,14 +1584,14 @@ const DanmakuStorage = () => {
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
                         {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
                       </div>
-                      <div style={{ fontSize: 12, color: '#666' }}>
-                        <div style={{ marginBottom: 2 }}>
+                      <div style={{ fontSize: 13, color: '#666' }}>
+                        <div style={{ marginBottom: 4 }}>
                           <Text type="secondary">原路径: </Text>
-                          <Text code style={{ fontSize: 11 }}>{item.oldPath}</Text>
+                          <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
                         </div>
                         <div>
                           <Text type="secondary">新路径: </Text>
-                          <Text code style={{ fontSize: 11, color: '#52c41a' }}>{item.newPath}</Text>
+                          <Text code style={{ fontSize: 13, color: '#52c41a' }}>{item.newPath}</Text>
                         </div>
                         {!item.exists && (
                           <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
