@@ -633,17 +633,42 @@ async def ai_season_mapping_and_correction(
             title_lower = item_title.lower()
             detected_season = None
 
-            # 使用公共季度关键词配置
-            season_keywords = SEASON_KEYWORDS
+            # V2.1.6方案: 优先使用TMDB季度名称和别名进行匹配
+            for season in seasons_info:
+                season_num = season.season_number
+                season_name = season.name or f"第{season_num}季"
+                season_aliases = season.aliases or []
 
-            # 检查标题中的季度关键词
-            for season_num, keywords in season_keywords.items():
-                for keyword in keywords:
-                    if keyword in title_lower:
+                logger.info(f"  ○ 检查 '{item_title}' 是否匹配季度 S{season_num}: {season_name}")
+                if season_aliases:
+                    logger.info(f"     别名: {', '.join(season_aliases[:3])}{'...' if len(season_aliases) > 3 else ''}")
+
+                # 检查是否包含TMDB季度名称
+                if season_name.lower() in title_lower:
+                    detected_season = season_num
+                    logger.info(f"  ✓ '{item_title}' 匹配到TMDB季度名称: {season_name}")
+                    break
+
+                # 检查是否包含TMDB季度别名
+                for alias in season_aliases:
+                    if alias.lower() in title_lower:
                         detected_season = season_num
+                        logger.info(f"  ✓ '{item_title}' 匹配到TMDB季度别名: {alias}")
                         break
+
                 if detected_season:
                     break
+
+            # 如果TMDB匹配没有结果，再使用通用季度关键词
+            if not detected_season:
+                season_keywords = SEASON_KEYWORDS
+                for season_num, keywords in season_keywords.items():
+                    for keyword in keywords:
+                        if keyword in title_lower:
+                            detected_season = season_num
+                            break
+                    if detected_season:
+                        break
 
             # 如果检测到明确的季度关键词，优先使用
             if detected_season:
@@ -661,12 +686,16 @@ async def ai_season_mapping_and_correction(
                         )
                         logger.debug(f"  ○ '{item_title}' 检测到季度关键词 S{detected_season}，匹配TMDB: {season_name} (相似度: {similarity:.1f}%)")
 
-                        # 如果相似度达到阈值，使用检测到的季度
-                        if similarity >= similarity_threshold:
+                        # V2.1.6: 如果是TMDB直接匹配的季度名称，降低阈值要求
+                        adjusted_threshold = max(similarity_threshold * 0.7, 40.0)  # 降低阈值到40%或原阈值的70%
+                        if similarity >= adjusted_threshold:
                             best_season = detected_season
-                            best_confidence = similarity
+                            best_confidence = max(similarity, 80.0)  # TMDB匹配给予最低80%置信度
                             best_season_name = season_name
+                            logger.info(f"  ✓ '{item_title}' TMDB季度匹配成功: S{detected_season} ({season_name}) (相似度: {similarity:.1f}% >= {adjusted_threshold:.1f}%)")
                             break
+                        else:
+                            logger.debug(f"  ○ '{item_title}' TMDB季度相似度不足: S{detected_season} ({season_name}) (相似度: {similarity:.1f}% < {adjusted_threshold:.1f}%)")
                 else:
                     # TMDB没有对应季度，回退到相似度匹配
                     logger.debug(f"  ○ '{item_title}' 检测到季度关键词 S{detected_season}，但TMDB无此季度，回退到相似度匹配")
