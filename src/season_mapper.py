@@ -69,6 +69,85 @@ def is_spinoff_title(title: str, base_title: str) -> bool:
 
 
 # ============================================================================
+# 标题中明确季度信息提取 (V2.1.7新增)
+# ============================================================================
+
+# 中文数字到阿拉伯数字的映射
+CHINESE_NUM_MAP = {
+    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+    '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+}
+
+# 罗马数字到阿拉伯数字的映射
+ROMAN_NUM_MAP = {
+    'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5,
+    'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10,
+    'ⅰ': 1, 'ⅱ': 2, 'ⅲ': 3, 'ⅳ': 4, 'ⅴ': 5,
+    'ⅵ': 6, 'ⅶ': 7, 'ⅷ': 8, 'ⅸ': 9, 'ⅹ': 10,
+}
+
+
+def _extract_explicit_season_from_title(title: str) -> Optional[int]:
+    """
+    从标题中提取明确的季度信息 (V2.1.7新增)
+
+    识别以下模式:
+    - "第二季"、"第三季" 等中文季度
+    - "Season 2"、"Season 3" 等英文季度
+    - "S2"、"S3" 等缩写（需在标题末尾或空格后）
+    - 罗马数字如 "II"、"III" 等（需在标题末尾）
+
+    Args:
+        title: 标题字符串
+
+    Returns:
+        季度数字，如果没有明确季度信息则返回 None
+    """
+    if not title:
+        return None
+
+    title_clean = title.strip()
+
+    # 模式1: 中文 "第N季" (N为中文或阿拉伯数字)
+    match = re.search(r'第([一二三四五六七八九十]+|\d+)季', title_clean)
+    if match:
+        num_str = match.group(1)
+        if num_str.isdigit():
+            return int(num_str)
+        elif num_str in CHINESE_NUM_MAP:
+            return CHINESE_NUM_MAP[num_str]
+
+    # 模式2: 英文 "Season N"
+    match = re.search(r'Season\s*(\d+)', title_clean, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    # 模式3: 缩写 "S2"、"S3" 等（在空格后或末尾）
+    match = re.search(r'(?:^|\s)S(\d+)(?:\s|$)', title_clean, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    # 模式4: 罗马数字（在末尾，如 "刀剑神域 II"）
+    match = re.search(r'\s+(I{1,3}|IV|VI{0,3}|IX|X|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ])\s*$', title_clean, re.IGNORECASE)
+    if match:
+        roman = match.group(1).lower()
+        if roman in ROMAN_NUM_MAP:
+            return ROMAN_NUM_MAP[roman]
+
+    # 模式5: 标题末尾的阿拉伯数字（如 "暴风之铳2"、"魔法少女小圆3"）
+    # 匹配末尾的数字，但排除年份（4位数字）和分辨率（如1080）
+    match = re.search(r'[^\d](\d{1,2})\s*$', title_clean)
+    if match:
+        num = int(match.group(1))
+        # 只接受合理的季度范围 (1-20)
+        if 1 <= num <= 20:
+            return num
+
+    return None
+
+
+# ============================================================================
 # 核心相似度计算函数 (V2.1.6风格，不依赖thefuzz)
 # ============================================================================
 
@@ -699,24 +778,27 @@ async def ai_season_mapping_and_correction(
             logger.info(f"○ AI季度映射: '{search_title}' 只有1个季度或无季度信息，跳过")
             return []
 
-        logger.info(f"✓ AI季度映射: 获取到 '{search_title}' 的[{metadata_source}]季度信息，共 {len(seasons_info)} 个季度")
+        # 聚合日志收集
+        log_lines = []
+        log_lines.append(f"✓ AI季度映射: 获取到 '{search_title}' 的[{metadata_source}]季度信息，共 {len(seasons_info)} 个季度")
         for season in seasons_info:
             season_name = season.name or f"第{season.season_number}季"
-            logger.info(f"  - 第{season.season_number}季: {season_name}")
+            log_lines.append(f"  - 第{season.season_number}季: {season_name}")
 
         # 4. 对所有搜索结果进行季度修正
         tv_results = [item for item in search_results if item.type == 'tv_series']
         if not tv_results:
-            logger.info(f"○ AI季度映射: 没有TV结果需要修正")
+            log_lines.append(f"○ AI季度映射: 没有TV结果需要修正")
+            logger.info("\n".join(log_lines))
             return []
 
-        logger.info(f"○ 开始季度修正，检查 {len(tv_results)} 个TV结果...")
+        log_lines.append(f"○ 开始季度修正，检查 {len(tv_results)} 个TV结果...")
 
         # 调试：打印季度信息详情
-        logger.info(f"🔍 [{metadata_source}]季度信息详情:")
+        log_lines.append(f"🔍 [{metadata_source}]季度信息详情:")
         for season in seasons_info:
             aliases_str = ', '.join(season.aliases[:5]) if season.aliases else '无'
-            logger.info(f"  S{season.season_number}: {season.name} (别名: {aliases_str})")
+            log_lines.append(f"  S{season.season_number}: {season.name} (别名: {aliases_str})")
 
         # 5. V2.1.6增强方案：算法优先 + 别名等价匹配
         corrected_results = []
@@ -740,6 +822,13 @@ async def ai_season_mapping_and_correction(
                 continue
 
             logger.debug(f"  ○ 检查 '{item_title}' 的季度匹配...")
+
+            # V2.1.7新增: 标题中明确季度信息保护
+            # 如果标题已明确包含"第N季"等信息，且与当前season一致，则跳过修正
+            explicit_season = _extract_explicit_season_from_title(item_title)
+            if explicit_season is not None and explicit_season == item.season:
+                logger.debug(f"  ○ 标题已明确包含季度信息: '{item_title}' → S{explicit_season}，跳过修正")
+                continue
 
             # 策略1: 别名等价匹配 (最快)
             equivalent_info = title_alias_mapping.get(item_title)
@@ -803,13 +892,15 @@ async def ai_season_mapping_and_correction(
                     'method': best_method
                 }
                 corrected_results.append(correction)
-                logger.info(f"  ✓ {best_method}修正: '{item_title}' S{item.season or '?'} → S{best_season} ({best_season_name}) (置信度: {best_confidence:.1f}%)")
+                log_lines.append(f"  ✓ {best_method}修正: '{item_title}' S{item.season or '?'} → S{best_season} ({best_season_name}) (置信度: {best_confidence:.1f}%)")
             elif best_confidence >= similarity_threshold:
                 logger.debug(f"  ○ 无需修正: '{item_title}' 已是正确季度 S{best_season} ({best_method}, 置信度: {best_confidence:.1f}%)")
             else:
                 logger.debug(f"  ○ 相似度不足: '{item_title}' 保持原季度 S{item.season or '?'} (最高相似度: {best_confidence:.1f}% < {similarity_threshold}%)")
 
-        logger.info(f"✓ V2.1.6增强季度映射完成: 修正了 {len(corrected_results)} 个结果的季度信息")
+        log_lines.append(f"✓ 季度映射完成: 修正了 {len(corrected_results)} 个结果的季度信息")
+        # 聚合式打印所有日志
+        logger.info("\n".join(log_lines))
         return corrected_results
 
     except Exception as e:
@@ -849,14 +940,16 @@ async def ai_type_and_season_mapping_and_correction(
         dict: 包含类型修正和季度修正的结果
     """
     try:
-        logger.info(f"○ 开始统一AI映射修正: '{search_title}' ({len(search_results)} 个结果)")
+        # 聚合日志收集
+        unified_log_lines = []
+        unified_log_lines.append(f"○ 开始统一AI映射修正: '{search_title}' ({len(search_results)} 个结果)")
 
         # 初始化结果
         type_corrections = []
         season_corrections = []
 
         # 1. 类型修正（目前保持原类型）
-        logger.info(f"○ 开始类型修正...")
+        unified_log_lines.append(f"○ 开始类型修正...")
         for item in search_results:
             original_type = item.type
             corrected_type = original_type
@@ -867,9 +960,9 @@ async def ai_type_and_season_mapping_and_correction(
                     'corrected_type': corrected_type
                 })
                 item.type = corrected_type
-                logger.info(f"  ✓ 类型修正: '{item.title}' {original_type} → {corrected_type}")
+                unified_log_lines.append(f"  ✓ 类型修正: '{item.title}' {original_type} → {corrected_type}")
 
-        logger.info(f"✓ 类型修正完成: 修正了 {len(type_corrections)} 个结果的类型信息")
+        unified_log_lines.append(f"✓ 类型修正完成: 修正了 {len(type_corrections)} 个结果的类型信息")
 
         # 2. 季度修正（只对电视剧进行）
         tv_results = [item for item in search_results if item.type == 'tv_series']
@@ -889,13 +982,16 @@ async def ai_type_and_season_mapping_and_correction(
             for correction in season_corrections:
                 item = correction['item']
                 item.season = correction['corrected_season']
-                logger.info(f"  ✓ 季度修正应用: '{item.title}' → S{item.season}")
+                unified_log_lines.append(f"  ✓ 季度修正应用: '{item.title}' → S{item.season}")
 
         # 3. 构建修正后的结果列表
         corrected_results = search_results.copy()
 
         total_corrections = len(type_corrections) + len(season_corrections)
-        logger.info(f"✓ 统一AI映射修正完成: 类型修正 {len(type_corrections)} 个, 季度修正 {len(season_corrections)} 个, 总计 {total_corrections} 个")
+        unified_log_lines.append(f"✓ 统一AI映射修正完成: 类型修正 {len(type_corrections)} 个, 季度修正 {len(season_corrections)} 个, 总计 {total_corrections} 个")
+
+        # 聚合式打印所有日志
+        logger.info("\n".join(unified_log_lines))
 
         return {
             'type_corrections': type_corrections,

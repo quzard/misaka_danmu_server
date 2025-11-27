@@ -666,3 +666,14 @@ export const batchDeleteLocalItems = (itemIds) => api.post('/api/ui/local-items/
 
 /** 导入本地弹幕项 */
 export const importLocalItems = (data) => api.post('/api/ui/local-items/import', data)
+
+// ==================== 弹幕存储批量操作 ====================
+
+/** 批量迁移弹幕文件 */
+export const batchMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-migrate', data)
+
+/** 批量重命名弹幕文件 */
+export const batchRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-rename', data)
+
+/** 应用新模板 */
+export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
