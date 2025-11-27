@@ -938,6 +938,14 @@ async def load_resources_stream(
                             logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
                             _version_cache = None
                             _version_cache_time = None
+
+                            # 重载成功后，自动备份新下载的资源
+                            try:
+                                logger.info("正在备份新下载的资源...")
+                                await backup_scrapers(current_user)
+                                logger.info("新资源备份完成")
+                            except Exception as backup_error:
+                                logger.warning(f"备份新资源失败: {backup_error}")
                         except Exception as e:
                             logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
                             try:

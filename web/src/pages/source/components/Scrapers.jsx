@@ -1210,11 +1210,16 @@ export const Scrapers = () => {
                           </>
                         ) : '刷新'}
                       </Button>
+                      {/* PC端：更新提示显示在刷新按钮右边 */}
+                      {versionInfo.hasUpdate && (
+                        <Typography.Text type="warning" style={{ marginLeft: 8 }}>🆙 有更新可用</Typography.Text>
+                      )}
                     </div>
                   )}
-                  {versionInfo.hasUpdate && (
+                  {/* 移动端：更新提示显示在下一行 */}
+                  {isMobile && versionInfo.hasUpdate && (
                     <div className="flex items-center gap-2">
-                      <Typography.Text type="warning">有更新可用</Typography.Text>
+                      <Typography.Text type="warning">🆙 有更新可用</Typography.Text>
                     </div>
                   )}
                 </div>
