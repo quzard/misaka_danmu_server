@@ -81,8 +81,35 @@ const DanmakuStorage = () => {
   const [renamePreviewLoading, setRenamePreviewLoading] = useState(false);
   // 模板转换配置
   const [templateTarget, setTemplateTarget] = useState('tv');
+  const [customTemplate, setCustomTemplate] = useState('');  // 自定义模板
   const [templatePreviewData, setTemplatePreviewData] = useState(null);
   const [templatePreviewLoading, setTemplatePreviewLoading] = useState(false);
+
+  // 可用的模板变量定义
+  const templateVariables = [
+    { name: '${title}', desc: '作品标题', example: '葬送的芙莉莲' },
+    { name: '${titleBase}', desc: '标准化标题（去除季度信息，如"第X季"、"第X期"等）', example: '葬送的芙莉莲' },
+    { name: '${season}', desc: '季度号', example: '1' },
+    { name: '${season:02d}', desc: '季度号（补零到2位）', example: '01' },
+    { name: '${episode}', desc: '分集号', example: '12' },
+    { name: '${episode:02d}', desc: '分集号（补零到2位）', example: '12' },
+    { name: '${episode:03d}', desc: '分集号（补零到3位）', example: '012' },
+    { name: '${year}', desc: '年份', example: '2024' },
+    { name: '${provider}', desc: '数据源提供商', example: 'dandanplay' },
+    { name: '${animeId}', desc: '作品ID', example: '227' },
+    { name: '${episodeId}', desc: '分集ID', example: '25000227010001' },
+    { name: '${sourceId}', desc: '数据源ID', example: '1' },
+  ];
+
+  // 预设模板选项
+  const presetTemplates = [
+    { value: 'tv', label: '电视节目模板', template: '${title}/Season ${season}/${title} - S${season}E${episode}' },
+    { value: 'movie', label: '电影模板', template: '${title}/${title}' },
+    { value: 'id', label: 'ID模板', template: '${animeId}/${episodeId}' },
+    { value: 'plex', label: 'Plex风格', template: '${title}/${title} - S${season:02d}E${episode:02d}' },
+    { value: 'emby', label: 'Emby风格', template: '${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}' },
+    { value: 'titleBase', label: '标准化标题', template: '${titleBase}/Season ${season}/${titleBase} - S${season}E${episode}' },
+  ];
 
   // 检测是否为移动端
   useEffect(() => {
@@ -1297,38 +1324,90 @@ const DanmakuStorage = () => {
             onOk={handleExecuteTemplate}
             confirmLoading={operationLoading}
             okText="确认应用"
-            width={isMobile ? '95%' : 900}
+            width={isMobile ? '95%' : 1350}
           >
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
               <Text type="secondary">💡 将选中条目的弹幕文件按新的存储模板重新组织命名</Text>
             </div>
+
+            {/* 可用参数按钮组 */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: 8, color: '#666' }}>可用参数（点击插入）:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {templateVariables.map((v) => (
+                  <Tooltip
+                    key={v.name}
+                    title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
+                    placement="top"
+                  >
+                    <Button
+                      size="small"
+                      type="dashed"
+                      onClick={() => {
+                        const newTemplate = customTemplate + v.name;
+                        setCustomTemplate(newTemplate);
+                        setTemplateTarget('custom');
+                      }}
+                      style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    >
+                      {v.name}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>目标模板:</div>
-              <Select
-                value={templateTarget}
-                onChange={async (v) => {
-                  setTemplateTarget(v);
-                  // 选择模板后自动预览
-                  setTemplatePreviewLoading(true);
-                  try {
-                    const response = await previewDanmakuTemplate({
-                      animeIds: selectedRowKeys,
-                      templateType: v,
-                    });
-                    setTemplatePreviewData(response.data);
-                  } catch (error) {
-                    message.error('预览失败: ' + (error.message || '未知错误'));
-                  } finally {
-                    setTemplatePreviewLoading(false);
-                  }
-                }}
-                style={{ width: '100%' }}
-                loading={templatePreviewLoading}
-              >
-                <Option value="tv">电视节目模板: {'${title}/Season ${season}/${title} - S${season}E${episode}.xml'}</Option>
-                <Option value="movie">电影模板: {'${title}/${title}.xml'}</Option>
-                <Option value="id">ID模板: {'${animeId}/${episodeId}.xml'}</Option>
-              </Select>
+              <Row gutter={12}>
+                <Col span={isMobile ? 24 : 8}>
+                  <Select
+                    value={templateTarget}
+                    onChange={async (v) => {
+                      setTemplateTarget(v);
+                      if (v !== 'custom') {
+                        const preset = presetTemplates.find(p => p.value === v);
+                        if (preset) {
+                          setCustomTemplate(preset.template);
+                        }
+                        // 选择预设模板后自动预览
+                        setTemplatePreviewLoading(true);
+                        try {
+                          const response = await previewDanmakuTemplate({
+                            animeIds: selectedRowKeys,
+                            templateType: v,
+                          });
+                          setTemplatePreviewData(response.data);
+                        } catch (error) {
+                          message.error('预览失败: ' + (error.message || '未知错误'));
+                        } finally {
+                          setTemplatePreviewLoading(false);
+                        }
+                      }
+                    }}
+                    style={{ width: '100%', marginBottom: isMobile ? 8 : 0 }}
+                  >
+                    {presetTemplates.map(p => (
+                      <Option key={p.value} value={p.value}>{p.label}</Option>
+                    ))}
+                    <Option value="custom">自定义模板</Option>
+                  </Select>
+                </Col>
+                <Col span={isMobile ? 24 : 16}>
+                  <Input
+                    value={customTemplate}
+                    onChange={(e) => {
+                      setCustomTemplate(e.target.value);
+                      setTemplateTarget('custom');
+                    }}
+                    placeholder="输入自定义模板，如: ${title}/Season ${season}/${title} - S${season}E${episode}"
+                    style={{ fontFamily: 'monospace' }}
+                  />
+                </Col>
+              </Row>
+              <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+                当前模板: <Text code style={{ fontSize: 12 }}>{customTemplate || presetTemplates.find(p => p.value === templateTarget)?.template || ''}.xml</Text>
+              </div>
             </div>
 
             {/* 预览区域 */}
