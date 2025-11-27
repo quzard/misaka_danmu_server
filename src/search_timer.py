@@ -30,21 +30,30 @@ class SearchTimingReport:
         self.steps.append(TimingResult(name, duration_ms, success, details))
     
     def print_report(self, logger_instance=None):
-        """打印计时报告"""
+        """打印计时报告 - 合并为单条日志"""
         log = logger_instance or logger
-        
-        log.info(f"⏱️ ═══════════════════════════════════════════════════════")
-        log.info(f"⏱️ 【{self.search_type}】计时报告 - '{self.keyword}'")
-        log.info(f"⏱️ ───────────────────────────────────────────────────────")
-        
+
+        # 构建报告内容
+        lines = [
+            "",
+            "⏱️ ═══════════════════════════════════════════════════════",
+            f"⏱️ 【{self.search_type}】计时报告 - '{self.keyword}'",
+            "⏱️ ───────────────────────────────────────────────────────",
+        ]
+
         for step in self.steps:
             status = "✓" if step.success else "✗"
             detail_str = f" ({step.details})" if step.details else ""
-            log.info(f"⏱️   {status} {step.name}: {step.duration_ms:.0f}ms{detail_str}")
-        
-        log.info(f"⏱️ ───────────────────────────────────────────────────────")
-        log.info(f"⏱️ 总耗时: {self.total_duration_ms:.0f}ms ({self.total_duration_ms/1000:.2f}s)")
-        log.info(f"⏱️ ═══════════════════════════════════════════════════════")
+            lines.append(f"⏱️   {status} {step.name}: {step.duration_ms:.0f}ms{detail_str}")
+
+        lines.extend([
+            "⏱️ ───────────────────────────────────────────────────────",
+            f"⏱️ 总耗时: {self.total_duration_ms:.0f}ms ({self.total_duration_ms/1000:.2f}s)",
+            "⏱️ ═══════════════════════════════════════════════════════",
+        ])
+
+        # 合并为单条日志输出
+        log.info("\n".join(lines))
 
 
 class SearchTimer:

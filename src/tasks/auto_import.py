@@ -65,8 +65,9 @@ async def auto_search_and_import_task(
     _reverse_lookup_tmdb_chinese_title = _get_reverse_lookup_tmdb_chinese_title()
     generic_import_task = _get_generic_import_task()
     
-    # 初始化计时器
+    # 初始化计时器并开始计时
     timer = SearchTimer(SEARCH_TYPE_CONTROL_AUTO_IMPORT, payload.searchTerm, logger)
+    timer.start()
 
     try:
         # 防御性检查：确保 rate_limiter 已被正确传递。

@@ -1066,8 +1066,9 @@ async def _execute_fallback_search_task(
     ai_matcher_manager: AIMatcherManager
 ):
     """执行后备搜索任务。"""
-    # 初始化计时器
+    # 初始化计时器并开始计时
     timer = SearchTimer(SEARCH_TYPE_FALLBACK_SEARCH, search_term, logger)
+    timer.start()
 
     try:
         timer.step_start("关键词解析与预处理")
@@ -2195,8 +2196,9 @@ async def _get_match_for_item(
 
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
-            # 初始化计时器
+            # 初始化计时器并开始计时
             match_timer = SearchTimer(SEARCH_TYPE_FALLBACK_MATCH, item.fileName, logger)
+            match_timer.start()
 
             try:
                 match_timer.step_start("初始化与解析")

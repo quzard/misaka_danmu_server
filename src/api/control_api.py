@@ -510,8 +510,9 @@ async def search_media(
             detail="已有搜索或自动导入任务正在进行中，请稍后再试。"
         )
 
-    # 初始化计时器
+    # 初始化计时器并开始计时
     timer = SearchTimer(SEARCH_TYPE_CONTROL_SEARCH, keyword, logger)
+    timer.start()
 
     try:
         timer.step_start("关键词解析")
