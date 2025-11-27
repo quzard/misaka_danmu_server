@@ -1412,8 +1412,13 @@ def _parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     使用正则表达式从文件名中解析出番剧标题和集数。
     这是一个简化的实现，用于 dandanplay 兼容接口。
     """
-    # 移除文件扩展名
-    name_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    # 移除文件扩展名 - 只有当后缀是真正的视频扩展名时才移除
+    VIDEO_EXTENSIONS = {'mkv', 'mp4', 'avi', 'wmv', 'flv', 'ts', 'm2ts', 'rmvb', 'rm', 'mov', 'webm', 'mpg', 'mpeg', 'vob', 'iso', 'bdmv'}
+    name_without_ext = filename
+    if '.' in filename:
+        parts = filename.rsplit('.', 1)
+        if len(parts) == 2 and parts[1].lower() in VIDEO_EXTENSIONS:
+            name_without_ext = parts[0]
 
     # 模式1: SXXEXX 格式 (e.g., "Some.Anime.S01E02.1080p.mkv")
     s_e_pattern = re.compile(
