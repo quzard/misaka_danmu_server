@@ -153,19 +153,20 @@ async def refresh_single_episode(
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """为指定分集启动一个后台任务，重新获取其弹幕。"""
     # 检查分集是否存在，以提供更友好的404错误
     episode = await crud.get_episode_for_refresh(session, episodeId)
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
-    
+
     logger.info(f"用户 '{current_user.username}' 请求刷新分集 ID: {episodeId} ({episode['title']})")
 
     provider_name = episode.get('providerName', '未知源')
     task_title = f"刷新分集: {episode['title']} - [{provider_name}]"
-    task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, rate_limiter, callback)
+    task_coro = lambda session, callback: tasks.refresh_episode_task(episodeId, session, scraper_manager, rate_limiter, callback, config_manager)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"分集 '{episode['title']}' 的刷新任务已提交。", "taskId": task_id}
@@ -179,7 +180,8 @@ async def refresh_episodes_bulk(
     session: AsyncSession = Depends(get_db_session),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """批量刷新多个分集的弹幕（整合为一个任务）"""
     body = await request.json()
@@ -191,7 +193,7 @@ async def refresh_episodes_bulk(
     logger.info(f"用户 '{current_user.username}' 请求批量刷新 {len(episode_ids)} 个分集")
 
     task_title = f"批量刷新 {len(episode_ids)} 个分集"
-    task_coro = lambda s, cb: tasks.refresh_bulk_episodes_task(episode_ids, s, scraper_manager, rate_limiter, cb)
+    task_coro = lambda s, cb: tasks.refresh_bulk_episodes_task(episode_ids, s, scraper_manager, rate_limiter, cb, config_manager)
     task_id, _ = await task_manager.submit_task(task_coro, task_title)
 
     return {"message": f"已提交批量刷新任务，共 {len(episode_ids)} 个分集", "taskId": task_id}

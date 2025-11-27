@@ -1245,12 +1245,13 @@ async def refresh_episode(
     task_manager: TaskManager = Depends(get_task_manager),
     manager: ScraperManager = Depends(get_scraper_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    config_manager: ConfigManager = Depends(get_config_manager),
 ):
     """提交一个后台任务，为单个分集重新从其源网站获取最新的弹幕。"""
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
     task_id, _ = await task_manager.submit_task(
-        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb),
+        lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb, config_manager),
         f"外部API刷新分集: {info['title']}"
     )
     return {"message": "刷新分集任务已提交", "taskId": task_id}
@@ -1281,13 +1282,18 @@ async def get_danmaku(episodeId: int, session: AsyncSession = Depends(get_db_ses
     return models.CommentResponse(count=len(comments), comments=[models.Comment.model_validate(c) for c in comments])
 
 @router.post("/danmaku/{episodeId}", status_code=202, summary="覆盖弹幕", response_model=ControlTaskResponse)
-async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest, task_manager: TaskManager = Depends(get_task_manager)):
+async def overwrite_danmaku(
+    episodeId: int,
+    payload: models.DanmakuUpdateRequest,
+    task_manager: TaskManager = Depends(get_task_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
     """提交一个后台任务，用请求体中提供的弹幕列表完全覆盖指定分集的现有弹幕。"""
     async def overwrite_task(session: AsyncSession, cb: Callable):
         await cb(10, "清空中...")
         await crud.clear_episode_comments(session, episodeId)
         await cb(50, f"插入 {len(payload.comments)} 条新弹幕...")
-        
+
         comments_to_insert = []
         for c in payload.comments:
             comment_dict = c.model_dump()
@@ -1299,7 +1305,7 @@ async def overwrite_danmaku(episodeId: int, payload: models.DanmakuUpdateRequest
                 comment_dict['t'] = 0.0 # 如果解析失败，则默认为0
             comments_to_insert.append(comment_dict)
 
-        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, None)
+        added = await crud.save_danmaku_for_episode(session, episodeId, comments_to_insert, config_manager)
         raise TaskSuccess(f"弹幕覆盖完成，新增 {added} 条。")
     try:
         task_id, _ = await task_manager.submit_task(overwrite_task, f"外部API覆盖弹幕 (分集ID: {episodeId})")

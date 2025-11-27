@@ -150,10 +150,11 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) =
 
         {isLocal && (
           <Form.Item
-            label="弹幕文件路径"
+            label="弹幕文件存储路径"
             name="filePath"
+            tooltip="弹幕XML文件的存储路径，修改后会更新数据库记录（不会移动实际文件）"
           >
-            <Input disabled style={{ color: '#000' }} />
+            <Input placeholder="例如: D:\Danmaku\xxx.xml" />
           </Form.Item>
         )}
       </Form>

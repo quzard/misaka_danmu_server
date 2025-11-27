@@ -53,7 +53,14 @@ async def save_danmaku_for_episode(
     comments: List[Dict[str, Any]],
     config_manager = None
 ) -> int:
-    """将弹幕写入XML文件，并更新数据库记录，返回新增数量。"""
+    """
+    将弹幕写入XML文件，并更新数据库记录，返回新增数量。
+
+    刷新逻辑：
+    - 如果episode已有danmakuFilePath，使用原有路径（刷新场景）
+    - 如果episode没有danmakuFilePath，生成新路径（首次下载场景，支持自定义路径）
+    - 比较新旧弹幕数量，只有新的更多才替换
+    """
     if not comments:
         return 0
 
@@ -65,40 +72,49 @@ async def save_danmaku_for_episode(
     if not episode:
         raise ValueError(f"找不到ID为 {episode_id} 的分集")
 
-    anime_id = episode.source.anime.id
-    source_id = episode.source.id
+    new_comment_count = len(comments)
+    old_comment_count = episode.commentCount or 0
 
-    # 新增：获取原始弹幕服务器信息
+    # 刷新场景：如果新弹幕数量不比原有的多，跳过写入
+    if episode.danmakuFilePath and new_comment_count <= old_comment_count:
+        logger.info(f"分集 {episode_id} 弹幕数量未增加 (新:{new_comment_count} <= 旧:{old_comment_count})，跳过刷新")
+        return 0
+
+    # 获取原始弹幕服务器信息
     provider_name = episode.source.providerName
-    # 这是一个简化的映射，您可以根据需要扩展
     chat_server_map = {
         "bilibili": "comment.bilibili.com"
     }
     xml_content = _generate_xml_from_comments(comments, episode_id, provider_name, chat_server_map.get(provider_name, "danmaku.misaka.org"))
 
-    # 新增：支持自定义路径模板
-    web_path, absolute_path = await _generate_danmaku_path(
-        session, episode, config_manager
-    )
+    # 判断路径：刷新使用原有路径，首次下载生成新路径
+    if episode.danmakuFilePath:
+        # 刷新场景：使用原有路径
+        web_path = episode.danmakuFilePath
+        absolute_path = _get_fs_path_from_web_path(web_path)
+        if absolute_path is None:
+            logger.error(f"无法解析原有弹幕路径: {web_path}，尝试生成新路径")
+            web_path, absolute_path = await _generate_danmaku_path(session, episode, config_manager)
+        else:
+            logger.info(f"刷新弹幕：使用原有路径 {absolute_path} (新:{new_comment_count} > 旧:{old_comment_count})")
+    else:
+        # 首次下载场景：生成新路径（支持自定义路径）
+        web_path, absolute_path = await _generate_danmaku_path(session, episode, config_manager)
+        logger.info(f"首次下载：生成新路径 {absolute_path}")
 
     try:
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         absolute_path.write_text(xml_content, encoding='utf-8')
-        logger.info(f"弹幕已成功写入文件: {absolute_path}")
+        logger.info(f"弹幕已成功写入文件: {absolute_path} (共 {new_comment_count} 条)")
     except OSError as e:
         logger.error(f"写入弹幕文件失败: {absolute_path}。错误: {e}")
         raise
 
     # 更新Episode的弹幕信息
     from .episode import update_episode_danmaku_info
-    await update_episode_danmaku_info(session, episode_id, web_path, len(comments))
-    return len(comments)
+    await update_episode_danmaku_info(session, episode_id, web_path, new_comment_count)
+    return new_comment_count
 
-# ... (rest of the file needs to be refactored similarly) ...
-
-# This is a placeholder for the rest of the refactored functions.
-# The full implementation would involve converting every function in the original crud.py.
-# For brevity, I'll stop here, but the pattern is consistent.
 
 
 async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=None) -> tuple[str, Path]:

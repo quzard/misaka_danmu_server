@@ -83,14 +83,15 @@ class RefreshLatestEpisodeJob(BaseJob):
                 # 创建刷新任务
                 task_title = f"刷新最新集: {source_info['title']} - 第{latest_episode.episodeIndex}集"
                 unique_key = f"refresh-latest-{source_id}-ep{latest_episode.episodeIndex}"
-                
+
                 def create_refresh_task(ep_id, s_info):
                     return lambda s, cb: refresh_episode_task(
                         episodeId=ep_id,
                         session=s,
                         manager=self.scraper_manager,
                         rate_limiter=self.rate_limiter,
-                        progress_callback=cb
+                        progress_callback=cb,
+                        config_manager=self.config_manager
                     )
                 
                 try:

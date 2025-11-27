@@ -46,6 +46,7 @@ class LocalItemUpdate(BaseModel):
     tvdbId: Optional[str] = None
     imdbId: Optional[str] = None
     posterUrl: Optional[str] = None
+    filePath: Optional[str] = None  # 弹幕文件存储路径
 
 
 class LocalItemImportConfig(BaseModel):

@@ -3179,7 +3179,7 @@ async def get_comments_for_dandan(
 
                         # 保存弹幕
                         added_count = await crud.save_danmaku_for_episode(
-                            task_session, current_episodeId, comments, None
+                            task_session, current_episodeId, comments, config_manager
                         )
                         await task_session.commit()
                         logger.info(f"保存成功，共 {added_count} 条弹幕")
