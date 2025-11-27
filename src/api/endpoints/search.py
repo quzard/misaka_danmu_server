@@ -181,6 +181,17 @@ async def search_anime_provider(
         # 修正：检查是否有任何启用的辅助源或强制辅助源
         has_any_aux_source = await metadata_manager.has_any_enabled_aux_source()
 
+        # 🚀 V2.1.6优化: 提前启动元数据查询，与搜索并行
+        metadata_prefetch_task = None
+        if ai_matcher and metadata_manager:
+            async def prefetch_metadata():
+                try:
+                    from ...season_mapper import _get_cached_metadata_search
+                    return await _get_cached_metadata_search(search_title, metadata_manager, logger)
+                except Exception:
+                    return None
+            metadata_prefetch_task = asyncio.create_task(prefetch_metadata())
+
         if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
@@ -334,13 +345,22 @@ async def search_anime_provider(
     if ai_matcher and metadata_manager:
         try:
             logger.info("🔄 开始AI映射修正...")
+            # 获取预取的元数据结果（如果有）
+            prefetched_metadata = None
+            if metadata_prefetch_task:
+                try:
+                    prefetched_metadata = await metadata_prefetch_task
+                except Exception:
+                    pass
+
             mapping_result = await ai_type_and_season_mapping_and_correction(
                 search_title=search_title,
                 search_results=sorted_results,
                 metadata_manager=metadata_manager,
                 ai_matcher=ai_matcher,
                 logger=logger,
-                similarity_threshold=60.0
+                similarity_threshold=60.0,
+                prefetched_metadata_results=prefetched_metadata
             )
 
             # 应用修正结果
