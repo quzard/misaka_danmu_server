@@ -334,6 +334,14 @@ export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
 export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
 /** 重载弹幕源 */
 export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
+/** 删除弹幕源备份 */
+export const deleteScraperBackup = () => api.delete('/api/ui/scrapers/backup')
+/** 删除当前弹幕源 */
+export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current')
+/** 获取自动更新配置 */
+export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
+/** 保存自动更新配置 */
+export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-update', data)
 /** 获取GitHub Token */
 export const getGithubToken = () => api.get('/api/ui/config/github-token')
 /** 保存GitHub Token */
