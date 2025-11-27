@@ -165,6 +165,8 @@ async def search_anime_provider(
 
         logger.info(f"用户 '{current_user.username}' 正在搜索: '{keyword}' (解析为: title='{search_title}', season={season_to_filter}, episode={episode_to_filter})")
 
+        
+
         # 第一次检查:在所有搜索之前检查是否有弹幕源
         if not manager.has_enabled_scrapers:
             logger.warning("❌ 没有启用的弹幕搜索源，终止本次搜索")
@@ -328,10 +330,10 @@ async def search_anime_provider(
 
 
 
-    # 使用统一的AI类型和季度映射修正函数
+    # 🚀 V2.1.6: 使用统一的AI类型和季度映射修正函数
     if ai_matcher and metadata_manager:
         try:
-            # 使用新的统一函数进行类型和季度修正
+            logger.info("🔄 开始AI映射修正...")
             mapping_result = await ai_type_and_season_mapping_and_correction(
                 search_title=search_title,
                 search_results=sorted_results,
