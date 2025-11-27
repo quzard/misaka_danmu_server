@@ -54,7 +54,47 @@ class BatchOperationResult(BaseModel):
     details: List[dict]
 
 
+class MigratePreviewRequest(BaseModel):
+    """迁移预览请求"""
+    animeIds: List[int]
+    targetPath: str
+    keepStructure: bool = True
+
+
+class MigratePreviewResult(BaseModel):
+    """迁移预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
+class TemplatePreviewRequest(BaseModel):
+    """模板预览请求"""
+    animeIds: List[int]
+    templateType: str  # tv, movie, id
+
+
+class TemplatePreviewResult(BaseModel):
+    """模板预览结果"""
+    totalCount: int
+    previewItems: List[dict]
+
+
 # ==================== API端点 ====================
+
+@router.post("/preview-migrate", response_model=MigratePreviewResult, summary="预览批量迁移")
+async def preview_migrate(
+    request: MigratePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """预览迁移结果，不实际执行"""
+    result = await crud.preview_migrate_danmaku(
+        session,
+        anime_ids=request.animeIds,
+        target_path=request.targetPath,
+        keep_structure=request.keepStructure
+    )
+    return MigratePreviewResult(**result)
 
 @router.post("/batch-migrate", response_model=BatchOperationResult, summary="批量迁移弹幕文件")
 async def batch_migrate(
@@ -90,6 +130,23 @@ async def batch_rename(
         regex_replace=request.regexReplace or ""
     )
     return BatchOperationResult(**result)
+
+
+@router.post("/preview-template", response_model=TemplatePreviewResult, summary="预览应用模板")
+async def preview_template(
+    request: TemplatePreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """预览模板应用结果，不实际执行"""
+    result = await crud.preview_apply_template(
+        session,
+        anime_ids=request.animeIds,
+        template_type=request.templateType,
+        config_manager=config_manager
+    )
+    return TemplatePreviewResult(**result)
 
 
 @router.post("/apply-template", response_model=BatchOperationResult, summary="应用新模板")

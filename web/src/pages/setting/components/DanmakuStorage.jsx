@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, RocketOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, browseDirectory, createFolder, deleteFolder, getAnimeLibrary, batchMigrateDanmaku, batchRenameDanmaku, applyDanmakuTemplate } from '@/apis';
+import { getConfig, setConfig, browseDirectory, createFolder, deleteFolder, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 import Cookies from 'js-cookie';
 import {
@@ -144,6 +144,8 @@ const DanmakuStorage = () => {
   const [migrateTargetPath, setMigrateTargetPath] = useState('/app/config/danmaku');
   const [migrateKeepStructure, setMigrateKeepStructure] = useState(true);
   const [migrateConflictAction, setMigrateConflictAction] = useState('skip');
+  const [migratePreviewData, setMigratePreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   // 重命名配置
   const [renameMode, setRenameMode] = useState('prefix');
   const [renamePrefix, setRenamePrefix] = useState('');
@@ -152,6 +154,8 @@ const DanmakuStorage = () => {
   const [renameRegexReplace, setRenameRegexReplace] = useState('');
   // 模板转换配置
   const [templateTarget, setTemplateTarget] = useState('tv');
+  const [templatePreviewData, setTemplatePreviewData] = useState(null);
+  const [templatePreviewLoading, setTemplatePreviewLoading] = useState(false);
 
   // 检测是否为移动端
   useEffect(() => {
@@ -444,7 +448,29 @@ const DanmakuStorage = () => {
       message.warning('请先选择要迁移的条目');
       return;
     }
+    setMigratePreviewData(null); // 清空预览数据
     setMigrateModalVisible(true);
+  };
+
+  // 预览迁移
+  const handlePreviewMigrate = async () => {
+    if (!migrateTargetPath) {
+      message.warning('请输入目标目录');
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const response = await previewMigrateDanmaku({
+        animeIds: selectedRowKeys,
+        targetPath: migrateTargetPath,
+        keepStructure: migrateKeepStructure,
+      });
+      setMigratePreviewData(response.data);
+    } catch (error) {
+      message.error('预览失败: ' + (error.message || '未知错误'));
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   // 打开重命名Modal
@@ -462,7 +488,24 @@ const DanmakuStorage = () => {
       message.warning('请先选择要转换的条目');
       return;
     }
+    setTemplatePreviewData(null); // 清空预览数据
     setTemplateModalVisible(true);
+  };
+
+  // 预览应用模板
+  const handlePreviewTemplate = async () => {
+    setTemplatePreviewLoading(true);
+    try {
+      const response = await previewDanmakuTemplate({
+        animeIds: selectedRowKeys,
+        templateType: templateTarget,
+      });
+      setTemplatePreviewData(response.data);
+    } catch (error) {
+      message.error('预览失败: ' + (error.message || '未知错误'));
+    } finally {
+      setTemplatePreviewLoading(false);
+    }
   };
 
   // 执行迁移操作
@@ -473,18 +516,20 @@ const DanmakuStorage = () => {
     }
     setOperationLoading(true);
     try {
-      const result = await batchMigrateDanmaku({
+      const response = await batchMigrateDanmaku({
         animeIds: selectedRowKeys,
         targetPath: migrateTargetPath,
         keepStructure: migrateKeepStructure,
         conflictAction: migrateConflictAction,
       });
+      const result = response.data;
       if (result.success) {
         message.success(`迁移完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
       } else {
         message.warning(`迁移部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
       }
       setMigrateModalVisible(false);
+      setMigratePreviewData(null);
       setSelectedRowKeys([]);
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
@@ -507,7 +552,7 @@ const DanmakuStorage = () => {
     }
     setOperationLoading(true);
     try {
-      const result = await batchRenameDanmaku({
+      const response = await batchRenameDanmaku({
         animeIds: selectedRowKeys,
         mode: renameMode,
         prefix: renamePrefix,
@@ -515,6 +560,7 @@ const DanmakuStorage = () => {
         regexPattern: renameRegexPattern,
         regexReplace: renameRegexReplace,
       });
+      const result = response.data;
       if (result.success) {
         message.success(`重命名完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
       } else {
@@ -535,16 +581,18 @@ const DanmakuStorage = () => {
   const handleExecuteTemplate = async () => {
     setOperationLoading(true);
     try {
-      const result = await applyDanmakuTemplate({
+      const response = await applyDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
       });
+      const result = response.data;
       if (result.success) {
         message.success(`模板应用完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
       } else {
         message.warning(`模板应用部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
       }
       setTemplateModalVisible(false);
+      setTemplatePreviewData(null);
       setSelectedRowKeys([]);
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
@@ -1221,24 +1269,34 @@ const DanmakuStorage = () => {
           <Modal
             title="批量迁移"
             open={migrateModalVisible}
-            onCancel={() => setMigrateModalVisible(false)}
+            onCancel={() => { setMigrateModalVisible(false); setMigratePreviewData(null); }}
             onOk={handleExecuteMigrate}
             confirmLoading={operationLoading}
             okText="确认迁移"
-            width={600}
+            width={700}
           >
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>目标目录:</div>
-              <Input
-                value={migrateTargetPath}
-                onChange={(e) => setMigrateTargetPath(e.target.value)}
-                placeholder="/app/config/danmaku/new"
-              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input
+                  value={migrateTargetPath}
+                  onChange={(e) => { setMigrateTargetPath(e.target.value); setMigratePreviewData(null); }}
+                  placeholder="/app/config/danmaku/new"
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  type="primary"
+                  onClick={handlePreviewMigrate}
+                  loading={previewLoading}
+                >
+                  预览
+                </Button>
+              </div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <Checkbox
                 checked={migrateKeepStructure}
-                onChange={(e) => setMigrateKeepStructure(e.target.checked)}
+                onChange={(e) => { setMigrateKeepStructure(e.target.checked); setMigratePreviewData(null); }}
               >
                 保持原目录结构
               </Checkbox>
@@ -1255,10 +1313,50 @@ const DanmakuStorage = () => {
                 <Option value="rename">重命名</Option>
               </Select>
             </div>
-            <Divider />
-            <div style={{ color: '#666' }}>
-              将迁移 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
-            </div>
+
+            {/* 预览区域 */}
+            {migratePreviewData && (
+              <>
+                <Divider orientation="left">迁移预览</Divider>
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                  {migratePreviewData.previewItems.map((item, index) => (
+                    <div key={index} style={{ marginBottom: 12, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                      <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                        {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#666' }}>
+                        <div style={{ marginBottom: 2 }}>
+                          <Text type="secondary">原路径: </Text>
+                          <Text code style={{ fontSize: 11 }}>{item.oldPath}</Text>
+                        </div>
+                        <div>
+                          <Text type="secondary">新路径: </Text>
+                          <Text code style={{ fontSize: 11, color: '#52c41a' }}>{item.newPath}</Text>
+                        </div>
+                        {!item.exists && (
+                          <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, color: '#666' }}>
+                  共 <strong>{migratePreviewData.totalCount}</strong> 个文件将被迁移
+                </div>
+              </>
+            )}
+
+            {!migratePreviewData && (
+              <>
+                <Divider />
+                <div style={{ color: '#666' }}>
+                  将迁移 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+                  <div style={{ marginTop: 8, fontSize: 12 }}>
+                    <Text type="secondary">点击"预览"按钮查看详细迁移路径</Text>
+                  </div>
+                </div>
+              </>
+            )}
           </Modal>
 
           {/* 重命名Modal */}
@@ -1330,20 +1428,69 @@ const DanmakuStorage = () => {
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>目标模板:</div>
-              <Select
-                value={templateTarget}
-                onChange={setTemplateTarget}
-                style={{ width: '100%' }}
-              >
-                <Option value="tv">电视节目模板: {'${title}/Season ${season}/${title} - S${season}E${episode}.xml'}</Option>
-                <Option value="movie">电影模板: {'${title}/${title}.xml'}</Option>
-                <Option value="id">ID模板: {'${animeId}/${episodeId}.xml'}</Option>
-              </Select>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Select
+                  value={templateTarget}
+                  onChange={(v) => { setTemplateTarget(v); setTemplatePreviewData(null); }}
+                  style={{ flex: 1 }}
+                >
+                  <Option value="tv">电视节目模板: {'${title}/Season ${season}/${title} - S${season}E${episode}.xml'}</Option>
+                  <Option value="movie">电影模板: {'${title}/${title}.xml'}</Option>
+                  <Option value="id">ID模板: {'${animeId}/${episodeId}.xml'}</Option>
+                </Select>
+                <Button
+                  type="primary"
+                  onClick={handlePreviewTemplate}
+                  loading={templatePreviewLoading}
+                >
+                  预览
+                </Button>
+              </div>
             </div>
-            <Divider />
-            <div style={{ color: '#666' }}>
-              将转换 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
-            </div>
+
+            {/* 预览区域 */}
+            {templatePreviewData && (
+              <>
+                <Divider orientation="left">转换预览</Divider>
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                  {templatePreviewData.previewItems.map((item, index) => (
+                    <div key={index} style={{ marginBottom: 12, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                      <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                        {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#666' }}>
+                        <div style={{ marginBottom: 2 }}>
+                          <Text type="secondary">原路径: </Text>
+                          <Text code style={{ fontSize: 11 }}>{item.oldPath}</Text>
+                        </div>
+                        <div>
+                          <Text type="secondary">新路径: </Text>
+                          <Text code style={{ fontSize: 11, color: '#52c41a' }}>{item.newPath}</Text>
+                        </div>
+                        {!item.exists && (
+                          <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, color: '#666' }}>
+                  共 <strong>{templatePreviewData.totalCount}</strong> 个文件将被转换
+                </div>
+              </>
+            )}
+
+            {!templatePreviewData && (
+              <>
+                <Divider />
+                <div style={{ color: '#666' }}>
+                  将转换 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+                  <div style={{ marginTop: 8, fontSize: 12 }}>
+                    <Text type="secondary">点击"预览"按钮查看详细转换路径</Text>
+                  </div>
+                </div>
+              </>
+            )}
           </Modal>
         </TabPane>
 

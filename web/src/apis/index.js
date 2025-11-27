@@ -669,11 +669,17 @@ export const importLocalItems = (data) => api.post('/api/ui/local-items/import',
 
 // ==================== 弹幕存储批量操作 ====================
 
+/** 预览批量迁移 */
+export const previewMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-migrate', data)
+
 /** 批量迁移弹幕文件 */
 export const batchMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-migrate', data)
 
 /** 批量重命名弹幕文件 */
 export const batchRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-rename', data)
+
+/** 预览应用模板 */
+export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/preview-template', data)
 
 /** 应用新模板 */
 export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
