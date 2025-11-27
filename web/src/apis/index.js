@@ -255,6 +255,9 @@ export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
 /** 批量删除webhook任务 */
 export const deleteWebhookTasks = data =>
   api.post('/api/ui/webhook-tasks/delete-bulk', data)
+/** 清空所有webhook任务 */
+export const clearAllWebhookTasks = () =>
+  api.delete('/api/ui/webhook-tasks/clear-all')
 /** 立即执行webhook任务 */
 export const runWebhookTasksNow = data =>
   api.post('/api/ui/webhook-tasks/run-now', data)

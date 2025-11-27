@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { List, Button, Tag, Space, Card, Checkbox, Empty, Tooltip, Input, Modal } from 'antd'
-import { DeleteOutlined, CheckOutlined, MinusOutlined, PlayCircleOutlined, SearchOutlined } from '@ant-design/icons'
+import { DeleteOutlined, CheckOutlined, MinusOutlined, PlayCircleOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getWebhookTasks, deleteWebhookTasks, runWebhookTasksNow } from '../../../apis'
+import { getWebhookTasks, deleteWebhookTasks, runWebhookTasksNow, clearAllWebhookTasks } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { useModal } from '../../../ModalContext'
 
@@ -110,6 +110,24 @@ export const WebhookTasks = () => {
     })
   }
 
+  const handleClearAll = () => {
+    modalApi.confirm({
+      title: '清空所有任务',
+      content: `确定要清空所有 ${pagination.total} 个待处理任务吗？此操作不可撤销！`,
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const { data } = await clearAllWebhookTasks()
+          messageApi.success(data.message || '清空成功')
+          setSelectedTasks([])
+          fetchTasks()
+        } catch (error) {
+          messageApi.error('清空失败')
+        }
+      },
+    })
+  }
+
   const selectedTaskIds = useMemo(() => new Set(selectedTasks.map(t => t.id)), [
     selectedTasks,
   ])
@@ -153,6 +171,16 @@ export const WebhookTasks = () => {
                 icon={<DeleteOutlined />}
                 disabled={selectedTasks.length === 0}
                 onClick={handleBulkDelete}
+              />
+            </Tooltip>
+            <Tooltip title="清空所有任务">
+              <Button
+                danger
+                type="primary"
+                shape="circle"
+                icon={<ClearOutlined />}
+                disabled={pagination.total === 0}
+                onClick={handleClearAll}
               />
             </Tooltip>
             <Tooltip title="搜索任务">

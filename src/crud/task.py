@@ -539,6 +539,14 @@ async def delete_webhook_tasks(session: AsyncSession, task_ids: List[int]) -> in
     return result.rowcount
 
 
+async def delete_all_webhook_tasks(session: AsyncSession) -> int:
+    """清空所有 Webhook 任务"""
+    stmt = delete(WebhookTask)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
+
 async def get_due_webhook_tasks(session: AsyncSession) -> List[WebhookTask]:
     """获取所有已到执行时间的待处理任务"""
     now = get_now()
