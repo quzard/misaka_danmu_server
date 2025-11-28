@@ -23,8 +23,16 @@ from ..database import sync_postgres_sequence
 logger = logging.getLogger(__name__)
 
 
-async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
-    """获取媒体库中的所有番剧及其关联信息（如分集数），支持搜索和分页。"""
+async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, anime_type: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
+    """获取媒体库中的所有番剧及其关联信息（如分集数），支持搜索、类型过滤和分页。
+
+    Args:
+        session: 数据库会话
+        keyword: 搜索关键词
+        anime_type: 类型过滤 ('movie' 或 'tv'，其中 'tv' 包含 tv_series 和 ova)
+        page: 页码
+        page_size: 每页数量，-1 表示不分页
+    """
     stmt = (
         select(
             Anime.id.label("animeId"),
@@ -56,6 +64,13 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
                 for col in [Anime.title, AnimeAlias.nameEn, AnimeAlias.nameJp, AnimeAlias.nameRomaji, AnimeAlias.aliasCn1, AnimeAlias.aliasCn2, AnimeAlias.aliasCn3]
             ]
             stmt = stmt.where(or_(*like_conditions))
+
+    # 类型过滤
+    if anime_type:
+        if anime_type == 'movie':
+            stmt = stmt.where(Anime.type == 'movie')
+        elif anime_type == 'tv':
+            stmt = stmt.where(Anime.type.in_(['tv_series', 'ova']))
 
     count_subquery = stmt.alias("count_subquery")
     count_stmt = select(func.count()).select_from(count_subquery)

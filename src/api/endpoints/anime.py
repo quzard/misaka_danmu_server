@@ -94,13 +94,14 @@ async def create_anime_entry(
 @router.get("/library", response_model=models.LibraryResponse, summary="获取媒体库内容")
 async def get_library(
     keyword: Optional[str] = Query(None, description="按标题搜索"),
+    type: Optional[str] = Query(None, description="类型过滤: movie=电影, tv=TV/OVA"),
     page: int = Query(1, ge=1, description="页码"),
     pageSize: int = Query(10, ge=1, description="每页数量"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """获取数据库中所有已收录的番剧信息，支持搜索和分页。"""
-    paginated_result = await crud.get_library_anime(session, keyword=keyword, page=page, page_size=pageSize)
+    """获取数据库中所有已收录的番剧信息，支持搜索、类型过滤和分页。"""
+    paginated_result = await crud.get_library_anime(session, keyword=keyword, anime_type=type, page=page, page_size=pageSize)
     return models.LibraryResponse(
         total=paginated_result["total"],
         list=[models.LibraryAnimeInfo.model_validate(item) for item in paginated_result["list"]]
