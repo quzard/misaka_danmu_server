@@ -14,6 +14,7 @@ on:
 
 env:
   DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/misaka_danmu_server
 
 jobs:
   # 准备构建参数
@@ -24,15 +25,10 @@ jobs:
       image_tag: ${{ steps.prep.outputs.image_tag }}
       extra_tags: ${{ steps.prep.outputs.extra_tags }}
       build_arm: ${{ steps.prep.outputs.build_arm }}
-      ghcr_image: ${{ steps.prep.outputs.ghcr_image }}
     steps:
       - name: Prepare build parameters
         id: prep
         run: |
-          GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/misaka_danmu_server
-          GHCR_IMAGE=${GHCR_IMAGE,,}
-          echo "ghcr_image=${GHCR_IMAGE}" >> $GITHUB_OUTPUT
-
           # 默认值
           SO_TAG="latest"
           BUILD_ARM="true"
@@ -46,8 +42,6 @@ jobs:
             echo "image_tag=test" >> $GITHUB_OUTPUT
             SO_TAG="test"
             BUILD_ARM="false"
-          elif [[ $GITHUB_REF == refs/heads/beta ]]; then
-            echo "image_tag=beta" >> $GITHUB_OUTPUT
           fi
 
           echo "so_tag=${SO_TAG}" >> $GITHUB_OUTPUT
@@ -90,7 +84,7 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKERHUB_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-amd64
-            ${{ needs.prepare.outputs.ghcr_image }}:${{ needs.prepare.outputs.image_tag }}-amd64
+            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-amd64
           build-args: |
             SO_TAG=${{ needs.prepare.outputs.so_tag }}
           secrets: |
@@ -133,7 +127,7 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKERHUB_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-arm64
-            ${{ needs.prepare.outputs.ghcr_image }}:${{ needs.prepare.outputs.image_tag }}-arm64
+            ${{ env.GHCR_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-arm64
           build-args: |
             SO_TAG=${{ needs.prepare.outputs.so_tag }}
           secrets: |
@@ -165,7 +159,7 @@ jobs:
         run: |
           TAG="${{ needs.prepare.outputs.image_tag }}"
           DOCKERHUB_IMAGE="${{ env.DOCKERHUB_IMAGE }}"
-          GHCR_IMAGE="${{ needs.prepare.outputs.ghcr_image }}"
+          GHCR_IMAGE="${{ env.GHCR_IMAGE }}"
           BUILD_ARM="${{ needs.prepare.outputs.build_arm }}"
           EXTRA_TAGS="${{ needs.prepare.outputs.extra_tags }}"
 
