@@ -9,73 +9,71 @@ on:
   push:
     branches:
       - "test"
-      - "beta"
     tags:
       - "v*.*.*"
 
+env:
+  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
+
 jobs:
-  build-and-push:
-    # 在最新的 Ubuntu 虚拟机上运行
+  # 准备构建参数
+  prepare:
     runs-on: ubuntu-latest
-    # 添加权限以便推送到 GitHub Container Registry
+    outputs:
+      so_tag: ${{ steps.prep.outputs.so_tag }}
+      image_tag: ${{ steps.prep.outputs.image_tag }}
+      extra_tags: ${{ steps.prep.outputs.extra_tags }}
+      build_arm: ${{ steps.prep.outputs.build_arm }}
+      ghcr_image: ${{ steps.prep.outputs.ghcr_image }}
+    steps:
+      - name: Prepare build parameters
+        id: prep
+        run: |
+          GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/misaka_danmu_server
+          GHCR_IMAGE=${GHCR_IMAGE,,}
+          echo "ghcr_image=${GHCR_IMAGE}" >> $GITHUB_OUTPUT
+
+          # 默认值
+          SO_TAG="latest"
+          BUILD_ARM="true"
+          EXTRA_TAGS=""
+
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+            echo "image_tag=${TAG}" >> $GITHUB_OUTPUT
+            EXTRA_TAGS="latest"
+          elif [[ $GITHUB_REF == refs/heads/test ]]; then
+            echo "image_tag=test" >> $GITHUB_OUTPUT
+            SO_TAG="test"
+            BUILD_ARM="false"
+          elif [[ $GITHUB_REF == refs/heads/beta ]]; then
+            echo "image_tag=beta" >> $GITHUB_OUTPUT
+          fi
+
+          echo "so_tag=${SO_TAG}" >> $GITHUB_OUTPUT
+          echo "build_arm=${BUILD_ARM}" >> $GITHUB_OUTPUT
+          echo "extra_tags=${EXTRA_TAGS}" >> $GITHUB_OUTPUT
+
+  # 构建 AMD64 镜像
+  build-amd64:
+    needs: prepare
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      # 步骤1: 检出代码，以便 workflow 可以访问它
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 步骤2: 准备 Docker 镜像标签和构建参数
-      # 根据触发事件（分支或标签）动态生成镜像标签、平台和SO_TAG
-      - name: Prepare Docker tags and platforms
-        id: prep
-        run: |
-          # Docker Hub 镜像名
-          DOCKERHUB_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/misaka_danmu_server
-          # GitHub Container Registry 镜像名 (自动转换为小写)
-          GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/misaka_danmu_server
-          GHCR_IMAGE=${GHCR_IMAGE,,}  # 转换为小写
-
-          # 默认构建所有平台和SO_TAG
-          PLATFORMS="linux/amd64,linux/arm64"
-          SO_TAG="latest"
-
-          # 如果是标签推送 (e.g., v1.2.3)
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            # 从 ref 中提取标签名 (e.g., v1.2.3)
-            TAG=${GITHUB_REF#refs/tags/}
-            # 设置输出: 同时推送到 Docker Hub 和 GHCR
-            echo "tags=${DOCKERHUB_IMAGE}:${TAG},${DOCKERHUB_IMAGE}:latest,${GHCR_IMAGE}:${TAG},${GHCR_IMAGE}:latest" >> $GITHUB_OUTPUT
-            SO_TAG="latest"
-          # 如果是推送到 test 分支
-          elif [[ $GITHUB_REF == refs/heads/test ]]; then
-            # 设置输出: 同时推送到 Docker Hub 和 GHCR
-            echo "tags=${DOCKERHUB_IMAGE}:test,${GHCR_IMAGE}:test" >> $GITHUB_OUTPUT
-            # 仅为 test 分支构建 amd64，并使用test标签的.so文件
-            PLATFORMS="linux/amd64"
-            SO_TAG="test"
-          # 如果是推送到 beta 分支
-          elif [[ $GITHUB_REF == refs/heads/beta ]]; then
-            # 设置输出: 同时推送到 Docker Hub 和 GHCR
-            echo "tags=${DOCKERHUB_IMAGE}:beta,${GHCR_IMAGE}:beta" >> $GITHUB_OUTPUT
-            SO_TAG="latest"
-          fi
-          echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
-          echo "so_tag=${SO_TAG}" >> $GITHUB_OUTPUT
-
-      # 步骤3: 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 步骤4: 登录到 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 步骤5: 登录到 GitHub Container Registry
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -83,18 +81,122 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤6: 构建并推送 Docker 镜像到两个仓库
-      # 仅当上一步成功生成了标签时才运行此步骤
-      - name: Build and push Docker image
-        if: steps.prep.outputs.tags
+      - name: Build and push AMD64 image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: ${{ steps.prep.outputs.platforms }}
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.prep.outputs.tags }}
+          tags: |
+            ${{ env.DOCKERHUB_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-amd64
+            ${{ needs.prepare.outputs.ghcr_image }}:${{ needs.prepare.outputs.image_tag }}-amd64
           build-args: |
-            SO_TAG=${{ steps.prep.outputs.so_tag }}
+            SO_TAG=${{ needs.prepare.outputs.so_tag }}
           secrets: |
             XOR_KEY_SECRET=${{ secrets.XOR_KEY_SECRET }}
+
+  # 构建 ARM64 镜像（使用原生 ARM runner）
+  build-arm64:
+    needs: prepare
+    if: needs.prepare.outputs.build_arm == 'true'
+    runs-on: ubuntu-latest-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_IMAGE }}:${{ needs.prepare.outputs.image_tag }}-arm64
+            ${{ needs.prepare.outputs.ghcr_image }}:${{ needs.prepare.outputs.image_tag }}-arm64
+          build-args: |
+            SO_TAG=${{ needs.prepare.outputs.so_tag }}
+          secrets: |
+            XOR_KEY_SECRET=${{ secrets.XOR_KEY_SECRET }}
+
+  # 创建多架构 manifest
+  create-manifest:
+    needs: [prepare, build-amd64, build-arm64]
+    if: always() && needs.build-amd64.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest (multi-arch)
+        run: |
+          TAG="${{ needs.prepare.outputs.image_tag }}"
+          DOCKERHUB_IMAGE="${{ env.DOCKERHUB_IMAGE }}"
+          GHCR_IMAGE="${{ needs.prepare.outputs.ghcr_image }}"
+          BUILD_ARM="${{ needs.prepare.outputs.build_arm }}"
+          EXTRA_TAGS="${{ needs.prepare.outputs.extra_tags }}"
+
+          # 根据是否构建了 ARM 来决定 manifest 内容
+          if [[ "$BUILD_ARM" == "true" && "${{ needs.build-arm64.result }}" == "success" ]]; then
+            # 多架构 manifest
+            docker buildx imagetools create -t ${DOCKERHUB_IMAGE}:${TAG} \
+              ${DOCKERHUB_IMAGE}:${TAG}-amd64 \
+              ${DOCKERHUB_IMAGE}:${TAG}-arm64
+
+            docker buildx imagetools create -t ${GHCR_IMAGE}:${TAG} \
+              ${GHCR_IMAGE}:${TAG}-amd64 \
+              ${GHCR_IMAGE}:${TAG}-arm64
+
+            # 额外标签（如 latest）
+            if [[ -n "$EXTRA_TAGS" ]]; then
+              for EXTRA_TAG in $EXTRA_TAGS; do
+                docker buildx imagetools create -t ${DOCKERHUB_IMAGE}:${EXTRA_TAG} \
+                  ${DOCKERHUB_IMAGE}:${TAG}-amd64 \
+                  ${DOCKERHUB_IMAGE}:${TAG}-arm64
+
+                docker buildx imagetools create -t ${GHCR_IMAGE}:${EXTRA_TAG} \
+                  ${GHCR_IMAGE}:${TAG}-amd64 \
+                  ${GHCR_IMAGE}:${TAG}-arm64
+              done
+            fi
+          else
+            # 仅 AMD64
+            docker buildx imagetools create -t ${DOCKERHUB_IMAGE}:${TAG} \
+              ${DOCKERHUB_IMAGE}:${TAG}-amd64
+
+            docker buildx imagetools create -t ${GHCR_IMAGE}:${TAG} \
+              ${GHCR_IMAGE}:${TAG}-amd64
+          fi
