@@ -141,7 +141,7 @@ export const MatchFallbackSetting = () => {
               <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <Form.Item
                   name="matchFallbackEnabled"
-                  label="启用匹配后备"
+                  label="启用后备匹配"
                   valuePropName="checked"
                   tooltip="启用后，当播放客户端尝试使用match接口时，接口在本地库中找不到任何结果时，系统将自动触发一个后台任务，尝试从全网搜索并导入对应的弹幕。"
                   style={{ flex: 1 }}
@@ -314,7 +314,7 @@ export const MatchFallbackSetting = () => {
               <Form.Item
                 label={
                   <Space>
-                    匹配后备Token授权
+                    后备功能 Token 授权
                     <Tooltip title="选择允许触发匹配后备功能的Token。如果不选择任何Token，则所有Token都可以触发后备功能。只有被选中的Token才能在匹配失败时自动触发后备搜索任务。">
                       <QuestionCircleOutlined />
                     </Tooltip>
@@ -407,7 +407,7 @@ export const MatchFallbackSetting = () => {
         <Form.Item
           label={
             <Space>
-              匹配后备黑名单
+              后备匹配黑名单
               <Tooltip title="使用正则表达式过滤文件名，匹配的文件不会触发后备机制。例如：预告|广告|花絮 可以过滤包含这些关键词的文件。留空表示不过滤。">
                 <QuestionCircleOutlined />
               </Tooltip>
