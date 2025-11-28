@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Form, Input, Switch, Button, Space, message, Popconfirm, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
-import { FolderOpenOutlined, RocketOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
+import { FolderOpenOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
 import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
@@ -263,14 +263,6 @@ const DanmakuStorage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleBatchRename = async () => {
-    message.info('批量重命名功能开发中...');
-  };
-
-  const handleMigrateDirectory = async () => {
-    message.info('迁移弹幕目录功能开发中...');
   };
 
   // ==================== 迁移与重命名功能 ====================
@@ -949,17 +941,6 @@ const DanmakuStorage = () => {
           </div>
         </Form.Item>
 
-        {/* 操作按钮 */}
-        <Card
-          title={
-            <Space>
-              操作面板
-            </Space>
-          }
-          size="small"
-          style={{ marginTop: '24px' }}
-        >
-          <div className="flex flex-col gap-3">
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}
@@ -968,6 +949,7 @@ const DanmakuStorage = () => {
               size="large"
               block
               style={{
+                marginTop: '24px',
                 height: '48px',
                 fontSize: '16px',
                 fontWeight: 500
@@ -975,39 +957,6 @@ const DanmakuStorage = () => {
             >
               保存配置
             </Button>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                icon={<FolderOpenOutlined />}
-                onClick={handleBatchRename}
-                disabled={!customDanmakuPathEnabled || loading}
-                size="large"
-                block
-                style={{ flex: 1, height: '44px' }}
-              >
-                批量重命名
-              </Button>
-
-              <Popconfirm
-                title="确定要迁移弹幕目录吗?"
-                description="此操作会移动所有弹幕文件到新目录"
-                onConfirm={handleMigrateDirectory}
-                disabled={!customDanmakuPathEnabled || loading}
-              >
-                <Button
-                  danger
-                  icon={<RocketOutlined />}
-                  disabled={!customDanmakuPathEnabled || loading}
-                  size="large"
-                  block
-                  style={{ flex: 1, height: '44px' }}
-                >
-                  迁移目录
-                </Button>
-              </Popconfirm>
-            </div>
-          </div>
-        </Card>
           </Form>
         </TabPane>
 
