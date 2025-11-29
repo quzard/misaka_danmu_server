@@ -1349,7 +1349,7 @@ export const EpisodeDetail = () => {
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={batchEditData.map(item => item.episodeId)} strategy={verticalListSortingStrategy}>
               <table className="w-full text-sm">
-                <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                   <tr>
                     <th className="p-2 border w-10">拖拽</th>
                     <th className="p-2 border w-32">ID</th>
