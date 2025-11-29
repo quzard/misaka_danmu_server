@@ -423,6 +423,7 @@ async def preview_apply_template(
     session: AsyncSession,
     anime_ids: List[int],
     template_type: str,
+    custom_template: str = None,
     config_manager = None
 ) -> Dict[str, Any]:
     """预览应用模板结果（不实际执行）"""
@@ -436,16 +437,29 @@ async def preview_apply_template(
     # 因为"应用新模板"功能的目的是让用户选择一个预设模板来重新组织文件
     if template_type == "tv":
         base_dir = "/app/config/danmaku"
-        template = "${title}/Season ${season}/${title} - S${season}E${episode}"
-        # 只获取目录配置，不覆盖模板
+        template = "${title}/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "movie":
         base_dir = "/app/config/danmaku"
         template = "${title}/${title}"
-        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+    elif template_type == "plex":
+        base_dir = "/app/config/danmaku"
+        template = "${title}/${title} - S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "emby":
+        base_dir = "/app/config/danmaku"
+        template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom" and custom_template:
+        base_dir = "/app/config/danmaku"
+        template = custom_template
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     else:  # id
         base_dir = "/app/config/danmaku"
         template = "${animeId}/${episodeId}"
@@ -471,9 +485,16 @@ async def preview_apply_template(
 
             # 构建新路径
             try:
+                season_val = anime.season or 1
+                episode_val = episode.episodeIndex or 1
                 relative_path = template.replace("${title}", anime.title or "Unknown")
-                relative_path = relative_path.replace("${season}", str(anime.season or 1).zfill(2))
-                relative_path = relative_path.replace("${episode}", str(episode.episodeIndex or 1).zfill(2))
+                # 先处理带格式的变量（补零）
+                relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
+                relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
+                relative_path = relative_path.replace("${episode:03d}", str(episode_val).zfill(3))
+                # 再处理不带格式的变量（不补零）
+                relative_path = relative_path.replace("${season}", str(season_val))
+                relative_path = relative_path.replace("${episode}", str(episode_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
 
@@ -505,6 +526,7 @@ async def apply_danmaku_template(
     session: AsyncSession,
     anime_ids: List[int],
     template_type: str,
+    custom_template: str = None,
     config_manager = None
 ) -> Dict[str, Any]:
     """按新的存储模板重新组织弹幕文件"""
@@ -522,16 +544,29 @@ async def apply_danmaku_template(
     # 因为"应用新模板"功能的目的是让用户选择一个预设模板来重新组织文件
     if template_type == "tv":
         base_dir = "/app/config/danmaku"
-        template = "${title}/Season ${season}/${title} - S${season}E${episode}"
-        # 只获取目录配置，不覆盖模板
+        template = "${title}/Season ${season:02d}/${title} - S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "movie":
         base_dir = "/app/config/danmaku"
         template = "${title}/${title}"
-        # 只获取目录配置，不覆盖模板
         if config_manager:
             base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+    elif template_type == "plex":
+        base_dir = "/app/config/danmaku"
+        template = "${title}/${title} - S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "emby":
+        base_dir = "/app/config/danmaku"
+        template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom" and custom_template:
+        base_dir = "/app/config/danmaku"
+        template = custom_template
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     else:  # id
         base_dir = "/app/config/danmaku"
         template = "${animeId}/${episodeId}"
@@ -574,9 +609,16 @@ async def apply_danmaku_template(
 
             # 构建新路径
             try:
+                season_val = anime.season or 1
+                episode_val = episode.episodeIndex or 1
                 relative_path = template.replace("${title}", anime.title or "Unknown")
-                relative_path = relative_path.replace("${season}", str(anime.season or 1).zfill(2))
-                relative_path = relative_path.replace("${episode}", str(episode.episodeIndex or 1).zfill(2))
+                # 先处理带格式的变量（补零）
+                relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
+                relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
+                relative_path = relative_path.replace("${episode:03d}", str(episode_val).zfill(3))
+                # 再处理不带格式的变量（不补零）
+                relative_path = relative_path.replace("${season}", str(season_val))
+                relative_path = relative_path.replace("${episode}", str(episode_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
 

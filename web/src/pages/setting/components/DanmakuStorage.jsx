@@ -474,6 +474,7 @@ const DanmakuStorage = () => {
       const response = await previewDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       setTemplatePreviewData(response.data);
     } catch (error) {
@@ -490,6 +491,7 @@ const DanmakuStorage = () => {
       const response = await previewDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       setTemplatePreviewData(response.data);
     } catch (error) {
@@ -575,6 +577,7 @@ const DanmakuStorage = () => {
       const response = await applyDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       const result = response.data;
       if (result.success) {
@@ -1318,6 +1321,7 @@ const DanmakuStorage = () => {
                           const response = await previewDanmakuTemplate({
                             animeIds: selectedRowKeys,
                             templateType: v,
+                            customTemplate: v === 'custom' ? customTemplate : undefined,
                           });
                           setTemplatePreviewData(response.data);
                         } catch (error) {

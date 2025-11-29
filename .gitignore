@@ -20,3 +20,4 @@ src/rate_limiter.py
 generator_config.ini
 src/scrapers
 !src/scrapers/base.py
+.augment/rules/rule-name.md
