@@ -91,7 +91,9 @@ export const EpisodeDetail = () => {
   const [isBatchEditModalOpen, setIsBatchEditModalOpen] = useState(false)
   const [batchEditData, setBatchEditData] = useState([])
   const [batchEditLoading, setBatchEditLoading] = useState(false)
+  const [batchIndexMode, setBatchIndexMode] = useState('none') // none, offset, reorder
   const [batchOffsetValue, setBatchOffsetValue] = useState(0)
+  const [batchReorderStart, setBatchReorderStart] = useState(1) // 按顺序重排的起始集数
   const [batchNameMode, setBatchNameMode] = useState('none') // none, prefix, regex
   const [batchNamePrefix, setBatchNamePrefix] = useState('')
   const [batchNameSuffix, setBatchNameSuffix] = useState('')
@@ -412,7 +414,9 @@ export const EpisodeDetail = () => {
   // 打开批量编辑弹窗
   const openBatchEditModal = (episodes) => {
     setBatchEditData(episodes.map(ep => ({ ...ep })))
+    setBatchIndexMode('none')
     setBatchOffsetValue(0)
+    setBatchReorderStart(1)
     setBatchNameMode('none')
     setBatchNamePrefix('')
     setBatchNameSuffix('')
@@ -429,6 +433,14 @@ export const EpisodeDetail = () => {
       episodeIndex: item.episodeIndex + batchOffsetValue
     })))
     setBatchOffsetValue(0)
+  }
+
+  // 应用按顺序重排集数（预览）
+  const handleApplyBatchReorder = () => {
+    setBatchEditData(prev => prev.map((item, index) => ({
+      ...item,
+      episodeIndex: batchReorderStart + index
+    })))
   }
 
   // 应用批量命名（预览）
@@ -1273,20 +1285,49 @@ export const EpisodeDetail = () => {
         okText="确认提交"
         cancelText="取消"
       >
-        {/* 批量偏移 */}
+        {/* 批量调整集数 */}
         <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
-          <div className="font-medium mb-2">⚡ 批量偏移集数</div>
-          <div className="flex items-center gap-2">
-            <InputNumber
-              value={batchOffsetValue}
-              onChange={setBatchOffsetValue}
-              placeholder="偏移量（可为负数）"
-              className="w-40"
+          <div className="font-medium mb-2">🔢 批量调整集数</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={batchIndexMode}
+              onChange={setBatchIndexMode}
+              style={{ width: 120 }}
+              options={[
+                { value: 'none', label: '不修改' },
+                { value: 'offset', label: '偏移' },
+                { value: 'reorder', label: '按顺序重排' },
+              ]}
             />
-            <Button onClick={handleApplyBatchOffset} disabled={!batchOffsetValue}>
-              应用偏移
+            {batchIndexMode === 'offset' && (
+              <>
+                <InputNumber
+                  value={batchOffsetValue}
+                  onChange={setBatchOffsetValue}
+                  placeholder="偏移量"
+                  className="w-28"
+                />
+                <span className="text-gray-500 text-sm">正数增加，负数减少</span>
+              </>
+            )}
+            {batchIndexMode === 'reorder' && (
+              <>
+                <span className="text-gray-500 text-sm">从第</span>
+                <InputNumber
+                  value={batchReorderStart}
+                  onChange={setBatchReorderStart}
+                  min={1}
+                  className="w-20"
+                />
+                <span className="text-gray-500 text-sm">集开始</span>
+              </>
+            )}
+            <Button
+              onClick={batchIndexMode === 'offset' ? handleApplyBatchOffset : handleApplyBatchReorder}
+              disabled={batchIndexMode === 'none' || (batchIndexMode === 'offset' && !batchOffsetValue)}
+            >
+              应用
             </Button>
-            <span className="text-gray-500 text-sm">输入正数增加集数，负数减少集数</span>
           </div>
         </div>
 
