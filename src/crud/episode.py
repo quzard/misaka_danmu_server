@@ -314,10 +314,13 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     if not episode:
         return False
 
-    # 情况1: 集数未改变，仅更新标题或URL
+    # 情况1: 集数未改变，仅更新标题、URL或弹幕文件路径
     if episode.episodeIndex == update_data.episodeIndex:
         episode.title = update_data.title
         episode.sourceUrl = update_data.sourceUrl
+        # 如果提供了弹幕文件路径，则更新（仅更新数据库记录，不移动文件）
+        if update_data.danmakuFilePath is not None:
+            episode.danmakuFilePath = update_data.danmakuFilePath
         await session.commit()
         return True
 

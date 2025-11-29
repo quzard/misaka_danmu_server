@@ -164,6 +164,7 @@ class EpisodeInfoUpdate(BaseModel):
     title: str = Field(..., min_length=1, description="新的分集标题")
     episodeIndex: int = Field(..., ge=1, description="新的集数")
     sourceUrl: Optional[str] = Field(None, description="新的官方链接")
+    danmakuFilePath: Optional[str] = Field(None, description="弹幕文件路径")
 
 class AnimeFullDetails(BaseModel):
     """用于返回番剧完整信息的模型"""
@@ -243,6 +244,7 @@ class EpisodeDetail(BaseModel):
     sourceUrl: Optional[str] = None
     fetchedAt: Optional[datetime] = None
     commentCount: int
+    danmakuFilePath: Optional[str] = None
 
 class PaginatedEpisodesResponse(BaseModel):
     """用于分集列表分页的响应模型"""

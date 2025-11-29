@@ -41,7 +41,8 @@ class BatchRenameRequest(BaseModel):
 class ApplyTemplateRequest(BaseModel):
     """应用模板请求"""
     animeIds: List[int]
-    templateType: str  # tv, movie, id
+    templateType: str  # tv, movie, id, plex, emby, custom
+    customTemplate: Optional[str] = None  # 自定义模板字符串
 
 
 class BatchOperationResult(BaseModel):
@@ -70,7 +71,8 @@ class MigratePreviewResult(BaseModel):
 class TemplatePreviewRequest(BaseModel):
     """模板预览请求"""
     animeIds: List[int]
-    templateType: str  # tv, movie, id
+    templateType: str  # tv, movie, id, plex, emby, custom
+    customTemplate: Optional[str] = None  # 自定义模板字符串
 
 
 class TemplatePreviewResult(BaseModel):
@@ -179,6 +181,7 @@ async def preview_template(
         session,
         anime_ids=request.animeIds,
         template_type=request.templateType,
+        custom_template=request.customTemplate,
         config_manager=config_manager
     )
     return TemplatePreviewResult(**result)
@@ -196,6 +199,7 @@ async def apply_template(
         session,
         anime_ids=request.animeIds,
         template_type=request.templateType,
+        custom_template=request.customTemplate,
         config_manager=config_manager
     )
     return BatchOperationResult(**result)

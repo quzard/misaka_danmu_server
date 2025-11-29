@@ -37,7 +37,7 @@ import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
-import { HomeOutlined } from '@ant-design/icons'
+import { EditOutlined, HomeOutlined } from '@ant-design/icons'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
@@ -425,6 +425,16 @@ export const AnimeDetail = () => {
       render: (_, record) => {
         return (
           <Space>
+            <Tooltip title="批量编辑该源的所有分集">
+              <span
+                className="cursor-pointer hover:text-primary"
+                onClick={() => {
+                  navigate(`/episode/${record.sourceId}?animeId=${id}&batchEdit=all`)
+                }}
+              >
+                <EditOutlined style={{ fontSize: 18 }} />
+              </span>
+            </Tooltip>
             <Tooltip title="精确标记源，请求弹幕时优先使用该源">
               <span
                 className="cursor-pointer hover:text-primary"

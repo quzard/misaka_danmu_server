@@ -276,18 +276,11 @@ const DanmakuStorage = () => {
         pageSize: libraryPageSize,
       };
       if (keyword) params.keyword = keyword;
+      // 类型过滤：传递给后端处理，而不是前端过滤
+      if (typeFilter !== 'all') params.type = typeFilter;
 
       const response = await getAnimeLibrary(params);
-      let items = response.data?.list || [];
-
-      // 类型过滤
-      if (typeFilter !== 'all') {
-        items = items.filter(item => {
-          if (typeFilter === 'movie') return item.type === 'movie';
-          if (typeFilter === 'tv') return item.type === 'tv_series' || item.type === 'ova';
-          return true;
-        });
-      }
+      const items = response.data?.list || [];
 
       setLibraryItems(items);
       setLibraryTotal(response.data?.total || 0);
@@ -481,6 +474,7 @@ const DanmakuStorage = () => {
       const response = await previewDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       setTemplatePreviewData(response.data);
     } catch (error) {
@@ -497,6 +491,7 @@ const DanmakuStorage = () => {
       const response = await previewDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       setTemplatePreviewData(response.data);
     } catch (error) {
@@ -582,6 +577,7 @@ const DanmakuStorage = () => {
       const response = await applyDanmakuTemplate({
         animeIds: selectedRowKeys,
         templateType: templateTarget,
+        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
       });
       const result = response.data;
       if (result.success) {
@@ -1325,6 +1321,7 @@ const DanmakuStorage = () => {
                           const response = await previewDanmakuTemplate({
                             animeIds: selectedRowKeys,
                             templateType: v,
+                            customTemplate: v === 'custom' ? customTemplate : undefined,
                           });
                           setTemplatePreviewData(response.data);
                         } catch (error) {

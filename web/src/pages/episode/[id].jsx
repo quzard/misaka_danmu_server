@@ -35,10 +35,16 @@ import {
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import {
+  EditOutlined,
   HomeOutlined,
+  HolderOutlined,
   UploadOutlined,
   VerticalAlignMiddleOutlined,
 } from '@ant-design/icons'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { Select } from 'antd'
 import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
@@ -80,6 +86,19 @@ export const EpisodeDetail = () => {
   const [uploading, setUploading] = useState(false)
   const [fileList, setFileList] = useState([])
   const [lastClickedIndex, setLastClickedIndex] = useState(null)
+
+  // 批量编辑相关状态
+  const [isBatchEditModalOpen, setIsBatchEditModalOpen] = useState(false)
+  const [batchEditData, setBatchEditData] = useState([])
+  const [batchEditLoading, setBatchEditLoading] = useState(false)
+  const [batchIndexMode, setBatchIndexMode] = useState('none') // none, offset, reorder
+  const [batchOffsetValue, setBatchOffsetValue] = useState(0)
+  const [batchReorderStart, setBatchReorderStart] = useState(1) // 按顺序重排的起始集数
+  const [batchNameMode, setBatchNameMode] = useState('none') // none, prefix, regex
+  const [batchNamePrefix, setBatchNamePrefix] = useState('')
+  const [batchNameSuffix, setBatchNameSuffix] = useState('')
+  const [batchRegexPattern, setBatchRegexPattern] = useState('')
+  const [batchRegexReplace, setBatchRegexReplace] = useState('')
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -138,6 +157,14 @@ export const EpisodeDetail = () => {
   useEffect(() => {
     getDetail()
   }, [id, animeId, pagination.current, pagination.pageSize])
+
+  // 处理 URL 参数 batchEdit=all，自动打开批量编辑弹窗
+  const batchEditParam = searchParams.get('batchEdit')
+  useEffect(() => {
+    if (batchEditParam === 'all' && episodeList.length > 0 && !isBatchEditModalOpen) {
+      openBatchEditModal(episodeList)
+    }
+  }, [batchEditParam, episodeList])
 
   const handleBatchImportSuccess = task => {
     setIsBatchModalOpen(false)
@@ -329,17 +356,131 @@ export const EpisodeDetail = () => {
     },
   ]
 
-  const rowSelection = {
-    selectedRowKeys: selectedRows.map(r => r.episodeId),
-    onChange: (selectedRowKeys, selectedRows) => {
-      setSelectedRows(selectedRows)
-    },
-    onSelectAll: (selected, selectedRows, changeRows) => {
-      if (selected) {
-        setSelectedRows(episodeList)
-      } else {
-        setSelectedRows([])
+  // 可拖拽行组件
+  const SortableRow = ({ id, data, index }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    }
+    return (
+      <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
+        <td className="p-2 border cursor-move" {...attributes} {...listeners}>
+          <HolderOutlined />
+        </td>
+        <td className="p-2 border text-xs">{data.episodeId}</td>
+        <td className="p-2 border">
+          <Input
+            size="small"
+            value={data.title}
+            onChange={(e) => {
+              setBatchEditData(prev => prev.map((item, i) => i === index ? { ...item, title: e.target.value } : item))
+            }}
+          />
+        </td>
+        <td className="p-2 border">
+          <InputNumber
+            size="small"
+            min={1}
+            value={data.episodeIndex}
+            onChange={(val) => {
+              setBatchEditData(prev => prev.map((item, i) => i === index ? { ...item, episodeIndex: val } : item))
+            }}
+          />
+        </td>
+      </tr>
+    )
+  }
+
+  // 拖拽传感器
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  // 拖拽结束处理
+  const handleDragEnd = (event) => {
+    const { active, over } = event
+    if (active.id !== over?.id) {
+      setBatchEditData((items) => {
+        const oldIndex = items.findIndex(item => item.episodeId === active.id)
+        const newIndex = items.findIndex(item => item.episodeId === over.id)
+        return arrayMove(items, oldIndex, newIndex)
+      })
+    }
+  }
+
+  // 打开批量编辑弹窗
+  const openBatchEditModal = (episodes) => {
+    setBatchEditData(episodes.map(ep => ({ ...ep })))
+    setBatchIndexMode('none')
+    setBatchOffsetValue(0)
+    setBatchReorderStart(1)
+    setBatchNameMode('none')
+    setBatchNamePrefix('')
+    setBatchNameSuffix('')
+    setBatchRegexPattern('')
+    setBatchRegexReplace('')
+    setIsBatchEditModalOpen(true)
+  }
+
+  // 应用批量偏移（预览）
+  const handleApplyBatchOffset = () => {
+    if (!batchOffsetValue) return
+    setBatchEditData(prev => prev.map(item => ({
+      ...item,
+      episodeIndex: item.episodeIndex + batchOffsetValue
+    })))
+    setBatchOffsetValue(0)
+  }
+
+  // 应用按顺序重排集数（预览）
+  const handleApplyBatchReorder = () => {
+    setBatchEditData(prev => prev.map((item, index) => ({
+      ...item,
+      episodeIndex: batchReorderStart + index
+    })))
+  }
+
+  // 应用批量命名（预览）
+  const handleApplyBatchRename = () => {
+    if (batchNameMode === 'none') return
+    setBatchEditData(prev => prev.map(item => {
+      let newTitle = item.title
+      if (batchNameMode === 'prefix') {
+        newTitle = batchNamePrefix + item.title + batchNameSuffix
+      } else if (batchNameMode === 'regex') {
+        try {
+          newTitle = item.title.replace(new RegExp(batchRegexPattern, 'g'), batchRegexReplace)
+        } catch (e) {
+          messageApi.error('正则表达式错误: ' + e.message)
+          return item
+        }
       }
+      return { ...item, title: newTitle }
+    }))
+  }
+
+  // 提交批量编辑
+  const handleBatchEditSubmit = async () => {
+    setBatchEditLoading(true)
+    try {
+      for (const item of batchEditData) {
+        await editEpisode({
+          episodeId: item.episodeId,
+          title: item.title,
+          episodeIndex: item.episodeIndex,
+          sourceUrl: item.sourceUrl,
+        })
+      }
+      messageApi.success('批量编辑成功')
+      setIsBatchEditModalOpen(false)
+      getDetail()
+    } catch (error) {
+      messageApi.error('批量编辑失败: ' + error.message)
+    } finally {
+      setBatchEditLoading(false)
     }
   }
 
@@ -704,6 +845,15 @@ export const EpisodeDetail = () => {
           </Button>
           <div className="flex flex-wrap gap-2 sm:justify-end">
             <Button
+              onClick={() => openBatchEditModal(selectedRows)}
+              disabled={!selectedRows.length}
+            >
+              <Tooltip title="批量编辑选中分集的标题和集数">
+                <EditOutlined />
+                <span className="ml-1">批量编辑</span>
+              </Tooltip>
+            </Button>
+            <Button
               onClick={handleOffset}
               disabled={!selectedRows.length}
             >
@@ -814,7 +964,7 @@ export const EpisodeDetail = () => {
             dataSource={episodeList}
             columns={columns}
             rowKey={'episodeId'}
-            tableProps={{ rowSelection, rowClassName: () => '' }}
+            tableProps={{ rowClassName: () => '' }}
             scroll={{ x: '100%' }}
             renderCard={(record) => {
               const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
@@ -1057,6 +1207,15 @@ export const EpisodeDetail = () => {
               <Input placeholder="请输入官方链接" />
             </Form.Item>
           )}
+          {isEditing && (
+            <Form.Item
+              name="danmakuFilePath"
+              label="弹幕文件路径"
+              tooltip="弹幕XML文件的存储路径，修改后会更新数据库记录（不会移动实际文件）"
+            >
+              <Input placeholder="例如: /app/config/danmaku/123/456.xml" />
+            </Form.Item>
+          )}
           <Form.Item name="episodeId" hidden>
             <Input />
           </Form.Item>
@@ -1114,6 +1273,143 @@ export const EpisodeDetail = () => {
           rowKey={'episodeId'}
           scroll={{ x: '100%' }}
         />
+      </Modal>
+      {/* 批量编辑弹窗 */}
+      <Modal
+        title="批量编辑分集"
+        open={isBatchEditModalOpen}
+        onCancel={() => setIsBatchEditModalOpen(false)}
+        onOk={handleBatchEditSubmit}
+        confirmLoading={batchEditLoading}
+        width={800}
+        okText="确认提交"
+        cancelText="取消"
+      >
+        {/* 批量调整集数 */}
+        <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
+          <div className="font-medium mb-2">🔢 批量调整集数</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={batchIndexMode}
+              onChange={setBatchIndexMode}
+              style={{ width: 120 }}
+              options={[
+                { value: 'none', label: '不修改' },
+                { value: 'offset', label: '偏移' },
+                { value: 'reorder', label: '按顺序重排' },
+              ]}
+            />
+            {batchIndexMode === 'offset' && (
+              <>
+                <InputNumber
+                  value={batchOffsetValue}
+                  onChange={setBatchOffsetValue}
+                  placeholder="偏移量"
+                  className="w-28"
+                />
+                <span className="text-gray-500 text-sm">正数增加，负数减少</span>
+              </>
+            )}
+            {batchIndexMode === 'reorder' && (
+              <>
+                <span className="text-gray-500 text-sm">从第</span>
+                <InputNumber
+                  value={batchReorderStart}
+                  onChange={setBatchReorderStart}
+                  min={1}
+                  className="w-20"
+                />
+                <span className="text-gray-500 text-sm">集开始</span>
+              </>
+            )}
+            <Button
+              onClick={batchIndexMode === 'offset' ? handleApplyBatchOffset : handleApplyBatchReorder}
+              disabled={batchIndexMode === 'none' || (batchIndexMode === 'offset' && !batchOffsetValue)}
+            >
+              应用
+            </Button>
+          </div>
+        </div>
+
+        {/* 批量命名 */}
+        <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
+          <div className="font-medium mb-2">📝 批量命名</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={batchNameMode}
+              onChange={setBatchNameMode}
+              style={{ width: 120 }}
+              options={[
+                { value: 'none', label: '不修改' },
+                { value: 'prefix', label: '前后缀' },
+                { value: 'regex', label: '正则替换' },
+              ]}
+            />
+            {batchNameMode === 'prefix' && (
+              <>
+                <Input
+                  value={batchNamePrefix}
+                  onChange={(e) => setBatchNamePrefix(e.target.value)}
+                  placeholder="前缀"
+                  style={{ width: 100 }}
+                />
+                <span>原标题</span>
+                <Input
+                  value={batchNameSuffix}
+                  onChange={(e) => setBatchNameSuffix(e.target.value)}
+                  placeholder="后缀"
+                  style={{ width: 100 }}
+                />
+              </>
+            )}
+            {batchNameMode === 'regex' && (
+              <>
+                <Input
+                  value={batchRegexPattern}
+                  onChange={(e) => setBatchRegexPattern(e.target.value)}
+                  placeholder="正则表达式"
+                  style={{ width: 150 }}
+                />
+                <span>→</span>
+                <Input
+                  value={batchRegexReplace}
+                  onChange={(e) => setBatchRegexReplace(e.target.value)}
+                  placeholder="替换为"
+                  style={{ width: 150 }}
+                />
+              </>
+            )}
+            <Button onClick={handleApplyBatchRename} disabled={batchNameMode === 'none'}>
+              应用命名
+            </Button>
+          </div>
+        </div>
+
+        {/* 可拖拽编辑表格 */}
+        <div className="border rounded overflow-auto" style={{ maxHeight: 400 }}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={batchEditData.map(item => item.episodeId)} strategy={verticalListSortingStrategy}>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-2 border w-10">拖拽</th>
+                    <th className="p-2 border w-32">ID</th>
+                    <th className="p-2 border">剧集名</th>
+                    <th className="p-2 border w-24">集数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchEditData.map((item, index) => (
+                    <SortableRow key={item.episodeId} id={item.episodeId} data={item} index={index} />
+                  ))}
+                </tbody>
+              </table>
+            </SortableContext>
+          </DndContext>
+        </div>
+        <div className="mt-2 text-gray-500 text-sm">
+          💡 拖拽行可调整顺序，点击"确认提交"后才会保存更改
+        </div>
       </Modal>
       <BatchImportModal
         open={isBatchModalOpen}
