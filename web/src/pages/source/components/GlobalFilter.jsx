@@ -37,7 +37,27 @@ export const GlobalFilter = () => {
     <div className="my-6">
       <Card loading={loading} title="全局搜索结果标题过滤">
         <div className="mb-4">
-          此处配置的正则表达式将应用于所有搜索源返回的结果标题，用于在搜索阶段过滤掉非正片内容（如预告合集、幕后花絮等）。
+          <div className="text-sm mb-2 opacity-75">
+            <div className="bg-blue-50 dark:bg-blue-900/30 p-3 rounded mb-3">
+              <p className="font-semibold text-blue-800 dark:text-blue-300 mb-2">
+                🔍 过滤层级说明
+              </p>
+              <pre className="text-blue-700 dark:text-blue-400 text-xs mb-3 whitespace-pre-wrap font-mono bg-white/50 dark:bg-gray-800/50 p-2 rounded">
+{`搜索结果/
+├── 葬送的芙莉莲                     ← 【全局搜索结果标题过滤】针对这里
+│   │                                   过滤掉带有"预告合集"、"花絮"等关键词的搜索结果
+│   │
+│   └── 分集列表/
+│       ├── 第1话 启程之地            ← 【分集标题过滤】针对这里
+│       ├── 第2话 别人生                 过滤掉"PV1"、"特典"、"OP"等分集
+│       ├── PV1 (被过滤)
+│       └── ...`}
+              </pre>
+              <p className="text-blue-600 dark:text-blue-400 text-xs">
+                💡 如需调整分集过滤，请前往「搜索源」→ 点击对应源的 ⚙️ 设置按钮 → 「分集标题黑名单 (正则)」
+              </p>
+            </div>
+          </div>
         </div>
         <Form
           form={form}
