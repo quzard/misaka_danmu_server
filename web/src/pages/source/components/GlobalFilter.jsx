@@ -54,7 +54,7 @@ export const GlobalFilter = () => {
 │       └── ...`}
               </pre>
               <p className="text-blue-600 dark:text-blue-400 text-xs">
-                💡 如需调整分集过滤，请前往「搜索源」→ 点击对应源的 ⚙️ 设置按钮 → 「分集标题黑名单 (正则)」
+                💡 如需调整分集过滤，请前往「搜索源」→ 「弹幕搜索源」点击对应源的 ⚙️ 设置按钮 → 「分集标题黑名单 (正则)」
               </p>
             </div>
           </div>
