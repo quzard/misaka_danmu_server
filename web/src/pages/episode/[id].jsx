@@ -329,20 +329,6 @@ export const EpisodeDetail = () => {
     },
   ]
 
-  const rowSelection = {
-    selectedRowKeys: selectedRows.map(r => r.episodeId),
-    onChange: (selectedRowKeys, selectedRows) => {
-      setSelectedRows(selectedRows)
-    },
-    onSelectAll: (selected, selectedRows, changeRows) => {
-      if (selected) {
-        setSelectedRows(episodeList)
-      } else {
-        setSelectedRows([])
-      }
-    }
-  }
-
   const keepColumns = [
     {
       title: '集数',
@@ -814,7 +800,7 @@ export const EpisodeDetail = () => {
             dataSource={episodeList}
             columns={columns}
             rowKey={'episodeId'}
-            tableProps={{ rowSelection, rowClassName: () => '' }}
+            tableProps={{ rowClassName: () => '' }}
             scroll={{ x: '100%' }}
             renderCard={(record) => {
               const isSelected = selectedRows.some(row => row.episodeId === record.episodeId);
