@@ -154,7 +154,8 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int, page: i
             Episode.episodeIndex.label("episodeIndex"),
             Episode.sourceUrl.label("sourceUrl"),
             Episode.fetchedAt.label("fetchedAt"),
-            Episode.commentCount.label("commentCount")
+            Episode.commentCount.label("commentCount"),
+            Episode.danmakuFilePath.label("danmakuFilePath")
         )
         .where(Episode.sourceId == source_id)
         .order_by(Episode.episodeIndex).offset(offset).limit(page_size)

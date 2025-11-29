@@ -1057,6 +1057,15 @@ export const EpisodeDetail = () => {
               <Input placeholder="请输入官方链接" />
             </Form.Item>
           )}
+          {isEditing && (
+            <Form.Item
+              name="danmakuFilePath"
+              label="弹幕文件路径"
+              tooltip="弹幕XML文件的存储路径，修改后会更新数据库记录（不会移动实际文件）"
+            >
+              <Input placeholder="例如: /app/config/danmaku/123/456.xml" />
+            </Form.Item>
+          )}
           <Form.Item name="episodeId" hidden>
             <Input />
           </Form.Item>
