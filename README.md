@@ -1,25 +1,31 @@
 <div align="center">
-  <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
-</div>
+<img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
+<h1 align="center" style="margin-top: 0">御坂网络弹幕服务</h1>
+<p align="center">
+<strong>自托管弹幕聚合与管理服务，兼容 dandanplay API</strong>
+</p>
 
-<h2 align="center">
-御坂网络弹幕服务
-</h2>
-
-<div align="center">
+[快速开始](https://docs.misaka10876.top/快速开始)
+|
+[客户端配置](https://docs.misaka10876.top/客户端配置)
+|
+[元数据配置](https://docs.misaka10876.top/config/元数据源配置)
+|
+[常见问题](https://docs.misaka10876.top/常见问题)
+|
+[问题反馈](https://docs.misaka10876.top/问题反馈)
 
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 ![Docker Pulls](https://img.shields.io/docker/pulls/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)
 [![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmaku)
+[![Docs](https://img.shields.io/badge/Docs-文档-blue?logo=readthedocs)](https://docs.misaka10876.top/)
 
 </div>
 
 ---
 
-
-一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
 本项目旨在通过刮削主流视频网站的弹幕，为您自己的媒体库提供一个统一、私有的弹幕API。它自带一个现代化的Web界面，方便您管理弹幕库、搜索源、API令牌和系统设置。
 
@@ -80,28 +86,6 @@
 ### 推广须知
 
 - 请不要在 ***B站*** 或中国大陆社交平台发布视频或文章宣传本项目
-
-## 📚 文档导航
-
-### 快速入门
-- **[🚀 快速开始](docs/快速开始.md)** - Docker Compose 一键部署指南
-- **[📱 客户端配置](docs/客户端配置.md)** - 播放器弹幕接口配置
-
-### 功能配置
-- **[🎬 元数据源配置](docs/元数据源配置.md)** - TMDB, TVDB, Bangumi 等 API 密钥配置
-- **[🤖 AI 功能配置](docs/AI功能配置.md)** - AI 智能匹配和识别增强配置
-- **[🔗 Webhook 配置](docs/Webhook配置.md)** - Emby/Jellyfin/Plex 自动化配置
-- **[🤖 Telegram Bot](docs/Telegram机器人.md)** - 机器人集成指南
-
-### 高级功能
-- **[🎬 弹幕功能配置](docs/弹幕功能配置.md)** - Token管理、输出控制、存储配置、后备机制等
-- **[🔧 弹幕源管理](docs/弹幕源管理.md)** - 弹幕源加载、备份与恢复
-
-### 运维与优化
-- **[⚡ MySQL 优化](docs/MySQL内存优化.md)** - 内存优化配置指南
-- **[❓ 常见问题](docs/常见问题.md)** - 故障排除与解决方案
-
----
 
 ### 贡献者
 
