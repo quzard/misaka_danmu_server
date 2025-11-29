@@ -176,6 +176,9 @@ async def update_scraper_config(
         configurable_fields = getattr(scraper_class, 'configurable_fields', {})
         for field_key in configurable_fields.keys():
             # field_key 就是配置键,例如 "gamerCookie" 或 "dandanplay_app_id"
+            # 获取字段类型信息 (label, type, tooltip)
+            field_info = configurable_fields[field_key]
+            field_type = field_info[1] if isinstance(field_info, tuple) and len(field_info) > 1 else "string"
 
             # 对于dandanplay的下划线命名字段,前端可能发送驼峰命名
             if providerName == 'dandanplay' and '_' in field_key:
@@ -184,11 +187,22 @@ async def update_scraper_config(
                 camel_key = parts[0] + ''.join(word.capitalize() for word in parts[1:])
                 # 检查payload中是否有驼峰命名的键
                 if camel_key in payload:
-                    await config_manager.setValue(field_key, payload[camel_key])
+                    value = payload[camel_key]
+                    # 布尔类型转换为字符串存储
+                    if field_type == "boolean":
+                        value = str(value).lower()
+                    await config_manager.setValue(field_key, value)
                 elif field_key in payload:
-                    await config_manager.setValue(field_key, payload[field_key])
+                    value = payload[field_key]
+                    if field_type == "boolean":
+                        value = str(value).lower()
+                    await config_manager.setValue(field_key, value)
             elif field_key in payload:
-                await config_manager.setValue(field_key, payload[field_key])
+                value = payload[field_key]
+                # 布尔类型转换为字符串存储
+                if field_type == "boolean":
+                    value = str(value).lower()
+                await config_manager.setValue(field_key, value)
 
         # 3. 处理分集黑名单字段(动态字段,每个源都有)
         # 前端发送驼峰命名: gamerEpisodeBlacklistRegex
