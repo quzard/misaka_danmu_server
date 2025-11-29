@@ -1,12 +1,9 @@
 <div align="center">
-  <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
-</div>
-
-<h2 align="center">
-御坂网络弹幕服务
-</h2>
-
-<div align="center">
+<img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
+<h1 align="center" style="margin-top: 0">御坂网络弹幕服务</h1>
+<p align="center">
+<strong>自托管弹幕聚合与管理服务，兼容 dandanplay API</strong>
+</p>
 
 [快速开始](https://docs.misaka10876.top/快速开始)
 |
@@ -25,13 +22,10 @@
 [![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmaku)
 [![Docs](https://img.shields.io/badge/Docs-文档-blue?logo=readthedocs)](https://docs.misaka10876.top/)
 
-
 </div>
 
 ---
 
-
-一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
 本项目旨在通过刮削主流视频网站的弹幕，为您自己的媒体库提供一个统一、私有的弹幕API。它自带一个现代化的Web界面，方便您管理弹幕库、搜索源、API令牌和系统设置。
 
