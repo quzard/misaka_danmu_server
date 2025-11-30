@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
 import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
@@ -136,6 +136,43 @@ const DanmakuStorage = () => {
     const defaultTemplate = selectedType === 'movie' ? '${title}/${episodeId}' : '${animeId}/${episodeId}';
     setSelectedTemplate(defaultTemplate);
   }, [selectedType]);
+
+  // 监听自定义模板变化，自动预览（防抖）
+  const templatePreviewTimerRef = useRef(null);
+  useEffect(() => {
+    // 只在模板 Modal 打开且是自定义模式时才触发预览
+    if (!templateModalVisible || templateTarget !== 'custom' || !customTemplate) {
+      return;
+    }
+
+    // 清除之前的定时器
+    if (templatePreviewTimerRef.current) {
+      clearTimeout(templatePreviewTimerRef.current);
+    }
+
+    // 防抖：300ms 后调用预览 API
+    templatePreviewTimerRef.current = setTimeout(async () => {
+      setTemplatePreviewLoading(true);
+      try {
+        const response = await previewDanmakuTemplate({
+          animeIds: selectedRowKeys,
+          templateType: 'custom',
+          customTemplate: customTemplate,
+        });
+        setTemplatePreviewData(response.data);
+      } catch (error) {
+        message.error('预览失败: ' + (error.message || '未知错误'));
+      } finally {
+        setTemplatePreviewLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (templatePreviewTimerRef.current) {
+        clearTimeout(templatePreviewTimerRef.current);
+      }
+    };
+  }, [customTemplate, templateTarget, templateModalVisible, selectedRowKeys]);
 
   const loadConfig = async () => {
     try {
