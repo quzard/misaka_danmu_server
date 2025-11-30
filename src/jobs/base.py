@@ -19,7 +19,7 @@ class BaseJob(ABC):
     description: str = "" # 任务的详细描述，用于前端显示
     is_system_task: bool = False  # 新增：标识是否为系统内置任务
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager=None):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager=None, ai_matcher_manager=None):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
@@ -27,6 +27,7 @@ class BaseJob(ABC):
         self.metadata_manager = metadata_manager
         self.config_manager = config_manager
         self.title_recognition_manager = title_recognition_manager
+        self.ai_matcher_manager = ai_matcher_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
