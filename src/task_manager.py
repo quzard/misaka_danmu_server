@@ -255,6 +255,14 @@ class TaskManager:
                 # 重新放回队列
                 for task_id, task in tasks_to_resume:
                     self.logger.info(f"任务 '{task.title}' (ID: {task_id}) 暂停时间已到，重新放回 {task.queue_type} 队列")
+
+                    # 更新数据库状态为排队中，让前端能看到任务已恢复
+                    try:
+                        async with self._session_factory() as session:
+                            await crud.update_task_status(session, task_id, TaskStatus.PENDING)
+                    except Exception as e:
+                        self.logger.warning(f"更新任务 '{task.title}' 状态失败: {e}")
+
                     if task.queue_type == "download":
                         await self._download_queue.put(task)
                     elif task.queue_type == "management":
