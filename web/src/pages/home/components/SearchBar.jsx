@@ -152,7 +152,12 @@ export const SearchBar = () => {
               size="large"
               enterButton="搜索"
               loading={loading}
-              onSearch={() => form.submit()}
+              onSearch={value => {
+                if (value) {
+                  form.setFieldValue('keyword', value)
+                  form.submit()
+                }
+              }}
             />
           </Form.Item>
         </div>

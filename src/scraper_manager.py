@@ -28,6 +28,7 @@ class ScraperManager:
         self._session_factory = session_factory
         self._domain_map: Dict[str, str] = {}
         self._search_locks: set[str] = set()
+        self._webhook_search_locks: set[str] = set()  # Webhook 搜索锁（基于 animeTitle-season）
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.metadata_manager = metadata_manager
@@ -48,6 +49,22 @@ class ScraperManager:
         async with self._lock:
             self._search_locks.discard(api_key)
             logging.getLogger(__name__).info(f"Search lock released for API key '{api_key[:8]}...'.")
+
+    async def acquire_webhook_search_lock(self, lock_key: str) -> bool:
+        """获取 Webhook 搜索锁。基于 animeTitle-season 的锁，防止同一作品同季的多个请求同时搜索。"""
+        async with self._lock:
+            if lock_key in self._webhook_search_locks:
+                logging.getLogger(__name__).info(f"Webhook 搜索锁已被占用: '{lock_key}'，跳过重复搜索。")
+                return False
+            self._webhook_search_locks.add(lock_key)
+            logging.getLogger(__name__).info(f"Webhook 搜索锁已获取: '{lock_key}'。")
+            return True
+
+    async def release_webhook_search_lock(self, lock_key: str):
+        """释放 Webhook 搜索锁。"""
+        async with self._lock:
+            self._webhook_search_locks.discard(lock_key)
+            logging.getLogger(__name__).info(f"Webhook 搜索锁已释放: '{lock_key}'。")
 
 
     
