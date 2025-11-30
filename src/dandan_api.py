@@ -1737,7 +1737,7 @@ async def search_anime_for_dandan(
             search_title_for_fallback = f"{title_to_search} S{season_to_search:02d}"
 
         # 创建一个临时的ai_matcher_manager用于传递（实际会在协程工厂中重新创建）
-        ai_matcher_manager_local = AIMatcherManager(session_factory=session.session_factory, config_manager=config_manager)
+        ai_matcher_manager_local = AIMatcherManager(config_manager=config_manager)
 
         return await _handle_fallback_search(
             search_title_for_fallback, token, session, scraper_manager,
