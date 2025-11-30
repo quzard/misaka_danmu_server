@@ -1532,10 +1532,19 @@ export const EpisodeDetail = () => {
             </div>
           )}
           {/* 预览和应用按钮 */}
-          <div className="flex gap-2">
-            <Button onClick={handlePreviewRules} disabled={renameRules.length === 0}>👁 预览效果</Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">👁 预览效果</span>
+              <Switch
+                checked={isPreviewMode}
+                onChange={(checked) => {
+                  if (checked) handlePreviewRules()
+                  else { setIsPreviewMode(false); setPreviewData({}) }
+                }}
+                disabled={renameRules.length === 0}
+              />
+            </div>
             <Button type="primary" onClick={handleApplyBatchRename} disabled={renameRules.length === 0}>✅ 应用规则</Button>
-            {isPreviewMode && <Button onClick={() => { setIsPreviewMode(false); setPreviewData({}) }}>退出预览</Button>}
           </div>
         </div>
 
