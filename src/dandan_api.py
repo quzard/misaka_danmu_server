@@ -964,7 +964,7 @@ async def _handle_fallback_search(
         """后备搜索任务的协程工厂"""
         try:
             # 获取AI匹配器
-            ai_matcher_manager_local = AIMatcherManager(session_factory=session_inner.session_factory, config_manager=config_manager)
+            ai_matcher_manager_local = AIMatcherManager(config_manager=config_manager)
 
             # 执行搜索任务
             await _execute_fallback_search_task(
