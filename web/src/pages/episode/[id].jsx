@@ -94,11 +94,12 @@ export const EpisodeDetail = () => {
   const [batchIndexMode, setBatchIndexMode] = useState('none') // none, offset, reorder
   const [batchOffsetValue, setBatchOffsetValue] = useState(0)
   const [batchReorderStart, setBatchReorderStart] = useState(1) // 按顺序重排的起始集数
-  const [batchNameMode, setBatchNameMode] = useState('none') // none, prefix, regex
-  const [batchNamePrefix, setBatchNamePrefix] = useState('')
-  const [batchNameSuffix, setBatchNameSuffix] = useState('')
-  const [batchRegexPattern, setBatchRegexPattern] = useState('')
-  const [batchRegexReplace, setBatchRegexReplace] = useState('')
+  // ReNamer风格多规则批量重命名系统
+  const [renameRules, setRenameRules] = useState([])
+  const [selectedRuleType, setSelectedRuleType] = useState('replace')
+  const [ruleParams, setRuleParams] = useState({})
+  const [isPreviewMode, setIsPreviewMode] = useState(false)
+  const [previewData, setPreviewData] = useState({})
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -364,6 +365,8 @@ export const EpisodeDetail = () => {
       transition,
       opacity: isDragging ? 0.5 : 1,
     }
+    const previewTitle = previewData[data.episodeId]
+    const hasPreviewChange = isPreviewMode && previewTitle && previewTitle !== data.title
     return (
       <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
         <td className="p-2 border cursor-move" {...attributes} {...listeners}>
@@ -371,13 +374,21 @@ export const EpisodeDetail = () => {
         </td>
         <td className="p-2 border text-xs">{data.episodeId}</td>
         <td className="p-2 border">
-          <Input
-            size="small"
-            value={data.title}
-            onChange={(e) => {
-              setBatchEditData(prev => prev.map((item, i) => i === index ? { ...item, title: e.target.value } : item))
-            }}
-          />
+          {hasPreviewChange ? (
+            <div className="text-sm">
+              <span className="text-gray-400 line-through">{data.title}</span>
+              <span className="mx-1 text-blue-500">→</span>
+              <span className="text-green-600 font-medium">{previewTitle}</span>
+            </div>
+          ) : (
+            <Input
+              size="small"
+              value={data.title}
+              onChange={(e) => {
+                setBatchEditData(prev => prev.map((item, i) => i === index ? { ...item, title: e.target.value } : item))
+              }}
+            />
+          )}
         </td>
         <td className="p-2 border">
           <InputNumber
@@ -417,11 +428,12 @@ export const EpisodeDetail = () => {
     setBatchIndexMode('none')
     setBatchOffsetValue(0)
     setBatchReorderStart(1)
-    setBatchNameMode('none')
-    setBatchNamePrefix('')
-    setBatchNameSuffix('')
-    setBatchRegexPattern('')
-    setBatchRegexReplace('')
+    // 重置多规则系统
+    setRenameRules([])
+    setSelectedRuleType('replace')
+    setRuleParams({})
+    setIsPreviewMode(false)
+    setPreviewData({})
     setIsBatchEditModalOpen(true)
   }
 
@@ -443,23 +455,125 @@ export const EpisodeDetail = () => {
     })))
   }
 
-  // 应用批量命名（预览）
-  const handleApplyBatchRename = () => {
-    if (batchNameMode === 'none') return
-    setBatchEditData(prev => prev.map(item => {
-      let newTitle = item.title
-      if (batchNameMode === 'prefix') {
-        newTitle = batchNamePrefix + item.title + batchNameSuffix
-      } else if (batchNameMode === 'regex') {
-        try {
-          newTitle = item.title.replace(new RegExp(batchRegexPattern, 'g'), batchRegexReplace)
-        } catch (e) {
-          messageApi.error('正则表达式错误: ' + e.message)
-          return item
-        }
+  // 规则类型配置
+  const ruleTypeOptions = [
+    { value: 'replace', label: '替换' },
+    { value: 'regex', label: '正则' },
+    { value: 'insert', label: '插入' },
+    { value: 'delete', label: '删除' },
+    { value: 'serialize', label: '序列化' },
+    { value: 'case', label: '大小写' },
+    { value: 'strip', label: '清理' },
+  ]
+
+  // 应用单条规则到标题
+  const applyRule = (title, rule, index) => {
+    if (!rule.enabled) return title
+    try {
+      switch (rule.type) {
+        case 'replace':
+          return rule.params.caseSensitive
+            ? title.split(rule.params.search).join(rule.params.replace || '')
+            : title.replace(new RegExp(rule.params.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), rule.params.replace || '')
+        case 'regex':
+          return title.replace(new RegExp(rule.params.pattern, 'g'), rule.params.replace || '')
+        case 'insert':
+          if (rule.params.position === 'start') return (rule.params.text || '') + title
+          if (rule.params.position === 'end') return title + (rule.params.text || '')
+          const pos = parseInt(rule.params.index) || 0
+          return title.slice(0, pos) + (rule.params.text || '') + title.slice(pos)
+        case 'delete':
+          if (rule.params.mode === 'text') {
+            return rule.params.caseSensitive
+              ? title.split(rule.params.text).join('')
+              : title.replace(new RegExp(rule.params.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+          }
+          const from = parseInt(rule.params.from) || 0
+          const count = parseInt(rule.params.count) || 0
+          return title.slice(0, from) + title.slice(from + count)
+        case 'serialize':
+          const start = parseInt(rule.params.start) || 1
+          const step = parseInt(rule.params.step) || 1
+          const digits = parseInt(rule.params.digits) || 2
+          const num = String(start + index * step).padStart(digits, '0')
+          const serialized = (rule.params.prefix || '') + num + (rule.params.suffix || '')
+          if (rule.params.position === 'start') return serialized + title
+          if (rule.params.position === 'end') return title + serialized
+          return serialized // 替换原标题
+        case 'case':
+          if (rule.params.mode === 'upper') return title.toUpperCase()
+          if (rule.params.mode === 'lower') return title.toLowerCase()
+          if (rule.params.mode === 'title') return title.charAt(0).toUpperCase() + title.slice(1).toLowerCase()
+          return title
+        case 'strip':
+          let result = title
+          if (rule.params.trimSpaces) result = result.trim()
+          if (rule.params.trimDuplicateSpaces) result = result.replace(/\s+/g, ' ')
+          if (rule.params.chars) result = result.split(rule.params.chars).join('')
+          return result
+        default:
+          return title
       }
-      return { ...item, title: newTitle }
-    }))
+    } catch (e) {
+      messageApi.error(`规则 "${ruleTypeOptions.find(r => r.value === rule.type)?.label}" 执行错误: ${e.message}`)
+      return title
+    }
+  }
+
+  // 应用所有规则到标题
+  const applyAllRules = (title, index) => {
+    return renameRules.reduce((t, rule) => applyRule(t, rule, index), title)
+  }
+
+  // 添加规则
+  const handleAddRule = () => {
+    const newRule = {
+      id: Date.now().toString(),
+      type: selectedRuleType,
+      enabled: true,
+      params: { ...ruleParams }
+    }
+    setRenameRules(prev => [...prev, newRule])
+    setRuleParams({})
+  }
+
+  // 删除规则
+  const handleDeleteRule = (ruleId) => {
+    setRenameRules(prev => prev.filter(r => r.id !== ruleId))
+  }
+
+  // 切换规则启用状态
+  const handleToggleRule = (ruleId) => {
+    setRenameRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: !r.enabled } : r))
+  }
+
+  // 预览效果
+  const handlePreviewRules = () => {
+    if (renameRules.length === 0) {
+      messageApi.warning('请先添加规则')
+      return
+    }
+    const preview = {}
+    batchEditData.forEach((item, index) => {
+      preview[item.episodeId] = applyAllRules(item.title, index)
+    })
+    setPreviewData(preview)
+    setIsPreviewMode(true)
+  }
+
+  // 应用批量命名规则
+  const handleApplyBatchRename = () => {
+    if (renameRules.length === 0) {
+      messageApi.warning('请先添加规则')
+      return
+    }
+    setBatchEditData(prev => prev.map((item, index) => ({
+      ...item,
+      title: applyAllRules(item.title, index)
+    })))
+    setIsPreviewMode(false)
+    setPreviewData({})
+    messageApi.success('规则已应用')
   }
 
   // 提交批量编辑
@@ -1331,57 +1445,97 @@ export const EpisodeDetail = () => {
           </div>
         </div>
 
-        {/* 批量命名 */}
+        {/* 批量命名规则 - ReNamer风格 */}
         <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
-          <div className="font-medium mb-2">📝 批量命名</div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="font-medium mb-2">📝 批量命名规则</div>
+          {/* 添加规则区域 */}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="text-gray-500 text-sm">添加规则:</span>
             <Select
-              value={batchNameMode}
-              onChange={setBatchNameMode}
-              style={{ width: 120 }}
-              options={[
-                { value: 'none', label: '不修改' },
-                { value: 'prefix', label: '前后缀' },
-                { value: 'regex', label: '正则替换' },
-              ]}
+              value={selectedRuleType}
+              onChange={(v) => { setSelectedRuleType(v); setRuleParams({}) }}
+              style={{ width: 100 }}
+              options={ruleTypeOptions}
             />
-            {batchNameMode === 'prefix' && (
+            {/* 替换规则参数 */}
+            {selectedRuleType === 'replace' && (
               <>
-                <Input
-                  value={batchNamePrefix}
-                  onChange={(e) => setBatchNamePrefix(e.target.value)}
-                  placeholder="前缀"
-                  style={{ width: 100 }}
-                />
-                <span>原标题</span>
-                <Input
-                  value={batchNameSuffix}
-                  onChange={(e) => setBatchNameSuffix(e.target.value)}
-                  placeholder="后缀"
-                  style={{ width: 100 }}
-                />
-              </>
-            )}
-            {batchNameMode === 'regex' && (
-              <>
-                <Input
-                  value={batchRegexPattern}
-                  onChange={(e) => setBatchRegexPattern(e.target.value)}
-                  placeholder="正则表达式"
-                  style={{ width: 150 }}
-                />
+                <Input value={ruleParams.search || ''} onChange={(e) => setRuleParams(p => ({ ...p, search: e.target.value }))} placeholder="查找" style={{ width: 120 }} />
                 <span>→</span>
-                <Input
-                  value={batchRegexReplace}
-                  onChange={(e) => setBatchRegexReplace(e.target.value)}
-                  placeholder="替换为"
-                  style={{ width: 150 }}
-                />
+                <Input value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
               </>
             )}
-            <Button onClick={handleApplyBatchRename} disabled={batchNameMode === 'none'}>
-              应用命名
-            </Button>
+            {/* 正则规则参数 */}
+            {selectedRuleType === 'regex' && (
+              <>
+                <Input value={ruleParams.pattern || ''} onChange={(e) => setRuleParams(p => ({ ...p, pattern: e.target.value }))} placeholder="正则表达式" style={{ width: 150 }} />
+                <span>→</span>
+                <Input value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
+              </>
+            )}
+            {/* 插入规则参数 */}
+            {selectedRuleType === 'insert' && (
+              <>
+                <Input value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
+                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }]} />
+              </>
+            )}
+            {/* 删除规则参数 */}
+            {selectedRuleType === 'delete' && (
+              <Input value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value, mode: 'text' }))} placeholder="要删除的文本" style={{ width: 150 }} />
+            )}
+            {/* 序列化规则参数 */}
+            {selectedRuleType === 'serialize' && (
+              <>
+                <Input value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder="前缀" style={{ width: 60 }} />
+                <span className="text-gray-400">{'{序号}'}</span>
+                <Input value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder="后缀" style={{ width: 60 }} />
+                <InputNumber value={ruleParams.start || 1} onChange={(v) => setRuleParams(p => ({ ...p, start: v }))} min={0} placeholder="起始" style={{ width: 70 }} />
+                <InputNumber value={ruleParams.digits || 2} onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))} min={1} max={5} placeholder="位数" style={{ width: 70 }} />
+                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }, { value: 'replace', label: '替换' }]} />
+              </>
+            )}
+            {/* 大小写规则参数 */}
+            {selectedRuleType === 'case' && (
+              <Select value={ruleParams.mode || 'upper'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 120 }} options={[{ value: 'upper', label: '全大写' }, { value: 'lower', label: '全小写' }, { value: 'title', label: '首字母大写' }]} />
+            )}
+            {/* 清理规则参数 */}
+            {selectedRuleType === 'strip' && (
+              <>
+                <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={ruleParams.trimSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimSpaces: e.target.checked }))} />首尾空格</label>
+                <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={ruleParams.trimDuplicateSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimDuplicateSpaces: e.target.checked }))} />重复空格</label>
+                <Input value={ruleParams.chars || ''} onChange={(e) => setRuleParams(p => ({ ...p, chars: e.target.value }))} placeholder="删除字符" style={{ width: 100 }} />
+              </>
+            )}
+            <Button type="primary" onClick={handleAddRule}>+ 添加</Button>
+          </div>
+          {/* 已添加的规则列表 */}
+          {renameRules.length > 0 && (
+            <div className="border rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
+              {renameRules.map((rule, idx) => (
+                <div key={rule.id} className="flex items-center gap-2 py-1 border-b last:border-b-0">
+                  <input type="checkbox" checked={rule.enabled} onChange={() => handleToggleRule(rule.id)} />
+                  <span className="text-gray-500 text-xs">{idx + 1}.</span>
+                  <Tag color={rule.enabled ? 'blue' : 'default'}>{ruleTypeOptions.find(r => r.value === rule.type)?.label}</Tag>
+                  <span className="text-sm flex-1 truncate">
+                    {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
+                    {rule.type === 'regex' && `/${rule.params.pattern}/ → "${rule.params.replace || ''}"`}
+                    {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? '开头' : '结尾'})`}
+                    {rule.type === 'delete' && `删除 "${rule.params.text}"`}
+                    {rule.type === 'serialize' && `${rule.params.prefix || ''}{${String(rule.params.start || 1).padStart(rule.params.digits || 2, '0')}}${rule.params.suffix || ''}`}
+                    {rule.type === 'case' && (rule.params.mode === 'upper' ? '全大写' : rule.params.mode === 'lower' ? '全小写' : '首字母大写')}
+                    {rule.type === 'strip' && '清理空格/字符'}
+                  </span>
+                  <Button type="text" danger size="small" onClick={() => handleDeleteRule(rule.id)}>🗑</Button>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* 预览和应用按钮 */}
+          <div className="flex gap-2">
+            <Button onClick={handlePreviewRules} disabled={renameRules.length === 0}>👁 预览效果</Button>
+            <Button type="primary" onClick={handleApplyBatchRename} disabled={renameRules.length === 0}>✅ 应用规则</Button>
+            {isPreviewMode && <Button onClick={() => { setIsPreviewMode(false); setPreviewData({}) }}>退出预览</Button>}
           </div>
         </div>
 
