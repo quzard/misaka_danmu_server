@@ -273,18 +273,27 @@ async def search_anime_provider(
             # 只有当用户明确指定季度时，我们才进行更严格的过滤。
             normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
             filtered_results = []
+            excluded_results = []
             for item in all_results:
                 normalized_item_title = normalize_for_filtering(item.title)
                 if not normalized_item_title: continue
-                
+
                 # 检查搜索结果是否与任何一个别名匹配
                 # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
                 # 修正：使用 partial_ratio 来更好地匹配续作和外传 (e.g., "刀剑神域" vs "刀剑神域外传")
                 # 85 的阈值可以在保留强相关的同时，过滤掉大部分无关结果。
                 if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
                     filtered_results.append(item)
+                else:
+                    excluded_results.append(item)
 
-            logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
+            # 聚合打印过滤结果
+            filter_log_lines = [f"别名过滤结果 (保留 {len(filtered_results)}/{len(all_results)}):"]
+            for item in excluded_results:
+                filter_log_lines.append(f"  - 已过滤: {item.title}")
+            for item in filtered_results:
+                filter_log_lines.append(f"  - {item.title}")
+            logger.info("\n".join(filter_log_lines))
             timer.step_end(details=f"保留{len(filtered_results)}个")
             results = filtered_results
 
