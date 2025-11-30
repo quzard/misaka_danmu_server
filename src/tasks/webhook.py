@@ -6,6 +6,7 @@ from typing import Callable, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from thefuzz import fuzz
+from fastapi import HTTPException
 
 from .. import crud, models, orm_models
 from ..orm_models import AnimeSource as AS
@@ -65,6 +66,16 @@ async def run_webhook_tasks_directly_manual(
             await session.delete(task)
             await session.commit()  # 为每个成功提交的任务单独提交删除操作
             submitted_count += 1
+        except HTTPException as e:
+            if e.status_code == 409:
+                # 409 表示已有相同任务在队列中，视为成功并删除延迟任务
+                logger.info(f"手动执行 Webhook 任务 (ID: {task.id}) 时发现相同任务已在队列中，跳过。")
+                await session.delete(task)
+                await session.commit()
+                submitted_count += 1
+            else:
+                logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
+                await session.rollback()
         except Exception as e:
             logger.error(f"手动执行 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)
             await session.rollback()
@@ -105,6 +116,14 @@ async def webhook_search_and_dispatch_task(
     timer = SearchTimer(SEARCH_TYPE_WEBHOOK, f"{animeTitle} S{season:02d}E{currentEpisodeIndex:02d}", logger)
     timer.start()
 
+    # 🔒 Webhook 搜索锁：防止同一作品同季的多个请求同时搜索导致重复任务
+    webhook_lock_key = f"webhook-{animeTitle}-S{season}"
+    lock_acquired = await manager.acquire_webhook_search_lock(webhook_lock_key)
+    if not lock_acquired:
+        # 已有相同作品的搜索任务在运行，直接返回成功（任务已在处理中）
+        logger.info(f"Webhook 任务: '{animeTitle}' S{season:02d} 已有搜索任务在运行，跳过重复请求。")
+        raise TaskSuccess(f"相同作品已有搜索任务在处理中，无需重复提交。")
+
     try:
         logger.info(f"Webhook 任务: 开始为 '{animeTitle}' (S{season:02d}E{currentEpisodeIndex:02d}) 查找最佳源...")
         await progress_callback(5, "正在检查已收藏的源...")
@@ -141,7 +160,14 @@ async def webhook_search_and_dispatch_task(
                     title_recognition_manager=title_recognition_manager,
                     selectedEpisodes=selectedEpisodes,
                 )
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                try:
+                    await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                except HTTPException as e:
+                    if e.status_code == 409:
+                        # 409 表示已有相同任务在队列中，视为成功
+                        logger.info(f"Webhook 任务: 收藏源任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
+                        raise TaskSuccess(f"相同任务已在处理中，无需重复提交。")
+                    raise
 
                 timer.step_end(details="找到收藏源")
                 timer.finish()  # 打印计时报告
@@ -448,7 +474,13 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
             )
-            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            try:
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            except HTTPException as e:
+                if e.status_code == 409:
+                    logger.info(f"Webhook 任务: AI匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
+                    raise TaskSuccess(f"相同任务已在处理中，无需重复提交。")
+                raise
 
             timer.step_end(details="AI匹配成功")
             timer.finish()  # 打印计时报告
@@ -547,7 +579,13 @@ async def webhook_search_and_dispatch_task(
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
             )
-            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            try:
+                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            except HTTPException as e:
+                if e.status_code == 409:
+                    logger.info(f"Webhook 任务: 传统匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
+                    raise TaskSuccess(f"相同任务已在处理中，无需重复提交。")
+                raise
 
             timer.step_end(details="传统匹配成功")
             timer.finish()  # 打印计时报告
@@ -634,7 +672,13 @@ async def webhook_search_and_dispatch_task(
             title_recognition_manager=title_recognition_manager,
             selectedEpisodes=selectedEpisodes,
         )
-        await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        try:
+            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        except HTTPException as e:
+            if e.status_code == 409:
+                logger.info(f"Webhook 任务: 顺延匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
+                raise TaskSuccess(f"相同任务已在处理中，无需重复提交。")
+            raise
 
         timer.step_end(details="顺延匹配成功")
         timer.finish()  # 打印计时报告
@@ -650,4 +694,7 @@ async def webhook_search_and_dispatch_task(
         timer.finish()  # 打印计时报告（即使失败也打印）
         logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise
+    finally:
+        # 🔓 释放 Webhook 搜索锁
+        await manager.release_webhook_search_lock(webhook_lock_key)
 
