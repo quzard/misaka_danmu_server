@@ -39,6 +39,31 @@ SAFE_TYPE_EXPANSIONS = {
     'serial': ['bigserial'],
 }
 
+# 等效类型映射（这些类型在功能上是等效的，不应发出警告）
+# 使用 frozenset 表示一组等效的类型
+EQUIVALENT_TYPE_GROUPS = [
+    frozenset({'int', 'integer'}),  # MySQL INT 和 INTEGER 是同义词
+    frozenset({'tinyint', 'boolean', 'bool'}),  # MySQL 用 TINYINT(1) 表示布尔值
+    frozenset({'datetime', 'timestamp'}),  # 在应用层面通常等效处理
+    frozenset({'text', 'mediumtext'}),  # TEXT 变体，通常可互换
+    frozenset({'double', 'double precision', 'float8'}),  # 浮点数变体
+]
+
+
+def _are_types_equivalent(type1: str, type2: str) -> bool:
+    """检查两个类型名是否在功能上等效"""
+    type1 = type1.lower()
+    type2 = type2.lower()
+
+    if type1 == type2:
+        return True
+
+    for group in EQUIVALENT_TYPE_GROUPS:
+        if type1 in group and type2 in group:
+            return True
+
+    return False
+
 
 async def _get_db_columns(conn: AsyncConnection, db_type: str, table_name: str) -> Dict[str, dict]:
     """获取数据库表的实际字段信息"""
@@ -215,8 +240,11 @@ async def sync_database_schema(conn: AsyncConnection, db_type: str):
             db_type_name = db_col_info['data_type']
             db_length = db_col_info['max_length']
 
-            # 检查是否需要类型扩展
-            if db_type_name != model_type or (model_length and db_length and model_length > db_length):
+            # 检查类型是否等效（如 int/integer, tinyint/boolean 等）
+            types_equivalent = _are_types_equivalent(db_type_name, model_type)
+
+            # 检查是否需要类型扩展（仅当类型不等效时才检查）
+            if not types_equivalent or (model_length and db_length and model_length > db_length):
                 if _is_safe_type_expansion(db_type_name, model_type, db_length, model_length):
                     try:
                         # 构建新类型字符串
@@ -229,8 +257,8 @@ async def sync_database_schema(conn: AsyncConnection, db_type: str):
                         logger.warning(f"表 {table_name}: 字段 {col_name} 类型扩展失败: {e}")
                         stats['warnings'] += 1
                 else:
-                    # 类型不匹配且不是安全扩展，发出警告
-                    if db_type_name != model_type:
+                    # 类型不匹配且不是安全扩展，发出警告（跳过等效类型）
+                    if not types_equivalent:
                         logger.warning(
                             f"表 {table_name}: 字段 {col_name} 类型不匹配 "
                             f"(数据库: {db_type_name}, 模型: {model_type})，跳过自动变更，请手动处理"
