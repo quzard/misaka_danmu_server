@@ -487,6 +487,7 @@ async def preview_apply_template(
             try:
                 season_val = anime.season or 1
                 episode_val = episode.episodeIndex or 1
+                year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
@@ -495,6 +496,7 @@ async def preview_apply_template(
                 # 再处理不带格式的变量（不补零）
                 relative_path = relative_path.replace("${season}", str(season_val))
                 relative_path = relative_path.replace("${episode}", str(episode_val))
+                relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
 
@@ -611,6 +613,7 @@ async def apply_danmaku_template(
             try:
                 season_val = anime.season or 1
                 episode_val = episode.episodeIndex or 1
+                year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
@@ -619,6 +622,7 @@ async def apply_danmaku_template(
                 # 再处理不带格式的变量（不补零）
                 relative_path = relative_path.replace("${season}", str(season_val))
                 relative_path = relative_path.replace("${episode}", str(episode_val))
+                relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
 

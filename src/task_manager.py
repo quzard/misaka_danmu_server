@@ -71,6 +71,23 @@ class TaskManager:
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
+        # 任务恢复所需的依赖，通过 set_recovery_dependencies 方法注入
+        self._recovery_dependencies: Optional[Dict[str, Any]] = None
+
+    def set_recovery_dependencies(self, dependencies: Dict[str, Any]):
+        """设置任务恢复所需的依赖
+
+        Args:
+            dependencies: 包含以下键的字典：
+                - scraper_manager: ScraperManager 实例
+                - rate_limiter: RateLimiter 实例
+                - metadata_manager: MetadataSourceManager 实例
+                - ai_matcher_manager: AIMatcherManager 实例
+                - title_recognition_manager: TitleRecognitionManager 实例
+        """
+        self._recovery_dependencies = dependencies
+        self.logger.info("任务恢复依赖已设置")
+
     def start(self):
         """启动后台工作协程来处理任务队列。"""
         if self._download_worker_task is None:
@@ -330,9 +347,14 @@ class TaskManager:
         task_id = str(uuid4())
         task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters, queue_type=queue_type)
 
+        # 将任务参数序列化为JSON字符串，用于重启后恢复任务
+        task_parameters_json = json.dumps(task_parameters, ensure_ascii=False) if task_parameters else None
+
         async with self._session_factory() as session:
             await crud.create_task_in_history(
-                session, task_id, title, TaskStatus.PENDING, "等待执行...", scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type
+                session, task_id, title, TaskStatus.PENDING, "等待执行...",
+                scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type,
+                task_type=task_type, task_parameters=task_parameters_json
             )
 
         if run_immediately:
@@ -549,70 +571,193 @@ class TaskManager:
         return False
 
     async def _handle_interrupted_tasks(self):
-        """处理服务重启时中断的任务"""
+        """处理服务重启时中断的任务（包括运行中和排队中的任务）"""
         try:
             async with self._session_factory() as session:
-                # 获取所有运行中的任务状态
+                # 1. 处理运行中的任务（这些任务有 TaskStateCache 记录）
                 running_tasks = await crud.get_all_running_task_states(session)
 
                 if running_tasks:
-                    self.logger.info(f"发现 {len(running_tasks)} 个中断的任务，正在处理...")
-
-                    # 尝试恢复任务或标记为失败
+                    self.logger.info(f"发现 {len(running_tasks)} 个运行中被中断的任务，正在处理...")
                     for task_info in running_tasks:
-                        await self._try_recover_task(task_info)
-
-                    # 清理所有中断的任务状态
+                        await self._try_recover_task(task_info, is_running=True)
+                    # 将运行中的任务标记为失败
                     await crud.mark_interrupted_tasks_as_failed(session)
-                    self.logger.info("已处理所有中断的任务")
-                else:
-                    self.logger.info("没有发现中断的任务")
+                    self.logger.info("已处理所有运行中被中断的任务")
+
+                # 2. 处理排队中的任务（这些任务直接从 TaskHistory 表恢复）
+                pending_tasks = await crud.get_pending_recoverable_tasks(session)
+
+                if pending_tasks:
+                    self.logger.info(f"发现 {len(pending_tasks)} 个排队中的任务，正在尝试恢复...")
+                    recovered_count = 0
+                    failed_count = 0
+
+                    for task_info in pending_tasks:
+                        if await self._try_recover_task(task_info, is_running=False):
+                            recovered_count += 1
+                        else:
+                            failed_count += 1
+                            # 将无法恢复的任务标记为失败
+                            await crud.update_task_in_history(
+                                session, task_info["taskId"], "失败",
+                                description="因服务重启且无法恢复而取消"
+                            )
+
+                    self.logger.info(f"排队中的任务处理完成: {recovered_count} 个已恢复, {failed_count} 个无法恢复")
+
+                if not running_tasks and not pending_tasks:
+                    self.logger.info("没有发现需要处理的中断任务")
 
         except Exception as e:
             self.logger.error(f"处理中断任务时发生错误: {e}", exc_info=True)
 
-    async def _try_recover_task(self, task_info: Dict):
-        """尝试恢复单个任务，如果无法恢复则记录日志"""
+    async def _try_recover_task(self, task_info: Dict, is_running: bool = True) -> bool:
+        """尝试恢复单个任务
+
+        Args:
+            task_info: 任务信息字典
+            is_running: True表示是运行中被中断的任务，False表示是排队中的任务
+
+        Returns:
+            bool: 恢复成功返回True，失败返回False
+        """
         task_id = task_info["taskId"]
-        task_type = task_info["taskType"]
-        task_title = task_info["taskTitle"]
+        task_type = task_info.get("taskType")
+        task_title = task_info.get("taskTitle", "未知任务")
+        unique_key = task_info.get("uniqueKey")
+        queue_type = task_info.get("queueType", "download")
+
+        # 如果没有任务类型或参数，无法恢复
+        if not task_type or not task_info.get("taskParameters"):
+            self.logger.warning(f"任务 '{task_title}' (ID: {task_id}) 缺少恢复所需信息，无法恢复")
+            return False
 
         try:
             # 解析任务参数
-            task_parameters = json.loads(task_info["taskParameters"])
+            task_parameters = json.loads(task_info["taskParameters"]) if isinstance(task_info["taskParameters"], str) else task_info["taskParameters"]
 
-            # 根据任务类型尝试恢复
-            if task_type == "generic_import":
-                await self._recover_generic_import_task(task_id, task_title, task_parameters)
-            elif task_type == "match_fallback":
-                await self._recover_match_fallback_task(task_id, task_title, task_parameters)
-            else:
-                self.logger.warning(f"未知的任务类型 '{task_type}'，无法恢复任务 '{task_title}' (ID: {task_id})")
+            # 检查是否有恢复依赖
+            if not self._recovery_dependencies:
+                self.logger.warning(f"任务恢复依赖未设置，无法恢复任务 '{task_title}' (ID: {task_id})")
+                return False
 
+            # 对于运行中的任务，只记录日志（可能已部分完成，不安全重启）
+            if is_running:
+                self.logger.info(f"运行中的任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，类型: {task_type}")
+                return False
+
+            # 对于排队中的任务，尝试重建协程工厂并重新提交
+            coro_factory = await self._rebuild_coro_factory(task_type, task_parameters)
+            if not coro_factory:
+                self.logger.warning(f"无法为任务类型 '{task_type}' 重建协程工厂，任务 '{task_title}' (ID: {task_id}) 恢复失败")
+                return False
+
+            # 重新提交任务到队列（使用新的任务ID，保留原有标题）
+            new_task_id, _ = await self.submit_task(
+                coro_factory,
+                task_title,
+                unique_key=unique_key,
+                task_type=task_type,
+                task_parameters=task_parameters,
+                queue_type=queue_type
+            )
+            self.logger.info(f"成功恢复任务 '{task_title}'，新任务ID: {new_task_id}")
+            return True
+
+        except HTTPException as e:
+            if e.status_code == 409:
+                # 任务已存在，视为恢复成功
+                self.logger.info(f"任务 '{task_title}' 已在队列中，跳过恢复")
+                return True
+            self.logger.error(f"尝试恢复任务 '{task_title}' (ID: {task_id}) 时发生HTTP错误: {e.detail}")
+            return False
         except Exception as e:
             self.logger.error(f"尝试恢复任务 '{task_title}' (ID: {task_id}) 时发生错误: {e}", exc_info=True)
+            return False
 
-    async def _recover_generic_import_task(self, task_id: str, task_title: str, task_parameters: Dict):
-        """恢复通用导入任务"""
+    async def _rebuild_coro_factory(self, task_type: str, task_parameters: Dict) -> Optional[Callable]:
+        """根据任务类型和参数重建协程工厂
+
+        Args:
+            task_type: 任务类型
+            task_parameters: 任务参数
+
+        Returns:
+            协程工厂函数，如果无法重建则返回None
+        """
+        if not self._recovery_dependencies:
+            return None
+
+        deps = self._recovery_dependencies
+        scraper_manager = deps.get("scraper_manager")
+        rate_limiter = deps.get("rate_limiter")
+        metadata_manager = deps.get("metadata_manager")
+        ai_matcher_manager = deps.get("ai_matcher_manager")
+        title_recognition_manager = deps.get("title_recognition_manager")
+
         try:
-            # 这里可以根据需要重新创建任务
-            # 由于任务可能已经部分完成，我们选择不自动重启，而是记录日志
-            self.logger.info(f"通用导入任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，参数: {task_parameters}")
+            if task_type == "generic_import":
+                # 动态导入以避免循环依赖
+                from . import tasks
 
-            # 可以在这里添加逻辑来检查任务是否已经部分完成
-            # 并决定是否需要重新启动任务
+                return lambda session, callback: tasks.generic_import_task(
+                    provider=task_parameters.get("provider"),
+                    mediaId=task_parameters.get("mediaId"),
+                    animeTitle=task_parameters.get("animeTitle"),
+                    mediaType=task_parameters.get("mediaType"),
+                    season=task_parameters.get("season"),
+                    year=task_parameters.get("year"),
+                    currentEpisodeIndex=task_parameters.get("currentEpisodeIndex"),
+                    imageUrl=task_parameters.get("imageUrl"),
+                    doubanId=task_parameters.get("doubanId"),
+                    config_manager=self.config_manager,
+                    tmdbId=task_parameters.get("tmdbId"),
+                    imdbId=task_parameters.get("imdbId"),
+                    tvdbId=task_parameters.get("tvdbId"),
+                    bangumiId=task_parameters.get("bangumiId"),
+                    metadata_manager=metadata_manager,
+                    task_manager=self,
+                    progress_callback=callback,
+                    session=session,
+                    manager=scraper_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager,
+                    selectedEpisodes=task_parameters.get("selectedEpisodes"),
+                )
+
+            elif task_type == "webhook_search":
+                from .tasks import webhook as webhook_tasks
+
+                return lambda session, callback: webhook_tasks.webhook_search_and_dispatch_task(
+                    animeTitle=task_parameters.get("animeTitle"),
+                    mediaType=task_parameters.get("mediaType"),
+                    season=task_parameters.get("season"),
+                    currentEpisodeIndex=task_parameters.get("currentEpisodeIndex"),
+                    searchKeyword=task_parameters.get("searchKeyword"),
+                    doubanId=task_parameters.get("doubanId"),
+                    tmdbId=task_parameters.get("tmdbId"),
+                    imdbId=task_parameters.get("imdbId"),
+                    tvdbId=task_parameters.get("tvdbId"),
+                    bangumiId=task_parameters.get("bangumiId"),
+                    webhookSource=task_parameters.get("webhookSource"),
+                    year=task_parameters.get("year"),
+                    progress_callback=callback,
+                    session=session,
+                    manager=scraper_manager,
+                    task_manager=self,
+                    metadata_manager=metadata_manager,
+                    config_manager=self.config_manager,
+                    ai_matcher_manager=ai_matcher_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager,
+                    selectedEpisodes=task_parameters.get("selectedEpisodes"),
+                )
+
+            else:
+                self.logger.warning(f"未知的任务类型 '{task_type}'，无法重建协程工厂")
+                return None
 
         except Exception as e:
-            self.logger.error(f"恢复通用导入任务时发生错误: {e}", exc_info=True)
-
-    async def _recover_match_fallback_task(self, task_id: str, task_title: str, task_parameters: Dict):
-        """恢复匹配后备任务"""
-        try:
-            # 匹配后备任务通常可以安全地重新启动
-            self.logger.info(f"匹配后备任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，参数: {task_parameters}")
-
-            # 可以在这里添加逻辑来重新启动匹配后备任务
-            # 由于这类任务通常是幂等的，可以安全重启
-
-        except Exception as e:
-            self.logger.error(f"恢复匹配后备任务时发生错误: {e}", exc_info=True)
+            self.logger.error(f"重建任务类型 '{task_type}' 的协程工厂时发生错误: {e}", exc_info=True)
+            return None

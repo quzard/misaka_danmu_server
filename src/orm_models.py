@@ -281,6 +281,9 @@ class TaskHistory(Base):
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", NaiveDateTime)
     uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
     queueType: Mapped[str] = mapped_column("queue_type", String(20), default="download", server_default="download")
+    # 任务恢复相关字段：在提交时保存，用于重启后恢复排队中的任务
+    taskType: Mapped[Optional[str]] = mapped_column("task_type", String(100), nullable=True)
+    taskParameters: Mapped[Optional[str]] = mapped_column("task_parameters", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 
