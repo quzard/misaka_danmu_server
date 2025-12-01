@@ -44,9 +44,11 @@ SAFE_TYPE_EXPANSIONS = {
 EQUIVALENT_TYPE_GROUPS = [
     frozenset({'int', 'integer'}),  # MySQL INT 和 INTEGER 是同义词
     frozenset({'tinyint', 'boolean', 'bool'}),  # MySQL 用 TINYINT(1) 表示布尔值
-    frozenset({'datetime', 'timestamp'}),  # 在应用层面通常等效处理
+    frozenset({'datetime', 'timestamp', 'timestamp without time zone', 'timestamp with time zone'}),  # 时间戳类型等效
     frozenset({'text', 'mediumtext'}),  # TEXT 变体，通常可互换
     frozenset({'double', 'double precision', 'float8'}),  # 浮点数变体
+    frozenset({'varchar', 'character varying'}),  # PostgreSQL VARCHAR 别名
+    frozenset({'enum', 'user-defined'}),  # PostgreSQL 枚举类型
 ]
 
 
