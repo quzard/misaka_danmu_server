@@ -56,6 +56,10 @@ async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitStat
     """获取所有速率限制状态。"""
     result = await session.execute(select(RateLimitState))
     states = result.scalars().all()
+    # 统一处理时区，确保返回的时间是 naive 的
+    for state in states:
+        if state.lastResetTime and state.lastResetTime.tzinfo:
+            state.lastResetTime = state.lastResetTime.replace(tzinfo=None)
     return states
 
 

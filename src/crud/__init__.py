@@ -58,6 +58,7 @@ from .task import (
     get_task_state_cache,
     clear_task_state_cache,
     get_all_running_task_states,
+    get_pending_recoverable_tasks,
 )
 
 # MediaServer模块
