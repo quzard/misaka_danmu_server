@@ -295,8 +295,6 @@ class ScraperManager:
             episode_info: 分集信息
             max_results_per_source: 每个源最多返回的结果数量（None表示不限制）
         """
-        import time
-
         enabled_scrapers = [
             scraper for name, scraper in self.scrapers.items()
             if self.scraper_settings.get(name, {}).get('isEnabled')
@@ -306,15 +304,16 @@ class ScraperManager:
             self.last_search_timing = []
             return []
 
-        # 包装搜索任务以收集耗时
+        # 包装搜索任务，从 @track_performance 装饰器存储的 _task_timings 中读取耗时
         async def timed_search(scraper, keyword):
-            start_time = time.perf_counter()
+            task_id = id(asyncio.current_task())  # 获取当前任务ID
             try:
                 result = await scraper.search(keyword, episode_info=episode_info)
-                duration_ms = (time.perf_counter() - start_time) * 1000
+                # 从装饰器存储的 _task_timings 中读取耗时（并发安全）
+                duration_ms = scraper._task_timings.pop(task_id, 0) if hasattr(scraper, '_task_timings') else 0
                 return (scraper.provider_name, result, duration_ms, None)
             except Exception as e:
-                duration_ms = (time.perf_counter() - start_time) * 1000
+                duration_ms = scraper._task_timings.pop(task_id, 0) if hasattr(scraper, '_task_timings') else 0
                 return (scraper.provider_name, None, duration_ms, e)
 
         tasks = []
