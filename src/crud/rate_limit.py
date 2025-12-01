@@ -22,6 +22,8 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
 
     处理并发竞争条件：如果多个请求同时尝试创建同一记录，
     捕获 IntegrityError 并重新查询已存在的记录。
+
+    注：时区处理由 NaiveDateTime TypeDecorator 在 ORM 层自动完成。
     """
     stmt = select(RateLimitState).where(RateLimitState.providerName == provider_name)
     result = await session.execute(stmt)
@@ -44,22 +46,16 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
                 # 理论上不应该发生，但做防御性处理
                 raise RuntimeError(f"无法获取或创建流控状态: {provider_name}")
 
-    # 关键修复：无论数据来自数据库还是新创建，都确保返回的时间是 naive 的。
-    # 这可以解决 PostgreSQL 驱动返回带时区时间对象的问题。
-    if state.lastResetTime and state.lastResetTime.tzinfo:
-        state.lastResetTime = state.lastResetTime.replace(tzinfo=None)
-
     return state
 
 
 async def get_all_rate_limit_states(session: AsyncSession) -> List[RateLimitState]:
-    """获取所有速率限制状态。"""
+    """获取所有速率限制状态。
+
+    注：时区处理由 NaiveDateTime TypeDecorator 在 ORM 层自动完成。
+    """
     result = await session.execute(select(RateLimitState))
     states = result.scalars().all()
-    # 统一处理时区，确保返回的时间是 naive 的
-    for state in states:
-        if state.lastResetTime and state.lastResetTime.tzinfo:
-            state.lastResetTime = state.lastResetTime.replace(tzinfo=None)
     return states
 
 

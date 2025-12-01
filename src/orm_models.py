@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, Index, Integer,
-    String, TEXT, TIMESTAMP, TypeDecorator, UniqueConstraint, DECIMAL, func
+    String, TEXT, TypeDecorator, UniqueConstraint, DECIMAL, func
 )
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -15,8 +15,9 @@ class NaiveDateTime(TypeDecorator):
     自定义数据库类型，确保无论数据库驱动返回何种datetime对象，
     在应用层面我们得到的都是不带时区信息的（naive）datetime。
     这解决了PostgreSQL驱动返回带时区时间，而MySQL驱动返回不带时区时间的不一致性问题。
+    使用 DateTime 而非 TIMESTAMP，避免 MySQL 自动进行时区转换。
     """
-    impl = TIMESTAMP
+    impl = DateTime
     cache_ok = True
 
     def process_bind_param(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
