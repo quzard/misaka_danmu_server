@@ -141,6 +141,45 @@ async def _migrate_clear_rate_limit_state_task(conn: AsyncConnection):
     await conn.execute(text("TRUNCATE TABLE rate_limit_state;"))
     await conn.execute(text("DELETE FROM config WHERE config_key IN ('globalRateLimitEnabled', 'globalRateLimitCount', 'globalRateLimitPeriod')"))
 
+
+async def _migrate_add_rate_limit_checksum_task(conn: AsyncConnection, db_type: str):
+    """迁移任务: 为 rate_limit_state 表添加 checksum 字段并清空数据。"""
+    table_name = "rate_limit_state"
+    column_name = "checksum"
+
+    # 检查列是否存在
+    if db_type == "mysql":
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+            AND table_name = '{table_name}'
+            AND column_name = '{column_name}'
+        """)
+    else:  # postgresql
+        check_sql = text(f"""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = '{table_name}'
+            AND column_name = '{column_name}'
+        """)
+
+    column_exists = (await conn.execute(check_sql)).scalar() > 0
+
+    if not column_exists:
+        logger.info(f"为表 '{table_name}' 添加 '{column_name}' 列...")
+        if db_type == "mysql":
+            alter_sql = text(f"ALTER TABLE {table_name} ADD COLUMN `{column_name}` VARCHAR(64) NULL DEFAULT NULL")
+        else:  # postgresql
+            alter_sql = text(f'ALTER TABLE {table_name} ADD COLUMN "{column_name}" VARCHAR(64) NULL DEFAULT NULL')
+        await conn.execute(alter_sql)
+        logger.info(f"成功为表 '{table_name}' 添加 '{column_name}' 列")
+    else:
+        logger.info(f"表 '{table_name}' 的 '{column_name}' 列已存在，跳过添加")
+
+    # 清空表数据（因为旧数据没有有效的 checksum）
+    await conn.execute(text(f"TRUNCATE TABLE {table_name};"))
+    logger.info(f"已清空表 '{table_name}' 的数据，等待新的流控状态写入")
+
+
 async def _migrate_add_unique_key_to_task_history_task(conn: AsyncConnection, db_type: str):
     """迁移任务: 确保 task_history 表有 unique_key 字段和索引。"""
     if db_type == "mysql":
@@ -676,6 +715,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_rename_ai_config_keys_v1", _rename_ai_config_keys_task, ()),
         ("migrate_create_local_danmaku_items_table_v1", _create_local_danmaku_items_table_task, (db_type,)),
         ("migrate_add_latest_episode_refresh_fields_v1", _add_latest_episode_refresh_fields_task, (db_type,)),
+        ("migrate_add_rate_limit_checksum_v1", _migrate_add_rate_limit_checksum_task, (db_type,)),
     ]
 
     for migration_id, migration_func, args in migrations:

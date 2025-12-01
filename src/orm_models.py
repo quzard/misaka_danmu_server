@@ -309,6 +309,7 @@ class RateLimitState(Base):
     providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
     requestCount: Mapped[int] = mapped_column("request_count", Integer, default=0)
     lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", NaiveDateTime)
+    checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
 
 class TitleRecognition(Base):
     """识别词配置表 - 单记录全量存储"""
