@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, or_, and_, update, delete
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 
 from ..orm_models import RateLimitState
@@ -17,18 +18,31 @@ logger = logging.getLogger(__name__)
 
 
 async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: str) -> RateLimitState:
-    """获取或创建特定提供商的速率限制状态。"""
+    """获取或创建特定提供商的速率限制状态。
+
+    处理并发竞争条件：如果多个请求同时尝试创建同一记录，
+    捕获 IntegrityError 并重新查询已存在的记录。
+    """
     stmt = select(RateLimitState).where(RateLimitState.providerName == provider_name)
     result = await session.execute(stmt)
     state = result.scalar_one_or_none()
     if not state:
-        state = RateLimitState(
-            providerName=provider_name,
-            requestCount=0,
-            lastResetTime=get_now() # lastResetTime is explicitly set here
-        )
-        session.add(state)
-        await session.flush()
+        try:
+            state = RateLimitState(
+                providerName=provider_name,
+                requestCount=0,
+                lastResetTime=get_now()
+            )
+            session.add(state)
+            await session.flush()
+        except IntegrityError:
+            # 并发创建冲突，回滚当前事务中的失败操作，重新查询已存在的记录
+            await session.rollback()
+            result = await session.execute(stmt)
+            state = result.scalar_one_or_none()
+            if not state:
+                # 理论上不应该发生，但做防御性处理
+                raise RuntimeError(f"无法获取或创建流控状态: {provider_name}")
 
     # 关键修复：无论数据来自数据库还是新创建，都确保返回的时间是 naive 的。
     # 这可以解决 PostgreSQL 驱动返回带时区时间对象的问题。
