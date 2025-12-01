@@ -28,6 +28,8 @@ class ScraperManager:
         self._session_factory = session_factory
         self._domain_map: Dict[str, str] = {}
         self._search_locks: set[str] = set()
+        # 存储最后一次 search_all 的单源耗时信息: [(provider_name, duration_ms, result_count), ...]
+        self.last_search_timing: List[Tuple[str, float, int]] = []
         self._webhook_search_locks: set[str] = set()  # Webhook 搜索锁（基于 animeTitle-season）
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
@@ -293,39 +295,79 @@ class ScraperManager:
             episode_info: 分集信息
             max_results_per_source: 每个源最多返回的结果数量（None表示不限制）
         """
+        import time
+
         enabled_scrapers = [
             scraper for name, scraper in self.scrapers.items()
             if self.scraper_settings.get(name, {}).get('isEnabled')
         ]
 
         if not enabled_scrapers:
+            self.last_search_timing = []
             return []
+
+        # 包装搜索任务以收集耗时
+        async def timed_search(scraper, keyword):
+            start_time = time.perf_counter()
+            try:
+                result = await scraper.search(keyword, episode_info=episode_info)
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                return (scraper.provider_name, result, duration_ms, None)
+            except Exception as e:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                return (scraper.provider_name, None, duration_ms, e)
 
         tasks = []
         for keyword in keywords:
             for scraper in enabled_scrapers:
-                tasks.append(scraper.search(keyword, episode_info=episode_info))
+                tasks.append(timed_search(scraper, keyword))
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        timed_results = await asyncio.gather(*tasks)
+
+        # 聚合每个源的耗时和结果数（同一个源可能搜索多个关键词）
+        provider_timing: Dict[str, Tuple[float, int]] = {}  # {provider: (max_duration, total_count)}
 
         all_results = []
-        seen_results = set() # 用于去重
+        seen_results = set()
 
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                # This assumes enabled_scrapers order is preserved in tasks
-                provider_name = enabled_scrapers[i // len(keywords)].provider_name
-                logging.getLogger(__name__).error(f"搜索源 '{provider_name}' 的搜索子任务失败: {result}", exc_info=True)
+        for provider_name, result, duration_ms, error in timed_results:
+            if error:
+                logging.getLogger(__name__).error(f"搜索源 '{provider_name}' 的搜索子任务失败: {error}", exc_info=True)
+                # 记录失败的耗时
+                if provider_name not in provider_timing:
+                    provider_timing[provider_name] = (duration_ms, 0)
+                else:
+                    old_dur, old_cnt = provider_timing[provider_name]
+                    provider_timing[provider_name] = (max(old_dur, duration_ms), old_cnt)
             elif result:
                 # 优化5: 限制每个源的结果数量
                 limited_result = result[:max_results_per_source] if max_results_per_source else result
+                result_count = len(limited_result)
+
+                # 更新耗时统计
+                if provider_name not in provider_timing:
+                    provider_timing[provider_name] = (duration_ms, result_count)
+                else:
+                    old_dur, old_cnt = provider_timing[provider_name]
+                    provider_timing[provider_name] = (max(old_dur, duration_ms), old_cnt + result_count)
 
                 for item in limited_result:
-                    # 使用 (provider, mediaId) 作为唯一标识符
                     unique_id = (item.provider, item.mediaId)
                     if unique_id not in seen_results:
                         all_results.append(item)
                         seen_results.add(unique_id)
+            else:
+                # 空结果
+                if provider_name not in provider_timing:
+                    provider_timing[provider_name] = (duration_ms, 0)
+                else:
+                    old_dur, old_cnt = provider_timing[provider_name]
+                    provider_timing[provider_name] = (max(old_dur, duration_ms), old_cnt)
+
+        # 保存耗时信息供计时报告使用
+        self.last_search_timing = [
+            (name, dur, cnt) for name, (dur, cnt) in sorted(provider_timing.items(), key=lambda x: -x[1][0])
+        ]
 
         # 新增：在此处应用全局标题过滤
         cn_pattern_str = await self.config_manager.get("search_result_global_blacklist_cn", "")

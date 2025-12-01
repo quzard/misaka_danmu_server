@@ -251,7 +251,13 @@ async def webhook_search_and_dispatch_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
-        timer.step_end(details=f"{len(all_search_results)}个结果")
+        # 收集单源搜索耗时信息
+        from ..search_timer import SubStepTiming
+        source_timing_sub_steps = [
+            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+            for name, dur, cnt in manager.last_search_timing
+        ]
+        timer.step_end(details=f"{len(all_search_results)}个结果", sub_steps=source_timing_sub_steps)
 
         if not all_search_results:
             timer.finish()  # 打印计时报告

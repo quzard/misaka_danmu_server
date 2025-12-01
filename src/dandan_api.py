@@ -1154,7 +1154,13 @@ async def _execute_fallback_search_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
-        timer.step_end(details=f"{len(sorted_results)}个结果")
+        # 收集单源搜索耗时信息
+        from .search_timer import SubStepTiming
+        source_timing_sub_steps = [
+            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+            for name, dur, cnt in scraper_manager.last_search_timing
+        ]
+        timer.step_end(details=f"{len(sorted_results)}个结果", sub_steps=source_timing_sub_steps)
 
         # 5. 根据标题关键词修正媒体类型（与 WebUI 一致）
         def is_movie_by_title(title: str) -> bool:
@@ -2241,15 +2247,22 @@ async def _get_match_for_item(
                     progress_callback=progress_callback
                 )
 
+                # 收集单源搜索耗时信息
+                from .search_timer import SubStepTiming
+                source_timing_sub_steps = [
+                    SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+                    for name, dur, cnt in scraper_manager.last_search_timing
+                ]
+
                 if not all_results:
                     logger.warning(f"匹配后备失败：没有找到任何搜索结果")
-                    match_timer.step_end(details="无结果")
+                    match_timer.step_end(details="无结果", sub_steps=source_timing_sub_steps)
                     match_timer.finish()  # 打印计时报告
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
 
-                match_timer.step_end(details=f"{len(all_results)}个结果")
+                match_timer.step_end(details=f"{len(all_results)}个结果", sub_steps=source_timing_sub_steps)
                 logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 
                 # 使用统一的AI类型和季度映射修正函数

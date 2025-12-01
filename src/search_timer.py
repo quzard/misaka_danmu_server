@@ -9,12 +9,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class SubStepTiming:
+    """子步骤计时结果（用于单源搜索耗时等）"""
+    name: str
+    duration_ms: float
+    result_count: int = 0
+
+
+@dataclass
 class TimingResult:
     """单个计时结果"""
     name: str
     duration_ms: float
     success: bool = True
     details: Optional[str] = None
+    sub_steps: List[SubStepTiming] = field(default_factory=list)
 
 
 @dataclass
@@ -25,9 +34,9 @@ class SearchTimingReport:
     total_duration_ms: float = 0.0
     steps: List[TimingResult] = field(default_factory=list)
     
-    def add_step(self, name: str, duration_ms: float, success: bool = True, details: str = None):
+    def add_step(self, name: str, duration_ms: float, success: bool = True, details: str = None, sub_steps: List[SubStepTiming] = None):
         """添加一个步骤的计时结果"""
-        self.steps.append(TimingResult(name, duration_ms, success, details))
+        self.steps.append(TimingResult(name, duration_ms, success, details, sub_steps or []))
     
     def print_report(self, logger_instance=None):
         """打印计时报告 - 合并为单条日志"""
@@ -45,6 +54,9 @@ class SearchTimingReport:
             status = "✓" if step.success else "✗"
             detail_str = f" ({step.details})" if step.details else ""
             lines.append(f"⏱️   {status} {step.name}: {step.duration_ms:.0f}ms{detail_str}")
+            # 打印子步骤（如单源搜索耗时）
+            for sub in step.sub_steps:
+                lines.append(f"⏱️            - {sub.name}: {sub.duration_ms:.0f}ms（{sub.result_count}个结果）")
 
         lines.extend([
             "⏱️ ───────────────────────────────────────────────────────",

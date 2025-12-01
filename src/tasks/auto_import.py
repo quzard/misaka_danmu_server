@@ -472,7 +472,13 @@ async def auto_search_and_import_task(
             episode_info=episode_info,  # 传递分集信息（与 WebUI 一致）
             alias_similarity_threshold=70,  # 使用 70% 别名相似度阈值（与 WebUI 一致）
         )
-        timer.step_end(details=f"{len(all_results)}个结果")
+        # 收集单源搜索耗时信息
+        from ..search_timer import SubStepTiming
+        source_timing_sub_steps = [
+            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+            for name, dur, cnt in scraper_manager.last_search_timing
+        ]
+        timer.step_end(details=f"{len(all_results)}个结果", sub_steps=source_timing_sub_steps)
 
         logger.info(f"搜索完成，共 {len(all_results)} 个结果")
 

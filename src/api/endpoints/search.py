@@ -211,7 +211,13 @@ async def search_anime_provider(
             # 修正:变量名统一
             timer.step_start("弹幕源搜索")
             all_results = await manager.search_all([search_title], episode_info=episode_info)
-            timer.step_end(details=f"{len(all_results)}个结果")
+            # 收集单源搜索耗时信息
+            from ...search_timer import SubStepTiming
+            source_timing_sub_steps = [
+                SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+                for name, dur, cnt in manager.last_search_timing
+            ]
+            timer.step_end(details=f"{len(all_results)}个结果", sub_steps=source_timing_sub_steps)
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
             filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
         else:
