@@ -809,6 +809,12 @@ async def load_resources_stream(
                                 remote_hashes = scraper_info.get('hashes', {})
                                 remote_hash = remote_hashes.get(platform_key)
 
+                                # 调试日志：检查哈希值获取情况
+                                if not remote_hashes:
+                                    logger.debug(f"\t{scraper_name}: 远程无 hashes 字段")
+                                elif not remote_hash:
+                                    logger.debug(f"\t{scraper_name}: 远程 hashes 中无 {platform_key} 键，可用键: {list(remote_hashes.keys())}")
+
                                 # 检查是否需要下载(只对比 JSON 中的哈希值)
                                 should_download = True
                                 if remote_hash:
