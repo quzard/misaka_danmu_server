@@ -258,7 +258,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           <span>
             增量追更定时任务：{taskStatus.enabled ? '已启用' : '已禁用'}
             {taskStatus.cronExpression && (
-              <Tag className="ml-2">{taskStatus.cronExpression}</Tag>
+              <Tag className="ml-4">{taskStatus.cronExpression}</Tag>
             )}
           </span>
         }
@@ -285,10 +285,12 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           <span className="font-medium">{source.providerName}</span>
           <Tag color="blue" size="small">当前 第{source.episodeCount}集</Tag>
           {source.incrementalRefreshEnabled && (
-            <Tag color="green" size="small">追更中</Tag>
-          )}
-          {source.incrementalRefreshFailures > 0 && (
-            <Tag color="error" size="small">失败 {source.incrementalRefreshFailures} 次</Tag>
+            <>
+              <Tag color="green" size="small">追更中</Tag>
+              <Tag color={source.incrementalRefreshFailures > 0 ? 'error' : 'default'} size="small">
+                失败 {source.incrementalRefreshFailures}/10
+              </Tag>
+            </>
           )}
           {source.isFavorited && (
             <Tag color="gold" size="small">★ 已标记</Tag>

@@ -704,11 +704,15 @@ export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/
 // --- 追更与标记管理 ---
 
 /** 获取所有源（按番剧分组）用于追更管理，支持分页和过滤 */
-export const getIncrementalRefreshSources = (params = {}) => {
-  const { page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all' } = params
-  return api.get('/api/ui/library/incremental-refresh/sources', {
-    params: { page, pageSize, keyword, favoriteFilter, refreshFilter }
+export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all' } = {}) => {
+  const queryParams = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    keyword,
+    favoriteFilter,
+    refreshFilter
   })
+  return api.get(`/api/ui/library/incremental-refresh/sources?${queryParams.toString()}`)
 }
 
 /** 获取增量追更定时任务状态 */
