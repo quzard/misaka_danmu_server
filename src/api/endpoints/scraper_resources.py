@@ -858,10 +858,24 @@ async def load_resources_stream(
 
                                         if response.status_code == 200:
                                             # 写入文件
-                                            await asyncio.to_thread(target_path.write_bytes, response.content)
+                                            file_content = response.content
+                                            await asyncio.to_thread(target_path.write_bytes, file_content)
 
-                                            # 保存远程哈希值(如果有)
+                                            # 验证文件哈希值（如果远程提供了哈希值）
                                             if remote_hash:
+                                                import hashlib
+                                                local_hash = hashlib.sha256(file_content).hexdigest()
+                                                if local_hash != remote_hash:
+                                                    # 哈希值不匹配，文件可能损坏，删除并标记失败
+                                                    logger.error(f"\t文件哈希验证失败 {scraper_name}: 期望 {remote_hash[:16]}..., 实际 {local_hash[:16]}...")
+                                                    try:
+                                                        await asyncio.to_thread(target_path.unlink)
+                                                    except Exception:
+                                                        pass
+                                                    if retry_count == max_retries:
+                                                        failed_downloads.append(scraper_name)
+                                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '哈希验证失败'}, ensure_ascii=False)}\n\n"
+                                                    continue  # 重试下载
                                                 hashes_data[scraper_name] = remote_hash
 
                                             download_count += 1
@@ -893,20 +907,37 @@ async def load_resources_stream(
                     # 保存版本信息和哈希值
                     if versions_data:
                         try:
+                            # 如果有下载失败的文件，合并旧版本信息而不是完全覆盖
+                            # 这样可以保留失败文件的旧版本信息，避免版本信息丢失
+                            existing_scrapers = {}
+                            existing_hashes = {}
+                            if failed_downloads and SCRAPERS_VERSIONS_FILE.exists():
+                                try:
+                                    existing_versions = json.loads(await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.read_text))
+                                    existing_scrapers = existing_versions.get('scrapers', {})
+                                    existing_hashes = existing_versions.get('hashes', {})
+                                    logger.info(f"检测到 {len(failed_downloads)} 个下载失败，将合并旧版本信息")
+                                except Exception as e:
+                                    logger.debug(f"读取旧版本信息失败: {e}")
+
+                            # 合并版本信息：新成功的覆盖旧的，失败的保留旧的
+                            merged_scrapers = {**existing_scrapers, **versions_data}
+                            merged_hashes = {**existing_hashes, **hashes_data}
+
                             # 构建完整的版本信息
                             full_versions_data = {
                                 "platform": platform_info['platform'],
                                 "type": platform_info['arch'],
                                 "version": package_data.get("version", "unknown"),
-                                "scrapers": versions_data
+                                "scrapers": merged_scrapers
                             }
 
                             # 只有当有哈希值数据时才添加 hashes 字段(兼容旧版本)
-                            if hashes_data:
-                                full_versions_data["hashes"] = hashes_data
-                                logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息和 {len(hashes_data)} 个哈希值")
+                            if merged_hashes:
+                                full_versions_data["hashes"] = merged_hashes
+                                logger.info(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息和 {len(merged_hashes)} 个哈希值")
                             else:
-                                logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息(无哈希值)")
+                                logger.info(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息(无哈希值)")
 
                             versions_json_str = json.dumps(full_versions_data, indent=2, ensure_ascii=False)
                             await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)

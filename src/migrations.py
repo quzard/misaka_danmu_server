@@ -49,19 +49,31 @@ async def _run_migration(conn: AsyncConnection, migration_id: str, migration_fun
             raise
 
 
+# async def _migrate_clear_rate_limit_state_v1(conn: AsyncConnection):
+#     """
+#     清空 rate_limit_state 表数据。
+
+#     原因：修复了 MySQL DATETIME 微秒四舍五入导致 checksum 验证失败的问题。
+#     旧数据的 checksum 是用错误的时间计算的，需要清空后重新生成。
+#     """
+#     logger.info("清空 rate_limit_state 表...")
+#     await conn.execute(text("DELETE FROM rate_limit_state"))
+#     logger.info("rate_limit_state 表已清空，将在下次访问时重新生成正确的 checksum。")
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
-    
+
     注意：简单的添加字段和类型扩展现在由 db_maintainer.py 自动处理。
     此处仅保留需要数据转换的复杂迁移任务。
     """
     logger.info("开始执行数据库迁移检查...")
 
-    # 迁移任务列表（已清空，新的迁移任务在此添加）
+    # 迁移任务列表
     migrations = [
         # 格式: ("migration_id", migration_func, (args,))
-        # 示例: ("migrate_example_v1", _migrate_example_task, (db_type,)),
+ #       ("migrate_clear_rate_limit_state_v1", _migrate_clear_rate_limit_state_v1, ()),
     ]
 
     for migration_id, migration_func, args in migrations:
