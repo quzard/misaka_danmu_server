@@ -809,12 +809,6 @@ async def load_resources_stream(
                                 remote_hashes = scraper_info.get('hashes', {})
                                 remote_hash = remote_hashes.get(platform_key)
 
-                                # 调试日志：检查哈希值获取情况
-                                if not remote_hashes:
-                                    logger.debug(f"\t{scraper_name}: 远程无 hashes 字段")
-                                elif not remote_hash:
-                                    logger.debug(f"\t{scraper_name}: 远程 hashes 中无 {platform_key} 键，可用键: {list(remote_hashes.keys())}")
-
                                 # 检查是否需要下载(只对比 JSON 中的哈希值)
                                 should_download = True
                                 if remote_hash:
@@ -826,7 +820,9 @@ async def load_resources_stream(
                                             local_hashes = local_versions.get('hashes', {})
                                             local_hash = local_hashes.get(scraper_name)
                                         except Exception as e:
-                                            logger.debug(f"读取本地版本文件失败: {e}")
+                                            logger.warning(f"读取本地版本文件失败: {e}")
+                                    else:
+                                        logger.info(f"\t{scraper_name}: 本地 versions.json 不存在，需要下载")
 
                                     # 比较哈希值
                                     if local_hash and local_hash == remote_hash:
@@ -840,6 +836,12 @@ async def load_resources_stream(
                                         logger.info(f"\t跳过下载 {scraper_name} ({filename}) - 哈希值相同 [{index}/{total_count}]")
                                         last_heartbeat = asyncio.get_event_loop().time()
                                         yield f"data: {json.dumps({'type': 'skip_hash', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count}, ensure_ascii=False)}\n\n"
+                                    elif local_hash:
+                                        logger.info(f"\t{scraper_name}: 哈希值不同，需要下载 (本地: {local_hash[:16]}..., 远程: {remote_hash[:16]}...)")
+                                    else:
+                                        logger.info(f"\t{scraper_name}: 本地无哈希记录，需要下载")
+                                else:
+                                    logger.info(f"\t{scraper_name}: 远程无哈希值 (hashes={bool(remote_hashes)}, platform_key={platform_key})，需要下载")
 
                                 if not should_download:
                                     continue
