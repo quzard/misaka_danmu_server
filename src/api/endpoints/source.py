@@ -127,11 +127,11 @@ async def toggle_source_incremental_refresh(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """切换指定数据源的定时增量更新的启用/禁用状态。"""
-    toggled = await crud.toggle_source_incremental_refresh(session, sourceId)
-    if not toggled:
+    """切换指定数据源的定时增量更新的启用/禁用状态。同一番剧下只能有一个源开启追更。"""
+    new_state = await crud.toggle_source_incremental_refresh(session, sourceId)
+    if new_state is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
-    logger.info(f"用户 '{current_user.username}' 切换了源 ID {sourceId} 的定时增量更新状态。")
+    logger.info(f"用户 '{current_user.username}' 切换了源 ID {sourceId} 的追更状态为 {new_state}。")
 
 
 @router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
@@ -359,6 +359,15 @@ class IncrementalRefreshAnimeGroup(BaseModel):
     sources: List[IncrementalRefreshSourceInfo]
 
 
+class IncrementalRefreshSourcesResponse(BaseModel):
+    """追更源列表响应（分页）"""
+    total: int  # 总番剧数
+    totalSources: int  # 总源数
+    refreshEnabled: int  # 追更中数量
+    favorited: int  # 已标记数量
+    list: List[IncrementalRefreshAnimeGroup]
+
+
 class IncrementalRefreshTaskStatus(BaseModel):
     """增量追更定时任务状态"""
     exists: bool
@@ -379,14 +388,26 @@ class BatchSetFavoriteRequest(BaseModel):
     sourceIds: List[int]
 
 
-@router.get("/library/incremental-refresh/sources", response_model=List[IncrementalRefreshAnimeGroup], summary="获取所有源（按番剧分组）")
+@router.get("/library/incremental-refresh/sources", response_model=IncrementalRefreshSourcesResponse, summary="获取所有源（按番剧分组，支持分页和过滤）")
 async def get_incremental_refresh_sources(
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(20, ge=1, le=100, description="每页番剧数量"),
+    keyword: str = Query("", description="搜索关键词（匹配番剧名称或源名称）"),
+    favoriteFilter: str = Query("all", regex="^(all|favorited|unfavorited)$", description="标记过滤"),
+    refreshFilter: str = Query("all", regex="^(all|enabled|disabled)$", description="追更过滤"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """获取所有源（包括启用和未启用追更的），按番剧分组返回。用于追更管理弹窗。"""
-    groups = await crud.get_incremental_refresh_sources_grouped(session)
-    return groups
+    """获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。用于追更管理弹窗。"""
+    result = await crud.get_incremental_refresh_sources_grouped(
+        session,
+        page=page,
+        page_size=pageSize,
+        keyword=keyword,
+        favorite_filter=favoriteFilter,
+        refresh_filter=refreshFilter,
+    )
+    return result
 
 
 @router.get("/library/incremental-refresh/task-status", response_model=IncrementalRefreshTaskStatus, summary="获取增量追更定时任务状态")

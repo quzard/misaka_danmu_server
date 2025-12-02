@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react'
-import { Modal, Drawer, Input, Switch, Radio, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert } from 'antd'
-import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import React, { useEffect, useState, useCallback } from 'react'
+import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination } from 'antd'
+import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined } from '@ant-design/icons'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store/index.js'
 import {
@@ -25,73 +25,147 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const [selectedSourceIds, setSelectedSourceIds] = useState([])
   const [operationLoading, setOperationLoading] = useState(false)
 
+  // 分页和过滤状态
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [favoriteFilter, setFavoriteFilter] = useState('all')
+  const [refreshFilter, setRefreshFilter] = useState('all')
+  const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0 })
+
   // 加载数据
-  const fetchData = async () => {
+  const fetchData = useCallback(async (params = {}) => {
     setLoading(true)
     try {
       const [sourcesRes, statusRes] = await Promise.all([
-        getIncrementalRefreshSources(),
+        getIncrementalRefreshSources({
+          page: params.page ?? page,
+          pageSize,
+          keyword: params.keyword ?? searchKeyword,
+          favoriteFilter: params.favoriteFilter ?? favoriteFilter,
+          refreshFilter: params.refreshFilter ?? refreshFilter,
+        }),
         getIncrementalRefreshTaskStatus(),
       ])
-      setAnimeGroups(sourcesRes?.data || [])
+      const data = sourcesRes?.data || {}
+      setAnimeGroups(data.list || [])
+      setStats({
+        total: data.total || 0,
+        totalSources: data.totalSources || 0,
+        refreshEnabled: data.refreshEnabled || 0,
+        favorited: data.favorited || 0,
+      })
       setTaskStatus(statusRes?.data || null)
     } catch (error) {
       message.error('加载数据失败: ' + error.message)
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, pageSize, searchKeyword, favoriteFilter, refreshFilter])
 
   useEffect(() => {
     if (open) {
-      fetchData()
-      setSelectedSourceIds([])
+      setPage(1)
+      setFavoriteFilter('all')
+      setRefreshFilter('all')
       setSearchKeyword('')
+      setSelectedSourceIds([])
+      fetchData({ page: 1, keyword: '', favoriteFilter: 'all', refreshFilter: 'all' })
     }
   }, [open])
 
-  // 过滤后的数据
-  const filteredGroups = useMemo(() => {
-    if (!searchKeyword.trim()) return animeGroups
-    const keyword = searchKeyword.toLowerCase()
-    return animeGroups
-      .map(group => ({
-        ...group,
-        sources: group.sources.filter(
-          s => group.animeTitle.toLowerCase().includes(keyword) || s.providerName.toLowerCase().includes(keyword)
-        ),
-      }))
-      .filter(group => group.sources.length > 0)
-  }, [animeGroups, searchKeyword])
+  // 搜索处理（防抖）
+  const handleSearch = (value) => {
+    setSearchKeyword(value)
+    setPage(1)
+    fetchData({ page: 1, keyword: value })
+  }
 
-  // 统计信息
-  const stats = useMemo(() => {
-    const allSources = animeGroups.flatMap(g => g.sources)
-    return {
-      total: allSources.length,
-      refreshEnabled: allSources.filter(s => s.incrementalRefreshEnabled).length,
-      favorited: allSources.filter(s => s.isFavorited).length,
-      failed: allSources.filter(s => s.incrementalRefreshFailures > 0).length,
-    }
-  }, [animeGroups])
+  // 过滤器变更处理
+  const handleFavoriteFilterChange = (filter) => {
+    setFavoriteFilter(filter)
+    setPage(1)
+    fetchData({ page: 1, favoriteFilter: filter })
+  }
 
-  // 切换单个源的追更状态
+  const handleRefreshFilterChange = (filter) => {
+    setRefreshFilter(filter)
+    setPage(1)
+    fetchData({ page: 1, refreshFilter: filter })
+  }
+
+  // 分页变更
+  const handlePageChange = (newPage) => {
+    setPage(newPage)
+    fetchData({ page: newPage })
+  }
+
+  // 切换单个源的追更状态（本地乐观更新）
   const handleToggleRefresh = async (sourceId) => {
+    // 找到源所属的番剧
+    const group = animeGroups.find(g => g.sources.some(s => s.sourceId === sourceId))
+    if (!group) return
+
+    const source = group.sources.find(s => s.sourceId === sourceId)
+    const newState = !source.incrementalRefreshEnabled
+
+    // 乐观更新本地状态
+    setAnimeGroups(prev => prev.map(g => {
+      if (g.animeId !== group.animeId) return g
+      return {
+        ...g,
+        sources: g.sources.map(s => {
+          if (s.sourceId === sourceId) {
+            return { ...s, incrementalRefreshEnabled: newState }
+          }
+          // 互斥：开启一个源时关闭同组其他源
+          if (newState) {
+            return { ...s, incrementalRefreshEnabled: false }
+          }
+          return s
+        })
+      }
+    }))
+
     try {
       await toggleSourceIncremental({ sourceId })
-      fetchData()
     } catch (error) {
       message.error('操作失败: ' + error.message)
+      fetchData() // 失败时重新获取数据恢复状态
     }
   }
 
-  // 切换单个源的标记状态
+  // 切换单个源的标记状态（本地乐观更新）
   const handleToggleFavorite = async (sourceId) => {
+    // 找到源所属的番剧
+    const group = animeGroups.find(g => g.sources.some(s => s.sourceId === sourceId))
+    if (!group) return
+
+    const source = group.sources.find(s => s.sourceId === sourceId)
+    const newState = !source.isFavorited
+
+    // 乐观更新本地状态
+    setAnimeGroups(prev => prev.map(g => {
+      if (g.animeId !== group.animeId) return g
+      return {
+        ...g,
+        sources: g.sources.map(s => {
+          if (s.sourceId === sourceId) {
+            return { ...s, isFavorited: newState }
+          }
+          // 互斥：开启一个源时关闭同组其他源
+          if (newState) {
+            return { ...s, isFavorited: false }
+          }
+          return s
+        })
+      }
+    }))
+
     try {
       await toggleSourceFavorite({ sourceId })
-      fetchData()
     } catch (error) {
       message.error('操作失败: ' + error.message)
+      fetchData() // 失败时重新获取数据恢复状态
     }
   }
 
@@ -171,7 +245,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           message="增量追更定时任务未配置"
           description="请在设置中配置增量追更定时任务，否则追更功能不会自动执行。"
           showIcon
-          className="mb-4"
+          className="mb-6"
         />
       )
     }
@@ -194,7 +268,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
             : null
         }
         showIcon
-        className="mb-4"
+        className="mb-8"
       />
     )
   }
@@ -209,7 +283,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{source.providerName}</span>
-          <Tag color="blue" size="small">追到 第{source.episodeCount}集</Tag>
+          <Tag color="blue" size="small">当前 第{source.episodeCount}集</Tag>
           {source.incrementalRefreshEnabled && (
             <Tag color="green" size="small">追更中</Tag>
           )}
@@ -249,12 +323,47 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       {/* 定时任务状态 */}
       {renderTaskStatus()}
 
-      {/* 统计信息 */}
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Tag>共 {stats.total} 个源</Tag>
-        <Tag color="blue">追更中 {stats.refreshEnabled} 个</Tag>
-        <Tag color="green">已标记 {stats.favorited} 个</Tag>
-        {stats.failed > 0 && <Tag color="red">失败 {stats.failed} 个</Tag>}
+      {/* 统计信息和过滤器 */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Tag>共 {stats.totalSources} 个源</Tag>
+          <Tag color="blue">追更中 {stats.refreshEnabled} 个</Tag>
+          <Tag color="green">已标记 {stats.favorited} 个</Tag>
+        </div>
+        <Space size="small">
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'all', label: '全部' },
+                { key: 'enabled', label: '已追更' },
+                { key: 'disabled', label: '未追更' },
+              ],
+              selectedKeys: [refreshFilter],
+              onClick: ({ key }) => handleRefreshFilterChange(key),
+            }}
+            trigger={['click']}
+          >
+            <Button size="small">
+              追更: {refreshFilter === 'all' ? '全部' : refreshFilter === 'enabled' ? '已追更' : '未追更'} <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'all', label: '全部' },
+                { key: 'favorited', label: '已标记' },
+                { key: 'unfavorited', label: '未标记' },
+              ],
+              selectedKeys: [favoriteFilter],
+              onClick: ({ key }) => handleFavoriteFilterChange(key),
+            }}
+            trigger={['click']}
+          >
+            <Button size="small">
+              标记: {favoriteFilter === 'all' ? '全部' : favoriteFilter === 'favorited' ? '已标记' : '未标记'} <DownOutlined />
+            </Button>
+          </Dropdown>
+        </Space>
       </div>
 
       {/* 搜索框 */}
@@ -262,20 +371,21 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
         placeholder="搜索番剧或源名称..."
         value={searchKeyword}
         onChange={(e) => setSearchKeyword(e.target.value)}
+        onSearch={handleSearch}
         allowClear
         className="mb-3"
       />
 
       {/* 源列表 */}
-      <div className="flex-1 overflow-auto" style={{ maxHeight: isMobile ? 'calc(100vh - 350px)' : 400 }}>
+      <div className="flex-1 overflow-auto" style={{ maxHeight: isMobile ? 'calc(100vh - 400px)' : 350 }}>
         {loading ? (
           <div className="flex justify-center py-8"><Spin /></div>
-        ) : filteredGroups.length === 0 ? (
+        ) : animeGroups.length === 0 ? (
           <Empty description="暂无数据" />
         ) : (
           <Collapse
-            defaultActiveKey={filteredGroups.slice(0, 3).map(g => g.animeId)}
-            items={filteredGroups.map(group => ({
+            defaultActiveKey={animeGroups.slice(0, 3).map(g => g.animeId)}
+            items={animeGroups.map(group => ({
               key: group.animeId,
               label: (
                 <div className="flex items-center gap-2">
@@ -288,6 +398,21 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           />
         )}
       </div>
+
+      {/* 分页 */}
+      {stats.total > pageSize && (
+        <div className="mt-3 flex justify-center">
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={stats.total}
+            onChange={handlePageChange}
+            showSizeChanger={false}
+            showQuickJumper={stats.total > pageSize * 3}
+            size="small"
+          />
+        </div>
+      )}
 
       {/* 批量操作按钮 */}
       <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-3">

@@ -703,8 +703,13 @@ export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/
 
 // --- 追更与标记管理 ---
 
-/** 获取所有源（按番剧分组）用于追更管理 */
-export const getIncrementalRefreshSources = () => api.get('/api/ui/library/incremental-refresh/sources')
+/** 获取所有源（按番剧分组）用于追更管理，支持分页和过滤 */
+export const getIncrementalRefreshSources = (params = {}) => {
+  const { page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all' } = params
+  return api.get('/api/ui/library/incremental-refresh/sources', {
+    params: { page, pageSize, keyword, favoriteFilter, refreshFilter }
+  })
+}
 
 /** 获取增量追更定时任务状态 */
 export const getIncrementalRefreshTaskStatus = () => api.get('/api/ui/library/incremental-refresh/task-status')

@@ -296,28 +296,38 @@ async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, 
         return new_order
 
 
-async def get_incremental_refresh_sources_grouped(session: AsyncSession) -> List[Dict[str, Any]]:
+async def get_incremental_refresh_sources_grouped(
+    session: AsyncSession,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: str = "",
+    favorite_filter: str = "all",  # all / favorited / unfavorited
+    refresh_filter: str = "all",   # all / enabled / disabled
+) -> Dict[str, Any]:
     """
-    获取所有源（包括启用和未启用追更的），按番剧分组返回。
-    返回格式: [
-        {
-            "animeId": 1,
-            "animeTitle": "葬送的芙莉莲",
-            "sources": [
-                {
-                    "sourceId": 1,
-                    "providerName": "腾讯视频",
-                    "isFavorited": True,
-                    "incrementalRefreshEnabled": True,
-                    "incrementalRefreshFailures": 0,
-                    "lastRefreshLatestEpisodeAt": datetime,
-                    "episodeCount": 28
-                },
-                ...
-            ]
-        },
-        ...
-    ]
+    获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。
+
+    参数:
+        page: 页码（从1开始）
+        page_size: 每页番剧数量
+        keyword: 搜索关键词（匹配番剧名称或源名称）
+        favorite_filter: 标记过滤 (all/favorited/unfavorited)
+        refresh_filter: 追更过滤 (all/enabled/disabled)
+
+    返回格式: {
+        "total": 100,  # 总番剧数
+        "totalSources": 118,  # 总源数
+        "refreshEnabled": 5,  # 追更中数量
+        "favorited": 3,  # 已标记数量
+        "list": [
+            {
+                "animeId": 1,
+                "animeTitle": "葬送的芙莉莲",
+                "sources": [...]
+            },
+            ...
+        ]
+    }
     """
     # 子查询：统计每个源的分集数量
     episode_count_subquery = (
@@ -329,8 +339,8 @@ async def get_incremental_refresh_sources_grouped(session: AsyncSession) -> List
         .subquery()
     )
 
-    # 主查询：获取所有源及其关联的番剧信息
-    stmt = (
+    # 基础查询：获取所有源及其关联的番剧信息
+    base_stmt = (
         select(
             Anime.id.label("animeId"),
             Anime.title.label("animeTitle"),
@@ -344,14 +354,43 @@ async def get_incremental_refresh_sources_grouped(session: AsyncSession) -> List
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
         .outerjoin(episode_count_subquery, AnimeSource.id == episode_count_subquery.c.sourceId)
-        .order_by(Anime.title, AnimeSource.providerName)
     )
 
-    result = await session.execute(stmt)
+    # 应用过滤条件
+    conditions = []
+    if keyword:
+        keyword_pattern = f"%{keyword}%"
+        conditions.append(
+            or_(
+                Anime.title.ilike(keyword_pattern),
+                AnimeSource.providerName.ilike(keyword_pattern)
+            )
+        )
+    if favorite_filter == "favorited":
+        conditions.append(AnimeSource.isFavorited == True)
+    elif favorite_filter == "unfavorited":
+        conditions.append(AnimeSource.isFavorited == False)
+    if refresh_filter == "enabled":
+        conditions.append(AnimeSource.incrementalRefreshEnabled == True)
+    elif refresh_filter == "disabled":
+        conditions.append(AnimeSource.incrementalRefreshEnabled == False)
+
+    if conditions:
+        base_stmt = base_stmt.where(and_(*conditions))
+
+    # 排序
+    base_stmt = base_stmt.order_by(Anime.title, AnimeSource.providerName)
+
+    # 执行查询
+    result = await session.execute(base_stmt)
     rows = result.mappings().all()
 
     # 按番剧分组
     grouped = {}
+    total_sources = 0
+    refresh_enabled_count = 0
+    favorited_count = 0
+
     for row in rows:
         anime_id = row["animeId"]
         if anime_id not in grouped:
@@ -369,8 +408,27 @@ async def get_incremental_refresh_sources_grouped(session: AsyncSession) -> List
             "lastRefreshLatestEpisodeAt": row["lastRefreshLatestEpisodeAt"],
             "episodeCount": row["episodeCount"]
         })
+        total_sources += 1
+        if row["incrementalRefreshEnabled"]:
+            refresh_enabled_count += 1
+        if row["isFavorited"]:
+            favorited_count += 1
 
-    return list(grouped.values())
+    all_groups = list(grouped.values())
+    total_anime = len(all_groups)
+
+    # 分页（按番剧分页）
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_groups = all_groups[start_idx:end_idx]
+
+    return {
+        "total": total_anime,
+        "totalSources": total_sources,
+        "refreshEnabled": refresh_enabled_count,
+        "favorited": favorited_count,
+        "list": paginated_groups
+    }
 
 
 async def batch_toggle_incremental_refresh(session: AsyncSession, source_ids: List[int], enabled: bool) -> int:
