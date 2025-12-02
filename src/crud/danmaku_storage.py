@@ -109,7 +109,12 @@ async def preview_migrate_danmaku(
             else:
                 new_path = target_base / old_path.name
 
-            new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+            # 计算新的 web 路径 - 支持自定义路径（不在 CONFIG_DIR 下）
+            try:
+                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+            except ValueError:
+                # 自定义路径不在 CONFIG_DIR 下，直接使用绝对路径
+                new_web_path = str(new_path)
 
             results["totalCount"] += 1
             results["previewItems"].append({
@@ -200,25 +205,30 @@ async def batch_migrate_danmaku(
             try:
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_path), str(new_path))
-                
-                # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+
+                # 更新数据库路径 - 支持自定义路径（不在 CONFIG_DIR 下）
+                try:
+                    new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+                except ValueError:
+                    # 自定义路径不在 CONFIG_DIR 下，直接使用绝对路径
+                    new_web_path = str(new_path)
+
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
-                
+
                 results["successCount"] += 1
                 results["details"].append({
-                    "episodeId": episode.id, 
-                    "status": "success", 
+                    "episodeId": episode.id,
+                    "status": "success",
                     "newPath": new_web_path
                 })
             except Exception as e:
                 logger.error(f"迁移文件失败: {e}")
                 results["failedCount"] += 1
                 results["details"].append({
-                    "episodeId": episode.id, 
-                    "status": "failed", 
+                    "episodeId": episode.id,
+                    "status": "failed",
                     "reason": str(e)
                 })
     
@@ -392,8 +402,13 @@ async def batch_rename_danmaku(
             try:
                 old_path.rename(new_path)
 
-                # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+                # 更新数据库路径 - 支持自定义路径（不在 CONFIG_DIR 下）
+                try:
+                    new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+                except ValueError:
+                    # 自定义路径不在 CONFIG_DIR 下，直接使用绝对路径
+                    new_web_path = str(new_path)
+
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
@@ -652,8 +667,13 @@ async def apply_danmaku_template(
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_path), str(new_path))
 
-                # 更新数据库路径
-                new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+                # 更新数据库路径 - 支持自定义路径（不在 CONFIG_DIR 下）
+                try:
+                    new_web_path = "/app/config/" + str(new_path.relative_to(CONFIG_DIR))
+                except ValueError:
+                    # 自定义路径不在 CONFIG_DIR 下，直接使用绝对路径
+                    new_web_path = str(new_path)
+
                 await session.execute(
                     update(Episode).where(Episode.id == episode.id).values(danmakuFilePath=new_web_path)
                 )
