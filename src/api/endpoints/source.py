@@ -397,9 +397,9 @@ async def get_incremental_refresh_task_status(
     """检测增量追更定时任务是否存在及其状态。"""
     tasks_list = await scheduler.get_all_tasks()
 
-    # 查找 job_type 为 "incremental_refresh" 的任务
+    # 查找 job_type 为 "incrementalRefresh" 的任务（驼峰命名）
     for task in tasks_list:
-        if task.get("jobType") == "incremental_refresh":
+        if task.get("jobType") == "incrementalRefresh":
             return IncrementalRefreshTaskStatus(
                 exists=True,
                 enabled=task.get("isEnabled", False),

@@ -201,40 +201,45 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
   // 渲染源列表项
   const renderSourceItem = (source, animeTitle) => (
-    <div key={source.sourceId} className="flex items-center gap-3 py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded">
+    <div key={source.sourceId} className="flex items-center gap-4 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg border-b border-gray-100 dark:border-gray-700 last:border-b-0">
       <Checkbox
         checked={selectedSourceIds.includes(source.sourceId)}
         onChange={(e) => handleCheckboxChange(source.sourceId, e.target.checked)}
       />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium truncate">{source.providerName}</span>
-          <Tag size="small">{source.episodeCount} 集</Tag>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium">{source.providerName}</span>
+          <Tag color="blue" size="small">追到 第{source.episodeCount}集</Tag>
+          {source.incrementalRefreshEnabled && (
+            <Tag color="green" size="small">追更中</Tag>
+          )}
           {source.incrementalRefreshFailures > 0 && (
-            <Tag color="error" size="small">
-              失败 {source.incrementalRefreshFailures} 次
-            </Tag>
+            <Tag color="error" size="small">失败 {source.incrementalRefreshFailures} 次</Tag>
+          )}
+          {source.isFavorited && (
+            <Tag color="gold" size="small">★ 已标记</Tag>
           )}
         </div>
         {source.lastRefreshLatestEpisodeAt && (
-          <div className="text-xs text-gray-500">
-            上次追更：{dayjs(source.lastRefreshLatestEpisodeAt).format('MM-DD HH:mm')}
+          <div className="text-xs text-gray-400 mt-1">
+            上次追更：{dayjs(source.lastRefreshLatestEpisodeAt).format('YYYY-MM-DD HH:mm')}
           </div>
         )}
       </div>
-      <Radio
-        checked={source.isFavorited}
-        onClick={() => handleToggleFavorite(source.sourceId)}
-      >
-        标记
-      </Radio>
-      <Switch
-        size="small"
-        checked={source.incrementalRefreshEnabled}
-        onChange={() => handleToggleRefresh(source.sourceId)}
-        checkedChildren="追更"
-        unCheckedChildren="关闭"
-      />
+      <Space size="small">
+        <Switch
+          checkedChildren="追更"
+          unCheckedChildren="追更"
+          checked={source.incrementalRefreshEnabled}
+          onChange={() => handleToggleRefresh(source.sourceId)}
+        />
+        <Switch
+          checkedChildren="标记"
+          unCheckedChildren="标记"
+          checked={source.isFavorited}
+          onChange={() => handleToggleFavorite(source.sourceId)}
+        />
+      </Space>
     </div>
   )
 
@@ -285,19 +290,21 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       </div>
 
       {/* 批量操作按钮 */}
-      <div className="mt-4 pt-3 border-t flex flex-wrap gap-2">
-        <span className="text-gray-500 text-sm leading-8">
-          已选 {selectedSourceIds.length} 项：
+      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-3">
+        <span className="text-gray-500 text-sm">
+          已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项：
         </span>
-        <Button size="small" onClick={handleBatchEnableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-          批量开启追更
-        </Button>
-        <Button size="small" onClick={handleBatchDisableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-          批量关闭追更
-        </Button>
-        <Button size="small" onClick={handleBatchSetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-          批量设为标记
-        </Button>
+        <Space size="small" wrap>
+          <Button onClick={handleBatchEnableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
+            批量开启追更
+          </Button>
+          <Button onClick={handleBatchDisableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
+            批量关闭追更
+          </Button>
+          <Button onClick={handleBatchSetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
+            批量设为标记
+          </Button>
+        </Space>
       </div>
     </div>
   )

@@ -228,13 +228,30 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
     return source.isFavorited
 
 
-async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> bool:
+async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> Optional[bool]:
+    """
+    切换源的追更状态。
+    同一番剧下只能有一个源开启追更（与标记规则相同）。
+    返回新的追更状态（True/False），如果源不存在则返回 None。
+    """
     source = await session.get(AnimeSource, source_id)
     if not source:
-        return False
+        return None
+
+    # 切换当前源的追更状态
     source.incrementalRefreshEnabled = not source.incrementalRefreshEnabled
+
+    # 如果开启了追更，则关闭同一番剧下其他源的追更
+    if source.incrementalRefreshEnabled:
+        stmt = (
+            update(AnimeSource)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(incrementalRefreshEnabled=False)
+        )
+        await session.execute(stmt)
+
     await session.commit()
-    return True
+    return source.incrementalRefreshEnabled
 
 
 async def increment_incremental_refresh_failures(session: AsyncSession, source_id: int) -> int:
@@ -357,16 +374,44 @@ async def get_incremental_refresh_sources_grouped(session: AsyncSession) -> List
 
 
 async def batch_toggle_incremental_refresh(session: AsyncSession, source_ids: List[int], enabled: bool) -> int:
-    """批量设置追更状态，返回受影响的行数。"""
+    """
+    批量设置追更状态。
+    如果开启追更，同一番剧下只能有一个源开启追更（与标记规则相同）。
+    返回成功设置的数量。
+    """
     if not source_ids:
         return 0
-    result = await session.execute(
-        update(AnimeSource)
-        .where(AnimeSource.id.in_(source_ids))
-        .values(incrementalRefreshEnabled=enabled)
-    )
+
+    if not enabled:
+        # 关闭追更：直接批量关闭即可
+        result = await session.execute(
+            update(AnimeSource)
+            .where(AnimeSource.id.in_(source_ids))
+            .values(incrementalRefreshEnabled=False)
+        )
+        await session.commit()
+        return result.rowcount
+
+    # 开启追更：需要遵循互斥规则
+    count = 0
+    for source_id in source_ids:
+        source = await session.get(AnimeSource, source_id)
+        if not source:
+            continue
+
+        # 开启当前源的追更
+        source.incrementalRefreshEnabled = True
+
+        # 关闭同一番剧下其他源的追更
+        await session.execute(
+            update(AnimeSource)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(incrementalRefreshEnabled=False)
+        )
+        count += 1
+
     await session.commit()
-    return result.rowcount
+    return count
 
 
 async def batch_set_favorite(session: AsyncSession, source_ids: List[int]) -> int:
