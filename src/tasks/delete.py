@@ -31,8 +31,15 @@ def delete_danmaku_file(danmaku_file_path_str: Optional[str]):
         logger.error(f"删除弹幕文件 '{danmaku_file_path_str}' 时出错: {e}", exc_info=True)
 
 
-async def delete_anime_task(animeId: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete an anime and all its related data."""
+async def delete_anime_task(animeId: int, session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
+    """Background task to delete an anime and all its related data.
+
+    Args:
+        animeId: 作品ID
+        session: 数据库会话
+        progress_callback: 进度回调函数
+        delete_files: 是否同时删除弹幕XML文件，默认为True
+    """
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -45,19 +52,39 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
             if not anime_exists:
                 raise TaskSuccess("作品未找到，无需删除。")
 
-            # 1. 删除关联的弹幕文件目录
-            await progress_callback(50, "正在删除关联的弹幕文件...")
-            anime_danmaku_dir = DANMAKU_BASE_DIR / str(animeId)
-            if anime_danmaku_dir.exists() and anime_danmaku_dir.is_dir():
-                shutil.rmtree(anime_danmaku_dir)
-                logger.info(f"已删除作品的弹幕目录: {anime_danmaku_dir}")
+            # 1. 删除关联的弹幕文件（支持自定义路径）
+            if delete_files:
+                await progress_callback(30, "正在删除关联的弹幕文件...")
+                # 查询该作品下所有分集的弹幕文件路径
+                from sqlalchemy.orm import selectinload
+                sources_stmt = select(orm_models.AnimeSource).where(
+                    orm_models.AnimeSource.animeId == animeId
+                ).options(selectinload(orm_models.AnimeSource.episodes))
+                sources_result = await session.execute(sources_stmt)
+                sources = sources_result.scalars().all()
+
+                deleted_files_count = 0
+                for source in sources:
+                    for episode in source.episodes:
+                        if episode.danmakuFilePath:
+                            delete_danmaku_file(episode.danmakuFilePath)
+                            deleted_files_count += 1
+
+                # 同时尝试删除默认目录（兼容旧数据）
+                anime_danmaku_dir = DANMAKU_BASE_DIR / str(animeId)
+                if anime_danmaku_dir.exists() and anime_danmaku_dir.is_dir():
+                    shutil.rmtree(anime_danmaku_dir)
+                    logger.info(f"已删除作品的弹幕目录: {anime_danmaku_dir}")
+
+                logger.info(f"已删除作品 {animeId} 的 {deleted_files_count} 个弹幕文件")
 
             # 2. 删除作品本身 (数据库将通过级联删除所有关联记录)
             await progress_callback(90, "正在删除数据库记录...")
             await session.delete(anime_exists)
 
             await session.commit()
-            raise TaskSuccess("删除成功。")
+            msg = "删除成功。" if delete_files else "删除成功（保留了弹幕文件）。"
+            raise TaskSuccess(msg)
         except OperationalError as e:
             await session.rollback()
             if "Lock wait timeout exceeded" in str(e) and attempt < max_retries - 1:
@@ -77,8 +104,15 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
             raise
 
 
-async def delete_source_task(sourceId: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete a source and all its related data."""
+async def delete_source_task(sourceId: int, session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
+    """Background task to delete a source and all its related data.
+
+    Args:
+        sourceId: 数据源ID
+        session: 数据库会话
+        progress_callback: 进度回调函数
+        delete_files: 是否同时删除弹幕XML文件，默认为True
+    """
     await progress_callback(0, "开始删除...")
     try:
         # 检查源是否存在
@@ -89,17 +123,21 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
             raise TaskSuccess("数据源未找到，无需删除。")
 
         # 在删除数据库记录前，先删除关联的物理文件
-        episodes_to_delete_res = await session.execute(
-            select(orm_models.Episode.danmakuFilePath).where(orm_models.Episode.sourceId == sourceId)
-        )
-        for file_path in episodes_to_delete_res.scalars().all():
-            delete_danmaku_file(file_path)
+        if delete_files:
+            await progress_callback(30, "正在删除关联的弹幕文件...")
+            episodes_to_delete_res = await session.execute(
+                select(orm_models.Episode.danmakuFilePath).where(orm_models.Episode.sourceId == sourceId)
+            )
+            for file_path in episodes_to_delete_res.scalars().all():
+                delete_danmaku_file(file_path)
 
         # 删除源记录，数据库将级联删除其下的所有分集记录
+        await progress_callback(80, "正在删除数据库记录...")
         await session.delete(source_exists)
         await session.commit()
 
-        raise TaskSuccess("删除成功。")
+        msg = "删除成功。" if delete_files else "删除成功（保留了弹幕文件）。"
+        raise TaskSuccess(msg)
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
         raise
@@ -109,8 +147,15 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
         raise
 
 
-async def delete_episode_task(episodeId: int, session: AsyncSession, progress_callback: Callable):
-    """Background task to delete an episode and its comments."""
+async def delete_episode_task(episodeId: int, session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
+    """Background task to delete an episode and its comments.
+
+    Args:
+        episodeId: 分集ID
+        session: 数据库会话
+        progress_callback: 进度回调函数
+        delete_files: 是否同时删除弹幕XML文件，默认为True
+    """
     await progress_callback(0, "开始删除...")
     try:
         # 检查分集是否存在
@@ -121,11 +166,13 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
             raise TaskSuccess("分集未找到，无需删除。")
 
         # 在删除数据库记录前，先删除物理文件
-        delete_danmaku_file(episode_exists.danmakuFilePath)
+        if delete_files:
+            delete_danmaku_file(episode_exists.danmakuFilePath)
 
         await session.delete(episode_exists)
         await session.commit()
-        raise TaskSuccess("删除成功。")
+        msg = "删除成功。" if delete_files else "删除成功（保留了弹幕文件）。"
+        raise TaskSuccess(msg)
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
         raise
@@ -135,8 +182,15 @@ async def delete_episode_task(episodeId: int, session: AsyncSession, progress_ca
         raise
 
 
-async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, progress_callback: Callable):
-    """后台任务：批量删除多个分集。"""
+async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
+    """后台任务：批量删除多个分集。
+
+    Args:
+        episodeIds: 分集ID列表
+        session: 数据库会话
+        progress_callback: 进度回调函数
+        delete_files: 是否同时删除弹幕XML文件，默认为True
+    """
     total = len(episodeIds)
     await progress_callback(5, f"准备删除 {total} 个分集...")
     deleted_count = 0
@@ -149,7 +203,8 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
             episode_result = await session.execute(episode_stmt)
             episode = episode_result.scalar_one_or_none()
             if episode:
-                delete_danmaku_file(episode.danmakuFilePath)
+                if delete_files:
+                    delete_danmaku_file(episode.danmakuFilePath)
                 await session.delete(episode)
                 deleted_count += 1
 
@@ -159,7 +214,8 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
                 # 短暂休眠，以允许其他数据库操作有机会执行
                 await asyncio.sleep(0.1)
 
-        raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
+        suffix = "" if delete_files else "（保留了弹幕文件）"
+        raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。{suffix}")
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
         raise
@@ -169,8 +225,15 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
         raise
 
 
-async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, progress_callback: Callable):
-    """Background task to delete multiple sources."""
+async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
+    """Background task to delete multiple sources.
+
+    Args:
+        sourceIds: 数据源ID列表
+        session: 数据库会话
+        progress_callback: 进度回调函数
+        delete_files: 是否同时删除弹幕XML文件，默认为True
+    """
     total = len(sourceIds)
     deleted_count = 0
     for i, sourceId in enumerate(sourceIds):
@@ -181,6 +244,14 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
             source_result = await session.execute(source_stmt)
             source = source_result.scalar_one_or_none()
             if source:
+                # 删除关联的弹幕文件
+                if delete_files:
+                    episodes_to_delete_res = await session.execute(
+                        select(orm_models.Episode.danmakuFilePath).where(orm_models.Episode.sourceId == sourceId)
+                    )
+                    for file_path in episodes_to_delete_res.scalars().all():
+                        delete_danmaku_file(file_path)
+
                 await session.delete(source)
                 await session.commit()
                 deleted_count += 1
@@ -188,5 +259,6 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
             logger.error(f"批量删除源任务中，删除源 (ID: {sourceId}) 失败: {e}", exc_info=True)
             # Continue to the next one
     await session.commit()
-    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。")
+    suffix = "" if delete_files else "（保留了弹幕文件）"
+    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。{suffix}")
 

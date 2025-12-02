@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -97,6 +97,7 @@ export const Library = () => {
 
   const modalApi = useModal()
   const messageApi = useMessage()
+  const deleteFilesRef = useRef(true) // 删除时是否同时删除弹幕文件，默认为 true
 
   const getList = async () => {
     try {
@@ -305,6 +306,7 @@ export const Library = () => {
   ]
 
   const handleDelete = async record => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除',
       zIndex: 1002,
@@ -313,13 +315,22 @@ export const Library = () => {
           确定要删除{record.name}吗？
           <br />
           此操作将在后台提交一个删除任务
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
-          const res = await deleteAnime({ animeId: record.animeId })
+          const res = await deleteAnime({ animeId: record.animeId, deleteFiles: deleteFilesRef.current })
           goTask(res)
         } catch (error) {
           messageApi.error('提交删除任务失败')

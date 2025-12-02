@@ -217,14 +217,25 @@ async def update_task_progress_in_history(
     session: AsyncSession,
     task_id: str,
     status: str,
-    progress: int,
+    progress: Optional[int],
     description: str
 ):
-    """更新任务进度"""
+    """更新任务进度
+
+    Args:
+        progress: 进度值，如果为 None 则保持当前进度不变
+    """
+    # 构建更新值字典
+    values = {"status": status, "description": description, "updatedAt": get_now()}
+
+    # 只有当 progress 不为 None 时才更新进度字段
+    if progress is not None:
+        values["progress"] = progress
+
     await session.execute(
         update(TaskHistory)
         .where(TaskHistory.taskId == task_id)
-        .values(status=status, progress=progress, description=description, updatedAt=get_now())
+        .values(**values)
     )
     await session.commit()
 

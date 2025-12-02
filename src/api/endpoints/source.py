@@ -85,6 +85,7 @@ async def get_source_details(
 @router.delete("/library/source/{sourceId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定数据源的任务")
 async def delete_source_from_anime(
     sourceId: int,
+    deleteFiles: bool = Query(True, description="是否同时删除弹幕XML文件"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -95,11 +96,13 @@ async def delete_source_from_anime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
+    if not deleteFiles:
+        task_title += " (保留文件)"
     unique_key = f"delete-source-{sourceId}"
-    task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
+    task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback, delete_files=deleteFiles)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})，deleteFiles={deleteFiles}。")
     return {"message": f"删除源 '{source_info['providerName']}' 的任务已提交。", "taskId": task_id}
 
 
@@ -233,13 +236,16 @@ async def delete_bulk_sources(
     if not request_data.sourceIds:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
+    delete_files = getattr(request_data, 'deleteFiles', True)
     task_title = f"批量删除 {len(request_data.sourceIds)} 个数据源"
+    if not delete_files:
+        task_title += " (保留文件)"
     ids_str = ",".join(sorted([str(sid) for sid in request_data.sourceIds]))
     unique_key = f"delete-bulk-sources-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
-    task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback)
+    task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback, delete_files=delete_files)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})，deleteFiles={delete_files}。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
 

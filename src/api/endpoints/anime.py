@@ -281,6 +281,7 @@ async def reassociate_with_conflict_resolution(
 @router.delete("/library/anime/{animeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除媒体库中番剧的任务", response_model=UITaskResponse)
 async def delete_anime_from_library(
     animeId: int,
+    deleteFiles: bool = Query(True, description="是否同时删除弹幕XML文件"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -290,14 +291,16 @@ async def delete_anime_from_library(
     anime_details = await crud.get_anime_full_details(session, animeId)
     if not anime_details:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anime not found")
-    
+
     # 修正：为删除任务添加基于 animeId 的唯一键，以防止因作品重名导致的任务冲突。
     task_title = f"删除作品: {anime_details['title']}"
+    if not deleteFiles:
+        task_title += " (保留文件)"
     unique_key = f"delete-anime-{animeId}"
-    task_coro = lambda session, callback: tasks.delete_anime_task(animeId, session, callback)
+    task_coro = lambda session, callback: tasks.delete_anime_task(animeId, session, callback, delete_files=deleteFiles)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了删除作品 ID: {animeId} 的任务 (Task ID: {task_id})，deleteFiles={deleteFiles}。")
     return {"message": f"删除作品 '{anime_details['title']}' 的任务已提交。", "taskId": task_id}
 
 
