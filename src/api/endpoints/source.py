@@ -393,8 +393,8 @@ async def get_incremental_refresh_sources(
     page: int = Query(1, ge=1, description="页码"),
     pageSize: int = Query(20, ge=1, le=100, description="每页番剧数量"),
     keyword: str = Query("", description="搜索关键词（匹配番剧名称或源名称）"),
-    favoriteFilter: str = Query("all", regex="^(all|favorited|unfavorited)$", description="标记过滤"),
-    refreshFilter: str = Query("all", regex="^(all|enabled|disabled)$", description="追更过滤"),
+    favoriteFilter: str = Query("all", pattern="^(all|favorited|unfavorited)$", description="标记过滤"),
+    refreshFilter: str = Query("all", pattern="^(all|enabled|disabled)$", description="追更过滤"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):

@@ -245,7 +245,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           message="增量追更定时任务未配置"
           description="请在设置中配置增量追更定时任务，否则追更功能不会自动执行。"
           showIcon
-          className="mb-6"
+          style={{ marginBottom: 24 }}
         />
       )
     }
@@ -268,7 +268,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
             : null
         }
         showIcon
-        className="mb-8"
+        style={{ marginBottom: 24 }}
       />
     )
   }
