@@ -38,6 +38,7 @@ import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { CreateAnimeModal } from '../../components/CreateAnimeModal'
+import { IncrementalRefreshModal } from '../../components/IncrementalRefreshModal'
 import { RoutePaths } from '../../general/RoutePaths'
 import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
@@ -80,6 +81,7 @@ export const Library = () => {
     total: 0,
   })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -678,6 +680,9 @@ export const Library = () => {
                   重置
                 </Button>
               )}
+              <Button onClick={() => setIsRefreshModalOpen(true)}>
+                追更管理
+              </Button>
               <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
                 自定义影视条目
               </Button>
@@ -728,14 +733,23 @@ export const Library = () => {
                 </Button>
               )}
             </div>
-            <Button
-              type="primary"
-              block
-              size="large"
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              自定义影视条目
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                block
+                size="large"
+                onClick={() => setIsRefreshModalOpen(true)}
+              >
+                追更管理
+              </Button>
+              <Button
+                type="primary"
+                block
+                size="large"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                自定义影视条目
+              </Button>
+            </div>
           </div>
         )}
         <ResponsiveTable
@@ -845,6 +859,10 @@ export const Library = () => {
         open={isCreateModalOpen}
         onCancel={() => setIsCreateModalOpen(false)}
         onSuccess={handleCreateSuccess}
+      />
+      <IncrementalRefreshModal
+        open={isRefreshModalOpen}
+        onCancel={() => setIsRefreshModalOpen(false)}
       />
       <Modal
         title="编辑影视信息"

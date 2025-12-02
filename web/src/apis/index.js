@@ -700,3 +700,17 @@ export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storag
 
 /** 应用新模板 */
 export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
+
+// --- 追更与标记管理 ---
+
+/** 获取所有源（按番剧分组）用于追更管理 */
+export const getIncrementalRefreshSources = () => api.get('/api/ui/library/incremental-refresh/sources')
+
+/** 获取增量追更定时任务状态 */
+export const getIncrementalRefreshTaskStatus = () => api.get('/api/ui/library/incremental-refresh/task-status')
+
+/** 批量开启/关闭追更 */
+export const batchToggleIncrementalRefresh = (data) => api.post('/api/ui/library/incremental-refresh/batch-toggle', data)
+
+/** 批量设置标记 */
+export const batchSetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-favorite', data)

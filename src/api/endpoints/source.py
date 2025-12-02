@@ -339,4 +339,105 @@ async def batch_manual_import(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
+# --- 追更与标记管理 ---
+
+class IncrementalRefreshSourceInfo(BaseModel):
+    """单个源的追更信息"""
+    sourceId: int
+    providerName: str
+    isFavorited: bool
+    incrementalRefreshEnabled: bool
+    incrementalRefreshFailures: int
+    lastRefreshLatestEpisodeAt: Optional[datetime] = None
+    episodeCount: int
+
+
+class IncrementalRefreshAnimeGroup(BaseModel):
+    """按番剧分组的追更信息"""
+    animeId: int
+    animeTitle: str
+    sources: List[IncrementalRefreshSourceInfo]
+
+
+class IncrementalRefreshTaskStatus(BaseModel):
+    """增量追更定时任务状态"""
+    exists: bool
+    enabled: bool
+    cronExpression: Optional[str] = None
+    nextRunTime: Optional[datetime] = None
+    taskId: Optional[str] = None
+
+
+class BatchToggleIncrementalRequest(BaseModel):
+    """批量开启/关闭追更请求"""
+    sourceIds: List[int]
+    enabled: bool
+
+
+class BatchSetFavoriteRequest(BaseModel):
+    """批量设置标记请求"""
+    sourceIds: List[int]
+
+
+@router.get("/library/incremental-refresh/sources", response_model=List[IncrementalRefreshAnimeGroup], summary="获取所有源（按番剧分组）")
+async def get_incremental_refresh_sources(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """获取所有源（包括启用和未启用追更的），按番剧分组返回。用于追更管理弹窗。"""
+    groups = await crud.get_incremental_refresh_sources_grouped(session)
+    return groups
+
+
+@router.get("/library/incremental-refresh/task-status", response_model=IncrementalRefreshTaskStatus, summary="获取增量追更定时任务状态")
+async def get_incremental_refresh_task_status(
+    current_user: models.User = Depends(security.get_current_user),
+    scheduler: SchedulerManager = Depends(get_scheduler_manager),
+):
+    """检测增量追更定时任务是否存在及其状态。"""
+    tasks_list = await scheduler.get_all_tasks()
+
+    # 查找 job_type 为 "incremental_refresh" 的任务
+    for task in tasks_list:
+        if task.get("jobType") == "incremental_refresh":
+            return IncrementalRefreshTaskStatus(
+                exists=True,
+                enabled=task.get("isEnabled", False),
+                cronExpression=task.get("cronExpression"),
+                nextRunTime=task.get("nextRunTime"),
+                taskId=task.get("taskId")
+            )
+
+    return IncrementalRefreshTaskStatus(
+        exists=False,
+        enabled=False,
+        cronExpression=None,
+        nextRunTime=None,
+        taskId=None
+    )
+
+
+@router.post("/library/incremental-refresh/batch-toggle", summary="批量开启/关闭追更")
+async def batch_toggle_incremental_refresh(
+    payload: BatchToggleIncrementalRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量开启或关闭指定源的增量追更。"""
+    count = await crud.batch_toggle_incremental_refresh(session, payload.sourceIds, payload.enabled)
+    action = "开启" if payload.enabled else "关闭"
+    return {"message": f"成功{action} {count} 个源的追更", "count": count}
+
+
+@router.post("/library/incremental-refresh/batch-favorite", summary="批量设置标记")
+async def batch_set_favorite(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量设置标记。每个源会被设为标记，同一番剧下的其他源会被取消标记。"""
+    count = await crud.batch_set_favorite(session, payload.sourceIds)
+    return {"message": f"成功设置 {count} 个源为标记", "count": count}
+
+
 
