@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud, orm_models
 from ..rate_limiter import RateLimiter, RateLimitExceededError
-from ..task_manager import TaskStatus
+from ..task_manager import TaskStatus, TaskPauseForRateLimit
 from .utils import extract_short_error_message
 
 logger = logging.getLogger(__name__)
@@ -375,80 +375,13 @@ async def _import_episodes_iteratively(
                 logger.error(f"分集 '{episode.title}' 因运行时错误而跳过: {str(e)}")
                 continue
             except RateLimitExceededError as e:
-                # 达到流控限制，暂停并等待
+                # 达到流控限制，抛出暂停异常让任务管理器处理
+                # 这样可以释放 worker 去处理其他源的任务，而不是阻塞等待
                 logger.warning(f"分集导入因达到速率限制而暂停: {e}")
-                await progress_callback(base_progress, f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试...", status=TaskStatus.PAUSED)
-                await asyncio.sleep(e.retry_after_seconds)
-                # 重试当前分集
-                try:
-                    # 根据是否为后备任务选择不同的速率限制方法
-                    if is_fallback:
-                        await rate_limiter.check_fallback(fallback_type, scraper.provider_name)
-                    else:
-                        await rate_limiter.check(scraper.provider_name)
-                    comments = await scraper.get_comments(episode.episodeId, progress_callback=lambda p, msg: progress_callback(base_progress + int(p * 0.6 / len(episodes)), msg))
-                    # 修正：检查弹幕是否为空（None 或空列表）
-                    if comments is not None and len(comments) > 0:
-                        if is_fallback:
-                            await rate_limiter.increment_fallback(fallback_type, scraper.provider_name)
-                        else:
-                            await rate_limiter.increment(scraper.provider_name)
-                        episode_db_id = await crud.create_episode_if_not_exists(
-                            session, anime_id, source_id, episode.episodeIndex,
-                            episode.title, episode.url, episode.episodeId
-                        )
-
-                        # 智能刷新模式：比较弹幕数量
-                        if smart_refresh:
-                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                            episode_result = await session.execute(episode_stmt)
-                            existing_episode = episode_result.scalar_one_or_none()
-
-                            if existing_episode and existing_episode.commentCount > 0:
-                                new_count = len(comments)
-                                existing_count = existing_episode.commentCount
-
-                                if new_count > existing_count:
-                                    actual_new_count = new_count - existing_count
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
-                                elif new_count == existing_count:
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                    skipped_episodes_indices.append(episode.episodeIndex)
-                                    continue
-                                else:
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                    skipped_episodes_indices.append(episode.episodeIndex)
-                                    continue
-                        else:
-                            # 普通模式：检查是否已有弹幕，如果有则跳过
-                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                            episode_result = await session.execute(episode_stmt)
-                            existing_episode = episode_result.scalar_one_or_none()
-                            if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                                successful_episodes_indices.append(episode.episodeIndex)
-                                continue
-
-                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                        await session.commit()
-
-                        total_comments_added += added_count
-                        successful_episodes_indices.append(episode.episodeIndex)
-                        logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 重试后写入 {added_count} 条弹幕并已提交。")
-                    else:
-                        # 修正：重试后获取弹幕失败或为空时，不创建分集记录
-                        failed_episodes_count += 1
-                        if comments is None:
-                            failed_episodes_details[episode.episodeIndex] = "重试后仍获取弹幕失败"
-                            logger.warning(f"分集 '{episode.title}' 重试后仍获取弹幕失败（返回 None）。")
-                        else:
-                            failed_episodes_details[episode.episodeIndex] = "重试后获取弹幕为空"
-                            logger.warning(f"分集 '{episode.title}' 重试后获取弹幕为空（0条）。")
-                except Exception as retry_e:
-                    failed_episodes_count += 1
-                    error_msg = _extract_short_error_message(retry_e)
-                    failed_episodes_details[episode.episodeIndex] = f"重试失败: {error_msg}"
-                    logger.error(f"重试处理分集 '{episode.title}' 时发生错误: {retry_e}", exc_info=True)
+                raise TaskPauseForRateLimit(
+                    retry_after_seconds=e.retry_after_seconds,
+                    message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+                )
             except Exception as e:
                 failed_episodes_count += 1
                 error_msg = _extract_short_error_message(e)
