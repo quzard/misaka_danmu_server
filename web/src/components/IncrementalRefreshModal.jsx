@@ -307,7 +307,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
   // 渲染源列表项
   const renderSourceItem = (source, animeTitle) => (
-    <div key={source.sourceId} className="flex items-center gap-4 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+    <div key={source.sourceId} className="flex items-center gap-4 py-3 px-4 rounded-lg border-b border-gray-100 dark:border-gray-700 last:border-b-0 hover:bg-gray-100 dark:hover:bg-gray-700">
       <Checkbox
         checked={selectedSourceIds.includes(source.sourceId)}
         onChange={(e) => handleCheckboxChange(source.sourceId, e.target.checked)}
