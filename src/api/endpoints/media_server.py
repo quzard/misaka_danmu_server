@@ -151,12 +151,17 @@ async def create_media_server(
         filter_rules=payload.filterRules
     )
     await session.commit()
-    
+
+    # 如果服务器启用，加载到管理器中
+    if payload.isEnabled:
+        manager = get_media_server_manager()
+        await manager.reload_server(server_id)
+
     # 返回创建的服务器
     server = await crud.get_media_server_by_id(session, server_id)
     if not server:
         raise HTTPException(status_code=500, detail="创建媒体服务器后无法获取")
-    
+
     return server
 
 
@@ -179,17 +184,21 @@ async def update_media_server(
         selected_libraries=payload.selectedLibraries,
         filter_rules=payload.filterRules
     )
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="媒体服务器不存在")
-    
+
     await session.commit()
-    
+
+    # 重新加载服务器实例，确保配置变更立即生效
+    manager = get_media_server_manager()
+    await manager.reload_server(server_id)
+
     # 返回更新后的服务器
     server = await crud.get_media_server_by_id(session, server_id)
     if not server:
         raise HTTPException(status_code=500, detail="更新媒体服务器后无法获取")
-    
+
     return server
 
 

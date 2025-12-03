@@ -228,13 +228,30 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
     return source.isFavorited
 
 
-async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> bool:
+async def toggle_source_incremental_refresh(session: AsyncSession, source_id: int) -> Optional[bool]:
+    """
+    切换源的追更状态。
+    同一番剧下只能有一个源开启追更（与标记规则相同）。
+    返回新的追更状态（True/False），如果源不存在则返回 None。
+    """
     source = await session.get(AnimeSource, source_id)
     if not source:
-        return False
+        return None
+
+    # 切换当前源的追更状态
     source.incrementalRefreshEnabled = not source.incrementalRefreshEnabled
+
+    # 如果开启了追更，则关闭同一番剧下其他源的追更
+    if source.incrementalRefreshEnabled:
+        stmt = (
+            update(AnimeSource)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(incrementalRefreshEnabled=False)
+        )
+        await session.execute(stmt)
+
     await session.commit()
-    return True
+    return source.incrementalRefreshEnabled
 
 
 async def increment_incremental_refresh_failures(session: AsyncSession, source_id: int) -> int:
@@ -274,7 +291,231 @@ async def _assign_source_order_if_missing(session: AsyncSession, anime_id: int, 
         max_order_res = await session.execute(max_order_stmt)
         current_max_order = max_order_res.scalar_one_or_none() or 0
         new_order = current_max_order + 1
-        
+
         await session.execute(update(AnimeSource).where(AnimeSource.id == source_id).values(sourceOrder=new_order))
         return new_order
+
+
+async def get_incremental_refresh_sources_grouped(
+    session: AsyncSession,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: str = "",
+    favorite_filter: str = "all",  # all / favorited / unfavorited
+    refresh_filter: str = "all",   # all / enabled / disabled
+) -> Dict[str, Any]:
+    """
+    获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。
+
+    参数:
+        page: 页码（从1开始）
+        page_size: 每页番剧数量
+        keyword: 搜索关键词（匹配番剧名称或源名称）
+        favorite_filter: 标记过滤 (all/favorited/unfavorited)
+        refresh_filter: 追更过滤 (all/enabled/disabled)
+
+    返回格式: {
+        "total": 100,  # 总番剧数
+        "totalSources": 118,  # 总源数
+        "refreshEnabled": 5,  # 追更中数量
+        "favorited": 3,  # 已标记数量
+        "list": [
+            {
+                "animeId": 1,
+                "animeTitle": "葬送的芙莉莲",
+                "sources": [...]
+            },
+            ...
+        ]
+    }
+    """
+    # 子查询：统计每个源的分集数量
+    episode_count_subquery = (
+        select(
+            Episode.sourceId,
+            func.count(Episode.id).label("episode_count")
+        )
+        .group_by(Episode.sourceId)
+        .subquery()
+    )
+
+    # 基础查询：获取所有源及其关联的番剧信息
+    base_stmt = (
+        select(
+            Anime.id.label("animeId"),
+            Anime.title.label("animeTitle"),
+            Anime.type.label("animeType"),
+            AnimeSource.id.label("sourceId"),
+            AnimeSource.providerName.label("providerName"),
+            AnimeSource.isFavorited.label("isFavorited"),
+            AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
+            AnimeSource.incrementalRefreshFailures.label("incrementalRefreshFailures"),
+            AnimeSource.lastRefreshLatestEpisodeAt.label("lastRefreshLatestEpisodeAt"),
+            func.coalesce(episode_count_subquery.c.episode_count, 0).label("episodeCount")
+        )
+        .join(Anime, AnimeSource.animeId == Anime.id)
+        .outerjoin(episode_count_subquery, AnimeSource.id == episode_count_subquery.c.sourceId)
+    )
+
+    # 应用过滤条件
+    conditions = []
+    if keyword:
+        keyword_pattern = f"%{keyword}%"
+        conditions.append(
+            or_(
+                Anime.title.ilike(keyword_pattern),
+                AnimeSource.providerName.ilike(keyword_pattern)
+            )
+        )
+    if favorite_filter == "favorited":
+        conditions.append(AnimeSource.isFavorited == True)
+    elif favorite_filter == "unfavorited":
+        conditions.append(AnimeSource.isFavorited == False)
+    if refresh_filter == "enabled":
+        conditions.append(AnimeSource.incrementalRefreshEnabled == True)
+    elif refresh_filter == "disabled":
+        conditions.append(AnimeSource.incrementalRefreshEnabled == False)
+
+    if conditions:
+        base_stmt = base_stmt.where(and_(*conditions))
+
+    # 排序
+    base_stmt = base_stmt.order_by(Anime.title, AnimeSource.providerName)
+
+    # 执行查询
+    result = await session.execute(base_stmt)
+    rows = result.mappings().all()
+
+    # 按番剧分组
+    grouped = {}
+    total_sources = 0
+    refresh_enabled_count = 0
+    favorited_count = 0
+
+    for row in rows:
+        anime_id = row["animeId"]
+        if anime_id not in grouped:
+            grouped[anime_id] = {
+                "animeId": anime_id,
+                "animeTitle": row["animeTitle"],
+                "animeType": row["animeType"],
+                "sources": []
+            }
+        grouped[anime_id]["sources"].append({
+            "sourceId": row["sourceId"],
+            "providerName": row["providerName"],
+            "isFavorited": row["isFavorited"],
+            "incrementalRefreshEnabled": row["incrementalRefreshEnabled"],
+            "incrementalRefreshFailures": row["incrementalRefreshFailures"],
+            "lastRefreshLatestEpisodeAt": row["lastRefreshLatestEpisodeAt"],
+            "episodeCount": row["episodeCount"]
+        })
+        total_sources += 1
+        if row["incrementalRefreshEnabled"]:
+            refresh_enabled_count += 1
+        if row["isFavorited"]:
+            favorited_count += 1
+
+    all_groups = list(grouped.values())
+    total_anime = len(all_groups)
+
+    # 分页（按番剧分页）
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_groups = all_groups[start_idx:end_idx]
+
+    return {
+        "total": total_anime,
+        "totalSources": total_sources,
+        "refreshEnabled": refresh_enabled_count,
+        "favorited": favorited_count,
+        "list": paginated_groups
+    }
+
+
+async def batch_toggle_incremental_refresh(session: AsyncSession, source_ids: List[int], enabled: bool) -> int:
+    """
+    批量设置追更状态。
+    如果开启追更，同一番剧下只能有一个源开启追更（与标记规则相同）。
+    返回成功设置的数量。
+    """
+    if not source_ids:
+        return 0
+
+    if not enabled:
+        # 关闭追更：直接批量关闭即可
+        result = await session.execute(
+            update(AnimeSource)
+            .where(AnimeSource.id.in_(source_ids))
+            .values(incrementalRefreshEnabled=False)
+        )
+        await session.commit()
+        return result.rowcount
+
+    # 开启追更：需要遵循互斥规则
+    count = 0
+    for source_id in source_ids:
+        source = await session.get(AnimeSource, source_id)
+        if not source:
+            continue
+
+        # 开启当前源的追更
+        source.incrementalRefreshEnabled = True
+
+        # 关闭同一番剧下其他源的追更
+        await session.execute(
+            update(AnimeSource)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(incrementalRefreshEnabled=False)
+        )
+        count += 1
+
+    await session.commit()
+    return count
+
+
+async def batch_set_favorite(session: AsyncSession, source_ids: List[int]) -> int:
+    """
+    批量设置标记。对于每个源，将其设为标记，并取消同一番剧下其他源的标记。
+    返回成功设置的数量。
+    """
+    if not source_ids:
+        return 0
+
+    count = 0
+    for source_id in source_ids:
+        source = await session.get(AnimeSource, source_id)
+        if not source:
+            continue
+
+        # 设置当前源为标记
+        source.isFavorited = True
+
+        # 取消同一番剧下其他源的标记
+        await session.execute(
+            update(AnimeSource)
+            .where(AnimeSource.animeId == source.animeId, AnimeSource.id != source_id)
+            .values(isFavorited=False)
+        )
+        count += 1
+
+    await session.commit()
+    return count
+
+
+async def batch_unset_favorite(session: AsyncSession, source_ids: List[int]) -> int:
+    """
+    批量取消标记。
+    返回成功取消的数量。
+    """
+    if not source_ids:
+        return 0
+
+    result = await session.execute(
+        update(AnimeSource)
+        .where(AnimeSource.id.in_(source_ids))
+        .values(isFavorited=False)
+    )
+    await session.commit()
+    return result.rowcount
 

@@ -83,6 +83,7 @@ export const EpisodeDetail = () => {
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const uploadRef = useRef(null)
+  const deleteFilesRef = useRef(true) // 删除时是否同时删除弹幕文件，默认为 true
   const [uploading, setUploading] = useState(false)
   const [fileList, setFileList] = useState([])
   const [lastClickedIndex, setLastClickedIndex] = useState(null)
@@ -620,6 +621,7 @@ export const EpisodeDetail = () => {
   ]
 
   const handleBatchDelete = () => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除分集',
       zIndex: 1002,
@@ -628,6 +630,15 @@ export const EpisodeDetail = () => {
           <Typography.Text>您确定要删除选中的 {selectedRows.length} 个分集吗？</Typography.Text>
           <br />
           <Typography.Text>此操作将在后台提交一个批量删除任务。</Typography.Text>
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
@@ -636,6 +647,7 @@ export const EpisodeDetail = () => {
         try {
           const res = await deleteAnimeEpisode({
             episodeIds: selectedRows?.map(it => it.episodeId),
+            deleteFiles: deleteFilesRef.current,
           })
           goTask(res)
         } catch (error) {
@@ -646,6 +658,7 @@ export const EpisodeDetail = () => {
   }
 
   const deleteEpisodeSingle = record => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除分集',
       zIndex: 1002,
@@ -654,6 +667,15 @@ export const EpisodeDetail = () => {
           <Typography.Text>您确定要删除分集 '{record.title}' 吗？</Typography.Text>
           <br />
           <Typography.Text>此操作将在后台提交一个批量删除任务。</Typography.Text>
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
@@ -662,6 +684,7 @@ export const EpisodeDetail = () => {
         try {
           const res = await deleteAnimeEpisodeSingle({
             id: record.episodeId,
+            deleteFiles: deleteFilesRef.current,
           })
           goTask(res)
         } catch (error) {

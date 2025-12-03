@@ -402,7 +402,7 @@ export const biliLogout = () =>
 export const getAnimeLibrary = data => api.get('/api/ui/library', data)
 /** 删除单个资源 */
 export const deleteAnime = data =>
-  api.delete(`/api/ui/library/anime/${data.animeId}`)
+  api.delete(`/api/ui/library/anime/${data.animeId}?deleteFiles=${data.deleteFiles !== false}`)
 /** 获取影视信息 */
 export const getAnimeDetail = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/details`)
@@ -447,11 +447,11 @@ export const reassociateWithResolution = data =>
 
 /** 批量删除数据源 */
 export const deleteAnimeSource = data =>
-  api.post('/api/ui/library/sources/delete-bulk', data)
+  api.post('/api/ui/library/sources/delete-bulk', { sourceIds: data.sourceIds, deleteFiles: data.deleteFiles !== false })
 
 /** 删除单个数据源 */
 export const deleteAnimeSourceSingle = data =>
-  api.delete(`/api/ui/library/source/${data.sourceId}`)
+  api.delete(`/api/ui/library/source/${data.sourceId}?deleteFiles=${data.deleteFiles !== false}`)
 
 /** 数据源收藏状态 */
 export const toggleSourceFavorite = data =>
@@ -486,7 +486,7 @@ export const manualImportEpisode = data =>
 
 /** 批量删除集 */
 export const deleteAnimeEpisode = data =>
-  api.post('/api/ui/library/episodes/delete-bulk', data)
+  api.post('/api/ui/library/episodes/delete-bulk', { episodeIds: data.episodeIds, deleteFiles: data.deleteFiles !== false })
 
 /** 刷新集弹幕 */
 export const refreshEpisodeDanmaku = data =>
@@ -498,7 +498,7 @@ export const refreshEpisodesBulk = data =>
 
 /** 删除集 */
 export const deleteAnimeEpisodeSingle = data =>
-  api.delete(`/api/ui/library/episode/${data.id}`)
+  api.delete(`/api/ui/library/episode/${data.id}?deleteFiles=${data.deleteFiles !== false}`)
 
 /** 重整集数 */
 export const resetEpisode = data =>
@@ -700,3 +700,29 @@ export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storag
 
 /** 应用新模板 */
 export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
+
+// --- 追更与标记管理 ---
+
+/** 获取所有源（按番剧分组）用于追更管理，支持分页和过滤 */
+export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all' } = {}) => {
+  const queryParams = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    keyword,
+    favoriteFilter,
+    refreshFilter
+  })
+  return api.get(`/api/ui/library/incremental-refresh/sources?${queryParams.toString()}`)
+}
+
+/** 获取增量追更定时任务状态 */
+export const getIncrementalRefreshTaskStatus = () => api.get('/api/ui/library/incremental-refresh/task-status')
+
+/** 批量开启/关闭追更 */
+export const batchToggleIncrementalRefresh = (data) => api.post('/api/ui/library/incremental-refresh/batch-toggle', data)
+
+/** 批量设置标记 */
+export const batchSetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-favorite', data)
+
+/** 批量取消标记 */
+export const batchUnsetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-unfavorite', data)

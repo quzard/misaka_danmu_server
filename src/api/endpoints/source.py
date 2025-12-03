@@ -85,6 +85,7 @@ async def get_source_details(
 @router.delete("/library/source/{sourceId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定数据源的任务")
 async def delete_source_from_anime(
     sourceId: int,
+    deleteFiles: bool = Query(True, description="是否同时删除弹幕XML文件"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -95,11 +96,13 @@ async def delete_source_from_anime(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     task_title = f"删除源: {source_info['title']} ({source_info['providerName']})"
+    if not deleteFiles:
+        task_title += " (保留文件)"
     unique_key = f"delete-source-{sourceId}"
-    task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback)
+    task_coro = lambda session, callback: tasks.delete_source_task(sourceId, session, callback, delete_files=deleteFiles)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了删除源 ID: {sourceId} 的任务 (Task ID: {task_id})，deleteFiles={deleteFiles}。")
     return {"message": f"删除源 '{source_info['providerName']}' 的任务已提交。", "taskId": task_id}
 
 
@@ -124,11 +127,11 @@ async def toggle_source_incremental_refresh(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """切换指定数据源的定时增量更新的启用/禁用状态。"""
-    toggled = await crud.toggle_source_incremental_refresh(session, sourceId)
-    if not toggled:
+    """切换指定数据源的定时增量更新的启用/禁用状态。同一番剧下只能有一个源开启追更。"""
+    new_state = await crud.toggle_source_incremental_refresh(session, sourceId)
+    if new_state is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
-    logger.info(f"用户 '{current_user.username}' 切换了源 ID {sourceId} 的定时增量更新状态。")
+    logger.info(f"用户 '{current_user.username}' 切换了源 ID {sourceId} 的追更状态为 {new_state}。")
 
 
 @router.get("/library/source/{sourceId}/episodes", response_model=models.PaginatedEpisodesResponse, summary="获取数据源的所有分集")
@@ -233,13 +236,16 @@ async def delete_bulk_sources(
     if not request_data.sourceIds:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source IDs list cannot be empty.")
 
+    delete_files = getattr(request_data, 'deleteFiles', True)
     task_title = f"批量删除 {len(request_data.sourceIds)} 个数据源"
+    if not delete_files:
+        task_title += " (保留文件)"
     ids_str = ",".join(sorted([str(sid) for sid in request_data.sourceIds]))
     unique_key = f"delete-bulk-sources-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
-    task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback)
+    task_coro = lambda session, callback: tasks.delete_bulk_sources_task(request_data.sourceIds, session, callback, delete_files=delete_files)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.sourceIds)} 个源的任务 (Task ID: {task_id})，deleteFiles={delete_files}。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
 
@@ -331,6 +337,144 @@ async def batch_manual_import(
         return {"message": "批量手动导入任务已提交", "taskId": task_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+# --- 追更与标记管理 ---
+
+class IncrementalRefreshSourceInfo(BaseModel):
+    """单个源的追更信息"""
+    sourceId: int
+    providerName: str
+    isFavorited: bool
+    incrementalRefreshEnabled: bool
+    incrementalRefreshFailures: int
+    lastRefreshLatestEpisodeAt: Optional[datetime] = None
+    episodeCount: int
+
+
+class IncrementalRefreshAnimeGroup(BaseModel):
+    """按番剧分组的追更信息"""
+    animeId: int
+    animeTitle: str
+    animeType: str  # tv_series, movie, ova, other
+    sources: List[IncrementalRefreshSourceInfo]
+
+
+class IncrementalRefreshSourcesResponse(BaseModel):
+    """追更源列表响应（分页）"""
+    total: int  # 总番剧数
+    totalSources: int  # 总源数
+    refreshEnabled: int  # 追更中数量
+    favorited: int  # 已标记数量
+    maxFailures: int  # 最大失败次数配置
+    list: List[IncrementalRefreshAnimeGroup]
+
+
+class IncrementalRefreshTaskStatus(BaseModel):
+    """增量追更定时任务状态"""
+    exists: bool
+    enabled: bool
+    cronExpression: Optional[str] = None
+    nextRunTime: Optional[datetime] = None
+    taskId: Optional[str] = None
+
+
+class BatchToggleIncrementalRequest(BaseModel):
+    """批量开启/关闭追更请求"""
+    sourceIds: List[int]
+    enabled: bool
+
+
+class BatchSetFavoriteRequest(BaseModel):
+    """批量设置标记请求"""
+    sourceIds: List[int]
+
+
+@router.get("/library/incremental-refresh/sources", response_model=IncrementalRefreshSourcesResponse, summary="获取所有源（按番剧分组，支持分页和过滤）")
+async def get_incremental_refresh_sources(
+    page: int = Query(1, ge=1, description="页码"),
+    pageSize: int = Query(20, ge=1, le=100, description="每页番剧数量"),
+    keyword: str = Query("", description="搜索关键词（匹配番剧名称或源名称）"),
+    favoriteFilter: str = Query("all", pattern="^(all|favorited|unfavorited)$", description="标记过滤"),
+    refreshFilter: str = Query("all", pattern="^(all|enabled|disabled)$", description="追更过滤"),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。用于追更管理弹窗。"""
+    result = await crud.get_incremental_refresh_sources_grouped(
+        session,
+        page=page,
+        page_size=pageSize,
+        keyword=keyword,
+        favorite_filter=favoriteFilter,
+        refresh_filter=refreshFilter,
+    )
+    # 获取最大失败次数配置
+    max_failures = int(await crud.get_config_value(session, "incrementalRefreshMaxFailures", "10"))
+    result["maxFailures"] = max_failures
+    return result
+
+
+@router.get("/library/incremental-refresh/task-status", response_model=IncrementalRefreshTaskStatus, summary="获取增量追更定时任务状态")
+async def get_incremental_refresh_task_status(
+    current_user: models.User = Depends(security.get_current_user),
+    scheduler: SchedulerManager = Depends(get_scheduler_manager),
+):
+    """检测增量追更定时任务是否存在及其状态。"""
+    tasks_list = await scheduler.get_all_tasks()
+
+    # 查找 job_type 为 "incrementalRefresh" 的任务（驼峰命名）
+    for task in tasks_list:
+        if task.get("jobType") == "incrementalRefresh":
+            return IncrementalRefreshTaskStatus(
+                exists=True,
+                enabled=task.get("isEnabled", False),
+                cronExpression=task.get("cronExpression"),
+                nextRunTime=task.get("nextRunTime"),
+                taskId=task.get("taskId")
+            )
+
+    return IncrementalRefreshTaskStatus(
+        exists=False,
+        enabled=False,
+        cronExpression=None,
+        nextRunTime=None,
+        taskId=None
+    )
+
+
+@router.post("/library/incremental-refresh/batch-toggle", summary="批量开启/关闭追更")
+async def batch_toggle_incremental_refresh(
+    payload: BatchToggleIncrementalRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量开启或关闭指定源的增量追更。"""
+    count = await crud.batch_toggle_incremental_refresh(session, payload.sourceIds, payload.enabled)
+    action = "开启" if payload.enabled else "关闭"
+    return {"message": f"成功{action} {count} 个源的追更", "count": count}
+
+
+@router.post("/library/incremental-refresh/batch-favorite", summary="批量设置标记")
+async def batch_set_favorite(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量设置标记。每个源会被设为标记，同一番剧下的其他源会被取消标记。"""
+    count = await crud.batch_set_favorite(session, payload.sourceIds)
+    return {"message": f"成功设置 {count} 个源为标记", "count": count}
+
+
+@router.post("/library/incremental-refresh/batch-unfavorite", summary="批量取消标记")
+async def batch_unset_favorite(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量取消标记。"""
+    count = await crud.batch_unset_favorite(session, payload.sourceIds)
+    return {"message": f"成功取消 {count} 个源的标记", "count": count}
 
 
 

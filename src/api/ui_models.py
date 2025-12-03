@@ -35,6 +35,7 @@ class ReassociationRequest(BaseModel):
 class BulkDeleteEpisodesRequest(BaseModel):
     """批量删除分集请求"""
     episodeIds: List[int] = Field(..., alias="episode_ids")
+    deleteFiles: bool = Field(True, description="是否同时删除弹幕XML文件")
 
     class Config:
         populate_by_name = True
@@ -43,6 +44,7 @@ class BulkDeleteEpisodesRequest(BaseModel):
 class BulkDeleteRequest(BaseModel):
     """批量删除数据源请求"""
     sourceIds: List[int] = Field(..., alias="source_ids")
+    deleteFiles: bool = Field(True, description="是否同时删除弹幕XML文件")
 
     class Config:
         populate_by_name = True

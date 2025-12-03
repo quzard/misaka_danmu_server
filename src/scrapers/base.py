@@ -76,18 +76,30 @@ def track_performance(func):
     """
     装饰器: 跟踪异步方法的执行时间,不影响并发性能。
     记录到 INFO 级别,方便查看性能统计。
+    使用任务ID作为键存储耗时，确保并发安全，供 scraper_manager 读取。
     """
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
         start_time = time.perf_counter()
+        task_id = id(asyncio.current_task())  # 获取当前任务ID，确保并发安全
         try:
             result = await func(self, *args, **kwargs)
             elapsed = time.perf_counter() - start_time
+            elapsed_ms = elapsed * 1000
+            # 使用任务ID作为键存储耗时，确保并发安全
+            if not hasattr(self, '_task_timings'):
+                self._task_timings = {}
+            self._task_timings[task_id] = elapsed_ms
             # 记录到 INFO 级别,显示搜索源名称和耗时
             self.logger.info(f"[{self.provider_name}] {func.__name__} 耗时: {elapsed:.3f}s")
             return result
         except Exception as e:
             elapsed = time.perf_counter() - start_time
+            elapsed_ms = elapsed * 1000
+            # 即使失败也存储耗时
+            if not hasattr(self, '_task_timings'):
+                self._task_timings = {}
+            self._task_timings[task_id] = elapsed_ms
             self.logger.warning(f"[{self.provider_name}] {func.__name__} 失败耗时: {elapsed:.3f}s")
             raise
     return wrapper

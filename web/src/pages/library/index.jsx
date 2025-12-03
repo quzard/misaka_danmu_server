@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -38,6 +38,7 @@ import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { CreateAnimeModal } from '../../components/CreateAnimeModal'
+import { IncrementalRefreshModal } from '../../components/IncrementalRefreshModal'
 import { RoutePaths } from '../../general/RoutePaths'
 import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
@@ -80,6 +81,7 @@ export const Library = () => {
     total: 0,
   })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
 
   const [form] = Form.useForm()
   const [editOpen, setEditOpen] = useState(false)
@@ -97,6 +99,7 @@ export const Library = () => {
 
   const modalApi = useModal()
   const messageApi = useMessage()
+  const deleteFilesRef = useRef(true) // 删除时是否同时删除弹幕文件，默认为 true
 
   const getList = async () => {
     try {
@@ -305,6 +308,7 @@ export const Library = () => {
   ]
 
   const handleDelete = async record => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除',
       zIndex: 1002,
@@ -313,13 +317,22 @@ export const Library = () => {
           确定要删除{record.name}吗？
           <br />
           此操作将在后台提交一个删除任务
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
         try {
-          const res = await deleteAnime({ animeId: record.animeId })
+          const res = await deleteAnime({ animeId: record.animeId, deleteFiles: deleteFilesRef.current })
           goTask(res)
         } catch (error) {
           messageApi.error('提交删除任务失败')
@@ -667,6 +680,9 @@ export const Library = () => {
                   重置
                 </Button>
               )}
+              <Button onClick={() => setIsRefreshModalOpen(true)}>
+                追更管理
+              </Button>
               <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
                 自定义影视条目
               </Button>
@@ -717,14 +733,23 @@ export const Library = () => {
                 </Button>
               )}
             </div>
-            <Button
-              type="primary"
-              block
-              size="large"
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              自定义影视条目
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                block
+                size="large"
+                onClick={() => setIsRefreshModalOpen(true)}
+              >
+                追更管理
+              </Button>
+              <Button
+                type="primary"
+                block
+                size="large"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                自定义影视条目
+              </Button>
+            </div>
           </div>
         )}
         <ResponsiveTable
@@ -834,6 +859,10 @@ export const Library = () => {
         open={isCreateModalOpen}
         onCancel={() => setIsCreateModalOpen(false)}
         onSuccess={handleCreateSuccess}
+      />
+      <IncrementalRefreshModal
+        open={isRefreshModalOpen}
+        onCancel={() => setIsRefreshModalOpen(false)}
       />
       <Modal
         title="编辑影视信息"

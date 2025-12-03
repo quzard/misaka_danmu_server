@@ -185,9 +185,16 @@ async def create_task_in_history(
     description: str,
     scheduled_task_id: Optional[str] = None,
     unique_key: Optional[str] = None,
-    queue_type: str = "download"
+    queue_type: str = "download",
+    task_type: Optional[str] = None,
+    task_parameters: Optional[str] = None
 ):
-    """在任务历史中创建新任务"""
+    """在任务历史中创建新任务
+
+    Args:
+        task_type: 任务类型，用于重启后恢复任务（如 'generic_import', 'webhook_search' 等）
+        task_parameters: JSON格式的任务参数，用于重启后重建协程工厂
+    """
     now = get_now()
     new_task = TaskHistory(
         taskId=task_id,
@@ -198,7 +205,9 @@ async def create_task_in_history(
         createdAt=now,  # type: ignore
         updatedAt=now,  # type: ignore
         uniqueKey=unique_key,
-        queueType=queue_type
+        queueType=queue_type,
+        taskType=task_type,
+        taskParameters=task_parameters
     )
     session.add(new_task)
     await session.commit()
@@ -208,14 +217,25 @@ async def update_task_progress_in_history(
     session: AsyncSession,
     task_id: str,
     status: str,
-    progress: int,
+    progress: Optional[int],
     description: str
 ):
-    """更新任务进度"""
+    """更新任务进度
+
+    Args:
+        progress: 进度值，如果为 None 则保持当前进度不变
+    """
+    # 构建更新值字典
+    values = {"status": status, "description": description, "updatedAt": get_now()}
+
+    # 只有当 progress 不为 None 时才更新进度字段
+    if progress is not None:
+        values["progress"] = progress
+
     await session.execute(
         update(TaskHistory)
         .where(TaskHistory.taskId == task_id)
-        .values(status=status, progress=progress, description=description, updatedAt=get_now())
+        .values(**values)
     )
     await session.commit()
 
@@ -634,8 +654,41 @@ async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, A
             "taskParameters": task_state.taskParameters,
             "createdAt": task_state.createdAt,
             "updatedAt": task_state.updatedAt,
-            "historyStatus": task_history.status
+            "historyStatus": task_history.status,
+            "taskTitle": task_history.title,
+            "uniqueKey": task_history.uniqueKey,
+            "queueType": task_history.queueType
         })
 
     return task_states
+
+
+async def get_pending_recoverable_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
+    """获取所有排队中且可恢复的任务（有taskType和taskParameters的任务）
+
+    用于服务重启后恢复排队中的任务。只有同时具备 taskType 和 taskParameters 的任务才能被恢复。
+    """
+    result = await session.execute(
+        select(TaskHistory)
+        .where(
+            TaskHistory.status == "排队中",
+            TaskHistory.taskType.isnot(None),
+            TaskHistory.taskParameters.isnot(None)
+        )
+        .order_by(TaskHistory.createdAt.asc())  # 按创建时间排序，先提交的先恢复
+    )
+
+    pending_tasks = []
+    for task_history in result.scalars().all():
+        pending_tasks.append({
+            "taskId": task_history.taskId,
+            "taskType": task_history.taskType,
+            "taskParameters": task_history.taskParameters,
+            "taskTitle": task_history.title,
+            "uniqueKey": task_history.uniqueKey,
+            "queueType": task_history.queueType,
+            "createdAt": task_history.createdAt
+        })
+
+    return pending_tasks
 

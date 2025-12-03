@@ -58,6 +58,7 @@ from .task import (
     get_task_state_cache,
     clear_task_state_cache,
     get_all_running_task_states,
+    get_pending_recoverable_tasks,
 )
 
 # MediaServer模块
@@ -169,6 +170,9 @@ from .source import (
     disable_incremental_refresh,
     get_sources_with_incremental_refresh_enabled,
     _assign_source_order_if_missing,
+    get_incremental_refresh_sources_grouped,
+    batch_toggle_incremental_refresh,
+    batch_set_favorite,
 )
 
 # Danmaku模块

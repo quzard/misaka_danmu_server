@@ -215,6 +215,16 @@ async def lifespan(app: FastAPI):
 
     init_time = time.time() - init_start
     logger.info(f"并行初始化完成，耗时 {init_time:.2f} 秒")
+
+    # 设置任务恢复所需的依赖，用于重启后恢复排队中的任务
+    app.state.task_manager.set_recovery_dependencies({
+        "scraper_manager": app.state.scraper_manager,
+        "rate_limiter": app.state.rate_limiter,
+        "metadata_manager": app.state.metadata_manager,
+        "ai_matcher_manager": app.state.ai_matcher_manager,
+        "title_recognition_manager": app.state.title_recognition_manager,
+    })
+
     # 5. 启动服务（必须在上面完成后）
     app.state.task_manager.start()
     await create_initial_admin_user(app)

@@ -555,7 +555,13 @@ async def search_media(
             use_source_priority_sorting=False,  # 不排序，后面自己处理
             progress_callback=None
         )
-        timer.step_end(details=f"{len(results)}个结果")
+        # 收集单源搜索耗时信息
+        from ..search_timer import SubStepTiming
+        source_timing_sub_steps = [
+            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+            for name, dur, cnt in manager.last_search_timing
+        ]
+        timer.step_end(details=f"{len(results)}个结果", sub_steps=source_timing_sub_steps)
 
         logger.info(f"搜索完成，共 {len(results)} 个结果")
 

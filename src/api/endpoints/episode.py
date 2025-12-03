@@ -126,6 +126,7 @@ async def edit_episode_info(
 @router.delete("/library/episode/{episodeId}", status_code=status.HTTP_202_ACCEPTED, summary="提交删除指定分集的任务", response_model=UITaskResponse)
 async def delete_episode_from_source(
     episodeId: int,
+    deleteFiles: bool = Query(True, description="是否同时删除弹幕XML文件"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
     task_manager: TaskManager = Depends(get_task_manager)
@@ -137,11 +138,13 @@ async def delete_episode_from_source(
 
     provider_name = episode_info.get('providerName', '未知源')
     task_title = f"删除分集: {episode_info['title']} - [{provider_name}]"
+    if not deleteFiles:
+        task_title += " (保留文件)"
     unique_key = f"delete-episode-{episodeId}"
-    task_coro = lambda session, callback: tasks.delete_episode_task(episodeId, session, callback)
+    task_coro = lambda session, callback: tasks.delete_episode_task(episodeId, session, callback, delete_files=deleteFiles)
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了删除分集 ID: {episodeId} 的任务 (Task ID: {task_id})，deleteFiles={deleteFiles}。")
     return {"message": f"删除分集 '{episode_info['title']}' 的任务已提交。", "taskId": task_id}
 
 
@@ -210,16 +213,19 @@ async def delete_bulk_episodes(
     if not request_data.episodeIds:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Episode IDs list cannot be empty.")
 
+    delete_files = getattr(request_data, 'deleteFiles', True)
     task_title = f"批量删除 {len(request_data.episodeIds)} 个分集"
+    if not delete_files:
+        task_title += " (保留文件)"
     ids_str = ",".join(sorted([str(eid) for eid in request_data.episodeIds]))
     unique_key = f"delete-bulk-episodes-{hashlib.md5(ids_str.encode('utf-8')).hexdigest()[:8]}"
-    
+
     # 注意：这里我们将整个列表传递给任务
-    task_coro = lambda session, callback: tasks.delete_bulk_episodes_task(request_data.episodeIds, session, callback)
-    
+    task_coro = lambda session, callback: tasks.delete_bulk_episodes_task(request_data.episodeIds, session, callback, delete_files=delete_files)
+
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key, run_immediately=True)
 
-    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episodeIds)} 个分集的任务 (Task ID: {task_id})。")
+    logger.info(f"用户 '{current_user.username}' 提交了批量删除 {len(request_data.episodeIds)} 个分集的任务 (Task ID: {task_id})，deleteFiles={delete_files}。")
     return {"message": task_title + "的任务已提交。", "taskId": task_id}
 
 

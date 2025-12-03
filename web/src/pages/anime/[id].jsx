@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   addSourceToAnime,
@@ -27,6 +27,7 @@ import {
   Modal,
   Row,
   Space,
+  Switch,
   Table,
   Tooltip,
   Tag,
@@ -72,6 +73,7 @@ export const AnimeDetail = () => {
   const navigate = useNavigate()
   const modalApi = useModal()
   const messageApi = useMessage()
+  const deleteFilesRef = useRef(true) // 删除时是否同时删除弹幕文件，默认为 true
 
   console.log(sourceList, 'sourceList')
 
@@ -218,6 +220,7 @@ export const AnimeDetail = () => {
   }
 
   const handleBatchDelete = () => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除数据源',
       zIndex: 1002,
@@ -226,6 +229,15 @@ export const AnimeDetail = () => {
           您确定要删除选中的 {selectedRows.length} 个数据源吗？
           <br />
           此操作将在后台提交一个批量删除任务。
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
@@ -234,6 +246,7 @@ export const AnimeDetail = () => {
         try {
           const res = await deleteAnimeSource({
             sourceIds: selectedRows?.map(it => it.sourceId),
+            deleteFiles: deleteFilesRef.current,
           })
           goTask(res)
         } catch (error) {
@@ -244,6 +257,7 @@ export const AnimeDetail = () => {
   }
 
   const handleDeleteSingle = record => {
+    deleteFilesRef.current = true // 重置为默认值
     modalApi.confirm({
       title: '删除数据源',
       zIndex: 1002,
@@ -252,6 +266,15 @@ export const AnimeDetail = () => {
           您确定要删除这个数据源吗？
           <br />
           此操作将在后台提交一个删除任务。
+          <div className="flex items-center gap-2 mt-3">
+            <span>同时删除弹幕文件：</span>
+            <Switch
+              defaultChecked={true}
+              onChange={checked => {
+                deleteFilesRef.current = checked
+              }}
+            />
+          </div>
         </div>
       ),
       okText: '确认',
@@ -260,6 +283,7 @@ export const AnimeDetail = () => {
         try {
           const res = await deleteAnimeSourceSingle({
             sourceId: record.sourceId,
+            deleteFiles: deleteFilesRef.current,
           })
           goTask(res)
         } catch (error) {

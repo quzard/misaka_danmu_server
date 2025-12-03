@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, Index, Integer,
-    String, TEXT, TIMESTAMP, TypeDecorator, UniqueConstraint, DECIMAL, func
+    String, TEXT, TypeDecorator, UniqueConstraint, DECIMAL, func
 )
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -15,8 +15,9 @@ class NaiveDateTime(TypeDecorator):
     自定义数据库类型，确保无论数据库驱动返回何种datetime对象，
     在应用层面我们得到的都是不带时区信息的（naive）datetime。
     这解决了PostgreSQL驱动返回带时区时间，而MySQL驱动返回不带时区时间的不一致性问题。
+    使用 DateTime 而非 TIMESTAMP，避免 MySQL 自动进行时区转换。
     """
-    impl = TIMESTAMP
+    impl = DateTime
     cache_ok = True
 
     def process_bind_param(self, value: Optional[datetime], dialect: Any) -> Optional[datetime]:
@@ -281,6 +282,9 @@ class TaskHistory(Base):
     finishedAt: Mapped[Optional[datetime]] = mapped_column("finished_at", NaiveDateTime)
     uniqueKey: Mapped[Optional[str]] = mapped_column("unique_key", String(255), index=True)
     queueType: Mapped[str] = mapped_column("queue_type", String(20), default="download", server_default="download")
+    # 任务恢复相关字段：在提交时保存，用于重启后恢复排队中的任务
+    taskType: Mapped[Optional[str]] = mapped_column("task_type", String(100), nullable=True)
+    taskParameters: Mapped[Optional[str]] = mapped_column("task_parameters", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 
@@ -309,6 +313,7 @@ class RateLimitState(Base):
     providerName: Mapped[str] = mapped_column("provider_name", String(50), primary_key=True)
     requestCount: Mapped[int] = mapped_column("request_count", Integer, default=0)
     lastResetTime: Mapped[datetime] = mapped_column("last_reset_time", NaiveDateTime)
+    checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
 
 class TitleRecognition(Base):
     """识别词配置表 - 单记录全量存储"""

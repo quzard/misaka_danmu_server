@@ -386,13 +386,15 @@ async def generic_import_task(
             await session.execute(stmt)
             await session.commit()
 
-            # 检查失败次数是否达到10次
+            # 检查失败次数是否达到配置的上限
             source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == incremental_refresh_source_id)
             source_result = await session.execute(source_stmt)
             source_obj = source_result.scalar_one_or_none()
 
-            if source_obj and source_obj.incrementalRefreshFailures >= 10:
-                # 达到10次失败,自动禁用追更
+            # 获取配置的最大失败次数（默认10次）
+            max_failures = int(await crud.get_config_value(session, "incrementalRefreshMaxFailures", "10"))
+            if source_obj and source_obj.incrementalRefreshFailures >= max_failures:
+                # 达到上限,自动禁用追更
                 disable_stmt = sql_update(orm_models.AnimeSource).where(
                     orm_models.AnimeSource.id == incremental_refresh_source_id
                 ).values(

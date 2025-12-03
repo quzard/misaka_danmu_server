@@ -295,10 +295,13 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                     failed_episodes.append((episode_index, episode_id))
                     continue
                 except RateLimitExceededError as e:
-                    # 达到流控限制，等待后重试
-                    logger.warning(f"批量刷新遇到速率限制，等待 {e.retry_after_seconds:.0f} 秒...")
-                    await asyncio.sleep(e.retry_after_seconds)
-                    await rate_limiter.check(provider_name)
+                    # 达到流控限制，抛出暂停异常让任务管理器处理
+                    # 这样可以释放 worker 去处理其他源的任务，而不是阻塞等待
+                    logger.warning(f"批量刷新遇到速率限制: {e}")
+                    raise TaskPauseForRateLimit(
+                        retry_after_seconds=e.retry_after_seconds,
+                        message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+                    )
 
                 # 3. 下载弹幕
                 from ..models import ProviderEpisodeInfo
