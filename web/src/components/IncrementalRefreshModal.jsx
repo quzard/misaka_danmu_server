@@ -8,6 +8,7 @@ import {
   getIncrementalRefreshTaskStatus,
   batchToggleIncrementalRefresh,
   batchSetFavorite,
+  batchUnsetFavorite,
   toggleSourceIncremental,
   toggleSourceFavorite,
 } from '../apis'
@@ -30,7 +31,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const [pageSize] = useState(20)
   const [favoriteFilter, setFavoriteFilter] = useState('all')
   const [refreshFilter, setRefreshFilter] = useState('all')
-  const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0 })
+  const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0, maxFailures: 10 })
 
   // 加载数据
   const fetchData = useCallback(async (params = {}) => {
@@ -53,6 +54,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
         totalSources: data.totalSources || 0,
         refreshEnabled: data.refreshEnabled || 0,
         favorited: data.favorited || 0,
+        maxFailures: data.maxFailures || 10,
       })
       setTaskStatus(statusRes?.data || null)
     } catch (error) {
@@ -226,6 +228,36 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     }
   }
 
+  // 批量取消标记
+  const handleBatchUnsetFavorite = async () => {
+    if (selectedSourceIds.length === 0) {
+      message.warning('请先选择源')
+      return
+    }
+    setOperationLoading(true)
+    try {
+      await batchUnsetFavorite({ sourceIds: selectedSourceIds })
+      message.success('批量取消标记成功')
+      setSelectedSourceIds([])
+      fetchData()
+    } catch (error) {
+      message.error('操作失败: ' + error.message)
+    } finally {
+      setOperationLoading(false)
+    }
+  }
+
+  // 全选当前页
+  const handleSelectAll = () => {
+    const allSourceIds = animeGroups.flatMap(g => g.sources.map(s => s.sourceId))
+    setSelectedSourceIds(allSourceIds)
+  }
+
+  // 取消全选
+  const handleDeselectAll = () => {
+    setSelectedSourceIds([])
+  }
+
   // 选择框变化
   const handleCheckboxChange = (sourceId, checked) => {
     setSelectedSourceIds(prev =>
@@ -288,7 +320,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
             <>
               <Tag color="green" size="small">追更中</Tag>
               <Tag color={source.incrementalRefreshFailures > 0 ? 'error' : 'default'} size="small">
-                失败 {source.incrementalRefreshFailures}/10
+                失败 {source.incrementalRefreshFailures}/{stats.maxFailures}
               </Tag>
             </>
           )}
@@ -391,6 +423,9 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
               key: group.animeId,
               label: (
                 <div className="flex items-center gap-2">
+                  <Tag size="small" color={group.animeType === 'movie' ? 'purple' : 'blue'}>
+                    {group.animeType === 'movie' ? '电影' : '剧集'}
+                  </Tag>
                   <span className="font-medium">{group.animeTitle}</span>
                   <Tag size="small">{group.sources.length} 个源</Tag>
                 </div>
@@ -418,6 +453,10 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
       {/* 批量操作按钮 */}
       <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-3">
+        <Space size="small">
+          <Button size="small" onClick={handleSelectAll}>全选</Button>
+          <Button size="small" onClick={handleDeselectAll}>取消全选</Button>
+        </Space>
         <span className="text-gray-500 text-sm">
           已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项：
         </span>
@@ -430,6 +469,9 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           </Button>
           <Button onClick={handleBatchSetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
             批量设为标记
+          </Button>
+          <Button onClick={handleBatchUnsetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
+            批量取消标记
           </Button>
         </Space>
       </div>

@@ -86,6 +86,9 @@ def get_default_configs(settings=None, ai_prompts=None):
         'webhookFallbackEnabled': ('false', '是否启用Webhook顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
         'externalApiFallbackEnabled': ('false', '是否启用外部控制API/匹配后备/后备搜索顺延机制。当选中的源没有有效分集时，自动尝试下一个源。'),
 
+        # 增量追更配置
+        'incrementalRefreshMaxFailures': (10, '增量追更最大失败次数。超过此次数后自动禁用该源的追更功能。'),
+
         # 预下载配置
         'preDownloadNextEpisodeEnabled': ('false', '是否启用预下载下一集弹幕。当播放当前集时，自动下载下一集的弹幕。需要启用匹配后备或后备搜索。'),
 

@@ -356,6 +356,7 @@ class IncrementalRefreshAnimeGroup(BaseModel):
     """按番剧分组的追更信息"""
     animeId: int
     animeTitle: str
+    animeType: str  # tv_series, movie, ova, other
     sources: List[IncrementalRefreshSourceInfo]
 
 
@@ -365,6 +366,7 @@ class IncrementalRefreshSourcesResponse(BaseModel):
     totalSources: int  # 总源数
     refreshEnabled: int  # 追更中数量
     favorited: int  # 已标记数量
+    maxFailures: int  # 最大失败次数配置
     list: List[IncrementalRefreshAnimeGroup]
 
 
@@ -407,6 +409,9 @@ async def get_incremental_refresh_sources(
         favorite_filter=favoriteFilter,
         refresh_filter=refreshFilter,
     )
+    # 获取最大失败次数配置
+    max_failures = int(await crud.get_config_value(session, "incrementalRefreshMaxFailures", "10"))
+    result["maxFailures"] = max_failures
     return result
 
 
@@ -459,6 +464,17 @@ async def batch_set_favorite(
     """批量设置标记。每个源会被设为标记，同一番剧下的其他源会被取消标记。"""
     count = await crud.batch_set_favorite(session, payload.sourceIds)
     return {"message": f"成功设置 {count} 个源为标记", "count": count}
+
+
+@router.post("/library/incremental-refresh/batch-unfavorite", summary="批量取消标记")
+async def batch_unset_favorite(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量取消标记。"""
+    count = await crud.batch_unset_favorite(session, payload.sourceIds)
+    return {"message": f"成功取消 {count} 个源的标记", "count": count}
 
 
 

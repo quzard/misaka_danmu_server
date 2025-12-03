@@ -723,3 +723,6 @@ export const batchToggleIncrementalRefresh = (data) => api.post('/api/ui/library
 
 /** 批量设置标记 */
 export const batchSetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-favorite', data)
+
+/** 批量取消标记 */
+export const batchUnsetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-unfavorite', data)

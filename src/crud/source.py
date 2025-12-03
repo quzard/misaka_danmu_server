@@ -344,6 +344,7 @@ async def get_incremental_refresh_sources_grouped(
         select(
             Anime.id.label("animeId"),
             Anime.title.label("animeTitle"),
+            Anime.type.label("animeType"),
             AnimeSource.id.label("sourceId"),
             AnimeSource.providerName.label("providerName"),
             AnimeSource.isFavorited.label("isFavorited"),
@@ -397,6 +398,7 @@ async def get_incremental_refresh_sources_grouped(
             grouped[anime_id] = {
                 "animeId": anime_id,
                 "animeTitle": row["animeTitle"],
+                "animeType": row["animeType"],
                 "sources": []
             }
         grouped[anime_id]["sources"].append({
@@ -499,4 +501,21 @@ async def batch_set_favorite(session: AsyncSession, source_ids: List[int]) -> in
 
     await session.commit()
     return count
+
+
+async def batch_unset_favorite(session: AsyncSession, source_ids: List[int]) -> int:
+    """
+    批量取消标记。
+    返回成功取消的数量。
+    """
+    if not source_ids:
+        return 0
+
+    result = await session.execute(
+        update(AnimeSource)
+        .where(AnimeSource.id.in_(source_ids))
+        .values(isFavorited=False)
+    )
+    await session.commit()
+    return result.rowcount
 
