@@ -1145,9 +1145,9 @@ const AutoMatchSetting = () => {
         </Form>
 
         {/* 说明文字 */}
-        <div style={{ marginTop: 24, padding: 16, background: '#f5f5f5', borderRadius: 4 }}>
-          <h4 style={{ marginTop: 0 }}>功能说明</h4>
-          <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+        <div className="mt-6 p-4 rounded" style={{ backgroundColor: 'var(--color-card)' }}>
+          <h4 className="mt-0" style={{ color: 'var(--color-text)' }}>功能说明</h4>
+          <ul style={{ marginBottom: 0, paddingLeft: 20, color: 'var(--color-text)' }}>
             <li>
               <strong>传统匹配</strong>: 基于标题相似度和类型匹配的算法,快速但可能不够精准
             </li>

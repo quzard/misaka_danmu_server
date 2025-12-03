@@ -94,7 +94,7 @@ const MediaItemEditor = ({ visible, item, onClose, onSaved, isLocal = false }) =
           name="season"
         >
           <InputNumber
-            min={1}
+            min={0}
             style={{ width: '100%' }}
             disabled={mediaType === 'movie'}
             placeholder={mediaType === 'movie' ? '电影无需填写季度' : ''}

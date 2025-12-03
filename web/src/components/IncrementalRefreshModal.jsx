@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination } from 'antd'
-import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined } from '@ant-design/icons'
+import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination, Popover } from 'antd'
+import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined, SearchOutlined } from '@ant-design/icons'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store/index.js'
 import {
@@ -307,7 +307,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
   // 渲染源列表项
   const renderSourceItem = (source, animeTitle) => (
-    <div key={source.sourceId} className="flex items-center gap-4 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+    <div key={source.sourceId} className="source-item flex items-center gap-4 py-3 px-4 rounded-lg border-b border-gray-100 dark:border-gray-700 last:border-b-0 hover:bg-gray-100 dark:hover:bg-gray-700">
       <Checkbox
         checked={selectedSourceIds.includes(source.sourceId)}
         onChange={(e) => handleCheckboxChange(source.sourceId, e.target.checked)}
@@ -365,6 +365,27 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           <Tag color="green">已标记 {stats.favorited} 个</Tag>
         </div>
         <Space size="small">
+          <Popover
+            content={
+              <div style={{ width: 220 }}>
+                <Input
+                  placeholder="搜索番剧或源名称..."
+                  allowClear
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  onPressEnter={(e) => handleSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            }
+            title="搜索"
+            trigger="click"
+            placement="bottom"
+          >
+            <Button size="small" icon={<SearchOutlined />}>
+              {searchKeyword ? `搜索: ${searchKeyword.length > 4 ? searchKeyword.slice(0, 4) + '...' : searchKeyword}` : '搜索'}
+            </Button>
+          </Popover>
           <Dropdown
             menu={{
               items: [
@@ -399,16 +420,6 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           </Dropdown>
         </Space>
       </div>
-
-      {/* 搜索框 */}
-      <Input.Search
-        placeholder="搜索番剧或源名称..."
-        value={searchKeyword}
-        onChange={(e) => setSearchKeyword(e.target.value)}
-        onSearch={handleSearch}
-        allowClear
-        className="mb-3"
-      />
 
       {/* 源列表 */}
       <div className="flex-1 overflow-auto" style={{ maxHeight: isMobile ? 'calc(100vh - 400px)' : 350 }}>
@@ -452,27 +463,52 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       )}
 
       {/* 批量操作按钮 */}
-      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-3">
-        <Space size="small">
-          <Button size="small" onClick={handleSelectAll}>全选</Button>
-          <Button size="small" onClick={handleDeselectAll}>取消全选</Button>
-        </Space>
+      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-2">
         <span className="text-gray-500 text-sm">
-          已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项：
+          已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项
         </span>
         <Space size="small" wrap>
-          <Button onClick={handleBatchEnableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-            批量开启追更
-          </Button>
-          <Button onClick={handleBatchDisableRefresh} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-            批量关闭追更
-          </Button>
-          <Button onClick={handleBatchSetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-            批量设为标记
-          </Button>
-          <Button onClick={handleBatchUnsetFavorite} loading={operationLoading} disabled={selectedSourceIds.length === 0}>
-            批量取消标记
-          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'selectAll', label: '全选当前页', onClick: handleSelectAll },
+                { key: 'deselectAll', label: '取消全选', onClick: handleDeselectAll },
+              ],
+            }}
+            trigger={['click']}
+          >
+            <Button size="small">
+              操作 <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'enable', label: '批量开启', onClick: handleBatchEnableRefresh, disabled: selectedSourceIds.length === 0 },
+                { key: 'disable', label: '批量关闭', onClick: handleBatchDisableRefresh, disabled: selectedSourceIds.length === 0 },
+              ],
+            }}
+            trigger={['click']}
+            disabled={operationLoading}
+          >
+            <Button size="small" loading={operationLoading}>
+              批量追更 <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'set', label: '批量开启', onClick: handleBatchSetFavorite, disabled: selectedSourceIds.length === 0 },
+                { key: 'unset', label: '批量关闭', onClick: handleBatchUnsetFavorite, disabled: selectedSourceIds.length === 0 },
+              ],
+            }}
+            trigger={['click']}
+            disabled={operationLoading}
+          >
+            <Button size="small" loading={operationLoading}>
+              批量标记 <DownOutlined />
+            </Button>
+          </Dropdown>
         </Space>
       </div>
     </div>

@@ -414,3 +414,8 @@ a:hover {
     }
   }
 }
+
+/* 深色模式下 Collapse 组件源列表项 hover 样式 */
+.dark .ant-collapse-content .source-item:hover {
+  background-color: var(--color-hover) !important;
+}
