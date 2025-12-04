@@ -220,6 +220,32 @@ const DanmakuStorage = () => {
     setRenameRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
   };
 
+  // 监听规则变化，自动更新预览
+  useEffect(() => {
+    if (!isRenamePreviewMode || !renameModalVisible) return;
+
+    const previewItems = [];
+    selectedRows.forEach(row => {
+      if (row.episodes) {
+        row.episodes.forEach(ep => {
+          if (ep.danmakuFilePath) {
+            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
+            const baseName = oldName.replace(/\.[^/.]+$/, '');
+            const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+            const newBaseName = applyAllRenameRules(baseName, previewItems.length);
+            previewItems.push({
+              oldName: oldName,
+              newName: newBaseName + ext,
+              episodeId: ep.episodeId,
+              oldPath: ep.danmakuFilePath
+            });
+          }
+        });
+      }
+    });
+    setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
+  }, [renameRules, isRenamePreviewMode, renameModalVisible]);
+
   // 检测是否为移动端
   useEffect(() => {
     const checkIsMobile = () => {
@@ -584,8 +610,26 @@ const DanmakuStorage = () => {
     setRenameRules([]);
     setSelectedRuleType('replace');
     setRuleParams({});
-    setRenamePreviewData(null);
-    setIsRenamePreviewMode(false);
+
+    // 默认打开预览，显示原始文件名
+    const previewItems = [];
+    selectedRows.forEach(row => {
+      if (row.episodes) {
+        row.episodes.forEach(ep => {
+          if (ep.danmakuFilePath) {
+            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
+            previewItems.push({
+              oldName: oldName,
+              newName: oldName, // 初始时新名称等于旧名称
+              episodeId: ep.episodeId,
+              oldPath: ep.danmakuFilePath
+            });
+          }
+        });
+      }
+    });
+    setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
+    setIsRenamePreviewMode(true);
     setRenameModalVisible(true);
   };
 
