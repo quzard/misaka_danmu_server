@@ -420,8 +420,8 @@ const LocalItemList = ({ refreshTrigger }) => {
   ];
 
   const segmentedStyle = {
-    backgroundColor: 'var(--ant-color-bg-container, #fff)',
-    border: '1px solid var(--ant-color-border, #d9d9d9)'
+    backgroundColor: 'var(--color-card)',
+    border: '1px solid var(--color-border)'
   };
 
   // 通用导入函数
@@ -1050,9 +1050,9 @@ const LocalItemList = ({ refreshTrigger }) => {
                       {/* 作品标题 */}
                       <div style={{
                         padding: '12px 16px',
-                        background: 'var(--ant-color-fill-quaternary, #f5f5f5)',
+                        background: 'var(--color-hover)',
                         borderRadius: '8px 8px 0 0',
-                        borderBottom: '1px solid var(--ant-color-border, #d9d9d9)'
+                        borderBottom: '1px solid var(--color-border)'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <Checkbox
@@ -1076,9 +1076,9 @@ const LocalItemList = ({ refreshTrigger }) => {
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: 16, fontWeight: 600 }}>
                               {item.title}
-                              {item.year && <span style={{ marginLeft: 8, color: 'var(--ant-color-text-secondary, #666)', fontWeight: 400 }}>({item.year})</span>}
+                              {item.year && <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontWeight: 400 }}>({item.year})</span>}
                             </div>
-                            <div style={{ fontSize: 12, color: 'var(--ant-color-text-secondary, #666)', marginTop: 4 }}>
+                            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>
                               <Tag size="small" color={item.mediaType === 'movie' ? 'blue' : 'purple'}>
                                 {item.mediaType === 'movie' ? '电影' : '电视节目'}
                               </Tag>
@@ -1093,9 +1093,9 @@ const LocalItemList = ({ refreshTrigger }) => {
                       {/* 子项列表 */}
                       {item.children && item.children.length > 0 && (
                         <div style={{
-                          background: 'var(--ant-color-bg-container, #fff)',
+                          background: 'var(--color-card)',
                           borderRadius: '0 0 8px 8px',
-                          border: '1px solid var(--ant-color-border, #d9d9d9)',
+                          border: '1px solid var(--color-border)',
                           borderTop: 'none'
                         }}>
                           {item.children.map((child, index) => (
@@ -1103,7 +1103,7 @@ const LocalItemList = ({ refreshTrigger }) => {
                               key={child.key}
                               style={{
                                 padding: '12px 16px 12px 48px',
-                                borderBottom: index < item.children.length - 1 ? '1px solid var(--ant-color-border-secondary, #f0f0f0)' : 'none'
+                                borderBottom: index < item.children.length - 1 ? '1px solid var(--color-border)' : 'none'
                               }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1142,7 +1142,7 @@ const LocalItemList = ({ refreshTrigger }) => {
                                       child.title
                                     )}
                                   </div>
-                                  <div style={{ fontSize: 12, color: 'var(--ant-color-text-secondary, #666)', marginTop: 4 }}>
+                                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>
                                     <Space size="small" wrap>
                                       <Tag size="small" color={child.mediaType === 'movie_file' ? 'cyan' : 'orange'}>
                                         {child.mediaType === 'movie_file' ? '弹幕文件' : `${child.episodeCount}集`}

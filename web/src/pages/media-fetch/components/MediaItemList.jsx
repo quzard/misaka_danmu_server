@@ -1109,7 +1109,7 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
                         }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 16, fontWeight: 500 }}>{item.title}</div>
-                          {item.year && <div style={{ color: '#666' }}>{item.year}</div>}
+                          {item.year && <div style={{ color: 'var(--color-text-secondary)' }}>{item.year}</div>}
                         </div>
                       </div>
                     }
