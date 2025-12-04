@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
 const { Text } = Typography;
@@ -78,6 +78,7 @@ const DanmakuStorage = () => {
   const [renamePreviewData, setRenamePreviewData] = useState(null);
   const [renamePreviewLoading, setRenamePreviewLoading] = useState(false);
   const [isRenamePreviewMode, setIsRenamePreviewMode] = useState(false);
+  const [renameOriginalItems, setRenameOriginalItems] = useState([]); // 保存原始文件名列表
   // 模板转换配置
   const [templateTarget, setTemplateTarget] = useState('tv');
   const [customTemplate, setCustomTemplate] = useState('');  // 自定义模板
@@ -222,29 +223,23 @@ const DanmakuStorage = () => {
 
   // 监听规则变化，自动更新预览
   useEffect(() => {
-    if (!isRenamePreviewMode || !renameModalVisible) return;
+    if (!isRenamePreviewMode || !renameModalVisible || renameOriginalItems.length === 0) return;
 
-    const previewItems = [];
-    selectedRows.forEach(row => {
-      if (row.episodes) {
-        row.episodes.forEach(ep => {
-          if (ep.danmakuFilePath) {
-            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
-            const baseName = oldName.replace(/\.[^/.]+$/, '');
-            const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
-            const newBaseName = applyAllRenameRules(baseName, previewItems.length);
-            previewItems.push({
-              oldName: oldName,
-              newName: newBaseName + ext,
-              episodeId: ep.episodeId,
-              oldPath: ep.danmakuFilePath
-            });
-          }
-        });
-      }
+    // 使用从后端获取的原始文件名列表计算新名称
+    const previewItems = renameOriginalItems.map((item, index) => {
+      const oldName = item.oldName;
+      const baseName = oldName.replace(/\.[^/.]+$/, '');
+      const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+      const newBaseName = applyAllRenameRules(baseName, index);
+      return {
+        oldName: oldName,
+        newName: newBaseName + ext,
+        episodeId: item.episodeId,
+        oldPath: item.oldPath
+      };
     });
     setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
-  }, [renameRules, isRenamePreviewMode, renameModalVisible]);
+  }, [renameRules, isRenamePreviewMode, renameModalVisible, renameOriginalItems]);
 
   // 检测是否为移动端
   useEffect(() => {
@@ -601,7 +596,7 @@ const DanmakuStorage = () => {
   };
 
   // 打开重命名Modal
-  const handleOpenRenameModal = () => {
+  const handleOpenRenameModal = async () => {
     if (selectedRows.length === 0) {
       message.warning('请先选择要重命名的条目');
       return;
@@ -610,27 +605,38 @@ const DanmakuStorage = () => {
     setRenameRules([]);
     setSelectedRuleType('replace');
     setRuleParams({});
-
-    // 默认打开预览，显示原始文件名
-    const previewItems = [];
-    selectedRows.forEach(row => {
-      if (row.episodes) {
-        row.episodes.forEach(ep => {
-          if (ep.danmakuFilePath) {
-            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
-            previewItems.push({
-              oldName: oldName,
-              newName: oldName, // 初始时新名称等于旧名称
-              episodeId: ep.episodeId,
-              oldPath: ep.danmakuFilePath
-            });
-          }
-        });
-      }
-    });
-    setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
-    setIsRenamePreviewMode(true);
+    setRenamePreviewLoading(true);
     setRenameModalVisible(true);
+    setIsRenamePreviewMode(true);
+
+    // 调用后端API获取原始文件名列表
+    try {
+      const response = await previewRenameDanmaku({
+        animeIds: selectedRowKeys,
+        mode: 'prefix',
+        prefix: '',
+        suffix: '',
+        regexPattern: '',
+        regexReplace: '',
+      });
+      const items = response.data?.previewItems || [];
+      // 保存原始文件名列表，用于后续规则计算
+      setRenameOriginalItems(items);
+      // 初始预览显示原始文件名
+      const previewItems = items.map(item => ({
+        oldName: item.oldName,
+        newName: item.oldName, // 初始时新名称等于旧名称
+        episodeId: item.episodeId,
+        oldPath: item.oldPath
+      }));
+      setRenamePreviewData({ totalCount: items.length, previewItems: previewItems.slice(0, 20) });
+    } catch (error) {
+      message.error('获取文件列表失败: ' + (error.message || '未知错误'));
+      setRenamePreviewData(null);
+      setRenameOriginalItems([]);
+    } finally {
+      setRenamePreviewLoading(false);
+    }
   };
 
   // 打开模板转换Modal
@@ -713,31 +719,22 @@ const DanmakuStorage = () => {
       return;
     }
 
-    // 计算每个文件的新名称
-    const directRenames = [];
-    let globalIndex = 0;
-    selectedRows.forEach(row => {
-      if (row.episodes) {
-        row.episodes.forEach(ep => {
-          if (ep.danmakuFilePath) {
-            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
-            const baseName = oldName.replace(/\.[^/.]+$/, '');
-            const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
-            const newBaseName = applyAllRenameRules(baseName, globalIndex);
-            directRenames.push({
-              episodeId: ep.episodeId,
-              newName: newBaseName + ext
-            });
-            globalIndex++;
-          }
-        });
-      }
-    });
-
-    if (directRenames.length === 0) {
+    if (renameOriginalItems.length === 0) {
       message.warning('没有找到需要重命名的文件');
       return;
     }
+
+    // 使用从后端获取的原始文件名列表计算新名称
+    const directRenames = renameOriginalItems.map((item, index) => {
+      const oldName = item.oldName;
+      const baseName = oldName.replace(/\.[^/.]+$/, '');
+      const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+      const newBaseName = applyAllRenameRules(baseName, index);
+      return {
+        episodeId: item.episodeId,
+        newName: newBaseName + ext
+      };
+    });
 
     setOperationLoading(true);
     try {
@@ -1477,26 +1474,19 @@ const DanmakuStorage = () => {
                 <Switch
                   checked={isRenamePreviewMode}
                   onChange={(checked) => {
-                    if (checked && renameRules.length > 0) {
-                      // 计算预览数据
-                      const previewItems = [];
-                      selectedRows.forEach(row => {
-                        if (row.episodes) {
-                          row.episodes.forEach((ep, idx) => {
-                            if (ep.danmakuFilePath) {
-                              const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
-                              const baseName = oldName.replace(/\.[^/.]+$/, '');
-                              const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
-                              const newBaseName = applyAllRenameRules(baseName, previewItems.length);
-                              previewItems.push({
-                                oldName: oldName,
-                                newName: newBaseName + ext,
-                                episodeId: ep.episodeId,
-                                oldPath: ep.danmakuFilePath
-                              });
-                            }
-                          });
-                        }
+                    if (checked && renameOriginalItems.length > 0) {
+                      // 使用从后端获取的原始文件名列表计算预览数据
+                      const previewItems = renameOriginalItems.map((item, index) => {
+                        const oldName = item.oldName;
+                        const baseName = oldName.replace(/\.[^/.]+$/, '');
+                        const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+                        const newBaseName = applyAllRenameRules(baseName, index);
+                        return {
+                          oldName: oldName,
+                          newName: newBaseName + ext,
+                          episodeId: item.episodeId,
+                          oldPath: item.oldPath
+                        };
                       });
                       setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
                       setIsRenamePreviewMode(true);
@@ -1505,12 +1495,12 @@ const DanmakuStorage = () => {
                       setRenamePreviewData(null);
                     }
                   }}
-                  disabled={renameRules.length === 0}
+                  disabled={renameOriginalItems.length === 0}
                   size="small"
                 />
               </div>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{renameOriginalItems.length}</strong> 个弹幕文件
               </Text>
             </div>
 
