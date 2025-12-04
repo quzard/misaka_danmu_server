@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Radio, Row, Col, Tabs, Table, Modal, Tag, Progress, Checkbox, Tooltip } from 'antd';
-import { FolderOpenOutlined, CheckCircleOutlined, SettingOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip } from 'antd';
+import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
 const { Text } = Typography;
@@ -71,14 +71,13 @@ const DanmakuStorage = () => {
   const [migrateConflictAction, setMigrateConflictAction] = useState('skip');
   const [migratePreviewData, setMigratePreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  // 重命名配置
-  const [renameMode, setRenameMode] = useState('prefix');
-  const [renamePrefix, setRenamePrefix] = useState('');
-  const [renameSuffix, setRenameSuffix] = useState('');
-  const [renameRegexPattern, setRenameRegexPattern] = useState('');
-  const [renameRegexReplace, setRenameRegexReplace] = useState('');
+  // 重命名配置 - 多规则系统
+  const [renameRules, setRenameRules] = useState([]);
+  const [selectedRuleType, setSelectedRuleType] = useState('replace');
+  const [ruleParams, setRuleParams] = useState({});
   const [renamePreviewData, setRenamePreviewData] = useState(null);
   const [renamePreviewLoading, setRenamePreviewLoading] = useState(false);
+  const [isRenamePreviewMode, setIsRenamePreviewMode] = useState(false);
   // 模板转换配置
   const [templateTarget, setTemplateTarget] = useState('tv');
   const [customTemplate, setCustomTemplate] = useState('');  // 自定义模板
@@ -112,6 +111,114 @@ const DanmakuStorage = () => {
     { value: 'custom_movie', label: '自定义模板-电影', template: movieDanmakuFilenameTemplate || '${title}/${episodeId}' },
     { value: 'custom_tv', label: '自定义模板-电视节目', template: tvDanmakuFilenameTemplate || '${animeId}/${episodeId}' },
   ];
+
+  // 多规则重命名 - 规则类型配置
+  const ruleTypeOptions = [
+    { value: 'replace', label: '替换' },
+    { value: 'regex', label: '正则' },
+    { value: 'insert', label: '插入' },
+    { value: 'delete', label: '删除' },
+    { value: 'serialize', label: '序列化' },
+    { value: 'case', label: '大小写' },
+    { value: 'strip', label: '清理' },
+  ];
+
+  // 应用单条规则到文件名
+  const applyRenameRule = (filename, rule, index) => {
+    if (!rule.enabled) return filename;
+    try {
+      switch (rule.type) {
+        case 'replace':
+          return rule.params.caseSensitive
+            ? filename.split(rule.params.search || '').join(rule.params.replace || '')
+            : filename.replace(new RegExp((rule.params.search || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), rule.params.replace || '');
+        case 'regex':
+          return filename.replace(new RegExp(rule.params.pattern || '', 'g'), rule.params.replace || '');
+        case 'insert':
+          if (rule.params.position === 'start') return (rule.params.text || '') + filename;
+          if (rule.params.position === 'end') return filename + (rule.params.text || '');
+          const pos = parseInt(rule.params.index) || 0;
+          return filename.slice(0, pos) + (rule.params.text || '') + filename.slice(pos);
+        case 'delete':
+          if (rule.params.mode === 'text') {
+            return rule.params.caseSensitive
+              ? filename.split(rule.params.text || '').join('')
+              : filename.replace(new RegExp((rule.params.text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+          }
+          const from = parseInt(rule.params.from) || 0;
+          const count = parseInt(rule.params.count) || 0;
+          return filename.slice(0, from) + filename.slice(from + count);
+        case 'serialize':
+          const start = parseInt(rule.params.start) || 1;
+          const step = parseInt(rule.params.step) || 1;
+          const digits = parseInt(rule.params.digits) || 2;
+          const num = String(start + index * step).padStart(digits, '0');
+          const serialized = (rule.params.prefix || '') + num + (rule.params.suffix || '');
+          if (rule.params.position === 'start') return serialized + filename;
+          if (rule.params.position === 'end') return filename + serialized;
+          return serialized;
+        case 'case':
+          if (rule.params.mode === 'upper') return filename.toUpperCase();
+          if (rule.params.mode === 'lower') return filename.toLowerCase();
+          if (rule.params.mode === 'title') return filename.charAt(0).toUpperCase() + filename.slice(1).toLowerCase();
+          return filename;
+        case 'strip':
+          let result = filename;
+          if (rule.params.trimSpaces) result = result.trim();
+          if (rule.params.trimDuplicateSpaces) result = result.replace(/\s+/g, ' ');
+          if (rule.params.chars) result = result.split(rule.params.chars).join('');
+          return result;
+        default:
+          return filename;
+      }
+    } catch (e) {
+      message.error(`规则 "${ruleTypeOptions.find(r => r.value === rule.type)?.label}" 执行错误: ${e.message}`);
+      return filename;
+    }
+  };
+
+  // 应用所有规则到文件名
+  const applyAllRenameRules = (filename, index) => {
+    return renameRules.reduce((name, rule) => applyRenameRule(name, rule, index), filename);
+  };
+
+  // 添加规则
+  const handleAddRenameRule = () => {
+    if (selectedRuleType === 'replace' && !ruleParams.search) {
+      message.warning('请输入要查找的文本');
+      return;
+    }
+    if (selectedRuleType === 'regex' && !ruleParams.pattern) {
+      message.warning('请输入正则表达式');
+      return;
+    }
+    if (selectedRuleType === 'insert' && !ruleParams.text) {
+      message.warning('请输入要插入的文本');
+      return;
+    }
+    if (selectedRuleType === 'delete' && ruleParams.mode === 'text' && !ruleParams.text) {
+      message.warning('请输入要删除的文本');
+      return;
+    }
+    const newRule = {
+      id: Date.now().toString(),
+      type: selectedRuleType,
+      enabled: true,
+      params: { ...ruleParams }
+    };
+    setRenameRules(prev => [...prev, newRule]);
+    setRuleParams({});
+  };
+
+  // 删除规则
+  const handleDeleteRenameRule = (ruleId) => {
+    setRenameRules(prev => prev.filter(r => r.id !== ruleId));
+  };
+
+  // 切换规则启用状态
+  const handleToggleRenameRule = (ruleId) => {
+    setRenameRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
+  };
 
   // 检测是否为移动端
   useEffect(() => {
@@ -467,36 +574,19 @@ const DanmakuStorage = () => {
     }
   };
 
-  // 重命名预览函数
-  const fetchRenamePreview = async (mode, prefix, suffix, regexPattern, regexReplace) => {
-    setRenamePreviewLoading(true);
-    try {
-      const response = await previewRenameDanmaku({
-        animeIds: selectedRowKeys,
-        mode,
-        prefix: prefix || '',
-        suffix: suffix || '',
-        regexPattern: regexPattern || '',
-        regexReplace: regexReplace || '',
-      });
-      setRenamePreviewData(response.data);
-    } catch (error) {
-      message.error('预览失败: ' + (error.message || '未知错误'));
-    } finally {
-      setRenamePreviewLoading(false);
-    }
-  };
-
   // 打开重命名Modal
-  const handleOpenRenameModal = async () => {
+  const handleOpenRenameModal = () => {
     if (selectedRows.length === 0) {
       message.warning('请先选择要重命名的条目');
       return;
     }
+    // 重置多规则状态
+    setRenameRules([]);
+    setSelectedRuleType('replace');
+    setRuleParams({});
     setRenamePreviewData(null);
+    setIsRenamePreviewMode(false);
     setRenameModalVisible(true);
-    // 打开时自动预览（显示原始文件名）
-    await fetchRenamePreview(renameMode, renamePrefix, renameSuffix, renameRegexPattern, renameRegexReplace);
   };
 
   // 打开模板转换Modal
@@ -572,25 +662,45 @@ const DanmakuStorage = () => {
     }
   };
 
-  // 执行重命名操作
+  // 执行重命名操作 - 使用多规则系统
   const handleExecuteRename = async () => {
-    if (renameMode === 'prefix' && !renamePrefix && !renameSuffix) {
-      message.warning('请输入前缀或后缀');
+    if (renameRules.length === 0) {
+      message.warning('请先添加重命名规则');
       return;
     }
-    if (renameMode === 'regex' && !renameRegexPattern) {
-      message.warning('请输入正则表达式匹配模式');
+
+    // 计算每个文件的新名称
+    const directRenames = [];
+    let globalIndex = 0;
+    selectedRows.forEach(row => {
+      if (row.episodes) {
+        row.episodes.forEach(ep => {
+          if (ep.danmakuFilePath) {
+            const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
+            const baseName = oldName.replace(/\.[^/.]+$/, '');
+            const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+            const newBaseName = applyAllRenameRules(baseName, globalIndex);
+            directRenames.push({
+              episodeId: ep.episodeId,
+              newName: newBaseName + ext
+            });
+            globalIndex++;
+          }
+        });
+      }
+    });
+
+    if (directRenames.length === 0) {
+      message.warning('没有找到需要重命名的文件');
       return;
     }
+
     setOperationLoading(true);
     try {
       const response = await batchRenameDanmaku({
         animeIds: selectedRowKeys,
-        mode: renameMode,
-        prefix: renamePrefix,
-        suffix: renameSuffix,
-        regexPattern: renameRegexPattern,
-        regexReplace: renameRegexReplace,
+        mode: 'direct',
+        directRenames: directRenames,
       });
       const result = response.data;
       if (result.success) {
@@ -599,6 +709,7 @@ const DanmakuStorage = () => {
         message.warning(`重命名部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
       }
       setRenameModalVisible(false);
+      setRenameRules([]);
       setSelectedRowKeys([]);
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
@@ -874,17 +985,17 @@ const DanmakuStorage = () => {
         }>
           <div style={{
             padding: '16px',
-            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+            background: 'var(--color-hover)',
             borderRadius: '8px',
-            border: '1px solid #dee2e6',
+            border: '1px solid var(--color-border)',
             fontFamily: 'JetBrains Mono, Consolas, monospace',
             fontSize: '13px',
             wordBreak: 'break-all',
-            color: '#495057'
+            color: 'var(--color-text)'
           }}>
             {moviePreviewPath || '请配置模板以查看预览'}
           </div>
-          <div style={{ color: '#6c757d', fontSize: '12px', marginTop: '8px' }}>
+          <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
             📝 示例: 铃芽之旅 (2022)
           </div>
         </Form.Item>
@@ -961,17 +1072,17 @@ const DanmakuStorage = () => {
         }>
           <div style={{
             padding: '16px',
-            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+            background: 'var(--color-hover)',
             borderRadius: '8px',
-            border: '1px solid #dee2e6',
+            border: '1px solid var(--color-border)',
             fontFamily: 'JetBrains Mono, Consolas, monospace',
             fontSize: '13px',
             wordBreak: 'break-all',
-            color: '#495057'
+            color: 'var(--color-text)'
           }}>
             {tvPreviewPath || '请配置模板以查看预览'}
           </div>
-          <div style={{ color: '#6c757d', fontSize: '12px', marginTop: '8px' }}>
+          <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
             📝 示例: 葬送的芙莉莲 S01E01
           </div>
         </Form.Item>
@@ -1159,13 +1270,13 @@ const DanmakuStorage = () => {
             {migratePreviewData && (
               <>
                 <Divider orientation="left">迁移预览</Divider>
-                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {migratePreviewData.previewItems.map((item, index) => (
-                    <div key={index} style={{ marginBottom: 12, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                    <div key={index} style={{ marginBottom: 12, padding: 8, background: 'var(--color-hover)', borderRadius: 4 }}>
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
                         {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
                       </div>
-                      <div style={{ fontSize: 13, color: '#666' }}>
+                      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
                         <div style={{ marginBottom: 4 }}>
                           <Text type="secondary">原路径: </Text>
                           <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
@@ -1181,7 +1292,7 @@ const DanmakuStorage = () => {
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 8, color: '#666' }}>
+                <div style={{ marginTop: 8, color: 'var(--color-text-secondary)' }}>
                   共 <strong>{migratePreviewData.totalCount}</strong> 个文件将被迁移
                 </div>
               </>
@@ -1200,103 +1311,184 @@ const DanmakuStorage = () => {
             )}
           </Modal>
 
-          {/* 重命名Modal */}
+          {/* 重命名Modal - 多规则系统 */}
           <Modal
             title="批量重命名"
             open={renameModalVisible}
-            onCancel={() => setRenameModalVisible(false)}
+            onCancel={() => {
+              setRenameModalVisible(false);
+              setRenameRules([]);
+              setRuleParams({});
+              setIsRenamePreviewMode(false);
+              setRenamePreviewData(null);
+            }}
             onOk={handleExecuteRename}
             confirmLoading={operationLoading}
             okText="确认重命名"
-            width={700}
+            okButtonProps={{ disabled: renameRules.length === 0 }}
+            width={800}
           >
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ marginBottom: 8 }}>重命名规则:</div>
-              <Radio.Group
-                value={renameMode}
-                onChange={(e) => {
-                  const newMode = e.target.value;
-                  setRenameMode(newMode);
-                  // 切换模式时重新预览
-                  fetchRenamePreview(newMode, renamePrefix, renameSuffix, renameRegexPattern, renameRegexReplace);
-                }}
-              >
-                <Radio value="prefix">添加前后缀</Radio>
-                <Radio value="regex">正则替换</Radio>
-              </Radio.Group>
+            {/* 规则添加区域 */}
+            <div style={{ marginBottom: 16, padding: 12, background: 'var(--color-hover)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>添加规则:</span>
+                <Select
+                  value={selectedRuleType}
+                  onChange={(v) => { setSelectedRuleType(v); setRuleParams({}); }}
+                  style={{ width: 100 }}
+                  options={ruleTypeOptions}
+                  size="small"
+                />
+                {/* 替换规则参数 */}
+                {selectedRuleType === 'replace' && (
+                  <>
+                    <Input size="small" value={ruleParams.search || ''} onChange={(e) => setRuleParams(p => ({ ...p, search: e.target.value }))} placeholder="查找" style={{ width: 120 }} />
+                    <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
+                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
+                    <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>区分大小写</Checkbox>
+                  </>
+                )}
+                {/* 正则规则参数 */}
+                {selectedRuleType === 'regex' && (
+                  <>
+                    <Input size="small" value={ruleParams.pattern || ''} onChange={(e) => setRuleParams(p => ({ ...p, pattern: e.target.value }))} placeholder="正则表达式" style={{ width: 150 }} />
+                    <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
+                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
+                  </>
+                )}
+                {/* 插入规则参数 */}
+                {selectedRuleType === 'insert' && (
+                  <>
+                    <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
+                    <Select size="small" value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }]} />
+                  </>
+                )}
+                {/* 删除规则参数 */}
+                {selectedRuleType === 'delete' && (
+                  <>
+                    <Select size="small" value={ruleParams.mode || 'text'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 80 }} options={[{ value: 'text', label: '文本' }, { value: 'range', label: '范围' }]} />
+                    {(ruleParams.mode || 'text') === 'text' ? (
+                      <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="删除文本" style={{ width: 120 }} />
+                    ) : (
+                      <>
+                        <Input size="small" type="number" value={ruleParams.from || ''} onChange={(e) => setRuleParams(p => ({ ...p, from: e.target.value }))} placeholder="起始位置" style={{ width: 80 }} />
+                        <Input size="small" type="number" value={ruleParams.count || ''} onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))} placeholder="删除字数" style={{ width: 80 }} />
+                      </>
+                    )}
+                  </>
+                )}
+                {/* 序列化规则参数 */}
+                {selectedRuleType === 'serialize' && (
+                  <>
+                    <Input size="small" value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder="前缀" style={{ width: 60 }} />
+                    <Input size="small" type="number" value={ruleParams.start || 1} onChange={(e) => setRuleParams(p => ({ ...p, start: e.target.value }))} placeholder="起始" style={{ width: 50 }} />
+                    <Input size="small" type="number" value={ruleParams.digits || 2} onChange={(e) => setRuleParams(p => ({ ...p, digits: e.target.value }))} placeholder="位数" style={{ width: 50 }} />
+                    <Input size="small" value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder="后缀" style={{ width: 60 }} />
+                    <Select size="small" value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }, { value: 'replace', label: '替换' }]} />
+                  </>
+                )}
+                {/* 大小写规则参数 */}
+                {selectedRuleType === 'case' && (
+                  <Select size="small" value={ruleParams.mode || 'upper'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 120 }} options={[{ value: 'upper', label: '全大写' }, { value: 'lower', label: '全小写' }, { value: 'title', label: '首字母大写' }]} />
+                )}
+                {/* 清理规则参数 */}
+                {selectedRuleType === 'strip' && (
+                  <>
+                    <Checkbox checked={ruleParams.trimSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimSpaces: e.target.checked }))}>首尾空格</Checkbox>
+                    <Checkbox checked={ruleParams.trimDuplicateSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimDuplicateSpaces: e.target.checked }))}>重复空格</Checkbox>
+                    <Input size="small" value={ruleParams.chars || ''} onChange={(e) => setRuleParams(p => ({ ...p, chars: e.target.value }))} placeholder="删除字符" style={{ width: 80 }} />
+                  </>
+                )}
+                <Button type="primary" size="small" onClick={handleAddRenameRule}>+ 添加</Button>
+              </div>
             </div>
-            {renameMode === 'prefix' ? (
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Input
-                  addonBefore="添加前缀"
-                  value={renamePrefix}
-                  onChange={(e) => {
-                    setRenamePrefix(e.target.value);
-                    fetchRenamePreview(renameMode, e.target.value, renameSuffix, renameRegexPattern, renameRegexReplace);
-                  }}
-                  placeholder="例如: 弹幕_"
-                />
-                <Input
-                  addonBefore="添加后缀"
-                  value={renameSuffix}
-                  onChange={(e) => {
-                    setRenameSuffix(e.target.value);
-                    fetchRenamePreview(renameMode, renamePrefix, e.target.value, renameRegexPattern, renameRegexReplace);
-                  }}
-                  placeholder="例如: _backup (在.xml之前)"
-                />
-              </Space>
-            ) : (
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Input
-                  addonBefore="匹配模式"
-                  value={renameRegexPattern}
-                  onChange={(e) => {
-                    setRenameRegexPattern(e.target.value);
-                    fetchRenamePreview(renameMode, renamePrefix, renameSuffix, e.target.value, renameRegexReplace);
-                  }}
-                  placeholder="正则表达式，例如: (\d+)"
-                />
-                <Input
-                  addonBefore="替换为"
-                  value={renameRegexReplace}
-                  onChange={(e) => {
-                    setRenameRegexReplace(e.target.value);
-                    fetchRenamePreview(renameMode, renamePrefix, renameSuffix, renameRegexPattern, e.target.value);
-                  }}
-                  placeholder="例如: Episode_$1"
-                />
-              </Space>
+
+            {/* 已添加的规则列表 */}
+            {renameRules.length > 0 && (
+              <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, marginBottom: 16, background: 'var(--color-card)', maxHeight: 120, overflowY: 'auto' }}>
+                {renameRules.map((rule, idx) => (
+                  <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: idx < renameRules.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
+                    <Checkbox checked={rule.enabled} onChange={() => handleToggleRenameRule(rule.id)} />
+                    <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>{idx + 1}.</span>
+                    <Tag color={rule.enabled ? 'blue' : 'default'}>{ruleTypeOptions.find(r => r.value === rule.type)?.label}</Tag>
+                    <span style={{ fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
+                      {rule.type === 'regex' && `/${rule.params.pattern}/ → "${rule.params.replace || ''}"`}
+                      {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? '开头' : '结尾'})`}
+                      {rule.type === 'delete' && (rule.params.mode === 'text' ? `删除 "${rule.params.text}"` : `删除 位置${rule.params.from}起${rule.params.count}字符`)}
+                      {rule.type === 'serialize' && `${rule.params.prefix || ''}{${String(rule.params.start || 1).padStart(rule.params.digits || 2, '0')}}${rule.params.suffix || ''}`}
+                      {rule.type === 'case' && (rule.params.mode === 'upper' ? '全大写' : rule.params.mode === 'lower' ? '全小写' : '首字母大写')}
+                      {rule.type === 'strip' && '清理空格/字符'}
+                    </span>
+                    <Button type="text" danger size="small" onClick={() => handleDeleteRenameRule(rule.id)}>🗑</Button>
+                  </div>
+                ))}
+              </div>
             )}
 
-            {/* 预览区域 */}
-            <Divider orientation="left">重命名预览</Divider>
-            {renamePreviewLoading ? (
-              <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
-                正在加载预览...
+            {/* 预览开关和操作 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13 }}>👁 预览效果</span>
+                <Switch
+                  checked={isRenamePreviewMode}
+                  onChange={(checked) => {
+                    if (checked && renameRules.length > 0) {
+                      // 计算预览数据
+                      const previewItems = [];
+                      selectedRows.forEach(row => {
+                        if (row.episodes) {
+                          row.episodes.forEach((ep, idx) => {
+                            if (ep.danmakuFilePath) {
+                              const oldName = ep.danmakuFilePath.split('/').pop().split('\\').pop();
+                              const baseName = oldName.replace(/\.[^/.]+$/, '');
+                              const ext = oldName.includes('.') ? '.' + oldName.split('.').pop() : '';
+                              const newBaseName = applyAllRenameRules(baseName, previewItems.length);
+                              previewItems.push({
+                                oldName: oldName,
+                                newName: newBaseName + ext,
+                                episodeId: ep.episodeId,
+                                oldPath: ep.danmakuFilePath
+                              });
+                            }
+                          });
+                        }
+                      });
+                      setRenamePreviewData({ totalCount: previewItems.length, previewItems: previewItems.slice(0, 20) });
+                      setIsRenamePreviewMode(true);
+                    } else {
+                      setIsRenamePreviewMode(false);
+                      setRenamePreviewData(null);
+                    }
+                  }}
+                  disabled={renameRules.length === 0}
+                  size="small"
+                />
               </div>
-            ) : renamePreviewData ? (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+              </Text>
+            </div>
+
+            {/* 预览区域 */}
+            {isRenamePreviewMode && renamePreviewData && (
               <>
-                <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                <Divider orientation="left" style={{ margin: '8px 0' }}>重命名预览 (显示前20条)</Divider>
+                <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {renamePreviewData.previewItems.map((item, index) => (
-                    <div key={index} style={{ marginBottom: 8, padding: 6, background: '#fafafa', borderRadius: 4 }}>
+                    <div key={index} style={{ marginBottom: 8, padding: 6, background: 'var(--color-hover)', borderRadius: 4 }}>
                       <div style={{ fontSize: 13 }}>
-                        <Text code style={{ fontSize: 13 }}>{item.oldName}</Text>
-                        <span style={{ margin: '0 8px', color: '#999' }}>→</span>
-                        <Text code style={{ fontSize: 13, color: item.error ? '#ff4d4f' : '#52c41a' }}>{item.newName}</Text>
-                        {!item.exists && <Tag color="warning" style={{ marginLeft: 8 }}>文件不存在</Tag>}
+                        <Text code style={{ fontSize: 12 }}>{item.oldName}</Text>
+                        <span style={{ margin: '0 8px', color: 'var(--color-text-secondary)' }}>→</span>
+                        <Text code style={{ fontSize: 12, color: '#52c41a' }}>{item.newName}</Text>
                       </div>
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 8, color: '#666' }}>
+                <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
                   共 <strong>{renamePreviewData.totalCount}</strong> 个文件将被重命名
                 </div>
               </>
-            ) : (
-              <div style={{ color: '#666' }}>
-                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
-              </div>
             )}
           </Modal>
 
@@ -1399,13 +1591,13 @@ const DanmakuStorage = () => {
             {templatePreviewData && (
               <>
                 <Divider orientation="left">转换预览</Divider>
-                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {templatePreviewData.previewItems.map((item, index) => (
-                    <div key={index} style={{ marginBottom: 12, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                    <div key={index} style={{ marginBottom: 12, padding: 8, background: 'var(--color-hover)', borderRadius: 4 }}>
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
                         {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
                       </div>
-                      <div style={{ fontSize: 13, color: '#666' }}>
+                      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
                         <div style={{ marginBottom: 4 }}>
                           <Text type="secondary">原路径: </Text>
                           <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
@@ -1421,7 +1613,7 @@ const DanmakuStorage = () => {
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 8, color: '#666' }}>
+                <div style={{ marginTop: 8, color: 'var(--color-text-secondary)' }}>
                   共 <strong>{templatePreviewData.totalCount}</strong> 个文件将被转换
                 </div>
               </>
@@ -1430,7 +1622,7 @@ const DanmakuStorage = () => {
             {!templatePreviewData && !templatePreviewLoading && (
               <>
                 <Divider />
-                <div style={{ color: '#666' }}>
+                <div style={{ color: 'var(--color-text-secondary)' }}>
                   将转换 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
                   <div style={{ marginTop: 8, fontSize: 12 }}>
                     <Text type="secondary">选择模板后将自动显示预览</Text>
@@ -1439,7 +1631,7 @@ const DanmakuStorage = () => {
               </>
             )}
             {templatePreviewLoading && (
-              <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
+              <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
                 正在加载预览...
               </div>
             )}

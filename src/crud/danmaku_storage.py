@@ -322,9 +322,15 @@ async def batch_rename_danmaku(
     prefix: str = "",
     suffix: str = "",
     regex_pattern: str = "",
-    regex_replace: str = ""
+    regex_replace: str = "",
+    direct_renames: Dict[int, str] = None
 ) -> Dict[str, Any]:
-    """批量重命名弹幕文件"""
+    """批量重命名弹幕文件
+
+    Args:
+        mode: 重命名模式 - 'prefix' (前后缀), 'regex' (正则替换), 'direct' (直接指定新名称)
+        direct_renames: 直接指定新名称的字典 {episodeId: newName}，仅当 mode='direct' 时使用
+    """
     results = {
         "success": True,
         "totalCount": 0,
@@ -363,7 +369,10 @@ async def batch_rename_danmaku(
             extension = old_path.suffix
 
             # 计算新文件名
-            if mode == "prefix":
+            if mode == "direct" and direct_renames and episode.id in direct_renames:
+                # 直接使用前端计算好的新名称
+                new_name = direct_renames[episode.id]
+            elif mode == "prefix":
                 new_name = f"{prefix}{old_name}{suffix}{extension}"
             elif mode == "regex":
                 try:

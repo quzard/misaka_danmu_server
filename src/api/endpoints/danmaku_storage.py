@@ -28,14 +28,21 @@ class BatchMigrateRequest(BaseModel):
     conflictAction: str = "skip"  # skip, overwrite, rename
 
 
+class DirectRenameItem(BaseModel):
+    """直接重命名项"""
+    episodeId: int
+    newName: str
+
+
 class BatchRenameRequest(BaseModel):
     """批量重命名请求"""
     animeIds: List[int]
-    mode: str  # prefix, regex
+    mode: str  # prefix, regex, direct
     prefix: Optional[str] = ""
     suffix: Optional[str] = ""
     regexPattern: Optional[str] = ""
     regexReplace: Optional[str] = ""
+    directRenames: Optional[List[DirectRenameItem]] = None  # 直接指定新名称列表
 
 
 class ApplyTemplateRequest(BaseModel):
@@ -157,6 +164,11 @@ async def batch_rename(
     session: AsyncSession = Depends(get_db_session)
 ):
     """批量重命名选中条目的弹幕文件"""
+    # 转换直接重命名列表格式
+    direct_renames = None
+    if request.directRenames:
+        direct_renames = {item.episodeId: item.newName for item in request.directRenames}
+
     result = await crud.batch_rename_danmaku(
         session,
         anime_ids=request.animeIds,
@@ -164,7 +176,8 @@ async def batch_rename(
         prefix=request.prefix or "",
         suffix=request.suffix or "",
         regex_pattern=request.regexPattern or "",
-        regex_replace=request.regexReplace or ""
+        regex_replace=request.regexReplace or "",
+        direct_renames=direct_renames
     )
     return BatchOperationResult(**result)
 
