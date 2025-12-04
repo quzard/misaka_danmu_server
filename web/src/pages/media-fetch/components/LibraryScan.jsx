@@ -456,7 +456,7 @@ const LibraryScan = () => {
                   border: currentServer.isEnabled ? '2px solid #52c41a' : '2px solid #faad14',
                   borderRadius: '12px',
                   padding: '20px',
-                  backgroundColor: currentServer.isEnabled ? '#f6ffed' : '#fffbe6',
+                  backgroundColor: currentServer.isEnabled ? 'var(--ant-color-success-bg, #f6ffed)' : 'var(--ant-color-warning-bg, #fffbe6)',
                   marginBottom: '16px',
                   position: 'relative',
                   overflow: 'hidden'
@@ -470,7 +470,7 @@ const LibraryScan = () => {
                     right: 0,
                     width: '80px',
                     height: '80px',
-                    backgroundColor: currentServer.isEnabled ? '#b7eb8f' : '#ffe58f',
+                    backgroundColor: currentServer.isEnabled ? 'var(--ant-color-success-border, #b7eb8f)' : 'var(--ant-color-warning-border, #ffe58f)',
                     borderRadius: '50%',
                     opacity: 0.1,
                     transform: 'translate(30px, -30px)'
@@ -492,7 +492,7 @@ const LibraryScan = () => {
                       />
                       <div>
                         <div style={{ display: 'flex', alignItems: screens.xs ? 'flex-start' : 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', color: '#262626', wordBreak: 'break-word', flex: '1 1 auto' }}>
+                          <Text strong style={{ fontSize: screens.xs ? '14px' : '16px', wordBreak: 'break-word', flex: '1 1 auto' }}>
                             {currentServer.name}
                           </Text>
                           <div style={{ display: 'flex', gap: '4px', flexWrap: screens.xs ? 'nowrap' : 'wrap', flexShrink: 0 }}>
@@ -716,10 +716,10 @@ const LibraryScan = () => {
                     <Col xs={24} sm={12} md={8} lg={6} key={library.id}>
                       <div
                         style={{
-                          border: selectedLibraryIds.includes(library.id) ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                          border: selectedLibraryIds.includes(library.id) ? '2px solid #1890ff' : '1px solid var(--ant-color-border, #d9d9d9)',
                           borderRadius: '8px',
                           padding: '16px',
-                          backgroundColor: selectedLibraryIds.includes(library.id) ? '#f0f8ff' : '#fff',
+                          backgroundColor: selectedLibraryIds.includes(library.id) ? 'var(--ant-color-primary-bg, rgba(24, 144, 255, 0.1))' : 'var(--ant-color-bg-container, #fff)',
                           cursor: 'pointer',
                           transition: 'all 0.3s',
                           height: '100%',
