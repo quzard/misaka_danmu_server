@@ -470,6 +470,20 @@ async def preview_apply_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom_movie":
+        # 使用用户在存储配置中设置的电影模板
+        base_dir = "/app/config/danmaku/movies"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
+    elif template_type == "custom_tv":
+        # 使用用户在存储配置中设置的电视模板
+        base_dir = "/app/config/danmaku/tv"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "custom" and custom_template:
         base_dir = "/app/config/danmaku"
         template = custom_template
@@ -579,6 +593,20 @@ async def apply_danmaku_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom_movie":
+        # 使用用户在存储配置中设置的电影模板
+        base_dir = "/app/config/danmaku/movies"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
+    elif template_type == "custom_tv":
+        # 使用用户在存储配置中设置的电视模板
+        base_dir = "/app/config/danmaku/tv"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "custom" and custom_template:
         base_dir = "/app/config/danmaku"
         template = custom_template

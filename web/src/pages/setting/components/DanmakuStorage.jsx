@@ -109,6 +109,8 @@ const DanmakuStorage = () => {
     { value: 'plex', label: 'Plex风格', template: '${title}/${title} - S${season:02d}E${episode:02d}' },
     { value: 'emby', label: 'Emby风格', template: '${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}' },
     { value: 'titleBase', label: '标准化标题', template: '${titleBase}/Season ${season}/${titleBase} - S${season}E${episode}' },
+    { value: 'custom_movie', label: '自定义模板-电影', template: movieDanmakuFilenameTemplate || '${title}/${episodeId}' },
+    { value: 'custom_tv', label: '自定义模板-电视节目', template: tvDanmakuFilenameTemplate || '${animeId}/${episodeId}' },
   ];
 
   // 检测是否为移动端
