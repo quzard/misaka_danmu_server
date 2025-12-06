@@ -537,6 +537,9 @@ async def preview_apply_template(
                 relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
+                # 处理 provider 变量
+                provider_name = episode.source.providerName if episode.source else "unknown"
+                relative_path = relative_path.replace("${provider}", provider_name or "unknown")
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)
@@ -677,6 +680,9 @@ async def apply_danmaku_template(
                 relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
+                # 处理 provider 变量
+                provider_name = episode.source.providerName if episode.source else "unknown"
+                relative_path = relative_path.replace("${provider}", provider_name or "unknown")
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)
