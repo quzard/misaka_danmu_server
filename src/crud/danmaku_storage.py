@@ -480,6 +480,11 @@ async def preview_apply_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "titleBase":
+        base_dir = "/app/config/danmaku"
+        template = "${titleBase}/Season ${season:02d}/${titleBase} - S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "custom_movie":
         # 使用用户在存储配置中设置的电影模板
         base_dir = "/app/config/danmaku/movies"
@@ -607,6 +612,11 @@ async def apply_danmaku_template(
     elif template_type == "emby":
         base_dir = "/app/config/danmaku"
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "titleBase":
+        base_dir = "/app/config/danmaku"
+        template = "${titleBase}/Season ${season:02d}/${titleBase} - S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "custom_movie":
