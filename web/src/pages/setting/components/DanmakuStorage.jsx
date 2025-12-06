@@ -88,6 +88,12 @@ const DanmakuStorage = () => {
   // 从后端获取的模板变量（统一列表）
   const [templateVariables, setTemplateVariables] = useState([]);
 
+  // 电影/电视配置Tab切换
+  const [activeConfigTab, setActiveConfigTab] = useState('movie');
+  // 快速模板弹窗
+  const [quickTemplateModalVisible, setQuickTemplateModalVisible] = useState(false);
+  const [quickTemplateType, setQuickTemplateType] = useState('movie'); // 'movie' or 'tv'
+
   // 输入框引用，用于插入变量到光标位置
   const movieTemplateInputRef = useRef(null);
   const tvTemplateInputRef = useRef(null);
@@ -885,81 +891,87 @@ const DanmakuStorage = () => {
           </div>
         </Form.Item>
 
-        {/* 快速模板选择器 */}
-        <Card
-          title={
-            <Space>
-              <RocketOutlined />
-              快速应用模板
-            </Space>
-          }
-          size="small"
+        {/* 可折叠变量区域 */}
+        <Collapse
+          defaultActiveKey={['variables']}
           style={{ marginBottom: '24px' }}
-        >
-          <div style={{ marginBottom: '16px' }}>
-            <Row gutter={[16, 24]}>
-              <Col xs={24} sm={8} style={{ marginBottom: '16px' }}>
-                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>内容类型</div>
-                <Select
-                  value={selectedType}
-                  onChange={setSelectedType}
-                  disabled={!customDanmakuPathEnabled}
-                  placeholder="选择类型"
-                  style={{ width: '100%' }}
-                >
-                  <Option value="movie">🎬 电影/剧场版</Option>
-                  <Option value="tv">📺 电视节目</Option>
-                </Select>
-              </Col>
-              <Col xs={24} sm={10} style={{ marginBottom: '16px' }}>
-                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>命名模板</div>
-                <Select
-                  value={selectedTemplate}
-                  onChange={setSelectedTemplate}
-                  placeholder="选择一个模板"
-                  disabled={!customDanmakuPathEnabled}
-                  style={{ width: '100%' }}
-                >
-                  {TEMPLATES[selectedType].map((tpl) => (
-                    <Option key={tpl.value} value={tpl.value}>
-                      {tpl.label}
-                    </Option>
-                  ))}
-                </Select>
-              </Col>
-              <Col xs={24} sm={6}>
-                <div style={{ marginBottom: '12px', fontWeight: 500, color: '#666' }}>操作</div>
-                <Button
-                  type="primary"
-                  icon={<CheckCircleOutlined />}
-                  onClick={applyTemplate}
-                  disabled={!customDanmakuPathEnabled || !selectedTemplate}
-                  block
-                  style={{ height: '32px' }}
-                >
-                  应用模板
-                </Button>
-              </Col>
-            </Row>
-          </div>
+          items={[
+            {
+              key: 'variables',
+              label: (
+                <Space>
+                  <span>📂 可用变量</span>
+                  <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                    (点击插入到光标处)
+                  </span>
+                </Space>
+              ),
+              children: (
+                <div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                    {(templateVariables || []).map((v) => (
+                      <Tooltip
+                        key={v.name}
+                        title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
+                        placement="top"
+                        trigger={isMobile ? 'click' : 'hover'}
+                      >
+                        <Button
+                          size="small"
+                          type="dashed"
+                          disabled={!customDanmakuPathEnabled}
+                          onClick={() => {
+                            // 根据当前激活的Tab插入到对应的输入框光标处
+                            const inputRef = activeConfigTab === 'movie' ? movieTemplateInputRef : tvTemplateInputRef;
+                            const currentValue = activeConfigTab === 'movie' ? movieDanmakuFilenameTemplate : tvDanmakuFilenameTemplate;
+                            const setValue = activeConfigTab === 'movie' ? setMovieDanmakuFilenameTemplate : setTvDanmakuFilenameTemplate;
+                            const fieldName = activeConfigTab === 'movie' ? 'movieDanmakuFilenameTemplate' : 'tvDanmakuFilenameTemplate';
 
-          <div style={{
-            padding: '12px',
-            background: 'linear-gradient(135deg, #f6f9fc 0%, #e9ecef 100%)',
-            borderRadius: '6px',
-            border: '1px solid #e1e8ed'
-          }}>
-            <div style={{ color: '#666', fontSize: '13px', lineHeight: '1.5' }}>
-              <strong>💡 提示：</strong>选择内容类型和命名模板后，点击"应用模板"按钮将自动填充到对应的命名模板字段中，让配置更加便捷高效。
-            </div>
-          </div>
-        </Card>
+                            if (inputRef.current && inputRef.current.input) {
+                              const input = inputRef.current.input;
+                              const start = input.selectionStart || 0;
+                              const end = input.selectionEnd || 0;
+                              const newValue = currentValue.slice(0, start) + v.name + currentValue.slice(end);
+                              setValue(newValue);
+                              form.setFieldValue(fieldName, newValue);
+                              // 设置光标位置
+                              setTimeout(() => {
+                                input.focus();
+                                input.setSelectionRange(start + v.name.length, start + v.name.length);
+                              }, 0);
+                            } else {
+                              // 如果无法获取光标，则追加到末尾
+                              const newValue = currentValue + v.name;
+                              setValue(newValue);
+                              form.setFieldValue(fieldName, newValue);
+                            }
+                          }}
+                          style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                        >
+                          {v.name}
+                        </Button>
+                      </Tooltip>
+                    ))}
+                  </div>
+                  <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>
+                    💡 电影模板中使用季/集变量时将输出为空
+                  </div>
+                </div>
+              )
+            }
+          ]}
+        />
 
-        <Divider orientation="left">
-          <Space>
-            🎬 电影/剧场版配置
-          </Space>
-        </Divider>
+        {/* 电影/电视配置Tabs */}
+        <Tabs
+          activeKey={activeConfigTab}
+          onChange={setActiveConfigTab}
+          items={[
+            {
+              key: 'movie',
+              label: <span>🎬 电影/剧场版</span>,
+              children: (
+                <div>
 
         {/* 电影存储目录 */}
         <Form.Item
@@ -994,47 +1006,32 @@ const DanmakuStorage = () => {
 
         {/* 电影命名模板 */}
         <Form.Item
-          label="电影命名模板"
+          label="命名模板"
           name="movieDanmakuFilenameTemplate"
         >
           <div>
-            <Input
-              ref={movieTemplateInputRef}
-              value={movieDanmakuFilenameTemplate}
-              onChange={(e) => {
-                setMovieDanmakuFilenameTemplate(e.target.value);
-                form.setFieldValue('movieDanmakuFilenameTemplate', e.target.value);
-              }}
-              placeholder="${title}/${episodeId}"
-              disabled={!customDanmakuPathEnabled}
-            />
-            {/* 可点击的变量按钮组 */}
-            <div style={{ marginTop: '8px' }}>
-              <div style={{ marginBottom: '6px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>点击插入变量:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {(templateVariables || []).map((v) => (
-                  <Tooltip
-                    key={v.name}
-                    title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
-                    placement="top"
-                    trigger={isMobile ? 'click' : 'hover'}
-                  >
-                    <Button
-                      size="small"
-                      type="dashed"
-                      disabled={!customDanmakuPathEnabled}
-                      onClick={() => {
-                        const newValue = movieDanmakuFilenameTemplate + v.name;
-                        setMovieDanmakuFilenameTemplate(newValue);
-                        form.setFieldValue('movieDanmakuFilenameTemplate', newValue);
-                      }}
-                      style={{ fontFamily: 'monospace', fontSize: '11px' }}
-                    >
-                      {v.name}
-                    </Button>
-                  </Tooltip>
-                ))}
-              </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Input
+                ref={movieTemplateInputRef}
+                value={movieDanmakuFilenameTemplate}
+                onChange={(e) => {
+                  setMovieDanmakuFilenameTemplate(e.target.value);
+                  form.setFieldValue('movieDanmakuFilenameTemplate', e.target.value);
+                }}
+                placeholder="${title}/${episodeId}"
+                disabled={!customDanmakuPathEnabled}
+                style={{ flex: 1 }}
+              />
+              <Button
+                icon={<FileOutlined />}
+                onClick={() => {
+                  setQuickTemplateType('movie');
+                  setQuickTemplateModalVisible(true);
+                }}
+                disabled={!customDanmakuPathEnabled}
+              >
+                快速模板
+              </Button>
             </div>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
               💡 支持子目录如 {'${title}/${episodeId}'}，.xml后缀会自动拼接
@@ -1045,7 +1042,7 @@ const DanmakuStorage = () => {
         {/* 电影路径预览 */}
         <Form.Item label={
           <Space>
-            👀 电影路径预览
+            👀 路径预览
           </Space>
         }>
           <div style={{
@@ -1064,16 +1061,17 @@ const DanmakuStorage = () => {
             📝 示例: 铃芽之旅 (2022)
           </div>
         </Form.Item>
-
-        <Divider orientation="left">
-          <Space>
-            📺 电视节目配置
-          </Space>
-        </Divider>
-
+                </div>
+              )
+            },
+            {
+              key: 'tv',
+              label: <span>📺 电视节目</span>,
+              children: (
+                <div>
         {/* 电视存储目录 */}
         <Form.Item
-          label="电视存储目录"
+          label="存储目录"
           name="tvDanmakuDirectoryPath"
         >
           <div>
@@ -1104,47 +1102,32 @@ const DanmakuStorage = () => {
 
         {/* 电视命名模板 */}
         <Form.Item
-          label="电视命名模板"
+          label="命名模板"
           name="tvDanmakuFilenameTemplate"
         >
           <div>
-            <Input
-              ref={tvTemplateInputRef}
-              value={tvDanmakuFilenameTemplate}
-              onChange={(e) => {
-                setTvDanmakuFilenameTemplate(e.target.value);
-                form.setFieldValue('tvDanmakuFilenameTemplate', e.target.value);
-              }}
-              placeholder="${animeId}/${episodeId}"
-              disabled={!customDanmakuPathEnabled}
-            />
-            {/* 可点击的变量按钮组 */}
-            <div style={{ marginTop: '8px' }}>
-              <div style={{ marginBottom: '6px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>点击插入变量:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {(templateVariables || []).map((v) => (
-                  <Tooltip
-                    key={v.name}
-                    title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
-                    placement="top"
-                    trigger={isMobile ? 'click' : 'hover'}
-                  >
-                    <Button
-                      size="small"
-                      type="dashed"
-                      disabled={!customDanmakuPathEnabled}
-                      onClick={() => {
-                        const newValue = tvDanmakuFilenameTemplate + v.name;
-                        setTvDanmakuFilenameTemplate(newValue);
-                        form.setFieldValue('tvDanmakuFilenameTemplate', newValue);
-                      }}
-                      style={{ fontFamily: 'monospace', fontSize: '11px' }}
-                    >
-                      {v.name}
-                    </Button>
-                  </Tooltip>
-                ))}
-              </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Input
+                ref={tvTemplateInputRef}
+                value={tvDanmakuFilenameTemplate}
+                onChange={(e) => {
+                  setTvDanmakuFilenameTemplate(e.target.value);
+                  form.setFieldValue('tvDanmakuFilenameTemplate', e.target.value);
+                }}
+                placeholder="${animeId}/${episodeId}"
+                disabled={!customDanmakuPathEnabled}
+                style={{ flex: 1 }}
+              />
+              <Button
+                icon={<FileOutlined />}
+                onClick={() => {
+                  setQuickTemplateType('tv');
+                  setQuickTemplateModalVisible(true);
+                }}
+                disabled={!customDanmakuPathEnabled}
+              >
+                快速模板
+              </Button>
             </div>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
               💡 支持子目录如 {'${animeId}/${episodeId}'}，.xml后缀会自动拼接
@@ -1155,7 +1138,7 @@ const DanmakuStorage = () => {
         {/* 电视路径预览 */}
         <Form.Item label={
           <Space>
-            👀 电视路径预览
+            👀 路径预览
           </Space>
         }>
           <div style={{
@@ -1174,6 +1157,11 @@ const DanmakuStorage = () => {
             📝 示例: 葬送的芙莉莲 S01E01
           </div>
         </Form.Item>
+                </div>
+              )
+            }
+          ]}
+        />
 
             <Button
               type="primary"
@@ -1726,6 +1714,56 @@ const DanmakuStorage = () => {
         onClose={() => setBrowserVisible(false)}
         onSelect={handleSelectDirectory}
       />
+
+      {/* 快速模板选择弹窗 */}
+      <Modal
+        title="📋 选择模板"
+        open={quickTemplateModalVisible}
+        onCancel={() => setQuickTemplateModalVisible(false)}
+        footer={null}
+        width={500}
+      >
+        <div style={{ marginBottom: '16px', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+          选择一个预设模板，将自动填充到{quickTemplateType === 'movie' ? '电影' : '电视节目'}命名模板中
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {presetTemplates.filter(t => !t.value.startsWith('custom_')).map((tpl) => (
+            <Button
+              key={tpl.value}
+              block
+              style={{
+                textAlign: 'left',
+                height: 'auto',
+                padding: '12px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start'
+              }}
+              onClick={() => {
+                if (quickTemplateType === 'movie') {
+                  setMovieDanmakuFilenameTemplate(tpl.template);
+                  form.setFieldValue('movieDanmakuFilenameTemplate', tpl.template);
+                } else {
+                  setTvDanmakuFilenameTemplate(tpl.template);
+                  form.setFieldValue('tvDanmakuFilenameTemplate', tpl.template);
+                }
+                setQuickTemplateModalVisible(false);
+                message.success(`已应用模板: ${tpl.label}`);
+              }}
+            >
+              <div style={{ fontWeight: 500 }}>{tpl.label}</div>
+              <div style={{
+                fontSize: '12px',
+                color: 'var(--color-text-secondary)',
+                fontFamily: 'monospace',
+                marginTop: '4px'
+              }}>
+                {tpl.template}
+              </div>
+            </Button>
+          ))}
+        </div>
+      </Modal>
     </Card>
   );
 };

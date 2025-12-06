@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ..orm_models import Anime, AnimeSource, Episode
+from ..path_template import normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -527,6 +528,9 @@ async def preview_apply_template(
                 episode_val = episode.episodeIndex or 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
+                # 处理 titleBase（标准化标题，去除季度信息）
+                title_base = normalize_title(anime.title) if anime.title else "Unknown"
+                relative_path = relative_path.replace("${titleBase}", title_base)
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
                 relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
@@ -670,6 +674,9 @@ async def apply_danmaku_template(
                 episode_val = episode.episodeIndex or 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
+                # 处理 titleBase（标准化标题，去除季度信息）
+                title_base = normalize_title(anime.title) if anime.title else "Unknown"
+                relative_path = relative_path.replace("${titleBase}", title_base)
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
                 relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
