@@ -360,7 +360,8 @@ const DanmakuStorage = () => {
     const movieExampleContext = {
       animeId: '160',
       episodeId: '25000160010001',
-      title: '铃芽之旅',
+      title: '铃芽之旅 第二季',
+      titleBase: '铃芽之旅',  // 电影标题通常不含季度信息
       season: '1',
       episode: '1',
       year: '2022',
@@ -372,7 +373,8 @@ const DanmakuStorage = () => {
     const tvExampleContext = {
       animeId: '160',
       episodeId: '25000160010001',
-      title: '葬送的芙莉莲',
+      title: '葬送的芙莉莲 第二季',
+      titleBase: '葬送的芙莉莲',  // 标准化标题，去除季度信息
       season: '1',
       episode: '1',
       year: '2023',
