@@ -1510,13 +1510,17 @@ async def abort_task(
     - force=true: 强制中止，直接将任务标记为失败状态
     """
     if force:
-        # 强制中止：直接将任务标记为失败
+        # 强制中止：先尝试取消协程，再将任务标记为失败
         from . import crud
         task = await crud.get_task_from_history_by_id(session, taskId)
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
 
-        # 直接更新任务状态为失败
+        # 先尝试取消正在运行的协程（如果任务正在运行）
+        # 这是关键：确保 worker 不会继续等待被终止的任务
+        await task_manager.abort_current_task(taskId)
+
+        # 然后更新数据库状态为失败
         success = await crud.force_fail_task(session, taskId)
         if success:
             return {"message": "任务已强制标记为失败状态。"}
