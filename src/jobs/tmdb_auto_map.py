@@ -391,6 +391,14 @@ class TmdbAutoMapJob(BaseJob):
 
                     if not all_groups:
                         self.logger.info(f"'{title}' (TMDB ID: {tmdb_id}) 没有找到任何剧集组。")
+                        # 即使没有剧集组，也要更新别名
+                        if aliases_to_update and any(aliases_to_update.values()):
+                            updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
+                            if updated_fields:
+                                mode_str = "(AI修正模式)" if force_update else ""
+                                self.logger.info(f"为 '{title}' 更新了别名{mode_str}: {', '.join(updated_fields)}")
+                        await session.commit()
+                        processed_count += 1
                         continue
 
                     self.logger.info(f"为 '{title}' 找到 {len(all_groups)} 个剧集组: {[g.get('name') for g in all_groups]}")

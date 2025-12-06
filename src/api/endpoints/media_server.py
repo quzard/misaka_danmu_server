@@ -597,6 +597,10 @@ async def import_media_items(
 
     # 提交导入任务
     item_ids_list = list(all_item_ids)
+    # 生成基于 item_ids 的 unique_key，以区分不同批次的导入任务
+    sorted_ids = sorted(item_ids_list)
+    unique_key = f"media-import-{hash(tuple(sorted_ids))}"
+
     task_id, _ = await task_manager.submit_task(
         lambda session, progress_callback: tasks.import_media_items(
             item_ids_list,
@@ -611,7 +615,8 @@ async def import_media_items(
             title_recognition_manager=title_recognition_manager
         ),
         title=f"导入媒体项: {len(item_ids_list)}个",
-        queue_type="download"
+        queue_type="download",
+        unique_key=unique_key
     )
 
     return {"message": "媒体项导入任务已提交", "taskId": task_id}

@@ -322,9 +322,15 @@ async def batch_rename_danmaku(
     prefix: str = "",
     suffix: str = "",
     regex_pattern: str = "",
-    regex_replace: str = ""
+    regex_replace: str = "",
+    direct_renames: Dict[int, str] = None
 ) -> Dict[str, Any]:
-    """批量重命名弹幕文件"""
+    """批量重命名弹幕文件
+
+    Args:
+        mode: 重命名模式 - 'prefix' (前后缀), 'regex' (正则替换), 'direct' (直接指定新名称)
+        direct_renames: 直接指定新名称的字典 {episodeId: newName}，仅当 mode='direct' 时使用
+    """
     results = {
         "success": True,
         "totalCount": 0,
@@ -363,7 +369,10 @@ async def batch_rename_danmaku(
             extension = old_path.suffix
 
             # 计算新文件名
-            if mode == "prefix":
+            if mode == "direct" and direct_renames and episode.id in direct_renames:
+                # 直接使用前端计算好的新名称
+                new_name = direct_renames[episode.id]
+            elif mode == "prefix":
                 new_name = f"{prefix}{old_name}{suffix}{extension}"
             elif mode == "regex":
                 try:
@@ -470,6 +479,20 @@ async def preview_apply_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom_movie":
+        # 使用用户在存储配置中设置的电影模板
+        base_dir = "/app/config/danmaku/movies"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
+    elif template_type == "custom_tv":
+        # 使用用户在存储配置中设置的电视模板
+        base_dir = "/app/config/danmaku/tv"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "custom" and custom_template:
         base_dir = "/app/config/danmaku"
         template = custom_template
@@ -579,6 +602,20 @@ async def apply_danmaku_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "custom_movie":
+        # 使用用户在存储配置中设置的电影模板
+        base_dir = "/app/config/danmaku/movies"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('movieDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('movieDanmakuFilenameTemplate', template)
+    elif template_type == "custom_tv":
+        # 使用用户在存储配置中设置的电视模板
+        base_dir = "/app/config/danmaku/tv"
+        template = "${animeId}/${episodeId}"  # 默认值
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+            template = await config_manager.get('tvDanmakuFilenameTemplate', template)
     elif template_type == "custom" and custom_template:
         base_dir = "/app/config/danmaku"
         template = custom_template

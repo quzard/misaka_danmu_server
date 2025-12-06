@@ -375,11 +375,14 @@ async def finalize_task_in_history(session: AsyncSession, task_id: str, status: 
     await clear_task_state_cache(session, task_id)
 
 
-async def update_task_progress_in_history(session: AsyncSession, task_id: str, status: str, progress: int, description: str):
+async def update_task_progress_in_history(session: AsyncSession, task_id: str, status: str, progress: Optional[int], description: str):
+    values = {"status": status, "description": description, "updatedAt": get_now()}
+    if progress is not None:
+        values["progress"] = progress
     await session.execute(
         update(TaskHistory)
         .where(TaskHistory.taskId == task_id)
-        .values(status=status, progress=progress, description=description, updatedAt=get_now())
+        .values(**values)
     )
     await session.commit()
 

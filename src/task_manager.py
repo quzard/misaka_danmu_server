@@ -213,6 +213,8 @@ class TaskManager:
             task: Task = await self._download_queue.get()
             try:
                 self._current_download_task = task
+                # 执行前检查全局限制，避免频繁暂停
+                await self._wait_for_global_limit()
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="download")
             except Exception as e:
@@ -243,6 +245,8 @@ class TaskManager:
             task: Task = await self._fallback_queue.get()
             try:
                 self._current_fallback_task = task
+                # 执行前检查全局限制，避免频繁暂停
+                await self._wait_for_global_limit()
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="fallback")
             except Exception as e:
@@ -289,6 +293,20 @@ class TaskManager:
 
             except Exception as e:
                 self.logger.error(f"❌ 暂停任务监控器发生错误: {type(e).__name__}: {e}", exc_info=True)
+
+    async def _wait_for_global_limit(self):
+        """在执行任务前检查全局限制，如果已满则等待"""
+        if not self._recovery_dependencies:
+            return
+
+        rate_limiter = self._recovery_dependencies.get("rate_limiter")
+        if not rate_limiter:
+            return
+
+        is_limited, wait_seconds = await rate_limiter.get_global_limit_status()
+        if is_limited and wait_seconds > 0:
+            self.logger.info(f"全局速率限制已满，等待 {wait_seconds:.0f} 秒后继续...")
+            await asyncio.sleep(wait_seconds + 1)  # 多等1秒确保限制已重置
 
     async def pause_task_for_rate_limit(self, task: Task, retry_after_seconds: float):
         """将任务暂停指定时间，然后重新放回队列"""
