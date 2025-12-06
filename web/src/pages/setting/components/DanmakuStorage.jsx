@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip } from 'antd';
 import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate } from '@/apis';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
 const { Text } = Typography;
@@ -85,21 +85,12 @@ const DanmakuStorage = () => {
   const [templatePreviewData, setTemplatePreviewData] = useState(null);
   const [templatePreviewLoading, setTemplatePreviewLoading] = useState(false);
 
-  // 可用的模板变量定义
-  const templateVariables = [
-    { name: '${title}', desc: '作品标题', example: '葬送的芙莉莲' },
-    { name: '${titleBase}', desc: '标准化标题（去除季度信息，如"第X季"、"第X期"等）', example: '葬送的芙莉莲' },
-    { name: '${season}', desc: '季度号', example: '1' },
-    { name: '${season:02d}', desc: '季度号（补零到2位）', example: '01' },
-    { name: '${episode}', desc: '分集号', example: '12' },
-    { name: '${episode:02d}', desc: '分集号（补零到2位）', example: '12' },
-    { name: '${episode:03d}', desc: '分集号（补零到3位）', example: '012' },
-    { name: '${year}', desc: '年份', example: '2024' },
-    { name: '${provider}', desc: '数据源提供商', example: 'dandanplay' },
-    { name: '${animeId}', desc: '作品ID', example: '227' },
-    { name: '${episodeId}', desc: '分集ID', example: '25000227010001' },
-    { name: '${sourceId}', desc: '数据源ID', example: '1' },
-  ];
+  // 从后端获取的模板变量（统一列表）
+  const [templateVariables, setTemplateVariables] = useState([]);
+
+  // 输入框引用，用于插入变量到光标位置
+  const movieTemplateInputRef = useRef(null);
+  const tvTemplateInputRef = useRef(null);
 
   // 预设模板选项
   const presetTemplates = [
@@ -334,6 +325,16 @@ const DanmakuStorage = () => {
         tvDanmakuDirectoryPath: tvDir,
         tvDanmakuFilenameTemplate: tvTemplate,
       });
+
+      // 获取模板变量列表
+      try {
+        const varsRes = await getTemplateVariables();
+        if (varsRes?.data) {
+          setTemplateVariables(varsRes.data);
+        }
+      } catch (e) {
+        console.warn('获取模板变量失败，使用默认值', e);
+      }
     } catch (error) {
       message.error('加载配置失败');
       console.error(error);
@@ -998,6 +999,7 @@ const DanmakuStorage = () => {
         >
           <div>
             <Input
+              ref={movieTemplateInputRef}
               value={movieDanmakuFilenameTemplate}
               onChange={(e) => {
                 setMovieDanmakuFilenameTemplate(e.target.value);
@@ -1006,14 +1008,36 @@ const DanmakuStorage = () => {
               placeholder="${title}/${episodeId}"
               disabled={!customDanmakuPathEnabled}
             />
-            <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-              支持变量: {'${animeId}'}, {'${episodeId}'}, {'${title}'}, {'${year}'}, {'${provider}'}
+            {/* 可点击的变量按钮组 */}
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ marginBottom: '6px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>点击插入变量:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {(templateVariables || []).map((v) => (
+                  <Tooltip
+                    key={v.name}
+                    title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
+                    placement="top"
+                    trigger={isMobile ? 'click' : 'hover'}
+                  >
+                    <Button
+                      size="small"
+                      type="dashed"
+                      disabled={!customDanmakuPathEnabled}
+                      onClick={() => {
+                        const newValue = movieDanmakuFilenameTemplate + v.name;
+                        setMovieDanmakuFilenameTemplate(newValue);
+                        form.setFieldValue('movieDanmakuFilenameTemplate', newValue);
+                      }}
+                      style={{ fontFamily: 'monospace', fontSize: '11px' }}
+                    >
+                      {v.name}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
             </div>
-            <div style={{ color: '#999', fontSize: '12px' }}>
-              支持子目录: {'${title}'}/<wbr/>{'${episodeId}'}
-            </div>
-            <div style={{ color: '#999', fontSize: '12px' }}>
-              .xml后缀会自动拼接,无需在模板中添加
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
+              💡 支持子目录如 {'${title}/${episodeId}'}，.xml后缀会自动拼接
             </div>
           </div>
         </Form.Item>
@@ -1085,6 +1109,7 @@ const DanmakuStorage = () => {
         >
           <div>
             <Input
+              ref={tvTemplateInputRef}
               value={tvDanmakuFilenameTemplate}
               onChange={(e) => {
                 setTvDanmakuFilenameTemplate(e.target.value);
@@ -1093,14 +1118,36 @@ const DanmakuStorage = () => {
               placeholder="${animeId}/${episodeId}"
               disabled={!customDanmakuPathEnabled}
             />
-            <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-              支持变量: {'${animeId}'}, {'${episodeId}'}, {'${title}'}, {'${season:02d}'}, {'${episode:02d}'}
+            {/* 可点击的变量按钮组 */}
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ marginBottom: '6px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>点击插入变量:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {(templateVariables || []).map((v) => (
+                  <Tooltip
+                    key={v.name}
+                    title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
+                    placement="top"
+                    trigger={isMobile ? 'click' : 'hover'}
+                  >
+                    <Button
+                      size="small"
+                      type="dashed"
+                      disabled={!customDanmakuPathEnabled}
+                      onClick={() => {
+                        const newValue = tvDanmakuFilenameTemplate + v.name;
+                        setTvDanmakuFilenameTemplate(newValue);
+                        form.setFieldValue('tvDanmakuFilenameTemplate', newValue);
+                      }}
+                      style={{ fontFamily: 'monospace', fontSize: '11px' }}
+                    >
+                      {v.name}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
             </div>
-            <div style={{ color: '#999', fontSize: '12px' }}>
-              支持子目录: {'${animeId}'}/<wbr/>{'${episodeId}'}
-            </div>
-            <div style={{ color: '#999', fontSize: '12px' }}>
-              .xml后缀会自动拼接,无需在模板中添加
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
+              💡 支持子目录如 {'${animeId}/${episodeId}'}，.xml后缀会自动拼接
             </div>
           </div>
         </Form.Item>
@@ -1544,7 +1591,7 @@ const DanmakuStorage = () => {
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8, color: '#666' }}>可用参数（点击插入）:</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {templateVariables.map((v) => (
+                {(templateVariables || []).map((v) => (
                   <Tooltip
                     key={v.name}
                     title={<div><div>{v.desc}</div><div style={{ color: '#aaa', marginTop: 4 }}>示例: {v.example}</div></div>}
