@@ -701,6 +701,9 @@ export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storag
 /** 应用新模板 */
 export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
 
+/** 获取模板变量列表 */
+export const getTemplateVariables = () => api.get('/api/ui/danmaku-storage/template-variables')
+
 // --- 追更与标记管理 ---
 
 /** 获取所有源（按番剧分组）用于追更管理，支持分页和过滤 */

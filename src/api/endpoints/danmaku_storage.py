@@ -106,6 +106,35 @@ class RenamePreviewResult(BaseModel):
 
 # ==================== API端点 ====================
 
+# 模板变量定义 - 集中管理，方便扩展
+# 模板变量定义 - 统一列表，电影类型使用季/集时输出null
+TEMPLATE_VARIABLES = [
+    {"name": "${title}", "desc": "作品标题", "example": "葬送的芙莉莲"},
+    {"name": "${titleBase}", "desc": "标准化标题(去除季度信息)", "example": "葬送的芙莉莲"},
+    {"name": "${season}", "desc": "季度号(电影为null)", "example": "1"},
+    {"name": "${season:02d}", "desc": "季度号补零(电影为null)", "example": "01"},
+    {"name": "${episode}", "desc": "集数(电影为null)", "example": "1"},
+    {"name": "${episode:02d}", "desc": "集数补零(电影为null)", "example": "01"},
+    {"name": "${episode:03d}", "desc": "集数补零到3位(电影为null)", "example": "001"},
+    {"name": "${year}", "desc": "年份", "example": "2023"},
+    {"name": "${provider}", "desc": "数据源名称", "example": "bilibili"},
+    {"name": "${animeId}", "desc": "作品ID", "example": "234"},
+    {"name": "${episodeId}", "desc": "分集ID", "example": "25000234010001"},
+    {"name": "${sourceId}", "desc": "数据源ID", "example": "1"},
+]
+
+
+@router.get("/template-variables", summary="获取模板变量列表")
+async def get_template_variables(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取所有可用的模板变量列表，用于前端动态渲染变量按钮。
+    返回统一的变量列表，电影类型使用季/集变量时会输出null。
+    """
+    return TEMPLATE_VARIABLES
+
+
 @router.post("/preview-migrate", response_model=MigratePreviewResult, summary="预览批量迁移")
 async def preview_migrate(
     request: MigratePreviewRequest,

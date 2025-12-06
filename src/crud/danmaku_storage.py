@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ..orm_models import Anime, AnimeSource, Episode
+from ..path_template import normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -479,6 +480,11 @@ async def preview_apply_template(
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "titleBase":
+        base_dir = "/app/config/danmaku"
+        template = "${titleBase}/Season ${season:02d}/${titleBase} - S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "custom_movie":
         # 使用用户在存储配置中设置的电影模板
         base_dir = "/app/config/danmaku/movies"
@@ -527,6 +533,9 @@ async def preview_apply_template(
                 episode_val = episode.episodeIndex or 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
+                # 处理 titleBase（标准化标题，去除季度信息）
+                title_base = normalize_title(anime.title) if anime.title else "Unknown"
+                relative_path = relative_path.replace("${titleBase}", title_base)
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
                 relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
@@ -537,6 +546,9 @@ async def preview_apply_template(
                 relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
+                # 处理 provider 变量
+                provider_name = episode.source.providerName if episode.source else "unknown"
+                relative_path = relative_path.replace("${provider}", provider_name or "unknown")
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)
@@ -600,6 +612,11 @@ async def apply_danmaku_template(
     elif template_type == "emby":
         base_dir = "/app/config/danmaku"
         template = "${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}"
+        if config_manager:
+            base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
+    elif template_type == "titleBase":
+        base_dir = "/app/config/danmaku"
+        template = "${titleBase}/Season ${season:02d}/${titleBase} - S${season:02d}E${episode:02d}"
         if config_manager:
             base_dir = await config_manager.get('tvDanmakuDirectoryPath', base_dir)
     elif template_type == "custom_movie":
@@ -667,6 +684,9 @@ async def apply_danmaku_template(
                 episode_val = episode.episodeIndex or 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
+                # 处理 titleBase（标准化标题，去除季度信息）
+                title_base = normalize_title(anime.title) if anime.title else "Unknown"
+                relative_path = relative_path.replace("${titleBase}", title_base)
                 # 先处理带格式的变量（补零）
                 relative_path = relative_path.replace("${season:02d}", str(season_val).zfill(2))
                 relative_path = relative_path.replace("${episode:02d}", str(episode_val).zfill(2))
@@ -677,6 +697,9 @@ async def apply_danmaku_template(
                 relative_path = relative_path.replace("${year}", str(year_val))
                 relative_path = relative_path.replace("${animeId}", str(anime.id))
                 relative_path = relative_path.replace("${episodeId}", str(episode.id))
+                # 处理 provider 变量
+                provider_name = episode.source.providerName if episode.source else "unknown"
+                relative_path = relative_path.replace("${provider}", provider_name or "unknown")
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)

@@ -17,6 +17,7 @@ from typing import Dict, Set, Tuple, Optional
 from sqlalchemy import text, inspect
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.engine import Inspector
+from sqlalchemy.dialects import mysql as mysql_dialect, postgresql as pg_dialect
 
 from .orm_models import Base
 
@@ -137,9 +138,14 @@ def _build_add_column_sql(table_name: str, column, db_type: str) -> str:
     """构建 ALTER TABLE ADD COLUMN 语句"""
     col_name = column.name
     col_type = column.type
-    
-    # 获取数据库原生类型
-    type_str = col_type.compile(dialect=None)
+
+    # 获取数据库原生类型 - 根据数据库类型使用正确的 dialect
+    # PostgreSQL 没有 DATETIME 类型，需要使用 TIMESTAMP
+    if db_type == "mysql":
+        dialect = mysql_dialect.dialect()
+    else:  # postgresql
+        dialect = pg_dialect.dialect()
+    type_str = col_type.compile(dialect=dialect)
     
     # 处理 nullable
     nullable = column.nullable if column.nullable is not None else True
