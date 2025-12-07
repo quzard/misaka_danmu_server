@@ -303,6 +303,7 @@ async def get_incremental_refresh_sources_grouped(
     keyword: str = "",
     favorite_filter: str = "all",  # all / favorited / unfavorited
     refresh_filter: str = "all",   # all / enabled / disabled
+    type_filter: str = "all",      # all / movie / tv
 ) -> Dict[str, Any]:
     """
     获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。
@@ -313,6 +314,7 @@ async def get_incremental_refresh_sources_grouped(
         keyword: 搜索关键词（匹配番剧名称或源名称）
         favorite_filter: 标记过滤 (all/favorited/unfavorited)
         refresh_filter: 追更过滤 (all/enabled/disabled)
+        type_filter: 类型过滤 (all/movie/tv)
 
     返回格式: {
         "total": 100,  # 总番剧数
@@ -375,6 +377,10 @@ async def get_incremental_refresh_sources_grouped(
         conditions.append(AnimeSource.incrementalRefreshEnabled == True)
     elif refresh_filter == "disabled":
         conditions.append(AnimeSource.incrementalRefreshEnabled == False)
+    if type_filter == "movie":
+        conditions.append(Anime.type == "movie")
+    elif type_filter == "tv":
+        conditions.append(Anime.type == "tv")
 
     if conditions:
         base_stmt = base_stmt.where(and_(*conditions))

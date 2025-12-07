@@ -490,7 +490,7 @@ async def set_provider_settings(
     """批量更新指定元数据源的相关配置。"""
     config_keys_map = {
         "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-        "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
+        "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken", "authMode"],
         "douban": "doubanCookie", # 单值配置
         "tvdb": "tvdbApiKey",   # 单值配置
     }
