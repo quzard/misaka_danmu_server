@@ -432,7 +432,7 @@ class MetadataSourceManager:
         config_keys_map = {
             # Metadata Sources
             "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-            "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken", "bangumiAuthMode"],
+            "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken", "authMode"],
             "douban": ["doubanCookie"],
             "tvdb": ["tvdbApiKey"],
             "imdb": ["imdbUseApi", "imdbEnableFallback"],  # IMDb 配置
@@ -487,16 +487,9 @@ class MetadataSourceManager:
 
         # 添加特殊逻辑：Bangumi 认证模式
         if providerName == "bangumi":
-            # 优先使用数据库中保存的 authMode，默认为 token
-            saved_auth_mode = config_values.get("bangumiAuthMode", "")
-            if saved_auth_mode in ("token", "oauth"):
-                config_values["authMode"] = saved_auth_mode
-            else:
-                # 兼容旧数据：如果没有保存 authMode，根据是否有 token 来推断
-                if config_values.get("bangumiToken"):
-                    config_values["authMode"] = "token"
-                else:
-                    config_values["authMode"] = "token"  # 默认 token 模式
+            # 如果数据库中没有保存 authMode，设置默认值为 token
+            if not config_values.get("authMode"):
+                config_values["authMode"] = "token"
 
         return config_values
 

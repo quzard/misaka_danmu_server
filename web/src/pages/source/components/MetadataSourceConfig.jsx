@@ -36,7 +36,19 @@ export function BangumiConfig({ form }) {
   const [showToken, setShowToken] = useState(false)
   const oauthPopupRef = useRef(null)
 
-  // 加载配置
+  // 使用 ref 来存储当前状态，避免 useEffect 依赖导致重新加载
+  const authModeRef = useRef(authMode)
+  const authInfoRef = useRef(authInfo)
+
+  useEffect(() => {
+    authModeRef.current = authMode
+  }, [authMode])
+
+  useEffect(() => {
+    authInfoRef.current = authInfo
+  }, [authInfo])
+
+  // 加载配置 - 只在组件挂载时执行一次
   useEffect(() => {
     loadConfig()
 
@@ -53,7 +65,7 @@ export function BangumiConfig({ form }) {
 
     // 定期检查授权状态并自动刷新 (每5分钟检查一次)
     const checkAuthInterval = setInterval(() => {
-      if (authMode === 'oauth' && authInfo.isAuthenticated) {
+      if (authModeRef.current === 'oauth' && authInfoRef.current.isAuthenticated) {
         loadConfig()
       }
     }, 5 * 60 * 1000) // 5分钟
@@ -62,7 +74,7 @@ export function BangumiConfig({ form }) {
       window.removeEventListener('message', handleMessage)
       clearInterval(checkAuthInterval)
     }
-  }, [authMode, authInfo.isAuthenticated])
+  }, []) // 空依赖数组，只在挂载时执行
 
   const loadConfig = async () => {
     try {
