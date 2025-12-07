@@ -278,7 +278,7 @@ export const Metadata = () => {
           bangumiToken: values.bangumiToken,
           bangumiClientId: values.bangumiClientId,
           bangumiClientSecret: values.bangumiClientSecret,
-          authMode: values.authMode || 'token', // 保存认证模式
+          bangumiAuthMode: values.authMode || 'token', // 保存认证模式
         })
       } else if (providerName === 'tmdb') {
         await setTmdbConfig({
