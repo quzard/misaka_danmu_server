@@ -406,7 +406,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
               items: [
                 { key: 'all', label: '全部' },
                 { key: 'movie', label: '电影' },
-                { key: 'tv', label: '电视节目' },
+                { key: 'tv_series', label: '电视节目' },
               ],
               selectedKeys: [typeFilter],
               onClick: ({ key }) => handleTypeFilterChange(key),
