@@ -681,7 +681,7 @@ export const Library = () => {
                 </Button>
               )}
               <Button onClick={() => setIsRefreshModalOpen(true)}>
-                追更管理
+                批量管理
               </Button>
               <Button type="primary" onClick={() => setIsCreateModalOpen(true)}>
                 自定义影视条目

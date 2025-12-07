@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination, Popover } from 'antd'
-import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined, SearchOutlined } from '@ant-design/icons'
+import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination, Popover, Popconfirm } from 'antd'
+import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined, SearchOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store/index.js'
 import {
@@ -11,6 +11,7 @@ import {
   batchUnsetFavorite,
   toggleSourceIncremental,
   toggleSourceFavorite,
+  deleteAnimeSource,
 } from '../apis'
 import dayjs from 'dayjs'
 
@@ -31,6 +32,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const [pageSize] = useState(20)
   const [favoriteFilter, setFavoriteFilter] = useState('all')
   const [refreshFilter, setRefreshFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0, maxFailures: 10 })
 
   // 加载数据
@@ -44,6 +46,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           keyword: params.keyword ?? searchKeyword,
           favoriteFilter: params.favoriteFilter ?? favoriteFilter,
           refreshFilter: params.refreshFilter ?? refreshFilter,
+          typeFilter: params.typeFilter ?? typeFilter,
         }),
         getIncrementalRefreshTaskStatus(),
       ])
@@ -62,16 +65,17 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchKeyword, favoriteFilter, refreshFilter])
+  }, [page, pageSize, searchKeyword, favoriteFilter, refreshFilter, typeFilter])
 
   useEffect(() => {
     if (open) {
       setPage(1)
       setFavoriteFilter('all')
       setRefreshFilter('all')
+      setTypeFilter('all')
       setSearchKeyword('')
       setSelectedSourceIds([])
-      fetchData({ page: 1, keyword: '', favoriteFilter: 'all', refreshFilter: 'all' })
+      fetchData({ page: 1, keyword: '', favoriteFilter: 'all', refreshFilter: 'all', typeFilter: 'all' })
     }
   }, [open])
 
@@ -93,6 +97,12 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     setRefreshFilter(filter)
     setPage(1)
     fetchData({ page: 1, refreshFilter: filter })
+  }
+
+  const handleTypeFilterChange = (filter) => {
+    setTypeFilter(filter)
+    setPage(1)
+    fetchData({ page: 1, typeFilter: filter })
   }
 
   // 分页变更
@@ -247,6 +257,25 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     }
   }
 
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedSourceIds.length === 0) {
+      message.warning('请先选择源')
+      return
+    }
+    setOperationLoading(true)
+    try {
+      await deleteAnimeSource({ sourceIds: selectedSourceIds, deleteFiles: true })
+      message.success(`批量删除任务已提交，共 ${selectedSourceIds.length} 个源`)
+      setSelectedSourceIds([])
+      fetchData()
+    } catch (error) {
+      message.error('操作失败: ' + error.message)
+    } finally {
+      setOperationLoading(false)
+    }
+  }
+
   // 全选当前页
   const handleSelectAll = () => {
     const allSourceIds = animeGroups.flatMap(g => g.sources.map(s => s.sourceId))
@@ -390,6 +419,22 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
             menu={{
               items: [
                 { key: 'all', label: '全部' },
+                { key: 'movie', label: '电影' },
+                { key: 'tv', label: '电视节目' },
+              ],
+              selectedKeys: [typeFilter],
+              onClick: ({ key }) => handleTypeFilterChange(key),
+            }}
+            trigger={['click']}
+          >
+            <Button size="small">
+              类型: {typeFilter === 'all' ? '全部' : typeFilter === 'movie' ? '电影' : '电视节目'} <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'all', label: '全部' },
                 { key: 'enabled', label: '已追更' },
                 { key: 'disabled', label: '未追更' },
               ],
@@ -509,6 +554,24 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
               批量标记 <DownOutlined />
             </Button>
           </Dropdown>
+          <Popconfirm
+            title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
+            description="此操作将删除源及其关联的弹幕文件"
+            onConfirm={handleBatchDelete}
+            okText="确定"
+            cancelText="取消"
+            disabled={selectedSourceIds.length === 0}
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={operationLoading}
+              disabled={selectedSourceIds.length === 0}
+            >
+              批量删除
+            </Button>
+          </Popconfirm>
         </Space>
       </div>
     </div>
@@ -518,7 +581,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   if (isMobile) {
     return (
       <Drawer
-        title="追更与标记管理"
+        title="批量管理"
         placement="bottom"
         onClose={onCancel}
         open={open}
@@ -531,7 +594,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
   return (
     <Modal
-      title="追更与标记管理"
+      title="批量管理"
       open={open}
       onCancel={onCancel}
       footer={null}

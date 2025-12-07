@@ -397,10 +397,11 @@ async def get_incremental_refresh_sources(
     keyword: str = Query("", description="搜索关键词（匹配番剧名称或源名称）"),
     favoriteFilter: str = Query("all", pattern="^(all|favorited|unfavorited)$", description="标记过滤"),
     refreshFilter: str = Query("all", pattern="^(all|enabled|disabled)$", description="追更过滤"),
+    typeFilter: str = Query("all", pattern="^(all|movie|tv)$", description="类型过滤"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。用于追更管理弹窗。"""
+    """获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。用于批量管理弹窗。"""
     result = await crud.get_incremental_refresh_sources_grouped(
         session,
         page=page,
@@ -408,6 +409,7 @@ async def get_incremental_refresh_sources(
         keyword=keyword,
         favorite_filter=favoriteFilter,
         refresh_filter=refreshFilter,
+        type_filter=typeFilter,
     )
     # 获取最大失败次数配置
     max_failures = int(await crud.get_config_value(session, "incrementalRefreshMaxFailures", "10"))
