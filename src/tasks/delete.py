@@ -113,6 +113,8 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
         progress_callback: 进度回调函数
         delete_files: 是否同时删除弹幕XML文件，默认为True
     """
+    from sqlalchemy import func
+
     await progress_callback(0, "开始删除...")
     try:
         # 检查源是否存在
@@ -121,6 +123,9 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
         source_exists = source_result.scalar_one_or_none()
         if not source_exists:
             raise TaskSuccess("数据源未找到，无需删除。")
+
+        # 记录 anime ID，用于后续检查是否需要删除 anime
+        anime_id = source_exists.animeId
 
         # 在删除数据库记录前，先删除关联的物理文件
         if delete_files:
@@ -132,11 +137,28 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
                 delete_danmaku_file(file_path)
 
         # 删除源记录，数据库将级联删除其下的所有分集记录
-        await progress_callback(80, "正在删除数据库记录...")
+        await progress_callback(70, "正在删除数据库记录...")
         await session.delete(source_exists)
         await session.commit()
 
-        msg = "删除成功。" if delete_files else "删除成功（保留了弹幕文件）。"
+        # 检查该 anime 是否还有其他源，如果没有则删除 anime 条目
+        await progress_callback(90, "正在检查并清理空作品...")
+        count_stmt = select(func.count(orm_models.AnimeSource.id)).where(
+            orm_models.AnimeSource.animeId == anime_id
+        )
+        count_result = await session.execute(count_stmt)
+        source_count = count_result.scalar_one()
+
+        orphan_msg = ""
+        if source_count == 0:
+            anime = await session.get(orm_models.Anime, anime_id)
+            if anime:
+                await session.delete(anime)
+                await session.commit()
+                orphan_msg = "，并清理了空的作品条目"
+                logger.info(f"已删除没有源的作品条目 (ID: {anime_id})")
+
+        msg = f"删除成功{orphan_msg}。" if delete_files else f"删除成功（保留了弹幕文件）{orphan_msg}。"
         raise TaskSuccess(msg)
     except TaskSuccess:
         # 显式地重新抛出 TaskSuccess，以确保它被 TaskManager 正确处理
@@ -234,16 +256,23 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
         progress_callback: 进度回调函数
         delete_files: 是否同时删除弹幕XML文件，默认为True
     """
+    from sqlalchemy import func
+
     total = len(sourceIds)
     deleted_count = 0
+    affected_anime_ids = set()  # 记录受影响的 anime ID
+
     for i, sourceId in enumerate(sourceIds):
-        progress = int((i / total) * 100)
+        progress = int((i / total) * 90)  # 留10%给清理空anime
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {sourceId})...")
         try:
             source_stmt = select(orm_models.AnimeSource).where(orm_models.AnimeSource.id == sourceId)
             source_result = await session.execute(source_stmt)
             source = source_result.scalar_one_or_none()
             if source:
+                # 记录受影响的 anime ID
+                affected_anime_ids.add(source.animeId)
+
                 # 删除关联的弹幕文件
                 if delete_files:
                     episodes_to_delete_res = await session.execute(
@@ -258,7 +287,33 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
         except Exception as e:
             logger.error(f"批量删除源任务中，删除源 (ID: {sourceId}) 失败: {e}", exc_info=True)
             # Continue to the next one
+
+    # 清理没有源的 anime 条目
+    orphan_anime_count = 0
+    if affected_anime_ids:
+        await progress_callback(95, "正在清理空的作品条目...")
+        for anime_id in affected_anime_ids:
+            try:
+                # 检查该 anime 是否还有源
+                count_stmt = select(func.count(orm_models.AnimeSource.id)).where(
+                    orm_models.AnimeSource.animeId == anime_id
+                )
+                count_result = await session.execute(count_stmt)
+                source_count = count_result.scalar_one()
+
+                if source_count == 0:
+                    # 没有源了，删除 anime 条目
+                    anime = await session.get(orm_models.Anime, anime_id)
+                    if anime:
+                        await session.delete(anime)
+                        await session.commit()
+                        orphan_anime_count += 1
+                        logger.info(f"已删除没有源的作品条目 (ID: {anime_id})")
+            except Exception as e:
+                logger.error(f"清理空 anime 条目 (ID: {anime_id}) 时出错: {e}", exc_info=True)
+
     await session.commit()
     suffix = "" if delete_files else "（保留了弹幕文件）"
-    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。{suffix}")
+    orphan_msg = f"，清理了 {orphan_anime_count} 个空作品条目" if orphan_anime_count > 0 else ""
+    raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个{orphan_msg}。{suffix}")
 
