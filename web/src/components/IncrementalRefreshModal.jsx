@@ -480,7 +480,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
               label: (
                 <div className="flex items-center gap-2">
                   <Tag size="small" color={group.animeType === 'movie' ? 'purple' : 'blue'}>
-                    {group.animeType === 'movie' ? '电影' : '剧集'}
+                    {group.animeType === 'movie' ? '电影' : '电视节目'}
                   </Tag>
                   <span className="font-medium">{group.animeTitle}</span>
                   <Tag size="small">{group.sources.length} 个源</Tag>
