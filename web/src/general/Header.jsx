@@ -296,7 +296,7 @@ const MobileHeader = ({ activeKey }) => {
                     {
                       key: 'session-manager',
                       label: '会话管理',
-                      icon: 'desktop',
+                      icon: 'checksurface',
                     },
                     {
                       key: 'change-password',

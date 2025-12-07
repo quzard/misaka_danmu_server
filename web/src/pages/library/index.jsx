@@ -739,7 +739,7 @@ export const Library = () => {
                 size="large"
                 onClick={() => setIsRefreshModalOpen(true)}
               >
-                追更管理
+                批量管理
               </Button>
               <Button
                 type="primary"
