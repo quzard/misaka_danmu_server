@@ -449,27 +449,29 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
               标记: {favoriteFilter === 'all' ? '全部' : favoriteFilter === 'favorited' ? '已标记' : '未标记'} <DownOutlined />
             </Button>
           </Dropdown>
-          <Popover
-            content={
-              <div style={{ width: 220 }}>
-                <Input
-                  placeholder="搜索番剧或源名称..."
-                  allowClear
-                  value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
-                  onPressEnter={(e) => handleSearch(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            }
-            title="搜索"
-            trigger="click"
-            placement="bottom"
-          >
-            <Button size="small" icon={<SearchOutlined />}>
-              {searchKeyword ? `搜索: ${searchKeyword.length > 4 ? searchKeyword.slice(0, 4) + '...' : searchKeyword}` : '搜索'}
-            </Button>
-          </Popover>
+          {!isMobile && (
+            <Popover
+              content={
+                <div style={{ width: 220 }}>
+                  <Input
+                    placeholder="搜索番剧或源名称..."
+                    allowClear
+                    value={searchKeyword}
+                    onChange={(e) => setSearchKeyword(e.target.value)}
+                    onPressEnter={(e) => handleSearch(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              }
+              title="搜索"
+              trigger="click"
+              placement="bottom"
+            >
+              <Button size="small" icon={<SearchOutlined />}>
+                {searchKeyword ? `搜索: ${searchKeyword.length > 4 ? searchKeyword.slice(0, 4) + '...' : searchKeyword}` : '搜索'}
+              </Button>
+            </Popover>
+          )}
         </Space>
       </div>
 
@@ -532,71 +534,170 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       )}
 
       {/* 批量操作按钮 */}
-      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 flex items-center flex-wrap gap-2">
-        <span className="text-gray-500 text-sm">
-          已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项
-        </span>
-        <Space size="small" wrap>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'selectAll', label: '全选当前页', onClick: handleSelectAll },
-                { key: 'deselectAll', label: '取消全选', onClick: handleDeselectAll },
-              ],
-            }}
-            trigger={['click']}
-          >
-            <Button size="small">
-              操作 <DownOutlined />
-            </Button>
-          </Dropdown>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'enable', label: '批量开启', onClick: handleBatchEnableRefresh, disabled: selectedSourceIds.length === 0 },
-                { key: 'disable', label: '批量关闭', onClick: handleBatchDisableRefresh, disabled: selectedSourceIds.length === 0 },
-              ],
-            }}
-            trigger={['click']}
-            disabled={operationLoading}
-          >
-            <Button size="small" loading={operationLoading}>
-              批量追更 <DownOutlined />
-            </Button>
-          </Dropdown>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'set', label: '批量开启', onClick: handleBatchSetFavorite, disabled: selectedSourceIds.length === 0 },
-                { key: 'unset', label: '批量关闭', onClick: handleBatchUnsetFavorite, disabled: selectedSourceIds.length === 0 },
-              ],
-            }}
-            trigger={['click']}
-            disabled={operationLoading}
-          >
-            <Button size="small" loading={operationLoading}>
-              批量标记 <DownOutlined />
-            </Button>
-          </Dropdown>
-          <Popconfirm
-            title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
-            description="此操作将删除源及其关联的弹幕文件"
-            onConfirm={handleBatchDelete}
-            okText="确定"
-            cancelText="取消"
-            disabled={selectedSourceIds.length === 0}
-          >
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              loading={operationLoading}
+      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+        {/* 第一行：已选数量 + 搜索（移动端） */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-gray-500 text-sm">
+            已选 <span className="font-medium text-blue-500">{selectedSourceIds.length}</span> 项
+          </span>
+          {isMobile && (
+            <Popover
+              content={
+                <div style={{ width: 220 }}>
+                  <Input
+                    placeholder="搜索番剧或源名称..."
+                    allowClear
+                    value={searchKeyword}
+                    onChange={(e) => setSearchKeyword(e.target.value)}
+                    onPressEnter={(e) => handleSearch(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              }
+              title="搜索"
+              trigger="click"
+              placement="top"
+            >
+              <Button size="small" icon={<SearchOutlined />} className="ml-auto">
+                {searchKeyword ? `搜索: ${searchKeyword.length > 4 ? searchKeyword.slice(0, 4) + '...' : searchKeyword}` : '搜索'}
+              </Button>
+            </Popover>
+          )}
+        </div>
+        {/* 移动端：分两行显示按钮 */}
+        {isMobile ? (
+          <div className="space-y-2">
+            {/* 第一行：操作 + 批量删除 */}
+            <div className="flex gap-2">
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'selectAll', label: '全选当前页', onClick: handleSelectAll },
+                    { key: 'deselectAll', label: '取消全选', onClick: handleDeselectAll },
+                  ],
+                }}
+                trigger={['click']}
+              >
+                <Button size="small" className="flex-1">
+                  操作 <DownOutlined />
+                </Button>
+              </Dropdown>
+              <Popconfirm
+                title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
+                description="此操作将删除源及其关联的弹幕文件"
+                onConfirm={handleBatchDelete}
+                okText="确定"
+                cancelText="取消"
+                disabled={selectedSourceIds.length === 0}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={operationLoading}
+                  disabled={selectedSourceIds.length === 0}
+                  className="flex-1"
+                >
+                  批量删除
+                </Button>
+              </Popconfirm>
+            </div>
+            {/* 第二行：批量追更 + 批量标记 */}
+            <div className="flex gap-2">
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'enable', label: '批量开启', onClick: handleBatchEnableRefresh, disabled: selectedSourceIds.length === 0 },
+                    { key: 'disable', label: '批量关闭', onClick: handleBatchDisableRefresh, disabled: selectedSourceIds.length === 0 },
+                  ],
+                }}
+                trigger={['click']}
+                disabled={operationLoading}
+              >
+                <Button size="small" loading={operationLoading} className="flex-1">
+                  批量追更 <DownOutlined />
+                </Button>
+              </Dropdown>
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'set', label: '批量开启', onClick: handleBatchSetFavorite, disabled: selectedSourceIds.length === 0 },
+                    { key: 'unset', label: '批量关闭', onClick: handleBatchUnsetFavorite, disabled: selectedSourceIds.length === 0 },
+                  ],
+                }}
+                trigger={['click']}
+                disabled={operationLoading}
+              >
+                <Button size="small" loading={operationLoading} className="flex-1">
+                  批量标记 <DownOutlined />
+                </Button>
+              </Dropdown>
+            </div>
+          </div>
+        ) : (
+          /* 桌面端：一行显示所有按钮 */
+          <Space size="small" wrap>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'selectAll', label: '全选当前页', onClick: handleSelectAll },
+                  { key: 'deselectAll', label: '取消全选', onClick: handleDeselectAll },
+                ],
+              }}
+              trigger={['click']}
+            >
+              <Button size="small">
+                操作 <DownOutlined />
+              </Button>
+            </Dropdown>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'enable', label: '批量开启', onClick: handleBatchEnableRefresh, disabled: selectedSourceIds.length === 0 },
+                  { key: 'disable', label: '批量关闭', onClick: handleBatchDisableRefresh, disabled: selectedSourceIds.length === 0 },
+                ],
+              }}
+              trigger={['click']}
+              disabled={operationLoading}
+            >
+              <Button size="small" loading={operationLoading}>
+                批量追更 <DownOutlined />
+              </Button>
+            </Dropdown>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'set', label: '批量开启', onClick: handleBatchSetFavorite, disabled: selectedSourceIds.length === 0 },
+                  { key: 'unset', label: '批量关闭', onClick: handleBatchUnsetFavorite, disabled: selectedSourceIds.length === 0 },
+                ],
+              }}
+              trigger={['click']}
+              disabled={operationLoading}
+            >
+              <Button size="small" loading={operationLoading}>
+                批量标记 <DownOutlined />
+              </Button>
+            </Dropdown>
+            <Popconfirm
+              title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
+              description="此操作将删除源及其关联的弹幕文件"
+              onConfirm={handleBatchDelete}
+              okText="确定"
+              cancelText="取消"
               disabled={selectedSourceIds.length === 0}
             >
-              批量删除
-            </Button>
-          </Popconfirm>
-        </Space>
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                loading={operationLoading}
+                disabled={selectedSourceIds.length === 0}
+              >
+                批量删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        )}
       </div>
     </div>
   )
