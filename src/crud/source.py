@@ -379,8 +379,8 @@ async def get_incremental_refresh_sources_grouped(
         conditions.append(AnimeSource.incrementalRefreshEnabled == False)
     if type_filter == "movie":
         conditions.append(Anime.type == "movie")
-    elif type_filter == "tv":
-        conditions.append(Anime.type == "tv")
+    elif type_filter == "tv_series":
+        conditions.append(Anime.type == "tv_series")
 
     if conditions:
         base_stmt = base_stmt.where(and_(*conditions))

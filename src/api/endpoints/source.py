@@ -397,7 +397,7 @@ async def get_incremental_refresh_sources(
     keyword: str = Query("", description="搜索关键词（匹配番剧名称或源名称）"),
     favoriteFilter: str = Query("all", pattern="^(all|favorited|unfavorited)$", description="标记过滤"),
     refreshFilter: str = Query("all", pattern="^(all|enabled|disabled)$", description="追更过滤"),
-    typeFilter: str = Query("all", pattern="^(all|movie|tv)$", description="类型过滤"),
+    typeFilter: str = Query("all", pattern="^(all|movie|tv_series)$", description="类型过滤"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
