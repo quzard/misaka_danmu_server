@@ -283,11 +283,8 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
         try:
             custom_path_enabled_str = await config_manager.get('customDanmakuPathEnabled', 'false')
             custom_path_enabled = custom_path_enabled_str.lower() == 'true'
-            logger.debug(f"自定义路径配置检查: customDanmakuPathEnabled='{custom_path_enabled_str}', enabled={custom_path_enabled}")
         except Exception as e:
             logger.warning(f"获取自定义路径配置失败: {e}")
-    else:
-        logger.debug(f"generate_danmaku_path: config_manager 为 None，使用默认路径")
 
     if custom_path_enabled and config_manager:
         try:
@@ -296,11 +293,9 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
             if anime_type == 'movie':
                 root_directory = await config_manager.get('movieDanmakuDirectoryPath', '/app/config/danmaku/movies')
                 filename_template = await config_manager.get('movieDanmakuFilenameTemplate', '${title}/${episodeId}')
-                logger.info(f"使用电影/剧场版路径配置: root={root_directory}, template={filename_template}")
             else:
                 root_directory = await config_manager.get('tvDanmakuDirectoryPath', '/app/config/danmaku/tv')
                 filename_template = await config_manager.get('tvDanmakuFilenameTemplate', '${animeId}/${episodeId}')
-                logger.info(f"使用电视节目路径配置: root={root_directory}, template={filename_template}")
 
             # 创建路径模板上下文
             context = create_danmaku_context(
@@ -343,7 +338,7 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
             return web_path, absolute_path
 
         except Exception as e:
-            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径", exc_info=True)
+            logger.error(f"使用自定义路径模板失败: {e}，回退到默认路径")
 
     # 默认路径逻辑 - 根据运行环境自动调整
     def _is_docker_environment():
