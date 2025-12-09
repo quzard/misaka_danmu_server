@@ -301,6 +301,43 @@ const DanmakuStorage = () => {
     };
   }, [customTemplate, templateTarget, templateModalVisible, selectedRowKeys]);
 
+  // 监听迁移配置变化，自动预览（防抖）
+  const migratePreviewTimerRef = useRef(null);
+  useEffect(() => {
+    // 只在迁移 Modal 打开且有目标路径时才触发预览
+    if (!migrateModalVisible || !migrateTargetPath || selectedRowKeys.length === 0) {
+      return;
+    }
+
+    // 清除之前的定时器
+    if (migratePreviewTimerRef.current) {
+      clearTimeout(migratePreviewTimerRef.current);
+    }
+
+    // 防抖：300ms 后调用预览 API
+    migratePreviewTimerRef.current = setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const response = await previewMigrateDanmaku({
+          animeIds: selectedRowKeys,
+          targetPath: migrateTargetPath,
+          keepStructure: migrateKeepStructure,
+        });
+        setMigratePreviewData(response.data);
+      } catch (error) {
+        message.error('预览失败: ' + (error.message || '未知错误'));
+      } finally {
+        setPreviewLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (migratePreviewTimerRef.current) {
+        clearTimeout(migratePreviewTimerRef.current);
+      }
+    };
+  }, [migrateTargetPath, migrateKeepStructure, migrateModalVisible, selectedRowKeys]);
+
   const loadConfig = async () => {
     try {
       setLoading(true);
@@ -1310,7 +1347,7 @@ const DanmakuStorage = () => {
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={migrateTargetPath}
-                  onChange={(e) => { setMigrateTargetPath(e.target.value); setMigratePreviewData(null); }}
+                  onChange={(e) => setMigrateTargetPath(e.target.value)}
                   placeholder="/app/config/danmaku/new"
                   style={{ flex: 1 }}
                 />
@@ -1326,7 +1363,7 @@ const DanmakuStorage = () => {
             <div style={{ marginBottom: 16 }}>
               <Checkbox
                 checked={migrateKeepStructure}
-                onChange={(e) => { setMigrateKeepStructure(e.target.checked); setMigratePreviewData(null); }}
+                onChange={(e) => setMigrateKeepStructure(e.target.checked)}
               >
                 保持原目录结构
               </Checkbox>

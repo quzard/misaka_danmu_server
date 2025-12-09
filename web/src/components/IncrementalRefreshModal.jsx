@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination, Popover, Popconfirm } from 'antd'
+import { Modal, Drawer, Input, Switch, Button, Checkbox, Collapse, Tag, Spin, Empty, Space, message, Alert, Dropdown, Pagination, Popover } from 'antd'
 import { SyncOutlined, ClockCircleOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, DownOutlined, SearchOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store/index.js'
@@ -34,6 +34,10 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const [refreshFilter, setRefreshFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0, maxFailures: 10 })
+
+  // 批量删除确认弹窗状态
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deleteFiles, setDeleteFiles] = useState(true)
 
   // 加载数据
   const fetchData = useCallback(async (params = {}) => {
@@ -264,17 +268,24 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     }
   }
 
-  // 批量删除
-  const handleBatchDelete = async () => {
+  // 打开批量删除确认弹窗
+  const openDeleteModal = () => {
     if (selectedSourceIds.length === 0) {
       message.warning('请先选择源')
       return
     }
+    setDeleteModalOpen(true)
+  }
+
+  // 执行批量删除
+  const handleBatchDelete = async () => {
     setOperationLoading(true)
     try {
-      await deleteAnimeSource({ sourceIds: selectedSourceIds, deleteFiles: true })
+      await deleteAnimeSource({ sourceIds: selectedSourceIds, deleteFiles })
       message.success(`批量删除任务已提交，共 ${selectedSourceIds.length} 个源`)
       setSelectedSourceIds([])
+      setDeleteModalOpen(false)
+      setDeleteFiles(true)  // 重置为默认值
       fetchData()
     } catch (error) {
       message.error('操作失败: ' + error.message)
@@ -582,25 +593,17 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
                   操作 <DownOutlined />
                 </Button>
               </Dropdown>
-              <Popconfirm
-                title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
-                description="此操作将删除源及其关联的弹幕文件"
-                onConfirm={handleBatchDelete}
-                okText="确定"
-                cancelText="取消"
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                loading={operationLoading}
                 disabled={selectedSourceIds.length === 0}
+                className="flex-1"
+                onClick={openDeleteModal}
               >
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  loading={operationLoading}
-                  disabled={selectedSourceIds.length === 0}
-                  className="flex-1"
-                >
-                  批量删除
-                </Button>
-              </Popconfirm>
+                批量删除
+              </Button>
             </div>
             {/* 第二行：批量追更 + 批量标记 */}
             <div className="flex gap-2">
@@ -678,54 +681,83 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
                 批量标记 <DownOutlined />
               </Button>
             </Dropdown>
-            <Popconfirm
-              title={`确定要删除选中的 ${selectedSourceIds.length} 个源吗?`}
-              description="此操作将删除源及其关联的弹幕文件"
-              onConfirm={handleBatchDelete}
-              okText="确定"
-              cancelText="取消"
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={operationLoading}
               disabled={selectedSourceIds.length === 0}
+              onClick={openDeleteModal}
             >
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                loading={operationLoading}
-                disabled={selectedSourceIds.length === 0}
-              >
-                批量删除
-              </Button>
-            </Popconfirm>
+              批量删除
+            </Button>
           </Space>
         )}
       </div>
     </div>
   )
 
+  // 删除确认弹窗
+  const renderDeleteModal = () => (
+    <Modal
+      title="批量删除确认"
+      open={deleteModalOpen}
+      onCancel={() => {
+        setDeleteModalOpen(false)
+        setDeleteFiles(true)
+      }}
+      onOk={handleBatchDelete}
+      okText="确定删除"
+      cancelText="取消"
+      okButtonProps={{ danger: true, loading: operationLoading }}
+    >
+      <div className="py-4">
+        <p className="mb-4">确定要删除选中的 <strong>{selectedSourceIds.length}</strong> 个源吗？</p>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={deleteFiles}
+            onChange={(e) => setDeleteFiles(e.target.checked)}
+          >
+            同时删除弹幕XML文件
+          </Checkbox>
+        </div>
+        <p className="text-gray-500 text-sm mt-2">
+          {deleteFiles ? '将删除源及其关联的弹幕文件' : '仅删除数据库记录，保留弹幕文件'}
+        </p>
+      </div>
+    </Modal>
+  )
+
   // 响应式渲染
   if (isMobile) {
     return (
-      <Drawer
-        title="批量管理"
-        placement="bottom"
-        onClose={onCancel}
-        open={open}
-        height="85vh"
-      >
-        {renderContent()}
-      </Drawer>
+      <>
+        <Drawer
+          title="批量管理"
+          placement="bottom"
+          onClose={onCancel}
+          open={open}
+          height="85vh"
+        >
+          {renderContent()}
+        </Drawer>
+        {renderDeleteModal()}
+      </>
     )
   }
 
   return (
-    <Modal
-      title="批量管理"
-      open={open}
-      onCancel={onCancel}
-      footer={null}
-      width={700}
-    >
-      {renderContent()}
-    </Modal>
+    <>
+      <Modal
+        title="批量管理"
+        open={open}
+        onCancel={onCancel}
+        footer={null}
+        width={700}
+      >
+        {renderContent()}
+      </Modal>
+      {renderDeleteModal()}
+    </>
   )
 }
