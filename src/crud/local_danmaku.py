@@ -117,6 +117,8 @@ async def get_local_works(
     session: AsyncSession,
     is_imported: Optional[bool] = None,
     media_type: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
     page: int = 1,
     page_size: int = 100
 ) -> Dict[str, Any]:
@@ -127,6 +129,10 @@ async def get_local_works(
         conditions.append(LocalDanmakuItem.isImported == is_imported)
     if media_type:
         conditions.append(LocalDanmakuItem.mediaType == media_type)
+    if year_from is not None:
+        conditions.append(LocalDanmakuItem.year >= year_from)
+    if year_to is not None:
+        conditions.append(LocalDanmakuItem.year <= year_to)
 
     # 查询作品列表(按title分组,同时获取每组的ID列表)
     # 只按 title, mediaType, year 分组,其他字段取第一个非空值
@@ -444,4 +450,3 @@ async def get_episode_ids_by_season(
     )
     result = await session.execute(stmt)
     return [row[0] for row in result.all()]
-

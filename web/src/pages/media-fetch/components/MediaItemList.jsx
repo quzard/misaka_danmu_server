@@ -7,7 +7,7 @@ import EpisodeListModal from './EpisodeListModal';
 
 const { Search } = Input;
 
-const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter }) => {
+const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter, yearFrom, yearTo }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -40,6 +40,12 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
       // 添加搜索过滤
       if (searchText) {
         params.search = searchText;
+      }
+      if (yearFrom !== undefined && yearFrom !== null && yearFrom !== '') {
+        params.year_from = yearFrom;
+      }
+      if (yearTo !== undefined && yearTo !== null && yearTo !== '') {
+        params.year_to = yearTo;
       }
 
       const res = await getMediaWorks(params);
@@ -126,9 +132,10 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
 
   useEffect(() => {
     if (serverId) {
-      loadItems();
+      loadItems(1, pagination.pageSize);
     }
-  }, [serverId, refreshTrigger, externalMediaTypeFilter, searchText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, refreshTrigger, externalMediaTypeFilter, searchText, yearFrom, yearTo]);
 
   // 同步外部选中的项目
   useEffect(() => {

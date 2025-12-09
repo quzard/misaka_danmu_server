@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented } from 'antd';
+import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber } from 'antd';
 import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
@@ -22,6 +22,8 @@ const LibraryScan = () => {
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
   const [showServerUrl, setShowServerUrl] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
+  const [yearFrom, setYearFrom] = useState();
+  const [yearTo, setYearTo] = useState();
 
   const screens = Grid.useBreakpoint();
 
@@ -833,6 +835,28 @@ const LibraryScan = () => {
                     { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
                   ]}
                 />
+                <Space size="small" align="center">
+                  <span>年份</span>
+                  <InputNumber
+                    placeholder="起始"
+                    value={yearFrom}
+                    onChange={setYearFrom}
+                    min={0}
+                    controls={false}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                  <span>~</span>
+                  <InputNumber
+                    placeholder="结束"
+                    value={yearTo}
+                    onChange={setYearTo}
+                    min={0}
+                    controls={false}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </Space>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
@@ -897,6 +921,8 @@ const LibraryScan = () => {
             selectedItems={selectedMediaItems}
             onSelectionChange={setSelectedMediaItems}
             mediaTypeFilter={mediaTypeFilter}
+            yearFrom={yearFrom}
+            yearTo={yearTo}
           />
         </Card>
       )}

@@ -192,6 +192,8 @@ async def get_media_works(
     is_imported: Optional[bool] = None,
     media_type: Optional[str] = None,
     search: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
     page: int = 1,
     page_size: int = 100
 ) -> Dict[str, Any]:
@@ -211,6 +213,10 @@ async def get_media_works(
             movie_stmt = movie_stmt.where(orm_models.MediaItem.isImported == is_imported)
         if search:
             movie_stmt = movie_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            movie_stmt = movie_stmt.where(orm_models.MediaItem.year >= year_from)
+        if year_to is not None:
+            movie_stmt = movie_stmt.where(orm_models.MediaItem.year <= year_to)
 
         movie_stmt = movie_stmt.order_by(orm_models.MediaItem.createdAt.desc())
         movie_result = await session.execute(movie_stmt)
@@ -256,6 +262,10 @@ async def get_media_works(
             tv_stmt = tv_stmt.where(orm_models.MediaItem.isImported == is_imported)
         if search:
             tv_stmt = tv_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            tv_stmt = tv_stmt.where(orm_models.MediaItem.year >= year_from)
+        if year_to is not None:
+            tv_stmt = tv_stmt.where(orm_models.MediaItem.year <= year_to)
 
         tv_stmt = tv_stmt.group_by(orm_models.MediaItem.title, orm_models.MediaItem.serverId)
         tv_stmt = tv_stmt.order_by(func.max(orm_models.MediaItem.createdAt).desc())
@@ -535,4 +545,3 @@ async def clear_media_items_by_server(session: AsyncSession, server_id: int) -> 
     result = await session.execute(stmt)
     await session.flush()
     return result.rowcount
-

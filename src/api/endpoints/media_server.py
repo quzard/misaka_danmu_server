@@ -373,6 +373,8 @@ async def get_media_works(
     is_imported: Optional[bool] = Query(None),
     media_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    year_from: Optional[int] = Query(None, description="起始年份，闭区间"),
+    year_to: Optional[int] = Query(None, description="结束年份，闭区间"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     session: AsyncSession = Depends(get_db_session),
@@ -385,6 +387,8 @@ async def get_media_works(
         is_imported=is_imported,
         media_type=media_type,
         search=search,
+        year_from=year_from,
+        year_to=year_to,
         page=page,
         page_size=page_size
     )
@@ -620,4 +624,3 @@ async def import_media_items(
     )
 
     return {"message": "媒体项导入任务已提交", "taskId": task_id}
-
