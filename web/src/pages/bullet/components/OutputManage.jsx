@@ -163,7 +163,7 @@ export const OutputManage = () => {
 
       <Card loading={loading} title="随机弹幕颜色" className="mt-4">
         <div className="text-sm text-gray-600 mb-3">
-          参考 danmu_api 的随机色策略，可配置随机色板和生效模式。默认不改色。
+          可配置随机色板和生效模式。默认不改色。
         </div>
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
@@ -185,6 +185,10 @@ export const OutputManage = () => {
           <div className="flex items-center gap-3">
             <ColorPicker
               value={colorPickerValue}
+              showText
+              presets={[
+                { label: '默认色板', colors: DEFAULT_COLOR_PALETTE },
+              ]}
               onChange={(_, hex) => setColorPickerValue(hex)}
             />
             <Button
