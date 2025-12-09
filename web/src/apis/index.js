@@ -206,6 +206,18 @@ export const getDanmuOutputAggregation = () =>
 /** 弹幕输出控制 启用弹幕聚合 */
 export const setDanmuOutputAggregation = data =>
   api.put('/api/ui/config/danmakuAggregationEnabled', data)
+/** 弹幕输出配置 随机颜色模式 */
+export const getDanmakuRandomColorMode = () =>
+  api.get('/api/ui/config/danmakuRandomColorMode')
+/** 弹幕输出配置 随机颜色模式 */
+export const setDanmakuRandomColorMode = data =>
+  api.put('/api/ui/config/danmakuRandomColorMode', data)
+/** 弹幕输出配置 随机颜色色板 */
+export const getDanmakuRandomColorPalette = () =>
+  api.get('/api/ui/config/danmakuRandomColorPalette')
+/** 弹幕输出配置 随机颜色色板 */
+export const setDanmakuRandomColorPalette = data =>
+  api.put('/api/ui/config/danmakuRandomColorPalette', data)
 
 /** 获取匹配后备机制状态 */
 export const getMatchFallback = () =>

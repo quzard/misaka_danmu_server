@@ -56,6 +56,11 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 弹幕源
         'danmakuOutputLimitPerSource': ('-1', '弹幕输出上限。-1为无限制。超出限制时按时间段均匀采样。'),
         'danmakuAggregationEnabled': ('true', '是否启用跨源弹幕聚合功能。'),
+        'danmakuRandomColorMode': ('off', '弹幕颜色转换模式：off(不使用)、white_to_random(白色弹幕随机染色)、all_random(全部随机染色)。'),
+        'danmakuRandomColorPalette': (
+            '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465',
+            '弹幕随机颜色色板，逗号分隔的十进制颜色值，默认加大白色概率。'
+        ),
         'scraperVerificationEnabled': ('false', '是否启用搜索源签名验证。'),
         'bilibiliCookie': ('', '用于访问B站API的Cookie，特别是buvid3。'),
         'gamerCookie': ('', '用于访问巴哈姆特动画疯的Cookie。'),
@@ -134,4 +139,3 @@ def get_default_configs(settings=None, ai_prompts=None):
         })
 
     return configs
-

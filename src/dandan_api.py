@@ -4,6 +4,7 @@ import json
 import re
 import time
 import ipaddress
+import random
 from typing import List, Optional, Dict, Any, Tuple
 from typing import Callable
 from datetime import datetime, timezone
@@ -38,6 +39,12 @@ from .season_mapper import title_contains_season_name
 from .models import ProviderEpisodeInfo
 from .commands import handle_command
 from .search_timer import SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH, SEARCH_TYPE_FALLBACK_MATCH
+from .danmaku_color import (
+    DEFAULT_RANDOM_COLOR_MODE,
+    DEFAULT_RANDOM_COLOR_PALETTE,
+    apply_random_color,
+    parse_palette,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -3708,6 +3715,15 @@ async def get_comments_for_dandan(
             cache_value = {"comments": comments_data, "timestamp": current_time}
             await _set_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key, cache_value, SAMPLED_COMMENTS_CACHE_TTL_DB)
             logger.debug(f"采样结果已缓存: {cache_key}")
+
+    # 应用随机颜色配置
+    try:
+        random_color_mode = await config_manager.get('danmakuRandomColorMode', DEFAULT_RANDOM_COLOR_MODE)
+        random_color_palette_raw = await config_manager.get('danmakuRandomColorPalette', DEFAULT_RANDOM_COLOR_PALETTE)
+        palette = parse_palette(random_color_palette_raw)
+        comments_data = apply_random_color(comments_data, random_color_mode, palette)
+    except Exception as e:
+        logger.error(f"应用随机颜色失败: {e}", exc_info=True)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
