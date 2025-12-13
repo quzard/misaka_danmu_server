@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber, Popover } from 'antd';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined } from '@ant-design/icons';
 
 const { Search } = Input;
 const { Text } = Typography;
@@ -923,28 +923,57 @@ const LocalItemList = ({ refreshTrigger }) => {
                   options={filterOptions}
                   style={segmentedStyle}
                 />
-                <Space size="small" align="center">
-                  <span>年份</span>
-                  <InputNumber
-                    placeholder="起始"
-                    value={yearFrom}
-                    onChange={setYearFrom}
-                    min={0}
-                    controls={false}
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
                     size="small"
-                    style={{ width: 80 }}
-                  />
-                  <span>~</span>
-                  <InputNumber
-                    placeholder="结束"
-                    value={yearTo}
-                    onChange={setYearTo}
-                    min={0}
-                    controls={false}
-                    size="small"
-                    style={{ width: 80 }}
-                  />
-                </Space>
+                  >
+                    {yearFrom || yearTo
+                      ? `年份: ${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}

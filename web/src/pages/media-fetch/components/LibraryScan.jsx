@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber } from 'antd';
+import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber, Popover } from 'antd';
+import { CalendarOutlined } from '@ant-design/icons';
 import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
@@ -835,28 +836,57 @@ const LibraryScan = () => {
                     { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
                   ]}
                 />
-                <Space size="small" align="center">
-                  <span>年份</span>
-                  <InputNumber
-                    placeholder="起始"
-                    value={yearFrom}
-                    onChange={setYearFrom}
-                    min={0}
-                    controls={false}
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
                     size="small"
-                    style={{ width: 80 }}
-                  />
-                  <span>~</span>
-                  <InputNumber
-                    placeholder="结束"
-                    value={yearTo}
-                    onChange={setYearTo}
-                    min={0}
-                    controls={false}
-                    size="small"
-                    style={{ width: 80 }}
-                  />
-                </Space>
+                  >
+                    {yearFrom || yearTo
+                      ? `年份: ${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
