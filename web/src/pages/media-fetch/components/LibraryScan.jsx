@@ -916,7 +916,58 @@ const LibraryScan = () => {
         >
           {screens.xs && (
             <div style={{ marginBottom: '16px', textAlign: 'center' }}>
-              <Space>
+              <Space wrap>
+                <Popover
+                  trigger="click"
+                  placement="bottomLeft"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
+                    size="large"
+                  >
+                    {yearFrom || yearTo
+                      ? `${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
