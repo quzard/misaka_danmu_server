@@ -1740,7 +1740,7 @@ export const EpisodeDetail = () => {
                     value={ruleParams.prefix || ''}
                     onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
                     placeholder="第"
-                    style={{ width: 70 }}
+                    style={{ width: 120 }}
                     addonBefore="前缀"
                     size="small"
                   />
@@ -1753,7 +1753,7 @@ export const EpisodeDetail = () => {
                     value={ruleParams.suffix || ''}
                     onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
                     placeholder="集"
-                    style={{ width: 70 }}
+                    style={{ width: 120 }}
                     addonBefore="后缀"
                     size="small"
                   />
