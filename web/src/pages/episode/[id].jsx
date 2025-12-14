@@ -1766,7 +1766,7 @@ export const EpisodeDetail = () => {
                     onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
                     min={0}
                     placeholder="起始"
-                    style={{ width: 100 }}
+                    style={{ width: 130 }}
                     addonBefore="起始值"
                     size="small"
                   />
@@ -1776,14 +1776,14 @@ export const EpisodeDetail = () => {
                     min={1}
                     max={5}
                     placeholder="位数"
-                    style={{ width: 100 }}
+                    style={{ width: 130 }}
                     addonBefore="补零位数"
                     size="small"
                   />
                   <Select
                     value={ruleParams.position || 'replace'}
                     onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
-                    style={{ width: 110 }}
+                    style={{ width: 100 }}
                     size="small"
                     options={[
                       { value: 'start', label: '添加到开头' },

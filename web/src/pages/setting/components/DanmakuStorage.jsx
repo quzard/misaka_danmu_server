@@ -1713,7 +1713,7 @@ const DanmakuStorage = () => {
                         onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
                         min={0}
                         placeholder="起始"
-                        style={{ width: 100 }}
+                        style={{ width: 130 }}
                         addonBefore="起始值"
                       />
                       <InputNumber
@@ -1723,14 +1723,14 @@ const DanmakuStorage = () => {
                         min={1}
                         max={5}
                         placeholder="位数"
-                        style={{ width: 100 }}
+                        style={{ width: 130 }}
                         addonBefore="补零位数"
                       />
                       <Select
                         size="small"
                         value={ruleParams.position || 'replace'}
                         onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
-                        style={{ width: 110 }}
+                        style={{ width: 100 }}
                         options={[
                           { value: 'start', label: '添加到开头' },
                           { value: 'end', label: '添加到结尾' },
