@@ -138,14 +138,52 @@ const DanmakuStorage = () => {
           const pos = parseInt(rule.params.index) || 0;
           return filename.slice(0, pos) + (rule.params.text || '') + filename.slice(pos);
         case 'delete':
-          if (rule.params.mode === 'text') {
-            return rule.params.caseSensitive
-              ? filename.split(rule.params.text || '').join('')
-              : filename.replace(new RegExp((rule.params.text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+          const deleteMode = rule.params.mode || 'text';
+
+          switch (deleteMode) {
+            case 'text':
+              // 删除指定文本
+              return rule.params.caseSensitive
+                ? filename.split(rule.params.text || '').join('')
+                : filename.replace(new RegExp((rule.params.text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+
+            case 'first':
+              // 删除前N个字符
+              const firstCount = parseInt(rule.params.count) || 0;
+              return filename.slice(firstCount);
+
+            case 'last':
+              // 删除后N个字符
+              const lastCount = parseInt(rule.params.count) || 0;
+              return filename.slice(0, -lastCount || undefined);
+
+            case 'toText':
+              // 从开头删除到指定文本（包含该文本）
+              const toText = rule.params.text || '';
+              if (!toText) return filename;
+              const toIndex = rule.params.caseSensitive
+                ? filename.indexOf(toText)
+                : filename.toLowerCase().indexOf(toText.toLowerCase());
+              return toIndex >= 0 ? filename.slice(toIndex + toText.length) : filename;
+
+            case 'fromText':
+              // 从指定文本删除到结尾（包含该文本）
+              const fromText = rule.params.text || '';
+              if (!fromText) return filename;
+              const fromIndex = rule.params.caseSensitive
+                ? filename.indexOf(fromText)
+                : filename.toLowerCase().indexOf(fromText.toLowerCase());
+              return fromIndex >= 0 ? filename.slice(0, fromIndex) : filename;
+
+            case 'range':
+              // 删除指定范围（从位置X删除Y个字符）
+              const from = parseInt(rule.params.from) || 0;
+              const count = parseInt(rule.params.count) || 0;
+              return filename.slice(0, from) + filename.slice(from + count);
+
+            default:
+              return filename;
           }
-          const from = parseInt(rule.params.from) || 0;
-          const count = parseInt(rule.params.count) || 0;
-          return filename.slice(0, from) + filename.slice(from + count);
         case 'serialize':
           const start = parseInt(rule.params.start) || 1;
           const step = parseInt(rule.params.step) || 1;
@@ -194,9 +232,20 @@ const DanmakuStorage = () => {
       message.warning('请输入要插入的文本');
       return;
     }
-    if (selectedRuleType === 'delete' && ruleParams.mode === 'text' && !ruleParams.text) {
-      message.warning('请输入要删除的文本');
-      return;
+    if (selectedRuleType === 'delete') {
+      const mode = ruleParams.mode || 'text';
+      if ((mode === 'text' || mode === 'toText' || mode === 'fromText') && !ruleParams.text) {
+        message.warning('请输入文本');
+        return;
+      }
+      if ((mode === 'first' || mode === 'last' || mode === 'range') && !ruleParams.count) {
+        message.warning('请输入字符数');
+        return;
+      }
+      if (mode === 'range' && ruleParams.from === undefined) {
+        message.warning('请输入起始位置');
+        return;
+      }
     }
     const newRule = {
       id: Date.now().toString(),
@@ -1481,13 +1530,118 @@ const DanmakuStorage = () => {
                 {/* 删除规则参数 */}
                 {selectedRuleType === 'delete' && (
                   <>
-                    <Select size="small" value={ruleParams.mode || 'text'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 80 }} options={[{ value: 'text', label: '文本' }, { value: 'range', label: '范围' }]} />
-                    {(ruleParams.mode || 'text') === 'text' ? (
-                      <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="删除文本" style={{ width: 120 }} />
-                    ) : (
+                    <Select
+                      size="small"
+                      value={ruleParams.mode || 'text'}
+                      onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))}
+                      style={{ width: 140 }}
+                      options={[
+                        { value: 'text', label: '删除文本' },
+                        { value: 'first', label: '删除前N个字符' },
+                        { value: 'last', label: '删除后N个字符' },
+                        { value: 'toText', label: '从开头删到文本' },
+                        { value: 'fromText', label: '从文本删到结尾' },
+                        { value: 'range', label: '删除范围' },
+                      ]}
+                    />
+                    {/* 删除指定文本 */}
+                    {(ruleParams.mode === 'text' || !ruleParams.mode) && (
                       <>
-                        <Input size="small" type="number" value={ruleParams.from || ''} onChange={(e) => setRuleParams(p => ({ ...p, from: e.target.value }))} placeholder="起始位置" style={{ width: 80 }} />
-                        <Input size="small" type="number" value={ruleParams.count || ''} onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))} placeholder="删除字数" style={{ width: 80 }} />
+                        <Input
+                          size="small"
+                          value={ruleParams.text || ''}
+                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                          placeholder="要删除的文本"
+                          style={{ width: 120 }}
+                        />
+                        <Checkbox
+                          checked={ruleParams.caseSensitive || false}
+                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                        >
+                          区分大小写
+                        </Checkbox>
+                      </>
+                    )}
+                    {/* 删除前N个字符 */}
+                    {ruleParams.mode === 'first' && (
+                      <Input
+                        size="small"
+                        type="number"
+                        value={ruleParams.count || ''}
+                        onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
+                        placeholder="字符数"
+                        style={{ width: 100 }}
+                      />
+                    )}
+                    {/* 删除后N个字符 */}
+                    {ruleParams.mode === 'last' && (
+                      <Input
+                        size="small"
+                        type="number"
+                        value={ruleParams.count || ''}
+                        onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
+                        placeholder="字符数"
+                        style={{ width: 100 }}
+                      />
+                    )}
+                    {/* 从开头删到文本 */}
+                    {ruleParams.mode === 'toText' && (
+                      <>
+                        <Input
+                          size="small"
+                          value={ruleParams.text || ''}
+                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                          placeholder="删除到此文本"
+                          style={{ width: 120 }}
+                        />
+                        <Checkbox
+                          checked={ruleParams.caseSensitive || false}
+                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                        >
+                          区分大小写
+                        </Checkbox>
+                      </>
+                    )}
+                    {/* 从文本删到结尾 */}
+                    {ruleParams.mode === 'fromText' && (
+                      <>
+                        <Input
+                          size="small"
+                          value={ruleParams.text || ''}
+                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                          placeholder="从此文本删除"
+                          style={{ width: 120 }}
+                        />
+                        <Checkbox
+                          checked={ruleParams.caseSensitive || false}
+                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                        >
+                          区分大小写
+                        </Checkbox>
+                      </>
+                    )}
+                    {/* 删除范围 */}
+                    {ruleParams.mode === 'range' && (
+                      <>
+                        <span style={{ fontSize: 13 }}>从位置</span>
+                        <Input
+                          size="small"
+                          type="number"
+                          value={ruleParams.from || ''}
+                          onChange={(e) => setRuleParams(p => ({ ...p, from: e.target.value }))}
+                          placeholder="起始位置"
+                          style={{ width: 90 }}
+                        />
+                        <span style={{ fontSize: 13 }}>删除</span>
+                        <Input
+                          size="small"
+                          type="number"
+                          value={ruleParams.count || ''}
+                          onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
+                          placeholder="字符数"
+                          style={{ width: 80 }}
+                        />
+                        <span style={{ fontSize: 13 }}>个字符</span>
                       </>
                     )}
                   </>
@@ -1530,7 +1684,25 @@ const DanmakuStorage = () => {
                       {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
                       {rule.type === 'regex' && `/${rule.params.pattern}/ → "${rule.params.replace || ''}"`}
                       {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? '开头' : '结尾'})`}
-                      {rule.type === 'delete' && (rule.params.mode === 'text' ? `删除 "${rule.params.text}"` : `删除 位置${rule.params.from}起${rule.params.count}字符`)}
+                      {rule.type === 'delete' && (() => {
+                        const mode = rule.params.mode || 'text';
+                        switch (mode) {
+                          case 'text':
+                            return `删除文本 "${rule.params.text}"`;
+                          case 'first':
+                            return `删除前 ${rule.params.count || 0} 个字符`;
+                          case 'last':
+                            return `删除后 ${rule.params.count || 0} 个字符`;
+                          case 'toText':
+                            return `从开头删到 "${rule.params.text}"`;
+                          case 'fromText':
+                            return `从 "${rule.params.text}" 删到结尾`;
+                          case 'range':
+                            return `从位置 ${rule.params.from || 0} 删除 ${rule.params.count || 0} 个字符`;
+                          default:
+                            return '删除';
+                        }
+                      })()}
                       {rule.type === 'serialize' && `${rule.params.prefix || ''}{${String(rule.params.start || 1).padStart(rule.params.digits || 2, '0')}}${rule.params.suffix || ''}`}
                       {rule.type === 'case' && (rule.params.mode === 'upper' ? '全大写' : rule.params.mode === 'lower' ? '全小写' : '首字母大写')}
                       {rule.type === 'strip' && '清理空格/字符'}
