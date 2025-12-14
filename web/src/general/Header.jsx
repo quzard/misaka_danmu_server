@@ -209,7 +209,7 @@ const MobileHeader = ({ activeKey }) => {
   const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
   const [newPasswordVisible, setNewPasswordVisible] = useState(false)
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false)
-  const { showMessage } = useMessage()
+  const messageApi = useMessage()
 
   const onLogout = async () => {
     await logout()
@@ -221,7 +221,7 @@ const MobileHeader = ({ activeKey }) => {
     try {
       setPasswordLoading(true)
       await changePassword(values)
-      showMessage('success', '密码修改成功')
+      messageApi.success('密码修改成功')
       setIsPasswordModalOpen(false)
       passwordForm.resetFields()
     } catch (error) {
@@ -241,7 +241,7 @@ const MobileHeader = ({ activeKey }) => {
         errorMsg = error.message
       }
 
-      showMessage('error', errorMsg)
+      messageApi.error(errorMsg)
     } finally {
       setPasswordLoading(false)
     }
