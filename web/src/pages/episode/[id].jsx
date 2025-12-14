@@ -484,14 +484,52 @@ export const EpisodeDetail = () => {
           const pos = parseInt(rule.params.index) || 0
           return title.slice(0, pos) + (rule.params.text || '') + title.slice(pos)
         case 'delete':
-          if (rule.params.mode === 'text') {
-            return rule.params.caseSensitive
-              ? title.split(rule.params.text).join('')
-              : title.replace(new RegExp(rule.params.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+          const deleteMode = rule.params.mode || 'text'
+
+          switch (deleteMode) {
+            case 'text':
+              // 删除指定文本
+              return rule.params.caseSensitive
+                ? title.split(rule.params.text).join('')
+                : title.replace(new RegExp(rule.params.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+
+            case 'first':
+              // 删除前N个字符
+              const firstCount = parseInt(rule.params.count) || 0
+              return title.slice(firstCount)
+
+            case 'last':
+              // 删除后N个字符
+              const lastCount = parseInt(rule.params.count) || 0
+              return title.slice(0, -lastCount || undefined)
+
+            case 'toText':
+              // 从开头删除到指定文本（包含该文本）
+              const toText = rule.params.text || ''
+              if (!toText) return title
+              const toIndex = rule.params.caseSensitive
+                ? title.indexOf(toText)
+                : title.toLowerCase().indexOf(toText.toLowerCase())
+              return toIndex >= 0 ? title.slice(toIndex + toText.length) : title
+
+            case 'fromText':
+              // 从指定文本删除到结尾（包含该文本）
+              const fromText = rule.params.text || ''
+              if (!fromText) return title
+              const fromIndex = rule.params.caseSensitive
+                ? title.indexOf(fromText)
+                : title.toLowerCase().indexOf(fromText.toLowerCase())
+              return fromIndex >= 0 ? title.slice(0, fromIndex) : title
+
+            case 'range':
+              // 删除指定范围（从位置X删除Y个字符）
+              const from = parseInt(rule.params.from) || 0
+              const count = parseInt(rule.params.count) || 0
+              return title.slice(0, from) + title.slice(from + count)
+
+            default:
+              return title
           }
-          const from = parseInt(rule.params.from) || 0
-          const count = parseInt(rule.params.count) || 0
-          return title.slice(0, from) + title.slice(from + count)
         case 'serialize':
           const start = parseInt(rule.params.start) || 1
           const step = parseInt(rule.params.step) || 1
@@ -528,6 +566,41 @@ export const EpisodeDetail = () => {
 
   // 添加规则
   const handleAddRule = () => {
+    // 验证必填参数
+    if (selectedRuleType === 'replace' && !ruleParams.search) {
+      messageApi.warning('请输入要查找的文本')
+      return
+    }
+    if (selectedRuleType === 'regex' && !ruleParams.pattern) {
+      messageApi.warning('请输入正则表达式')
+      return
+    }
+    if (selectedRuleType === 'insert') {
+      if (!ruleParams.text) {
+        messageApi.warning('请输入要插入的文本')
+        return
+      }
+      if (ruleParams.position === 'index' && ruleParams.index === undefined) {
+        messageApi.warning('请输入插入位置')
+        return
+      }
+    }
+    if (selectedRuleType === 'delete') {
+      const mode = ruleParams.mode || 'text'
+      if ((mode === 'text' || mode === 'toText' || mode === 'fromText') && !ruleParams.text) {
+        messageApi.warning('请输入文本')
+        return
+      }
+      if ((mode === 'first' || mode === 'last' || mode === 'range') && !ruleParams.count) {
+        messageApi.warning('请输入字符数')
+        return
+      }
+      if (mode === 'range' && ruleParams.from === undefined) {
+        messageApi.warning('请输入起始位置')
+        return
+      }
+    }
+
     const newRule = {
       id: Date.now().toString(),
       type: selectedRuleType,
@@ -536,6 +609,7 @@ export const EpisodeDetail = () => {
     }
     setRenameRules(prev => [...prev, newRule])
     setRuleParams({})
+    messageApi.success('规则已添加')
   }
 
   // 删除规则
@@ -547,6 +621,23 @@ export const EpisodeDetail = () => {
   const handleToggleRule = (ruleId) => {
     setRenameRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: !r.enabled } : r))
   }
+
+  // 监听规则变化，自动更新预览
+  useEffect(() => {
+    if (isPreviewMode) {
+      if (renameRules.length > 0) {
+        const preview = {}
+        batchEditData.forEach((item, index) => {
+          preview[item.episodeId] = applyAllRules(item.title, index)
+        })
+        setPreviewData(preview)
+      } else {
+        // 规则列表为空时清空预览
+        setPreviewData({})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRules, isPreviewMode, batchEditData])
 
   // 预览效果
   const handlePreviewRules = () => {
@@ -1500,23 +1591,221 @@ export const EpisodeDetail = () => {
             {selectedRuleType === 'insert' && (
               <>
                 <Input value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
-                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }]} />
+                <Select
+                  value={ruleParams.position || 'start'}
+                  onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                  style={{ width: 100 }}
+                  options={[
+                    { value: 'start', label: '开头' },
+                    { value: 'end', label: '结尾' },
+                    { value: 'index', label: '指定位置' }
+                  ]}
+                />
+                {ruleParams.position === 'index' && (
+                  <InputNumber
+                    value={ruleParams.index || 0}
+                    onChange={(v) => setRuleParams(p => ({ ...p, index: v }))}
+                    min={0}
+                    placeholder="位置"
+                    style={{ width: 80 }}
+                    addonAfter="位"
+                  />
+                )}
               </>
             )}
             {/* 删除规则参数 */}
             {selectedRuleType === 'delete' && (
-              <Input value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value, mode: 'text' }))} placeholder="要删除的文本" style={{ width: 150 }} />
+              <>
+                <Select
+                  value={ruleParams.mode || 'text'}
+                  onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))}
+                  style={{ width: 140 }}
+                  options={[
+                    { value: 'text', label: '删除文本' },
+                    { value: 'first', label: '删除前N个字符' },
+                    { value: 'last', label: '删除后N个字符' },
+                    { value: 'toText', label: '从开头删到文本' },
+                    { value: 'fromText', label: '从文本删到结尾' },
+                    { value: 'range', label: '删除范围' },
+                  ]}
+                />
+                {/* 删除指定文本 */}
+                {(ruleParams.mode === 'text' || !ruleParams.mode) && (
+                  <>
+                    <Input
+                      value={ruleParams.text || ''}
+                      onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                      placeholder="要删除的文本"
+                      style={{ width: 120 }}
+                    />
+                    <label className="flex items-center gap-1 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={ruleParams.caseSensitive || false}
+                        onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                      />
+                      区分大小写
+                    </label>
+                  </>
+                )}
+                {/* 删除前N个字符 */}
+                {ruleParams.mode === 'first' && (
+                  <InputNumber
+                    value={ruleParams.count || 0}
+                    onChange={(v) => setRuleParams(p => ({ ...p, count: v }))}
+                    min={0}
+                    placeholder="字符数"
+                    style={{ width: 100 }}
+                  />
+                )}
+                {/* 删除后N个字符 */}
+                {ruleParams.mode === 'last' && (
+                  <InputNumber
+                    value={ruleParams.count || 0}
+                    onChange={(v) => setRuleParams(p => ({ ...p, count: v }))}
+                    min={0}
+                    placeholder="字符数"
+                    style={{ width: 100 }}
+                  />
+                )}
+                {/* 从开头删到文本 */}
+                {ruleParams.mode === 'toText' && (
+                  <>
+                    <Input
+                      value={ruleParams.text || ''}
+                      onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                      placeholder="删除到此文本"
+                      style={{ width: 120 }}
+                    />
+                    <label className="flex items-center gap-1 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={ruleParams.caseSensitive || false}
+                        onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                      />
+                      区分大小写
+                    </label>
+                  </>
+                )}
+                {/* 从文本删到结尾 */}
+                {ruleParams.mode === 'fromText' && (
+                  <>
+                    <Input
+                      value={ruleParams.text || ''}
+                      onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
+                      placeholder="从此文本删除"
+                      style={{ width: 120 }}
+                    />
+                    <label className="flex items-center gap-1 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={ruleParams.caseSensitive || false}
+                        onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
+                      />
+                      区分大小写
+                    </label>
+                  </>
+                )}
+                {/* 删除范围 */}
+                {ruleParams.mode === 'range' && (
+                  <>
+                    <span className="text-sm">从位置</span>
+                    <InputNumber
+                      value={ruleParams.from || 0}
+                      onChange={(v) => setRuleParams(p => ({ ...p, from: v }))}
+                      min={0}
+                      placeholder="起始位置"
+                      style={{ width: 90 }}
+                    />
+                    <span className="text-sm">删除</span>
+                    <InputNumber
+                      value={ruleParams.count || 0}
+                      onChange={(v) => setRuleParams(p => ({ ...p, count: v }))}
+                      min={0}
+                      placeholder="字符数"
+                      style={{ width: 80 }}
+                    />
+                    <span className="text-sm">个字符</span>
+                  </>
+                )}
+              </>
             )}
             {/* 序列化规则参数 */}
             {selectedRuleType === 'serialize' && (
-              <>
-                <Input value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder="前缀" style={{ width: 60 }} />
-                <span className="text-gray-400">{'{序号}'}</span>
-                <Input value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder="后缀" style={{ width: 60 }} />
-                <InputNumber value={ruleParams.start || 1} onChange={(v) => setRuleParams(p => ({ ...p, start: v }))} min={0} placeholder="起始" style={{ width: 70 }} />
-                <InputNumber value={ruleParams.digits || 2} onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))} min={1} max={5} placeholder="位数" style={{ width: 70 }} />
-                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }, { value: 'replace', label: '替换' }]} />
-              </>
+              <div className="w-full flex flex-col gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded">
+                {/* 第一行：格式结构 */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-gray-500">格式结构:</span>
+                  <Input
+                    value={ruleParams.prefix || ''}
+                    onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
+                    placeholder="第"
+                    style={{ width: 120 }}
+                    addonBefore="前缀"
+                    size="small"
+                  />
+                  <span className="text-xs text-gray-400">+</span>
+                  <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded text-xs font-mono">
+                    序号
+                  </span>
+                  <span className="text-xs text-gray-400">+</span>
+                  <Input
+                    value={ruleParams.suffix || ''}
+                    onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
+                    placeholder="集"
+                    style={{ width: 120 }}
+                    addonBefore="后缀"
+                    size="small"
+                  />
+                </div>
+                {/* 第二行：序号参数 */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-gray-500">序号设置:</span>
+                  <InputNumber
+                    value={ruleParams.start || 1}
+                    onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
+                    min={0}
+                    placeholder="起始"
+                    style={{ width: 130 }}
+                    addonBefore="起始值"
+                    size="small"
+                  />
+                  <InputNumber
+                    value={ruleParams.digits || 2}
+                    onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
+                    min={1}
+                    max={5}
+                    placeholder="位数"
+                    style={{ width: 130 }}
+                    addonBefore="补零位数"
+                    size="small"
+                  />
+                  <Select
+                    value={ruleParams.position || 'replace'}
+                    onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                    style={{ width: 100 }}
+                    size="small"
+                    options={[
+                      { value: 'start', label: '添加到开头' },
+                      { value: 'end', label: '添加到结尾' },
+                      { value: 'replace', label: '替换标题' }
+                    ]}
+                  />
+                </div>
+                {/* 第三行：效果预览 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">效果预览:</span>
+                  <span className="text-sm font-mono text-blue-600 dark:text-blue-400 font-semibold">
+                    {
+                      ruleParams.position === 'start'
+                        ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原标题`
+                        : ruleParams.position === 'end'
+                        ? `原标题${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                        : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                    }
+                  </span>
+                </div>
+              </div>
             )}
             {/* 大小写规则参数 */}
             {selectedRuleType === 'case' && (
@@ -1544,7 +1833,25 @@ export const EpisodeDetail = () => {
                     {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
                     {rule.type === 'regex' && `/${rule.params.pattern}/ → "${rule.params.replace || ''}"`}
                     {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? '开头' : '结尾'})`}
-                    {rule.type === 'delete' && `删除 "${rule.params.text}"`}
+                    {rule.type === 'delete' && (() => {
+                      const mode = rule.params.mode || 'text'
+                      switch (mode) {
+                        case 'text':
+                          return `删除文本 "${rule.params.text}"`
+                        case 'first':
+                          return `删除前 ${rule.params.count || 0} 个字符`
+                        case 'last':
+                          return `删除后 ${rule.params.count || 0} 个字符`
+                        case 'toText':
+                          return `从开头删到 "${rule.params.text}"`
+                        case 'fromText':
+                          return `从 "${rule.params.text}" 删到结尾`
+                        case 'range':
+                          return `从位置 ${rule.params.from || 0} 删除 ${rule.params.count || 0} 个字符`
+                        default:
+                          return '删除'
+                      }
+                    })()}
                     {rule.type === 'serialize' && `${rule.params.prefix || ''}{${String(rule.params.start || 1).padStart(rule.params.digits || 2, '0')}}${rule.params.suffix || ''}`}
                     {rule.type === 'case' && (rule.params.mode === 'upper' ? '全大写' : rule.params.mode === 'lower' ? '全小写' : '首字母大写')}
                     {rule.type === 'strip' && '清理空格/字符'}

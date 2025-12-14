@@ -400,6 +400,8 @@ async def get_local_items(
 async def get_local_works(
     is_imported: Optional[bool] = Query(None),
     media_type: Optional[str] = Query(None),
+    year_from: Optional[int] = Query(None, description="起始年份，闭区间"),
+    year_to: Optional[int] = Query(None, description="结束年份，闭区间"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     session: AsyncSession = Depends(get_db_session),
@@ -410,6 +412,8 @@ async def get_local_works(
         session,
         is_imported=is_imported,
         media_type=media_type,
+        year_from=year_from,
+        year_to=year_to,
         page=page,
         page_size=page_size
     )

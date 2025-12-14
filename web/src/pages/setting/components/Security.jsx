@@ -28,7 +28,23 @@ export const Security = () => {
       form.resetFields()
       messageApi.success('修改成功')
     } catch (error) {
-      messageApi.error('修改失败')
+      // 优先从 error.response.data.detail 获取（直接来自后端）
+      const detail = error.response?.data?.detail || error.detail
+
+      let errorMsg = '修改失败'
+
+      if (Array.isArray(detail)) {
+        // Pydantic 422 验证错误：[{loc, msg, type}, ...]
+        errorMsg = detail.map(err => err.msg || JSON.stringify(err)).join('; ')
+      } else if (typeof detail === 'string') {
+        // 业务逻辑错误：字符串
+        errorMsg = detail
+      } else if (error.message && typeof error.message === 'string') {
+        // fetch.js 拦截器添加的 message 字段
+        errorMsg = error.message
+      }
+
+      messageApi.error(errorMsg)
     } finally {
       setIsLoading(false)
     }

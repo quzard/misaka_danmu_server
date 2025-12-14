@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented } from 'antd';
+import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber, Popover } from 'antd';
+import { CalendarOutlined } from '@ant-design/icons';
 import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
@@ -22,6 +23,8 @@ const LibraryScan = () => {
   const [selectedMediaItems, setSelectedMediaItems] = useState([]);
   const [showServerUrl, setShowServerUrl] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
+  const [yearFrom, setYearFrom] = useState();
+  const [yearTo, setYearTo] = useState();
 
   const screens = Grid.useBreakpoint();
 
@@ -767,10 +770,10 @@ const LibraryScan = () => {
               <Divider />
 
               <div style={{ textAlign: 'center' }}>
-                <Space size="large">
+                <Space size="middle" wrap>
                   <Button
                     type="default"
-                    size="large"
+                    size={screens.xs ? "middle" : "large"}
                     onClick={() => {
                       const allIds = libraries.map(lib => lib.id);
                       setSelectedLibraryIds(allIds);
@@ -780,7 +783,7 @@ const LibraryScan = () => {
                   </Button>
                   <Button
                     type="default"
-                    size="large"
+                    size={screens.xs ? "middle" : "large"}
                     onClick={() => {
                       // 清空所有选择，但保持至少一个选中
                       if (libraries.length > 0) {
@@ -793,8 +796,8 @@ const LibraryScan = () => {
                     清空
                   </Button>
                   <Button
-                    type="primary"
-                    size="large"
+                    type="default"
+                    size={screens.xs ? "middle" : "large"}
                     icon={<SaveOutlined />}
                     loading={savingLibraries}
                     onClick={handleSaveLibraries}
@@ -833,6 +836,57 @@ const LibraryScan = () => {
                     { label: '电视节目', value: 'tv_series', icon: <PlaySquareOutlined /> },
                   ]}
                 />
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
+                    size="small"
+                  >
+                    {yearFrom || yearTo
+                      ? `年份: ${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
@@ -862,7 +916,58 @@ const LibraryScan = () => {
         >
           {screens.xs && (
             <div style={{ marginBottom: '16px', textAlign: 'center' }}>
-              <Space>
+              <Space wrap size="middle">
+                <Popover
+                  trigger="click"
+                  placement="bottomLeft"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
+                    size="middle"
+                  >
+                    {yearFrom || yearTo
+                      ? `${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedMediaItems.length} 个项目吗?`}
                   onConfirm={handleBatchDelete}
@@ -874,7 +979,7 @@ const LibraryScan = () => {
                     danger
                     icon={<DeleteOutlined />}
                     disabled={selectedMediaItems.length === 0}
-                    size="large"
+                    size="middle"
                   >
                     删除
                   </Button>
@@ -884,7 +989,7 @@ const LibraryScan = () => {
                   icon={<ImportOutlined />}
                   onClick={handleImport}
                   disabled={selectedMediaItems.length === 0}
-                  size="large"
+                  size="middle"
                 >
                   导入
                 </Button>
@@ -897,6 +1002,8 @@ const LibraryScan = () => {
             selectedItems={selectedMediaItems}
             onSelectionChange={setSelectedMediaItems}
             mediaTypeFilter={mediaTypeFilter}
+            yearFrom={yearFrom}
+            yearTo={yearTo}
           />
         </Card>
       )}

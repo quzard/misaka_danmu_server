@@ -21,7 +21,7 @@ export const Bullet = () => {
       children: <TokenManage />,
     },
     {
-      label: '弹幕输出控制',
+      label: '弹幕输出配置',
       key: 'output',
       children: <OutputManage />,
     },

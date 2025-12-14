@@ -216,7 +216,7 @@ async def refresh_anime(
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
         unique_key = f"full-refresh-{sourceId}"
         task_title = f"全量刷新: {source_info['title']} ({source_info['providerName']})"
-        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb, metadata_manager)
+        task_coro = lambda s, cb: tasks.full_refresh_task(sourceId, s, scraper_manager, task_manager, rate_limiter, cb, metadata_manager, config_manager)
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")

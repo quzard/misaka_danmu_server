@@ -18,6 +18,7 @@ from .config_manager import ConfigManager
 from .cache_manager import CacheManager
 from .ai.ai_matcher_manager import AIMatcherManager
 from .database import init_db_tables, close_db_engine, create_initial_admin_user
+from .internal_polling import InternalPollingManager
 from .api import api_router, control_router
 from .dandan_api import dandan_router
 from .task_manager import TaskManager
@@ -250,6 +251,10 @@ async def lifespan(app: FastAPI):
     )
     await app.state.scheduler_manager.start()
 
+    # 内置轮询任务管理器（任务在 start() 中自动注册）
+    app.state.internal_polling = InternalPollingManager(app)
+    await app.state.internal_polling.start()
+
     total_time = time.time() - startup_start
     logger.info(f"应用启动完成，总耗时 {total_time:.2f} 秒")
 
@@ -310,6 +315,8 @@ async def lifespan(app: FastAPI):
         await app.state.media_server_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):
         await app.state.scheduler_manager.stop()
+    if hasattr(app.state, "internal_polling"):
+        await app.state.internal_polling.stop()
 
     logger.info("应用已完全关闭")
 

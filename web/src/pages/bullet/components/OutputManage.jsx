@@ -1,31 +1,84 @@
-import { Button, Card, InputNumber, message, Switch } from 'antd'
-import {
-  getDanmuOutputAggregation,
-  getDanmuOutputTotal,
-  setDanmuOutputAggregation,
-  setDanmuOutputTotal,
-} from '../../../apis'
 import { useEffect, useState } from 'react'
+import { Button, Card, ColorPicker, InputNumber, Select, Tag } from 'antd'
+import {
+  getDanmuOutputTotal,
+  setDanmuOutputTotal,
+  getDanmakuRandomColorMode,
+  setDanmakuRandomColorMode,
+  getDanmakuRandomColorPalette,
+  setDanmakuRandomColorPalette,
+} from '../../../apis'
 import { useMessage } from '../../../MessageContext'
+
+const DEFAULT_COLOR_PALETTE = [
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ff7f7f',
+  '#ffa07a',
+  '#fff68f',
+  '#90ee90',
+  '#7fffd4',
+  '#87cefa',
+  '#d8bfd8',
+  '#ffb6c1',
+]
+
+const parsePaletteFromServer = (raw) => {
+  if (!raw) return DEFAULT_COLOR_PALETTE
+  let values = []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) values = parsed
+  } catch {
+    values = String(raw)
+      .split(',')
+      .map(v => v.trim())
+  }
+  const toHex = (val) => {
+    const num = parseInt(String(val).replace('#', ''), 10)
+    if (Number.isNaN(num)) return null
+    return `#${num.toString(16).padStart(6, '0')}`
+  }
+  const palette = values
+    .map(toHex)
+    .filter(Boolean)
+  return palette.length > 0 ? palette : DEFAULT_COLOR_PALETTE
+}
+
+const paletteToServer = (palette) => {
+  const toInt = (hex) => parseInt(hex.replace('#', ''), 16)
+  const arr = palette.map(toInt)
+  return JSON.stringify(arr)
+}
 
 export const OutputManage = () => {
   const [loading, setLoading] = useState(false)
   const [limit, setLimit] = useState('-1')
-  // const [enable, setEnable] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
+  const [colorMode, setColorMode] = useState('off')
+  const [palette, setPalette] = useState(DEFAULT_COLOR_PALETTE)
+  const [colorPickerValue, setColorPickerValue] = useState('#ffffff')
+  const [colorSaveLoading, setColorSaveLoading] = useState(false)
 
   const messageApi = useMessage()
 
   const getConfig = async () => {
     setLoading(true)
     try {
-      // const [limitRes, enableRes] = await Promise.all([
-      //   getDanmuOutputTotal(),
-      //   getDanmuOutputAggregation(),
-      // ])
-      const limitRes = await getDanmuOutputTotal()
+      const [limitRes, colorModeRes, colorPaletteRes] = await Promise.all([
+        getDanmuOutputTotal(),
+        getDanmakuRandomColorMode(),
+        getDanmakuRandomColorPalette(),
+      ])
       setLimit(limitRes.data?.value ?? '-1')
-      // setEnable(enableRes.data?.value === 'true' ? true : false)
+      setColorMode(colorModeRes.data?.value || 'off')
+      setPalette(parsePaletteFromServer(colorPaletteRes.data?.value))
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -34,20 +87,49 @@ export const OutputManage = () => {
     }
   }
 
-  const handleSave = async () => {
+  const handleSaveLimit = async () => {
     setSaveLoading(true)
     try {
-      // await Promise.all([
-      //   setDanmuOutputTotal({ value: `${limit}` }),
-      //   setDanmuOutputAggregation({ value: enable ? 'true' : 'false' }),
-      // ])
       await setDanmuOutputTotal({ value: `${limit}` })
-      messageApi.success('保存成功')
+      messageApi.success('弹幕输出上限已保存')
     } catch (e) {
       messageApi.error('保存失败')
     } finally {
       setSaveLoading(false)
     }
+  }
+
+  const handleSaveColor = async () => {
+    setColorSaveLoading(true)
+    try {
+      await Promise.all([
+        setDanmakuRandomColorMode({ value: colorMode }),
+        setDanmakuRandomColorPalette({ value: paletteToServer(palette) }),
+      ])
+      messageApi.success('随机颜色配置已保存')
+    } catch (e) {
+      messageApi.error('保存随机颜色配置失败')
+    } finally {
+      setColorSaveLoading(false)
+    }
+  }
+
+  const addColorToPalette = (color) => {
+    const hex = color.toLowerCase()
+    if (palette.includes(hex)) {
+      messageApi.info('该颜色已存在')
+      return
+    }
+    setPalette(prev => [...prev, hex])
+  }
+
+  const removeColor = (color) => {
+    setPalette(prev => prev.filter(c => c !== color))
+  }
+
+  const randomColor = () => {
+    const rand = Math.floor(Math.random() * 16777216)
+    return `#${rand.toString(16).padStart(6, '0')}`
   }
 
   useEffect(() => {
@@ -56,37 +138,106 @@ export const OutputManage = () => {
 
   return (
     <div className="my-6">
-      <Card loading={loading} title="弹幕输出控制">
-        <div>在这里调整弹幕API的输出行为。</div>
+      <Card loading={loading} title="弹幕输出配置">
+        <div>在这里调整弹幕 API 的输出行为。</div>
         <div className="my-4">
           <div className="flex items-center justify-start gap-4 mb-2">
             <div>弹幕输出上限</div>
             <InputNumber value={limit} onChange={v => setLimit(v)} />
           </div>
           <div>
-            设置弹幕API返回的弹幕最大数量。-1表示无限制。
-            为防止客户端卡顿，建议设置一个合理的数值（如3000-5000）。
-            当弹幕总数超过此限制时，系统将按时间段均匀采样，确保弹幕在整个视频时长中分布均匀。
+            设置弹幕 API 返回的最大数量。-1 表示无限制。为防止客户端卡顿，建议设置 1000-5000。
+            当弹幕总数超过限制时，系统按时间段均匀采样，确保弹幕在视频时长中分布均匀。
           </div>
         </div>
-        {/* <div className="my-4">
-          <div className="flex items-center justify-start gap-4 mb-2">
-            <div>启用弹幕聚合</div>
-            <Switch checked={enable} onChange={v => setEnable(v)} />
-          </div>
-          <div>
-            开启后，当播放器请求关联弹幕时（withRelated=true），系统将聚合所有源的弹幕。关闭则只返回当前源的弹幕。
-          </div>
-        </div> */}
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end gap-3">
           <Button
             type="primary"
             loading={saveLoading}
-            onClick={() => {
-              handleSave()
-            }}
+            onClick={handleSaveLimit}
           >
-            保存设置
+            保存输出上限
+          </Button>
+        </div>
+      </Card>
+
+      <Card loading={loading} title="随机弹幕颜色" className="mt-4">
+        <div className="text-sm text-gray-600 mb-3">
+          可配置随机色板和生效模式。默认不改色。
+        </div>
+        <div className="flex flex-wrap items-center gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <span>模式</span>
+            <Select
+              value={colorMode}
+              style={{ width: 220 }}
+              onChange={setColorMode}
+              options={[
+                { label: '不使用', value: 'off' },
+                { label: '随机白色弹幕', value: 'white_to_random' },
+                { label: '全部随机上色', value: 'all_random' },
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 mb-3">
+          <div className="flex items-center gap-3">
+            <ColorPicker
+              value={colorPickerValue}
+              showText
+              presets={[
+                { label: '默认色板', colors: DEFAULT_COLOR_PALETTE },
+              ]}
+              onChange={(_, hex) => setColorPickerValue(hex)}
+            />
+            <Button
+              onClick={() => addColorToPalette(colorPickerValue)}
+              disabled={!colorPickerValue}
+            >
+              添加到色板
+            </Button>
+            <Button
+              onClick={() => {
+                const next = randomColor()
+                setColorPickerValue(next)
+                addColorToPalette(next)
+              }}
+            >
+              随机一个颜色
+            </Button>
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <div className="mb-2 text-sm text-gray-700">当前随机颜色序列</div>
+          <div className="flex flex-wrap gap-2">
+            {palette.map(color => (
+              <Tag
+                key={color}
+                closable
+                onClose={() => removeColor(color)}
+                style={{
+                  backgroundColor: color,
+                  borderColor: '#ccc',
+                  color: '#000',
+                  minWidth: 72,
+                  textAlign: 'center',
+                }}
+              >
+                {color}
+              </Tag>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3">
+          <Button
+            type="primary"
+            loading={colorSaveLoading}
+            onClick={handleSaveColor}
+          >
+            保存随机颜色
           </Button>
         </div>
       </Card>

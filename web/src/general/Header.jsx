@@ -225,7 +225,23 @@ const MobileHeader = ({ activeKey }) => {
       setIsPasswordModalOpen(false)
       passwordForm.resetFields()
     } catch (error) {
-      showMessage('error', error.response?.data?.detail || '密码修改失败')
+      // 优先从 error.response.data.detail 获取（直接来自后端）
+      const detail = error.response?.data?.detail || error.detail
+
+      let errorMsg = '密码修改失败'
+
+      if (Array.isArray(detail)) {
+        // Pydantic 422 验证错误：[{loc, msg, type}, ...]
+        errorMsg = detail.map(err => err.msg || JSON.stringify(err)).join('; ')
+      } else if (typeof detail === 'string') {
+        // 业务逻辑错误：字符串
+        errorMsg = detail
+      } else if (error.message && typeof error.message === 'string') {
+        // fetch.js 拦截器添加的 message 字段
+        errorMsg = error.message
+      }
+
+      showMessage('error', errorMsg)
     } finally {
       setPasswordLoading(false)
     }
@@ -335,7 +351,7 @@ const MobileHeader = ({ activeKey }) => {
           onFinish={handleChangePassword}
         >
           <Form.Item
-            name="currentPassword"
+            name="oldPassword"
             label="当前密码"
             rules={[{ required: true, message: '请输入当前密码' }]}
           >
@@ -355,10 +371,7 @@ const MobileHeader = ({ activeKey }) => {
           <Form.Item
             name="newPassword"
             label="新密码"
-            rules={[
-              { required: true, message: '请输入新密码' },
-              { min: 6, message: '密码长度至少6位' },
-            ]}
+            rules={[{ required: true, message: '请输入新密码' }]}
           >
             <Input.Password
               prefix={<LockOutlined />}
@@ -447,16 +460,31 @@ const DesktopHeader = ({ activeKey, version }) => {
     navigate(RoutePaths.LOGIN)
   }
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = async (values) => {
     try {
       setIsLoading(true)
-      const values = await form.validateFields()
       await changePassword(values)
       form.resetFields()
       messageApi.success('修改成功')
       setIsPasswordModalOpen(false)
     } catch (error) {
-      messageApi.error('修改失败')
+      // 优先从 error.response.data.detail 获取（直接来自后端）
+      const detail = error.response?.data?.detail || error.detail
+
+      let errorMsg = '修改失败'
+
+      if (Array.isArray(detail)) {
+        // Pydantic 422 验证错误：[{loc, msg, type}, ...]
+        errorMsg = detail.map(err => err.msg || JSON.stringify(err)).join('; ')
+      } else if (typeof detail === 'string') {
+        // 业务逻辑错误：字符串
+        errorMsg = detail
+      } else if (error.message && typeof error.message === 'string') {
+        // fetch.js 拦截器添加的 message 字段
+        errorMsg = error.message
+      }
+
+      messageApi.error(errorMsg)
     } finally {
       setIsLoading(false)
     }

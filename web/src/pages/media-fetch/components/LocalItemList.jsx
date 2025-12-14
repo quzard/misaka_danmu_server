@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber, Popover } from 'antd';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined, SearchOutlined } from '@ant-design/icons';
 
-const { Search } = Input;
 const { Text } = Typography;
 import {
   getLocalWorks,
@@ -32,7 +31,10 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [viewMode, setViewMode] = useState('table'); // 添加视图模式状态
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
   const [searchText, setSearchText] = useState(''); // 添加搜索状态
+  const [searchInput, setSearchInput] = useState(''); // 添加搜索输入状态（临时）
   const [isDataLoaded, setIsDataLoaded] = useState(false); // 添加数据加载标志
+  const [yearFrom, setYearFrom] = useState();
+  const [yearTo, setYearTo] = useState();
 
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
@@ -50,6 +52,13 @@ const LocalItemList = ({ refreshTrigger }) => {
       refreshData();
     }
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    if (isDataLoaded) {
+      loadItems(1, pagination.pageSize, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearFrom, yearTo]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -97,12 +106,13 @@ const LocalItemList = ({ refreshTrigger }) => {
 
   // 加载作品列表
   const loadItems = async (page = 1, pageSize = 50, forceRefresh = false) => {
+    const hasYearFilter = yearFrom !== undefined && yearFrom !== null && yearFrom !== '' || yearTo !== undefined && yearTo !== null && yearTo !== '';
     // 检查缓存
     const cacheKey = 'localItemsCache';
     const cacheTimestampKey = 'localItemsCacheTimestamp';
     const cacheExpiry = 5 * 60 * 1000; // 5分钟缓存
 
-    if (!forceRefresh) {
+    if (!forceRefresh && !hasYearFilter) {
       try {
         const cachedData = localStorage.getItem(cacheKey);
         const cachedTimestamp = localStorage.getItem(cacheTimestampKey);
@@ -127,6 +137,13 @@ const LocalItemList = ({ refreshTrigger }) => {
         page,
         page_size: pageSize,
       };
+
+      if (yearFrom !== undefined && yearFrom !== null && yearFrom !== '') {
+        params.year_from = yearFrom;
+      }
+      if (yearTo !== undefined && yearTo !== null && yearTo !== '') {
+        params.year_to = yearTo;
+      }
 
       const res = await getLocalWorks(params);
       const data = res.data;
@@ -897,20 +914,71 @@ const LocalItemList = ({ refreshTrigger }) => {
             <span className="mobile-only">本地扫描</span>
           </div>
         }
-        extra={
-          isMobile ? null : (
-            <Space>
-              <Segmented
-                value={mediaTypeFilter}
-                onChange={setMediaTypeFilter}
-                options={filterOptions}
-                style={segmentedStyle}
-              />
-              <Popconfirm
-                title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
-                onConfirm={handleBatchDelete}
-                okText="确定"
-                cancelText="取消"
+          extra={
+            isMobile ? null : (
+              <Space>
+                <Segmented
+                  value={mediaTypeFilter}
+                  onChange={setMediaTypeFilter}
+                  options={filterOptions}
+                  style={segmentedStyle}
+                />
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  content={
+                    <Space direction="vertical" size="small">
+                      <Space size="small" align="center">
+                        <InputNumber
+                          placeholder="起始年份"
+                          value={yearFrom}
+                          onChange={setYearFrom}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                        <span>~</span>
+                        <InputNumber
+                          placeholder="结束年份"
+                          value={yearTo}
+                          onChange={setYearTo}
+                          min={1900}
+                          max={2100}
+                          controls={false}
+                          style={{ width: 100 }}
+                        />
+                      </Space>
+                      {(yearFrom || yearTo) && (
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => {
+                            setYearFrom(undefined);
+                            setYearTo(undefined);
+                          }}
+                          style={{ padding: 0 }}
+                        >
+                          清空筛选
+                        </Button>
+                      )}
+                    </Space>
+                  }
+                >
+                  <Button
+                    icon={<CalendarOutlined />}
+                    size="small"
+                  >
+                    {yearFrom || yearTo
+                      ? `年份: ${yearFrom || '?'}~${yearTo || '?'}`
+                      : '年份'}
+                  </Button>
+                </Popover>
+                <Popconfirm
+                  title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
+                  onConfirm={handleBatchDelete}
+                  okText="确定"
+                  cancelText="取消"
                 disabled={selectedRowKeys.length === 0}
               >
                 <Button
@@ -947,6 +1015,57 @@ const LocalItemList = ({ refreshTrigger }) => {
               />
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Popover
+                trigger="click"
+                placement="bottomLeft"
+                content={
+                  <Space direction="vertical" size="small">
+                    <Space size="small" align="center">
+                      <InputNumber
+                        placeholder="起始年份"
+                        value={yearFrom}
+                        onChange={setYearFrom}
+                        min={1900}
+                        max={2100}
+                        controls={false}
+                        style={{ width: 100 }}
+                      />
+                      <span>~</span>
+                      <InputNumber
+                        placeholder="结束年份"
+                        value={yearTo}
+                        onChange={setYearTo}
+                        min={1900}
+                        max={2100}
+                        controls={false}
+                        style={{ width: 100 }}
+                      />
+                    </Space>
+                    {(yearFrom || yearTo) && (
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => {
+                          setYearFrom(undefined);
+                          setYearTo(undefined);
+                        }}
+                        style={{ padding: 0 }}
+                      >
+                        清空筛选
+                      </Button>
+                    )}
+                  </Space>
+                }
+              >
+                <Button
+                  icon={<CalendarOutlined />}
+                  size="small"
+                >
+                  {yearFrom || yearTo
+                    ? `${yearFrom || '?'}~${yearTo || '?'}`
+                    : '年份'}
+                </Button>
+              </Popover>
               <Popconfirm
                 title={`确定要删除选中的 ${selectedRowKeys.length} 个项目吗?`}
                 onConfirm={handleBatchDelete}
@@ -1010,12 +1129,56 @@ const LocalItemList = ({ refreshTrigger }) => {
                 </Button>
               </>
             )}
-            <Search
-              placeholder="搜索标题"
-              allowClear
-              style={isMobile ? { width: '100%', minWidth: '120px' } : { width: 200 }}
-              onSearch={setSearchText}
-            />
+            <Popover
+              trigger="click"
+              placement="bottom"
+              onOpenChange={(open) => {
+                if (open) {
+                  setSearchInput(searchText);
+                }
+              }}
+              content={(
+                <div style={{ width: 250 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Input
+                      placeholder="搜索标题..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onPressEnter={() => {
+                        setSearchText(searchInput);
+                      }}
+                      prefix={<SearchOutlined />}
+                      allowClear
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSearchInput('');
+                          setSearchText('');
+                        }}
+                      >
+                        清除
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<SearchOutlined />}
+                        onClick={() => {
+                          setSearchText(searchInput);
+                        }}
+                      >
+                        搜索
+                      </Button>
+                    </div>
+                  </Space>
+                </div>
+              )}
+            >
+              <Button icon={<SearchOutlined />}>
+                搜索{searchText && <span className="ml-1 text-blue-500">({searchText})</span>}
+              </Button>
+            </Popover>
           </Space>
         </div>
 

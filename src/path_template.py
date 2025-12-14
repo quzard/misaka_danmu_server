@@ -293,11 +293,9 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
             if anime_type == 'movie':
                 root_directory = await config_manager.get('movieDanmakuDirectoryPath', '/app/config/danmaku/movies')
                 filename_template = await config_manager.get('movieDanmakuFilenameTemplate', '${title}/${episodeId}')
-                logger.info(f"使用电影/剧场版路径配置")
             else:
                 root_directory = await config_manager.get('tvDanmakuDirectoryPath', '/app/config/danmaku/tv')
                 filename_template = await config_manager.get('tvDanmakuFilenameTemplate', '${animeId}/${episodeId}')
-                logger.info(f"使用电视节目路径配置")
 
             # 创建路径模板上下文
             context = create_danmaku_context(

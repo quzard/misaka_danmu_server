@@ -1,0 +1,132 @@
+import json
+import logging
+import random
+from typing import Any, Dict, Iterable, List
+
+logger = logging.getLogger(__name__)
+
+# 默认随机色板
+DEFAULT_RANDOM_COLOR_PALETTE: List[int] = [
+    16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215,
+    16744319, 16752762, 16774799, 9498256, 8388564, 8900346, 14204888, 16758465,
+]
+
+# 颜色模式：
+# - off: 不改色
+# - white_to_random: 仅将白色弹幕随机换色
+# - all_random: 所有弹幕随机换色
+DEFAULT_RANDOM_COLOR_MODE = "off"
+VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random"}
+
+
+def _normalize_color_value(value: Any) -> int:
+    """将颜色值规范为 int（支持 #RRGGBB / 0x / 纯数字字符串）。"""
+    if isinstance(value, int):
+        return max(0, min(16777215, value))
+    if isinstance(value, str):
+        v = value.strip().lower()
+        try:
+            if v.startswith("#"):
+                return int(v[1:], 16)
+            if v.startswith("0x"):
+                return int(v, 16)
+            return int(v)
+        except ValueError:
+            logger.warning("无法解析颜色值: %s", value)
+    return 16777215
+
+
+def parse_palette(raw_value: Any) -> List[int]:
+    """
+    将配置中的色板解析为 int 列表。
+    支持 JSON 数组、逗号分隔字符串、直接传入列表。
+    """
+    if raw_value is None:
+        return DEFAULT_RANDOM_COLOR_PALETTE
+
+    if isinstance(raw_value, list):
+        values = raw_value
+    else:
+        raw_str = str(raw_value).strip()
+        if not raw_str:
+            return DEFAULT_RANDOM_COLOR_PALETTE
+        try:
+            parsed = json.loads(raw_str)
+            if isinstance(parsed, list):
+                values = parsed
+            else:
+                values = []
+        except json.JSONDecodeError:
+            values = raw_str.split(",")
+
+    palette = [_normalize_color_value(v) for v in values if str(v).strip()]
+    return palette or DEFAULT_RANDOM_COLOR_PALETTE
+
+
+def _get_color_from_p(parts: List[str]) -> int:
+    """从弹幕 p 属性数组中获取颜色值。"""
+    if len(parts) >= 4:
+        return _normalize_color_value(parts[3])
+    if len(parts) >= 3:
+        return _normalize_color_value(parts[2])
+    return 16777215
+
+
+def _set_color_in_p(parts: List[str], color: int) -> None:
+    """在 p 属性数组中写回颜色值。"""
+    color_str = str(color)
+    if len(parts) >= 4:
+        parts[3] = color_str
+    elif len(parts) >= 3:
+        parts[2] = color_str
+    else:
+        # 兜底：不足 3 个字段时填充
+        while len(parts) < 3:
+            parts.append("0")
+        parts.append(color_str)
+
+
+def apply_random_color(
+    comments: List[Dict[str, Any]],
+    mode: str,
+    palette: Iterable[int],
+) -> List[Dict[str, Any]]:
+    """
+    根据模式对弹幕颜色进行转换。
+    - off: 不处理
+    - white_to_random: 仅将白色弹幕随机换色
+    - all_random: 所有弹幕随机换色
+    """
+    if mode not in VALID_RANDOM_COLOR_MODES or mode == "off":
+        return comments
+
+    palette_list = list(palette)
+    if not palette_list:
+        palette_list = DEFAULT_RANDOM_COLOR_PALETTE
+
+    processed = []
+    for item in comments:
+        p_attr = item.get("p", "")
+        if not p_attr:
+            processed.append(item)
+            continue
+
+        parts = p_attr.split(",")
+        current_color = _get_color_from_p(parts)
+
+        should_replace = (
+            mode == "all_random"
+            or (mode == "white_to_random" and current_color == 16777215)
+        )
+
+        if should_replace:
+            new_color = random.choice(palette_list)
+            if new_color != current_color:
+                _set_color_in_p(parts, new_color)
+                new_p = ",".join(parts)
+                processed.append({**item, "p": new_p})
+                continue
+
+        processed.append(item)
+
+    return processed

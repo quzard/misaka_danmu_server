@@ -202,7 +202,6 @@ export const Scrapers = () => {
   // 自动更新相关
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false)
   const [autoUpdateLoading, setAutoUpdateLoading] = useState(false)
-  const autoUpdateIntervalRef = useRef(null)
 
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
@@ -294,11 +293,6 @@ export const Scrapers = () => {
         downloadAbortController.current.abort()
         downloadAbortController.current = null
       }
-      // 清除自动更新轮询
-      if (autoUpdateIntervalRef.current) {
-        clearInterval(autoUpdateIntervalRef.current)
-        autoUpdateIntervalRef.current = null
-      }
     }
   }, [])
 
@@ -345,65 +339,26 @@ export const Scrapers = () => {
     }
   }
 
-  // 加载自动更新配置
+  // 加载自动更新配置（后端轮询，前端只控制开关）
   const loadAutoUpdateConfig = async () => {
     try {
       const res = await getScraperAutoUpdate()
       const enabled = res.data?.enabled || false
       setAutoUpdateEnabled(enabled)
-      if (enabled) {
-        startAutoUpdatePolling()
-      }
     } catch (error) {
       console.error('加载自动更新配置失败:', error)
     }
   }
 
-  // 启动自动更新轮询
-  const startAutoUpdatePolling = () => {
-    // 清除之前的轮询
-    if (autoUpdateIntervalRef.current) {
-      clearInterval(autoUpdateIntervalRef.current)
-    }
-    // 15分钟轮询一次
-    autoUpdateIntervalRef.current = setInterval(async () => {
-      await checkAndAutoUpdate()
-    }, 15 * 60 * 1000)
-  }
-
-  // 停止自动更新轮询
-  const stopAutoUpdatePolling = () => {
-    if (autoUpdateIntervalRef.current) {
-      clearInterval(autoUpdateIntervalRef.current)
-      autoUpdateIntervalRef.current = null
-    }
-  }
-
-  // 检查并自动更新
-  const checkAndAutoUpdate = async () => {
-    try {
-      const versionData = await loadVersionInfo()
-      if (versionData?.hasUpdate && resourceRepoUrl) {
-        console.log('检测到新版本，自动加载资源...')
-        // 自动触发加载资源
-        handleLoadResources()
-      }
-    } catch (error) {
-      console.error('自动更新检查失败:', error)
-    }
-  }
-
-  // 切换自动更新状态
+  // 切换自动更新状态（后端轮询，前端只控制开关）
   const handleAutoUpdateToggle = async (checked) => {
     try {
       setAutoUpdateLoading(true)
       await saveScraperAutoUpdate({ enabled: checked, interval: 15 })
       setAutoUpdateEnabled(checked)
       if (checked) {
-        startAutoUpdatePolling()
-        messageApi.success('已启用自动更新，每15分钟检查一次')
+        messageApi.success('已启用自动更新，后台每15分钟检查一次')
       } else {
-        stopAutoUpdatePolling()
         messageApi.success('已关闭自动更新')
       }
     } catch (error) {
