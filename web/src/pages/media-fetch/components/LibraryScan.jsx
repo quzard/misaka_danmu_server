@@ -770,10 +770,10 @@ const LibraryScan = () => {
               <Divider />
 
               <div style={{ textAlign: 'center' }}>
-                <Space size="large">
+                <Space size="middle" wrap>
                   <Button
                     type="default"
-                    size="large"
+                    size={screens.xs ? "middle" : "large"}
                     onClick={() => {
                       const allIds = libraries.map(lib => lib.id);
                       setSelectedLibraryIds(allIds);
@@ -783,7 +783,7 @@ const LibraryScan = () => {
                   </Button>
                   <Button
                     type="default"
-                    size="large"
+                    size={screens.xs ? "middle" : "large"}
                     onClick={() => {
                       // 清空所有选择，但保持至少一个选中
                       if (libraries.length > 0) {
@@ -796,8 +796,8 @@ const LibraryScan = () => {
                     清空
                   </Button>
                   <Button
-                    type="primary"
-                    size="large"
+                    type="default"
+                    size={screens.xs ? "middle" : "large"}
                     icon={<SaveOutlined />}
                     loading={savingLibraries}
                     onClick={handleSaveLibraries}
@@ -916,7 +916,7 @@ const LibraryScan = () => {
         >
           {screens.xs && (
             <div style={{ marginBottom: '16px', textAlign: 'center' }}>
-              <Space wrap>
+              <Space wrap size="middle">
                 <Popover
                   trigger="click"
                   placement="bottomLeft"
@@ -961,7 +961,7 @@ const LibraryScan = () => {
                 >
                   <Button
                     icon={<CalendarOutlined />}
-                    size="large"
+                    size="middle"
                   >
                     {yearFrom || yearTo
                       ? `${yearFrom || '?'}~${yearTo || '?'}`
@@ -979,7 +979,7 @@ const LibraryScan = () => {
                     danger
                     icon={<DeleteOutlined />}
                     disabled={selectedMediaItems.length === 0}
-                    size="large"
+                    size="middle"
                   >
                     删除
                   </Button>
@@ -989,7 +989,7 @@ const LibraryScan = () => {
                   icon={<ImportOutlined />}
                   onClick={handleImport}
                   disabled={selectedMediaItems.length === 0}
-                  size="large"
+                  size="middle"
                 >
                   导入
                 </Button>

@@ -1,17 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented, Pagination } from 'antd';
+import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented, Pagination, Popover } from 'antd';
 import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import EpisodeListModal from './EpisodeListModal';
-
-const { Search } = Input;
 
 const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter, yearFrom, yearTo }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [searchText, setSearchText] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // 临时搜索输入
   const [pagination, setPagination] = useState({ current: 1, pageSize: 100, total: 0 });
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -1016,12 +1015,56 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
               >
                 卡片
               </Button>
-              <Search
-                placeholder="搜索标题"
-                allowClear
-                style={{ width: 200 }}
-                onSearch={setSearchText}
-              />
+              <Popover
+                trigger="click"
+                placement="bottom"
+                onOpenChange={(open) => {
+                  if (open) {
+                    setSearchInput(searchText);
+                  }
+                }}
+                content={(
+                  <div style={{ width: 250 }}>
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Input
+                        placeholder="搜索标题..."
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        onPressEnter={() => {
+                          setSearchText(searchInput);
+                        }}
+                        prefix={<SearchOutlined />}
+                        allowClear
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setSearchInput('');
+                            setSearchText('');
+                          }}
+                        >
+                          清除
+                        </Button>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<SearchOutlined />}
+                          onClick={() => {
+                            setSearchText(searchInput);
+                          }}
+                        >
+                          搜索
+                        </Button>
+                      </div>
+                    </Space>
+                  </div>
+                )}
+              >
+                <Button icon={<SearchOutlined />} size="small">
+                  搜索{searchText && <span className="ml-1 text-blue-500">({searchText})</span>}
+                </Button>
+              </Popover>
             </Space>
           </div>
         }
@@ -1055,12 +1098,56 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
             </Col>
           </Row>
           <div style={{ marginTop: 16 }}>
-            <Search
-              placeholder="搜索标题"
-              allowClear
-              style={{ width: '100%', height: '44px' }}
-              onSearch={setSearchText}
-            />
+            <Popover
+              trigger="click"
+              placement="bottom"
+              onOpenChange={(open) => {
+                if (open) {
+                  setSearchInput(searchText);
+                }
+              }}
+              content={(
+                <div style={{ width: 250 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Input
+                      placeholder="搜索标题..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onPressEnter={() => {
+                        setSearchText(searchInput);
+                      }}
+                      prefix={<SearchOutlined />}
+                      allowClear
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSearchInput('');
+                          setSearchText('');
+                        }}
+                      >
+                        清除
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<SearchOutlined />}
+                        onClick={() => {
+                          setSearchText(searchInput);
+                        }}
+                      >
+                        搜索
+                      </Button>
+                    </div>
+                  </Space>
+                </div>
+              )}
+            >
+              <Button icon={<SearchOutlined />} size="large" block style={{ height: '44px', fontSize: '16px' }}>
+                搜索{searchText && <span className="ml-1 text-blue-500">({searchText})</span>}
+              </Button>
+            </Popover>
           </div>
         </div>
 
