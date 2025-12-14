@@ -1678,69 +1678,80 @@ const DanmakuStorage = () => {
                 )}
                 {/* 序列化规则参数 */}
                 {selectedRuleType === 'serialize' && (
-                  <>
+                  <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'var(--color-hover)', borderRadius: '6px' }}>
+                    {/* 第一行：格式结构 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>格式:</span>
+                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>格式结构:</span>
                       <Input
                         size="small"
                         value={ruleParams.prefix || ''}
                         onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
                         placeholder="第"
-                        style={{ width: 60 }}
+                        style={{ width: 70 }}
                         addonBefore="前缀"
                       />
-                      <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>
-                        {String((ruleParams.start || 1)).padStart(ruleParams.digits || 2, '0')}
+                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>+</span>
+                      <span style={{ padding: '2px 8px', background: '#e6f7ff', color: '#1890ff', borderRadius: '4px', fontSize: 12, fontFamily: 'monospace' }}>
+                        序号
                       </span>
+                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>+</span>
                       <Input
                         size="small"
                         value={ruleParams.suffix || ''}
                         onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
                         placeholder="集"
-                        style={{ width: 60 }}
+                        style={{ width: 70 }}
                         addonBefore="后缀"
                       />
                     </div>
-                    <InputNumber
-                      size="small"
-                      value={ruleParams.start || 1}
-                      onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
-                      min={0}
-                      placeholder="起始"
-                      style={{ width: 90 }}
-                      addonBefore="起始"
-                    />
-                    <InputNumber
-                      size="small"
-                      value={ruleParams.digits || 2}
-                      onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
-                      min={1}
-                      max={5}
-                      placeholder="位数"
-                      style={{ width: 90 }}
-                      addonBefore="位数"
-                    />
-                    <Select
-                      size="small"
-                      value={ruleParams.position || 'replace'}
-                      onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
-                      style={{ width: 100 }}
-                      options={[
-                        { value: 'start', label: '添加到开头' },
-                        { value: 'end', label: '添加到结尾' },
-                        { value: 'replace', label: '替换文件名' }
-                      ]}
-                    />
-                    <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
-                      预览: {
-                        ruleParams.position === 'start'
-                          ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原文件名`
-                          : ruleParams.position === 'end'
-                          ? `原文件名${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
-                          : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
-                      }
-                    </span>
-                  </>
+                    {/* 第二行：序号参数 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>序号设置:</span>
+                      <InputNumber
+                        size="small"
+                        value={ruleParams.start || 1}
+                        onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
+                        min={0}
+                        placeholder="起始"
+                        style={{ width: 100 }}
+                        addonBefore="起始值"
+                      />
+                      <InputNumber
+                        size="small"
+                        value={ruleParams.digits || 2}
+                        onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
+                        min={1}
+                        max={5}
+                        placeholder="位数"
+                        style={{ width: 100 }}
+                        addonBefore="补零位数"
+                      />
+                      <Select
+                        size="small"
+                        value={ruleParams.position || 'replace'}
+                        onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                        style={{ width: 110 }}
+                        options={[
+                          { value: 'start', label: '添加到开头' },
+                          { value: 'end', label: '添加到结尾' },
+                          { value: 'replace', label: '替换文件名' }
+                        ]}
+                      />
+                    </div>
+                    {/* 第三行：效果预览 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>效果预览:</span>
+                      <span style={{ fontSize: 13, fontFamily: 'monospace', color: '#1890ff', fontWeight: '600' }}>
+                        {
+                          ruleParams.position === 'start'
+                            ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原文件名`
+                            : ruleParams.position === 'end'
+                            ? `原文件名${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                            : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                        }
+                      </span>
+                    </div>
+                  </div>
                 )}
                 {/* 大小写规则参数 */}
                 {selectedRuleType === 'case' && (

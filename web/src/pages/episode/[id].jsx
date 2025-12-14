@@ -1732,64 +1732,80 @@ export const EpisodeDetail = () => {
             )}
             {/* 序列化规则参数 */}
             {selectedRuleType === 'serialize' && (
-              <>
+              <div className="w-full flex flex-col gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded">
+                {/* 第一行：格式结构 */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm text-gray-500">格式:</span>
+                  <span className="text-sm text-gray-500">格式结构:</span>
                   <Input
                     value={ruleParams.prefix || ''}
                     onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
                     placeholder="第"
-                    style={{ width: 60 }}
+                    style={{ width: 70 }}
                     addonBefore="前缀"
+                    size="small"
                   />
-                  <span className="text-gray-600 font-mono">
-                    {String((ruleParams.start || 1)).padStart(ruleParams.digits || 2, '0')}
+                  <span className="text-xs text-gray-400">+</span>
+                  <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded text-xs font-mono">
+                    序号
                   </span>
+                  <span className="text-xs text-gray-400">+</span>
                   <Input
                     value={ruleParams.suffix || ''}
                     onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
                     placeholder="集"
-                    style={{ width: 60 }}
+                    style={{ width: 70 }}
                     addonBefore="后缀"
+                    size="small"
                   />
                 </div>
-                <InputNumber
-                  value={ruleParams.start || 1}
-                  onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
-                  min={0}
-                  placeholder="起始"
-                  style={{ width: 90 }}
-                  addonBefore="起始"
-                />
-                <InputNumber
-                  value={ruleParams.digits || 2}
-                  onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
-                  min={1}
-                  max={5}
-                  placeholder="位数"
-                  style={{ width: 90 }}
-                  addonBefore="位数"
-                />
-                <Select
-                  value={ruleParams.position || 'replace'}
-                  onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
-                  style={{ width: 100 }}
-                  options={[
-                    { value: 'start', label: '添加到开头' },
-                    { value: 'end', label: '添加到结尾' },
-                    { value: 'replace', label: '替换标题' }
-                  ]}
-                />
-                <span className="text-xs text-gray-400">
-                  预览: {
-                    ruleParams.position === 'start'
-                      ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原标题`
-                      : ruleParams.position === 'end'
-                      ? `原标题${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
-                      : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
-                  }
-                </span>
-              </>
+                {/* 第二行：序号参数 */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-gray-500">序号设置:</span>
+                  <InputNumber
+                    value={ruleParams.start || 1}
+                    onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
+                    min={0}
+                    placeholder="起始"
+                    style={{ width: 100 }}
+                    addonBefore="起始值"
+                    size="small"
+                  />
+                  <InputNumber
+                    value={ruleParams.digits || 2}
+                    onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
+                    min={1}
+                    max={5}
+                    placeholder="位数"
+                    style={{ width: 100 }}
+                    addonBefore="补零位数"
+                    size="small"
+                  />
+                  <Select
+                    value={ruleParams.position || 'replace'}
+                    onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                    style={{ width: 110 }}
+                    size="small"
+                    options={[
+                      { value: 'start', label: '添加到开头' },
+                      { value: 'end', label: '添加到结尾' },
+                      { value: 'replace', label: '替换标题' }
+                    ]}
+                  />
+                </div>
+                {/* 第三行：效果预览 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">效果预览:</span>
+                  <span className="text-sm font-mono text-blue-600 dark:text-blue-400 font-semibold">
+                    {
+                      ruleParams.position === 'start'
+                        ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原标题`
+                        : ruleParams.position === 'end'
+                        ? `原标题${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                        : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                    }
+                  </span>
+                </div>
+              </div>
             )}
             {/* 大小写规则参数 */}
             {selectedRuleType === 'case' && (
