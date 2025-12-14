@@ -227,8 +227,23 @@ async def check_episode_exists(session: AsyncSession, episode_id: int) -> bool:
     return result.scalar_one_or_none() is not None
 
 
-async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str) -> int:
-    """如果分集不存在则创建，并返回其确定性的ID。"""
+async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, source_id: int, episode_index: int, title: str, url: Optional[str], provider_episode_id: str, update_existing_title: bool = False) -> int:
+    """
+    如果分集不存在则创建，并返回其确定性的ID。
+
+    Args:
+        session: 数据库会话
+        anime_id: 番剧ID
+        source_id: 数据源ID
+        episode_index: 分集序号
+        title: 分集标题
+        url: 数据源URL
+        provider_episode_id: 提供商分集ID
+        update_existing_title: 是否更新已存在分集的标题（默认False，保护用户自定义标题）
+
+    Returns:
+        分集ID
+    """
     # 1. 从数据库获取该源的持久化 sourceOrder
     source_order_stmt = select(AnimeSource.sourceOrder).where(AnimeSource.id == source_id)
     source_order_res = await session.execute(source_order_stmt)
@@ -248,17 +263,26 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
     existing_episode_result = await session.execute(existing_episode_stmt)
     existing_episode = existing_episode_result.scalar_one_or_none()
     if existing_episode:
-        # 如果episode已存在,更新标题和URL(如果新值不为空且与旧值不同)
+        # 如果episode已存在,根据参数决定是否更新标题和URL
         needs_update = False
-        if title and existing_episode.title != title:
+        update_details = []
+
+        # 修正：只有在明确允许更新标题时才更新（默认不更新，保护用户自定义标题）
+        if update_existing_title and title and existing_episode.title != title:
+            old_title = existing_episode.title
             existing_episode.title = title
             needs_update = True
+            update_details.append(f"标题: '{old_title}' → '{title}'")
+
+        # URL始终更新（URL变化不影响用户体验）
         if url and existing_episode.sourceUrl != url:
             existing_episode.sourceUrl = url
             needs_update = True
+            update_details.append(f"URL已更新")
+
         if needs_update:
             await session.flush()
-            logger.info(f"更新已存在的episode: id={new_episode_id}, title='{title}', url='{url}'")
+            logger.info(f"更新已存在的episode: id={new_episode_id}, 更新内容: {', '.join(update_details)}")
         return existing_episode.id
 
     # 3. 如果ID不存在，则创建新分集
