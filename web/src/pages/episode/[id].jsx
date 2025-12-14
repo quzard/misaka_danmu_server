@@ -566,6 +566,41 @@ export const EpisodeDetail = () => {
 
   // 添加规则
   const handleAddRule = () => {
+    // 验证必填参数
+    if (selectedRuleType === 'replace' && !ruleParams.search) {
+      messageApi.warning('请输入要查找的文本')
+      return
+    }
+    if (selectedRuleType === 'regex' && !ruleParams.pattern) {
+      messageApi.warning('请输入正则表达式')
+      return
+    }
+    if (selectedRuleType === 'insert') {
+      if (!ruleParams.text) {
+        messageApi.warning('请输入要插入的文本')
+        return
+      }
+      if (ruleParams.position === 'index' && ruleParams.index === undefined) {
+        messageApi.warning('请输入插入位置')
+        return
+      }
+    }
+    if (selectedRuleType === 'delete') {
+      const mode = ruleParams.mode || 'text'
+      if ((mode === 'text' || mode === 'toText' || mode === 'fromText') && !ruleParams.text) {
+        messageApi.warning('请输入文本')
+        return
+      }
+      if ((mode === 'first' || mode === 'last' || mode === 'range') && !ruleParams.count) {
+        messageApi.warning('请输入字符数')
+        return
+      }
+      if (mode === 'range' && ruleParams.from === undefined) {
+        messageApi.warning('请输入起始位置')
+        return
+      }
+    }
+
     const newRule = {
       id: Date.now().toString(),
       type: selectedRuleType,
@@ -574,6 +609,7 @@ export const EpisodeDetail = () => {
     }
     setRenameRules(prev => [...prev, newRule])
     setRuleParams({})
+    messageApi.success('规则已添加')
   }
 
   // 删除规则
@@ -585,6 +621,23 @@ export const EpisodeDetail = () => {
   const handleToggleRule = (ruleId) => {
     setRenameRules(prev => prev.map(r => r.id === ruleId ? { ...r, enabled: !r.enabled } : r))
   }
+
+  // 监听规则变化，自动更新预览
+  useEffect(() => {
+    if (isPreviewMode) {
+      if (renameRules.length > 0) {
+        const preview = {}
+        batchEditData.forEach((item, index) => {
+          preview[item.episodeId] = applyAllRules(item.title, index)
+        })
+        setPreviewData(preview)
+      } else {
+        // 规则列表为空时清空预览
+        setPreviewData({})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRules, isPreviewMode, batchEditData])
 
   // 预览效果
   const handlePreviewRules = () => {
@@ -1538,7 +1591,26 @@ export const EpisodeDetail = () => {
             {selectedRuleType === 'insert' && (
               <>
                 <Input value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
-                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }]} />
+                <Select
+                  value={ruleParams.position || 'start'}
+                  onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                  style={{ width: 100 }}
+                  options={[
+                    { value: 'start', label: '开头' },
+                    { value: 'end', label: '结尾' },
+                    { value: 'index', label: '指定位置' }
+                  ]}
+                />
+                {ruleParams.position === 'index' && (
+                  <InputNumber
+                    value={ruleParams.index || 0}
+                    onChange={(v) => setRuleParams(p => ({ ...p, index: v }))}
+                    min={0}
+                    placeholder="位置"
+                    style={{ width: 80 }}
+                    addonAfter="位"
+                  />
+                )}
               </>
             )}
             {/* 删除规则参数 */}
@@ -1661,12 +1733,62 @@ export const EpisodeDetail = () => {
             {/* 序列化规则参数 */}
             {selectedRuleType === 'serialize' && (
               <>
-                <Input value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder="前缀" style={{ width: 60 }} />
-                <span className="text-gray-400">{'{序号}'}</span>
-                <Input value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder="后缀" style={{ width: 60 }} />
-                <InputNumber value={ruleParams.start || 1} onChange={(v) => setRuleParams(p => ({ ...p, start: v }))} min={0} placeholder="起始" style={{ width: 70 }} />
-                <InputNumber value={ruleParams.digits || 2} onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))} min={1} max={5} placeholder="位数" style={{ width: 70 }} />
-                <Select value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }, { value: 'replace', label: '替换' }]} />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-gray-500">格式:</span>
+                  <Input
+                    value={ruleParams.prefix || ''}
+                    onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
+                    placeholder="第"
+                    style={{ width: 60 }}
+                    addonBefore="前缀"
+                  />
+                  <span className="text-gray-600 font-mono">
+                    {String((ruleParams.start || 1)).padStart(ruleParams.digits || 2, '0')}
+                  </span>
+                  <Input
+                    value={ruleParams.suffix || ''}
+                    onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
+                    placeholder="集"
+                    style={{ width: 60 }}
+                    addonBefore="后缀"
+                  />
+                </div>
+                <InputNumber
+                  value={ruleParams.start || 1}
+                  onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
+                  min={0}
+                  placeholder="起始"
+                  style={{ width: 90 }}
+                  addonBefore="起始"
+                />
+                <InputNumber
+                  value={ruleParams.digits || 2}
+                  onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
+                  min={1}
+                  max={5}
+                  placeholder="位数"
+                  style={{ width: 90 }}
+                  addonBefore="位数"
+                />
+                <Select
+                  value={ruleParams.position || 'replace'}
+                  onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                  style={{ width: 100 }}
+                  options={[
+                    { value: 'start', label: '添加到开头' },
+                    { value: 'end', label: '添加到结尾' },
+                    { value: 'replace', label: '替换标题' }
+                  ]}
+                />
+                <span className="text-xs text-gray-400">
+                  预览: {
+                    ruleParams.position === 'start'
+                      ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原标题`
+                      : ruleParams.position === 'end'
+                      ? `原标题${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                      : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                  }
+                </span>
               </>
             )}
             {/* 大小写规则参数 */}

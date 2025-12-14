@@ -220,6 +220,7 @@ const DanmakuStorage = () => {
 
   // 添加规则
   const handleAddRenameRule = () => {
+    // 验证必填参数
     if (selectedRuleType === 'replace' && !ruleParams.search) {
       message.warning('请输入要查找的文本');
       return;
@@ -228,9 +229,15 @@ const DanmakuStorage = () => {
       message.warning('请输入正则表达式');
       return;
     }
-    if (selectedRuleType === 'insert' && !ruleParams.text) {
-      message.warning('请输入要插入的文本');
-      return;
+    if (selectedRuleType === 'insert') {
+      if (!ruleParams.text) {
+        message.warning('请输入要插入的文本');
+        return;
+      }
+      if (ruleParams.position === 'index' && ruleParams.index === undefined) {
+        message.warning('请输入插入位置');
+        return;
+      }
     }
     if (selectedRuleType === 'delete') {
       const mode = ruleParams.mode || 'text';
@@ -247,6 +254,7 @@ const DanmakuStorage = () => {
         return;
       }
     }
+
     const newRule = {
       id: Date.now().toString(),
       type: selectedRuleType,
@@ -255,6 +263,7 @@ const DanmakuStorage = () => {
     };
     setRenameRules(prev => [...prev, newRule]);
     setRuleParams({});
+    message.success('规则已添加');
   };
 
   // 删除规则
@@ -1524,7 +1533,28 @@ const DanmakuStorage = () => {
                 {selectedRuleType === 'insert' && (
                   <>
                     <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
-                    <Select size="small" value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }]} />
+                    <Select
+                      size="small"
+                      value={ruleParams.position || 'start'}
+                      onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                      style={{ width: 100 }}
+                      options={[
+                        { value: 'start', label: '开头' },
+                        { value: 'end', label: '结尾' },
+                        { value: 'index', label: '指定位置' }
+                      ]}
+                    />
+                    {ruleParams.position === 'index' && (
+                      <InputNumber
+                        size="small"
+                        value={ruleParams.index || 0}
+                        onChange={(v) => setRuleParams(p => ({ ...p, index: v }))}
+                        min={0}
+                        placeholder="位置"
+                        style={{ width: 80 }}
+                        addonAfter="位"
+                      />
+                    )}
                   </>
                 )}
                 {/* 删除规则参数 */}
@@ -1649,11 +1679,67 @@ const DanmakuStorage = () => {
                 {/* 序列化规则参数 */}
                 {selectedRuleType === 'serialize' && (
                   <>
-                    <Input size="small" value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder="前缀" style={{ width: 60 }} />
-                    <Input size="small" type="number" value={ruleParams.start || 1} onChange={(e) => setRuleParams(p => ({ ...p, start: e.target.value }))} placeholder="起始" style={{ width: 50 }} />
-                    <Input size="small" type="number" value={ruleParams.digits || 2} onChange={(e) => setRuleParams(p => ({ ...p, digits: e.target.value }))} placeholder="位数" style={{ width: 50 }} />
-                    <Input size="small" value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder="后缀" style={{ width: 60 }} />
-                    <Select size="small" value={ruleParams.position || 'start'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 80 }} options={[{ value: 'start', label: '开头' }, { value: 'end', label: '结尾' }, { value: 'replace', label: '替换' }]} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>格式:</span>
+                      <Input
+                        size="small"
+                        value={ruleParams.prefix || ''}
+                        onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
+                        placeholder="第"
+                        style={{ width: 60 }}
+                        addonBefore="前缀"
+                      />
+                      <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>
+                        {String((ruleParams.start || 1)).padStart(ruleParams.digits || 2, '0')}
+                      </span>
+                      <Input
+                        size="small"
+                        value={ruleParams.suffix || ''}
+                        onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
+                        placeholder="集"
+                        style={{ width: 60 }}
+                        addonBefore="后缀"
+                      />
+                    </div>
+                    <InputNumber
+                      size="small"
+                      value={ruleParams.start || 1}
+                      onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
+                      min={0}
+                      placeholder="起始"
+                      style={{ width: 90 }}
+                      addonBefore="起始"
+                    />
+                    <InputNumber
+                      size="small"
+                      value={ruleParams.digits || 2}
+                      onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
+                      min={1}
+                      max={5}
+                      placeholder="位数"
+                      style={{ width: 90 }}
+                      addonBefore="位数"
+                    />
+                    <Select
+                      size="small"
+                      value={ruleParams.position || 'replace'}
+                      onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
+                      style={{ width: 100 }}
+                      options={[
+                        { value: 'start', label: '添加到开头' },
+                        { value: 'end', label: '添加到结尾' },
+                        { value: 'replace', label: '替换文件名' }
+                      ]}
+                    />
+                    <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
+                      预览: {
+                        ruleParams.position === 'start'
+                          ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原文件名`
+                          : ruleParams.position === 'end'
+                          ? `原文件名${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                          : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                      }
+                    </span>
                   </>
                 )}
                 {/* 大小写规则参数 */}
