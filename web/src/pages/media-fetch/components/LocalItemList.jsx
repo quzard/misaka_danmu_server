@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber, Popover } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined, SearchOutlined } from '@ant-design/icons';
 
-const { Search } = Input;
 const { Text } = Typography;
 import {
   getLocalWorks,
@@ -32,6 +31,7 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [viewMode, setViewMode] = useState('table'); // 添加视图模式状态
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all'); // 添加类型过滤状态
   const [searchText, setSearchText] = useState(''); // 添加搜索状态
+  const [searchInput, setSearchInput] = useState(''); // 添加搜索输入状态（临时）
   const [isDataLoaded, setIsDataLoaded] = useState(false); // 添加数据加载标志
   const [yearFrom, setYearFrom] = useState();
   const [yearTo, setYearTo] = useState();
@@ -1129,12 +1129,56 @@ const LocalItemList = ({ refreshTrigger }) => {
                 </Button>
               </>
             )}
-            <Search
-              placeholder="搜索标题"
-              allowClear
-              style={isMobile ? { width: '100%', minWidth: '120px' } : { width: 200 }}
-              onSearch={setSearchText}
-            />
+            <Popover
+              trigger="click"
+              placement="bottom"
+              onOpenChange={(open) => {
+                if (open) {
+                  setSearchInput(searchText);
+                }
+              }}
+              content={(
+                <div style={{ width: 250 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Input
+                      placeholder="搜索标题..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onPressEnter={() => {
+                        setSearchText(searchInput);
+                      }}
+                      prefix={<SearchOutlined />}
+                      allowClear
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSearchInput('');
+                          setSearchText('');
+                        }}
+                      >
+                        清除
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<SearchOutlined />}
+                        onClick={() => {
+                          setSearchText(searchInput);
+                        }}
+                      >
+                        搜索
+                      </Button>
+                    </div>
+                  </Space>
+                </div>
+              )}
+            >
+              <Button icon={<SearchOutlined />}>
+                搜索{searchText && <span className="ml-1 text-blue-500">({searchText})</span>}
+              </Button>
+            </Popover>
           </Space>
         </div>
 

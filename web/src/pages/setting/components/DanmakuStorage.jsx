@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip, Collapse } from 'antd';
+import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip, Collapse, Popover } from 'antd';
 import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
 import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
@@ -1294,14 +1294,47 @@ const DanmakuStorage = () => {
                 <Option value="movie">电影</Option>
                 <Option value="tv">TV/OVA</Option>
               </Select>
-              <Input.Search
-                placeholder="搜索标题..."
-                value={libraryKeyword}
-                onChange={(e) => setLibraryKeyword(e.target.value)}
-                onSearch={handleLibrarySearch}
-                style={{ width: 200 }}
-                allowClear
-              />
+              <Popover
+                trigger="click"
+                placement="bottom"
+                content={(
+                  <div style={{ width: 250 }}>
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Input
+                        placeholder="搜索标题..."
+                        value={libraryKeyword}
+                        onChange={(e) => setLibraryKeyword(e.target.value)}
+                        onPressEnter={handleLibrarySearch}
+                        prefix={<SearchOutlined />}
+                        allowClear
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setLibraryKeyword('');
+                            handleLibrarySearch();
+                          }}
+                        >
+                          清除
+                        </Button>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<SearchOutlined />}
+                          onClick={handleLibrarySearch}
+                        >
+                          搜索
+                        </Button>
+                      </div>
+                    </Space>
+                  </div>
+                )}
+              >
+                <Button icon={<SearchOutlined />}>
+                  搜索{libraryKeyword && <span className="ml-1 text-blue-500">({libraryKeyword})</span>}
+                </Button>
+              </Popover>
               <Button icon={<ReloadOutlined />} onClick={handleLibraryRefresh}>
                 刷新
               </Button>

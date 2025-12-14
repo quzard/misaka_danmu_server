@@ -460,10 +460,9 @@ const DesktopHeader = ({ activeKey, version }) => {
     navigate(RoutePaths.LOGIN)
   }
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = async (values) => {
     try {
       setIsLoading(true)
-      const values = await form.validateFields()
       await changePassword(values)
       form.resetFields()
       messageApi.success('修改成功')
