@@ -218,6 +218,18 @@ export const getDanmakuRandomColorPalette = () =>
 /** 弹幕输出配置 随机颜色色板 */
 export const setDanmakuRandomColorPalette = data =>
   api.put('/api/ui/config/danmakuRandomColorPalette', data)
+/** 弹幕输出配置 黑名单开关 */
+export const getDanmakuBlacklistEnabled = () =>
+  api.get('/api/ui/config/danmakuBlacklistEnabled')
+/** 弹幕输出配置 黑名单开关 */
+export const setDanmakuBlacklistEnabled = data =>
+  api.put('/api/ui/config/danmakuBlacklistEnabled', data)
+/** 弹幕输出配置 黑名单规则 */
+export const getDanmakuBlacklistPatterns = () =>
+  api.get('/api/ui/config/danmakuBlacklistPatterns')
+/** 弹幕输出配置 黑名单规则 */
+export const setDanmakuBlacklistPatterns = data =>
+  api.put('/api/ui/config/danmakuBlacklistPatterns', data)
 
 /** 获取匹配后备机制状态 */
 export const getMatchFallback = () =>

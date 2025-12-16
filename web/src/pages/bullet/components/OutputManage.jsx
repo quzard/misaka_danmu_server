@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ColorPicker, InputNumber, Select, Tag } from 'antd'
+import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input } from 'antd'
 import {
   getDanmuOutputTotal,
   setDanmuOutputTotal,
@@ -7,8 +7,14 @@ import {
   setDanmakuRandomColorMode,
   getDanmakuRandomColorPalette,
   setDanmakuRandomColorPalette,
+  getDanmakuBlacklistEnabled,
+  setDanmakuBlacklistEnabled,
+  getDanmakuBlacklistPatterns,
+  setDanmakuBlacklistPatterns,
 } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
+
+const { TextArea } = Input
 
 const DEFAULT_COLOR_PALETTE = [
   '#ffffff',
@@ -65,20 +71,27 @@ export const OutputManage = () => {
   const [palette, setPalette] = useState(DEFAULT_COLOR_PALETTE)
   const [colorPickerValue, setColorPickerValue] = useState('#ffffff')
   const [colorSaveLoading, setColorSaveLoading] = useState(false)
+  const [blacklistEnabled, setBlacklistEnabled] = useState(false)
+  const [blacklistPatterns, setBlacklistPatterns] = useState('')
+  const [blacklistSaveLoading, setBlacklistSaveLoading] = useState(false)
 
   const messageApi = useMessage()
 
   const getConfig = async () => {
     setLoading(true)
     try {
-      const [limitRes, colorModeRes, colorPaletteRes] = await Promise.all([
+      const [limitRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes] = await Promise.all([
         getDanmuOutputTotal(),
         getDanmakuRandomColorMode(),
         getDanmakuRandomColorPalette(),
+        getDanmakuBlacklistEnabled(),
+        getDanmakuBlacklistPatterns(),
       ])
       setLimit(limitRes.data?.value ?? '-1')
       setColorMode(colorModeRes.data?.value || 'off')
       setPalette(parsePaletteFromServer(colorPaletteRes.data?.value))
+      setBlacklistEnabled(blacklistEnabledRes.data?.value === 'true')
+      setBlacklistPatterns(blacklistPatternsRes.data?.value || '')
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -111,6 +124,21 @@ export const OutputManage = () => {
       messageApi.error('保存随机颜色配置失败')
     } finally {
       setColorSaveLoading(false)
+    }
+  }
+
+  const handleSaveBlacklist = async () => {
+    setBlacklistSaveLoading(true)
+    try {
+      await Promise.all([
+        setDanmakuBlacklistEnabled({ value: blacklistEnabled ? 'true' : 'false' }),
+        setDanmakuBlacklistPatterns({ value: blacklistPatterns }),
+      ])
+      messageApi.success('弹幕黑名单配置已保存')
+    } catch (e) {
+      messageApi.error('保存弹幕黑名单配置失败')
+    } finally {
+      setBlacklistSaveLoading(false)
     }
   }
 
@@ -238,6 +266,52 @@ export const OutputManage = () => {
             onClick={handleSaveColor}
           >
             保存随机颜色
+          </Button>
+        </div>
+      </Card>
+
+      <Card loading={loading} title="弹幕输出黑名单" className="mt-4">
+        <div className="text-sm text-gray-600 mb-4">
+          使用正则表达式过滤弹幕内容。启用后，匹配黑名单规则的弹幕将被拦截，不会输出到客户端。
+        </div>
+
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span>启用黑名单过滤</span>
+            <Switch
+              checked={blacklistEnabled}
+              onChange={setBlacklistEnabled}
+            />
+          </div>
+
+          <div className="mb-2 text-sm text-gray-700">
+            黑名单规则（正则表达式）
+          </div>
+          <TextArea
+            value={blacklistPatterns}
+            onChange={e => setBlacklistPatterns(e.target.value)}
+            placeholder="支持两种格式：&#10;1. 单行格式：用 | 分隔多个规则，如：广告|推广|666&#10;2. 多行格式：每行一个正则表达式"
+            rows={6}
+            disabled={!blacklistEnabled}
+            style={{ fontFamily: 'monospace', fontSize: '12px' }}
+          />
+
+          <div className="mt-2 text-xs text-gray-500">
+            <div>• 默认过滤规则参考hills TG群群友分享过滤规则</div>
+            <div>• 支持单行格式（用 | 分隔）或多行格式（每行一个规则）</div>
+            <div>• 不区分大小写，自动匹配弹幕内容</div>
+            <div>• 示例（单行）：<code className="bg-gray-100 px-1">广告|推广|666</code></div>
+            <div>• 示例（多行）：每行写一个规则，# 开头的行为注释</div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3">
+          <Button
+            type="primary"
+            loading={blacklistSaveLoading}
+            onClick={handleSaveBlacklist}
+          >
+            保存黑名单配置
           </Button>
         </div>
       </Card>
