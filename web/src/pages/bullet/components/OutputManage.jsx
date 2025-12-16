@@ -285,22 +285,22 @@ export const OutputManage = () => {
           </div>
 
           <div className="mb-2 text-sm text-gray-700">
-            黑名单规则（每行一个正则表达式）
+            黑名单规则（正则表达式）
           </div>
           <TextArea
             value={blacklistPatterns}
             onChange={e => setBlacklistPatterns(e.target.value)}
-            placeholder="例如：&#10;广告|推广&#10;https?://&#10;刷屏内容&#10;&#10;支持正则表达式，不区分大小写&#10;以 # 开头的行为注释，将被忽略"
-            rows={8}
+            placeholder="支持两种格式：&#10;1. 单行格式：用 | 分隔多个规则，如：广告|推广|666&#10;2. 多行格式：每行一个正则表达式"
+            rows={6}
             disabled={!blacklistEnabled}
-            style={{ fontFamily: 'monospace' }}
+            style={{ fontFamily: 'monospace', fontSize: '12px' }}
           />
 
           <div className="mt-2 text-xs text-gray-500">
-            <div>• 每行一个正则表达式，匹配弹幕内容（不区分大小写）</div>
-            <div>• 以 # 开头的行为注释，将被忽略</div>
-            <div>• 示例：<code className="bg-gray-100 px-1">广告|推广</code> 将拦截包含"广告"或"推广"的弹幕</div>
-            <div>• 示例：<code className="bg-gray-100 px-1">https?://</code> 将拦截包含网址的弹幕</div>
+            <div>• 支持单行格式（用 | 分隔）或多行格式（每行一个规则）</div>
+            <div>• 不区分大小写，自动匹配弹幕内容</div>
+            <div>• 示例（单行）：<code className="bg-gray-100 px-1">广告|推广|666</code></div>
+            <div>• 示例（多行）：每行写一个规则，# 开头的行为注释</div>
           </div>
         </div>
 
