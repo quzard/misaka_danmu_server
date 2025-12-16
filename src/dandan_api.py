@@ -45,6 +45,7 @@ from .danmaku_color import (
     apply_random_color,
     parse_palette,
 )
+from .danmaku_filter import apply_blacklist_filter
 
 logger = logging.getLogger(__name__)
 
@@ -634,10 +635,10 @@ def _process_comments_for_dandanplay(comments_data: List[Dict[str, Any]]) -> Lis
             if '[' in part and ']' in part:
                 core_parts_count = j
                 break
-        
+
         if core_parts_count == 4:
             del p_parts[2] # 移除字体大小 (index 2)
-        
+
         new_p_attr = ','.join(p_parts)
         processed_comments.append(models.Comment(cid=i, p=new_p_attr, m=item.get("m", "")))
     return processed_comments
@@ -3715,6 +3716,20 @@ async def get_comments_for_dandan(
             cache_value = {"comments": comments_data, "timestamp": current_time}
             await _set_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key, cache_value, SAMPLED_COMMENTS_CACHE_TTL_DB)
             logger.debug(f"采样结果已缓存: {cache_key}")
+
+    # 应用黑名单过滤
+    try:
+        blacklist_enabled = await config_manager.get('danmakuBlacklistEnabled', 'false')
+        if blacklist_enabled.lower() == 'true':
+            blacklist_patterns = await config_manager.get('danmakuBlacklistPatterns', '')
+            if blacklist_patterns:
+                original_count = len(comments_data)
+                comments_data = apply_blacklist_filter(comments_data, blacklist_patterns)
+                filtered_count = original_count - len(comments_data)
+                if filtered_count > 0:
+                    logger.info(f"弹幕黑名单过滤 (episodeId: {episodeId}): 拦截 {filtered_count} 条，保留 {len(comments_data)} 条")
+    except Exception as e:
+        logger.error(f"应用弹幕黑名单过滤失败: {e}", exc_info=True)
 
     # 应用随机颜色配置
     try:
