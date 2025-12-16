@@ -297,6 +297,7 @@ export const OutputManage = () => {
           />
 
           <div className="mt-2 text-xs text-gray-500">
+            <div>• 默认过滤规则参考hills TG群群友分享过滤规则</div>
             <div>• 支持单行格式（用 | 分隔）或多行格式（每行一个规则）</div>
             <div>• 不区分大小写，自动匹配弹幕内容</div>
             <div>• 示例（单行）：<code className="bg-gray-100 px-1">广告|推广|666</code></div>
