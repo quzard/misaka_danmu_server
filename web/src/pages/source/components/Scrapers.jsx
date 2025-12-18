@@ -5,10 +5,12 @@ import {
   Dropdown,
   Form,
   Input,
+  InputNumber,
   List,
   message,
   Modal,
   Row,
+  Select,
   Spin,
   Switch,
   Space,
@@ -833,6 +835,37 @@ export const Scrapers = () => {
     )
   }
 
+  // 解析字段配置（兼容多种格式）
+  const parseFieldConfig = (fieldInfo) => {
+    if (typeof fieldInfo === 'string') {
+      // 旧格式：仅label
+      return { label: fieldInfo, type: 'string', tooltip: '' }
+    } else if (Array.isArray(fieldInfo)) {
+      // 元组格式：[label, type, tooltip]
+      return {
+        label: fieldInfo[0],
+        type: fieldInfo[1] || 'string',
+        tooltip: fieldInfo[2] || '',
+        placeholder: '',
+        options: [],
+        min: undefined,
+        max: undefined,
+        step: undefined,
+        rows: 4,
+      }
+    } else {
+      // 新格式：完整对象
+      return {
+        type: 'string',
+        tooltip: '',
+        placeholder: '',
+        options: [],
+        rows: 4,
+        ...fieldInfo,
+      }
+    }
+  }
+
   const renderDynamicFormItems = () => {
     const currentScraper = list.find(it => it.providerName === setname)
     if (!currentScraper || !currentScraper.configurableFields) {
@@ -841,11 +874,8 @@ export const Scrapers = () => {
 
     return Object.entries(currentScraper.configurableFields).map(
       ([key, fieldInfo]) => {
-        // 兼容旧的字符串格式和新的元组格式
-        const [label, type, tooltip] =
-          typeof fieldInfo === 'string'
-            ? [fieldInfo, 'string', '']
-            : fieldInfo
+        const config = parseFieldConfig(fieldInfo)
+        const { label, type, tooltip, placeholder, options, min, max, step, rows } = config
         const camelKey = key.replace(/_([a-z])/g, g => g[1].toUpperCase())
 
         // 如果是 dandanplay，则跳过所有已在定制UI中处理的字段
@@ -858,6 +888,7 @@ export const Scrapers = () => {
           return null
         }
 
+        // 根据类型渲染对应的表单控件
         switch (type) {
           case 'boolean':
             return (
@@ -872,7 +903,95 @@ export const Scrapers = () => {
                 <Switch />
               </Form.Item>
             )
+
+          case 'password':
+            return (
+              <Form.Item
+                key={camelKey}
+                name={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+              >
+                <Input.Password placeholder={placeholder} />
+              </Form.Item>
+            )
+
+          case 'number':
+            return (
+              <Form.Item
+                key={camelKey}
+                name={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+              >
+                <InputNumber
+                  min={min}
+                  max={max}
+                  step={step}
+                  placeholder={placeholder}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            )
+
+          case 'select':
+            return (
+              <Form.Item
+                key={camelKey}
+                name={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+              >
+                <Select placeholder={placeholder || '请选择'}>
+                  {(options || []).map(opt => (
+                    <Select.Option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )
+
+          case 'textarea':
+            return (
+              <Form.Item
+                key={camelKey}
+                name={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+              >
+                <Input.TextArea rows={rows} placeholder={placeholder} />
+              </Form.Item>
+            )
+
+          case 'url':
+            return (
+              <Form.Item
+                key={camelKey}
+                name={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+                rules={[
+                  {
+                    type: 'url',
+                    message: '请输入有效的 URL 地址',
+                  },
+                ]}
+              >
+                <Input
+                  type="url"
+                  placeholder={placeholder || 'https://example.com'}
+                />
+              </Form.Item>
+            )
+
           case 'string':
+          default:
             // 为 gamer 的 cookie 提供更大的输入框
             if (key === 'gamerCookie') {
               return (
@@ -895,23 +1014,9 @@ export const Scrapers = () => {
                 className="mb-4"
                 tooltip={tooltip}
               >
-                <Input />
+                <Input placeholder={placeholder} />
               </Form.Item>
             )
-          case 'password':
-            return (
-              <Form.Item
-                key={camelKey}
-                name={camelKey}
-                label={label}
-                className="mb-4"
-                tooltip={tooltip}
-              >
-                <Input.Password />
-              </Form.Item>
-            )
-          default:
-            return null
         }
       }
     )
