@@ -406,7 +406,7 @@ class MetadataSourceStatusResponse(BaseModel):
     logRawResponses: bool = Field(False, alias="log_raw_responses")
 
 class ScraperSettingWithConfig(ScraperSetting):
-    configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str]]]] = None
+    configurableFields: Optional[Dict[str, Union[str, Tuple[str, str, str], Dict[str, Any]]]] = None
     isLoggable: bool
     version: Optional[str] = None  # 弹幕源版本号
 
