@@ -672,9 +672,23 @@ export const Scrapers = () => {
     // 动态地为所有可配置字段设置表单初始值
     const dynamicInitialValues = {}
     if (item.configurableFields) {
-      for (const key of Object.keys(item.configurableFields)) {
+      for (const [key, fieldInfo] of Object.entries(item.configurableFields)) {
         const camelKey = key.replace(/_([a-z])/g, g => g[1].toUpperCase())
-        dynamicInitialValues[camelKey] = res.data?.[camelKey]
+        const config = parseFieldConfig(fieldInfo)
+        let value = res.data?.[camelKey]
+
+        // 如果是 boolean 类型，需要将字符串转换为真正的 boolean
+        if (config.type === 'boolean') {
+          if (typeof value === 'string') {
+            value = value === 'true' || value === '1'
+          } else if (typeof value === 'number') {
+            value = value !== 0
+          } else {
+            value = Boolean(value)
+          }
+        }
+
+        dynamicInitialValues[camelKey] = value
       }
     }
 
