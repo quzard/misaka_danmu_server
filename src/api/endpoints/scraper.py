@@ -249,7 +249,7 @@ async def update_scraper_config(
             await config_manager.setValue(log_responses_key_db, str(value).lower())
 
         # 5. 重新加载该搜索源
-        manager.reload_scraper(providerName)
+        await manager.reload_scraper(providerName)
         logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置,已重新加载。")
         return
 
