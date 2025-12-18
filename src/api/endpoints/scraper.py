@@ -188,7 +188,16 @@ async def update_scraper_config(
             # field_key 就是配置键,例如 "gamerCookie" 或 "dandanplay_app_id"
             # 获取字段类型信息 (label, type, tooltip)
             field_info = configurable_fields[field_key]
-            field_type = field_info[1] if isinstance(field_info, tuple) and len(field_info) > 1 else "string"
+
+            # 支持三种格式：字符串、元组、字典
+            if isinstance(field_info, str):
+                field_type = "string"
+            elif isinstance(field_info, tuple) and len(field_info) > 1:
+                field_type = field_info[1]
+            elif isinstance(field_info, dict):
+                field_type = field_info.get('type', 'string')
+            else:
+                field_type = "string"
 
             # 对于dandanplay的下划线命名字段,前端可能发送驼峰命名
             if providerName == 'dandanplay' and '_' in field_key:

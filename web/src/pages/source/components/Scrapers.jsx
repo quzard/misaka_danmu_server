@@ -976,15 +976,8 @@ export const Scrapers = () => {
                 label={label}
                 className="mb-4"
                 tooltip={tooltip}
-                rules={[
-                  {
-                    type: 'url',
-                    message: '请输入有效的 URL 地址',
-                  },
-                ]}
               >
                 <Input
-                  type="url"
                   placeholder={placeholder || 'https://example.com'}
                 />
               </Form.Item>
