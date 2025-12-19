@@ -148,21 +148,9 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
             raise ValueError(f"分集 {episodeId} 的 provider_episode_id 为空")
 
         scraper = manager.get_scraper(provider_name)
-        try:
-            await rate_limiter.check(provider_name)
-        except RuntimeError as e:
-            # 配置错误（如速率限制配置验证失败），直接失败
-            if "配置验证失败" in str(e):
-                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
-            # 其他 RuntimeError 也应该失败
-            raise
-        except RateLimitExceededError as e:
-            # 抛出暂停异常，让任务管理器处理
-            logger.warning(f"刷新分集任务因达到速率限制而暂停: {e}")
-            raise TaskPauseForRateLimit(
-                retry_after_seconds=e.retry_after_seconds,
-                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
-            )
+
+        # 移除这里的 check，让并发下载函数自己处理流控
+        # 这样避免重复 check 导致占用2个配额
 
         await progress_callback(30, "正在从源获取新弹幕...")
 

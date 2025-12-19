@@ -245,8 +245,7 @@ class TaskManager:
             task: Task = await self._fallback_queue.get()
             try:
                 self._current_fallback_task = task
-                # 执行前检查全局限制，避免频繁暂停
-                await self._wait_for_global_limit()
+                # 后备队列不消耗全局配额，所以不需要等待全局流控
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="fallback")
             except Exception as e:

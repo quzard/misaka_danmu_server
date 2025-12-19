@@ -531,8 +531,8 @@ async def _try_predownload_next_episode(
 
                     await progress_callback(30, f"正在下载弹幕: {episode_title}...")
 
-                    # 检查速率限制
-                    await rate_limiter.check(provider)
+                    # 预下载使用后备流控（不消耗全局配额）
+                    await rate_limiter.check_fallback("search", provider)
 
                     # 下载弹幕
                     comments = await scraper.get_comments(
@@ -544,7 +544,7 @@ async def _try_predownload_next_episode(
                         logger.warning(f"预下载: 第 {next_episode_index} 集没有弹幕")
                         raise TaskSuccess("未找到弹幕")
 
-                    await rate_limiter.increment(provider)
+                    await rate_limiter.increment_fallback("search", provider)
 
                     logger.info(f"预下载: 获取到 {len(comments)} 条弹幕")
 
