@@ -576,7 +576,8 @@ async def _try_predownload_next_episode(
                 predownload_task,
                 f"预下载弹幕: {anime.title} 第{next_episode_index}集",
                 unique_key=unique_key,
-                task_type="predownload"
+                task_type="predownload",
+                queue_type="fallback"  # 预下载使用后备队列
             )
             logger.info(f"✓ 预下载任务已提交: anime='{anime.title}', index={next_episode_index}, taskId={task_id}")
 
