@@ -783,11 +783,14 @@ async def load_resources_stream(
                     failed_downloads = []
                     versions_data = {}  # 用于保存版本信息
                     hashes_data = {}  # 用于保存哈希值
+                    checked_count = 0  # 实际检查的源数量
 
                     # 下载并替换文件
                     download_timeout = httpx.Timeout(3.0, read=15.0)
                     async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
                         for index, (scraper_name, scraper_info) in enumerate(resources.items(), 1):
+                            checked_count = index
+                            logger.info(f"正在检查源 [{index}/{total_count}]: {scraper_name}")
                             await asyncio.sleep(0)
 
                             # 发送心跳
@@ -920,6 +923,8 @@ async def load_resources_stream(
                                 failed_downloads.append(scraper_name)
                                 logger.error(f"\t下载 {scraper_name} 失败: {e}")
                                 yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+                    logger.info(f"循环检查完成，总共检查了 {checked_count}/{total_count} 个源，下载 {download_count} 个，跳过 {skip_count} 个")
 
                     # 保存版本信息和哈希值
                     if versions_data:
