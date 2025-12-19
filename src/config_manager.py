@@ -58,7 +58,7 @@ class ConfigManager:
         """从缓存中移除一个特定的键，以便下次获取时能从数据库重新加载。"""
         if key in self._cache:
             del self._cache[key]
-            self.logger.info(f"配置缓存已失效: '{key}'")
+            # 不再打印缓存失效日志，避免日志噪音
 
     def clear_cache(self):
         """清空内存中的配置缓存，以便下次获取时能从数据库重新加载。"""

@@ -249,7 +249,17 @@ async def search_anime_provider(
             all_results, (all_possible_aliases, supplemental_results) = await asyncio.gather(
                 main_task, supp_task
             )
-            timer.step_end(details=f"弹幕{len(all_results)}个+辅助{len(supplemental_results)}个")
+
+            # 收集单源搜索耗时信息
+            from ...search_timer import SubStepTiming
+            source_timing_sub_steps = [
+                SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
+                for name, dur, cnt in manager.last_search_timing
+            ]
+            timer.step_end(
+                details=f"弹幕{len(all_results)}个+辅助{len(supplemental_results)}个",
+                sub_steps=source_timing_sub_steps
+            )
 
             timer.step_start("别名验证与过滤")
             # 3. 验证每个别名与原始搜索词的相似度

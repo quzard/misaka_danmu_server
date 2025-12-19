@@ -188,7 +188,16 @@ async def update_scraper_config(
             # field_key 就是配置键,例如 "gamerCookie" 或 "dandanplay_app_id"
             # 获取字段类型信息 (label, type, tooltip)
             field_info = configurable_fields[field_key]
-            field_type = field_info[1] if isinstance(field_info, tuple) and len(field_info) > 1 else "string"
+
+            # 支持三种格式：字符串、元组、字典
+            if isinstance(field_info, str):
+                field_type = "string"
+            elif isinstance(field_info, tuple) and len(field_info) > 1:
+                field_type = field_info[1]
+            elif isinstance(field_info, dict):
+                field_type = field_info.get('type', 'string')
+            else:
+                field_type = "string"
 
             # 对于dandanplay的下划线命名字段,前端可能发送驼峰命名
             if providerName == 'dandanplay' and '_' in field_key:
@@ -200,18 +209,24 @@ async def update_scraper_config(
                     value = payload[camel_key]
                     # 布尔类型转换为字符串存储
                     if field_type == "boolean":
-                        value = str(value).lower()
+                        # 先转换为标准 boolean，再转为 'true'/'false' 字符串
+                        bool_value = bool(value) if not isinstance(value, str) else value.lower() in ('true', '1', 'yes', 'on')
+                        value = 'true' if bool_value else 'false'
                     await config_manager.setValue(field_key, value)
                 elif field_key in payload:
                     value = payload[field_key]
                     if field_type == "boolean":
-                        value = str(value).lower()
+                        # 先转换为标准 boolean，再转为 'true'/'false' 字符串
+                        bool_value = bool(value) if not isinstance(value, str) else value.lower() in ('true', '1', 'yes', 'on')
+                        value = 'true' if bool_value else 'false'
                     await config_manager.setValue(field_key, value)
             elif field_key in payload:
                 value = payload[field_key]
                 # 布尔类型转换为字符串存储
                 if field_type == "boolean":
-                    value = str(value).lower()
+                    # 先转换为标准 boolean，再转为 'true'/'false' 字符串
+                    bool_value = bool(value) if not isinstance(value, str) else value.lower() in ('true', '1', 'yes', 'on')
+                    value = 'true' if bool_value else 'false'
                 await config_manager.setValue(field_key, value)
 
         # 3. 处理分集黑名单字段(动态字段,每个源都有)
@@ -234,7 +249,7 @@ async def update_scraper_config(
             await config_manager.setValue(log_responses_key_db, str(value).lower())
 
         # 5. 重新加载该搜索源
-        manager.reload_scraper(providerName)
+        await manager.reload_scraper(providerName)
         logger.info(f"用户 '{current_user.username}' 更新了搜索源 '{providerName}' 的配置,已重新加载。")
         return
 
