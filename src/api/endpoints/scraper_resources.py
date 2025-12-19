@@ -732,14 +732,17 @@ async def load_resources_stream(
                     except httpx.TimeoutException as timeout_err:
                         logger.error(f"连接超时: {timeout_err}")
                         yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
                     except httpx.ConnectError as conn_err:
                         logger.error(f"连接失败: {conn_err}")
                         yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
                     except Exception as e:
                         logger.error(f"获取资源包信息异常: {e}", exc_info=True)
                         yield f"data: {json.dumps({'type': 'error', 'message': f'获取资源包信息失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
 
                     # 获取资源列表 (支持 resources 字段)
@@ -747,11 +750,12 @@ async def load_resources_stream(
                     if not resources:
                         logger.error("资源包中未找到弹幕源文件")
                         yield f"data: {json.dumps({'type': 'error', 'message': '资源包中未找到弹幕源文件'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
 
                     # 计算总数
                     total_count = len(resources)
-                    logger.info(f"发现 {total_count} 个弹幕源待下载")
+                    logger.info(f"检测到 {total_count} 个弹幕源，开始比对哈希值...")
                     yield f"data: {json.dumps({'type': 'total', 'total': total_count}, ensure_ascii=False)}\n\n"
 
                     # 保存 package.json 到本地 - 使用异步IO
@@ -768,12 +772,14 @@ async def load_resources_stream(
                     except Exception as backup_error:
                         logger.error(f"备份失败: {backup_error}")
                         yield f"data: {json.dumps({'type': 'error', 'message': f'备份失败: {str(backup_error)}'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
 
                     # 下载并替换文件
                     scrapers_dir = _get_scrapers_dir()
-                    download_count = 0
+                    download_count = 0  # 已完成下载的数量
                     skip_count = 0  # 跳过的文件数(哈希值相同)
+                    need_download_count = 0  # 需要下载的总数
                     failed_downloads = []
                     versions_data = {}  # 用于保存版本信息
                     hashes_data = {}  # 用于保存哈希值
@@ -846,15 +852,18 @@ async def load_resources_stream(
                                 if not should_download:
                                     continue
 
+                                # 需要下载，计数器加1
+                                need_download_count += 1
+
                                 # 推送下载进度
                                 progress = int((index / total_count) * 100)
                                 last_heartbeat = asyncio.get_event_loop().time()
-                                yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count, 'progress': progress}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': total_count, 'download_index': need_download_count, 'progress': progress}, ensure_ascii=False)}\n\n"
 
                                 # 下载文件 - 重试机制
                                 file_url = f"{base_url}/{file_path}"
                                 max_retries = 3
-                                logger.info(f"\t开始下载 {scraper_name} ({filename}) [{index}/{total_count}]")
+                                logger.info(f"\t开始下载 {scraper_name} ({filename}) [检查进度: {index}/{total_count}, 下载: 第{need_download_count}个]")
 
                                 for retry_count in range(max_retries + 1):
                                     try:
@@ -961,11 +970,16 @@ async def load_resources_stream(
                             logger.info("已还原备份")
                         except Exception as restore_error:
                             logger.error(f"还原备份失败: {restore_error}", exc_info=True)
+                        # 发送流结束信号
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
 
                     # 推送完成信息
                     logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
                     yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
+
+                    # 发送流结束信号
+                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
                     # 后台重载任务
                     async def reload_scrapers_background():
@@ -999,6 +1013,7 @@ async def load_resources_stream(
                 except Exception as e:
                     logger.error(f"加载资源失败: {e}", exc_info=True)
                     yield f"data: {json.dumps({'type': 'error', 'message': f'加载失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
             finally:
                 logger.info("下载任务结束，释放下载锁")
 
