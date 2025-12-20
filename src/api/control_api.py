@@ -1257,9 +1257,14 @@ async def refresh_episode(
     """提交一个后台任务，为单个分集重新从其源网站获取最新的弹幕。"""
     info = await crud.get_episode_for_refresh(session, episodeId)
     if not info: raise HTTPException(404, "分集未找到")
+
+    # 使用 unique_key 防止重复提交，也便于弹幕获取时检测刷新状态
+    unique_key = f"refresh-episode-{episodeId}"
+
     task_id, _ = await task_manager.submit_task(
         lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb, config_manager),
-        f"外部API刷新分集: {info['title']}"
+        f"外部API刷新分集: {info['title']}",
+        unique_key=unique_key
     )
     return {"message": "刷新分集任务已提交", "taskId": task_id}
 

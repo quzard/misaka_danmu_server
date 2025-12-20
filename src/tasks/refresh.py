@@ -148,21 +148,9 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
             raise ValueError(f"分集 {episodeId} 的 provider_episode_id 为空")
 
         scraper = manager.get_scraper(provider_name)
-        try:
-            await rate_limiter.check(provider_name)
-        except RuntimeError as e:
-            # 配置错误（如速率限制配置验证失败），直接失败
-            if "配置验证失败" in str(e):
-                raise TaskSuccess(f"配置错误，任务已终止: {str(e)}")
-            # 其他 RuntimeError 也应该失败
-            raise
-        except RateLimitExceededError as e:
-            # 抛出暂停异常，让任务管理器处理
-            logger.warning(f"刷新分集任务因达到速率限制而暂停: {e}")
-            raise TaskPauseForRateLimit(
-                retry_after_seconds=e.retry_after_seconds,
-                message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
-            )
+
+        # 移除这里的 check，让并发下载函数自己处理流控
+        # 这样避免重复 check 导致占用2个配额
 
         await progress_callback(30, "正在从源获取新弹幕...")
 
@@ -198,7 +186,6 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
             await crud.update_episode_fetch_time(session, episodeId)
             raise TaskSuccess("未找到任何弹幕。")
 
-        await rate_limiter.increment(provider_name)
 
         await progress_callback(96, f"正在写入 {len(all_comments_from_source)} 条新弹幕...")
 
@@ -261,6 +248,9 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
     try:
         _download_episode_comments_concurrent = _get_download_concurrent()
 
+        # 维护受限源的集合（单源配额满时记录）
+        rate_limited_providers = set()
+
         for i, episode_id in enumerate(episodeIds):
             progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
             await progress_callback(progress, f"正在刷新分集 {i+1}/{total} (ID: {episode_id})...")
@@ -279,6 +269,12 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                 provider_episode_id = info["providerEpisodeId"]
                 episode_index = info.get("episodeIndex", episode_id)
 
+                # 检查该源是否已被标记为受限
+                if provider_name in rate_limited_providers:
+                    logger.info(f"源 '{provider_name}' 配额已满，跳过分集 {episode_id} (第{episode_index}集)")
+                    failed_episodes.append((episode_index, episode_id))
+                    continue
+
                 scraper = manager.get_scraper(provider_name)
 
                 # 2. 检查流控
@@ -295,13 +291,21 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                     failed_episodes.append((episode_index, episode_id))
                     continue
                 except RateLimitExceededError as e:
-                    # 达到流控限制，抛出暂停异常让任务管理器处理
-                    # 这样可以释放 worker 去处理其他源的任务，而不是阻塞等待
-                    logger.warning(f"批量刷新遇到速率限制: {e}")
-                    raise TaskPauseForRateLimit(
-                        retry_after_seconds=e.retry_after_seconds,
-                        message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
-                    )
+                    # 判断是全局配额满还是单源配额满
+                    error_msg = str(e)
+                    if "全局速率限制" in error_msg or "__global__" in error_msg:
+                        # 全局配额满，暂停整个任务
+                        logger.warning(f"批量刷新遇到全局速率限制: {e}")
+                        raise TaskPauseForRateLimit(
+                            retry_after_seconds=e.retry_after_seconds,
+                            message=f"全局速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+                        )
+                    else:
+                        # 单源配额满，标记该源并跳过当前分集
+                        rate_limited_providers.add(provider_name)
+                        logger.warning(f"源 '{provider_name}' 配额已满，跳过分集 {episode_id} (第{episode_index}集): {e}")
+                        failed_episodes.append((episode_index, episode_id))
+                        continue
 
                 # 3. 下载弹幕
                 from ..models import ProviderEpisodeInfo

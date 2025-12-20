@@ -46,8 +46,55 @@ from .danmaku_color import (
     parse_palette,
 )
 from .danmaku_filter import apply_blacklist_filter
+from .play_history import record_play_history
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== 刷新任务等待功能 ====================
+
+async def _wait_for_refresh_task(
+    episode_id: int,
+    task_manager: TaskManager,
+    max_wait_seconds: float = 15.0
+) -> bool:
+    """
+    等待指定分集的刷新任务完成
+
+    Args:
+        episode_id: 分集 ID
+        task_manager: 任务管理器
+        max_wait_seconds: 最大等待时间（秒）
+
+    Returns:
+        True 如果任务在等待期间完成，False 如果超时或无任务
+    """
+    unique_key = f"refresh-episode-{episode_id}"
+
+    # 检查是否有刷新任务正在执行
+    async with task_manager._lock:
+        if unique_key not in task_manager._active_unique_keys:
+            # 没有刷新任务
+            return False
+        logger.info(f"检测到分集 {episode_id} 正在刷新，等待最多 {max_wait_seconds} 秒")
+
+    # 等待任务完成
+    start_time = time.time()
+    check_interval = 0.5  # 每0.5秒检查一次
+
+    while time.time() - start_time < max_wait_seconds:
+        await asyncio.sleep(check_interval)
+
+        # 检查任务是否完成
+        async with task_manager._lock:
+            if unique_key not in task_manager._active_unique_keys:
+                elapsed = time.time() - start_time
+                logger.info(f"分集 {episode_id} 刷新任务在 {elapsed:.2f} 秒内完成")
+                return True
+
+    # 超时
+    logger.warning(f"分集 {episode_id} 刷新任务等待超时（{max_wait_seconds}秒）")
+    return False
 
 # --- Module-level Constants for Type Mappings and Parsing ---
 # To avoid repetition and improve maintainability.
@@ -531,8 +578,8 @@ async def _try_predownload_next_episode(
 
                     await progress_callback(30, f"正在下载弹幕: {episode_title}...")
 
-                    # 检查速率限制
-                    await rate_limiter.check(provider)
+                    # 预下载使用后备流控（不消耗全局配额）
+                    await rate_limiter.check_fallback("search", provider)
 
                     # 下载弹幕
                     comments = await scraper.get_comments(
@@ -544,7 +591,7 @@ async def _try_predownload_next_episode(
                         logger.warning(f"预下载: 第 {next_episode_index} 集没有弹幕")
                         raise TaskSuccess("未找到弹幕")
 
-                    await rate_limiter.increment(provider)
+                    await rate_limiter.increment_fallback("search", provider)
 
                     logger.info(f"预下载: 获取到 {len(comments)} 条弹幕")
 
@@ -576,7 +623,8 @@ async def _try_predownload_next_episode(
                 predownload_task,
                 f"预下载弹幕: {anime.title} 第{next_episode_index}集",
                 unique_key=unique_key,
-                task_type="predownload"
+                task_type="predownload",
+                queue_type="fallback"  # 预下载使用后备队列
             )
             logger.info(f"✓ 预下载任务已提交: anime='{anime.title}', index={next_episode_index}, taskId={task_id}")
 
@@ -2957,6 +3005,9 @@ async def get_comments_for_dandan(
 
     predownload_task.add_done_callback(handle_predownload_exception)
 
+    # 检查是否有刷新任务正在执行，如果有则等待（最多15秒）
+    await _wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=15.0)
+
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
@@ -3742,6 +3793,12 @@ async def get_comments_for_dandan(
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
+
+    # 记录播放历史（用于 @SXDM 指令）
+    try:
+        await record_play_history(session, token, episodeId)
+    except Exception as e:
+        logger.error(f"记录播放历史失败: episodeId={episodeId}, error={e}", exc_info=True)
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)

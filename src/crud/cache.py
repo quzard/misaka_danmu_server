@@ -20,15 +20,34 @@ logger = logging.getLogger(__name__)
 
 
 async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
-    stmt = select(CacheData.cacheValue).where(CacheData.cacheKey == key, CacheData.expiresAt > func.now())
-    result = await session.execute(stmt)
-    value = result.scalar_one_or_none()
-    if value:
+    # 先查询缓存记录（包括已过期的）以便调试
+    debug_stmt = select(CacheData.cacheValue, CacheData.expiresAt).where(CacheData.cacheKey == key)
+    debug_result = await session.execute(debug_stmt)
+    debug_row = debug_result.first()
+
+    if debug_row:
+        value, expires_at = debug_row
+        current_time = get_now()
+        is_expired = expires_at <= current_time
+        logger.debug(
+            f"缓存查询: key={key}, "
+            f"expires_at={expires_at}, "
+            f"current_time={current_time}, "
+            f"is_expired={is_expired}"
+        )
+
+        if is_expired:
+            logger.debug(f"缓存已过期: key={key}")
+            return None
+
         try:
             return json.loads(value)
         except json.JSONDecodeError:
+            logger.warning(f"缓存值JSON解析失败: key={key}, value={value[:100] if value else None}")
             return None
-    return None
+    else:
+        logger.debug(f"缓存不存在: key={key}")
+        return None
 
 
 async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: int, provider: Optional[str] = None):

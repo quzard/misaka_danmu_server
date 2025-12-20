@@ -71,6 +71,10 @@ class TaskManager:
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
+        # 受限源集合：记录因配额满而暂停的源
+        # {provider_name: expire_time} - expire_time 用于自动清除过期的受限记录
+        self._rate_limited_providers: Dict[str, float] = {}
+
         # 任务恢复所需的依赖，通过 set_recovery_dependencies 方法注入
         self._recovery_dependencies: Optional[Dict[str, Any]] = None
 
@@ -140,6 +144,19 @@ class TaskManager:
         except TaskPauseForRateLimit as e:
             # 任务因速率限制需要暂停
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {e.retry_after_seconds:.0f} 秒")
+
+            # 尝试从任务参数中提取源名称，记录受限源
+            provider_name = None
+            if task.task_parameters:
+                provider_name = task.task_parameters.get("provider") or task.task_parameters.get("providerName")
+
+            if provider_name:
+                # 记录受限源及其过期时间
+                expire_time = time.time() + e.retry_after_seconds
+                async with self._lock:
+                    self._rate_limited_providers[provider_name] = expire_time
+                self.logger.info(f"源 '{provider_name}' 已标记为受限，将在 {e.retry_after_seconds:.0f} 秒后自动清除")
+
             async with self._session_factory() as final_session:
                 await crud.update_task_progress_in_history(
                     final_session, task.task_id, TaskStatus.PAUSED,
@@ -207,12 +224,52 @@ class TaskManager:
 
         self.logger.info("任务管理器已停止。")
 
+    async def _check_task_provider_limited(self, task: Task) -> tuple[bool, float]:
+        """检查任务使用的源是否受限
+
+        Returns:
+            (is_limited, retry_after):
+                - is_limited: True 表示源受限，任务应该被暂停跳过
+                - retry_after: 需要等待的秒数
+        """
+        if not task.task_parameters:
+            return False, 0.0  # 没有参数，无法判断，允许执行
+
+        provider_name = task.task_parameters.get("provider") or task.task_parameters.get("providerName")
+        if not provider_name:
+            return False, 0.0  # 没有源信息，允许执行
+
+        current_time = time.time()
+        async with self._lock:
+            # 清理过期的受限记录
+            expired_providers = [p for p, expire_time in self._rate_limited_providers.items() if expire_time <= current_time]
+            for p in expired_providers:
+                del self._rate_limited_providers[p]
+
+            # 检查该源是否受限
+            if provider_name in self._rate_limited_providers:
+                expire_time = self._rate_limited_providers[provider_name]
+                retry_after = expire_time - current_time
+                if retry_after > 0:
+                    self.logger.info(f"任务 '{task.title}' 使用的源 '{provider_name}' 当前受限，暂停任务 {retry_after:.0f} 秒")
+                    return True, retry_after
+
+        return False, 0.0
+
     async def _download_worker(self):
         """从下载队列中获取并执行任务。"""
         while True:
             task: Task = await self._download_queue.get()
             try:
                 self._current_download_task = task
+
+                # 检查任务使用的源是否受限
+                is_limited, retry_after = await self._check_task_provider_limited(task)
+                if is_limited:
+                    # 源受限，暂停任务并继续处理下一个
+                    await self.pause_task_for_rate_limit(task, retry_after)
+                    continue  # 跳过该任务，处理下一个
+
                 # 执行前检查全局限制，避免频繁暂停
                 await self._wait_for_global_limit()
                 # The wrapper now handles removing the title from the pending set.
@@ -230,6 +287,14 @@ class TaskManager:
             task: Task = await self._management_queue.get()
             try:
                 self._current_management_task = task
+
+                # 检查任务使用的源是否受限（管理任务通常不涉及单源限制，但保持一致性）
+                is_limited, retry_after = await self._check_task_provider_limited(task)
+                if is_limited:
+                    # 源受限，暂停任务并继续处理下一个
+                    await self.pause_task_for_rate_limit(task, retry_after)
+                    continue  # 跳过该任务，处理下一个
+
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="management")
             except Exception as e:
@@ -245,8 +310,15 @@ class TaskManager:
             task: Task = await self._fallback_queue.get()
             try:
                 self._current_fallback_task = task
-                # 执行前检查全局限制，避免频繁暂停
-                await self._wait_for_global_limit()
+
+                # 检查任务使用的源是否受限
+                is_limited, retry_after = await self._check_task_provider_limited(task)
+                if is_limited:
+                    # 源受限，暂停任务并继续处理下一个
+                    await self.pause_task_for_rate_limit(task, retry_after)
+                    continue  # 跳过该任务，处理下一个
+
+                # 后备队列不消耗全局配额，所以不需要等待全局流控
                 # The wrapper now handles removing the title from the pending set.
                 await self._run_task_wrapper(task, queue_type="fallback")
             except Exception as e:
