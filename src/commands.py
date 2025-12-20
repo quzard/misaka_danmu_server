@@ -446,12 +446,12 @@ class RefreshDanmakuCommand(CommandHandler):
 
         anime_id = selected_anime["animeId"]
 
-        # 查询分集列表（通过 AnimeSource 关联）
+        # 查询分集列表（通过 AnimeSource 关联，按集数排序）
         stmt = (
             select(Episode)
             .join(AnimeSource, Episode.sourceId == AnimeSource.id)
             .where(AnimeSource.animeId == anime_id)
-            .order_by(Episode.id)
+            .order_by(Episode.episodeIndex)
         )
         result = await session.execute(stmt)
         episodes = result.scalars().all()
@@ -496,12 +496,15 @@ class RefreshDanmakuCommand(CommandHandler):
         ]
 
         # 第二条开始：每个分集（限制显示前50集）
+        # 提取标签字母（#A -> A）
+        label_prefix = selected_anime['label'][1:]  # 去掉 # 号
+
         for ep in episode_list[:50]:
             anime_items.append(
                 DandanSearchAnimeItem(
                     animeId=ep["episodeId"],
                     bangumiId=str(ep["episodeId"]),
-                    animeTitle=f"[{ep['index']}] {ep['episodeTitle']}",
+                    animeTitle=f"[{label_prefix}{ep['index']}] {ep['episodeTitle']}",
                     type="tvseries",
                     typeDescription=f"{ep['status']} | 弹幕数: {ep['commentCount']} 条",
                     imageUrl=image_url,
@@ -584,12 +587,12 @@ class RefreshDanmakuCommand(CommandHandler):
         anime_id = selected_anime["animeId"]
         anime_title = selected_anime["animeTitle"]
 
-        # 查询该番剧的所有分集
+        # 查询该番剧的所有分集（按集数排序）
         stmt = (
             select(Episode)
             .join(AnimeSource, Episode.sourceId == AnimeSource.id)
             .where(AnimeSource.animeId == anime_id)
-            .order_by(Episode.id)
+            .order_by(Episode.episodeIndex)
         )
         result = await session.execute(stmt)
         episodes = result.scalars().all()
