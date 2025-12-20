@@ -124,6 +124,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
     logger.info("🔢 步骤 2/3: 转换数值字段 BIGINT → INTEGER")
 
     # 注意: 只包含原本为 Integer 的字段,不包括主键等 BigInteger 字段
+    # 注意: media_servers.id 有外键约束，已从列表中移除
     INTEGER_FIELDS = {
         'anime': ['season', 'episode_count', 'year'],
         'anime_sources': ['source_order', 'incremental_refresh_failures'],
@@ -141,7 +142,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'external_api_logs': ['status_code'],
         'rate_limit_state': ['request_count'],
         'title_recognition': ['id'],
-        'media_servers': ['id'],
+        # 'media_servers': ['id'],  # 被外键 media_items_ibfk_1 引用，跳过
         'media_items': ['season', 'episode', 'year'],
         'local_danmaku_items': ['season', 'episode', 'year'],
     }
@@ -165,9 +166,10 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
     logger.info("📝 步骤 3/3: 转换字符串字段 TEXT/LONGTEXT → VARCHAR")
 
     # VARCHAR 字段映射 {表名: {字段名: 长度}} - 最低 500
+    # 注意: anime_sources.media_id 在复合唯一索引中，使用 255 避免超过 3072 字节限制
     VARCHAR_FIELDS = {
         'anime': {'title': 500, 'image_url': 512, 'local_image_path': 512},
-        'anime_sources': {'provider_name': 500, 'media_id': 500},
+        'anime_sources': {'provider_name': 500, 'media_id': 255},
         'episode': {'title': 500, 'provider_episode_id': 500, 'danmaku_file_path': 1024},
         'users': {'username': 500, 'hashed_password': 500},
         'user_sessions': {'jti': 500, 'ip_address': 500, 'user_agent': 500},

@@ -61,7 +61,7 @@ class AnimeSource(Base):
     animeId: Mapped[int] = mapped_column("anime_id", ForeignKey("anime.id", ondelete="CASCADE"))
     sourceOrder: Mapped[int] = mapped_column("source_order", Integer)
     providerName: Mapped[str] = mapped_column("provider_name", String(500))
-    mediaId: Mapped[str] = mapped_column("media_id", String(500))
+    mediaId: Mapped[str] = mapped_column("media_id", String(255))  # 255 以避免复合索引超过 3072 字节
     isFavorited: Mapped[bool] = mapped_column("is_favorited", Boolean, default=False)
     incrementalRefreshEnabled: Mapped[bool] = mapped_column("incremental_refresh_enabled", Boolean, default=False)
     incrementalRefreshFailures: Mapped[int] = mapped_column("incremental_refresh_failures", Integer, default=0)
@@ -329,7 +329,7 @@ class MediaServer(Base):
     """媒体服务器配置表"""
     __tablename__ = "media_servers"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)  # BigInteger 以匹配数据库和外键
     name: Mapped[str] = mapped_column(String(500))
     providerName: Mapped[str] = mapped_column("provider_name", String(500))  # emby, jellyfin, plex
     url: Mapped[str] = mapped_column(String(512))
@@ -348,7 +348,7 @@ class MediaItem(Base):
     __tablename__ = "media_items"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    serverId: Mapped[int] = mapped_column("server_id", ForeignKey("media_servers.id", ondelete="CASCADE"))
+    serverId: Mapped[int] = mapped_column("server_id", BigInteger, ForeignKey("media_servers.id", ondelete="CASCADE"))
     mediaId: Mapped[str] = mapped_column("media_id", String(500))  # 媒体服务器中的ID
     libraryId: Mapped[Optional[str]] = mapped_column("library_id", String(500))  # 所属媒体库ID
     title: Mapped[str] = mapped_column(String(500))
