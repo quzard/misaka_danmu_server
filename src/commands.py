@@ -329,6 +329,11 @@ class RefreshDanmakuCommand(CommandHandler):
             result = await session.execute(stmt)
             total_episodes = result.scalar() or 0
 
+            logger.info(
+                f"@SXDM 查询番剧集数: animeId={anime_id}, "
+                f"title={record['animeTitle']}, total_episodes={total_episodes}"
+            )
+
             anime_list.append({
                 "label": self.ANIME_LABELS[idx],
                 "animeId": anime_id,
@@ -336,16 +341,7 @@ class RefreshDanmakuCommand(CommandHandler):
                 "totalEpisodes": total_episodes
             })
 
-        # 构建返回消息
-        lines = ["📺 最近播放的番剧 (10分钟内):"]
-        lines.append("=" * 30)
-        for anime in anime_list:
-            lines.append(f"[{anime['label']}] {anime['animeTitle']} ({anime['totalEpisodes']}集)")
-        lines.append("=" * 30)
-        lines.append("💡 输入 @SXDM {标签} 查看分集")
-        lines.append("例如: @SXDM #A")
-
-        message = "\n".join(lines)
+        logger.info(f"@SXDM 构建番剧列表完成: anime_list={anime_list}")
 
         # 保存会话状态
         session_state = {
@@ -359,21 +355,30 @@ class RefreshDanmakuCommand(CommandHandler):
         # 记录执行时间
         await self.record_execution(token, session)
 
-        return DandanSearchAnimeResponse(animes=[
-            DandanSearchAnimeItem(
-                animeId=999999997,
-                bangumiId="999999997",
-                animeTitle="📺 最近播放列表",
-                type="other",
-                typeDescription=message,
-                imageUrl=image_url,
-                startDate="2025-01-01T00:00:00+08:00",
-                year=2025,
-                episodeCount=len(anime_list),
-                rating=0.0,
-                isFavorited=False
+        # 为每部番剧返回一个独立的 item
+        anime_items = []
+        for anime in anime_list:
+            anime_items.append(
+                DandanSearchAnimeItem(
+                    animeId=anime["animeId"],
+                    bangumiId=str(anime["animeId"]),
+                    animeTitle=f"{anime['label']} {anime['animeTitle']}",
+                    type="tvseries",
+                    typeDescription=f"📺 最近播放 | 共 {anime['totalEpisodes']} 集\n💡 输入 @SXDM {anime['label']} 查看分集列表",
+                    imageUrl=image_url,
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=anime["totalEpisodes"],
+                    rating=0.0,
+                    isFavorited=False
+                )
             )
-        ])
+
+        response = DandanSearchAnimeResponse(animes=anime_items)
+
+        logger.info(f"@SXDM 返回响应: 返回 {len(anime_items)} 部番剧")
+
+        return response
 
     async def _show_episode_list(
         self,
