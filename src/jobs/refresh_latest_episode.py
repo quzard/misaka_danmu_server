@@ -12,7 +12,7 @@ from .. import crud, orm_models
 from .base import BaseJob
 from ..task_manager import TaskSuccess
 from ..tasks import refresh_episode_task
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str
 
 
 class RefreshLatestEpisodeJob(BaseJob):
@@ -106,7 +106,7 @@ class RefreshLatestEpisodeJob(BaseJob):
                     await session.execute(
                         update(orm_models.AnimeSource)
                         .where(orm_models.AnimeSource.id == source_id)
-                        .values(lastRefreshLatestEpisodeAt=get_now())
+                        .values(lastRefreshLatestEpisodeAt=get_now_str())
                     )
                     await session.commit()
                     

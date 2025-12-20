@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import ApiToken, TokenAccessLog, UaRule
 from .. import models, orm_models
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str, datetime_to_str, str_to_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +47,17 @@ async def create_api_token(session: AsyncSession, name: str, token: str, validit
     existing_token = await session.execute(select(ApiToken).where(ApiToken.name == name))
     if existing_token.scalar_one_or_none():
         raise ValueError(f"名称为 '{name}' 的Token已存在。")
-    
+
     expires_at = None
     if validityPeriod != "permanent":
         days = int(validityPeriod.replace('d', '')) # type: ignore
-        # 修正：确保写入数据库的时间是 naive 的
-        expires_at = get_now() + timedelta(days=days)
+        # 计算过期时间并转换为字符串
+        expires_dt = get_now() + timedelta(days=days)
+        expires_at = datetime_to_str(expires_dt)
     new_token = ApiToken(
-        name=name, token=token, 
-        expiresAt=expires_at, 
-        createdAt=get_now(),
+        name=name, token=token,
+        expiresAt=expires_at,
+        createdAt=get_now_str(),
         dailyCallLimit=daily_call_limit
     )
     session.add(new_token)
@@ -85,7 +86,8 @@ async def update_api_token(
         else:
             try:
                 days = int(validity_period.replace('d', ''))
-                token.expiresAt = get_now() + timedelta(days=days)
+                expires_dt = get_now() + timedelta(days=days)
+                token.expiresAt = datetime_to_str(expires_dt)
             except (ValueError, TypeError):
                 logger.warning(f"更新Token时收到无效的有效期格式: '{validity_period}'")
 
@@ -128,19 +130,22 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     token_info = result.scalar_one_or_none()
     if not token_info:
         return None
-    # 随着 orm_models.py 和 database.py 的修复，SQLAlchemy 现在应返回时区感知的 UTC 日期时间。
+    # 检查是否过期（字符串时间可以直接比较）
     if token_info.expiresAt:
-        if token_info.expiresAt < get_now(): # Compare naive datetimes
+        if token_info.expiresAt < get_now_str():
             return None # Token 已过期
-    
-    # --- 新增：每日调用限制检查 ---
-    now = get_now()
+
+    # --- 每日调用限制检查 ---
+    now_str = get_now_str()
     current_count = token_info.dailyCallCount
-    
+
     # 如果有上次调用记录，且不是今天，则视为计数为0
-    if token_info.lastCallAt and token_info.lastCallAt.date() < now.date():
-        current_count = 0
-        
+    if token_info.lastCallAt:
+        last_call_dt = str_to_datetime(token_info.lastCallAt)
+        now_dt = str_to_datetime(now_str)
+        if last_call_dt and now_dt and last_call_dt.date() < now_dt.date():
+            current_count = 0
+
     if token_info.dailyCallLimit != -1 and current_count >= token_info.dailyCallLimit:
         return None # Token 已达到每日调用上限
 
@@ -157,7 +162,7 @@ async def increment_token_call_count(session: AsyncSession, token_id: int):
     # 重置逻辑已移至 validate_api_token 中，以避免竞争条件。
     token.dailyCallCount += 1
     # 总是更新最后调用时间
-    token.lastCallAt = get_now()
+    token.lastCallAt = get_now_str()
     # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
 
 

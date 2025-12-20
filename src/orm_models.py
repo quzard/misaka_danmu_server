@@ -6,7 +6,6 @@ from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, Index,
     String, TypeDecorator, UniqueConstraint, DECIMAL, func
 )
-from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.dialects.postgresql import TEXT as PG_TEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from .timezone import get_now
@@ -38,18 +37,23 @@ class NaiveDateTime(TypeDecorator):
 
 class TextTime(TypeDecorator):
     """
-    时间存储为文本类型 - MySQL: LONGTEXT, PostgreSQL: TEXT
+    时间存储为文本类型 - MySQL: VARCHAR(50), PostgreSQL: TEXT
     格式: YYYY-MM-DD HH:MM:SS (不包含微秒)
 
     用途：数据库迁移后，所有时间字段使用此类型。
+
+    注意：MySQL 使用 VARCHAR(50) 而非 LONGTEXT，原因：
+    - 部分时间字段有索引（如 expires_at, created_at）
+    - MySQL 不允许 LONGTEXT 字段有索引
+    - VARCHAR(50) 足够存储时间字符串，同时支持索引
     """
-    impl = String
+    impl = String(50)  # 默认长度 50
     cache_ok = True
 
     def load_dialect_impl(self, dialect):
         """根据数据库类型返回对应的文本类型"""
         if dialect.name == 'mysql':
-            return dialect.type_descriptor(LONGTEXT)
+            return dialect.type_descriptor(String(50))  # VARCHAR(50)
         else:  # PostgreSQL
             return dialect.type_descriptor(PG_TEXT)
 
@@ -77,17 +81,22 @@ class TextTime(TypeDecorator):
 
 class LongText(TypeDecorator):
     """
-    长文本类型 - MySQL: LONGTEXT, PostgreSQL: TEXT
+    长文本类型 - MySQL: VARCHAR(500), PostgreSQL: TEXT
 
     用途：数据库迁移后，所有字符串字段使用此类型。
+
+    注意：MySQL 使用 VARCHAR(500) 而非 LONGTEXT，原因：
+    - 部分字段有索引（主键、唯一键、外键、普通索引）
+    - MySQL 不允许 LONGTEXT 字段有索引
+    - VARCHAR(500) 足够大，同时支持索引
     """
-    impl = String
+    impl = String(500)  # 默认长度 500
     cache_ok = True
 
     def load_dialect_impl(self, dialect):
         """根据数据库类型返回对应的文本类型"""
         if dialect.name == 'mysql':
-            return dialect.type_descriptor(LONGTEXT)
+            return dialect.type_descriptor(String(500))  # VARCHAR(500)
         else:  # PostgreSQL
             return dialect.type_descriptor(PG_TEXT)
 

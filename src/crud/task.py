@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, or_, String
 
 from ..orm_models import ScheduledTask, TaskHistory, WebhookTask, TaskStateCache
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str, datetime_to_str
 from .. import orm_models
 
 logger = logging.getLogger(__name__)
@@ -507,16 +507,20 @@ async def create_webhook_task(
     delay: timedelta
 ):
     """创建一个新的待处理 Webhook 任务"""
-    now = get_now()
-    execute_time = now + delay if is_delayed else now
+    now_dt = get_now()
+    execute_dt = now_dt + delay if is_delayed else now_dt
+
+    # 转换为字符串
+    now_str = datetime_to_str(now_dt)
+    execute_str = datetime_to_str(execute_dt)
 
     try:
         # 将payload字典序列化为JSON字符串
         payload_json = json.dumps(payload, ensure_ascii=False)
 
         new_task = WebhookTask(
-            receptionTime=now,
-            executeTime=execute_time,
+            receptionTime=now_str,
+            executeTime=execute_str,
             taskTitle=task_title,
             uniqueKey=unique_key,
             payload=payload_json,

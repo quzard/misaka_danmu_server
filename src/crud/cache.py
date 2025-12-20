@@ -14,13 +14,14 @@ from datetime import datetime, timedelta
 
 from ..orm_models import CacheData
 from .. import models, orm_models
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str, datetime_to_str
 
 logger = logging.getLogger(__name__)
 
 
 async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
-    stmt = select(CacheData.cacheValue).where(CacheData.cacheKey == key, CacheData.expiresAt > func.now())
+    now_str = get_now_str()
+    stmt = select(CacheData.cacheValue).where(CacheData.cacheKey == key, CacheData.expiresAt > now_str)
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
     if value:
@@ -33,7 +34,8 @@ async def get_cache(session: AsyncSession, key: str) -> Optional[Any]:
 
 async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: int, provider: Optional[str] = None):
     json_value = json.dumps(value, ensure_ascii=False)
-    expires_at = get_now() + timedelta(seconds=ttl_seconds)
+    expires_dt = get_now() + timedelta(seconds=ttl_seconds)
+    expires_at = datetime_to_str(expires_dt)
 
     dialect = session.bind.dialect.name
     values_to_insert = {"cacheProvider": provider, "cacheKey": key, "cacheValue": json_value, "expiresAt": expires_at}
@@ -60,7 +62,8 @@ async def set_cache(session: AsyncSession, key: str, value: Any, ttl_seconds: in
 
 
 async def clear_expired_cache(session: AsyncSession):
-    await session.execute(delete(CacheData).where(CacheData.expiresAt <= get_now()))
+    now_str = get_now_str()
+    await session.execute(delete(CacheData).where(CacheData.expiresAt <= now_str))
     await session.commit()
 
 
@@ -80,9 +83,10 @@ async def get_cache_keys_by_pattern(session: AsyncSession, pattern: str) -> List
     """根据模式获取缓存键列表"""
     # 将通配符*转换为SQL的%
     sql_pattern = pattern.replace('*', '%')
+    now_str = get_now_str()
     stmt = select(CacheData.cacheKey).where(
         CacheData.cacheKey.like(sql_pattern),
-        CacheData.expiresAt > func.now()
+        CacheData.expiresAt > now_str
     )
     result = await session.execute(stmt)
     return [row[0] for row in result.fetchall()]

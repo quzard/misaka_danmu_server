@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, Episode, TitleRecognition, OauthState, TaskHistory, TaskStateCache, WebhookTask, ScheduledTask
 from .. import models, orm_models
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str
 from .task import clear_task_state_cache
 
 logger = logging.getLogger(__name__)
@@ -114,10 +114,11 @@ async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, A
 
 
 async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
+    now_str = get_now_str()
     stmt = (
         update(TaskHistory)
         .where(TaskHistory.status.in_(['运行中', '已暂停']))
-        .values(status='失败', description='因程序重启而中断', finishedAt=get_now(), updatedAt=get_now()) # finishedAt and updatedAt are explicitly set here
+        .values(status='失败', description='因程序重启而中断', finishedAt=now_str, updatedAt=now_str) # finishedAt and updatedAt are explicitly set here
     )
     result = await session.execute(stmt)
     await session.commit()
@@ -128,8 +129,8 @@ async def mark_interrupted_tasks_as_failed(session: AsyncSession) -> int:
 
 async def get_due_webhook_tasks(session: AsyncSession) -> List[WebhookTask]:
     """获取所有已到执行时间的待处理任务。"""
-    now = get_now()
-    stmt = select(WebhookTask).where(WebhookTask.status == "pending", WebhookTask.executeTime <= now)
+    now_str = get_now_str()
+    stmt = select(WebhookTask).where(WebhookTask.status == "pending", WebhookTask.executeTime <= now_str)
     result = await session.execute(stmt)
     return result.scalars().all()
 

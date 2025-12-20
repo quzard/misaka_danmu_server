@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, AnimeAlias
 from .. import models, orm_models
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str
 from ..danmaku_parser import parse_dandan_xml_to_comments
 from .source import check_source_exists_by_media_id, get_anime_id_by_source_media_id, _assign_source_order_if_missing
 
@@ -408,14 +408,14 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
 
 
 async def update_episode_fetch_time(session: AsyncSession, episode_id: int):
-    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now()))
+    await session.execute(update(Episode).where(Episode.id == episode_id).values(fetchedAt=get_now_str()))
     await session.commit()
 
 
 async def update_episode_danmaku_info(session: AsyncSession, episode_id: int, file_path: str, count: int):
     """更新分集的弹幕文件路径和弹幕数量。"""
     stmt = update(Episode).where(Episode.id == episode_id).values(
-        danmakuFilePath=file_path, commentCount=count, fetchedAt=get_now()
+        danmakuFilePath=file_path, commentCount=count, fetchedAt=get_now_str()
     )
     await session.execute(stmt) # type: ignore
     await session.flush()

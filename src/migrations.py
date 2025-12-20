@@ -177,17 +177,19 @@ async def _migrate_to_text_and_bigint_v1(conn: AsyncConnection, db_type: str):
 
     # ========== Step 2: 修改时间字段类型 ==========
     logger.info("🕐 修改时间字段类型...")
-    text_type = 'LONGTEXT' if db_type == 'mysql' else 'TEXT'
+    # 修正：MySQL 使用 VARCHAR(50)，PostgreSQL 使用 TEXT
+    # 原因：MySQL 不允许 LONGTEXT 字段有索引，而许多时间字段有索引
+    time_type = 'VARCHAR(50)' if db_type == 'mysql' else 'TEXT'
 
     for table, fields in TIMESTAMP_FIELDS.items():
         for field in fields:
             try:
                 if db_type == 'mysql':
-                    sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{field}` {text_type}")
+                    sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{field}` {time_type}")
                 else:  # postgresql
-                    sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{field}" TYPE {text_type} USING {field}::text')
+                    sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{field}" TYPE {time_type} USING {field}::text')
                 await conn.execute(sql)
-                logger.info(f"  ✅ {table}.{field} → {text_type}")
+                logger.info(f"  ✅ {table}.{field} → {time_type}")
                 migrated_count['timestamp'] += 1
             except Exception as e:
                 logger.warning(f"  ⚠️  {table}.{field} 迁移失败: {e}")
@@ -213,16 +215,20 @@ async def _migrate_to_text_and_bigint_v1(conn: AsyncConnection, db_type: str):
 
     # ========== Step 4: 修改字符串字段类型 ==========
     logger.info("📝 修改字符串字段类型...")
+    # 修正：MySQL 使用 VARCHAR(500)，PostgreSQL 使用 TEXT
+    # 原因：MySQL 不允许 LONGTEXT 字段有索引（主键/唯一键/外键）
+    # VARCHAR(500) 足够大，同时支持索引
+    string_type = 'VARCHAR(500)' if db_type == 'mysql' else 'TEXT'
 
     for table, fields in STRING_FIELDS.items():
         for field in fields:
             try:
                 if db_type == 'mysql':
-                    sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{field}` {text_type}")
+                    sql = text(f"ALTER TABLE `{table}` MODIFY COLUMN `{field}` {string_type}")
                 else:  # postgresql
-                    sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{field}" TYPE {text_type}')
+                    sql = text(f'ALTER TABLE "{table}" ALTER COLUMN "{field}" TYPE {string_type}')
                 await conn.execute(sql)
-                logger.info(f"  ✅ {table}.{field} → {text_type}")
+                logger.info(f"  ✅ {table}.{field} → {string_type}")
                 migrated_count['string'] += 1
             except Exception as e:
                 logger.warning(f"  ⚠️  {table}.{field} 迁移失败: {e}")

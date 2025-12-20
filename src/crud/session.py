@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 
 from ..orm_models import UserSession
-from ..timezone import get_now
+from ..timezone import get_now, get_now_str, datetime_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +23,20 @@ async def create_user_session(
     expires_minutes: Optional[int] = None
 ) -> int:
     """创建新的用户会话"""
-    now = get_now()
+    now_str = get_now_str()
     expires_at = None
     if expires_minutes and expires_minutes != -1:
-        expires_at = now + timedelta(minutes=expires_minutes)
-    
+        now = get_now()
+        expires_dt = now + timedelta(minutes=expires_minutes)
+        expires_at = datetime_to_str(expires_dt)
+
     new_session = UserSession(
         userId=user_id,
         jti=jti,
         ipAddress=ip_address,
         userAgent=user_agent[:500] if user_agent and len(user_agent) > 500 else user_agent,
-        createdAt=now,
-        lastUsedAt=now,
+        createdAt=now_str,
+        lastUsedAt=now_str,
         expiresAt=expires_at,
         isRevoked=False
     )
@@ -71,20 +73,20 @@ async def validate_session(session: AsyncSession, jti: str) -> bool:
     )
     result = await session.execute(stmt)
     user_session = result.scalar_one_or_none()
-    
+
     if not user_session:
         return False
-    
-    # 检查是否过期
-    if user_session.expiresAt and user_session.expiresAt < get_now():
+
+    # 检查是否过期（字符串时间可以直接比较，因为格式是 YYYY-MM-DD HH:MM:SS）
+    if user_session.expiresAt and user_session.expiresAt < get_now_str():
         return False
-    
+
     return True
 
 
 async def update_session_last_used(session: AsyncSession, jti: str):
     """更新会话的最后使用时间"""
-    stmt = update(UserSession).where(UserSession.jti == jti).values(lastUsedAt=get_now())
+    stmt = update(UserSession).where(UserSession.jti == jti).values(lastUsedAt=get_now_str())
     await session.execute(stmt)
     await session.commit()
 
@@ -147,10 +149,10 @@ async def revoke_other_sessions(session: AsyncSession, user_id: int, current_jti
 
 async def cleanup_expired_sessions(session: AsyncSession) -> int:
     """清理过期和已撤销的会话"""
-    now = get_now()
+    now_str = get_now_str()
     stmt = delete(UserSession).where(
         (UserSession.isRevoked == True) |
-        ((UserSession.expiresAt != None) & (UserSession.expiresAt < now))
+        ((UserSession.expiresAt != None) & (UserSession.expiresAt < now_str))
     )
     result = await session.execute(stmt)
     await session.commit()
