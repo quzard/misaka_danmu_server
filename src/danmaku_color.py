@@ -25,14 +25,32 @@ def _normalize_color_value(value: Any) -> int:
         return max(0, min(16777215, value))
     if isinstance(value, str):
         v = value.strip().lower()
+
+        # 快速检查：如果包含明显的非颜色字符（如 [Gamer]xxx、用户名等），直接返回白色
+        # 这些值通常是平台错误地将其他数据放在了颜色字段中
+        if any(char in v for char in ['[', ']', ' ', '@', '_']) or v.startswith('gamer'):
+            return 16777215
+
         try:
             if v.startswith("#"):
-                return int(v[1:], 16)
+                # 十六进制颜色格式 #RRGGBB
+                hex_str = v[1:]
+                if len(hex_str) == 6 and all(c in '0123456789abcdef' for c in hex_str):
+                    return int(hex_str, 16)
+                # 格式错误但看起来像是尝试写十六进制
+                logger.debug("颜色格式错误（期望 #RRGGBB）: %s", value)
+                return 16777215
             if v.startswith("0x"):
+                # 0x前缀的十六进制
                 return int(v, 16)
-            return int(v)
+            # 纯数字字符串
+            color_int = int(v)
+            return max(0, min(16777215, color_int))
         except ValueError:
-            logger.warning("无法解析颜色值: %s", value)
+            # 只对看起来像颜色值但解析失败的情况记录调试日志
+            if v.isdigit() or v.startswith('#') or v.startswith('0x'):
+                logger.debug("无法解析颜色值: %s", value)
+            return 16777215
     return 16777215
 
 
