@@ -3005,8 +3005,8 @@ async def get_comments_for_dandan(
 
     predownload_task.add_done_callback(handle_predownload_exception)
 
-    # 记录播放历史（用于 @SXDM 指令，异步不阻塞）
-    asyncio.create_task(record_play_history(session, token, episodeId))
+    # 记录播放历史（用于 @SXDM 指令，后台异步执行，不阻塞）
+    asyncio.create_task(record_play_history(token, episodeId))
 
     # 检查是否有刷新任务正在执行，如果有则等待（最多15秒）
     await _wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=15.0)
