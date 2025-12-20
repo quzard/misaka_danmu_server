@@ -239,7 +239,7 @@ class RefreshDanmakuCommand(CommandHandler):
         custom_domain = await config_manager.get("customApiDomain", "")
         image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
 
-        # 获取会话状态
+        # 获取会话状态（用于缓存番剧和分集信息）
         session_key = f"cmd_session_{token}"
         session_state = await crud.get_cache(session, session_key)
         if not session_state:
@@ -249,18 +249,21 @@ class RefreshDanmakuCommand(CommandHandler):
         if not args:
             return await self._show_anime_list(token, session, session_key, custom_domain, image_url)
 
-        # 获取当前阶段
-        current_stage = session_state.get("stage", "select_anime")
+        # 解析参数
         arg = args[0].upper()
 
-        # 阶段2: select_anime → 选择番剧，显示分集列表
-        if current_stage == "select_anime":
-            return await self._show_episode_list(
-                token, session, session_key, session_state, arg, custom_domain, image_url
-            )
+        # 检查参数格式
+        import re
+        # 匹配 #A5 格式（标签+数字）
+        match_episode = re.match(r'^(#[A-E])(\d+)$', arg)
+        # 匹配 #A 格式（只有标签）
+        match_label = re.match(r'^#[A-E]$', arg)
 
-        # 阶段3: select_episode → 选择分集，触发刷新
-        elif current_stage == "select_episode":
+        if match_episode:
+            # 格式: #A5 → 直接触发刷新
+            label = match_episode.group(1)
+            episode_number = match_episode.group(2)
+
             # 获取依赖
             task_manager: TaskManager = kwargs.get('task_manager')
             scraper_manager: ScraperManager = kwargs.get('scraper_manager')
@@ -269,13 +272,25 @@ class RefreshDanmakuCommand(CommandHandler):
             if not all([task_manager, scraper_manager, rate_limiter]):
                 return self._error_response("系统依赖缺失", custom_domain, image_url)
 
-            return await self._trigger_refresh(
-                token, session, session_key, session_state, arg,
+            return await self._trigger_refresh_by_label(
+                token, session, session_key, session_state,
+                label, episode_number,
                 task_manager, scraper_manager, rate_limiter, config_manager,
                 custom_domain, image_url
             )
 
-        return self._error_response("会话状态异常，请重新执行 @SXDM", custom_domain, image_url)
+        elif match_label:
+            # 格式: #A → 显示分集列表
+            return await self._show_episode_list(
+                token, session, session_key, session_state, arg, custom_domain, image_url
+            )
+
+        else:
+            # 无效格式
+            return self._error_response(
+                f"❌ 无效的参数格式: {arg}\n\n💡 正确格式:\n• @SXDM #A - 查看分集列表\n• @SXDM #A5 - 刷新第5集",
+                custom_domain, image_url
+            )
 
     async def _show_anime_list(
         self,
@@ -355,8 +370,28 @@ class RefreshDanmakuCommand(CommandHandler):
         # 记录执行时间
         await self.record_execution(token, session)
 
-        # 为每部番剧返回一个独立的 item
-        anime_items = []
+        # 构建标签列表提示
+        labels = [anime["label"] for anime in anime_list]
+        labels_text = " ".join(labels)
+
+        # 第一条：引导说明
+        anime_items = [
+            DandanSearchAnimeItem(
+                animeId=999999998,
+                bangumiId="999999998",
+                animeTitle="📺 最近播放的番剧 (10分钟内)",
+                type="other",
+                typeDescription=f"请选择要刷新的剧集作品:\n\n可用标签: {labels_text}\n\n💡 使用方法:\n• @SXDM #A - 查看分集列表\n• @SXDM #A5 - 直接刷新第5集",
+                imageUrl=image_url,
+                startDate="2025-01-01T00:00:00+08:00",
+                year=2025,
+                episodeCount=len(anime_list),
+                rating=0.0,
+                isFavorited=False
+            )
+        ]
+
+        # 第二条开始：每部番剧
         for anime in anime_list:
             anime_items.append(
                 DandanSearchAnimeItem(
@@ -364,7 +399,7 @@ class RefreshDanmakuCommand(CommandHandler):
                     bangumiId=str(anime["animeId"]),
                     animeTitle=f"{anime['label']} {anime['animeTitle']}",
                     type="tvseries",
-                    typeDescription=f"📺 最近播放 | 共 {anime['totalEpisodes']} 集\n💡 输入 @SXDM {anime['label']} 查看分集列表",
+                    typeDescription=f"最近播放 | 共 {anime['totalEpisodes']} 集",
                     imageUrl=image_url,
                     startDate="2025-01-01T00:00:00+08:00",
                     year=2025,
@@ -376,7 +411,7 @@ class RefreshDanmakuCommand(CommandHandler):
 
         response = DandanSearchAnimeResponse(animes=anime_items)
 
-        logger.info(f"@SXDM 返回响应: 返回 {len(anime_items)} 部番剧")
+        logger.info(f"@SXDM 返回响应: 返回 {len(anime_items)} 条记录 (1条引导 + {len(anime_list)}部番剧)")
 
         return response
 
@@ -437,32 +472,20 @@ class RefreshDanmakuCommand(CommandHandler):
                 "status": status
             })
 
-        # 构建返回消息
-        lines = [f"📺 {selected_anime['animeTitle']} - 分集列表:"]
-        lines.append("=" * 40)
-        for ep in episode_list[:20]:  # 限制显示前20集
-            lines.append(f"[{ep['index']}] {ep['episodeTitle']} - {ep['status']} ({ep['commentCount']}条)")
-        if len(episode_list) > 20:
-            lines.append(f"... 还有 {len(episode_list) - 20} 集未显示")
-        lines.append("=" * 40)
-        lines.append("💡 输入 @SXDM {序号} 刷新弹幕")
-        lines.append("例如: @SXDM 5")
-
-        message = "\n".join(lines)
-
         # 更新会话状态
         session_state["stage"] = "select_episode"
         session_state["data"]["selectedAnime"] = selected_anime
         session_state["data"]["episodes"] = episode_list
         await crud.set_cache(session, session_key, session_state, 120)
 
-        return DandanSearchAnimeResponse(animes=[
+        # 第一条：引导说明
+        anime_items = [
             DandanSearchAnimeItem(
-                animeId=selected_anime["animeId"],
-                bangumiId=str(selected_anime["animeId"]),
-                animeTitle=f"📺 {selected_anime['animeTitle']}",
+                animeId=999999996,
+                bangumiId="999999996",
+                animeTitle=f"📺 {selected_anime['animeTitle']} - 分集列表",
                 type="other",
-                typeDescription=message,
+                typeDescription=f"请选择要刷新的集数:\n\n共 {len(episode_list)} 集\n\n💡 输入 @SXDM 标签+集数 刷新弹幕\n例如: @SXDM {selected_anime['label']}5 (刷新第5集)",
                 imageUrl=image_url,
                 startDate="2025-01-01T00:00:00+08:00",
                 year=2025,
@@ -470,7 +493,177 @@ class RefreshDanmakuCommand(CommandHandler):
                 rating=0.0,
                 isFavorited=False
             )
-        ])
+        ]
+
+        # 第二条开始：每个分集（限制显示前50集）
+        for ep in episode_list[:50]:
+            anime_items.append(
+                DandanSearchAnimeItem(
+                    animeId=ep["episodeId"],
+                    bangumiId=str(ep["episodeId"]),
+                    animeTitle=f"[{ep['index']}] {ep['episodeTitle']}",
+                    type="tvseries",
+                    typeDescription=f"{ep['status']} | 弹幕数: {ep['commentCount']} 条",
+                    imageUrl=image_url,
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=1,
+                    rating=0.0,
+                    isFavorited=False
+                )
+            )
+
+        logger.info(
+            f"@SXDM 返回分集列表: animeId={anime_id}, "
+            f"total={len(episode_list)}, displayed={min(50, len(episode_list))}"
+        )
+
+        return DandanSearchAnimeResponse(animes=anime_items)
+
+    async def _trigger_refresh_by_label(
+        self,
+        token: str,
+        session: AsyncSession,
+        session_key: str,
+        session_state: Dict,
+        label: str,
+        episode_number: str,
+        task_manager,
+        scraper_manager,
+        rate_limiter,
+        config_manager,
+        custom_domain: str,
+        image_url: str
+    ):
+        """根据标签和集数触发刷新任务（格式: #A5）"""
+        from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+        from .orm_models import Episode, AnimeSource
+        from . import tasks
+
+        # 解析集数编号
+        try:
+            ep_num = int(episode_number)
+        except ValueError:
+            return self._error_response(
+                f"❌ 无效的集数: {episode_number}",
+                custom_domain, image_url
+            )
+
+        # 从播放历史中获取番剧列表
+        cache_key = f"play_history_{token}"
+        history = await crud.get_cache(session, cache_key)
+        if not history:
+            return self._error_response(
+                "❌ 未找到播放历史\n💡 请先播放视频",
+                custom_domain, image_url
+            )
+
+        # 构建标签到番剧的映射
+        anime_list = []
+        for idx, record in enumerate(history[:5]):
+            anime_list.append({
+                "label": self.ANIME_LABELS[idx],
+                "animeId": record["animeId"],
+                "animeTitle": record["animeTitle"]
+            })
+
+        # 查找对应标签的番剧
+        selected_anime = None
+        for anime in anime_list:
+            if anime["label"] == label:
+                selected_anime = anime
+                break
+
+        if not selected_anime:
+            labels = " ".join([a["label"] for a in anime_list])
+            return self._error_response(
+                f"❌ 无效的标签: {label}\n💡 可用标签: {labels}",
+                custom_domain, image_url
+            )
+
+        anime_id = selected_anime["animeId"]
+        anime_title = selected_anime["animeTitle"]
+
+        # 查询该番剧的所有分集
+        stmt = (
+            select(Episode)
+            .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+            .where(AnimeSource.animeId == anime_id)
+            .order_by(Episode.id)
+        )
+        result = await session.execute(stmt)
+        episodes = result.scalars().all()
+
+        if not episodes:
+            return self._error_response(
+                f"❌ 未找到番剧分集信息\n番剧: {anime_title}",
+                custom_domain, image_url
+            )
+
+        # 验证集数编号
+        if ep_num < 1 or ep_num > len(episodes):
+            return self._error_response(
+                f"❌ 无效的集数: {ep_num}\n番剧: {anime_title}\n可用集数: 1-{len(episodes)}",
+                custom_domain, image_url
+            )
+
+        # 获取对应分集
+        selected_episode = episodes[ep_num - 1]
+        episode_id = selected_episode.id
+        episode_title = selected_episode.title or f"第{selected_episode.episodeIndex}话"
+
+        # 验证分集存在
+        info = await crud.get_episode_for_refresh(session, episode_id)
+        if not info:
+            return self._error_response(
+                f"❌ 分集信息异常: {episode_title}",
+                custom_domain, image_url
+            )
+
+        # 提交刷新任务
+        try:
+            unique_key = f"refresh-episode-{episode_id}"
+
+            task_id, _ = await task_manager.submit_task(
+                lambda s, cb: tasks.refresh_episode_task(
+                    episode_id, s, scraper_manager, rate_limiter, cb, config_manager
+                ),
+                f"指令刷新: {anime_title} - {episode_title}",
+                unique_key=unique_key
+            )
+
+            # 记录执行时间
+            await self.record_execution(token, session)
+
+            logger.info(
+                f"@SXDM 提交刷新任务: label={label}, episode_number={ep_num}, "
+                f"episodeId={episode_id}, anime={anime_title}, taskId={task_id}"
+            )
+
+            message = f"✓ 刷新任务已提交\n\n番剧: {anime_title}\n分集: [{ep_num}] {episode_title}\n任务ID: {task_id}\n\n🔄 任务处理中，请稍候15秒后重新获取弹幕"
+
+            return DandanSearchAnimeResponse(animes=[
+                DandanSearchAnimeItem(
+                    animeId=999999995,
+                    bangumiId="999999995",
+                    animeTitle="✓ 弹幕刷新任务已提交",
+                    type="other",
+                    typeDescription=message,
+                    imageUrl=image_url,
+                    startDate="2025-01-01T00:00:00+08:00",
+                    year=2025,
+                    episodeCount=0,
+                    rating=0.0,
+                    isFavorited=False
+                )
+            ])
+
+        except Exception as e:
+            logger.error(f"@SXDM 提交刷新任务失败: {e}", exc_info=True)
+            return self._error_response(
+                f"❌ 任务提交失败: {str(e)}",
+                custom_domain, image_url
+            )
 
     async def _trigger_refresh(
         self,
