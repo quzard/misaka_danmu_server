@@ -222,7 +222,7 @@ class RefreshDanmakuCommand(CommandHandler):
                      config_manager, **kwargs):
         """执行刷新指令"""
         from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
-        from .orm_models import Anime, AnimeSource, Episode, Comment
+        from .orm_models import Anime, AnimeSource, Episode
         from .task_manager import TaskManager
         from .scraper_manager import ScraperManager
         from .rate_limiter import RateLimiter
@@ -371,7 +371,7 @@ class RefreshDanmakuCommand(CommandHandler):
     ):
         """显示选中番剧的分集列表"""
         from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
-        from .orm_models import Episode, Comment
+        from .orm_models import Episode
 
         anime_list = session_state.get("data", {}).get("animeList", [])
 
@@ -402,20 +402,10 @@ class RefreshDanmakuCommand(CommandHandler):
         if not episodes:
             return self._error_response("❌ 未找到分集信息", custom_domain, image_url)
 
-        # 查询弹幕数量
-        episode_ids = [ep.episodeId for ep in episodes]
-        stmt = (
-            select(Comment.episodeId, func.count(Comment.cid))
-            .where(Comment.episodeId.in_(episode_ids))
-            .group_by(Comment.episodeId)
-        )
-        result = await session.execute(stmt)
-        comment_counts = dict(result.all())
-
-        # 构建分集信息
+        # 构建分集信息（使用 Episode.commentCount 字段）
         episode_list = []
         for ep in episodes:
-            count = comment_counts.get(ep.episodeId, 0)
+            count = ep.commentCount or 0
             status = "已缓存" if count > 0 else "未缓存"
             episode_list.append({
                 "index": len(episode_list) + 1,
