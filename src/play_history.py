@@ -32,17 +32,17 @@ async def record_play_history(
     """
     # 查询分集所属的番剧信息
     stmt = (
-        select(Anime.animeId, Anime.animeTitle)
-        .join(AnimeSource, AnimeSource.animeId == Anime.animeId)
+        select(Anime.id, Anime.title)
+        .join(AnimeSource, AnimeSource.animeId == Anime.id)
         .join(Episode, Episode.sourceId == AnimeSource.id)
-        .where(Episode.episodeId == episode_id)
+        .where(Episode.id == episode_id)
     )
     result = await session.execute(stmt)
     row = result.first()
     if not row:
         logger.debug(f"未找到分集信息: episodeId={episode_id}")
         return
-    
+
     anime_id, anime_title = row
     
     # 获取现有播放历史

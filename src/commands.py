@@ -279,7 +279,7 @@ class RefreshDanmakuCommand(CommandHandler):
     ):
         """显示最近播放的番剧列表"""
         from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
-        from .orm_models import Anime, Episode
+        from .orm_models import Anime, AnimeSource, Episode
 
         # 读取播放历史
         cache_key = f"play_history_{token}"
@@ -308,8 +308,12 @@ class RefreshDanmakuCommand(CommandHandler):
         for idx, record in enumerate(history[:5]):  # 只显示最近5部
             anime_id = record["animeId"]
 
-            # 查询总集数
-            stmt = select(func.count(Episode.episodeId)).where(Episode.animeId == anime_id)
+            # 查询总集数（通过 AnimeSource 关联）
+            stmt = (
+                select(func.count(Episode.id))
+                .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+                .where(AnimeSource.animeId == anime_id)
+            )
             result = await session.execute(stmt)
             total_episodes = result.scalar() or 0
 
@@ -371,7 +375,7 @@ class RefreshDanmakuCommand(CommandHandler):
     ):
         """显示选中番剧的分集列表"""
         from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
-        from .orm_models import Episode
+        from .orm_models import Episode, AnimeSource
 
         anime_list = session_state.get("data", {}).get("animeList", [])
 
@@ -390,11 +394,12 @@ class RefreshDanmakuCommand(CommandHandler):
 
         anime_id = selected_anime["animeId"]
 
-        # 查询分集列表
+        # 查询分集列表（通过 AnimeSource 关联）
         stmt = (
             select(Episode)
-            .where(Episode.animeId == anime_id)
-            .order_by(Episode.episodeId)
+            .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+            .where(AnimeSource.animeId == anime_id)
+            .order_by(Episode.id)
         )
         result = await session.execute(stmt)
         episodes = result.scalars().all()
@@ -409,8 +414,8 @@ class RefreshDanmakuCommand(CommandHandler):
             status = "已缓存" if count > 0 else "未缓存"
             episode_list.append({
                 "index": len(episode_list) + 1,
-                "episodeId": ep.episodeId,
-                "episodeTitle": ep.episodeTitle or f"第{ep.episodeIndex}话",
+                "episodeId": ep.id,
+                "episodeTitle": ep.title or f"第{ep.episodeIndex}话",
                 "commentCount": count,
                 "status": status
             })
