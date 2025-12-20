@@ -348,7 +348,7 @@ class IncrementalRefreshSourceInfo(BaseModel):
     isFavorited: bool
     incrementalRefreshEnabled: bool
     incrementalRefreshFailures: int
-    lastRefreshLatestEpisodeAt: Optional[str] = None  # 时间字段现在是字符串类型
+    lastRefreshLatestEpisodeAt: Optional[datetime] = None
     episodeCount: int
 
 

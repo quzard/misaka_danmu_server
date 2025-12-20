@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import RateLimitState
 from .. import models
-from ..timezone import get_now, get_now_str, datetime_to_str
+from ..timezone import get_now
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,11 @@ async def get_or_create_rate_limit_state(session: AsyncSession, provider_name: s
     state = result.scalar_one_or_none()
     if not state:
         try:
-            now_str = get_now_str()
+            now_truncated = get_now().replace(microsecond=0)
             state = RateLimitState(
                 providerName=provider_name,
                 requestCount=0,
-                lastResetTime=now_str
+                lastResetTime=now_truncated
             )
             session.add(state)
             await session.flush()
@@ -68,11 +68,11 @@ async def reset_all_rate_limit_states(session: AsyncSession):
     # 这确保了会话中已加载的ORM对象的状态能与数据库同步，
     # 解决了在 expire_on_commit=False 的情况下，对象状态陈旧的问题。
     states = (await session.execute(select(RateLimitState))).scalars().all()
-    # 使用字符串时间（格式已固定为 YYYY-MM-DD HH:MM:SS，无微秒）
-    now_str = get_now_str()
+    # 截断微秒，避免 MySQL 四舍五入导致 checksum 验证失败
+    now_naive = get_now().replace(microsecond=0)
     for state in states:
         state.requestCount = 0
-        state.lastResetTime = now_str
+        state.lastResetTime = now_naive
     # The commit will be handled by the calling function (e.g., RateLimiter.check)
 
 

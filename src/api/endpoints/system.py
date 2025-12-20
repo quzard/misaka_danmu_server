@@ -271,11 +271,8 @@ async def get_rate_limit_status(
     seconds_until_reset = 0
     if global_state:
         # 使用 get_now() 确保时区一致性
-        from ...timezone import str_to_datetime
-        last_reset_dt = str_to_datetime(global_state.lastResetTime)
-        if last_reset_dt:
-            time_since_reset = get_now().replace(tzinfo=None) - last_reset_dt
-            seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
+        time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
+        seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
     # 修正：从数据库获取所有已配置的搜索源，而不是调用一个不存在的方法

@@ -412,13 +412,8 @@ async def auto_import(
         async with session_factory() as session:
             recent_task = await crud.find_recent_task_by_unique_key(session, unique_key, threshold_hours)
             if recent_task:
-                from ..timezone import str_to_datetime
-                created_at_dt = str_to_datetime(recent_task.createdAt)
-                if created_at_dt:
-                    time_since_creation = get_now() - created_at_dt
-                    hours_ago = time_since_creation.total_seconds() / 3600
-                else:
-                    hours_ago = 0
+                time_since_creation = get_now() - recent_task.createdAt
+                hours_ago = time_since_creation.total_seconds() / 3600
                 # 关键修复：抛出异常前释放搜索锁
                 await manager.release_search_lock(api_key)
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"一个相似的任务在 {hours_ago:.1f} 小时前已被提交 (状态: {recent_task.status})。请在 {threshold_hours} 小时后重试。")
@@ -1605,11 +1600,8 @@ async def _get_rate_limit_status_data(
     global_state = states_map.get("__global__")
     seconds_until_reset = 0
     if global_state:
-        from ..timezone import str_to_datetime
-        last_reset_dt = str_to_datetime(global_state.lastResetTime)
-        if last_reset_dt:
-            time_since_reset = get_now().replace(tzinfo=None) - last_reset_dt
-            seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
+        time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
+        seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     # 获取后备流控状态
     fallback_match_state = states_map.get("__fallback_match__")
