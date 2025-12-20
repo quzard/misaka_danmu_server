@@ -81,22 +81,39 @@ class TextTime(TypeDecorator):
 
 class LongText(TypeDecorator):
     """
-    长文本类型 - MySQL: VARCHAR(500), PostgreSQL: TEXT
+    长文本类型 - MySQL: TEXT (64KB), PostgreSQL: TEXT
 
-    用途：数据库迁移后，所有字符串字段使用此类型。
+    用途：数据库迁移后，普通字符串字段使用此类型。
 
-    注意：MySQL 使用 VARCHAR(500) 而非 LONGTEXT，原因：
-    - 部分字段有索引（主键、唯一键、外键、普通索引）
-    - MySQL 不允许 LONGTEXT 字段有索引
-    - VARCHAR(500) 足够大，同时支持索引
+    TEXT 类型足够大（64KB），适用于标题、URL、路径等场景。
     """
-    impl = String(500)  # 默认长度 500
+    impl = PG_TEXT
     cache_ok = True
 
     def load_dialect_impl(self, dialect):
         """根据数据库类型返回对应的文本类型"""
         if dialect.name == 'mysql':
-            return dialect.type_descriptor(String(500))  # VARCHAR(500)
+            from sqlalchemy.dialects.mysql import TEXT as MySQL_TEXT
+            return dialect.type_descriptor(MySQL_TEXT)  # TEXT (64KB)
+        else:  # PostgreSQL
+            return dialect.type_descriptor(PG_TEXT)
+
+class VeryLongText(TypeDecorator):
+    """
+    超长文本类型 - MySQL: LONGTEXT (4GB), PostgreSQL: TEXT
+
+    用途：数据库迁移后，需要存储大量数据的字段使用此类型。
+
+    适用场景：配置值、缓存数据、日志消息、任务参数等。
+    """
+    impl = PG_TEXT
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        """根据数据库类型返回对应的文本类型"""
+        if dialect.name == 'mysql':
+            from sqlalchemy.dialects.mysql import LONGTEXT as MySQL_LONGTEXT
+            return dialect.type_descriptor(MySQL_LONGTEXT)  # LONGTEXT (4GB)
         else:  # PostgreSQL
             return dialect.type_descriptor(PG_TEXT)
 
@@ -224,14 +241,14 @@ class AnimeMetadata(Base):
 class Config(Base):
     __tablename__ = "config"
     configKey: Mapped[str] = mapped_column("config_key", LongText, primary_key=True)
-    configValue: Mapped[str] = mapped_column("config_value", LongText)
+    configValue: Mapped[str] = mapped_column("config_value", VeryLongText)  # 超大字段：配置可能很长
     description: Mapped[Optional[str]] = mapped_column(LongText)
 
 class CacheData(Base):
     __tablename__ = "cache_data"
     cacheProvider: Mapped[Optional[str]] = mapped_column("cache_provider", LongText)
     cacheKey: Mapped[str] = mapped_column("cache_key", LongText, primary_key=True)
-    cacheValue: Mapped[str] = mapped_column("cache_value", LongText)
+    cacheValue: Mapped[str] = mapped_column("cache_value", VeryLongText)  # 超大字段：缓存数据可能很大
     expiresAt: Mapped[str] = mapped_column("expires_at", TextTime, index=True)
 
 class ApiToken(Base):
@@ -331,7 +348,7 @@ class WebhookTask(Base):
     executeTime: Mapped[str] = mapped_column("execute_time", TextTime, index=True)
     webhookSource: Mapped[str] = mapped_column("webhook_source", LongText)
     status: Mapped[str] = mapped_column(LongText, default="pending", index=True) # pending, processing, failed, submitted
-    payload: Mapped[str] = mapped_column(LongText)
+    payload: Mapped[str] = mapped_column(VeryLongText)  # 超大字段：webhook payload 可能很大
     uniqueKey: Mapped[str] = mapped_column("unique_key", LongText, unique=True)
     taskTitle: Mapped[str] = mapped_column("task_title", LongText)
 
@@ -345,7 +362,7 @@ class TaskHistory(Base):
     title: Mapped[str] = mapped_column(LongText)
     status: Mapped[str] = mapped_column(LongText)
     progress: Mapped[int] = mapped_column(BigInteger, default=0)
-    description: Mapped[Optional[str]] = mapped_column(LongText)
+    description: Mapped[Optional[str]] = mapped_column(VeryLongText)  # 超大字段：任务描述可能很长
     createdAt: Mapped[str] = mapped_column("created_at", TextTime)
     updatedAt: Mapped[str] = mapped_column("updated_at", TextTime)
     finishedAt: Mapped[Optional[str]] = mapped_column("finished_at", TextTime)
@@ -353,7 +370,7 @@ class TaskHistory(Base):
     queueType: Mapped[str] = mapped_column("queue_type", LongText, default="download", server_default="download")
     # 任务恢复相关字段：在提交时保存，用于重启后恢复排队中的任务
     taskType: Mapped[Optional[str]] = mapped_column("task_type", LongText, nullable=True)
-    taskParameters: Mapped[Optional[str]] = mapped_column("task_parameters", LongText, nullable=True)
+    taskParameters: Mapped[Optional[str]] = mapped_column("task_parameters", VeryLongText, nullable=True)  # 超大字段：任务参数 JSON 可能很大
 
     __table_args__ = (Index('idx_created_at', 'created_at'),)
 
@@ -362,7 +379,7 @@ class TaskStateCache(Base):
     __tablename__ = "task_state_cache"
     taskId: Mapped[str] = mapped_column("task_id", LongText, primary_key=True)
     taskType: Mapped[str] = mapped_column("task_type", LongText)  # 任务类型，如 'generic_import', 'match_fallback'
-    taskParameters: Mapped[str] = mapped_column("task_parameters", LongText)  # JSON格式的任务参数
+    taskParameters: Mapped[str] = mapped_column("task_parameters", VeryLongText)  # 超大字段：任务参数 JSON 可能很大
     createdAt: Mapped[str] = mapped_column("created_at", TextTime)
     updatedAt: Mapped[str] = mapped_column("updated_at", TextTime)
 
@@ -375,7 +392,7 @@ class ExternalApiLog(Base):
     ipAddress: Mapped[str] = mapped_column("ip_address", LongText)
     endpoint: Mapped[str] = mapped_column(LongText)
     statusCode: Mapped[int] = mapped_column("status_code", BigInteger)
-    message: Mapped[Optional[str]] = mapped_column(LongText)
+    message: Mapped[Optional[str]] = mapped_column(VeryLongText)  # 超大字段：日志消息可能很长
 
 class RateLimitState(Base):
     __tablename__ = "rate_limit_state"
@@ -389,7 +406,7 @@ class TitleRecognition(Base):
     __tablename__ = "title_recognition"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    content: Mapped[str] = mapped_column(LongText)
+    content: Mapped[str] = mapped_column(VeryLongText)  # 超大字段：识别词列表可能很长
     created_at: Mapped[str] = mapped_column("created_at", TextTime, default=lambda: get_now().strftime("%Y-%m-%d %H:%M:%S"))
     updated_at: Mapped[str] = mapped_column("updated_at", TextTime, default=lambda: get_now().strftime("%Y-%m-%d %H:%M:%S"), onupdate=lambda: get_now().strftime("%Y-%m-%d %H:%M:%S"))
 

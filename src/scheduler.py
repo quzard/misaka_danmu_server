@@ -17,7 +17,7 @@ from . import crud
 from .rate_limiter import RateLimiter
 from .jobs.base import BaseJob
 from .jobs.webhook_processor import WebhookProcessorJob
-from .timezone import get_app_timezone
+from .timezone import get_app_timezone, datetime_to_str
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager
 from .metadata_manager import MetadataSourceManager
@@ -163,9 +163,10 @@ class SchedulerManager:
         if job:
             # 修正：使用 event.scheduled_run_time 作为 last_run_at 时间。
             # 这比 job.last_run_time 更可靠，因为它直接来自刚刚发生的事件，
-            # 并且能确保手动触发的任务也能正确记录运行时间。并将其转换为 naive datetime。
-            last_run_time = event.scheduled_run_time.replace(tzinfo=None) if event.scheduled_run_time else None
-            next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+            # 并且能确保手动触发的任务也能正确记录运行时间。
+            # 时间字段现在是字符串类型，使用 datetime_to_str 转换
+            last_run_time = datetime_to_str(event.scheduled_run_time.replace(tzinfo=None)) if event.scheduled_run_time else None
+            next_run_time = datetime_to_str(job.next_run_time.replace(tzinfo=None)) if job.next_run_time else None
             async with self._session_factory() as session:
                 await crud.update_scheduled_task_run_times(session, job.id, last_run_time, next_run_time)
             logger.info(f"已更新定时任务 '{job.name}' (ID: {job.id}) 的运行时间。")
@@ -190,7 +191,8 @@ class SchedulerManager:
                         runner = self._create_job_runner(task['jobType'], task['taskId'])
                         job = self.scheduler.add_job(runner, CronTrigger.from_crontab(task['cronExpression']), id=task['taskId'], name=task['name'], replace_existing=True)
                         if not task['isEnabled']: self.scheduler.pause_job(task['taskId'])
-                        next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+                        # 时间字段现在是字符串类型，使用 datetime_to_str 转换
+                        next_run_time = datetime_to_str(job.next_run_time.replace(tzinfo=None)) if job.next_run_time else None
                         await crud.update_scheduled_task_run_times(session, job.id, task['lastRunAt'], next_run_time)
                     except Exception as e:
                         logger.error(f"加载定时任务 '{task['name']}' (ID: {task['taskId']}) 失败: {e}")
@@ -250,7 +252,8 @@ class SchedulerManager:
             runner = self._create_job_runner(job_type, task_id)
             job = self.scheduler.add_job(runner, CronTrigger.from_crontab(cron), id=task_id, name=name)
             if not is_enabled: job.pause()
-            next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+            # 时间字段现在是字符串类型，使用 datetime_to_str 转换
+            next_run_time = datetime_to_str(job.next_run_time.replace(tzinfo=None)) if job.next_run_time else None
             await crud.update_scheduled_task_run_times(session, task_id, None, next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
@@ -276,7 +279,8 @@ class SchedulerManager:
                     job.resume()
                 else:
                     job.pause()
-                next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+                # 时间字段现在是字符串类型，使用 datetime_to_str 转换
+                next_run_time = datetime_to_str(job.next_run_time.replace(tzinfo=None)) if job.next_run_time else None
             else:
                 next_run_time = None
 
@@ -317,8 +321,9 @@ class SchedulerManager:
         await runner()
 
         # 手动运行后更新运行时间
-        last_run_time = datetime.now()
-        next_run_time = job.next_run_time.replace(tzinfo=None) if job.next_run_time else None
+        # 时间字段现在是字符串类型，使用 datetime_to_str 转换
+        last_run_time = datetime_to_str(datetime.now())
+        next_run_time = datetime_to_str(job.next_run_time.replace(tzinfo=None)) if job.next_run_time else None
         async with self._session_factory() as session:
             await crud.update_scheduled_task_run_times(session, task_id, last_run_time, next_run_time)
         logger.info(f"手动运行定时任务 '{task_info['name']}' (ID: {task_id}) 后已更新运行时间。")
