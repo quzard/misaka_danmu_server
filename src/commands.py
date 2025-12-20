@@ -292,6 +292,9 @@ class RefreshDanmakuCommand(CommandHandler):
         # 读取播放历史
         cache_key = f"play_history_{token}"
         history = await crud.get_cache(session, cache_key)
+
+        logger.info(f"@SXDM 查询播放历史: token={token[:8]}..., cache_key={cache_key}, result={history}")
+
         if not history:
             history = []
 
