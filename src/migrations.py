@@ -66,6 +66,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
     将数据库字段类型恢复到原始 ORM 模型定义
 
     目标:
+    0. 修复外键约束阻止的类型转换 (media_servers)
     1. VARCHAR/TEXT 时间字段 → DATETIME
     2. BIGINT 数值字段 → INTEGER (仅恢复原本为 Integer 的字段)
     3. TEXT/LONGTEXT 字符串字段 → VARCHAR (根据原始长度)
@@ -78,8 +79,52 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
 
     total_converted = 0
 
+    # ========== 步骤 0: 修复外键约束问题 ==========
+    if db_type == 'mysql':
+        logger.info("🔧 步骤 0/4: 修复 media_servers 外键约束问题")
+
+        # 步骤 0.1: 删除外键约束
+        try:
+            await conn.execute(text(
+                "ALTER TABLE `media_items` DROP FOREIGN KEY `media_items_ibfk_1`"
+            ))
+            logger.info("  ✅ 外键约束 media_items_ibfk_1 已删除")
+        except Exception as e:
+            if "check that it exists" in str(e).lower() or "doesn't exist" in str(e).lower():
+                logger.info("  ⚠️  外键约束不存在，跳过删除")
+            else:
+                logger.warning(f"  ⚠️  删除外键失败: {e}")
+
+        # 步骤 0.2: 修改字段类型
+        try:
+            await conn.execute(text("ALTER TABLE `media_servers` MODIFY COLUMN `id` BIGINT AUTO_INCREMENT"))
+            logger.info("  ✅ media_servers.id → BIGINT")
+            total_converted += 1
+        except Exception as e:
+            logger.warning(f"  ⚠️  media_servers.id 转换失败: {e}")
+
+        try:
+            await conn.execute(text("ALTER TABLE `media_items` MODIFY COLUMN `server_id` BIGINT"))
+            logger.info("  ✅ media_items.server_id → BIGINT")
+            total_converted += 1
+        except Exception as e:
+            logger.warning(f"  ⚠️  media_items.server_id 转换失败: {e}")
+
+        # 步骤 0.3: 重新创建外键约束
+        try:
+            await conn.execute(text(
+                "ALTER TABLE `media_items` ADD CONSTRAINT `media_items_ibfk_1` "
+                "FOREIGN KEY (`server_id`) REFERENCES `media_servers` (`id`) ON DELETE CASCADE"
+            ))
+            logger.info("  ✅ 外键约束已重新创建")
+        except Exception as e:
+            if "duplicate" in str(e).lower():
+                logger.info("  ⚠️  外键约束已存在，跳过创建")
+            else:
+                logger.warning(f"  ⚠️  重新创建外键失败: {e}")
+
     # ========== 第 1 步: 时间字段 → DATETIME ==========
-    logger.info("🕐 步骤 1/3: 转换时间字段 → DATETIME")
+    logger.info("🕐 步骤 1/4: 转换时间字段 → DATETIME")
 
     TIMESTAMP_FIELDS = {
         'anime': ['created_at'],
@@ -121,10 +166,10 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
 
 
     # ========== 第 2 步: 数值字段 BIGINT → INTEGER ==========
-    logger.info("🔢 步骤 2/3: 转换数值字段 BIGINT → INTEGER")
+    logger.info("🔢 步骤 2/4: 转换数值字段 BIGINT → INTEGER")
 
     # 注意: 只包含原本为 Integer 的字段,不包括主键等 BigInteger 字段
-    # 注意: media_servers.id 有外键约束，已从列表中移除
+    # 注意: media_servers.id 已在步骤 0 中处理为 BIGINT
     INTEGER_FIELDS = {
         'anime': ['season', 'episode_count', 'year'],
         'anime_sources': ['source_order', 'incremental_refresh_failures'],
@@ -163,7 +208,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
 
 
     # ========== 第 3 步: 字符串字段 TEXT/LONGTEXT → VARCHAR ==========
-    logger.info("📝 步骤 3/3: 转换字符串字段 TEXT/LONGTEXT → VARCHAR")
+    logger.info("📝 步骤 3/4: 转换字符串字段 TEXT/LONGTEXT → VARCHAR")
 
     # VARCHAR 字段映射 {表名: {字段名: 长度}} - 最低 500
     # 注意: anime_sources.media_id 在复合唯一索引中，使用 255 避免超过 3072 字节限制
