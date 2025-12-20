@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 async def record_play_history(
+    session: AsyncSession,
     token: str,
     episode_id: int
 ) -> None:
@@ -23,56 +24,56 @@ async def record_play_history(
     记录播放历史到缓存（只记录番剧，不记录具体集数）
     保留最近5部番剧，使用 #A #B #C #D #E 标识
 
-    此函数设计为后台异步执行，内部自己创建 session
+    此函数在独立的数据库事务中执行，不会影响主请求的事务
 
     Args:
+        session: 主请求的数据库会话（仅用于查询番剧信息）
         token: 用户 token
         episode_id: 分集 ID
     """
-    from .database import get_session
+    # 查询分集所属的番剧信息（使用主 session，只读操作）
+    stmt = (
+        select(Anime.id, Anime.title)
+        .join(AnimeSource, AnimeSource.animeId == Anime.id)
+        .join(Episode, Episode.sourceId == AnimeSource.id)
+        .where(Episode.id == episode_id)
+    )
+    result = await session.execute(stmt)
+    row = result.first()
+    if not row:
+        logger.debug(f"未找到分集信息: episodeId={episode_id}")
+        return
 
-    try:
-        async with get_session() as session:
-            # 查询分集所属的番剧信息
-            stmt = (
-                select(Anime.id, Anime.title)
-                .join(AnimeSource, AnimeSource.animeId == Anime.id)
-                .join(Episode, Episode.sourceId == AnimeSource.id)
-                .where(Episode.id == episode_id)
-            )
-            result = await session.execute(stmt)
-            row = result.first()
-            if not row:
-                logger.debug(f"未找到分集信息: episodeId={episode_id}")
-                return
+    anime_id, anime_title = row
 
-            anime_id, anime_title = row
+    # 在独立的 session 中更新缓存（避免影响主请求的事务）
+    from .database import get_session_factory
+    session_factory = get_session_factory()
 
-            # 获取现有播放历史
-            cache_key = f"play_history_{token}"
-            history = await crud.get_cache(session, cache_key)
-            if not history:
-                history = []
+    async with session_factory() as cache_session:
+        # 获取现有播放历史
+        cache_key = f"play_history_{token}"
+        history = await crud.get_cache(cache_session, cache_key)
+        if not history:
+            history = []
 
-            # 移除相同 animeId 的旧记录（去重）
-            history = [h for h in history if h.get("animeId") != anime_id]
+        # 移除相同 animeId 的旧记录（去重）
+        history = [h for h in history if h.get("animeId") != anime_id]
 
-            # 插入到最前面（#A 位置）
-            new_record = {
-                "animeId": anime_id,
-                "animeTitle": anime_title,
-                "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            history.insert(0, new_record)
+        # 插入到最前面（#A 位置）
+        new_record = {
+            "animeId": anime_id,
+            "animeTitle": anime_title,
+            "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        history.insert(0, new_record)
 
-            # 只保留最近5条
-            history = history[:5]
+        # 只保留最近5条
+        history = history[:5]
 
-            # 保存回缓存（10分钟）
-            await crud.set_cache(session, cache_key, history, 600)
-            logger.info(f"✓ 已记录播放历史: token={token[:8]}..., anime={anime_title}")
-    except Exception as e:
-        logger.error(f"记录播放历史失败: episodeId={episode_id}, error={e}", exc_info=True)
+        # 保存回缓存（10分钟），set_cache 会自动 commit
+        await crud.set_cache(cache_session, cache_key, history, 600)
+        logger.info(f"✓ 已记录播放历史: token={token[:8]}..., anime={anime_title}")
 
 
 async def get_play_history(

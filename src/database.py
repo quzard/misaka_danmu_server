@@ -13,9 +13,19 @@ from .migrations import run_migrations
 # 使用模块级日志记录器
 logger = logging.getLogger(__name__)
 
+# 全局 session_factory，在应用启动时设置
+_global_session_factory = None
+
 def get_db_type() -> str:
     """获取数据库类型"""
     return settings.database.type.lower()
+
+
+def get_session_factory():
+    """获取全局 session_factory"""
+    if _global_session_factory is None:
+        raise RuntimeError("Session factory 尚未初始化，请确保应用已启动")
+    return _global_session_factory
 
 
 async def sync_postgres_sequence(session: AsyncSession, table_name: str = "anime", sequence_name: str = "anime_id_seq"):
@@ -118,6 +128,8 @@ def _log_db_connection_error(context_message: str, e: Exception):
 
 async def create_db_engine_and_session(app: FastAPI):
     """创建数据库引擎和会话工厂，并存储在 app.state 中"""
+    global _global_session_factory
+
     try:
         db_url = _get_db_url()
         db_type = settings.database.type.lower()
@@ -130,8 +142,12 @@ async def create_db_engine_and_session(app: FastAPI):
         }
 
         engine = create_async_engine(db_url, **engine_args)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
         app.state.db_engine = engine
-        app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        app.state.db_session_factory = session_factory
+        _global_session_factory = session_factory  # 设置全局变量
+
         logger.info("数据库引擎和会话工厂创建成功。")
     except Exception as e:
         # 修正：调用标准化的错误日志函数，并提供更精确的上下文

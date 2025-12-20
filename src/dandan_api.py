@@ -3005,9 +3005,6 @@ async def get_comments_for_dandan(
 
     predownload_task.add_done_callback(handle_predownload_exception)
 
-    # 记录播放历史（用于 @SXDM 指令，后台异步执行，不阻塞）
-    asyncio.create_task(record_play_history(token, episodeId))
-
     # 检查是否有刷新任务正在执行，如果有则等待（最多15秒）
     await _wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=15.0)
 
@@ -3796,6 +3793,12 @@ async def get_comments_for_dandan(
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
+
+    # 记录播放历史（用于 @SXDM 指令）
+    try:
+        await record_play_history(session, token, episodeId)
+    except Exception as e:
+        logger.error(f"记录播放历史失败: episodeId={episodeId}, error={e}", exc_info=True)
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
