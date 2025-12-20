@@ -3,7 +3,6 @@
 支持以@开头的搜索词作为指令，提供通用的指令处理框架
 """
 import time
-import json
 import logging
 from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime
@@ -41,21 +40,29 @@ async def _set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any
 def parse_command(search_term: str) -> Optional[Tuple[str, List[str]]]:
     """
     解析指令
-    
+
     Args:
         search_term: 搜索词
-        
+
     Returns:
         (指令名称, 参数列表) 或 None（不是指令）
+
+    Special:
+        如果只输入 @，返回 ("HELP", []) 以展示帮助
     """
     if not search_term.startswith('@'):
         return None
-    
+
     parts = search_term[1:].strip().split()
-    command_name = parts[0].upper() if parts else ""
+
+    # 如果只输入 @，视为帮助指令
+    if not parts:
+        return ("HELP", [])
+
+    command_name = parts[0].upper()
     args = parts[1:] if len(parts) > 1 else []
-    
-    return (command_name, args) if command_name else None
+
+    return (command_name, args)
 
 
 class CommandHandler:
@@ -234,8 +241,9 @@ class RefreshDanmakuCommand(CommandHandler):
 
         # 获取会话状态
         session_key = f"cmd_session_{token}"
-        session_json = await crud.get_cache(session, session_key)
-        session_state = json.loads(session_json) if session_json else {}
+        session_state = await crud.get_cache(session, session_key)
+        if not session_state:
+            session_state = {}
 
         # 阶段1: 没有参数 → 显示番剧列表
         if not args:
@@ -283,8 +291,9 @@ class RefreshDanmakuCommand(CommandHandler):
 
         # 读取播放历史
         cache_key = f"play_history_{token}"
-        history_json = await crud.get_cache(session, cache_key)
-        history: List[Dict] = json.loads(history_json) if history_json else []
+        history = await crud.get_cache(session, cache_key)
+        if not history:
+            history = []
 
         if not history:
             return DandanSearchAnimeResponse(animes=[
@@ -342,7 +351,7 @@ class RefreshDanmakuCommand(CommandHandler):
             "data": {"animeList": anime_list},
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        await crud.set_cache(session, session_key, json.dumps(session_state, ensure_ascii=False), 120)
+        await crud.set_cache(session, session_key, session_state, 120)
 
         # 记录执行时间
         await self.record_execution(token, session)
@@ -437,7 +446,7 @@ class RefreshDanmakuCommand(CommandHandler):
         session_state["stage"] = "select_episode"
         session_state["data"]["selectedAnime"] = selected_anime
         session_state["data"]["episodes"] = episode_list
-        await crud.set_cache(session, session_key, json.dumps(session_state, ensure_ascii=False), 120)
+        await crud.set_cache(session, session_key, session_state, 120)
 
         return DandanSearchAnimeResponse(animes=[
             DandanSearchAnimeItem(
@@ -570,12 +579,57 @@ class RefreshDanmakuCommand(CommandHandler):
         ])
 
 
+class HelpCommand(CommandHandler):
+    """帮助指令 - 展示所有可用指令"""
+
+    def __init__(self):
+        super().__init__(
+            name="HELP",
+            description="展示所有可用指令及说明",
+            cooldown_seconds=0  # 无冷却
+        )
+
+    async def execute(self, token: str, args: List[str], session: AsyncSession,
+                     config_manager, **kwargs):
+        """展示所有可用指令"""
+        from .dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+
+        # 获取自定义域名
+        custom_domain = await config_manager.get("customApiDomain", "")
+        image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+
+        # 构建指令列表（排除 HELP 自己）
+        commands_info = []
+        for cmd_name, handler in COMMAND_HANDLERS.items():
+            if cmd_name == "HELP":
+                continue
+            commands_info.append(f"@{cmd_name} - {handler.description}")
+
+        commands_text = "\n".join(commands_info)
+
+        return DandanSearchAnimeResponse(animes=[
+            DandanSearchAnimeItem(
+                animeId=999999900,
+                bangumiId="999999900",
+                animeTitle="📖 可用指令列表",
+                type="other",
+                typeDescription=f"当前可用的指令：\n\n{commands_text}\n\n💡 提示：直接在搜索框输入指令即可使用",
+                imageUrl=image_url,
+                startDate="2025-01-01T00:00:00+08:00",
+                year=2025,
+                episodeCount=len(commands_info),
+                rating=0.0,
+                isFavorited=False
+            )
+        ])
+
+
 # 全局指令注册表
 COMMAND_HANDLERS: Dict[str, CommandHandler] = {
+    "HELP": HelpCommand(),
     "QLHC": ClearCacheCommand(),
     "SXDM": RefreshDanmakuCommand(),
     # 未来可以添加更多指令：
-    # "HELP": HelpCommand(),
     # "STATUS": StatusCommand(),
 }
 
@@ -612,7 +666,6 @@ async def handle_command(search_term: str, token: str, session: AsyncSession,
 
     if not handler:
         # 未知指令
-        available_commands = ', '.join(['@' + k for k in COMMAND_HANDLERS.keys()])
         logger.warning(f"未知指令: @{command_name}, token={token}")
 
         return DandanSearchAnimeResponse(animes=[
@@ -621,7 +674,7 @@ async def handle_command(search_term: str, token: str, session: AsyncSession,
                 bangumiId="999999998",
                 animeTitle=f"✗ 未知指令: @{command_name}",
                 type="other",
-                typeDescription=f"可用指令: {available_commands}",
+                typeDescription=f"该指令不存在\n\n💡 提示：输入 @ 或 @HELP 查看所有可用指令",
                 imageUrl=image_url,
                 startDate="2025-01-01T00:00:00+08:00",
                 year=2025,
