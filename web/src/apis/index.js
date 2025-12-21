@@ -54,6 +54,26 @@ export const getMatchTest = data =>
     JSON.stringify({ fileName: data.fileName })
   )
 
+/** 搜索分集测试 */
+export const searchEpisodesTest = data =>
+  api.get(
+    `/api/v1/${data.apiToken}/search/episodes?anime=${encodeURIComponent(data.anime)}${data.episode ? `&episode=${encodeURIComponent(data.episode)}` : ''}`
+  )
+
+/** 搜索作品测试 */
+export const searchAnimeTest = data =>
+  api.get(
+    `/api/v1/${data.apiToken}/search/anime?keyword=${encodeURIComponent(data.keyword)}`
+  )
+
+/** 番剧详情测试 */
+export const getBangumiDetailTest = data =>
+  api.get(`/api/v1/${data.apiToken}/bangumi/${data.bangumiId}`)
+
+/** 弹幕获取测试 */
+export const getCommentTest = data =>
+  api.get(`/api/v1/${data.apiToken}/comment/${data.episodeId}`)
+
 /** 清除搜索缓存 */
 export const clearSearchCache = () => api.post('/api/ui/cache/clear')
 
