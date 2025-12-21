@@ -18,6 +18,7 @@ import {
   InputNumber,
   Select,
   Tag,
+  Alert,
 } from 'antd'
 
 export const Test = () => {
@@ -56,11 +57,14 @@ export const Test = () => {
   const testConfigs = {
     match: {
       label: '文件名匹配',
+      apiPath: '/api/v1/{token}/match',
+      method: 'POST',
       handler: getMatchTest,
       fields: [
         {
           name: 'fileName',
           label: '文件名',
+          apiParam: 'fileName',
           placeholder: '请输入要测试匹配的文件名',
           required: true,
           component: Input,
@@ -86,11 +90,14 @@ export const Test = () => {
     },
     searchEpisodes: {
       label: '搜索分集',
+      apiPath: '/api/v1/{token}/search/episodes',
+      method: 'GET',
       handler: searchEpisodesTest,
       fields: [
         {
           name: 'anime',
           label: '节目名称',
+          apiParam: 'anime (query)',
           placeholder: '请输入节目名称',
           required: true,
           component: Input,
@@ -98,6 +105,7 @@ export const Test = () => {
         {
           name: 'episode',
           label: '分集标题',
+          apiParam: 'episode (query)',
           placeholder: '请输入分集标题（可选）',
           required: false,
           component: Input,
@@ -132,11 +140,14 @@ export const Test = () => {
     },
     searchAnime: {
       label: '搜索作品',
+      apiPath: '/api/v1/{token}/search/anime',
+      method: 'GET',
       handler: searchAnimeTest,
       fields: [
         {
           name: 'keyword',
           label: '关键词',
+          apiParam: 'keyword (query)',
           placeholder: '请输入搜索关键词',
           required: true,
           component: Input,
@@ -169,11 +180,14 @@ export const Test = () => {
     },
     bangumiDetail: {
       label: '番剧详情',
+      apiPath: '/api/v1/{token}/bangumi/{id}',
+      method: 'GET',
       handler: getBangumiDetailTest,
       fields: [
         {
           name: 'bangumiId',
           label: '番剧ID',
+          apiParam: 'id (path)',
           placeholder: '请输入番剧ID',
           required: true,
           component: InputNumber,
@@ -202,11 +216,14 @@ export const Test = () => {
     },
     comment: {
       label: '弹幕获取',
+      apiPath: '/api/v1/{token}/comment/{episodeId}',
+      method: 'GET',
       handler: getCommentTest,
       fields: [
         {
           name: 'episodeId',
           label: '分集ID',
+          apiParam: 'episodeId (path)',
           placeholder: '请输入分集ID',
           required: true,
           component: InputNumber,
@@ -277,6 +294,40 @@ export const Test = () => {
 
         <Row gutter={24} className="mt-4">
           <Col md={12} sm={24}>
+            {/* 接口信息展示 */}
+            <Alert
+              message={
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Tag color="blue">{currentConfig.method}</Tag>
+                    <code className="text-sm bg-gray-100 px-2 py-1 rounded">
+                      {currentConfig.apiPath}
+                    </code>
+                  </div>
+                  {currentConfig.fields.length > 0 && (
+                    <div className="text-xs text-gray-600">
+                      <div className="font-semibold mb-1">参数说明:</div>
+                      <div className="pl-2">
+                        {currentConfig.fields.map(field => (
+                          <div key={field.name} className="mb-1">
+                            <span className="font-mono text-blue-600">
+                              {field.label}
+                            </span>
+                            {' → '}
+                            <span className="text-gray-500">
+                              {field.apiParam || field.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              }
+              type="info"
+              className="mb-4"
+            />
+
             <Form
               form={form}
               layout="vertical"
@@ -288,7 +339,12 @@ export const Test = () => {
                 name="apiToken"
                 label={
                   <div className="flex items-center justify-between w-full">
-                    <span>弹幕 Token</span>
+                    <div className="flex items-center gap-2">
+                      <span>弹幕 Token</span>
+                      <span className="text-xs text-gray-400 font-normal">
+                        (token path)
+                      </span>
+                    </div>
                     <Button
                       type="link"
                       size="small"
@@ -353,7 +409,16 @@ export const Test = () => {
                   <Form.Item
                     key={field.name}
                     name={field.name}
-                    label={field.label}
+                    label={
+                      <div className="flex items-center gap-2">
+                        <span>{field.label}</span>
+                        {field.apiParam && (
+                          <span className="text-xs text-gray-400 font-normal">
+                            ({field.apiParam})
+                          </span>
+                        )}
+                      </div>
+                    }
                     rules={[
                       {
                         required: field.required,
