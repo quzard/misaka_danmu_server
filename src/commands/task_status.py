@@ -28,13 +28,14 @@ class TaskStatusCommand(CommandHandler):
             cooldown_seconds=3,
             usage="@CXRW [状态#] [#队列] [状态#队列] (支持大小写)",
             examples=[
-                "@CXRW - 查询进行中的任务",
-                "@cxrw a# - 查询所有任务（只指定状态）",
-                "@CXRW c# - 查询已完成的任务（只指定状态）",
-                "@cxrw #d - 查询下载队列的进行中任务（只指定队列）",
-                "@CXRW #m - 查询管理队列的进行中任务（只指定队列）",
-                "@cxrw r#d - 查询下载队列运行中的任务（同时指定）",
-                "@CXRW a#b - 查询后备队列的所有任务（同时指定）"
+                "@CXRW - 查询所有任务",
+                "@cxrw r# - 进行中",
+                "@CXRW c# - 已完成",
+                "@cxrw f# - 失败",
+                "@CXRW #d - 下载队列",
+                "@cxrw #m - 管理队列",
+                "@CXRW #b - 后备队列",
+                "@cxrw r#d - 下载队列运行中"
             ]
         )
     
@@ -53,7 +54,7 @@ class TaskStatusCommand(CommandHandler):
         # 状态标识: A(all), R(running), C(completed), F(failed), P(pending), S(paused)
         # 队列标识: D(download), M(management), B(fallback/backup)
 
-        status_filter = 'RUNNING'  # 默认为进行中
+        status_filter = 'ALL'  # 默认为所有任务
         queue_filter = None
 
         if args:
@@ -158,9 +159,10 @@ class TaskStatusCommand(CommandHandler):
                 title=f"📋 未找到匹配的任务",
                 description=f"筛选条件: {filter_desc}\n\n💡 尝试其他筛选条件\n\n"
                            f"示例:\n"
-                           f"  @CXRW all - 所有任务\n"
-                           f"  @CXRW completed - 已完成\n"
-                           f"  @CXRW running download - 下载队列运行中",
+                           f"  @CXRW - 所有任务\n"
+                           f"  @CXRW c# - 已完成\n"
+                           f"  @CXRW #d - 下载队列\n"
+                           f"  @CXRW r#d - 下载队列运行中",
                 image_url=image_url
             )
 

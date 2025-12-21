@@ -83,10 +83,7 @@ class RateLimitStatusCommand(CommandHandler):
         status_text = "🔴 禁用" if not enabled else ("⚠️ 验证失败" if verification_failed else "🟢 启用")
         
         reset_desc = (
-            f"流控状态: {status_text}\n"
-            f"周期长度: {period_str}\n"
-            f"距离重置: {time_display}\n\n"
-            f"💡 重置后所有计数器将清零"
+            f"💡流控状态: {status_text} 🔄距离重置: {time_display} ⏱️周期长度: {period_str}"
         )
         
         items.append(
