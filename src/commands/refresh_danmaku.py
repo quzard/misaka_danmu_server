@@ -150,10 +150,11 @@ class RefreshDanmakuCommand(CommandHandler):
             history = []
 
         if not history:
+            time_desc = f"{self.SESSION_TTL // 60}分钟有效"
             item = self.build_response_item(
                 anime_id=999999997,
                 title="未找到最近播放记录",
-                description="💡 提示: 播放视频后会自动记录 (10分钟有效)",
+                description=f"💡 提示: 播放视频后会自动记录 ({time_desc})",
                 image_url=image_url
             )
             return self.build_response([item])

@@ -169,7 +169,34 @@ class TaskStatusCommand(CommandHandler):
         # 构建响应列表
         items = []
 
-        # 第一项：总览
+        # 第一项：帮助说明
+        help_desc = (
+            "📖 参数说明:\n\n"
+            "状态标识:\n"
+            "  a# - 全部  r# - 进行中\n"
+            "  c# - 已完成  f# - 失败\n"
+            "  p# - 排队中  s# - 已暂停\n\n"
+            "队列标识:\n"
+            "  #d - 下载队列\n"
+            "  #m - 管理队列\n"
+            "  #b - 后备队列\n\n"
+            "组合使用:\n"
+            "  r#d - 下载队列运行中\n"
+            "  c#m - 管理队列已完成"
+        )
+
+        items.append(
+            self.build_response_item(
+                anime_id=999999979,
+                title="💡 @CXRW 使用说明",
+                description=help_desc,
+                image_url=image_url,
+                type="other",
+                episodeCount=0
+            )
+        )
+
+        # 第二项：任务总览
         # 构建统计查询（与主查询条件一致）
         total_stmt = select(func.count()).select_from(TaskHistory)
 
@@ -197,7 +224,7 @@ class TaskStatusCommand(CommandHandler):
             f"显示最新的 {len(tasks)} 条\n\n"
             f"💡 任务按更新时间排序"
         )
-        
+
         items.append(
             self.build_response_item(
                 anime_id=999999980,
