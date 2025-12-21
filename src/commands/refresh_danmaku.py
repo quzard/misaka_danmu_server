@@ -39,6 +39,9 @@ class RefreshDanmakuCommand(CommandHandler):
     # 番剧标签映射
     ANIME_LABELS = ['#A', '#B', '#C', '#D', '#E']
 
+    # 会话缓存时间（秒），用于保存用户的选择状态
+    SESSION_TTL = 1800  # 30分钟
+
     def __init__(self):
         super().__init__(
             name="SXDM",
@@ -189,7 +192,7 @@ class RefreshDanmakuCommand(CommandHandler):
             "data": {"animeList": anime_list},
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        await crud.set_cache(session, session_key, session_state, 120)
+        await crud.set_cache(session, session_key, session_state, self.SESSION_TTL)
 
         # 记录执行时间
         await self.record_execution(token, session)
@@ -199,10 +202,13 @@ class RefreshDanmakuCommand(CommandHandler):
         labels_text = " ".join(labels)
 
         # 第一条：引导说明
+        # 动态计算时间显示（转换为分钟）
+        time_desc = f"{self.SESSION_TTL // 60}分钟内" if self.SESSION_TTL >= 60 else f"{self.SESSION_TTL}秒内"
+
         anime_items = [
             self.build_response_item(
                 anime_id=999999998,
-                title="📺 最近播放的番剧 (10分钟内)",
+                title=f"📺 最近播放的番剧 ({time_desc})",
                 description=f"请选择要刷新的剧集作品:\n\n可用标签: {labels_text}\n\n"
                            f"💡 使用方法:\n• @SXDM #A - 查看分集列表\n• @SXDM #A5 - 直接刷新第5集",
                 image_url=image_url,
@@ -292,7 +298,7 @@ class RefreshDanmakuCommand(CommandHandler):
         session_state["stage"] = "select_episode"
         session_state["data"]["selectedAnime"] = selected_anime
         session_state["data"]["episodes"] = episode_list
-        await crud.set_cache(session, session_key, session_state, 120)
+        await crud.set_cache(session, session_key, session_state, self.SESSION_TTL)
 
         # 第一条：引导说明
         anime_items = [
@@ -311,9 +317,12 @@ class RefreshDanmakuCommand(CommandHandler):
         label_prefix = selected_anime['label'][1:]  # 去掉 # 号
 
         for ep in episode_list[:50]:
+            # 使用虚拟ID（900000000 + 索引），避免ID过大导致客户端解析错误
+            virtual_id = 900000000 + ep['index']
+
             anime_items.append(
                 self.build_response_item(
-                    anime_id=ep["episodeId"],
+                    anime_id=virtual_id,
                     title=f"[{label_prefix}{ep['index']}] {ep['episodeTitle']}",
                     description=f"{ep['status']} | 弹幕数: {ep['commentCount']} 条",
                     image_url=image_url,
