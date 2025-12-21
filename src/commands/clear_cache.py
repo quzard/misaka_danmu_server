@@ -23,8 +23,8 @@ class ClearCacheCommand(CommandHandler):
             name="QLHC",
             description="清理所有系统缓存（内存和数据库）",
             cooldown_seconds=30,
-            usage="@QLHC",
-            examples=["@QLHC"]
+            usage="@QLHC (支持大小写)",
+            examples=["@QLHC", "@qlhc"]
         )
     
     async def execute(self, token: str, args: List[str], session: AsyncSession,

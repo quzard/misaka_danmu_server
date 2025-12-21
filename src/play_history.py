@@ -32,8 +32,9 @@ async def record_play_history(
         episode_id: 分集 ID
     """
     # 查询分集所属的番剧信息（使用主 session，只读操作）
+    # 包含 imageUrl 和 localImagePath 用于显示海报
     stmt = (
-        select(Anime.id, Anime.title)
+        select(Anime.id, Anime.title, Anime.imageUrl, Anime.localImagePath)
         .join(AnimeSource, AnimeSource.animeId == Anime.id)
         .join(Episode, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episode_id)
@@ -44,7 +45,7 @@ async def record_play_history(
         logger.debug(f"未找到分集信息: episodeId={episode_id}")
         return
 
-    anime_id, anime_title = row
+    anime_id, anime_title, image_url, local_image_path = row
 
     # 在独立的 session 中更新缓存（避免影响主请求的事务）
     from .database import get_session_factory
@@ -64,6 +65,8 @@ async def record_play_history(
         new_record = {
             "animeId": anime_id,
             "animeTitle": anime_title,
+            "imageUrl": image_url,  # 远程海报URL
+            "localImagePath": local_image_path,  # 本地海报路径
             "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         history.insert(0, new_record)

@@ -39,16 +39,20 @@ class RefreshDanmakuCommand(CommandHandler):
     # 番剧标签映射
     ANIME_LABELS = ['#A', '#B', '#C', '#D', '#E']
 
+    # 会话缓存时间（秒），用于保存用户的选择状态
+    SESSION_TTL = 1800  # 30分钟
+
     def __init__(self):
         super().__init__(
             name="SXDM",
             description="刷新最近播放的弹幕",
             cooldown_seconds=2,
-            usage="@SXDM [标签] [集数]",
+            usage="@SXDM [标签] [集数] (支持大小写)",
             examples=[
                 "@SXDM - 查看最近播放",
-                "@SXDM #A - 查看A番剧的分集",
-                "@SXDM #A5 - 刷新A番剧第5集"
+                "@sxdm #a - 查看A番剧的分集",
+                "@SXDM #A5 - 刷新A番剧第5集",
+                "@sxdm #a5 - 小写也可以"
             ]
         )
 
@@ -146,10 +150,11 @@ class RefreshDanmakuCommand(CommandHandler):
             history = []
 
         if not history:
+            time_desc = f"{self.SESSION_TTL // 60}分钟有效"
             item = self.build_response_item(
                 anime_id=999999997,
                 title="未找到最近播放记录",
-                description="💡 提示: 播放视频后会自动记录 (10分钟有效)",
+                description=f"💡 提示: 播放视频后会自动记录 ({time_desc})",
                 image_url=image_url
             )
             return self.build_response([item])
@@ -189,7 +194,7 @@ class RefreshDanmakuCommand(CommandHandler):
             "data": {"animeList": anime_list},
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        await crud.set_cache(session, session_key, session_state, 120)
+        await crud.set_cache(session, session_key, session_state, self.SESSION_TTL)
 
         # 记录执行时间
         await self.record_execution(token, session)
@@ -199,10 +204,13 @@ class RefreshDanmakuCommand(CommandHandler):
         labels_text = " ".join(labels)
 
         # 第一条：引导说明
+        # 动态计算时间显示（转换为分钟）
+        time_desc = f"{self.SESSION_TTL // 60}分钟内" if self.SESSION_TTL >= 60 else f"{self.SESSION_TTL}秒内"
+
         anime_items = [
             self.build_response_item(
                 anime_id=999999998,
-                title="📺 最近播放的番剧 (10分钟内)",
+                title=f"📺 最近播放的番剧 ({time_desc})",
                 description=f"请选择要刷新的剧集作品:\n\n可用标签: {labels_text}\n\n"
                            f"💡 使用方法:\n• @SXDM #A - 查看分集列表\n• @SXDM #A5 - 直接刷新第5集",
                 image_url=image_url,
@@ -212,12 +220,18 @@ class RefreshDanmakuCommand(CommandHandler):
 
         # 第二条开始：每部番剧
         for anime in anime_list:
+            # 优先使用番剧自己的海报，如果没有则使用默认图片
+            anime_image = anime.get("imageUrl") or anime.get("localImagePath") or image_url
+            # 如果是本地路径且设置了自定义域名，则添加域名前缀
+            if anime_image and not anime_image.startswith(("http://", "https://", "/")):
+                anime_image = f"{custom_domain}/{anime_image}" if custom_domain else f"/{anime_image}"
+
             anime_items.append(
                 self.build_response_item(
                     anime_id=anime["animeId"],
                     title=f"{anime['label']} {anime['animeTitle']}",
                     description=f"最近播放 | 共 {anime['totalEpisodes']} 集",
-                    image_url=image_url,
+                    image_url=anime_image,
                     type="tvseries",
                     episodeCount=anime["totalEpisodes"]
                 )
@@ -238,7 +252,7 @@ class RefreshDanmakuCommand(CommandHandler):
         image_url: str
     ) -> "DandanSearchAnimeResponse":
         """显示选中番剧的分集列表"""
-        from ..orm_models import Episode, AnimeSource
+        from ..orm_models import Episode, AnimeSource, Anime
 
         anime_list = session_state.get("data", {}).get("animeList", [])
 
@@ -257,6 +271,21 @@ class RefreshDanmakuCommand(CommandHandler):
             )
 
         anime_id = selected_anime["animeId"]
+
+        # 查询番剧的海报信息
+        anime_stmt = select(Anime.imageUrl, Anime.localImagePath).where(Anime.id == anime_id)
+        anime_result = await session.execute(anime_stmt)
+        anime_row = anime_result.first()
+        anime_image_url = None
+        if anime_row:
+            anime_image_url = anime_row[0] or anime_row[1]  # imageUrl 或 localImagePath
+            # 处理本地路径
+            if anime_image_url and not anime_image_url.startswith(("http://", "https://", "/")):
+                anime_image_url = f"{custom_domain}/{anime_image_url}" if custom_domain else f"/{anime_image_url}"
+
+        # 如果没有找到番剧海报，使用默认图片
+        if not anime_image_url:
+            anime_image_url = image_url
 
         # 查询分集列表（通过 AnimeSource 关联，按集数排序）
         stmt = (
@@ -292,7 +321,7 @@ class RefreshDanmakuCommand(CommandHandler):
         session_state["stage"] = "select_episode"
         session_state["data"]["selectedAnime"] = selected_anime
         session_state["data"]["episodes"] = episode_list
-        await crud.set_cache(session, session_key, session_state, 120)
+        await crud.set_cache(session, session_key, session_state, self.SESSION_TTL)
 
         # 第一条：引导说明
         anime_items = [
@@ -301,7 +330,7 @@ class RefreshDanmakuCommand(CommandHandler):
                 title=f"📺 {selected_anime['animeTitle']} - 分集列表",
                 description=f"请选择要刷新的集数:\n\n共 {len(episode_list)} 集\n\n"
                            f"💡 输入 @SXDM 标签+集数 刷新弹幕\n例如: @SXDM {selected_anime['label']}5 (刷新第5集)",
-                image_url=image_url,
+                image_url=anime_image_url,  # 使用番剧的海报
                 episodeCount=len(episode_list)
             )
         ]
@@ -311,12 +340,15 @@ class RefreshDanmakuCommand(CommandHandler):
         label_prefix = selected_anime['label'][1:]  # 去掉 # 号
 
         for ep in episode_list[:50]:
+            # 使用虚拟ID（900000000 + 索引），避免ID过大导致客户端解析错误
+            virtual_id = 900000000 + ep['index']
+
             anime_items.append(
                 self.build_response_item(
-                    anime_id=ep["episodeId"],
+                    anime_id=virtual_id,
                     title=f"[{label_prefix}{ep['index']}] {ep['episodeTitle']}",
                     description=f"{ep['status']} | 弹幕数: {ep['commentCount']} 条",
-                    image_url=image_url,
+                    image_url=anime_image_url,  # 使用番剧的海报
                     type="tvseries",
                     episodeCount=1
                 )
