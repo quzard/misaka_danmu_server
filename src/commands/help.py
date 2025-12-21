@@ -22,8 +22,8 @@ class HelpCommand(CommandHandler):
             name="HELP",
             description="展示所有可用指令及说明",
             cooldown_seconds=0,  # 无冷却
-            usage="@ 或 @HELP",
-            examples=["@", "@HELP"]
+            usage="@ 或 @HELP (支持大小写)",
+            examples=["@", "@HELP", "@help"]
         )
 
     async def execute(self, token: str, args: List[str], session: AsyncSession,
@@ -57,8 +57,9 @@ class HelpCommand(CommandHandler):
                 anime_id=999999900,
                 title="📖 可用指令列表",
                 description=f"当前系统共有 {len(commands_list)} 个可用指令:\n\n"
+                           f"✅ 所有指令支持大小写 (@SXDM = @sxdm)\n"
                            f"💡 直接在搜索框输入 @指令名 即可使用\n"
-                           f"💡 例如: @SXDM 刷新弹幕",
+                           f"💡 例如: @sxdm 或 @SXDM 刷新弹幕",
                 image_url=image_url,
                 episodeCount=len(commands_list)
             )

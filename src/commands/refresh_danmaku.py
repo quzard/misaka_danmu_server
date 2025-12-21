@@ -47,11 +47,12 @@ class RefreshDanmakuCommand(CommandHandler):
             name="SXDM",
             description="刷新最近播放的弹幕",
             cooldown_seconds=2,
-            usage="@SXDM [标签] [集数]",
+            usage="@SXDM [标签] [集数] (支持大小写)",
             examples=[
                 "@SXDM - 查看最近播放",
-                "@SXDM #A - 查看A番剧的分集",
-                "@SXDM #A5 - 刷新A番剧第5集"
+                "@sxdm #a - 查看A番剧的分集",
+                "@SXDM #A5 - 刷新A番剧第5集",
+                "@sxdm #a5 - 小写也可以"
             ]
         )
 
@@ -218,12 +219,18 @@ class RefreshDanmakuCommand(CommandHandler):
 
         # 第二条开始：每部番剧
         for anime in anime_list:
+            # 优先使用番剧自己的海报，如果没有则使用默认图片
+            anime_image = anime.get("imageUrl") or anime.get("localImagePath") or image_url
+            # 如果是本地路径且设置了自定义域名，则添加域名前缀
+            if anime_image and not anime_image.startswith(("http://", "https://", "/")):
+                anime_image = f"{custom_domain}/{anime_image}" if custom_domain else f"/{anime_image}"
+
             anime_items.append(
                 self.build_response_item(
                     anime_id=anime["animeId"],
                     title=f"{anime['label']} {anime['animeTitle']}",
                     description=f"最近播放 | 共 {anime['totalEpisodes']} 集",
-                    image_url=image_url,
+                    image_url=anime_image,
                     type="tvseries",
                     episodeCount=anime["totalEpisodes"]
                 )
@@ -244,7 +251,7 @@ class RefreshDanmakuCommand(CommandHandler):
         image_url: str
     ) -> "DandanSearchAnimeResponse":
         """显示选中番剧的分集列表"""
-        from ..orm_models import Episode, AnimeSource
+        from ..orm_models import Episode, AnimeSource, Anime
 
         anime_list = session_state.get("data", {}).get("animeList", [])
 
@@ -263,6 +270,21 @@ class RefreshDanmakuCommand(CommandHandler):
             )
 
         anime_id = selected_anime["animeId"]
+
+        # 查询番剧的海报信息
+        anime_stmt = select(Anime.imageUrl, Anime.localImagePath).where(Anime.id == anime_id)
+        anime_result = await session.execute(anime_stmt)
+        anime_row = anime_result.first()
+        anime_image_url = None
+        if anime_row:
+            anime_image_url = anime_row[0] or anime_row[1]  # imageUrl 或 localImagePath
+            # 处理本地路径
+            if anime_image_url and not anime_image_url.startswith(("http://", "https://", "/")):
+                anime_image_url = f"{custom_domain}/{anime_image_url}" if custom_domain else f"/{anime_image_url}"
+
+        # 如果没有找到番剧海报，使用默认图片
+        if not anime_image_url:
+            anime_image_url = image_url
 
         # 查询分集列表（通过 AnimeSource 关联，按集数排序）
         stmt = (
@@ -307,7 +329,7 @@ class RefreshDanmakuCommand(CommandHandler):
                 title=f"📺 {selected_anime['animeTitle']} - 分集列表",
                 description=f"请选择要刷新的集数:\n\n共 {len(episode_list)} 集\n\n"
                            f"💡 输入 @SXDM 标签+集数 刷新弹幕\n例如: @SXDM {selected_anime['label']}5 (刷新第5集)",
-                image_url=image_url,
+                image_url=anime_image_url,  # 使用番剧的海报
                 episodeCount=len(episode_list)
             )
         ]
@@ -325,7 +347,7 @@ class RefreshDanmakuCommand(CommandHandler):
                     anime_id=virtual_id,
                     title=f"[{label_prefix}{ep['index']}] {ep['episodeTitle']}",
                     description=f"{ep['status']} | 弹幕数: {ep['commentCount']} 条",
-                    image_url=image_url,
+                    image_url=anime_image_url,  # 使用番剧的海报
                     type="tvseries",
                     episodeCount=1
                 )
