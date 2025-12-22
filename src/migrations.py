@@ -290,6 +290,60 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
     logger.info("   请重启应用验证字段类型是否恢复正常")
 
 
+async def _fix_api_tokens_id_autoincrement(conn: AsyncConnection):
+    """
+    修复 api_tokens 表的 id 字段，确保有 AUTO_INCREMENT 属性
+
+    问题：创建 API Token 时报错 "Field 'id' doesn't have a default value"
+    原因：id 字段缺少 AUTO_INCREMENT 属性
+    解决：添加 AUTO_INCREMENT 属性
+    """
+    logger.info("检查 api_tokens 表的 id 字段...")
+
+    try:
+        # 检查当前 id 字段的定义
+        check_sql = text("""
+            SELECT COLUMN_NAME, COLUMN_TYPE, EXTRA
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'api_tokens'
+            AND COLUMN_NAME = 'id'
+        """)
+
+        result = await conn.execute(check_sql)
+        row = result.fetchone()
+
+        if row:
+            extra = str(row[2]).lower() if row[2] else ""
+            logger.info(f"  当前 id 字段: {row[0]} {row[1]} {row[2]}")
+
+            # 检查是否已经有 AUTO_INCREMENT
+            if 'auto_increment' in extra:
+                logger.info("  ✅ id 字段已有 AUTO_INCREMENT 属性，无需修复")
+                return
+
+        logger.warning("  ⚠️  id 字段缺少 AUTO_INCREMENT 属性，开始修复...")
+
+        # 修改 id 字段，添加 AUTO_INCREMENT
+        alter_sql = text("""
+            ALTER TABLE api_tokens
+            MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT
+        """)
+
+        await conn.execute(alter_sql)
+        logger.info("  ✅ 成功为 api_tokens.id 添加 AUTO_INCREMENT 属性")
+
+        # 验证修复结果
+        result = await conn.execute(check_sql)
+        row = result.fetchone()
+        if row:
+            logger.info(f"  ✅ 修复后的 id 字段: {row[0]} {row[1]} {row[2]}")
+
+    except Exception as e:
+        logger.error(f"  ❌ 修复 api_tokens.id 失败: {e}")
+        raise
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -304,6 +358,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         # 格式: ("migration_id", migration_func, (args,))
         ("migrate_clear_rate_limit_state_v1", _migrate_clear_rate_limit_state_v1, ()),
         ("rollback_to_original_types_v1", _rollback_to_original_types_v1, (db_type,)),
+        ("fix_api_tokens_id_autoincrement_v1", _fix_api_tokens_id_autoincrement, ()),
     ]
 
     for migration_id, migration_func, args in migrations:
