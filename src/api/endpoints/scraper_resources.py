@@ -661,10 +661,10 @@ async def load_resources_stream(
                 last_heartbeat = asyncio.get_event_loop().time()
 
                 async def send_heartbeat_if_needed():
-                    """如果距离上次发送超过5秒,发送心跳"""
+                    """如果距离上次发送超过2秒,发送心跳（缩短间隔防止连接超时）"""
                     nonlocal last_heartbeat
                     current_time = asyncio.get_event_loop().time()
-                    if current_time - last_heartbeat > 5:
+                    if current_time - last_heartbeat > 2:
                         last_heartbeat = current_time
                         return ": heartbeat\n\n"
                     return None
@@ -871,20 +871,45 @@ async def load_resources_stream(
                                 for retry_count in range(max_retries + 1):
                                     try:
                                         if retry_count > 0:
-                                            logger.info(f"\t\t[重试 {retry_count}/{max_retries}] 下载 {scraper_name}")
+                                            logger.warning(f"\t\t[重试 {retry_count}/{max_retries}] 下载 {scraper_name}")
                                             await asyncio.sleep(1.0)
+                                            # 重试时发送心跳
+                                            heartbeat = await send_heartbeat_if_needed()
+                                            if heartbeat:
+                                                yield heartbeat
+
+                                        # 开始下载前发送心跳
+                                        heartbeat = await send_heartbeat_if_needed()
+                                        if heartbeat:
+                                            yield heartbeat
 
                                         response = await asyncio.wait_for(client.get(file_url), timeout=18.0)
+
+                                        # 下载完成后发送心跳
+                                        heartbeat = await send_heartbeat_if_needed()
+                                        if heartbeat:
+                                            yield heartbeat
 
                                         if response.status_code == 200:
                                             # 写入文件
                                             file_content = response.content
-                                            await asyncio.to_thread(target_path.write_bytes, file_content)
 
-                                            # 验证文件哈希值（如果远程提供了哈希值）
+                                            # 让出控制权，防止阻塞
+                                            await asyncio.sleep(0)
+
+                                            # 验证文件哈希值（如果远程提供了哈希值）- 使用异步方式
                                             if remote_hash:
                                                 import hashlib
-                                                local_hash = hashlib.sha256(file_content).hexdigest()
+                                                # 将哈希计算放到线程池，防止阻塞事件循环（大文件可能耗时数秒）
+                                                local_hash = await asyncio.to_thread(
+                                                    lambda data: hashlib.sha256(data).hexdigest(),
+                                                    file_content
+                                                )
+                                                # 哈希计算完成后发送心跳
+                                                heartbeat = await send_heartbeat_if_needed()
+                                                if heartbeat:
+                                                    yield heartbeat
+
                                                 if local_hash != remote_hash:
                                                     # 哈希值不匹配，文件可能损坏，删除并标记失败
                                                     logger.error(f"\t文件哈希验证失败 {scraper_name}: 期望 {remote_hash[:16]}..., 实际 {local_hash[:16]}...")
@@ -897,14 +922,28 @@ async def load_resources_stream(
                                                         yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '哈希验证失败'}, ensure_ascii=False)}\n\n"
                                                     continue  # 重试下载
                                                 hashes_data[scraper_name] = remote_hash
+                                                logger.debug(f"\t\t哈希验证通过: {scraper_name}")
+
+                                            # 写入文件（异步方式，防止阻塞）
+                                            logger.debug(f"\t\t正在写入文件: {filename} ({len(file_content)} 字节)")
+                                            await asyncio.to_thread(target_path.write_bytes, file_content)
+                                            logger.debug(f"\t\t文件写入完成: {filename}")
+
+                                            # 文件写入后发送心跳
+                                            heartbeat = await send_heartbeat_if_needed()
+                                            if heartbeat:
+                                                yield heartbeat
 
                                             download_count += 1
                                             version = scraper_info.get('version', 'unknown')
                                             versions_data[scraper_name] = version
 
-                                            logger.info(f"\t成功下载: {filename} (版本: {version})")
+                                            logger.info(f"\t✓ 成功下载: {filename} (版本: {version}, 大小: {len(file_content)} 字节)")
                                             last_heartbeat = asyncio.get_event_loop().time()
                                             yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
+
+                                            # 下载成功后让出控制权
+                                            await asyncio.sleep(0)
                                             break
                                         else:
                                             if retry_count == max_retries:
@@ -916,13 +955,25 @@ async def load_resources_stream(
                                         if retry_count == max_retries:
                                             failed_downloads.append(scraper_name)
                                             error_msg = "超时" if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)) else "连接失败"
-                                            logger.error(f"\t下载失败 {scraper_name}: {error_msg}")
+                                            logger.error(f"\t下载失败 {scraper_name}: {error_msg}", exc_info=True)
                                             yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': error_msg}, ensure_ascii=False)}\n\n"
+                                        # 让出控制权，防止连续重试时阻塞
+                                        await asyncio.sleep(0)
+                                    except Exception as retry_error:
+                                        # 捕获其他异常（如网络错误、解析错误等）
+                                        logger.error(f"\t\t下载 {scraper_name} 时出现异常 (重试 {retry_count}/{max_retries}): {retry_error}", exc_info=True)
+                                        if retry_count == max_retries:
+                                            failed_downloads.append(scraper_name)
+                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'异常: {str(retry_error)}'}, ensure_ascii=False)}\n\n"
+                                        await asyncio.sleep(0)
 
                             except Exception as e:
+                                # 外层异常处理：捕获整个文件处理流程中的错误
                                 failed_downloads.append(scraper_name)
-                                logger.error(f"\t下载 {scraper_name} 失败: {e}")
-                                yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': str(e)}, ensure_ascii=False)}\n\n"
+                                logger.error(f"\t处理 {scraper_name} 时发生严重错误: {e}", exc_info=True)
+                                yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'严重错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+                                # 让出控制权
+                                await asyncio.sleep(0)
 
                     logger.info(f"循环检查完成，总共检查了 {checked_count}/{total_count} 个源，下载 {download_count} 个，跳过 {skip_count} 个")
 

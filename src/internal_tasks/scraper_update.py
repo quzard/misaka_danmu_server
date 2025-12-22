@@ -289,25 +289,46 @@ async def _download_single_scraper(
                 if response.status_code == 200:
                     file_content = response.content
 
-                    # 验证哈希值
+                    # 让出控制权
+                    await asyncio.sleep(0)
+
+                    # 验证哈希值（异步方式，防止阻塞事件循环）
                     if remote_hash:
-                        local_hash = hashlib.sha256(file_content).hexdigest()
+                        # 将哈希计算放到线程池中执行
+                        local_hash = await asyncio.to_thread(
+                            lambda data: hashlib.sha256(data).hexdigest(),
+                            file_content
+                        )
                         if local_hash != remote_hash:
+                            logger.warning(f"\t哈希验证失败 {scraper_name} (重试 {retry + 1}/{max_retries})")
                             if retry == max_retries - 1:
                                 return "failed"
+                            await asyncio.sleep(0)
                             continue
                         hashes_data[scraper_name] = remote_hash
+                        logger.debug(f"\t哈希验证通过: {scraper_name}")
 
+                    # 写入文件（异步方式）
+                    logger.debug(f"\t写入文件: {scraper_name} ({len(file_content)} 字节)")
                     await asyncio.to_thread(target_path.write_bytes, file_content)
+
                     versions_data[scraper_name] = scraper_info.get('version', 'unknown')
-                    logger.debug(f"成功下载: {scraper_name}")
+                    logger.debug(f"✓ 成功下载: {scraper_name}")
+
+                    # 让出控制权
+                    await asyncio.sleep(0)
                     return "downloaded"
                 elif retry == max_retries - 1:
+                    logger.warning(f"\t下载失败 {scraper_name}: HTTP {response.status_code}")
                     return "failed"
+                # 让出控制权
+                await asyncio.sleep(0)
             except Exception as e:
                 if retry == max_retries - 1:
-                    logger.warning(f"下载 {scraper_name} 失败: {e}")
+                    logger.warning(f"下载 {scraper_name} 失败: {e}", exc_info=True)
                     return "failed"
+                # 重试前让出控制权
+                await asyncio.sleep(0.5)
 
         return "failed"
     except Exception as e:
