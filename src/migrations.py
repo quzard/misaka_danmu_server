@@ -292,52 +292,117 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
 
 async def _fix_api_tokens_id_autoincrement(conn: AsyncConnection):
     """
-    修复 api_tokens 表的 id 字段，确保有 AUTO_INCREMENT 属性
+    修复 api_tokens 表的 id 字段，确保有自增属性
 
     问题：创建 API Token 时报错 "Field 'id' doesn't have a default value"
-    原因：id 字段缺少 AUTO_INCREMENT 属性
-    解决：添加 AUTO_INCREMENT 属性
+    原因：id 字段缺少自增属性（MySQL: AUTO_INCREMENT, PostgreSQL: SERIAL/IDENTITY）
+    解决：根据数据库类型添加相应的自增属性
     """
     logger.info("检查 api_tokens 表的 id 字段...")
+    db_type = conn.dialect.name
 
     try:
-        # 检查当前 id 字段的定义
-        check_sql = text("""
-            SELECT COLUMN_NAME, COLUMN_TYPE, EXTRA
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'api_tokens'
-            AND COLUMN_NAME = 'id'
-        """)
+        if db_type == 'mysql':
+            # === MySQL 处理逻辑 ===
+            check_sql = text("""
+                SELECT COLUMN_NAME, COLUMN_TYPE, EXTRA
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'api_tokens'
+                AND COLUMN_NAME = 'id'
+            """)
 
-        result = await conn.execute(check_sql)
-        row = result.fetchone()
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
 
-        if row:
-            extra = str(row[2]).lower() if row[2] else ""
-            logger.info(f"  当前 id 字段: {row[0]} {row[1]} {row[2]}")
+            if row:
+                extra = str(row[2]).lower() if row[2] else ""
+                logger.info(f"  当前 id 字段 (MySQL): {row[0]} {row[1]} {row[2]}")
 
-            # 检查是否已经有 AUTO_INCREMENT
-            if 'auto_increment' in extra:
-                logger.info("  ✅ id 字段已有 AUTO_INCREMENT 属性，无需修复")
-                return
+                # 检查是否已经有 AUTO_INCREMENT
+                if 'auto_increment' in extra:
+                    logger.info("  ✅ id 字段已有 AUTO_INCREMENT 属性，无需修复")
+                    return
 
-        logger.warning("  ⚠️  id 字段缺少 AUTO_INCREMENT 属性，开始修复...")
+            logger.warning("  ⚠️  id 字段缺少 AUTO_INCREMENT 属性，开始修复...")
 
-        # 修改 id 字段，添加 AUTO_INCREMENT
-        alter_sql = text("""
-            ALTER TABLE api_tokens
-            MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT
-        """)
+            # 修改 id 字段，添加 AUTO_INCREMENT
+            alter_sql = text("""
+                ALTER TABLE api_tokens
+                MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT
+            """)
 
-        await conn.execute(alter_sql)
-        logger.info("  ✅ 成功为 api_tokens.id 添加 AUTO_INCREMENT 属性")
+            await conn.execute(alter_sql)
+            logger.info("  ✅ 成功为 api_tokens.id 添加 AUTO_INCREMENT 属性")
 
-        # 验证修复结果
-        result = await conn.execute(check_sql)
-        row = result.fetchone()
-        if row:
-            logger.info(f"  ✅ 修复后的 id 字段: {row[0]} {row[1]} {row[2]}")
+        elif db_type == 'postgresql':
+            # === PostgreSQL 处理逻辑 ===
+            # 检查 id 字段是否已有默认值（序列或 IDENTITY）
+            check_sql = text("""
+                SELECT
+                    column_name,
+                    data_type,
+                    column_default,
+                    is_identity
+                FROM information_schema.columns
+                WHERE table_schema = CURRENT_SCHEMA()
+                AND table_name = 'api_tokens'
+                AND column_name = 'id'
+            """)
+
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
+
+            if row:
+                column_default = str(row[2]) if row[2] else ""
+                is_identity = str(row[3]) if row[3] else "NO"
+                logger.info(f"  当前 id 字段 (PostgreSQL): {row[0]} {row[1]}, default={row[2]}, is_identity={row[3]}")
+
+                # 检查是否已有自增（序列或 IDENTITY）
+                if 'nextval' in column_default or is_identity == 'YES':
+                    logger.info("  ✅ id 字段已有自增属性，无需修复")
+                    return
+
+            logger.warning("  ⚠️  id 字段缺少自增属性，开始修复...")
+
+            # 创建序列（如果不存在）
+            sequence_name = 'api_tokens_id_seq'
+            create_seq_sql = text(f"""
+                CREATE SEQUENCE IF NOT EXISTS {sequence_name}
+                START WITH 1
+                INCREMENT BY 1
+                NO MINVALUE
+                NO MAXVALUE
+                CACHE 1
+            """)
+            await conn.execute(create_seq_sql)
+
+            # 获取当前最大 id 值
+            max_id_sql = text("SELECT COALESCE(MAX(id), 0) FROM api_tokens")
+            result = await conn.execute(max_id_sql)
+            max_id = result.scalar_one()
+
+            # 设置序列的当前值
+            if max_id > 0:
+                setval_sql = text(f"SELECT setval('{sequence_name}', :max_id)")
+                await conn.execute(setval_sql, {"max_id": max_id})
+
+            # 设置 id 字段的默认值为序列的下一个值
+            alter_sql = text(f"""
+                ALTER TABLE api_tokens
+                ALTER COLUMN id SET DEFAULT nextval('{sequence_name}')
+            """)
+            await conn.execute(alter_sql)
+
+            # 将序列的所有权交给表列（这样删除列时序列也会被删除）
+            owner_sql = text(f"ALTER SEQUENCE {sequence_name} OWNED BY api_tokens.id")
+            await conn.execute(owner_sql)
+
+            logger.info("  ✅ 成功为 api_tokens.id 添加序列自增属性")
+
+        else:
+            logger.warning(f"  ⚠️  不支持的数据库类型: {db_type}，跳过此迁移")
+            return
 
     except Exception as e:
         logger.error(f"  ❌ 修复 api_tokens.id 失败: {e}")
@@ -358,7 +423,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         # 格式: ("migration_id", migration_func, (args,))
         ("migrate_clear_rate_limit_state_v1", _migrate_clear_rate_limit_state_v1, ()),
         ("rollback_to_original_types_v1", _rollback_to_original_types_v1, (db_type,)),
-        ("fix_api_tokens_id_autoincrement_v1", _fix_api_tokens_id_autoincrement, ()),
+        ("fix_api_tokens_id_autoincrement_v2", _fix_api_tokens_id_autoincrement, ()),  # v2: 增加 PostgreSQL 支持
     ]
 
     for migration_id, migration_func, args in migrations:
