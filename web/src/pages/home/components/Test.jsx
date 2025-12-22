@@ -71,21 +71,70 @@ export const Test = () => {
         },
       ],
       renderResult: data => {
-        if (data?.isMatched) {
-          return (
-            <>
-              <div className="font-bold text-green-600">[匹配成功]</div>
-              {data.matches?.map((it, index) => (
-                <div key={index} className="mt-2 p-2 bg-green-50 rounded">
-                  <div>番剧: {it.animeTitle} (ID: {it.animeId})</div>
-                  <div>分集: {it.episodeTitle} (ID: {it.episodeId})</div>
-                  <div>类型: {it.typeDescription}</div>
+        // 检查是否有匹配结果
+        const hasMatches = data?.matches && data.matches.length > 0
+
+        if (!hasMatches) {
+          return <div className="text-red-600">[匹配失败] 未匹配到任何结果</div>
+        }
+
+        // 有匹配结果
+        const statusColor = data.isMatched ? 'text-green-600' : 'text-orange-600'
+        const statusText = data.isMatched
+          ? '[精确匹配]'
+          : `[多个匹配] 找到 ${data.matches.length} 个可能的匹配，请选择：`
+
+        return (
+          <>
+            <div className={`font-bold ${statusColor} mb-2`}>{statusText}</div>
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {data.matches.map((it, index) => (
+                <div
+                  key={index}
+                  className={`p-3 rounded border ${
+                    data.isMatched
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-blue-50 border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {it.imageUrl && (
+                      <img
+                        src={it.imageUrl}
+                        alt={it.animeTitle}
+                        className="w-16 h-24 object-cover rounded"
+                      />
+                    )}
+                    <div className="flex-1">
+                      <div className="font-semibold text-gray-800">
+                        {it.animeTitle}
+                        <span className="ml-2 text-xs text-gray-500">
+                          (作品ID: {it.animeId})
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {it.episodeTitle}
+                        <span className="ml-2 text-xs text-gray-400">
+                          (分集ID: {it.episodeId})
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        <Tag color={it.type === 'tvseries' ? 'blue' : 'purple'}>
+                          {it.typeDescription}
+                        </Tag>
+                        {it.shift !== 0 && (
+                          <Tag color="orange" className="ml-1">
+                            偏移: {it.shift > 0 ? `+${it.shift}` : it.shift}
+                          </Tag>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
-            </>
-          )
-        }
-        return <div className="text-red-600">[匹配失败] 未匹配到任何结果</div>
+            </div>
+          </>
+        )
       },
     },
     searchEpisodes: {

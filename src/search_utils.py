@@ -83,10 +83,13 @@ async def unified_search(
         cached_aliases = await crud.get_cache(session, alias_cache_key)
 
         if cached_aliases:
-            logger.info(f"从缓存中获取'{core_title}'的别名: {cached_aliases}")
             try:
                 import json
                 cached_alias_list = json.loads(cached_aliases)
+                # 使用 ensure_ascii=False 来正确显示中文
+                aliases_display = json.dumps(cached_alias_list, ensure_ascii=False, separators=(',', ':'))
+                logger.info(f"从缓存中获取'{core_title}'的别名({len(cached_alias_list)}个): {aliases_display}")
+
                 if use_alias_filtering:
                     # 验证缓存的别名相似度（使用核心标题进行比较）
                     for alias in cached_alias_list:
