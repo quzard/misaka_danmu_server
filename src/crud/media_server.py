@@ -7,7 +7,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, or_, and_
 
 from ..timezone import get_now
 from .. import orm_models
@@ -198,12 +198,11 @@ async def get_media_works(
     page_size: int = 100
 ) -> Dict[str, Any]:
     """
-    【优化版 - 数据库分页】获取作品列表(电影+电视剧组),按作品计数
+    【优化版 v2 - 解决 N+1 查询问题】获取作品列表(电影+电视剧组),按作品计数
 
     优化要点:
-    - 使用 UNION ALL 合并电影和电视剧查询
-    - 在数据库层面完成排序和分页
-    - 避免加载全部数据到内存
+    - 电视剧直接返回季度信息（seasons 字段），避免前端额外请求 /seasons 接口
+    - 将 100+ 个请求合并为 1 个请求
     """
     import time
     start_time = time.time()
@@ -261,18 +260,12 @@ async def get_media_works(
         return {"total": 0, "list": []}
 
     # ============================================================
-    # 步骤 2: 使用 UNION ALL 合并查询并分页
+    # 步骤 2: 获取作品列表
     # ============================================================
     works = []
-    offset = (page - 1) * page_size
-    remaining = page_size
 
-    # 计算当前页需要跳过多少电影和电视剧
-    # 由于电影和电视剧混合排序，我们需要分别查询然后合并
-    # 但为了简化，我们采用"先电影后电视剧"的策略，按 createdAt 排序
-
-    # 获取电影（如果需要）
-    if (media_type is None or media_type == 'movie') and remaining > 0:
+    # 获取电影
+    if media_type is None or media_type == 'movie':
         movie_stmt = select(
             orm_models.MediaItem.id,
             orm_models.MediaItem.serverId,
@@ -315,8 +308,8 @@ async def get_media_works(
                 "updatedAt": movie.updatedAt
             })
 
-    # 获取电视剧组（如果需要）
-    if (media_type is None or media_type == 'tv_series') and remaining > 0:
+    # 获取电视剧组
+    if media_type is None or media_type == 'tv_series':
         tv_stmt = select(
             orm_models.MediaItem.title,
             orm_models.MediaItem.serverId,
@@ -356,12 +349,73 @@ async def get_media_works(
             })
 
     # ============================================================
-    # 步骤 3: 排序和分页（在内存中，但数据量已经被过滤条件限制）
+    # 步骤 3: 排序和分页
     # ============================================================
     works.sort(key=lambda x: x['createdAt'], reverse=True)
     start = (page - 1) * page_size
     end = start + page_size
     paginated_works = works[start:end]
+
+    # ============================================================
+    # 步骤 4: 【关键优化】为电视剧批量获取季度信息，避免 N+1 查询
+    # ============================================================
+    tv_shows_in_page = [w for w in paginated_works if w['type'] == 'tv_show']
+
+    if tv_shows_in_page:
+        # 构建查询条件：获取当前页所有电视剧的季度信息
+        tv_titles = [(w['title'], w['serverId']) for w in tv_shows_in_page]
+
+        # 一次性查询所有电视剧的季度信息
+        seasons_stmt = select(
+            orm_models.MediaItem.title,
+            orm_models.MediaItem.serverId,
+            orm_models.MediaItem.season,
+            func.count(orm_models.MediaItem.id).label('episodeCount'),
+            func.min(orm_models.MediaItem.year).label('year'),
+            func.min(orm_models.MediaItem.posterUrl).label('posterUrl')
+        ).where(
+            orm_models.MediaItem.mediaType == 'tv_series'
+        )
+
+        # 构建 OR 条件：(title='A' AND serverId=1) OR (title='B' AND serverId=1) ...
+        title_conditions = [
+            and_(
+                orm_models.MediaItem.title == title,
+                orm_models.MediaItem.serverId == sid
+            )
+            for title, sid in tv_titles
+        ]
+        seasons_stmt = seasons_stmt.where(or_(*title_conditions))
+        seasons_stmt = seasons_stmt.group_by(
+            orm_models.MediaItem.title,
+            orm_models.MediaItem.serverId,
+            orm_models.MediaItem.season
+        ).order_by(
+            orm_models.MediaItem.title,
+            orm_models.MediaItem.season
+        )
+
+        seasons_result = await session.execute(seasons_stmt)
+        all_seasons = seasons_result.all()
+
+        # 按 (title, serverId) 分组季度信息
+        seasons_map = {}
+        for s in all_seasons:
+            key = (s.title, s.serverId)
+            if key not in seasons_map:
+                seasons_map[key] = []
+            seasons_map[key].append({
+                "season": s.season,
+                "episodeCount": s.episodeCount,
+                "year": s.year,
+                "posterUrl": s.posterUrl
+            })
+
+        # 将季度信息附加到电视剧作品上
+        for work in paginated_works:
+            if work['type'] == 'tv_show':
+                key = (work['title'], work['serverId'])
+                work['seasons'] = seasons_map.get(key, [])
 
     # 性能日志
     elapsed = time.time() - start_time
