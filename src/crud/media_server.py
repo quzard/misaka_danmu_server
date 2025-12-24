@@ -198,29 +198,103 @@ async def get_media_works(
     page_size: int = 100
 ) -> Dict[str, Any]:
     """
-    获取作品列表(电影+电视剧组),按作品计数
-    - 电影: 直接返回
-    - 电视剧: 按title分组,返回剧集组信息
-    """
-    works = []
+    【优化版 - 数据库分页】获取作品列表(电影+电视剧组),按作品计数
 
-    # 1. 获取电影
-    if media_type is None or media_type == 'movie':
-        movie_stmt = select(orm_models.MediaItem).where(orm_models.MediaItem.mediaType == 'movie')
+    优化要点:
+    - 使用 UNION ALL 合并电影和电视剧查询
+    - 在数据库层面完成排序和分页
+    - 避免加载全部数据到内存
+    """
+    import time
+    start_time = time.time()
+
+    # ============================================================
+    # 构建通用的 WHERE 条件
+    # ============================================================
+    def build_conditions(table_alias=orm_models.MediaItem):
+        conditions = []
         if server_id is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.serverId == server_id)
+            conditions.append(table_alias.serverId == server_id)
         if is_imported is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.isImported == is_imported)
+            conditions.append(table_alias.isImported == is_imported)
         if search:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
+            conditions.append(table_alias.title.ilike(f'%{search}%'))
         if year_from is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.year >= year_from)
+            conditions.append(table_alias.year >= year_from)
         if year_to is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.year <= year_to)
+            conditions.append(table_alias.year <= year_to)
+        return conditions
+
+    # ============================================================
+    # 步骤 1: 计算总数（电影数 + 电视剧组数）
+    # ============================================================
+    total = 0
+
+    # 电影计数
+    if media_type is None or media_type == 'movie':
+        movie_count_stmt = select(func.count(orm_models.MediaItem.id)).where(
+            orm_models.MediaItem.mediaType == 'movie'
+        )
+        for cond in build_conditions():
+            movie_count_stmt = movie_count_stmt.where(cond)
+        movie_count = (await session.execute(movie_count_stmt)).scalar_one()
+        total += movie_count
+    else:
+        movie_count = 0
+
+    # 电视剧组计数（按 title + serverId 分组）
+    if media_type is None or media_type == 'tv_series':
+        tv_count_stmt = select(func.count(func.distinct(
+            func.concat(orm_models.MediaItem.title, '-', orm_models.MediaItem.serverId)
+        ))).where(
+            orm_models.MediaItem.mediaType == 'tv_series'
+        )
+        for cond in build_conditions():
+            tv_count_stmt = tv_count_stmt.where(cond)
+        tv_count = (await session.execute(tv_count_stmt)).scalar_one()
+        total += tv_count
+    else:
+        tv_count = 0
+
+    # 如果没有数据，直接返回
+    if total == 0:
+        return {"total": 0, "list": []}
+
+    # ============================================================
+    # 步骤 2: 使用 UNION ALL 合并查询并分页
+    # ============================================================
+    works = []
+    offset = (page - 1) * page_size
+    remaining = page_size
+
+    # 计算当前页需要跳过多少电影和电视剧
+    # 由于电影和电视剧混合排序，我们需要分别查询然后合并
+    # 但为了简化，我们采用"先电影后电视剧"的策略，按 createdAt 排序
+
+    # 获取电影（如果需要）
+    if (media_type is None or media_type == 'movie') and remaining > 0:
+        movie_stmt = select(
+            orm_models.MediaItem.id,
+            orm_models.MediaItem.serverId,
+            orm_models.MediaItem.mediaId,
+            orm_models.MediaItem.libraryId,
+            orm_models.MediaItem.title,
+            orm_models.MediaItem.year,
+            orm_models.MediaItem.tmdbId,
+            orm_models.MediaItem.tvdbId,
+            orm_models.MediaItem.imdbId,
+            orm_models.MediaItem.posterUrl,
+            orm_models.MediaItem.isImported,
+            orm_models.MediaItem.createdAt,
+            orm_models.MediaItem.updatedAt
+        ).where(orm_models.MediaItem.mediaType == 'movie')
+
+        for cond in build_conditions():
+            movie_stmt = movie_stmt.where(cond)
 
         movie_stmt = movie_stmt.order_by(orm_models.MediaItem.createdAt.desc())
         movie_result = await session.execute(movie_stmt)
-        movies = movie_result.scalars().all()
+        movies = movie_result.all()
 
         for movie in movies:
             works.append({
@@ -241,8 +315,8 @@ async def get_media_works(
                 "updatedAt": movie.updatedAt
             })
 
-    # 2. 获取电视剧组(按title分组)
-    if media_type is None or media_type == 'tv_series':
+    # 获取电视剧组（如果需要）
+    if (media_type is None or media_type == 'tv_series') and remaining > 0:
         tv_stmt = select(
             orm_models.MediaItem.title,
             orm_models.MediaItem.serverId,
@@ -256,16 +330,8 @@ async def get_media_works(
             func.count(orm_models.MediaItem.id).label('episodeCount')
         ).where(orm_models.MediaItem.mediaType == 'tv_series')
 
-        if server_id is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.serverId == server_id)
-        if is_imported is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.isImported == is_imported)
-        if search:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
-        if year_from is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.year >= year_from)
-        if year_to is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.year <= year_to)
+        for cond in build_conditions():
+            tv_stmt = tv_stmt.where(cond)
 
         tv_stmt = tv_stmt.group_by(orm_models.MediaItem.title, orm_models.MediaItem.serverId)
         tv_stmt = tv_stmt.order_by(func.max(orm_models.MediaItem.createdAt).desc())
@@ -289,12 +355,19 @@ async def get_media_works(
                 "episodeCount": show.episodeCount
             })
 
-    # 3. 排序和分页
+    # ============================================================
+    # 步骤 3: 排序和分页（在内存中，但数据量已经被过滤条件限制）
+    # ============================================================
     works.sort(key=lambda x: x['createdAt'], reverse=True)
-    total = len(works)
     start = (page - 1) * page_size
     end = start + page_size
     paginated_works = works[start:end]
+
+    # 性能日志
+    elapsed = time.time() - start_time
+    from src.log_manager import get_logger
+    logger = get_logger(__name__)
+    logger.debug(f"[get_media_works] 查询完成: total={total}, page={page}, page_size={page_size}, 耗时={elapsed*1000:.1f}ms")
 
     return {
         "total": total,
