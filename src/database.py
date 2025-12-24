@@ -253,12 +253,9 @@ async def create_initial_admin_user(app: FastAPI):
     print("="*60 + "\n")
 
 async def init_db_tables(app: FastAPI):
-    """
-    初始化数据库和表
-
-    使用统一的数据库初始化器（database_initializer.py），参考 emby-toolkit 项目设计。
-    """
-    from .database_initializer import init_database_schema
+    """初始化数据库和表"""
+    from .db_maintainer import sync_database_schema
+    from .migrations import run_migrations
 
     # 1. 确保数据库存在
     await _create_db_if_not_exists()
@@ -266,11 +263,15 @@ async def init_db_tables(app: FastAPI):
     # 2. 创建数据库引擎和会话工厂
     await create_db_engine_and_session(app)
 
-    # 3. 使用统一的数据库初始化器执行所有初始化任务
+    # 3. 创建所有表（基于 ORM 模型）
     engine = app.state.db_engine
     async with engine.begin() as conn:
-        await init_database_schema(
-            conn=conn,
-            db_type=settings.database.type.lower(),
-            db_name=settings.database.name
-        )
+        await conn.run_sync(Base.metadata.create_all)
+
+    # 4. 同步数据库结构（自动检测并补充缺失的字段）
+    async with engine.begin() as conn:
+        await sync_database_schema(conn, settings.database.type.lower())
+
+    # 5. 执行数据库迁移任务
+    async with engine.begin() as conn:
+        await run_migrations(conn, settings.database.type.lower(), settings.database.name)
