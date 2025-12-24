@@ -240,27 +240,43 @@ async def get_media_works(
         return conditions
 
     # ============================================================
-    # 步骤 1: 计算总数（电影数 + 电视剧组数）
+    # 步骤 1: 计算总数（电影数 + 电视剧组数）- 合并为单次查询
     # ============================================================
-    total = 0
+    if media_type is None:
+        # 同时查询电影数和电视剧组数（一次数据库往返）
+        count_stmt = select(
+            func.sum(func.case((MI.mediaType == 'movie', 1), else_=0)).label('movie_count'),
+            func.count(func.distinct(func.case(
+                (MI.mediaType == 'tv_series', func.concat(MI.title, '-', MI.serverId)),
+                else_=None
+            ))).label('tv_count')
+        )
+        # 添加通用条件
+        if server_id is not None:
+            count_stmt = count_stmt.where(MI.serverId == server_id)
+        if search:
+            count_stmt = count_stmt.where(MI.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            count_stmt = count_stmt.where(MI.year >= year_from)
+        if year_to is not None:
+            count_stmt = count_stmt.where(MI.year <= year_to)
 
-    # 电影计数
-    if media_type is None or media_type == 'movie':
+        count_result = (await session.execute(count_stmt)).one()
+        movie_count = count_result.movie_count or 0
+        tv_count = count_result.tv_count or 0
+        total = movie_count + tv_count
+    elif media_type == 'movie':
         movie_count_stmt = select(func.count(MI.id)).where(*build_movie_conditions())
         movie_count = (await session.execute(movie_count_stmt)).scalar_one()
-        total += movie_count
-    else:
-        movie_count = 0
-
-    # 电视剧组计数（按 title + serverId 分组）
-    if media_type is None or media_type == 'tv_series':
+        tv_count = 0
+        total = movie_count
+    else:  # tv_series
         tv_count_stmt = select(func.count(func.distinct(
             func.concat(MI.title, '-', MI.serverId)
         ))).where(*build_tv_conditions())
         tv_count = (await session.execute(tv_count_stmt)).scalar_one()
-        total += tv_count
-    else:
-        tv_count = 0
+        movie_count = 0
+        total = tv_count
 
     # 如果没有数据，直接返回
     if total == 0:
@@ -365,37 +381,35 @@ async def get_media_works(
     tv_shows_in_page = [w for w in paginated_works if w['type'] == 'tv_show']
 
     if tv_shows_in_page:
-        # 构建查询条件：获取当前页所有电视剧的季度信息
-        tv_titles = [(w['title'], w['serverId']) for w in tv_shows_in_page]
+        # 如果所有电视剧都属于同一个 serverId，使用更高效的 IN 查询
+        server_ids = set(w['serverId'] for w in tv_shows_in_page)
+        titles = [w['title'] for w in tv_shows_in_page]
 
         # 一次性查询所有电视剧的季度信息
         seasons_stmt = select(
-            orm_models.MediaItem.title,
-            orm_models.MediaItem.serverId,
-            orm_models.MediaItem.season,
-            func.count(orm_models.MediaItem.id).label('episodeCount'),
-            func.min(orm_models.MediaItem.year).label('year'),
-            func.min(orm_models.MediaItem.posterUrl).label('posterUrl')
+            MI.title,
+            MI.serverId,
+            MI.season,
+            func.count(MI.id).label('episodeCount'),
+            func.min(MI.year).label('year'),
+            func.min(MI.posterUrl).label('posterUrl')
         ).where(
-            orm_models.MediaItem.mediaType == 'tv_series'
+            MI.mediaType == 'tv_series',
+            MI.title.in_(titles)
         )
 
-        # 构建 OR 条件：(title='A' AND serverId=1) OR (title='B' AND serverId=1) ...
-        title_conditions = [
-            and_(
-                orm_models.MediaItem.title == title,
-                orm_models.MediaItem.serverId == sid
-            )
-            for title, sid in tv_titles
-        ]
-        seasons_stmt = seasons_stmt.where(or_(*title_conditions))
+        # 如果只有一个 serverId，直接用等于条件（更高效）
+        if len(server_ids) == 1:
+            seasons_stmt = seasons_stmt.where(MI.serverId == list(server_ids)[0])
+        else:
+            seasons_stmt = seasons_stmt.where(MI.serverId.in_(server_ids))
+
         seasons_stmt = seasons_stmt.group_by(
-            orm_models.MediaItem.title,
-            orm_models.MediaItem.serverId,
-            orm_models.MediaItem.season
+            MI.title,
+            MI.serverId,
+            MI.season
         ).order_by(
-            orm_models.MediaItem.title,
-            orm_models.MediaItem.season
+            MI.season
         )
 
         seasons_result = await session.execute(seasons_stmt)
