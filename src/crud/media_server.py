@@ -365,8 +365,8 @@ async def get_media_works(
 
     # 性能日志
     elapsed = time.time() - start_time
-    from src.log_manager import get_logger
-    logger = get_logger(__name__)
+    import logging
+    logger = logging.getLogger(__name__)
     logger.debug(f"[get_media_works] 查询完成: total={total}, page={page}, page_size={page_size}, 耗时={elapsed*1000:.1f}ms")
 
     return {
