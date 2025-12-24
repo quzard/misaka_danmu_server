@@ -42,6 +42,8 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
     Returns:
         包含 total 和 list 的字典
     """
+    import time
+    start_time = time.time()
 
     # ============================================================
     # 步骤 1: 构建基础的 WHERE 条件
@@ -174,6 +176,10 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
 
     result = await session.execute(data_stmt)
     items = [dict(row) for row in result.mappings()]
+
+    # 性能日志
+    elapsed = time.time() - start_time
+    logger.debug(f"[get_library_anime] 查询完成: total={total_count}, page={page}, page_size={page_size}, 耗时={elapsed*1000:.1f}ms")
 
     return {"total": total_count, "list": items}
 
