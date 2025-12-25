@@ -38,6 +38,7 @@ import {
   LinkOutlined,
   ReloadOutlined,
   SearchOutlined,
+  ClearOutlined,
 } from '@ant-design/icons'
 import { DANDAN_TYPE_MAPPING } from '../../../configs'
 import { useWatch } from 'antd/es/form/Form'
@@ -83,7 +84,7 @@ export const SearchResult = () => {
   const [isMobile] = useAtom(isMobileAtom)
 
   const [searchLoading] = useAtom(searchLoadingAtom)
-  const [lastSearchResultData] = useAtom(lastSearchResultAtom)
+  const [lastSearchResultData, setLastSearchResultData] = useAtom(lastSearchResultAtom)
 
   const [selectList, setSelectList] = useState([])
 
@@ -733,94 +734,216 @@ export const SearchResult = () => {
           <div className="text-lg font-semibold mb-4">搜索结果</div>
           <div>
             <div className="mb-6">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button
-                  type="primary"
-                  className={isMobile ? 'flex-1' : ''}
-                  onClick={() => {
-                    setSelectList(list =>
-                      list.length === renderData.length ? [] : renderData
-                    )
-                  }}
-                  disabled={!renderData.length}
-                >
-                  {selectList.length === renderData.length && renderData.length
-                    ? '取消全选'
-                    : '全选'}
-                </Button>
-                <Dropdown menu={typeMenu}>
-                  <Button className={isMobile ? 'flex-1' : ''}>
-                    {typeFilter === 'all' ? (
-                      <>
-                        <MyIcon icon="tvlibrary" size={16} className="mr-1" />
-                        {isMobile ? '类型' : '按类型'}
-                      </>
-                    ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
-                      <>
-                        <MyIcon icon="movie" size={16} className="mr-1" />
-                        {isMobile ? '电影' : '电影/剧场版'}
-                      </>
-                    ) : (
-                      <>
-                        <MyIcon icon="tv" size={16} className="mr-1" />
-                        {isMobile ? 'TV' : '电视节目'}
-                      </>
-                    )}
-                  </Button>
-                </Dropdown>
-                <Dropdown menu={yearMenu} disabled={!years.length}>
-                  <Button icon={<CalendarOutlined />} className={isMobile ? 'flex-1' : ''}>
-                    {yearFilter === 'all' ? (isMobile ? '年份' : '按年份') : `${yearFilter}年`}
-                  </Button>
-                </Dropdown>
-                <Dropdown menu={providerMenu} disabled={!providers.length}>
-                  <Button icon={<CloudServerOutlined />} className={isMobile ? 'flex-1' : ''}>
-                    {providerFilter === 'all'
-                      ? (isMobile ? '来源' : '按来源')
-                      : providerFilter.charAt(0).toUpperCase() +
-                        providerFilter.slice(1)}
-                  </Button>
-                </Dropdown>
-                
-                <Popover
-                  content={
-                    <div style={{ width: 250 }}>
-                      <Input
-                        placeholder="输入标题关键词过滤"
-                        allowClear
-                        value={keyword}
-                        onChange={e => setKeyword(e.target.value)}
-                        autoFocus
-                      />
-                    </div>
-                  }
-                  title="过滤结果"
-                  trigger="click"
-                  placement={isMobile ? 'bottom' : 'bottomRight'}
-                >
-                  <Button 
-                    icon={<SearchOutlined />}
-                    className={isMobile ? 'flex-1' : ''}
+              {isMobile ? (
+                /* 移动端：两行布局 */
+                <div className="flex flex-col gap-2">
+                  {/* 第一行：4个筛选按钮 */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <Button
+                      type="primary"
+                      onClick={() => {
+                        setSelectList(list =>
+                          list.length === renderData.length ? [] : renderData
+                        )
+                      }}
+                      disabled={!renderData.length}
+                    >
+                      {selectList.length === renderData.length && renderData.length
+                        ? '取消全选'
+                        : '全选'}
+                    </Button>
+                    <Dropdown menu={typeMenu}>
+                      <Button className="w-full">
+                        {typeFilter === 'all' ? (
+                          <>
+                            <MyIcon icon="tvlibrary" size={16} className="mr-1" />
+                            类型
+                          </>
+                        ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
+                          <>
+                            <MyIcon icon="movie" size={16} className="mr-1" />
+                            电影
+                          </>
+                        ) : (
+                          <>
+                            <MyIcon icon="tv" size={16} className="mr-1" />
+                            TV
+                          </>
+                        )}
+                      </Button>
+                    </Dropdown>
+                    <Dropdown menu={yearMenu} disabled={!years.length}>
+                      <Button icon={<CalendarOutlined />} className="w-full">
+                        {yearFilter === 'all' ? '年份' : `${yearFilter}年`}
+                      </Button>
+                    </Dropdown>
+                    <Dropdown menu={providerMenu} disabled={!providers.length}>
+                      <Button icon={<CloudServerOutlined />} className="w-full">
+                        {providerFilter === 'all'
+                          ? '来源'
+                          : providerFilter.charAt(0).toUpperCase() +
+                            providerFilter.slice(1)}
+                      </Button>
+                    </Dropdown>
+                  </div>
+                  {/* 第二行：3个操作按钮均等分布 */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <Popover
+                      content={
+                        <div style={{ width: 250 }}>
+                          <Input
+                            placeholder="输入标题关键词过滤"
+                            allowClear
+                            value={keyword}
+                            onChange={e => setKeyword(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                      }
+                      title="过滤结果"
+                      trigger="click"
+                      placement="bottom"
+                    >
+                      <Button icon={<SearchOutlined />} className="w-full">
+                        {keyword ? `过滤: ${keyword.length > 5 ? keyword.slice(0, 5) + '...' : keyword}` : '过滤'}
+                      </Button>
+                    </Popover>
+                    <Button
+                      icon={<ClearOutlined />}
+                      className="w-full"
+                      onClick={() => {
+                        setLastSearchResultData({
+                          results: [],
+                          searchSeason: null,
+                          keyword: '',
+                        })
+                        setSelectList([])
+                        setKeyword('')
+                        setYearFilter('all')
+                        setProviderFilter('all')
+                        setTypeFilter('all')
+                      }}
+                    >
+                      清除
+                    </Button>
+                    <Button
+                      className="w-full"
+                      type="primary"
+                      onClick={() => {
+                        if (selectList.length === 0) {
+                          messageApi.error('请选择要导入的媒体')
+                          return
+                        }
+                        setBatchOpen(true)
+                      }}
+                      disabled={!renderData.length}
+                    >
+                      批量导入
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                /* 桌面端：单行flex布局 */
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      setSelectList(list =>
+                        list.length === renderData.length ? [] : renderData
+                      )
+                    }}
+                    disabled={!renderData.length}
                   >
-                    {keyword ? `过滤: ${keyword.length > 5 ? keyword.slice(0, 5) + '...' : keyword}` : '过滤'}
+                    {selectList.length === renderData.length && renderData.length
+                      ? '取消全选'
+                      : '全选'}
                   </Button>
-                </Popover>
-                
-                <Button
-                  className={isMobile ? 'flex-1' : 'ml-auto'}
-                  type="primary"
-                  onClick={() => {
-                    if (selectList.length === 0) {
-                      messageApi.error('请选择要导入的媒体')
-                      return
+                  <Dropdown menu={typeMenu}>
+                    <Button>
+                      {typeFilter === 'all' ? (
+                        <>
+                          <MyIcon icon="tvlibrary" size={16} className="mr-1" />
+                          按类型
+                        </>
+                      ) : typeFilter === DANDAN_TYPE_MAPPING.movie ? (
+                        <>
+                          <MyIcon icon="movie" size={16} className="mr-1" />
+                          电影/剧场版
+                        </>
+                      ) : (
+                        <>
+                          <MyIcon icon="tv" size={16} className="mr-1" />
+                          电视节目
+                        </>
+                      )}
+                    </Button>
+                  </Dropdown>
+                  <Dropdown menu={yearMenu} disabled={!years.length}>
+                    <Button icon={<CalendarOutlined />}>
+                      {yearFilter === 'all' ? '按年份' : `${yearFilter}年`}
+                    </Button>
+                  </Dropdown>
+                  <Dropdown menu={providerMenu} disabled={!providers.length}>
+                    <Button icon={<CloudServerOutlined />}>
+                      {providerFilter === 'all'
+                        ? '按来源'
+                        : providerFilter.charAt(0).toUpperCase() +
+                          providerFilter.slice(1)}
+                    </Button>
+                  </Dropdown>
+                  <Popover
+                    content={
+                      <div style={{ width: 250 }}>
+                        <Input
+                          placeholder="输入标题关键词过滤"
+                          allowClear
+                          value={keyword}
+                          onChange={e => setKeyword(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
                     }
-                    setBatchOpen(true)
-                  }}
-                  disabled={!renderData.length}
-                >
-                  批量导入
-                </Button>
-              </div>
+                    title="过滤结果"
+                    trigger="click"
+                    placement="bottomRight"
+                  >
+                    <Button icon={<SearchOutlined />}>
+                      {keyword ? `过滤: ${keyword.length > 5 ? keyword.slice(0, 5) + '...' : keyword}` : '过滤'}
+                    </Button>
+                  </Popover>
+                  <Button
+                    icon={<ClearOutlined />}
+                    onClick={() => {
+                      setLastSearchResultData({
+                        results: [],
+                        searchSeason: null,
+                        keyword: '',
+                      })
+                      setSelectList([])
+                      setKeyword('')
+                      setYearFilter('all')
+                      setProviderFilter('all')
+                      setTypeFilter('all')
+                    }}
+                  >
+                    清除结果
+                  </Button>
+                  <Button
+                    className="ml-auto"
+                    type="primary"
+                    onClick={() => {
+                      if (selectList.length === 0) {
+                        messageApi.error('请选择要导入的媒体')
+                        return
+                      }
+                      setBatchOpen(true)
+                    }}
+                    disabled={!renderData.length}
+                  >
+                    批量导入
+                  </Button>
+                </div>
+              )}
             </div>
           {!!renderData?.length ? (
             <List
