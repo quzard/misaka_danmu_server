@@ -176,12 +176,14 @@ export const SearchBar = () => {
             精确搜索
           </Checkbox>
 
-          <Form.Item name="season" label="季" className="mb-0 flex items-center">
+          <div className="flex items-center gap-1">
+            <span className={exactSearch ? '' : 'text-gray-400'}>季</span>
             <InputNumber min={0} placeholder="季数" disabled={!exactSearch} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item name="episode" label="集" className="mb-0 flex items-center">
+          </div>
+          <div className="flex items-center gap-1">
+            <span className={exactSearch ? '' : 'text-gray-400'}>集</span>
             <InputNumber min={1} placeholder="集数" disabled={!exactSearch || !season} style={{ width: 80 }} />
-          </Form.Item>
+          </div>
           <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
             插入
           </Button>
