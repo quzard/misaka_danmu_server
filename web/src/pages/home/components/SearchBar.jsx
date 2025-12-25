@@ -168,7 +168,7 @@ export const SearchBar = () => {
           </div>
         )}
 
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3 flex-wrap'}`}>
           <Checkbox
             checked={exactSearch}
             onChange={e => setExactSearch(e.target.checked)}
@@ -176,17 +176,17 @@ export const SearchBar = () => {
             {isMobile ? <span>精确<br />搜索</span> : '精确搜索'}
           </Checkbox>
 
-          <div className="flex items-center gap-3">
+          <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3'}`}>
             <div className="flex items-center gap-1">
               <span className={exactSearch ? '' : 'text-gray-400'}>季</span>
               <Form.Item name="season" noStyle>
-                <InputNumber min={0} placeholder="季数" disabled={!exactSearch} style={{ width: 80 }} />
+                <InputNumber min={0} placeholder="季" disabled={!exactSearch} style={{ width: isMobile ? 50 : 80 }} />
               </Form.Item>
             </div>
             <div className="flex items-center gap-1">
               <span className={exactSearch ? '' : 'text-gray-400'}>集</span>
               <Form.Item name="episode" noStyle>
-                <InputNumber min={1} placeholder="集数" disabled={!exactSearch || !season} style={{ width: 80 }} />
+                <InputNumber min={1} placeholder="集" disabled={!exactSearch || !season} style={{ width: isMobile ? 50 : 80 }} />
               </Form.Item>
             </div>
             <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
