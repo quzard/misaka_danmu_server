@@ -4,7 +4,9 @@ ARG SO_TAG=latest
 FROM l429609201/so:${SO_TAG} AS so-extractor
 
 # --- Stage 2: Build Frontend ---
-FROM node:20-alpine AS builder
+# 使用 $BUILDPLATFORM 确保前端构建在原生架构下执行，避免 QEMU 模拟导致的性能问题
+# 前端构建产物（HTML/CSS/JS）是平台无关的，不需要在目标架构下构建
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app/web
 
