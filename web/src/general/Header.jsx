@@ -27,10 +27,11 @@ const TelegramIcon = () => (
   </svg>
 )
 
-// 文档图标 (Simple Icons 标准 - Read the Docs 风格)
+// 文档图标 (Lucide - book-open)
 const DocsIcon = () => (
-  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor">
-    <path d="M7.732 0a59.316 59.316 0 0 0-4.977.218V24a62.933 62.933 0 0 1 4.977-.22c1.957 0 3.728.082 5.469.222V.218A60.446 60.446 0 0 0 7.732 0zm6.664.26V24a47.26 47.26 0 0 1 4.606-.635c1.747-.16 3.518-.242 5.002-.242V.877c-1.484 0-3.255.08-5.002.24a47.403 47.403 0 0 0-4.606.636zM0 .877v22.246c1.484 0 3.255-.08 5.002-.24A47.243 47.243 0 0 0 9.61 22.24V.635A47.33 47.33 0 0 1 5.002.877C3.255.877 1.484.877 0 .877z"/>
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
   </svg>
 )
 import { useMessage } from '../MessageContext'
