@@ -7,7 +7,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func, or_, and_, literal, union_all
+from sqlalchemy import select, update, delete, func, or_, and_, literal, union_all, case
 
 from ..timezone import get_now
 from .. import orm_models
@@ -245,8 +245,8 @@ async def get_media_works(
     if media_type is None:
         # 同时查询电影数和电视剧组数（一次数据库往返）
         count_stmt = select(
-            func.sum(func.case((MI.mediaType == 'movie', 1), else_=0)).label('movie_count'),
-            func.count(func.distinct(func.case(
+            func.sum(case((MI.mediaType == 'movie', 1), else_=0)).label('movie_count'),
+            func.count(func.distinct(case(
                 (MI.mediaType == 'tv_series', func.concat(MI.title, '-', MI.serverId)),
                 else_=None
             ))).label('tv_count')
