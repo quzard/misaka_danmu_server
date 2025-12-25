@@ -281,12 +281,22 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const handleBatchDelete = async () => {
     setOperationLoading(true)
     try {
+      const deletedCount = selectedSourceIds.length
       await deleteAnimeSource({ sourceIds: selectedSourceIds, deleteFiles })
-      message.success(`批量删除任务已提交，共 ${selectedSourceIds.length} 个源`)
+      message.success(`批量删除任务已提交，共 ${deletedCount} 个源`)
       setSelectedSourceIds([])
       setDeleteModalOpen(false)
       setDeleteFiles(true)  // 重置为默认值
-      fetchData()
+
+      // 计算删除后当前页是否还有数据
+      // 如果当前页的所有条目都被删除了，且不是第一页，则跳转到上一页
+      const currentPageItemCount = animeGroups.flatMap(g => g.sources).length
+      if (deletedCount >= currentPageItemCount && page > 1) {
+        setPage(page - 1)
+        fetchData({ page: page - 1 })
+      } else {
+        fetchData()
+      }
     } catch (error) {
       message.error('操作失败: ' + error.message)
     } finally {
