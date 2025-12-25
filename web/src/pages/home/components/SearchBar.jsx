@@ -176,23 +176,19 @@ export const SearchBar = () => {
             精确搜索
           </Checkbox>
 
-          {exactSearch && (
-            <>
-              <Form.Item name="season" label="季" className="mb-0">
-                <InputNumber min={0} placeholder="季数" style={{ width: 80 }} />
-              </Form.Item>
-              <Form.Item name="episode" label="集" className="mb-0">
-                <InputNumber min={1} placeholder="集数" disabled={!season} style={{ width: 80 }} />
-              </Form.Item>
-              <Button type="primary" onClick={onInsert} size="small">
-                插入
-              </Button>
-              {!isMobile && (
-                <span className="text-xs text-gray-500">
-                  填写季、集后可插入到名称中
-                </span>
-              )}
-            </>
+          <Form.Item name="season" label="季" className="mb-0 flex items-center">
+            <InputNumber min={0} placeholder="季数" disabled={!exactSearch} style={{ width: 80 }} />
+          </Form.Item>
+          <Form.Item name="episode" label="集" className="mb-0 flex items-center">
+            <InputNumber min={1} placeholder="集数" disabled={!exactSearch || !season} style={{ width: 80 }} />
+          </Form.Item>
+          <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
+            插入
+          </Button>
+          {!isMobile && (
+            <span className={`text-xs ${exactSearch ? 'text-gray-500' : 'text-gray-300'}`}>
+              填写季、集后可插入到名称中
+            </span>
           )}
         </div>
       </Form>
