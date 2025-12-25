@@ -26,6 +26,13 @@ const TelegramIcon = () => (
     <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
   </svg>
 )
+
+// 文档图标 (Simple Icons 标准 - Read the Docs 风格)
+const DocsIcon = () => (
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor">
+    <path d="M7.732 0a59.316 59.316 0 0 0-4.977.218V24a62.933 62.933 0 0 1 4.977-.22c1.957 0 3.728.082 5.469.222V.218A60.446 60.446 0 0 0 7.732 0zm6.664.26V24a47.26 47.26 0 0 1 4.606-.635c1.747-.16 3.518-.242 5.002-.242V.877c-1.484 0-3.255.08-5.002.24a47.403 47.403 0 0 0-4.606.636zM0 .877v22.246c1.484 0 3.255-.08 5.002-.24A47.243 47.243 0 0 0 9.61 22.24V.635A47.33 47.33 0 0 1 5.002.877C3.255.877 1.484.877 0 .877z"/>
+  </svg>
+)
 import { useMessage } from '../MessageContext'
 import {
   useFloating,
@@ -123,6 +130,7 @@ export const Header = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [version, setVersion] = useState('N/A');
+  const [docsUrl, setDocsUrl] = useState('');
   console.log(location)
 
   const activeKey = useMemo(() => {
@@ -138,6 +146,7 @@ export const Header = () => {
     const fetchVersion = async () => {
       const res = await getVersion();
       setVersion(`v${res.data.version}`);
+      setDocsUrl(res.data.docsUrl || '');
     };
     fetchVersion();
   }, []);
@@ -182,6 +191,18 @@ export const Header = () => {
                     <TelegramIcon />
                   </a>
                 </Tooltip>
+                {docsUrl && (
+                  <Tooltip title="文档">
+                    <a
+                      href={docsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#8CA1AF', fontSize: 18 }}
+                    >
+                      <DocsIcon />
+                    </a>
+                  </Tooltip>
+                )}
                 <Tag>{version}</Tag>
                 <DarkModeToggle />
               </div>
@@ -190,7 +211,7 @@ export const Header = () => {
           <MobileHeader activeKey={activeKey} />
         </>
       ) : (
-        <DesktopHeader activeKey={activeKey} version={version} />
+        <DesktopHeader activeKey={activeKey} version={version} docsUrl={docsUrl} />
       )}
     </>
   )
@@ -442,7 +463,7 @@ const MobileHeader = ({ activeKey }) => {
   )
 }
 
-const DesktopHeader = ({ activeKey, version }) => {
+const DesktopHeader = ({ activeKey, version, docsUrl }) => {
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
   const messageApi = useMessage()
@@ -534,6 +555,18 @@ const DesktopHeader = ({ activeKey, version }) => {
                 <TelegramIcon />
               </a>
             </Tooltip>
+            {docsUrl && (
+              <Tooltip title="文档">
+                <a
+                  href={docsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#8CA1AF', fontSize: 20 }}
+                >
+                  <DocsIcon />
+                </a>
+              </Tooltip>
+            )}
             <Tag>{version}</Tag>
             <Dropdown
               menu={{
