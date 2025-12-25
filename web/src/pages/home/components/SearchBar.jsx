@@ -117,7 +117,7 @@ export const SearchBar = () => {
           messageApi.success(res.data.message || '缓存已成功清除！')
         } catch (err) {
           messageApi.destroy()
-          messageApi.error(`清除缓存失败: ${error.message || error}`)
+          messageApi.error(`清除缓存失败: ${err.message || err}`)
         } finally {
           setCacheLoading(false)
         }
@@ -180,13 +180,13 @@ export const SearchBar = () => {
             <div className="flex items-center gap-1">
               <span className={exactSearch ? '' : 'text-gray-400'}>季</span>
               <Form.Item name="season" noStyle>
-                <InputNumber min={0} placeholder="季" disabled={!exactSearch} style={{ width: isMobile ? 50 : 80 }} />
+                <InputNumber min={0} placeholder="季" disabled={!exactSearch} style={{ width: 80 }} />
               </Form.Item>
             </div>
             <div className="flex items-center gap-1">
               <span className={exactSearch ? '' : 'text-gray-400'}>集</span>
               <Form.Item name="episode" noStyle>
-                <InputNumber min={1} placeholder="集" disabled={!exactSearch || !season} style={{ width: isMobile ? 50 : 80 }} />
+                <InputNumber min={1} placeholder="集" disabled={!exactSearch || !season} style={{ width: 80 }} />
               </Form.Item>
             </div>
             <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
