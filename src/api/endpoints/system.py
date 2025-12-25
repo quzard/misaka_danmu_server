@@ -38,7 +38,7 @@ from ...webhook_manager import WebhookManager
 from ...image_utils import download_image
 from ...scheduler import SchedulerManager
 from ...title_recognition import TitleRecognitionManager
-from ..._version import APP_VERSION
+from ..._version import APP_VERSION, DOCS_URL
 from thefuzz import fuzz
 from ...config import settings
 from ...timezone import get_now
@@ -97,10 +97,10 @@ async def get_comments(
     ]
     return models.PaginatedCommentResponse(total=total, list=comments)
 
-@router.get("/version", response_model=Dict[str, str], summary="获取应用版本号")
+@router.get("/version", response_model=Dict[str, str], summary="获取应用版本号和文档链接")
 async def get_app_version():
-    """获取当前后端应用的版本号。"""
-    return {"version": APP_VERSION}
+    """获取当前后端应用的版本号和文档链接。"""
+    return {"version": APP_VERSION, "docsUrl": DOCS_URL}
 
 
 
