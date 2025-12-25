@@ -811,6 +811,7 @@ export const SearchResult = () => {
                     <Button
                       icon={<ClearOutlined />}
                       className="w-full"
+                      disabled={!renderData.length}
                       onClick={() => {
                         setLastSearchResultData({
                           results: [],
@@ -913,6 +914,8 @@ export const SearchResult = () => {
                   </Popover>
                   <Button
                     icon={<ClearOutlined />}
+                    className="ml-auto"
+                    disabled={!renderData.length}
                     onClick={() => {
                       setLastSearchResultData({
                         results: [],
@@ -929,7 +932,6 @@ export const SearchResult = () => {
                     清除结果
                   </Button>
                   <Button
-                    className="ml-auto"
                     type="primary"
                     onClick={() => {
                       if (selectList.length === 0) {
