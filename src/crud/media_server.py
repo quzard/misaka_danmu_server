@@ -7,7 +7,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, or_, and_, literal, union_all, case
 
 from ..timezone import get_now
 from .. import orm_models
@@ -198,103 +198,245 @@ async def get_media_works(
     page_size: int = 100
 ) -> Dict[str, Any]:
     """
-    获取作品列表(电影+电视剧组),按作品计数
-    - 电影: 直接返回
-    - 电视剧: 按title分组,返回剧集组信息
+    【优化版 v3 - 数据库分页】获取作品列表(电影+电视剧组),按作品计数
+
+    优化要点:
+    1. 使用 UNION ALL 合并电影和电视剧查询，在数据库层面完成排序和分页
+    2. 电视剧直接返回季度信息（seasons 字段），避免 N+1 查询
+    3. 避免加载全部数据到内存
     """
-    works = []
+    import time
+    start_time = time.time()
 
-    # 1. 获取电影
+    MI = orm_models.MediaItem
+
+    # ============================================================
+    # 构建通用的 WHERE 条件
+    # ============================================================
+    def build_movie_conditions():
+        conditions = [MI.mediaType == 'movie']
+        if server_id is not None:
+            conditions.append(MI.serverId == server_id)
+        if is_imported is not None:
+            conditions.append(MI.isImported == is_imported)
+        if search:
+            conditions.append(MI.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            conditions.append(MI.year >= year_from)
+        if year_to is not None:
+            conditions.append(MI.year <= year_to)
+        return conditions
+
+    def build_tv_conditions():
+        conditions = [MI.mediaType == 'tv_series']
+        if server_id is not None:
+            conditions.append(MI.serverId == server_id)
+        if search:
+            conditions.append(MI.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            conditions.append(MI.year >= year_from)
+        if year_to is not None:
+            conditions.append(MI.year <= year_to)
+        return conditions
+
+    # ============================================================
+    # 步骤 1: 计算总数（电影数 + 电视剧组数）- 合并为单次查询
+    # ============================================================
+    if media_type is None:
+        # 同时查询电影数和电视剧组数（一次数据库往返）
+        count_stmt = select(
+            func.sum(case((MI.mediaType == 'movie', 1), else_=0)).label('movie_count'),
+            func.count(func.distinct(case(
+                (MI.mediaType == 'tv_series', func.concat(MI.title, '-', MI.serverId)),
+                else_=None
+            ))).label('tv_count')
+        )
+        # 添加通用条件
+        if server_id is not None:
+            count_stmt = count_stmt.where(MI.serverId == server_id)
+        if search:
+            count_stmt = count_stmt.where(MI.title.ilike(f'%{search}%'))
+        if year_from is not None:
+            count_stmt = count_stmt.where(MI.year >= year_from)
+        if year_to is not None:
+            count_stmt = count_stmt.where(MI.year <= year_to)
+
+        count_result = (await session.execute(count_stmt)).one()
+        movie_count = count_result.movie_count or 0
+        tv_count = count_result.tv_count or 0
+        total = movie_count + tv_count
+    elif media_type == 'movie':
+        movie_count_stmt = select(func.count(MI.id)).where(*build_movie_conditions())
+        movie_count = (await session.execute(movie_count_stmt)).scalar_one()
+        tv_count = 0
+        total = movie_count
+    else:  # tv_series
+        tv_count_stmt = select(func.count(func.distinct(
+            func.concat(MI.title, '-', MI.serverId)
+        ))).where(*build_tv_conditions())
+        tv_count = (await session.execute(tv_count_stmt)).scalar_one()
+        movie_count = 0
+        total = tv_count
+
+    # 如果没有数据，直接返回
+    if total == 0:
+        elapsed = time.time() - start_time
+        logger.debug(f"[get_media_works] 无数据, 耗时={elapsed*1000:.1f}ms")
+        return {"total": 0, "list": []}
+
+    # ============================================================
+    # 步骤 2: 使用 UNION ALL 在数据库层面分页
+    # ============================================================
+    offset = (page - 1) * page_size
+    queries = []
+
+    # 电影查询（统一字段结构）
     if media_type is None or media_type == 'movie':
-        movie_stmt = select(orm_models.MediaItem).where(orm_models.MediaItem.mediaType == 'movie')
-        if server_id is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.serverId == server_id)
-        if is_imported is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.isImported == is_imported)
-        if search:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
-        if year_from is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.year >= year_from)
-        if year_to is not None:
-            movie_stmt = movie_stmt.where(orm_models.MediaItem.year <= year_to)
+        movie_query = select(
+            literal('movie').label('type'),
+            MI.id.label('id'),
+            MI.serverId.label('serverId'),
+            MI.mediaId.label('mediaId'),
+            MI.libraryId.label('libraryId'),
+            MI.title.label('title'),
+            MI.year.label('year'),
+            MI.tmdbId.label('tmdbId'),
+            MI.tvdbId.label('tvdbId'),
+            MI.imdbId.label('imdbId'),
+            MI.posterUrl.label('posterUrl'),
+            MI.isImported.label('isImported'),
+            MI.createdAt.label('createdAt'),
+            MI.updatedAt.label('updatedAt'),
+            literal(0).label('seasonCount'),
+            literal(0).label('episodeCount')
+        ).where(*build_movie_conditions())
+        queries.append(movie_query)
 
-        movie_stmt = movie_stmt.order_by(orm_models.MediaItem.createdAt.desc())
-        movie_result = await session.execute(movie_stmt)
-        movies = movie_result.scalars().all()
-
-        for movie in movies:
-            works.append({
-                "type": "movie",
-                "id": movie.id,
-                "serverId": movie.serverId,
-                "mediaId": movie.mediaId,
-                "libraryId": movie.libraryId,
-                "title": movie.title,
-                "mediaType": "movie",
-                "year": movie.year,
-                "tmdbId": movie.tmdbId,
-                "tvdbId": movie.tvdbId,
-                "imdbId": movie.imdbId,
-                "posterUrl": movie.posterUrl,
-                "isImported": movie.isImported,
-                "createdAt": movie.createdAt,
-                "updatedAt": movie.updatedAt
-            })
-
-    # 2. 获取电视剧组(按title分组)
+    # 电视剧组查询（统一字段结构）
     if media_type is None or media_type == 'tv_series':
-        tv_stmt = select(
-            orm_models.MediaItem.title,
-            orm_models.MediaItem.serverId,
-            func.min(orm_models.MediaItem.year).label('year'),
-            func.min(orm_models.MediaItem.tmdbId).label('tmdbId'),
-            func.min(orm_models.MediaItem.tvdbId).label('tvdbId'),
-            func.min(orm_models.MediaItem.imdbId).label('imdbId'),
-            func.min(orm_models.MediaItem.posterUrl).label('posterUrl'),
-            func.max(orm_models.MediaItem.createdAt).label('createdAt'),
-            func.count(func.distinct(orm_models.MediaItem.season)).label('seasonCount'),
-            func.count(orm_models.MediaItem.id).label('episodeCount')
-        ).where(orm_models.MediaItem.mediaType == 'tv_series')
+        tv_query = select(
+            literal('tv_show').label('type'),
+            literal(0).label('id'),
+            MI.serverId.label('serverId'),
+            literal('').label('mediaId'),
+            literal('').label('libraryId'),
+            MI.title.label('title'),
+            func.min(MI.year).label('year'),
+            func.min(MI.tmdbId).label('tmdbId'),
+            func.min(MI.tvdbId).label('tvdbId'),
+            func.min(MI.imdbId).label('imdbId'),
+            func.min(MI.posterUrl).label('posterUrl'),
+            literal(None).label('isImported'),
+            func.max(MI.createdAt).label('createdAt'),
+            func.max(MI.updatedAt).label('updatedAt'),
+            func.count(func.distinct(MI.season)).label('seasonCount'),
+            func.count(MI.id).label('episodeCount')
+        ).where(*build_tv_conditions()).group_by(MI.title, MI.serverId)
+        queries.append(tv_query)
 
-        if server_id is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.serverId == server_id)
-        if is_imported is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.isImported == is_imported)
-        if search:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.title.ilike(f'%{search}%'))
-        if year_from is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.year >= year_from)
-        if year_to is not None:
-            tv_stmt = tv_stmt.where(orm_models.MediaItem.year <= year_to)
+    # 合并查询并分页
+    if len(queries) == 1:
+        union_query = queries[0]
+    else:
+        union_query = union_all(*queries)
 
-        tv_stmt = tv_stmt.group_by(orm_models.MediaItem.title, orm_models.MediaItem.serverId)
-        tv_stmt = tv_stmt.order_by(func.max(orm_models.MediaItem.createdAt).desc())
+    # 包装为子查询，然后排序分页
+    subquery = union_query.subquery('works')
+    final_query = select(subquery).order_by(
+        subquery.c.createdAt.desc()
+    ).offset(offset).limit(page_size)
 
-        tv_result = await session.execute(tv_stmt)
-        tv_shows = tv_result.all()
+    result = await session.execute(final_query)
+    rows = result.all()
 
-        for show in tv_shows:
-            works.append({
-                "type": "tv_show",
-                "serverId": show.serverId,
-                "title": show.title,
-                "mediaType": "tv_show",
-                "year": show.year,
-                "tmdbId": show.tmdbId,
-                "tvdbId": show.tvdbId,
-                "imdbId": show.imdbId,
-                "posterUrl": show.posterUrl,
-                "createdAt": show.createdAt,
-                "seasonCount": show.seasonCount,
-                "episodeCount": show.episodeCount
+    # 转换为字典列表
+    paginated_works = []
+    for row in rows:
+        work = {
+            "type": row.type,
+            "serverId": row.serverId,
+            "title": row.title,
+            "mediaType": row.type,
+            "year": row.year,
+            "tmdbId": row.tmdbId,
+            "tvdbId": row.tvdbId,
+            "imdbId": row.imdbId,
+            "posterUrl": row.posterUrl,
+            "createdAt": row.createdAt,
+        }
+        if row.type == 'movie':
+            work["id"] = row.id
+            work["mediaId"] = row.mediaId
+            work["libraryId"] = row.libraryId
+            work["isImported"] = row.isImported
+            work["updatedAt"] = row.updatedAt
+        else:
+            work["seasonCount"] = row.seasonCount
+            work["episodeCount"] = row.episodeCount
+        paginated_works.append(work)
+
+    # ============================================================
+    # 步骤 3: 【关键优化】为电视剧批量获取季度信息，避免 N+1 查询
+    # ============================================================
+    tv_shows_in_page = [w for w in paginated_works if w['type'] == 'tv_show']
+
+    if tv_shows_in_page:
+        # 如果所有电视剧都属于同一个 serverId，使用更高效的 IN 查询
+        server_ids = set(w['serverId'] for w in tv_shows_in_page)
+        titles = [w['title'] for w in tv_shows_in_page]
+
+        # 一次性查询所有电视剧的季度信息
+        seasons_stmt = select(
+            MI.title,
+            MI.serverId,
+            MI.season,
+            func.count(MI.id).label('episodeCount'),
+            func.min(MI.year).label('year'),
+            func.min(MI.posterUrl).label('posterUrl')
+        ).where(
+            MI.mediaType == 'tv_series',
+            MI.title.in_(titles)
+        )
+
+        # 如果只有一个 serverId，直接用等于条件（更高效）
+        if len(server_ids) == 1:
+            seasons_stmt = seasons_stmt.where(MI.serverId == list(server_ids)[0])
+        else:
+            seasons_stmt = seasons_stmt.where(MI.serverId.in_(server_ids))
+
+        seasons_stmt = seasons_stmt.group_by(
+            MI.title,
+            MI.serverId,
+            MI.season
+        ).order_by(
+            MI.season
+        )
+
+        seasons_result = await session.execute(seasons_stmt)
+        all_seasons = seasons_result.all()
+
+        # 按 (title, serverId) 分组季度信息
+        seasons_map = {}
+        for s in all_seasons:
+            key = (s.title, s.serverId)
+            if key not in seasons_map:
+                seasons_map[key] = []
+            seasons_map[key].append({
+                "season": s.season,
+                "episodeCount": s.episodeCount,
+                "year": s.year,
+                "posterUrl": s.posterUrl
             })
 
-    # 3. 排序和分页
-    works.sort(key=lambda x: x['createdAt'], reverse=True)
-    total = len(works)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_works = works[start:end]
+        # 将季度信息附加到电视剧作品上
+        for work in paginated_works:
+            if work['type'] == 'tv_show':
+                key = (work['title'], work['serverId'])
+                work['seasons'] = seasons_map.get(key, [])
+
+    # 性能日志
+    elapsed = time.time() - start_time
+    logger.info(f"[get_media_works] 查询完成: total={total}, page={page}, page_size={page_size}, 耗时={elapsed*1000:.1f}ms")
 
     return {
         "total": total,

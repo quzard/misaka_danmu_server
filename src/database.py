@@ -255,21 +255,23 @@ async def create_initial_admin_user(app: FastAPI):
 async def init_db_tables(app: FastAPI):
     """初始化数据库和表"""
     from .db_maintainer import sync_database_schema
+    from .migrations import run_migrations
 
+    # 1. 确保数据库存在
     await _create_db_if_not_exists()
+
+    # 2. 创建数据库引擎和会话工厂
     await create_db_engine_and_session(app)
 
+    # 3. 创建所有表（基于 ORM 模型）
     engine = app.state.db_engine
     async with engine.begin() as conn:
-        # 1. 首先，确保所有基于模型的表都已创建。
-        # `create_all` 会安全地跳过已存在的表。
-        logger.info("正在同步数据库模型，创建新表...")
         await conn.run_sync(Base.metadata.create_all)
-        logger.info("数据库模型同步完成。")
 
-        # 2. 数据库维护管理器：自动补充缺失的字段和安全扩展字段类型
+    # 4. 同步数据库结构（自动检测并补充缺失的字段）
+    async with engine.begin() as conn:
         await sync_database_schema(conn, settings.database.type.lower())
 
-        # 3. 然后，在已存在的表结构上运行统一的迁移任务。
+    # 5. 执行数据库迁移任务
+    async with engine.begin() as conn:
         await run_migrations(conn, settings.database.type.lower(), settings.database.name)
-    logger.info("数据库初始化完成。")

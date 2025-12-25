@@ -370,6 +370,11 @@ class MediaItem(Base):
         UniqueConstraint('server_id', 'media_id', name='idx_server_media_unique'),
         Index('idx_media_type', 'media_type'),
         Index('idx_is_imported', 'is_imported'),
+        # 性能优化索引
+        Index('idx_server_id', 'server_id'),  # 按服务器过滤
+        Index('idx_created_at', 'created_at'),  # 按创建时间排序
+        Index('idx_server_type', 'server_id', 'media_type'),  # 复合索引：服务器+类型
+        Index('idx_server_type_title', 'server_id', 'media_type', 'title'),  # 复合索引：电视剧分组
     )
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Input, message, Checkbox, Popconfirm, Tag, List, Row, Col, Dropdown, Segmented, Pagination, Popover } from 'antd';
 import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, AppstoreOutlined, TableOutlined, MoreOutlined, VideoCameraOutlined, PlaySquareOutlined } from '@ant-design/icons';
-import { getMediaWorks, getShowSeasons, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
+import { getMediaWorks, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import EpisodeListModal from './EpisodeListModal';
 
@@ -51,7 +51,8 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
       const data = res.data;
 
       // 构建树形结构(只包含作品和季度,不包含集)
-      const treeData = await buildTreeData(data.list);
+      // 【优化】buildTreeData 现在是同步函数，不再需要 await
+      const treeData = buildTreeData(data.list);
       setItems(treeData);
       setPagination({
         current: page,
@@ -67,7 +68,8 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
   };
 
   // 构建树形数据结构(作品 > 季度)
-  const buildTreeData = async (worksList) => {
+  // 【优化】直接使用后端返回的 seasons 字段，避免 N+1 查询
+  const buildTreeData = (worksList) => {
     const result = [];
 
     for (const work of worksList) {
@@ -80,49 +82,35 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
         });
       } else if (work.type === 'tv_show') {
         // 电视节目组节点
-        try {
-          const seasonsRes = await getShowSeasons(work.title, work.serverId);
-          const seasons = seasonsRes.data || [];
+        // 【优化】直接使用后端返回的 seasons，不再额外请求
+        const seasons = work.seasons || [];
 
-          result.push({
-            key: `show-${work.title}`,
-            title: work.title,
-            mediaType: 'tv_show',
-            year: work.year,
-            tmdbId: work.tmdbId,
-            tvdbId: work.tvdbId,
-            imdbId: work.imdbId,
-            posterUrl: work.posterUrl,
+        result.push({
+          key: `show-${work.title}`,
+          title: work.title,
+          mediaType: 'tv_show',
+          year: work.year,
+          tmdbId: work.tmdbId,
+          tvdbId: work.tvdbId,
+          imdbId: work.imdbId,
+          posterUrl: work.posterUrl,
+          serverId: work.serverId,
+          isGroup: true,
+          seasonCount: work.seasonCount,
+          episodeCount: work.episodeCount,
+          children: seasons.map(s => ({
+            key: `season-${work.title}-S${s.season}`,
+            title: `第 ${s.season} 季 (${s.episodeCount}集)`,
+            season: s.season,
+            episodeCount: s.episodeCount,
+            year: s.year,
+            posterUrl: s.posterUrl,
+            mediaType: 'tv_season',
             serverId: work.serverId,
+            showTitle: work.title,
             isGroup: true,
-            seasonCount: work.seasonCount,
-            episodeCount: work.episodeCount,
-            children: seasons.map(s => ({
-              key: `season-${work.title}-S${s.season}`,
-              title: `第 ${s.season} 季 (${s.episodeCount}集)`,
-              season: s.season,
-              episodeCount: s.episodeCount,
-              year: s.year,
-              posterUrl: s.posterUrl,
-              mediaType: 'tv_season',
-              serverId: work.serverId,
-              showTitle: work.title,
-              isGroup: true,
-            })),
-          });
-        } catch (error) {
-          console.error(`加载《${work.title}》季度信息失败:`, error);
-          // 即使加载季度失败,也添加剧集组节点
-          result.push({
-            key: `show-${work.title}`,
-            title: work.title,
-            mediaType: 'tv_show',
-            year: work.year,
-            serverId: work.serverId,
-            isGroup: true,
-            children: [],
-          });
-        }
+          })),
+        });
       }
     }
 
