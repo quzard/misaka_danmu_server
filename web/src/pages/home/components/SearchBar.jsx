@@ -173,24 +173,26 @@ export const SearchBar = () => {
             checked={exactSearch}
             onChange={e => setExactSearch(e.target.checked)}
           >
-            精确搜索
+            {isMobile ? <span>精确<br />搜索</span> : '精确搜索'}
           </Checkbox>
 
-          <div className="flex items-center gap-1">
-            <span className={exactSearch ? '' : 'text-gray-400'}>季</span>
-            <Form.Item name="season" noStyle>
-              <InputNumber min={0} placeholder="季数" disabled={!exactSearch} style={{ width: 80 }} />
-            </Form.Item>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <span className={exactSearch ? '' : 'text-gray-400'}>季</span>
+              <Form.Item name="season" noStyle>
+                <InputNumber min={0} placeholder="季数" disabled={!exactSearch} style={{ width: 80 }} />
+              </Form.Item>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className={exactSearch ? '' : 'text-gray-400'}>集</span>
+              <Form.Item name="episode" noStyle>
+                <InputNumber min={1} placeholder="集数" disabled={!exactSearch || !season} style={{ width: 80 }} />
+              </Form.Item>
+            </div>
+            <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
+              插入
+            </Button>
           </div>
-          <div className="flex items-center gap-1">
-            <span className={exactSearch ? '' : 'text-gray-400'}>集</span>
-            <Form.Item name="episode" noStyle>
-              <InputNumber min={1} placeholder="集数" disabled={!exactSearch || !season} style={{ width: 80 }} />
-            </Form.Item>
-          </div>
-          <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
-            插入
-          </Button>
           {!isMobile && (
             <span className={`text-xs ${exactSearch ? 'text-gray-500' : 'text-gray-300'}`}>
               填写季、集后可插入到名称中
