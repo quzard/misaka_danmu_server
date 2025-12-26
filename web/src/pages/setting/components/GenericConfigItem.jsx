@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Button, Input, InputNumber, Switch, Select, Tag } from 'antd'
+import { Button, Input, InputNumber, Switch, Select, Tag, message } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
-import { getConfig, setConfig } from '@/apis'
-import { useMessage } from '@/MessageContext'
+import { getConfig, setConfig } from '../../../apis'
 
 /**
  * 通用配置项组件
@@ -13,7 +12,7 @@ export const GenericConfigItem = ({ config }) => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [verifyInfo, setVerifyInfo] = useState(null)
-  const messageApi = useMessage()
+  const [messageApi, contextHolder] = message.useMessage()
 
   // 加载配置值
   useEffect(() => {
@@ -184,6 +183,7 @@ export const GenericConfigItem = ({ config }) => {
 
   return (
     <div className="mb-6">
+      {contextHolder}
       <div className="mb-1 font-medium">{config.label}</div>
       {config.description && (
         <div className="text-sm text-gray-500 mb-2">{config.description}</div>
@@ -193,16 +193,9 @@ export const GenericConfigItem = ({ config }) => {
           {renderInput()}
           {renderVerifyInfo()}
         </div>
-        {config.type !== 'boolean' && (
-          <Button type="primary" onClick={handleSave} loading={saving}>
-            保存
-          </Button>
-        )}
-        {config.type === 'boolean' && (
-          <Button type="primary" onClick={handleSave} loading={saving}>
-            保存
-          </Button>
-        )}
+        <Button type="primary" onClick={handleSave} loading={saving}>
+          保存
+        </Button>
       </div>
     </div>
   )

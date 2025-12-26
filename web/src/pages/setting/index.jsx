@@ -8,7 +8,7 @@ import { Performance } from './components/Performance'
 import AutoMatchSetting from './components/AutoMatchSetting'
 import { MobileTabs } from '@/components/MobileTabs'
 import { useAtomValue } from 'jotai'
-import { isMobileAtom } from '../../../store/index.js'
+import { isMobileAtom } from '../../../store'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
