@@ -75,7 +75,21 @@ from ..ui_models import (
     WebhookSettings, WebhookTaskItem, PaginatedWebhookTasksResponse,
     AITestRequest, AITestResponse
 )
+from ...config_schema import get_config_schema
+
 router = APIRouter()
+
+
+@router.get("/config/schema/parameters", summary="获取参数配置的 Schema")
+async def get_parameters_schema(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取参数配置页面的 Schema 定义。
+    前端根据此 Schema 动态渲染配置界面。
+    """
+    return get_config_schema()
+
 
 @router.get("/config/proxy", response_model=models.ProxySettingsResponse, summary="获取代理配置")
 
