@@ -1,4 +1,4 @@
-import { Card, Spin } from 'antd'
+import { Card, Spin, Empty } from 'antd'
 import { useState, useEffect } from 'react'
 import { getConfigSchema } from '../../../apis'
 import { GenericConfigItem } from './GenericConfigItem'
@@ -6,6 +6,7 @@ import { GenericConfigItem } from './GenericConfigItem'
 export const Parameters = () => {
   const [schema, setSchema] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     loadSchema()
@@ -14,10 +15,13 @@ export const Parameters = () => {
   const loadSchema = async () => {
     try {
       setLoading(true)
+      setError(null)
       const res = await getConfigSchema()
+      console.log('Schema loaded:', res.data)
       setSchema(res.data || [])
     } catch (err) {
       console.error('加载配置 Schema 失败:', err)
+      setError(err.message || '加载失败')
     } finally {
       setLoading(false)
     }
@@ -31,11 +35,27 @@ export const Parameters = () => {
     )
   }
 
+  if (error) {
+    return (
+      <div className="py-12">
+        <Empty description={`加载配置失败: ${error}`} />
+      </div>
+    )
+  }
+
+  if (!schema || schema.length === 0) {
+    return (
+      <div className="py-12">
+        <Empty description="暂无配置项" />
+      </div>
+    )
+  }
+
   return (
     <div>
       {schema.map((group) => (
         <Card key={group.key} title={group.label} className="mb-4">
-          {group.items.map((item) => (
+          {group.items?.map((item) => (
             <GenericConfigItem key={item.key} config={item} />
           ))}
         </Card>
