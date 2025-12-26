@@ -34,6 +34,17 @@ class ConfigValueRequest(BaseModel):
 
 # --- API Endpoints ---
 
+@router.get("/schema/parameters", summary="获取参数配置的 Schema")
+async def get_parameters_schema(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取参数配置页面的 Schema 定义。
+    前端根据此 Schema 动态渲染配置界面。
+    """
+    return get_config_schema()
+
+
 @router.get("/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
     config_key: str,
@@ -96,13 +107,4 @@ async def regenerate_external_api_key(
     return {"key": "externalApiKey", "value": new_key}
 
 
-@router.get("/schema/parameters", summary="获取参数配置的 Schema")
-async def get_parameters_schema(
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """
-    获取参数配置页面的 Schema 定义。
-    前端根据此 Schema 动态渲染配置界面。
-    """
-    return get_config_schema()
 
