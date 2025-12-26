@@ -104,6 +104,15 @@ def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
     return client_ip_str
 
 
+# 危险的 CIDR 网段（会匹配所有 IP）
+_DANGEROUS_NETWORKS = [
+    "0.0.0.0/0",      # 所有 IPv4
+    "::/0",           # 所有 IPv6
+    "0.0.0.0/1",      # 一半 IPv4
+    "128.0.0.0/1",    # 另一半 IPv4
+]
+
+
 async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optional[models.User]:
     """
     检查客户端 IP 是否在白名单中。
@@ -119,41 +128,74 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
     # 获取 IP 白名单配置
     ip_whitelist_str = await crud.get_config_value(session, "ipWhitelist", "")
     if not ip_whitelist_str or not ip_whitelist_str.strip():
+        # 白名单为空，清除所有缓存的白名单会话
+        if _whitelist_session_cache:
+            logger.info("IP 白名单已清空，清除所有缓存的白名单会话")
+            _whitelist_session_cache.clear()
         return None
 
     # 获取受信任代理配置并解析真实 IP
     trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
     client_ip_str = _get_real_client_ip_sync(request, trusted_proxies_str)
 
-    # 检查缓存：如果该 IP 已经验证过且未过期，直接返回缓存的用户
+    # 解析白名单网段（每次都解析，以便检测配置变更）
+    whitelist_networks = []
+    for entry in ip_whitelist_str.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # 安全检查：阻止危险的 CIDR 配置
+        if entry in _DANGEROUS_NETWORKS:
+            logger.error(f"危险的 IP 白名单配置被阻止: '{entry}'（会匹配所有 IP）")
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+            # 额外检查：阻止过大的网段（/8 以下，即超过 1600 万个 IP）
+            if network.version == 4 and network.prefixlen < 8:
+                logger.error(f"危险的 IP 白名单配置被阻止: '{entry}'（网段过大，包含超过 1600 万个 IP）")
+                continue
+            if network.version == 6 and network.prefixlen < 32:
+                logger.error(f"危险的 IP 白名单配置被阻止: '{entry}'（IPv6 网段过大）")
+                continue
+            whitelist_networks.append(network)
+        except ValueError:
+            logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
+
+    if not whitelist_networks:
+        return None
+
+    # 检查缓存：如果该 IP 已经验证过且未过期
     current_time = time.time()
     if client_ip_str in _whitelist_session_cache:
         cached_user, cached_time, cached_ttl, cached_jti = _whitelist_session_cache[client_ip_str]
+
+        # 【安全检查】验证该 IP 是否仍在当前白名单中
+        try:
+            client_addr = ipaddress.ip_address(client_ip_str)
+            still_whitelisted = any(client_addr in network for network in whitelist_networks)
+        except ValueError:
+            still_whitelisted = False
+
+        if not still_whitelisted:
+            # IP 已从白名单移除，立即撤销会话
+            logger.warning(f"IP {client_ip_str} 已从白名单移除，撤销其会话")
+            del _whitelist_session_cache[client_ip_str]
+            try:
+                await session_crud.revoke_session_by_jti(session, cached_jti)
+            except Exception as e:
+                logger.warning(f"撤销白名单会话失败: {e}")
+            return None
+
         if current_time - cached_time < cached_ttl:
             # 缓存有效，直接返回（不打印日志）
             return cached_user
         else:
             # 缓存过期，删除缓存并撤销数据库中的会话
             del _whitelist_session_cache[client_ip_str]
-            # 异步撤销会话（在后台执行）
             try:
                 await session_crud.revoke_session_by_jti(session, cached_jti)
             except Exception as e:
                 logger.warning(f"撤销过期白名单会话失败: {e}")
-
-    # 解析白名单网段
-    whitelist_networks = []
-    for entry in ip_whitelist_str.split(','):
-        entry = entry.strip()
-        if not entry:
-            continue
-        try:
-            whitelist_networks.append(ipaddress.ip_network(entry, strict=False))
-        except ValueError:
-            logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
-
-    if not whitelist_networks:
-        return None
 
     # 检查客户端 IP 是否在白名单中
     try:
@@ -161,14 +203,14 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
         is_whitelisted = any(client_addr in network for network in whitelist_networks)
 
         if is_whitelisted:
-            # 获取管理员用户
+            # 获取管理员用户（必须存在，否则不允许白名单登录）
             admin_user = await crud.get_user_by_username(session, "admin")
-            if admin_user:
-                user = models.User.model_validate(admin_user)
-                user_id = admin_user["id"]
-            else:
-                user = models.User(id=0, username="whitelist_user")
-                user_id = 0
+            if not admin_user:
+                logger.error("IP 白名单功能需要 admin 用户存在，但未找到 admin 用户")
+                return None
+
+            user = models.User.model_validate(admin_user)
+            user_id = admin_user["id"]
 
             # 获取 JWT 有效期配置（与正常登录一致）
             expire_minutes_str = await crud.get_config_value(session, 'jwtExpireMinutes', str(settings.jwt.access_token_expire_minutes))
@@ -186,14 +228,19 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
 
             # 创建数据库会话记录
             user_agent = request.headers.get("user-agent", "IP白名单免登录")
-            await session_crud.create_user_session(
-                session=session,
-                user_id=user_id,
-                jti=jti,
-                ip_address=client_ip_str,
-                user_agent=f"[白名单] {user_agent[:450]}" if user_agent else "[白名单] 未知",
-                expires_minutes=db_expire_minutes
-            )
+            try:
+                await session_crud.create_user_session(
+                    session=session,
+                    user_id=user_id,
+                    jti=jti,
+                    ip_address=client_ip_str,
+                    user_agent=f"[白名单] {user_agent[:450]}" if user_agent else "[白名单] 未知",
+                    expires_minutes=db_expire_minutes
+                )
+            except Exception as e:
+                logger.error(f"创建白名单会话记录失败: {e}")
+                # 即使数据库记录失败，仍然允许访问（但不缓存）
+                return user
 
             # 缓存结果并打印一次日志
             _whitelist_session_cache[client_ip_str] = (user, current_time, ttl_seconds, jti)
