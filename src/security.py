@@ -68,6 +68,81 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
     return client_ip_str
 
 
+async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optional[models.User]:
+    """
+    检查客户端 IP 是否在白名单中。
+    如果在白名单中，返回系统管理员用户；否则返回 None。
+
+    :param request: FastAPI Request 对象
+    :param session: 数据库会话
+    :return: 如果 IP 在白名单中返回管理员用户，否则返回 None
+    """
+    # 获取 IP 白名单配置
+    ip_whitelist_str = await crud.get_config_value(session, "ipWhitelist", "")
+    if not ip_whitelist_str or not ip_whitelist_str.strip():
+        return None
+
+    # 解析白名单网段
+    whitelist_networks = []
+    for entry in ip_whitelist_str.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            # 尝试解析为网络（支持 CIDR 格式）
+            whitelist_networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
+
+    if not whitelist_networks:
+        return None
+
+    # 获取真实客户端 IP
+    # 先检查是否有受信任代理配置
+    trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
+    trusted_networks = []
+    if trusted_proxies_str:
+        for proxy_entry in trusted_proxies_str.split(','):
+            try:
+                trusted_networks.append(ipaddress.ip_network(proxy_entry.strip(), strict=False))
+            except ValueError:
+                pass
+
+    client_ip_str = request.client.host if request.client else "127.0.0.1"
+
+    # 如果请求来自受信任代理，解析真实 IP
+    if trusted_networks:
+        try:
+            client_addr = ipaddress.ip_address(client_ip_str)
+            is_trusted = any(client_addr in network for network in trusted_networks)
+            if is_trusted:
+                x_forwarded_for = request.headers.get("x-forwarded-for")
+                if x_forwarded_for:
+                    client_ip_str = x_forwarded_for.split(',')[0].strip()
+                else:
+                    client_ip_str = request.headers.get("x-real-ip", client_ip_str)
+        except ValueError:
+            pass
+
+    # 检查客户端 IP 是否在白名单中
+    try:
+        client_addr = ipaddress.ip_address(client_ip_str)
+        is_whitelisted = any(client_addr in network for network in whitelist_networks)
+
+        if is_whitelisted:
+            logger.info(f"IP {client_ip_str} 在白名单中，免登录访问")
+            # 获取第一个管理员用户作为白名单用户
+            admin_user = await crud.get_user_by_username(session, "admin")
+            if admin_user:
+                return models.User.model_validate(admin_user)
+            # 如果没有 admin 用户，创建一个虚拟用户对象
+            return models.User(id=0, username="whitelist_user")
+    except ValueError:
+        logger.warning(f"无法解析客户端 IP '{client_ip_str}'")
+
+    return None
+
+
 async def _get_user_from_token(token: str, session: AsyncSession, validate_session: bool = True) -> Tuple[models.User, Optional[str]]:
     """
     核心逻辑：解码JWT，验证其有效性，并获取当前用户。
@@ -138,23 +213,57 @@ async def create_access_token(data: dict, session: AsyncSession, expires_delta: 
     return encoded_jwt, jti, expire_minutes
 
 
+# 可选的 OAuth2 scheme，允许没有 token 的请求通过（用于 IP 白名单场景）
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/ui/auth/token", auto_error=False)
+
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
     session: AsyncSession = Depends(get_db_session)
 ) -> models.User:
     """
     依赖项：解码JWT，验证其有效性，并获取当前用户。
+    支持 IP 白名单：如果客户端 IP 在白名单中，可以免登录访问。
     """
+    # 先检查 IP 白名单
+    whitelist_user = await check_ip_whitelist(request, session)
+    if whitelist_user:
+        return whitelist_user
+
+    # 如果不在白名单中，必须有有效的 token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user, _ = await _get_user_from_token(token, session)
     return user
 
 
 async def get_current_user_with_jti(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
     session: AsyncSession = Depends(get_db_session)
 ) -> Tuple[models.User, Optional[str]]:
     """
     依赖项：解码JWT，验证其有效性，并获取当前用户和 jti。
     用于需要知道当前会话 jti 的场景（如会话管理）。
+    支持 IP 白名单：如果客户端 IP 在白名单中，可以免登录访问。
     """
+    # 先检查 IP 白名单
+    whitelist_user = await check_ip_whitelist(request, session)
+    if whitelist_user:
+        return whitelist_user, None
+
+    # 如果不在白名单中，必须有有效的 token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return await _get_user_from_token(token, session)

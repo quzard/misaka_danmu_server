@@ -33,6 +33,14 @@ CONFIG_SCHEMA = [
                 "verifyEndpoint": "/api/ui/config/github-token/verify",
             },
             {
+                "key": "ipWhitelist",
+                "label": "访问IP白名单",
+                "type": "textarea",
+                "rows": 3,
+                "description": "⚠️ 安全警告：白名单内的IP访问管理界面时无需登录！请谨慎配置。多个IP或CIDR网段请用英文逗号(,)分隔。留空表示禁用此功能。",
+                "placeholder": "例如: 192.168.1.100, 10.0.0.0/8",
+            },
+            {
                 "key": "trustedProxies",
                 "label": "受信任的反向代理",
                 "type": "textarea",
