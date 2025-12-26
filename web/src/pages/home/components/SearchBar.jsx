@@ -117,7 +117,7 @@ export const SearchBar = () => {
           messageApi.success(res.data.message || '缓存已成功清除！')
         } catch (err) {
           messageApi.destroy()
-          messageApi.error(`清除缓存失败: ${error.message || error}`)
+          messageApi.error(`清除缓存失败: ${err.message || err}`)
         } finally {
           setCacheLoading(false)
         }
@@ -168,31 +168,35 @@ export const SearchBar = () => {
           </div>
         )}
 
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3 flex-wrap'}`}>
           <Checkbox
             checked={exactSearch}
             onChange={e => setExactSearch(e.target.checked)}
           >
-            精确搜索
+            {isMobile ? <span>精确<br />搜索</span> : '精确搜索'}
           </Checkbox>
 
-          {exactSearch && (
-            <>
-              <Form.Item name="season" label="季" className="mb-0">
-                <InputNumber min={0} placeholder="季数" style={{ width: 80 }} />
+          <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3'}`}>
+            <div className="flex items-center gap-1">
+              <span className={`leading-8 ${exactSearch ? '' : 'text-gray-400'}`}>季</span>
+              <Form.Item name="season" noStyle>
+                <InputNumber min={0} placeholder="季" disabled={!exactSearch} style={{ width: 80 }} />
               </Form.Item>
-              <Form.Item name="episode" label="集" className="mb-0">
-                <InputNumber min={1} placeholder="集数" disabled={!season} style={{ width: 80 }} />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className={`leading-8 ${exactSearch ? '' : 'text-gray-400'}`}>集</span>
+              <Form.Item name="episode" noStyle>
+                <InputNumber min={1} placeholder="集" disabled={!exactSearch || !season} style={{ width: 80 }} />
               </Form.Item>
-              <Button type="primary" onClick={onInsert} size="small">
-                插入
-              </Button>
-              {!isMobile && (
-                <span className="text-xs text-gray-500">
-                  填写季、集后可插入到名称中
-                </span>
-              )}
-            </>
+            </div>
+            <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
+              插入
+            </Button>
+          </div>
+          {!isMobile && (
+            <span className={`text-xs ${exactSearch ? 'text-gray-500' : 'text-gray-300'}`}>
+              填写季、集后可插入到名称中
+            </span>
           )}
         </div>
       </Form>

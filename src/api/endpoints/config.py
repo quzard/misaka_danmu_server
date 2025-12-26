@@ -16,6 +16,7 @@ from ...database import get_db_session
 from ...config_manager import ConfigManager
 from ...crud import config as config_crud
 from ..dependencies import get_config_manager
+from ...config_schema import get_config_schema
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,6 +33,17 @@ class ConfigValueRequest(BaseModel):
 
 
 # --- API Endpoints ---
+
+@router.get("/schema/parameters", summary="获取参数配置的 Schema")
+async def get_parameters_schema(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取参数配置页面的 Schema 定义。
+    前端根据此 Schema 动态渲染配置界面。
+    """
+    return get_config_schema()
+
 
 @router.get("/{config_key}", response_model=Dict[str, str], summary="获取指定配置项的值")
 async def get_config_item(
@@ -93,4 +105,6 @@ async def regenerate_external_api_key(
     config_manager.invalidate("externalApiKey")
     logger.info(f"用户 '{current_user.username}' 重新生成了外部 API Key。")
     return {"key": "externalApiKey", "value": new_key}
+
+
 

@@ -4,11 +4,10 @@ import { Proxy } from './components/Proxy'
 import { Parameters } from './components/Parameters'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Recognition } from './components/Recognition'
-import { Performance } from './components/Performance'
 import AutoMatchSetting from './components/AutoMatchSetting'
 import { MobileTabs } from '@/components/MobileTabs'
 import { useAtomValue } from 'jotai'
-import { isMobileAtom } from '../../../store/index.js'
+import { isMobileAtom } from '../../../store'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
@@ -36,11 +35,6 @@ export const Setting = () => {
       label: '识别词配置',
       key: 'recognition',
       children: <Recognition />,
-    },
-    {
-      label: '性能优化',
-      key: 'performance',
-      children: <Performance />,
     },
     {
       label: 'AI辅助增强',

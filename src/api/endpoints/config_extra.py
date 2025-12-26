@@ -75,7 +75,21 @@ from ..ui_models import (
     WebhookSettings, WebhookTaskItem, PaginatedWebhookTasksResponse,
     AITestRequest, AITestResponse
 )
+from ...config_schema import get_config_schema
+
 router = APIRouter()
+
+
+@router.get("/config/schema/parameters", summary="获取参数配置的 Schema")
+async def get_parameters_schema(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取参数配置页面的 Schema 定义。
+    前端根据此 Schema 动态渲染配置界面。
+    """
+    return get_config_schema()
+
 
 @router.get("/config/proxy", response_model=models.ProxySettingsResponse, summary="获取代理配置")
 
@@ -691,35 +705,54 @@ async def get_default_ai_prompts(
 @router.get("/config/ai/metrics", summary="获取AI调用统计")
 async def get_ai_metrics(
     hours: int = 24,
+    source: str = "db",  # db: 从数据库读取, memory: 从内存读取
     current_user: models.User = Depends(security.get_current_user),
-    ai_matcher_manager = Depends(get_ai_matcher_manager)
+    ai_matcher_manager = Depends(get_ai_matcher_manager),
+    session: AsyncSession = Depends(get_db_session)
 ):
     """
     获取AI调用的统计信息
 
     Args:
         hours: 统计最近多少小时的数据,默认24小时
+        source: 数据来源, db=数据库(持久化), memory=内存(实时)
 
     Returns:
         AI调用统计数据
     """
-    matcher = await ai_matcher_manager.get_matcher()
-    if not matcher:
-        return {
-            "error": "AI匹配器未初始化或未启用",
-            "stats": None
-        }
+    from ...crud.ai_metrics import get_ai_metrics_stats, get_ai_metrics_summary
 
-    stats = matcher.metrics.get_stats(hours)
+    # 优先从数据库读取（持久化数据）
+    if source == "db":
+        try:
+            stats = await get_ai_metrics_stats(session, hours)
+            summary = await get_ai_metrics_summary(session)
+            stats["summary"] = summary
+        except Exception as e:
+            logger.warning(f"从数据库读取 AI 统计失败，回退到内存: {e}")
+            source = "memory"  # 回退到内存
+
+    # 从内存读取（实时数据）
+    if source == "memory":
+        matcher = await ai_matcher_manager.get_matcher()
+        if not matcher:
+            return {
+                "error": "AI匹配器未初始化或未启用",
+                "ai_stats": None,
+                "cache_stats": None
+            }
+        stats = matcher.metrics.get_stats(hours)
 
     # 添加缓存统计
     cache_stats = None
-    if matcher.cache:
+    matcher = await ai_matcher_manager.get_matcher()
+    if matcher and matcher.cache:
         cache_stats = matcher.cache.get_stats()
 
     return {
         "ai_stats": stats,
-        "cache_stats": cache_stats
+        "cache_stats": cache_stats,
+        "source": source
     }
 
 

@@ -403,3 +403,24 @@ class LocalDanmakuItem(Base):
         Index('idx_local_media_type', 'media_type'),
         Index('idx_local_is_imported', 'is_imported'),
     )
+
+
+class AIMetricsLog(Base):
+    """AI 调用统计日志表"""
+    __tablename__ = "ai_metrics_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column("timestamp", NaiveDateTime, default=get_now, index=True)
+    method: Mapped[str] = mapped_column(String(100))  # select_best_match, recognize_title 等
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    durationMs: Mapped[int] = mapped_column("duration_ms", Integer, default=0)
+    tokensUsed: Mapped[int] = mapped_column("tokens_used", Integer, default=0)
+    model: Mapped[str] = mapped_column(String(100))
+    error: Mapped[Optional[str]] = mapped_column(TEXT)
+    cacheHit: Mapped[bool] = mapped_column("cache_hit", Boolean, default=False)
+
+    __table_args__ = (
+        Index('idx_ai_metrics_timestamp', 'timestamp'),
+        Index('idx_ai_metrics_method', 'method'),
+        Index('idx_ai_metrics_success', 'success'),
+    )

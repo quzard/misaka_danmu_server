@@ -603,13 +603,15 @@ export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tm
 /** 通用配置管理 */
 export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
 export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
+/** 获取参数配置 Schema */
+export const getConfigSchema = () => api.get('/api/ui/config/schema/parameters')
 export const getDefaultAIPrompts = () => api.get('/api/ui/config/ai/default-prompts')
 
 /** AI 余额查询 */
 export const getAIBalance = () => api.get('/api/ui/config/ai/balance')
 
 /** AI 调用统计 */
-export const getAIMetrics = (hours = 24) => api.get(`/api/ui/config/ai/metrics?hours=${hours}`)
+export const getAIMetrics = (hours = 24, source = 'db') => api.get(`/api/ui/config/ai/metrics?hours=${hours}&source=${source}`)
 
 /** 清空 AI 缓存 */
 export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')

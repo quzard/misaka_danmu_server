@@ -149,8 +149,8 @@ async def lifespan(app: FastAPI):
     app.state.cache_manager = CacheManager(session_factory)
     logger.info("缓存管理器已初始化")
 
-    # 初始化 AIMatcherManager
-    app.state.ai_matcher_manager = AIMatcherManager(app.state.config_manager)
+    # 初始化 AIMatcherManager（传入 session_factory 用于 AI 调用统计持久化）
+    app.state.ai_matcher_manager = AIMatcherManager(app.state.config_manager, session_factory)
     logger.info("AI匹配管理器已初始化")
 
     # --- 并行优化的初始化顺序 ---
