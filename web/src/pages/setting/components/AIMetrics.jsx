@@ -56,7 +56,8 @@ const AIMetrics = () => {
     return <Empty description="暂无数据" />
   }
 
-  const { ai_stats, cache_stats } = metricsData
+  const { ai_stats, cache_stats, source } = metricsData
+  const summary = ai_stats?.summary
 
   return (
     <div>
@@ -70,14 +71,19 @@ const AIMetrics = () => {
             <Option value={168}>最近7天</Option>
             <Option value={720}>最近30天</Option>
           </Select>
+          {source && (
+            <span style={{ color: '#888', fontSize: 12 }}>
+              数据来源: {source === 'db' ? '数据库（持久化）' : '内存（实时）'}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button icon={<ReloadOutlined />} onClick={loadMetrics} loading={loading}>
             刷新统计
           </Button>
-          <Button 
-            icon={<DeleteOutlined />} 
-            onClick={handleClearCache} 
+          <Button
+            icon={<DeleteOutlined />}
+            onClick={handleClearCache}
             loading={clearing}
             danger
           >
@@ -151,7 +157,7 @@ const AIMetrics = () => {
 
       {/* 缓存统计 */}
       {cache_stats && (
-        <Card title="💾 缓存统计">
+        <Card title="💾 缓存统计" style={{ marginBottom: 16 }}>
           <Row gutter={16}>
             <Col xs={24} sm={12} md={6}>
               <Statistic
@@ -178,6 +184,40 @@ const AIMetrics = () => {
               <Statistic
                 title="缓存大小"
                 value={`${cache_stats.size || 0} / ${cache_stats.max_size || 1000}`}
+              />
+            </Col>
+          </Row>
+        </Card>
+      )}
+
+      {/* 历史总计（仅数据库模式） */}
+      {summary && source === 'db' && (
+        <Card title="📊 历史总计">
+          <Row gutter={16}>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="累计调用次数"
+                value={summary.total_calls_all_time || 0}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="累计 Token 消耗"
+                value={summary.total_tokens_all_time || 0}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="首次调用"
+                value={summary.first_call ? new Date(summary.first_call).toLocaleString() : '-'}
+                valueStyle={{ fontSize: 14 }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="最近调用"
+                value={summary.last_call ? new Date(summary.last_call).toLocaleString() : '-'}
+                valueStyle={{ fontSize: 14 }}
               />
             </Col>
           </Row>

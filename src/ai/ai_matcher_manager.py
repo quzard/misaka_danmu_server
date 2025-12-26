@@ -14,18 +14,27 @@ from ..config_manager import ConfigManager
 class AIMatcherManager:
     """AI匹配管理器"""
 
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, db_session_factory=None):
         """
         初始化AI匹配管理器
 
         Args:
             config_manager: 配置管理器实例
+            db_session_factory: 数据库会话工厂（用于 AI 调用统计持久化）
         """
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
         self._matcher_cache: Optional[AIMatcher] = None
         self._last_config_hash: Optional[str] = None
         self._last_core_config_hash: Optional[str] = None
+        self._db_session_factory = db_session_factory
+
+    def set_db_session_factory(self, factory):
+        """设置数据库会话工厂（延迟初始化）"""
+        self._db_session_factory = factory
+        # 如果已有缓存的 matcher，更新其 metrics 的 session factory
+        if self._matcher_cache:
+            self._matcher_cache.metrics.set_db_session_factory(factory)
     
     async def is_enabled(self) -> bool:
         """
@@ -157,6 +166,10 @@ class AIMatcherManager:
             self._matcher_cache = AIMatcher(config)
             self._last_config_hash = config_hash
             self._last_core_config_hash = core_hash
+
+            # 设置数据库会话工厂用于持久化 AI 调用统计
+            if self._db_session_factory:
+                self._matcher_cache.metrics.set_db_session_factory(self._db_session_factory)
 
             return self._matcher_cache
         except Exception as e:

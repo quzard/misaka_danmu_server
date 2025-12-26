@@ -611,7 +611,7 @@ export const getDefaultAIPrompts = () => api.get('/api/ui/config/ai/default-prom
 export const getAIBalance = () => api.get('/api/ui/config/ai/balance')
 
 /** AI 调用统计 */
-export const getAIMetrics = (hours = 24) => api.get(`/api/ui/config/ai/metrics?hours=${hours}`)
+export const getAIMetrics = (hours = 24, source = 'db') => api.get(`/api/ui/config/ai/metrics?hours=${hours}&source=${source}`)
 
 /** 清空 AI 缓存 */
 export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
