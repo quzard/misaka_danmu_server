@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import uuid
 import ipaddress
 import logging
+import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status, Request
@@ -68,38 +69,15 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
     return client_ip_str
 
 
-async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optional[models.User]:
+# IP 白名单会话缓存
+# key: client_ip, value: (user, timestamp, ttl_seconds)
+_whitelist_session_cache: Dict[str, Tuple[models.User, float, int]] = {}
+
+
+def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
     """
-    检查客户端 IP 是否在白名单中。
-    如果在白名单中，返回系统管理员用户；否则返回 None。
-
-    :param request: FastAPI Request 对象
-    :param session: 数据库会话
-    :return: 如果 IP 在白名单中返回管理员用户，否则返回 None
+    同步获取真实客户端 IP（用于白名单检查）
     """
-    # 获取 IP 白名单配置
-    ip_whitelist_str = await crud.get_config_value(session, "ipWhitelist", "")
-    if not ip_whitelist_str or not ip_whitelist_str.strip():
-        return None
-
-    # 解析白名单网段
-    whitelist_networks = []
-    for entry in ip_whitelist_str.split(','):
-        entry = entry.strip()
-        if not entry:
-            continue
-        try:
-            # 尝试解析为网络（支持 CIDR 格式）
-            whitelist_networks.append(ipaddress.ip_network(entry, strict=False))
-        except ValueError:
-            logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
-
-    if not whitelist_networks:
-        return None
-
-    # 获取真实客户端 IP
-    # 先检查是否有受信任代理配置
-    trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
     trusted_networks = []
     if trusted_proxies_str:
         for proxy_entry in trusted_proxies_str.split(','):
@@ -110,7 +88,6 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
 
     client_ip_str = request.client.host if request.client else "127.0.0.1"
 
-    # 如果请求来自受信任代理，解析真实 IP
     if trusted_networks:
         try:
             client_addr = ipaddress.ip_address(client_ip_str)
@@ -124,23 +101,98 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
         except ValueError:
             pass
 
+    return client_ip_str
+
+
+async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optional[models.User]:
+    """
+    检查客户端 IP 是否在白名单中。
+    如果在白名单中，返回系统管理员用户；否则返回 None。
+    使用内存缓存减少重复检查和日志输出。
+
+    :param request: FastAPI Request 对象
+    :param session: 数据库会话
+    :return: 如果 IP 在白名单中返回管理员用户，否则返回 None
+    """
+    global _whitelist_session_cache
+
+    # 获取 IP 白名单配置
+    ip_whitelist_str = await crud.get_config_value(session, "ipWhitelist", "")
+    if not ip_whitelist_str or not ip_whitelist_str.strip():
+        return None
+
+    # 获取受信任代理配置并解析真实 IP
+    trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
+    client_ip_str = _get_real_client_ip_sync(request, trusted_proxies_str)
+
+    # 检查缓存：如果该 IP 已经验证过且未过期，直接返回缓存的用户
+    current_time = time.time()
+    if client_ip_str in _whitelist_session_cache:
+        cached_user, cached_time, cached_ttl = _whitelist_session_cache[client_ip_str]
+        if current_time - cached_time < cached_ttl:
+            # 缓存有效，直接返回（不打印日志）
+            return cached_user
+        else:
+            # 缓存过期，删除
+            del _whitelist_session_cache[client_ip_str]
+
+    # 解析白名单网段
+    whitelist_networks = []
+    for entry in ip_whitelist_str.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            whitelist_networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
+
+    if not whitelist_networks:
+        return None
+
     # 检查客户端 IP 是否在白名单中
     try:
         client_addr = ipaddress.ip_address(client_ip_str)
         is_whitelisted = any(client_addr in network for network in whitelist_networks)
 
         if is_whitelisted:
-            logger.info(f"IP {client_ip_str} 在白名单中，免登录访问")
-            # 获取第一个管理员用户作为白名单用户
+            # 获取管理员用户
             admin_user = await crud.get_user_by_username(session, "admin")
             if admin_user:
-                return models.User.model_validate(admin_user)
-            # 如果没有 admin 用户，创建一个虚拟用户对象
-            return models.User(id=0, username="whitelist_user")
+                user = models.User.model_validate(admin_user)
+            else:
+                user = models.User(id=0, username="whitelist_user")
+
+            # 获取 JWT 有效期配置（与正常登录一致）
+            expire_minutes_str = await crud.get_config_value(session, 'jwtExpireMinutes', str(settings.jwt.access_token_expire_minutes))
+            expire_minutes = int(expire_minutes_str)
+            # 如果是 -1（永不过期），使用一个较大的值（7天）
+            if expire_minutes == -1:
+                ttl_seconds = 7 * 24 * 60 * 60  # 7 天
+            else:
+                ttl_seconds = expire_minutes * 60  # 转换为秒
+
+            # 缓存结果并打印一次日志
+            _whitelist_session_cache[client_ip_str] = (user, current_time, ttl_seconds)
+            logger.info(f"IP {client_ip_str} 在白名单中，已建立免登录会话（有效期 {expire_minutes} 分钟）")
+            return user
     except ValueError:
         logger.warning(f"无法解析客户端 IP '{client_ip_str}'")
 
     return None
+
+
+def clear_whitelist_session_cache(ip: Optional[str] = None):
+    """
+    清除白名单会话缓存。
+
+    :param ip: 指定要清除的 IP，如果为 None 则清除所有缓存
+    """
+    global _whitelist_session_cache
+    if ip:
+        _whitelist_session_cache.pop(ip, None)
+    else:
+        _whitelist_session_cache.clear()
 
 
 async def _get_user_from_token(token: str, session: AsyncSession, validate_session: bool = True) -> Tuple[models.User, Optional[str]]:
