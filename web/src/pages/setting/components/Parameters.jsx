@@ -1,4 +1,4 @@
-import { Card, Empty, Spin } from 'antd'
+import { Empty, Spin, Tabs } from 'antd'
 import { useState, useEffect } from 'react'
 import {
   getConfigSchema,
@@ -62,16 +62,26 @@ export const Parameters = () => {
     )
   }
 
+  // 构建 Tabs 的 items
+  const tabItems = schema.map((group) => ({
+    key: group.key,
+    label: group.label,
+    children: (
+      <div className="py-2">
+        {group.items?.map((item) => (
+          <GenericConfigItem key={item.key} config={enrichConfig(item)} />
+        ))}
+      </div>
+    ),
+  }))
+
   return (
-    <div className="space-y-4">
-      {schema.map((group) => (
-        <Card key={group.key} title={group.label} size="small">
-          {group.items?.map((item) => (
-            <GenericConfigItem key={item.key} config={enrichConfig(item)} />
-          ))}
-        </Card>
-      ))}
-    </div>
+    <Tabs
+      defaultActiveKey={schema[0]?.key}
+      items={tabItems}
+      tabPosition="left"
+      className="parameters-tabs"
+    />
   )
 }
 
