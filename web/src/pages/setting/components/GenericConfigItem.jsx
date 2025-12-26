@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Button, Input, InputNumber, Switch, Select, Space, Tag, Form } from 'antd'
+import { Button, Input, InputNumber, Switch, Select, Tag } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
-import { getConfig, setConfig } from '../../../apis'
-import { useMessage } from '../../../MessageContext'
+import { getConfig, setConfig } from '@/apis'
+import { useMessage } from '@/MessageContext'
 
 /**
  * 通用配置项组件

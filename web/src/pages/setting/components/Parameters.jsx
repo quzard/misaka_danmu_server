@@ -1,6 +1,6 @@
 import { Card, Spin } from 'antd'
 import { useState, useEffect } from 'react'
-import { getConfigSchema } from '../../../apis'
+import { getConfigSchema } from '@/apis'
 import { GenericConfigItem } from './GenericConfigItem'
 
 export const Parameters = () => {
