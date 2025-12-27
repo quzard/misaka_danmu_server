@@ -1,0 +1,326 @@
+"""
+数据库备份定时任务
+使用 JSON 格式导出数据，支持跨数据库（MySQL/PostgreSQL）兼容
+"""
+import gzip
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, List, Dict, Any, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, inspect
+from sqlalchemy.orm import selectinload
+
+from .. import crud, orm_models
+from ..config import settings
+from ..timezone import get_now
+from .base import BaseJob
+from ..task_manager import TaskSuccess
+
+logger = logging.getLogger(__name__)
+
+# 默认备份路径
+DEFAULT_BACKUP_PATH = "/app/config/sql_backup"
+DEFAULT_RETENTION_COUNT = 5
+
+# 需要备份的表（按依赖顺序排列，被依赖的表在前）
+BACKUP_TABLES = [
+    ("users", orm_models.User),
+    ("anime", orm_models.Anime),
+    ("anime_sources", orm_models.AnimeSource),
+    ("episode", orm_models.Episode),
+    ("anime_metadata", orm_models.AnimeMetadata),
+    ("anime_aliases", orm_models.AnimeAlias),
+    ("config", orm_models.Config),
+    ("media_servers", orm_models.MediaServer),
+    ("scheduled_tasks", orm_models.ScheduledTask),
+    ("api_tokens", orm_models.ApiToken),
+]
+
+
+def model_to_dict(obj) -> Dict[str, Any]:
+    """将 ORM 对象转换为字典"""
+    result = {}
+    mapper = inspect(obj.__class__)
+    for column in mapper.columns:
+        value = getattr(obj, column.key)
+        # 处理 datetime 类型
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        result[column.key] = value
+    return result
+
+
+async def get_backup_path(session: AsyncSession) -> Path:
+    """获取备份路径"""
+    path_str = await crud.get_config_value(session, "backupPath", DEFAULT_BACKUP_PATH)
+    return Path(path_str)
+
+
+async def get_retention_count(session: AsyncSession) -> int:
+    """获取备份保留数量"""
+    count_str = await crud.get_config_value(session, "backupRetentionCount", str(DEFAULT_RETENTION_COUNT))
+    try:
+        return int(count_str)
+    except (ValueError, TypeError):
+        return DEFAULT_RETENTION_COUNT
+
+
+async def create_backup(session: AsyncSession, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    """
+    创建数据库备份
+    返回备份信息字典
+    """
+    backup_path = await get_backup_path(session)
+    backup_path.mkdir(parents=True, exist_ok=True)
+    
+    # 生成备份文件名
+    timestamp = get_now().strftime("%Y%m%d_%H%M%S")
+    filename = f"danmuapi_backup_{timestamp}.json.gz"
+    filepath = backup_path / filename
+    
+    # 构建备份数据
+    backup_data = {
+        "metadata": {
+            "version": "1.0",
+            "source_db_type": settings.database.type.lower(),
+            "created_at": get_now().isoformat(),
+            "tables": [name for name, _ in BACKUP_TABLES],
+        },
+        "data": {}
+    }
+    
+    total_tables = len(BACKUP_TABLES)
+    total_records = 0
+    
+    for idx, (table_name, model_class) in enumerate(BACKUP_TABLES):
+        if progress_callback:
+            progress = int((idx / total_tables) * 80)
+            await progress_callback(progress, f"正在导出表: {table_name}...")
+        
+        try:
+            stmt = select(model_class)
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+            
+            backup_data["data"][table_name] = [model_to_dict(r) for r in records]
+            total_records += len(records)
+            logger.info(f"导出表 {table_name}: {len(records)} 条记录")
+        except Exception as e:
+            logger.warning(f"导出表 {table_name} 失败: {e}")
+            backup_data["data"][table_name] = []
+    
+    # 写入压缩文件
+    if progress_callback:
+        await progress_callback(85, "正在压缩备份文件...")
+    
+    with gzip.open(filepath, 'wt', encoding='utf-8') as f:
+        json.dump(backup_data, f, ensure_ascii=False, indent=2)
+    
+    file_size = filepath.stat().st_size
+    
+    # 清理旧备份
+    if progress_callback:
+        await progress_callback(90, "正在清理旧备份...")
+    
+    retention_count = await get_retention_count(session)
+    await cleanup_old_backups(backup_path, retention_count)
+    
+    return {
+        "filename": filename,
+        "filepath": str(filepath),
+        "size": file_size,
+        "records": total_records,
+        "created_at": get_now().isoformat(),
+    }
+
+
+async def cleanup_old_backups(backup_path: Path, retention_count: int):
+    """清理旧备份，只保留最近的 N 个"""
+    backup_files = sorted(
+        [f for f in backup_path.glob("danmuapi_backup_*.json.gz")],
+        key=lambda x: x.stat().st_mtime,
+        reverse=True
+    )
+
+    for old_file in backup_files[retention_count:]:
+        try:
+            old_file.unlink()
+            logger.info(f"删除旧备份: {old_file.name}")
+        except Exception as e:
+            logger.error(f"删除旧备份失败 {old_file.name}: {e}")
+
+
+async def list_backups(session: AsyncSession) -> List[Dict[str, Any]]:
+    """列出所有备份文件"""
+    backup_path = await get_backup_path(session)
+
+    if not backup_path.exists():
+        return []
+
+    backups = []
+    for filepath in backup_path.glob("danmuapi_backup_*.json.gz"):
+        try:
+            stat = filepath.stat()
+            # 从文件名解析时间和数据库类型
+            # 尝试读取元数据
+            db_type = None
+            try:
+                with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                    # 只读取前面一小部分来获取元数据
+                    content = f.read(500)
+                    if '"source_db_type"' in content:
+                        import re
+                        match = re.search(r'"source_db_type"\s*:\s*"(\w+)"', content)
+                        if match:
+                            db_type = match.group(1)
+            except:
+                pass
+
+            backups.append({
+                "filename": filepath.name,
+                "size": stat.st_size,
+                "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "db_type": db_type,
+            })
+        except Exception as e:
+            logger.error(f"读取备份文件信息失败 {filepath.name}: {e}")
+
+    # 按创建时间倒序排列
+    backups.sort(key=lambda x: x["created_at"], reverse=True)
+    return backups
+
+
+async def delete_backup(session: AsyncSession, filename: str) -> bool:
+    """删除指定备份文件"""
+    backup_path = await get_backup_path(session)
+    filepath = backup_path / filename
+
+    # 安全检查：确保文件名合法
+    if not filename.startswith("danmuapi_backup_") or not filename.endswith(".json.gz"):
+        raise ValueError("无效的备份文件名")
+
+    if not filepath.exists():
+        raise FileNotFoundError(f"备份文件不存在: {filename}")
+
+    filepath.unlink()
+    logger.info(f"删除备份文件: {filename}")
+    return True
+
+
+async def restore_backup(session: AsyncSession, filename: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    """
+    从备份还原数据库
+    警告：此操作会清空现有数据！
+    """
+    from sqlalchemy import delete
+
+    backup_path = await get_backup_path(session)
+    filepath = backup_path / filename
+
+    if not filepath.exists():
+        raise FileNotFoundError(f"备份文件不存在: {filename}")
+
+    # 读取备份数据
+    if progress_callback:
+        await progress_callback(5, "正在读取备份文件...")
+
+    with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+        backup_data = json.load(f)
+
+    metadata = backup_data.get("metadata", {})
+    data = backup_data.get("data", {})
+
+    if progress_callback:
+        await progress_callback(10, "正在验证备份数据...")
+
+    # 按依赖关系的逆序删除数据（先删除有外键依赖的表）
+    tables_reversed = list(reversed(BACKUP_TABLES))
+    total_tables = len(tables_reversed)
+
+    for idx, (table_name, model_class) in enumerate(tables_reversed):
+        if progress_callback:
+            progress = 10 + int((idx / total_tables) * 40)
+            await progress_callback(progress, f"正在清空表: {table_name}...")
+
+        try:
+            await session.execute(delete(model_class))
+        except Exception as e:
+            logger.warning(f"清空表 {table_name} 失败: {e}")
+
+    await session.flush()
+
+    # 按依赖顺序插入数据
+    total_records = 0
+    for idx, (table_name, model_class) in enumerate(BACKUP_TABLES):
+        if progress_callback:
+            progress = 50 + int((idx / total_tables) * 45)
+            await progress_callback(progress, f"正在还原表: {table_name}...")
+
+        records = data.get(table_name, [])
+        if not records:
+            continue
+
+        try:
+            for record in records:
+                # 处理 datetime 字段
+                for key, value in record.items():
+                    if isinstance(value, str) and 'T' in value:
+                        try:
+                            record[key] = datetime.fromisoformat(value)
+                        except:
+                            pass
+
+                obj = model_class(**record)
+                session.add(obj)
+
+            total_records += len(records)
+            logger.info(f"还原表 {table_name}: {len(records)} 条记录")
+        except Exception as e:
+            logger.error(f"还原表 {table_name} 失败: {e}")
+            raise
+
+    await session.flush()
+
+    return {
+        "filename": filename,
+        "records": total_records,
+        "source_db_type": metadata.get("source_db_type"),
+        "backup_created_at": metadata.get("created_at"),
+    }
+
+
+class DatabaseBackupJob(BaseJob):
+    """
+    数据库备份定时任务
+    """
+    job_type = "databaseBackup"
+    job_name = "数据库备份"
+    description = "定期备份数据库数据为 JSON 格式，支持跨数据库（MySQL/PostgreSQL）还原。"
+
+    async def run(self, session: AsyncSession, progress_callback: Callable):
+        """
+        执行数据库备份任务
+        """
+        self.logger.info(f"开始执行 [{self.job_name}] 定时任务...")
+
+        await progress_callback(0, "开始备份数据库...")
+
+        try:
+            result = await create_backup(session, progress_callback)
+
+            await progress_callback(100, "备份完成")
+
+            size_mb = result['size'] / (1024 * 1024)
+            final_message = f"数据库备份完成。文件: {result['filename']}, 大小: {size_mb:.2f} MB, 记录数: {result['records']}"
+            self.logger.info(final_message)
+            raise TaskSuccess(final_message)
+
+        except TaskSuccess:
+            raise
+        except Exception as e:
+            self.logger.error(f"数据库备份失败: {e}", exc_info=True)
+            raise
+

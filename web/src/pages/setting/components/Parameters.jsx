@@ -7,6 +7,7 @@ import {
   verifyGithubToken,
 } from '../../../apis'
 import { GenericConfigItem } from './GenericConfigItem'
+import { DatabaseBackupManager } from './DatabaseBackupManager'
 
 // GitHub Token 的特殊配置（使用自定义 API）
 const GITHUB_TOKEN_CONFIG = {
@@ -14,6 +15,11 @@ const GITHUB_TOKEN_CONFIG = {
   getApi: getGithubToken,
   saveApi: saveGithubToken,
   verifyApi: verifyGithubToken,
+}
+
+// 需要渲染自定义组件的分组
+const CUSTOM_COMPONENTS = {
+  database: DatabaseBackupManager,
 }
 
 export const Parameters = () => {
@@ -63,17 +69,24 @@ export const Parameters = () => {
   }
 
   // 构建 Tabs 的 items
-  const tabItems = schema.map((group) => ({
-    key: group.key,
-    label: group.label,
-    children: (
-      <div className="py-2">
-        {group.items?.map((item) => (
-          <GenericConfigItem key={item.key} config={enrichConfig(item)} />
-        ))}
-      </div>
-    ),
-  }))
+  const tabItems = schema.map((group) => {
+    // 检查是否有自定义组件
+    const CustomComponent = CUSTOM_COMPONENTS[group.key] || (group.customComponent && CUSTOM_COMPONENTS[group.customComponent])
+
+    return {
+      key: group.key,
+      label: group.label,
+      children: (
+        <div className="py-2">
+          {group.items?.map((item) => (
+            <GenericConfigItem key={item.key} config={enrichConfig(item)} />
+          ))}
+          {/* 渲染自定义组件 */}
+          {CustomComponent && <CustomComponent />}
+        </div>
+      ),
+    }
+  })
 
   return (
     <Tabs

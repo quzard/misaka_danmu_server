@@ -7,7 +7,7 @@ from .endpoints import (
     auth, scraper, metadata_source, media_server,
     anime, source, episode, search, import_api, task,
     token, config_extra, settings, scheduled_task, webhook, system, auth_extra,
-    local_danmaku, scraper_resources, parameters, danmaku_storage
+    local_danmaku, scraper_resources, parameters, danmaku_storage, backup
 )
 
 # This router aggregates all non-dandanplay API endpoints.
@@ -48,6 +48,9 @@ api_router.include_router(auth_extra.auth_router, prefix="/ui/auth", tags=["Auth
 # Config端点 - config_extra.router 已包含所有config路由,不再需要 config.router
 # config.router 的通配符路由 /{config_key} 会与其他路由冲突,已在 config_extra.router 中重新实现
 api_router.include_router(config_extra.router, prefix="/ui", tags=["Config"], include_in_schema=False)
+
+# 备份管理端点
+api_router.include_router(backup.router, prefix="/ui", tags=["Backup"], include_in_schema=False)
 
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"], include_in_schema=False)
 
