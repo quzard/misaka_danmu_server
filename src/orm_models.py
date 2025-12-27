@@ -286,7 +286,7 @@ class TaskHistory(Base):
     taskType: Mapped[Optional[str]] = mapped_column("task_type", String(500), nullable=True)
     taskParameters: Mapped[Optional[str]] = mapped_column("task_parameters", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
 
-    __table_args__ = (Index('idx_created_at', 'created_at'),)
+    __table_args__ = (Index('idx_task_history_created_at', 'created_at'),)
 
 class TaskStateCache(Base):
     """任务状态缓存表，用于存储正在执行任务的参数，支持服务重启后的任务恢复"""
@@ -372,7 +372,7 @@ class MediaItem(Base):
         Index('idx_is_imported', 'is_imported'),
         # 性能优化索引
         Index('idx_server_id', 'server_id'),  # 按服务器过滤
-        Index('idx_created_at', 'created_at'),  # 按创建时间排序
+        Index('idx_media_items_created_at', 'created_at'),  # 按创建时间排序
         Index('idx_server_type', 'server_id', 'media_type'),  # 复合索引：服务器+类型
         Index('idx_server_type_title', 'server_id', 'media_type', 'title'),  # 复合索引：电视剧分组
     )
