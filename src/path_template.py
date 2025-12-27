@@ -298,9 +298,11 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
                 filename_template = await config_manager.get('tvDanmakuFilenameTemplate', '${animeId}/${episodeId}')
 
             # 创建路径模板上下文
+            # 注意：season 可能为 0（特别篇/SP），不能使用 or 1 来设置默认值
+            season_value = episode.source.anime.season if episode.source.anime.season is not None else 1
             context = create_danmaku_context(
                 anime_title=episode.source.anime.title,
-                season=episode.source.anime.season or 1,
+                season=season_value,
                 episode_index=episode.episodeIndex,
                 year=episode.source.anime.year,
                 provider=episode.source.providerName,
