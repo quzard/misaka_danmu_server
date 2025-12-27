@@ -16,7 +16,8 @@ from ...jobs.database_backup import (
     create_backup, list_backups, delete_backup, restore_backup,
     get_backup_path, get_retention_count
 )
-from ..dependencies import get_current_user, get_scheduler_manager
+from ..dependencies import get_scheduler_manager
+from ... import security
 from .. import models
 from ...scheduler import SchedulerManager
 
@@ -55,7 +56,7 @@ class RestoreRequest(BaseModel):
 
 @router.get("/list", response_model=List[BackupInfo], summary="获取备份列表")
 async def get_backup_list(
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """获取所有备份文件列表"""
@@ -69,7 +70,7 @@ async def get_backup_list(
 
 @router.post("/create", response_model=BackupCreateResponse, summary="立即创建备份")
 async def create_backup_now(
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """立即创建数据库备份"""
@@ -93,7 +94,7 @@ async def create_backup_now(
 @router.get("/download/{filename}", summary="下载备份文件")
 async def download_backup(
     filename: str,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """下载指定的备份文件"""
@@ -117,7 +118,7 @@ async def download_backup(
 @router.delete("/delete/{filename}", summary="删除备份文件")
 async def delete_backup_file(
     filename: str,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """删除指定的备份文件"""
@@ -136,7 +137,7 @@ async def delete_backup_file(
 @router.delete("/delete-batch", summary="批量删除备份文件")
 async def delete_backup_files_batch(
     filenames: List[str] = Query(..., description="要删除的文件名列表"),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """批量删除备份文件"""
@@ -161,7 +162,7 @@ async def delete_backup_files_batch(
 @router.post("/restore", summary="从备份还原数据库")
 async def restore_from_backup(
     request: RestoreRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -193,7 +194,7 @@ async def restore_from_backup(
 
 @router.get("/job-status", response_model=BackupJobStatus, summary="获取备份定时任务状态")
 async def get_backup_job_status(
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     scheduler: SchedulerManager = Depends(get_scheduler_manager),
 ):
     """获取数据库备份定时任务的状态"""
@@ -215,7 +216,7 @@ async def get_backup_job_status(
 
 @router.get("/config", summary="获取备份配置")
 async def get_backup_config(
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
     """获取备份相关配置"""
