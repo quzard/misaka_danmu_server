@@ -374,17 +374,26 @@ async def webhook_search_and_dispatch_task(
                 2000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
                 # 4. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
                 1000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
-                # 5. 年份匹配（使用 effective_year，优先使用数据库中的首播年份）
+                # 5. 🔧 长期连载作品优先：标题完全匹配 + 搜索结果年份比 webhook 年份早 3 年以上
+                # 理由：长期连载的作品（如从2020年播到2025年），webhook 传来的是单集年份（2025），
+                # 而搜索结果中年份更早的版本（2020）更可能是用户想要的原版
+                800 if (
+                    item.title.strip() == animeTitle.strip() and
+                    effective_year is not None and
+                    item.year is not None and
+                    effective_year - item.year >= 3
+                ) else 0,
+                # 6. 年份匹配（使用 effective_year，优先使用数据库中的首播年份）
                 500 if effective_year is not None and item.year is not None and item.year == effective_year else 0,
-                # 6. 季度匹配（仅对电视剧）
+                # 7. 季度匹配（仅对电视剧）
                 100 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
-                # 7. 一般相似度，但必须达到85%以上才考虑
+                # 8. 一般相似度，但必须达到85%以上才考虑
                 fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
-                # 8. 惩罚标题长度差异大的结果
+                # 9. 惩罚标题长度差异大的结果
                 -abs(len(item.title) - len(animeTitle)),
-                # 9. 惩罚年份不匹配的结果（使用 effective_year）
+                # 10. 惩罚年份不匹配的结果（使用 effective_year）
                 -500 if effective_year is not None and item.year is not None and item.year != effective_year else 0,
-                # 10. 最后考虑源优先级
+                # 11. 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
@@ -395,9 +404,17 @@ async def webhook_search_and_dispatch_task(
         for i, item in enumerate(all_search_results[:5]):
             title_match = "✓" if item.title.strip() == animeTitle.strip() else "✗"
             year_match = "✓" if effective_year is not None and item.year is not None and item.year == effective_year else ("✗" if effective_year is not None and item.year is not None else "-")
+            # 检查是否为长期连载作品（年份差>=3年）
+            is_long_running = (
+                item.title.strip() == animeTitle.strip() and
+                effective_year is not None and
+                item.year is not None and
+                effective_year - item.year >= 3
+            )
+            long_running_mark = "📺" if is_long_running else ""
             similarity = fuzz.token_set_ratio(animeTitle, item.title)
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}")
 
         # 评估所有候选项 (不限制数量)
         logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
