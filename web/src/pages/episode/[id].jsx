@@ -65,7 +65,7 @@ export const EpisodeDetail = () => {
   const modalApi = useModal()
 
   // 从后端配置获取默认分页大小
-  const defaultPageSize = useDefaultPageSize(50)
+  const defaultPageSize = useDefaultPageSize('episode')
 
   const [loading, setLoading] = useState(true)
   const [animeDetail, setAnimeDetail] = useState({})

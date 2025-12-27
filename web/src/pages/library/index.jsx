@@ -72,7 +72,7 @@ const ApplyField = ({ name, label, fetchedValue, form }) => {
 
 export const Library = () => {
   // 从后端配置获取默认分页大小
-  const defaultPageSize = useDefaultPageSize(50)
+  const defaultPageSize = useDefaultPageSize('library')
 
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])

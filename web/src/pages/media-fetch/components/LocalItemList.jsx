@@ -17,7 +17,7 @@ import { useDefaultPageSize } from '../../../hooks/useDefaultPageSize';
 
 const LocalItemList = ({ refreshTrigger }) => {
   // 从后端配置获取默认分页大小
-  const defaultPageSize = useDefaultPageSize(50);
+  const defaultPageSize = useDefaultPageSize('localItems');
 
   const [allItems, setAllItems] = useState([]); // 缓存所有数据
   const [currentPageItems, setCurrentPageItems] = useState([]); // 当前页显示的数据

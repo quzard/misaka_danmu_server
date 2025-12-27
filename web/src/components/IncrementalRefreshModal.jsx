@@ -22,7 +22,7 @@ import { useDefaultPageSize } from '../hooks/useDefaultPageSize'
 export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const isMobile = useAtomValue(isMobileAtom)
   // 从后端配置获取默认分页大小
-  const defaultPageSize = useDefaultPageSize(20)
+  const defaultPageSize = useDefaultPageSize('refreshModal')
 
   const [loading, setLoading] = useState(false)
   const [taskStatus, setTaskStatus] = useState(null)

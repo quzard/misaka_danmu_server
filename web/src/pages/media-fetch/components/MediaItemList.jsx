@@ -8,7 +8,7 @@ import { useDefaultPageSize } from '../../../hooks/useDefaultPageSize';
 
 const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter, yearFrom, yearTo }) => {
   // 从后端配置获取默认分页大小
-  const defaultPageSize = useDefaultPageSize(100);
+  const defaultPageSize = useDefaultPageSize('mediaItems');
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
