@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber, Popover } from 'antd';
-import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined, SearchOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, message, Popconfirm, Tag, Segmented, Input, Checkbox, Typography, List, Pagination, InputNumber, Popover, Switch } from 'antd';
+import { DeleteOutlined, EditOutlined, ImportOutlined, FolderOpenOutlined, TableOutlined, AppstoreOutlined, ReloadOutlined, CalendarOutlined, SearchOutlined, SortAscendingOutlined, SortDescendingOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
 import {
@@ -35,6 +35,7 @@ const LocalItemList = ({ refreshTrigger }) => {
   const [isDataLoaded, setIsDataLoaded] = useState(false); // 添加数据加载标志
   const [yearFrom, setYearFrom] = useState();
   const [yearTo, setYearTo] = useState();
+  const [sortOrder, setSortOrder] = useState('asc'); // 排序顺序: 'asc' 正序, 'desc' 倒序
 
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
@@ -102,7 +103,7 @@ const LocalItemList = ({ refreshTrigger }) => {
         total: filteredData.length
       }));
     }
-  }, [mediaTypeFilter, searchText, allItems, isDataLoaded]);
+  }, [mediaTypeFilter, searchText, allItems, isDataLoaded, sortOrder]);
 
   // 加载作品列表
   const loadItems = async (page = 1, pageSize = 50, forceRefresh = false) => {
@@ -190,24 +191,33 @@ const LocalItemList = ({ refreshTrigger }) => {
 
   // 获取当前筛选后的数据
   const getFilteredData = () => {
+    let result = allItems;
+
     if (mediaTypeFilter !== 'all') {
       if (mediaTypeFilter === 'movie') {
-        return allItems.filter(item => item.mediaType === 'movie');
+        result = result.filter(item => item.mediaType === 'movie');
       } else if (mediaTypeFilter === 'tv_series') {
-        return allItems.filter(item =>
+        result = result.filter(item =>
           item.mediaType === 'tv_season' || item.mediaType === 'tv_show'
         );
       }
-    } else if (searchText) {
+    }
+
+    if (searchText) {
       const searchLower = searchText.toLowerCase();
-      return allItems.filter(item =>
+      result = result.filter(item =>
         item.title?.toLowerCase().includes(searchLower) ||
         item.workTitle?.toLowerCase().includes(searchLower) ||
         item.fileName?.toLowerCase().includes(searchLower) ||
         item.displayPath?.toLowerCase().includes(searchLower)
       );
     }
-    return allItems;
+
+    // 根据排序顺序返回数据
+    if (sortOrder === 'desc') {
+      return [...result].reverse();
+    }
+    return result;
   };
 
   // 刷新数据（重新扫描）
@@ -1082,6 +1092,13 @@ const LocalItemList = ({ refreshTrigger }) => {
                   删除选中
                 </Button>
               </Popconfirm>
+              <Switch
+                checkedChildren={<SortAscendingOutlined />}
+                unCheckedChildren={<SortDescendingOutlined />}
+                checked={sortOrder === 'asc'}
+                onChange={(checked) => setSortOrder(checked ? 'asc' : 'desc')}
+                title={sortOrder === 'asc' ? '当前: 正序' : '当前: 倒序'}
+              />
               <Button
                 type="primary"
                 icon={<ImportOutlined />}
