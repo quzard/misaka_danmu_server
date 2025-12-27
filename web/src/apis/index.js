@@ -806,3 +806,12 @@ export const getBackupJobStatus = () => api.get('/api/ui/backup/job-status')
 
 /** 获取备份配置 */
 export const getBackupConfig = () => api.get('/api/ui/backup/config')
+
+/** 上传备份文件 */
+export const uploadBackup = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/api/ui/backup/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

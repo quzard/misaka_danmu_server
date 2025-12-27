@@ -40,16 +40,32 @@ BACKUP_TABLES = [
 ]
 
 
+def get_column_mapping(model_class) -> Dict[str, str]:
+    """获取数据库列名到 Python 属性名的映射"""
+    mapper = inspect(model_class)
+    return {column.name: column.key for column in mapper.columns}
+
+
 def model_to_dict(obj) -> Dict[str, Any]:
-    """将 ORM 对象转换为字典"""
+    """将 ORM 对象转换为字典，使用数据库列名作为键"""
     result = {}
     mapper = inspect(obj.__class__)
     for column in mapper.columns:
-        value = getattr(obj, column.key)
-        # 处理 datetime 类型
-        if isinstance(value, datetime):
-            value = value.isoformat()
-        result[column.key] = value
+        # 获取 Python 属性名（用于 getattr）
+        attr_name = column.key
+        # 获取数据库列名（用于 JSON 键）
+        db_column_name = column.name
+
+        try:
+            value = getattr(obj, attr_name)
+            # 处理 datetime 类型
+            if isinstance(value, datetime):
+                value = value.isoformat()
+            result[db_column_name] = value
+        except AttributeError:
+            # 如果属性不存在，跳过
+            logger.debug(f"属性 {attr_name} 不存在于 {obj.__class__.__name__}")
+            continue
     return result
 
 
@@ -264,16 +280,26 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             continue
 
         try:
+            # 获取数据库列名到 Python 属性名的映射
+            column_mapping = get_column_mapping(model_class)
+
             for record in records:
-                # 处理 datetime 字段
-                for key, value in record.items():
+                # 将数据库列名转换为 Python 属性名
+                converted_record = {}
+                for db_col_name, value in record.items():
+                    # 获取对应的 Python 属性名
+                    attr_name = column_mapping.get(db_col_name, db_col_name)
+
+                    # 处理 datetime 字段
                     if isinstance(value, str) and 'T' in value:
                         try:
-                            record[key] = datetime.fromisoformat(value)
+                            value = datetime.fromisoformat(value)
                         except:
                             pass
 
-                obj = model_class(**record)
+                    converted_record[attr_name] = value
+
+                obj = model_class(**converted_record)
                 session.add(obj)
 
             total_records += len(records)

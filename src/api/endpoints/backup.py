@@ -5,10 +5,11 @@ import logging
 from typing import List, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+import shutil
 
 from ... import crud, models, security
 from ...database import get_db_session
@@ -225,4 +226,58 @@ async def get_backup_config(
         "backup_path": str(backup_path),
         "retention_count": retention_count,
     }
+
+
+@router.post("/upload", summary="上传备份文件")
+async def upload_backup_file(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """上传备份文件到服务器"""
+    # 验证文件名
+    if not file.filename or not file.filename.endswith('.json.gz'):
+        raise HTTPException(status_code=400, detail="请上传 .json.gz 格式的备份文件")
+
+    # 验证文件名格式（可选，允许用户上传任意名称的备份）
+    # 为了安全，重命名为标准格式
+    import re
+    from ...timezone import get_now
+
+    backup_path = await get_backup_path(session)
+    backup_path.mkdir(parents=True, exist_ok=True)
+
+    # 如果文件名符合标准格式，保留原名；否则生成新名称
+    if re.match(r'^danmuapi_backup_\d{8}_\d{6}\.json\.gz$', file.filename):
+        target_filename = file.filename
+    else:
+        timestamp = get_now().strftime("%Y%m%d_%H%M%S")
+        target_filename = f"danmuapi_backup_{timestamp}.json.gz"
+
+    target_path = backup_path / target_filename
+
+    # 检查文件是否已存在
+    if target_path.exists():
+        raise HTTPException(status_code=400, detail=f"备份文件已存在: {target_filename}")
+
+    try:
+        # 保存文件
+        with open(target_path, 'wb') as f:
+            shutil.copyfileobj(file.file, f)
+
+        file_size = target_path.stat().st_size
+        logger.info(f"上传备份文件成功: {target_filename}, 大小: {file_size} bytes")
+
+        return {
+            "success": True,
+            "message": f"上传成功: {target_filename}",
+            "filename": target_filename,
+            "size": file_size,
+        }
+    except Exception as e:
+        # 清理失败的文件
+        if target_path.exists():
+            target_path.unlink()
+        logger.error(f"上传备份文件失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
 
