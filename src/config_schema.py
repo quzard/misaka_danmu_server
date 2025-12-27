@@ -130,6 +130,25 @@ CONFIG_SCHEMA = [
             },
         ],
     },
+    {
+        "key": "ui",
+        "label": "界面设置",
+        "items": [
+            {
+                "key": "defaultPageSize",
+                "label": "默认分页数量",
+                "type": "select",
+                "options": [
+                    {"value": "20", "label": "20 条/页"},
+                    {"value": "50", "label": "50 条/页"},
+                    {"value": "100", "label": "100 条/页"},
+                    {"value": "200", "label": "200 条/页"},
+                ],
+                "description": "列表页面的默认每页显示数量。修改后刷新页面生效。",
+                "placeholder": "50",
+            },
+        ],
+    },
 ]
 
 

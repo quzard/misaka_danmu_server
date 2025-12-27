@@ -13,14 +13,18 @@ import {
 } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import LocalEpisodeListModal from './LocalEpisodeListModal';
+import { useDefaultPageSize } from '../../../hooks/useDefaultPageSize';
 
 const LocalItemList = ({ refreshTrigger }) => {
+  // 从后端配置获取默认分页大小
+  const defaultPageSize = useDefaultPageSize(50);
+
   const [allItems, setAllItems] = useState([]); // 缓存所有数据
   const [currentPageItems, setCurrentPageItems] = useState([]); // 当前页显示的数据
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 40,
+    pageSize: defaultPageSize,
     total: 0,
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -39,6 +43,16 @@ const LocalItemList = ({ refreshTrigger }) => {
 
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
+
+  // 当默认分页大小加载完成后，更新 pagination
+  useEffect(() => {
+    if (defaultPageSize && !isMobile) {
+      setPagination(prev => ({
+        ...prev,
+        pageSize: defaultPageSize
+      }));
+    }
+  }, [defaultPageSize]);
 
   // 初始加载数据
   useEffect(() => {
@@ -73,10 +87,10 @@ const LocalItemList = ({ refreshTrigger }) => {
           pageSize: 20
         }));
       } else {
-        // 桌面端恢复默认设置
+        // 桌面端使用配置的默认分页大小
         setPagination(prev => ({
           ...prev,
-          pageSize: 50
+          pageSize: defaultPageSize
         }));
       }
     };
@@ -84,7 +98,7 @@ const LocalItemList = ({ refreshTrigger }) => {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  }, [defaultPageSize]);
 
   // 处理筛选和搜索的客户端过滤
   useEffect(() => {
