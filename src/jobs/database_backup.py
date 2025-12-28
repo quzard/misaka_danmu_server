@@ -288,20 +288,23 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             # 获取模型的所有有效属性名（用于过滤无效字段）
             mapper = inspect(model_class)
             valid_attrs = set()
-            datetime_attrs = set()  # 存储日期时间类型的 Python 属性名
+            # 存储 NOT NULL 的日期时间字段: {Python属性名: 数据库列名}
+            not_null_datetime_attrs = {}
 
             for column in mapper.columns:
                 # column.key 是 Python 属性名
                 attr_name = column.key
                 valid_attrs.add(attr_name)
 
-                col_type_class = type(column.type).__name__.upper()
-                col_type = str(column.type).upper()
-                if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
-                    datetime_attrs.add(attr_name)
+                # 检查是否为 NOT NULL 的日期时间字段
+                if not column.nullable:
+                    col_type_class = type(column.type).__name__.upper()
+                    col_type = str(column.type).upper()
+                    if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
+                        not_null_datetime_attrs[attr_name] = column.name
 
-            if datetime_attrs:
-                logger.debug(f"表 {table_name} 的日期时间属性: {datetime_attrs}")
+            if not_null_datetime_attrs:
+                logger.debug(f"表 {table_name} 的 NOT NULL 日期时间属性: {not_null_datetime_attrs}")
 
             for record in records:
                 # 将数据库列名转换为 Python 属性名
@@ -324,12 +327,13 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
 
                     converted_record[attr_name] = value
 
-                # 为日期时间字段提供默认值（如果值为 None）
+                # 为 NOT NULL 的日期时间字段提供默认值
                 # 这样可以处理从 MySQL 备份还原到 PostgreSQL 时的 NOT NULL 约束问题
-                for attr_name in datetime_attrs:
-                    if attr_name in converted_record and converted_record[attr_name] is None:
+                for attr_name, db_col_name in not_null_datetime_attrs.items():
+                    current_value = converted_record.get(attr_name)
+                    if current_value is None:
                         converted_record[attr_name] = now
-                        logger.info(f"为 {table_name}.{attr_name} 设置默认时间: {now}")
+                        logger.info(f"为 {table_name}.{attr_name} (db: {db_col_name}) 设置默认时间: {now}")
 
                 obj = model_class(**converted_record)
                 session.add(obj)
