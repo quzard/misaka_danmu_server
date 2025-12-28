@@ -138,6 +138,30 @@ async def search_anime_provider(
                 logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
         timer.step_end()
 
+        # 🚀 新增：季度名称映射 - 如果指定了季度，尝试获取该季度的实际名称
+        # 例如：搜索 "唐朝诡事录 S03" 时，通过TMDB查询第3季的实际名称 "唐朝诡事录之西行"
+        season_mapped_title = None
+        if season_to_filter is not None and season_to_filter > 0:
+            timer.step_start("季度名称映射")
+            try:
+                # 获取AI匹配器（如果可用）
+                ai_matcher_for_season = await ai_matcher_manager.get_matcher() if ai_matcher_manager else None
+                # 通过元数据源获取季度名称
+                season_name = await metadata_manager.season_mapper.get_season_name(
+                    search_title,
+                    season_to_filter,
+                    ai_matcher=ai_matcher_for_season,
+                    user=current_user
+                )
+                if season_name:
+                    season_mapped_title = season_name
+                    logger.info(f"✓ 季度名称映射: '{search_title}' S{season_to_filter:02d} → '{season_mapped_title}'")
+                else:
+                    logger.info(f"○ 季度名称映射未找到: '{search_title}' S{season_to_filter:02d}")
+            except Exception as e:
+                logger.warning(f"季度名称映射失败: {e}")
+            timer.step_end()
+
         # --- 新增：按季缓存逻辑 ---
         timer.step_start("缓存检查")
         # 缓存键基于核心标题和季度，允许在同一季的不同分集搜索中复用缓存
@@ -205,12 +229,18 @@ async def search_anime_provider(
                     return None
             metadata_prefetch_task = asyncio.create_task(prefetch_metadata())
 
+        # 构建搜索标题列表：包含原始标题和季度映射后的标题
+        search_titles = [search_title]
+        if season_mapped_title and season_mapped_title != search_title:
+            search_titles.append(season_mapped_title)
+            logger.info(f"搜索将同时使用: {search_titles}")
+
         if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
             # 修正:变量名统一
             timer.step_start("弹幕源搜索")
-            all_results = await manager.search_all([search_title], episode_info=episode_info)
+            all_results = await manager.search_all(search_titles, episode_info=episode_info)
             # 收集单源搜索耗时信息
             from ...search_timer import SubStepTiming
             source_timing_sub_steps = [
@@ -219,7 +249,7 @@ async def search_anime_provider(
             ]
             timer.step_end(details=f"{len(all_results)}个结果", sub_steps=source_timing_sub_steps)
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
-            filter_aliases = {search_title} # 确保至少有原始标题用于后续处理
+            filter_aliases = set(search_titles)  # 使用所有搜索标题作为过滤别名
         else:
             # 检查是否有启用的弹幕源 - 在辅助搜索之前先检查
             if not manager.has_enabled_scrapers:
@@ -233,12 +263,12 @@ async def search_anime_provider(
             logger.info("一个或多个元数据源已启用辅助搜索，开始执行...")
             # 修正：增加一个“防火墙”来验证从元数据源返回的别名，防止因模糊匹配导致的结果污染。
             # 优化：并行执行辅助搜索和主搜索
-            logger.info(f"将使用解析后的标题 '{search_title}' 进行全网搜索...")
+            logger.info(f"将使用标题列表 {search_titles} 进行全网搜索...")
 
             timer.step_start("并行搜索(弹幕源+辅助源)")
             # 1. 并行启动两个任务
             main_task = asyncio.create_task(
-                manager.search_all([search_title], episode_info=episode_info)
+                manager.search_all(search_titles, episode_info=episode_info)
             )
 
             supp_task = asyncio.create_task(
@@ -273,7 +303,7 @@ async def search_anime_provider(
             
             # 4. 使用经过验证的别名列表进行后续操作
             filter_aliases = validated_aliases
-            filter_aliases.add(search_title) # 确保原始搜索词总是在列表中
+            filter_aliases.update(search_titles)  # 确保所有搜索标题都在列表中
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
             # 新增：根据您的要求，打印最终的别名列表以供调试

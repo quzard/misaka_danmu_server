@@ -131,8 +131,23 @@ async def webhook_search_and_dispatch_task(
         timer.step_start("查找收藏源")
 
         # 1. 优先查找已收藏的源 (Favorited Source)
-        logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, 年份={year}")
-        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, year, title_recognition_manager, source=None)
+        # 🔧 修复：先用 title + season（不带年份）查询数据库
+        # 因为 webhook 传来的年份可能是单集放映年份，而不是作品首播年份
+        # 例如：《凡人修仙传》TV版首播于2020年，但2025年的新集 webhook 会传 year=2025
+        logger.info(f"Webhook 任务: 查找已存在的anime - 标题='{animeTitle}', 季数={season}, webhook年份={year}")
+
+        # 先不带年份查询，看数据库中是否已有这部作品
+        existing_anime = await crud.find_anime_by_title_season_year(session, animeTitle, season, None, title_recognition_manager, source=None)
+
+        # 如果找到了已有作品，使用数据库中的年份进行后续搜索
+        effective_year = year  # 默认使用 webhook 传来的年份
+        if existing_anime and existing_anime.get('year'):
+            db_year = existing_anime['year']
+            if year and db_year != year:
+                logger.info(f"Webhook 任务: 数据库年份({db_year}) 与 webhook 年份({year}) 不一致，使用数据库年份进行搜索")
+                effective_year = db_year
+            else:
+                effective_year = db_year
         if existing_anime:
             anime_id = existing_anime['id']
             favorited_source = await crud.find_favorited_source_for_anime(session, anime_id)
@@ -348,6 +363,7 @@ async def webhook_search_and_dispatch_task(
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
         # 使用与WebUI相同的智能排序逻辑，优化年份权重
+        # 🔧 使用 effective_year（数据库年份优先）进行排序，而不是 webhook 传来的 year
         all_search_results.sort(
             key=lambda item: (
                 # 1. 最高优先级：完全匹配的标题
@@ -358,30 +374,47 @@ async def webhook_search_and_dispatch_task(
                 2000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
                 # 4. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
                 1000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
-                # 5. 年份匹配（降低权重，避免年份匹配但标题不匹配的结果排在前面）
-                500 if year is not None and item.year is not None and item.year == year else 0,
-                # 6. 季度匹配（仅对电视剧）
+                # 5. 🔧 长期连载作品优先：标题完全匹配 + 搜索结果年份比 webhook 年份早 3 年以上
+                # 理由：长期连载的作品（如从2020年播到2025年），webhook 传来的是单集年份（2025），
+                # 而搜索结果中年份更早的版本（2020）更可能是用户想要的原版
+                800 if (
+                    item.title.strip() == animeTitle.strip() and
+                    effective_year is not None and
+                    item.year is not None and
+                    effective_year - item.year >= 3
+                ) else 0,
+                # 6. 年份匹配（使用 effective_year，优先使用数据库中的首播年份）
+                500 if effective_year is not None and item.year is not None and item.year == effective_year else 0,
+                # 7. 季度匹配（仅对电视剧）
                 100 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
-                # 7. 一般相似度，但必须达到85%以上才考虑
+                # 8. 一般相似度，但必须达到85%以上才考虑
                 fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
-                # 8. 惩罚标题长度差异大的结果
+                # 9. 惩罚标题长度差异大的结果
                 -abs(len(item.title) - len(animeTitle)),
-                # 9. 惩罚年份不匹配的结果（如果webhook提供了年份但搜索结果年份不匹配）
-                -500 if year is not None and item.year is not None and item.year != year else 0,
-                # 10. 最后考虑源优先级
+                # 10. 惩罚年份不匹配的结果（使用 effective_year）
+                -500 if effective_year is not None and item.year is not None and item.year != effective_year else 0,
+                # 11. 最后考虑源优先级
                 -provider_order.get(item.provider, 999)
             ),
             reverse=True # 按得分从高到低排序
         )
 
         # 添加排序后的调试日志
-        logger.info(f"Webhook 任务: 排序后的前5个结果:")
+        logger.info(f"Webhook 任务: 排序后的前5个结果 (effective_year={effective_year}):")
         for i, item in enumerate(all_search_results[:5]):
             title_match = "✓" if item.title.strip() == animeTitle.strip() else "✗"
-            year_match = "✓" if year is not None and item.year is not None and item.year == year else ("✗" if year is not None and item.year is not None else "-")
+            year_match = "✓" if effective_year is not None and item.year is not None and item.year == effective_year else ("✗" if effective_year is not None and item.year is not None else "-")
+            # 检查是否为长期连载作品（年份差>=3年）
+            is_long_running = (
+                item.title.strip() == animeTitle.strip() and
+                effective_year is not None and
+                item.year is not None and
+                effective_year - item.year >= 3
+            )
+            long_running_mark = "📺" if is_long_running else ""
             similarity = fuzz.token_set_ratio(animeTitle, item.title)
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%)")
+            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}")
 
         # 评估所有候选项 (不限制数量)
         logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
@@ -393,12 +426,12 @@ async def webhook_search_and_dispatch_task(
         if await ai_matcher_manager.is_enabled():
             logger.info("Webhook 任务: AI匹配已启用")
             try:
-                # 构建查询信息
+                # 构建查询信息（使用 effective_year 而不是 webhook 的 year）
                 query_info = {
                     'title': animeTitle,
                     'season': season if mediaType == 'tv_series' else None,
                     'episode': currentEpisodeIndex,
-                    'year': year,
+                    'year': effective_year,  # 使用数据库年份优先
                     'type': mediaType
                 }
 

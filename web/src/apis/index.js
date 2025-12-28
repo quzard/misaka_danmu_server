@@ -776,3 +776,42 @@ export const batchSetFavorite = (data) => api.post('/api/ui/library/incremental-
 
 /** 批量取消标记 */
 export const batchUnsetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-unfavorite', data)
+
+// --- 数据库备份管理 ---
+
+/** 获取备份列表 */
+export const getBackupList = () => api.get('/api/ui/backup/list')
+
+/** 创建备份 */
+export const createBackup = () => api.post('/api/ui/backup/create')
+
+/** 下载备份 */
+export const downloadBackup = (filename) => `/api/ui/backup/download/${filename}`
+
+/** 删除备份 */
+export const deleteBackup = (filename) => api.delete(`/api/ui/backup/delete/${filename}`)
+
+/** 批量删除备份 */
+export const deleteBackupBatch = (filenames) => {
+  const params = new URLSearchParams()
+  filenames.forEach(f => params.append('filenames', f))
+  return api.delete(`/api/ui/backup/delete-batch?${params.toString()}`)
+}
+
+/** 还原备份 */
+export const restoreBackup = (data) => api.post('/api/ui/backup/restore', data)
+
+/** 获取备份定时任务状态 */
+export const getBackupJobStatus = () => api.get('/api/ui/backup/job-status')
+
+/** 获取备份配置 */
+export const getBackupConfig = () => api.get('/api/ui/backup/config')
+
+/** 上传备份文件 */
+export const uploadBackup = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/api/ui/backup/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

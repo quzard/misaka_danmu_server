@@ -46,6 +46,7 @@ import { useMessage } from '../../MessageContext'
 import { ResponsiveTable } from '@/components/ResponsiveTable'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store/index.js'
+import { useDefaultPageSize } from '../../hooks/useDefaultPageSize'
 
 const ApplyField = ({ name, label, fetchedValue, form }) => {
   const currentValue = Form.useWatch(name, form)
@@ -70,6 +71,9 @@ const ApplyField = ({ name, label, fetchedValue, form }) => {
 }
 
 export const Library = () => {
+  // 从后端配置获取默认分页大小
+  const defaultPageSize = useDefaultPageSize('library')
+
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
   const [keyword, setKeyword] = useState('')
@@ -77,9 +81,19 @@ export const Library = () => {
   const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 50,
+    pageSize: defaultPageSize,
     total: 0,
   })
+
+  // 当默认分页大小加载完成后，更新 pagination
+  useEffect(() => {
+    if (defaultPageSize) {
+      setPagination(prev => ({
+        ...prev,
+        pageSize: defaultPageSize
+      }))
+    }
+  }, [defaultPageSize])
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
 

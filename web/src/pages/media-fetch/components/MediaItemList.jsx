@@ -4,14 +4,18 @@ import { SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, FolderOpe
 import { getMediaWorks, deleteMediaItem, batchDeleteMediaItems, importMediaItems } from '../../../apis';
 import MediaItemEditor from './MediaItemEditor';
 import EpisodeListModal from './EpisodeListModal';
+import { useDefaultPageSize } from '../../../hooks/useDefaultPageSize';
 
 const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelectionChange, mediaTypeFilter: externalMediaTypeFilter, yearFrom, yearTo }) => {
+  // 从后端配置获取默认分页大小
+  const defaultPageSize = useDefaultPageSize('mediaItems');
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [searchText, setSearchText] = useState('');
   const [searchInput, setSearchInput] = useState(''); // 临时搜索输入
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 100, total: 0 });
+  const [pagination, setPagination] = useState({ current: 1, pageSize: defaultPageSize, total: 0 });
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [episodeModalVisible, setEpisodeModalVisible] = useState(false);
@@ -116,6 +120,16 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
 
     return result;
   };
+
+  // 当默认分页大小加载完成后，更新 pagination
+  useEffect(() => {
+    if (defaultPageSize) {
+      setPagination(prev => ({
+        ...prev,
+        pageSize: defaultPageSize
+      }));
+    }
+  }, [defaultPageSize]);
 
   useEffect(() => {
     if (serverId) {

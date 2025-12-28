@@ -14,12 +14,16 @@ import {
   deleteAnimeSource,
 } from '../apis'
 import dayjs from 'dayjs'
+import { useDefaultPageSize } from '../hooks/useDefaultPageSize'
 
 /**
  * 追更与标记管理弹窗组件
  */
 export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const isMobile = useAtomValue(isMobileAtom)
+  // 从后端配置获取默认分页大小
+  const defaultPageSize = useDefaultPageSize('refreshModal')
+
   const [loading, setLoading] = useState(false)
   const [taskStatus, setTaskStatus] = useState(null)
   const [animeGroups, setAnimeGroups] = useState([])
@@ -29,7 +33,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
 
   // 分页和过滤状态
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(defaultPageSize)
   const [favoriteFilter, setFavoriteFilter] = useState('all')
   const [refreshFilter, setRefreshFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -38,6 +42,13 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   // 批量删除确认弹窗状态
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(true)
+
+  // 当默认分页大小加载完成后，更新 pageSize
+  useEffect(() => {
+    if (defaultPageSize) {
+      setPageSize(defaultPageSize)
+    }
+  }, [defaultPageSize])
 
   // 加载数据
   const fetchData = useCallback(async (params = {}) => {

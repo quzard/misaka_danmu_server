@@ -409,6 +409,76 @@ async def _fix_api_tokens_id_autoincrement(conn: AsyncConnection):
         raise
 
 
+async def _rename_duplicate_idx_created_at(conn: AsyncConnection, db_type: str):
+    """
+    修复重复的索引名 idx_created_at。
+    task_history 和 media_items 表都使用了相同的索引名，需要重命名。
+    """
+    logger.info("🔧 修复重复索引名 idx_created_at...")
+
+    try:
+        if db_type == 'mysql':
+            # MySQL: 检查 task_history 表是否有 idx_created_at 索引
+            check_sql = text("""
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'task_history'
+                AND INDEX_NAME = 'idx_created_at'
+            """)
+            result = await conn.execute(check_sql)
+            if result.scalar() > 0:
+                # 重命名索引
+                await conn.execute(text("ALTER TABLE `task_history` RENAME INDEX `idx_created_at` TO `idx_task_history_created_at`"))
+                logger.info("  ✅ task_history.idx_created_at → idx_task_history_created_at")
+            else:
+                logger.info("  ⚠️  task_history 表没有 idx_created_at 索引，跳过")
+
+            # 检查 media_items 表是否有 idx_created_at 索引
+            check_sql = text("""
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'media_items'
+                AND INDEX_NAME = 'idx_created_at'
+            """)
+            result = await conn.execute(check_sql)
+            if result.scalar() > 0:
+                await conn.execute(text("ALTER TABLE `media_items` RENAME INDEX `idx_created_at` TO `idx_media_items_created_at`"))
+                logger.info("  ✅ media_items.idx_created_at → idx_media_items_created_at")
+            else:
+                logger.info("  ⚠️  media_items 表没有 idx_created_at 索引，跳过")
+        else:
+            # PostgreSQL: 检查并重命名索引
+            check_sql = text("""
+                SELECT COUNT(*) FROM pg_indexes
+                WHERE tablename = 'task_history'
+                AND indexname = 'idx_created_at'
+            """)
+            result = await conn.execute(check_sql)
+            if result.scalar() > 0:
+                await conn.execute(text('ALTER INDEX "idx_created_at" RENAME TO "idx_task_history_created_at"'))
+                logger.info("  ✅ task_history.idx_created_at → idx_task_history_created_at")
+            else:
+                logger.info("  ⚠️  task_history 表没有 idx_created_at 索引，跳过")
+
+            # 检查 media_items 表
+            check_sql = text("""
+                SELECT COUNT(*) FROM pg_indexes
+                WHERE tablename = 'media_items'
+                AND indexname = 'idx_created_at'
+            """)
+            result = await conn.execute(check_sql)
+            if result.scalar() > 0:
+                await conn.execute(text('ALTER INDEX "idx_created_at" RENAME TO "idx_media_items_created_at"'))
+                logger.info("  ✅ media_items.idx_created_at → idx_media_items_created_at")
+            else:
+                logger.info("  ⚠️  media_items 表没有 idx_created_at 索引，跳过")
+
+        logger.info("✅ 重复索引名修复完成")
+    except Exception as e:
+        logger.warning(f"⚠️  修复重复索引名时出错: {e}")
+        # 不抛出异常，允许继续执行
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -424,6 +494,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_clear_rate_limit_state_v1", _migrate_clear_rate_limit_state_v1, ()),
         ("rollback_to_original_types_v1", _rollback_to_original_types_v1, (db_type,)),
         ("fix_api_tokens_id_autoincrement_v2", _fix_api_tokens_id_autoincrement, ()),  # v2: 增加 PostgreSQL 支持
+        ("rename_duplicate_idx_created_at_v1", _rename_duplicate_idx_created_at, (db_type,)),  # 修复重复索引名
     ]
 
     for migration_id, migration_func, args in migrations:

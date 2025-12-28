@@ -53,6 +53,7 @@ import { isUrl } from '../../utils/data'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store'
 import { ResponsiveTable } from '@/components/ResponsiveTable'
+import { useDefaultPageSize } from '../../hooks/useDefaultPageSize'
 
 export const EpisodeDetail = () => {
   const { id } = useParams()
@@ -63,6 +64,9 @@ export const EpisodeDetail = () => {
   const messageApi = useMessage()
   const modalApi = useModal()
 
+  // 从后端配置获取默认分页大小
+  const defaultPageSize = useDefaultPageSize('episode')
+
   const [loading, setLoading] = useState(true)
   const [animeDetail, setAnimeDetail] = useState({})
   const [episodeList, setEpisodeList] = useState([])
@@ -70,7 +74,7 @@ export const EpisodeDetail = () => {
   const [sourceInfo, setSourceInfo] = useState({})
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 50,
+    pageSize: defaultPageSize,
     total: 0,
   })
 
@@ -101,6 +105,16 @@ export const EpisodeDetail = () => {
   const [ruleParams, setRuleParams] = useState({})
   const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [previewData, setPreviewData] = useState({})
+
+  // 当默认分页大小加载完成后，更新 pagination
+  useEffect(() => {
+    if (defaultPageSize) {
+      setPagination(prev => ({
+        ...prev,
+        pageSize: defaultPageSize
+      }))
+    }
+  }, [defaultPageSize])
 
   useEffect(() => {
     const handleKeyDown = (e) => {

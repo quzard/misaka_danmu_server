@@ -529,8 +529,9 @@ async def preview_apply_template(
 
             # 构建新路径
             try:
-                season_val = anime.season or 1
-                episode_val = episode.episodeIndex or 1
+                # 注意：season 可能为 0（特别篇/SP），不能使用 or 1 来设置默认值
+                season_val = anime.season if anime.season is not None else 1
+                episode_val = episode.episodeIndex if episode.episodeIndex is not None else 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
                 # 处理 titleBase（标准化标题，去除季度信息）
@@ -680,8 +681,9 @@ async def apply_danmaku_template(
 
             # 构建新路径
             try:
-                season_val = anime.season or 1
-                episode_val = episode.episodeIndex or 1
+                # 注意：season 可能为 0（特别篇/SP），不能使用 or 1 来设置默认值
+                season_val = anime.season if anime.season is not None else 1
+                episode_val = episode.episodeIndex if episode.episodeIndex is not None else 1
                 year_val = anime.year or "Unknown"
                 relative_path = template.replace("${title}", anime.title or "Unknown")
                 # 处理 titleBase（标准化标题，去除季度信息）
