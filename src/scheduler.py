@@ -141,7 +141,8 @@ class SchedulerManager:
                 task_coro_factory,
                 job_instance.job_name,
                 scheduled_task_id=scheduled_task_id,
-                queue_type="management"  # 定时任务使用管理队列
+                queue_type="management",  # 定时任务使用管理队列
+                run_immediately=True  # 立即执行，不排队等待
             )
             # The apscheduler job now waits for the actual task to complete.
             await done_event.wait()
