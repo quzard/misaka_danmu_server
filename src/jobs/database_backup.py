@@ -270,6 +270,8 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
 
     # 按依赖顺序插入数据
     total_records = 0
+    now = get_now()
+
     for idx, (table_name, model_class) in enumerate(BACKUP_TABLES):
         if progress_callback:
             progress = 50 + int((idx / total_tables) * 45)
@@ -282,6 +284,13 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
         try:
             # 获取数据库列名到 Python 属性名的映射
             column_mapping = get_column_mapping(model_class)
+
+            # 获取模型的列信息，用于检查 NOT NULL 约束
+            mapper = inspect(model_class)
+            not_null_columns = {}
+            for column in mapper.columns:
+                if not column.nullable and not column.primary_key:
+                    not_null_columns[column.key] = column
 
             for record in records:
                 # 将数据库列名转换为 Python 属性名
@@ -298,6 +307,21 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                             pass
 
                     converted_record[attr_name] = value
+
+                # 为 NOT NULL 字段提供默认值（如果值为 None）
+                for attr_name, column in not_null_columns.items():
+                    if attr_name in converted_record and converted_record[attr_name] is None:
+                        # 根据列类型提供默认值
+                        col_type = str(column.type).upper()
+                        if 'DATETIME' in col_type or 'TIMESTAMP' in col_type:
+                            converted_record[attr_name] = now
+                            logger.debug(f"为 {table_name}.{attr_name} 设置默认时间: {now}")
+                        elif 'INT' in col_type or 'INTEGER' in col_type:
+                            converted_record[attr_name] = 0
+                        elif 'BOOL' in col_type:
+                            converted_record[attr_name] = False
+                        elif 'VARCHAR' in col_type or 'TEXT' in col_type or 'STRING' in col_type:
+                            converted_record[attr_name] = ''
 
                 obj = model_class(**converted_record)
                 session.add(obj)
