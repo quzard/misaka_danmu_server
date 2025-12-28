@@ -295,28 +295,34 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             mapper = inspect(model_class)
             valid_attrs = set(column_mapping.values())
 
-            # 存储 NOT NULL 的日期时间字段: {Python属性名: 数据库列名}
+            # 存储 NOT NULL 字段信息
+            # not_null_datetime_attrs: {Python属性名: 数据库列名} - 日期时间类型
+            # not_null_string_attrs: {Python属性名: 数据库列名} - 字符串类型
             not_null_datetime_attrs = {}
+            not_null_string_attrs = {}
+            primary_key_attrs = set()
 
             # 遍历 column_attrs 获取正确的属性名和列信息
             for attr_name, column_prop in mapper.column_attrs.items():
                 for column in column_prop.columns:
-                    # 检查是否为 NOT NULL 的日期时间字段
-                    if not column.nullable:
+                    # 获取主键字段
+                    if column.primary_key:
+                        primary_key_attrs.add(attr_name)
+
+                    # 检查是否为 NOT NULL 字段（非主键）
+                    if not column.nullable and not column.primary_key:
                         col_type_class = type(column.type).__name__.upper()
                         col_type = str(column.type).upper()
+
                         if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
                             not_null_datetime_attrs[attr_name] = column.name
+                        elif 'VARCHAR' in col_type or 'STRING' in col_type or 'TEXT' in col_type:
+                            not_null_string_attrs[attr_name] = column.name
 
             if not_null_datetime_attrs:
                 logger.debug(f"表 {table_name} 的 NOT NULL 日期时间属性: {not_null_datetime_attrs}")
-
-            # 获取主键字段
-            primary_key_attrs = set()
-            for attr_name, column_prop in mapper.column_attrs.items():
-                for column in column_prop.columns:
-                    if column.primary_key:
-                        primary_key_attrs.add(attr_name)
+            if not_null_string_attrs:
+                logger.debug(f"表 {table_name} 的 NOT NULL 字符串属性: {not_null_string_attrs}")
 
             for record in records:
                 # 将数据库列名转换为 Python 属性名
@@ -346,6 +352,22 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                     if current_value is None:
                         converted_record[attr_name] = now
                         logger.info(f"为 {table_name}.{attr_name} (db: {db_col_name}) 设置默认时间: {now}")
+
+                # 为 NOT NULL 的字符串字段提供默认值
+                for attr_name, db_col_name in not_null_string_attrs.items():
+                    current_value = converted_record.get(attr_name)
+                    if current_value is None:
+                        # 尝试从字段名推断默认值
+                        default_value = ""
+                        attr_lower = attr_name.lower()
+                        if 'provider' in attr_lower:
+                            # 对于 provider 类型字段，尝试从其他字段推断
+                            if 'name' in converted_record:
+                                name_val = converted_record.get('name', '')
+                                if name_val:
+                                    default_value = str(name_val).lower()
+                        converted_record[attr_name] = default_value
+                        logger.info(f"为 {table_name}.{attr_name} (db: {db_col_name}) 设置默认值: '{default_value}'")
 
                 # 检查主键字段是否为空，如果为空则跳过该记录
                 skip_record = False
