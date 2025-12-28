@@ -460,6 +460,54 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
 
     await session.flush()
 
+    # 重置 PostgreSQL 自增序列
+    # 这是必要的，因为还原数据时插入了带有 id 的记录，
+    # 但 PostgreSQL 的序列没有自动更新，会导致后续插入时主键冲突
+    if settings.database.type.lower() == "postgresql":
+        from sqlalchemy import text
+
+        # 获取所有有自增主键的表
+        autoincrement_tables = [
+            ("users", "id"),
+            ("anime", "id"),
+            ("anime_sources", "id"),
+            ("episode", "id"),
+            ("anime_metadata", "id"),
+            ("anime_aliases", "id"),
+            ("user_sessions", "id"),
+            ("api_tokens", "id"),
+            ("token_access_logs", "id"),
+            ("ua_rules", "id"),
+            ("tmdb_episode_mapping", "id"),
+            ("webhook_tasks", "id"),
+            ("external_api_logs", "id"),
+            ("title_recognition", "id"),
+            ("media_servers", "id"),
+            ("media_items", "id"),
+            ("local_danmaku_items", "id"),
+            ("ai_metrics_log", "id"),
+        ]
+
+        for table_name, pk_column in autoincrement_tables:
+            try:
+                # 获取表中最大的 id 值，然后重置序列
+                # PostgreSQL 序列名通常是 {table_name}_{column}_seq
+                reset_sql = text(f"""
+                    SELECT setval(
+                        pg_get_serial_sequence('{table_name}', '{pk_column}'),
+                        COALESCE((SELECT MAX({pk_column}) FROM {table_name}), 0) + 1,
+                        false
+                    )
+                """)
+                await session.execute(reset_sql)
+                logger.debug(f"重置序列: {table_name}.{pk_column}")
+            except Exception as e:
+                # 某些表可能没有序列（如字符串主键），忽略错误
+                logger.debug(f"重置序列 {table_name}.{pk_column} 失败（可能不存在）: {e}")
+
+        await session.flush()
+        logger.info("已重置所有 PostgreSQL 自增序列")
+
     return {
         "filename": filename,
         "records": total_records,
