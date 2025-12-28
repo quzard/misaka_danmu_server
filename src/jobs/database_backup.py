@@ -56,22 +56,23 @@ def model_to_dict(obj) -> Dict[str, Any]:
     """将 ORM 对象转换为字典，使用数据库列名作为键"""
     result = {}
     mapper = inspect(obj.__class__)
-    for column in mapper.columns:
-        # 获取 Python 属性名（用于 getattr）
-        attr_name = column.key
-        # 获取数据库列名（用于 JSON 键）
-        db_column_name = column.name
+    # 使用 column_attrs 获取正确的 Python 属性名
+    for attr_name, column_prop in mapper.column_attrs.items():
+        for column in column_prop.columns:
+            # attr_name 是 Python 属性名
+            # column.name 是数据库列名
+            db_column_name = column.name
 
-        try:
-            value = getattr(obj, attr_name)
-            # 处理 datetime 类型
-            if isinstance(value, datetime):
-                value = value.isoformat()
-            result[db_column_name] = value
-        except AttributeError:
-            # 如果属性不存在，跳过
-            logger.debug(f"属性 {attr_name} 不存在于 {obj.__class__.__name__}")
-            continue
+            try:
+                value = getattr(obj, attr_name)
+                # 处理 datetime 类型
+                if isinstance(value, datetime):
+                    value = value.isoformat()
+                result[db_column_name] = value
+            except AttributeError:
+                # 如果属性不存在，跳过
+                logger.debug(f"属性 {attr_name} 不存在于 {obj.__class__.__name__}")
+                continue
     return result
 
 
@@ -298,8 +299,10 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             # 存储 NOT NULL 字段信息
             # not_null_datetime_attrs: {Python属性名: 数据库列名} - 日期时间类型
             # not_null_string_attrs: {Python属性名: 数据库列名} - 字符串类型
+            # not_null_required_attrs: {Python属性名: 数据库列名} - 必须有值的字段（如外键）
             not_null_datetime_attrs = {}
             not_null_string_attrs = {}
+            not_null_required_attrs = {}  # 无法提供默认值的 NOT NULL 字段
             primary_key_attrs = set()
 
             # 遍历 column_attrs 获取正确的属性名和列信息
@@ -308,21 +311,30 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                     # 获取主键字段
                     if column.primary_key:
                         primary_key_attrs.add(attr_name)
+                        continue
 
                     # 检查是否为 NOT NULL 字段（非主键）
-                    if not column.nullable and not column.primary_key:
+                    if not column.nullable:
                         col_type_class = type(column.type).__name__.upper()
                         col_type = str(column.type).upper()
+
+                        # 检查是否有外键约束
+                        has_foreign_key = len(column.foreign_keys) > 0
 
                         if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
                             not_null_datetime_attrs[attr_name] = column.name
                         elif 'VARCHAR' in col_type or 'STRING' in col_type or 'TEXT' in col_type:
                             not_null_string_attrs[attr_name] = column.name
+                        elif has_foreign_key or 'INT' in col_type or 'BIGINT' in col_type:
+                            # 外键或整数类型的 NOT NULL 字段，无法提供默认值
+                            not_null_required_attrs[attr_name] = column.name
 
             if not_null_datetime_attrs:
                 logger.debug(f"表 {table_name} 的 NOT NULL 日期时间属性: {not_null_datetime_attrs}")
             if not_null_string_attrs:
                 logger.debug(f"表 {table_name} 的 NOT NULL 字符串属性: {not_null_string_attrs}")
+            if not_null_required_attrs:
+                logger.debug(f"表 {table_name} 的 NOT NULL 必需属性: {not_null_required_attrs}")
 
             for record in records:
                 # 将数据库列名转换为 Python 属性名
@@ -374,6 +386,16 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                 for pk_attr in primary_key_attrs:
                     if pk_attr not in converted_record or converted_record.get(pk_attr) is None:
                         logger.warning(f"跳过记录: {table_name} 主键字段 {pk_attr} 为空")
+                        skip_record = True
+                        break
+
+                if skip_record:
+                    continue
+
+                # 检查必需字段（如外键）是否为空，如果为空则跳过该记录
+                for req_attr, db_col_name in not_null_required_attrs.items():
+                    if req_attr not in converted_record or converted_record.get(req_attr) is None:
+                        logger.warning(f"跳过记录: {table_name} 必需字段 {req_attr} (db: {db_col_name}) 为空")
                         skip_record = True
                         break
 
