@@ -313,9 +313,16 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                     if attr_name in converted_record and converted_record[attr_name] is None:
                         # 根据列类型提供默认值
                         col_type = str(column.type).upper()
-                        if 'DATETIME' in col_type or 'TIMESTAMP' in col_type:
+                        col_type_class = type(column.type).__name__.upper()
+                        # 检查是否为日期时间类型（包括自定义的 NaiveDateTime）
+                        is_datetime = (
+                            'DATETIME' in col_type or
+                            'TIMESTAMP' in col_type or
+                            'NAIVEDATETIME' in col_type_class
+                        )
+                        if is_datetime:
                             converted_record[attr_name] = now
-                            logger.debug(f"为 {table_name}.{attr_name} 设置默认时间: {now}")
+                            logger.info(f"为 {table_name}.{attr_name} 设置默认时间: {now}")
                         elif 'INT' in col_type or 'INTEGER' in col_type:
                             converted_record[attr_name] = 0
                         elif 'BOOL' in col_type:
