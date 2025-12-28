@@ -41,7 +41,6 @@ export const DatabaseBackupManager = () => {
   // 上传相关状态
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [uploadFile, setUploadFile] = useState(null)
-  const [uploadConfirmText, setUploadConfirmText] = useState('')
   const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
@@ -139,7 +138,6 @@ export const DatabaseBackupManager = () => {
   // 打开上传弹窗
   const openUploadModal = () => {
     setUploadFile(null)
-    setUploadConfirmText('')
     setUploadModalVisible(true)
   }
 
@@ -161,17 +159,12 @@ export const DatabaseBackupManager = () => {
       message.error('请先选择文件')
       return
     }
-    if (uploadConfirmText !== '确认上传') {
-      message.error('请输入「确认上传」以继续')
-      return
-    }
     try {
       setUploading(true)
       const res = await uploadBackup(uploadFile)
       message.success(res.data?.message || '上传成功')
       setUploadModalVisible(false)
       setUploadFile(null)
-      setUploadConfirmText('')
       loadBackups()
     } catch (err) {
       message.error('上传失败: ' + (err.response?.data?.detail || err.message))
@@ -426,20 +419,18 @@ export const DatabaseBackupManager = () => {
         title={
           <span>
             <UploadOutlined className="mr-2" />
-            ⚠️ 上传备份文件
+            上传备份文件
           </span>
         }
         open={uploadModalVisible}
         onCancel={() => {
           setUploadModalVisible(false)
           setUploadFile(null)
-          setUploadConfirmText('')
         }}
         footer={[
           <Button key="cancel" onClick={() => {
             setUploadModalVisible(false)
             setUploadFile(null)
-            setUploadConfirmText('')
           }}>
             取消
           </Button>,
@@ -447,7 +438,7 @@ export const DatabaseBackupManager = () => {
             key="confirm"
             type="primary"
             loading={uploading}
-            disabled={!uploadFile || uploadConfirmText !== '确认上传'}
+            disabled={!uploadFile}
             onClick={handleUpload}
           >
             确认上传
@@ -483,22 +474,9 @@ export const DatabaseBackupManager = () => {
           <Alert
             type="info"
             showIcon
-            message="⚠️ 提示"
+            message="提示"
             description="上传的备份文件将保存到服务器备份目录中，您可以随时使用该文件进行数据库还原。"
-            className="mb-4"
           />
-
-          {/* 确认输入 */}
-          <div>
-            <p className="mb-2">请输入 「<strong>确认上传</strong>」 以继续：</p>
-            <Input
-              value={uploadConfirmText}
-              onChange={(e) => setUploadConfirmText(e.target.value)}
-              placeholder="输入：确认上传"
-              disabled={!uploadFile}
-              status={uploadConfirmText && uploadConfirmText !== '确认上传' ? 'error' : ''}
-            />
-          </div>
         </div>
       </Modal>
     </div>
