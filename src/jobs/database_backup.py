@@ -311,6 +311,13 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             if not_null_datetime_attrs:
                 logger.debug(f"表 {table_name} 的 NOT NULL 日期时间属性: {not_null_datetime_attrs}")
 
+            # 获取主键字段
+            primary_key_attrs = set()
+            for attr_name, column_prop in mapper.column_attrs.items():
+                for column in column_prop.columns:
+                    if column.primary_key:
+                        primary_key_attrs.add(attr_name)
+
             for record in records:
                 # 将数据库列名转换为 Python 属性名
                 converted_record = {}
@@ -339,6 +346,17 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                     if current_value is None:
                         converted_record[attr_name] = now
                         logger.info(f"为 {table_name}.{attr_name} (db: {db_col_name}) 设置默认时间: {now}")
+
+                # 检查主键字段是否为空，如果为空则跳过该记录
+                skip_record = False
+                for pk_attr in primary_key_attrs:
+                    if pk_attr not in converted_record or converted_record.get(pk_attr) is None:
+                        logger.warning(f"跳过记录: {table_name} 主键字段 {pk_attr} 为空")
+                        skip_record = True
+                        break
+
+                if skip_record:
+                    continue
 
                 obj = model_class(**converted_record)
                 session.add(obj)
