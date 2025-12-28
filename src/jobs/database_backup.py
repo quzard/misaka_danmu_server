@@ -43,7 +43,13 @@ BACKUP_TABLES = [
 def get_column_mapping(model_class) -> Dict[str, str]:
     """获取数据库列名到 Python 属性名的映射"""
     mapper = inspect(model_class)
-    return {column.name: column.key for column in mapper.columns}
+    mapping = {}
+    for attr_name, column_prop in mapper.column_attrs.items():
+        # attr_name 是 Python 属性名
+        # column_prop.columns[0].name 是数据库列名
+        for column in column_prop.columns:
+            mapping[column.name] = attr_name
+    return mapping
 
 
 def model_to_dict(obj) -> Dict[str, Any]:
@@ -285,23 +291,22 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             # 获取数据库列名到 Python 属性名的映射
             column_mapping = get_column_mapping(model_class)
 
-            # 获取模型的所有有效属性名（用于过滤无效字段）
+            # 获取模型的所有有效 Python 属性名
             mapper = inspect(model_class)
-            valid_attrs = set()
+            valid_attrs = set(column_mapping.values())
+
             # 存储 NOT NULL 的日期时间字段: {Python属性名: 数据库列名}
             not_null_datetime_attrs = {}
 
-            for column in mapper.columns:
-                # column.key 是 Python 属性名
-                attr_name = column.key
-                valid_attrs.add(attr_name)
-
-                # 检查是否为 NOT NULL 的日期时间字段
-                if not column.nullable:
-                    col_type_class = type(column.type).__name__.upper()
-                    col_type = str(column.type).upper()
-                    if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
-                        not_null_datetime_attrs[attr_name] = column.name
+            # 遍历 column_attrs 获取正确的属性名和列信息
+            for attr_name, column_prop in mapper.column_attrs.items():
+                for column in column_prop.columns:
+                    # 检查是否为 NOT NULL 的日期时间字段
+                    if not column.nullable:
+                        col_type_class = type(column.type).__name__.upper()
+                        col_type = str(column.type).upper()
+                        if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
+                            not_null_datetime_attrs[attr_name] = column.name
 
             if not_null_datetime_attrs:
                 logger.debug(f"表 {table_name} 的 NOT NULL 日期时间属性: {not_null_datetime_attrs}")
