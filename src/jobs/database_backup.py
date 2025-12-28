@@ -26,17 +26,47 @@ DEFAULT_BACKUP_PATH = "/app/config/sql_backup"
 DEFAULT_RETENTION_COUNT = 5
 
 # 需要备份的表（按依赖顺序排列，被依赖的表在前）
+# 注意：有外键依赖的表必须在被依赖的表之后
 BACKUP_TABLES = [
+    # === 基础表（无外键依赖）===
     ("users", orm_models.User),
     ("anime", orm_models.Anime),
+    ("config", orm_models.Config),
+    ("scrapers", orm_models.Scraper),
+    ("metadata_sources", orm_models.MetadataSource),
+    ("scheduled_tasks", orm_models.ScheduledTask),
+    ("media_servers", orm_models.MediaServer),
+    ("title_recognition", orm_models.TitleRecognition),
+    ("rate_limit_state", orm_models.RateLimitState),
+
+    # === 依赖 users 表 ===
+    ("user_sessions", orm_models.UserSession),
+    ("bangumi_auth", orm_models.BangumiAuth),
+    ("oauth_states", orm_models.OauthState),
+
+    # === 依赖 anime 表 ===
     ("anime_sources", orm_models.AnimeSource),
     ("episode", orm_models.Episode),
     ("anime_metadata", orm_models.AnimeMetadata),
     ("anime_aliases", orm_models.AnimeAlias),
-    ("config", orm_models.Config),
-    ("media_servers", orm_models.MediaServer),
-    ("scheduled_tasks", orm_models.ScheduledTask),
+
+    # === 依赖 media_servers 表 ===
+    ("media_items", orm_models.MediaItem),
+
+    # === 依赖 scheduled_tasks 表 ===
+    ("task_history", orm_models.TaskHistory),
+
+    # === 其他表 ===
     ("api_tokens", orm_models.ApiToken),
+    ("token_access_logs", orm_models.TokenAccessLog),
+    ("ua_rules", orm_models.UaRule),
+    ("tmdb_episode_mapping", orm_models.TmdbEpisodeMapping),
+    ("webhook_tasks", orm_models.WebhookTask),
+    ("task_state_cache", orm_models.TaskStateCache),
+    ("external_api_logs", orm_models.ExternalApiLog),
+    ("cache_data", orm_models.CacheData),
+    ("local_danmaku_items", orm_models.LocalDanmakuItem),
+    ("ai_metrics_log", orm_models.AIMetricsLog),
 ]
 
 
