@@ -128,11 +128,17 @@ async def create_backup(session: AsyncSession, progress_callback: Optional[Calla
     """
     backup_path = await get_backup_path(session)
     backup_path.mkdir(parents=True, exist_ok=True)
-    
-    # 生成备份文件名
-    timestamp = get_now().strftime("%Y%m%d_%H%M%S")
+
+    # 生成备份文件名（精确到毫秒，避免同一秒内多次备份覆盖）
+    timestamp = get_now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 去掉最后3位，保留毫秒
     filename = f"danmuapi_backup_{timestamp}.json.gz"
     filepath = backup_path / filename
+
+    # 获取保留数量配置
+    retention_count = await get_retention_count(session)
+
+    # 记录备份信息
+    logger.info(f"开始创建备份: 路径={backup_path}, 保留数量={retention_count}")
     
     # 构建备份数据
     backup_data = {
@@ -185,8 +191,7 @@ async def create_backup(session: AsyncSession, progress_callback: Optional[Calla
     # 清理旧备份
     if progress_callback:
         await progress_callback(90, "正在清理旧备份...")
-    
-    retention_count = await get_retention_count(session)
+
     await cleanup_old_backups(backup_path, retention_count)
     
     return {
@@ -206,12 +211,18 @@ async def cleanup_old_backups(backup_path: Path, retention_count: int):
         reverse=True
     )
 
-    for old_file in backup_files[retention_count:]:
-        try:
-            old_file.unlink()
-            logger.info(f"删除旧备份: {old_file.name}")
-        except Exception as e:
-            logger.error(f"删除旧备份失败 {old_file.name}: {e}")
+    logger.info(f"备份清理: 当前有 {len(backup_files)} 个备份文件, 保留 {retention_count} 个")
+
+    files_to_delete = backup_files[retention_count:]
+    if files_to_delete:
+        for old_file in files_to_delete:
+            try:
+                old_file.unlink()
+                logger.info(f"删除旧备份: {old_file.name}")
+            except Exception as e:
+                logger.error(f"删除旧备份失败 {old_file.name}: {e}")
+    else:
+        logger.info(f"无需清理，当前备份数量 ({len(backup_files)}) 未超过保留数量 ({retention_count})")
 
 
 async def list_backups(session: AsyncSession) -> List[Dict[str, Any]]:
