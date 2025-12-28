@@ -148,22 +148,30 @@ async def create_backup(session: AsyncSession, progress_callback: Optional[Calla
     total_tables = len(BACKUP_TABLES)
     total_records = 0
     
+    # 收集每个表的导出信息，最后统一打印
+    export_summary = []
+
     for idx, (table_name, model_class) in enumerate(BACKUP_TABLES):
         if progress_callback:
             progress = int((idx / total_tables) * 80)
             await progress_callback(progress, f"正在导出表: {table_name}...")
-        
+
         try:
             stmt = select(model_class)
             result = await session.execute(stmt)
             records = result.scalars().all()
-            
+
             backup_data["data"][table_name] = [model_to_dict(r) for r in records]
             total_records += len(records)
-            logger.info(f"导出表 {table_name}: {len(records)} 条记录")
+            export_summary.append(f"{table_name}: {len(records)}条")
         except Exception as e:
             logger.warning(f"导出表 {table_name} 失败: {e}")
             backup_data["data"][table_name] = []
+            export_summary.append(f"{table_name}: 失败")
+
+    # 一次性打印所有表的导出摘要（多行格式）
+    summary_lines = "\n".join(f"  - {item}" for item in export_summary)
+    logger.info(f"导出完成 ({len(BACKUP_TABLES)}个表, 共{total_records}条记录):\n{summary_lines}")
     
     # 写入压缩文件
     if progress_callback:
