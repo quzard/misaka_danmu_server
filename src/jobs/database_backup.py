@@ -109,6 +109,10 @@ def model_to_dict(obj) -> Dict[str, Any]:
 async def get_backup_path(session: AsyncSession) -> Path:
     """获取备份路径"""
     path_str = await crud.get_config_value(session, "backupPath", DEFAULT_BACKUP_PATH)
+    # 如果配置值为空字符串，使用默认路径
+    if not path_str or not path_str.strip():
+        path_str = DEFAULT_BACKUP_PATH
+        logger.debug(f"备份路径配置为空，使用默认路径: {path_str}")
     return Path(path_str)
 
 
