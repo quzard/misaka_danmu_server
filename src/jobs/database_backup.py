@@ -348,12 +348,29 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                         logger.debug(f"忽略无效字段: {db_col_name} -> {attr_name}")
                         continue
 
-                    # 处理 datetime 字段
+                    # 处理 datetime 字段 - 将 ISO 格式字符串转换为 datetime 对象
                     if isinstance(value, str) and 'T' in value:
                         try:
                             value = datetime.fromisoformat(value)
                         except:
                             pass
+
+                    # 处理 datetime 对象 - 如果目标字段是字符串类型，转换为字符串
+                    if isinstance(value, datetime):
+                        # 检查目标字段是否为字符串类型
+                        if attr_name in not_null_string_attrs or attr_name not in not_null_datetime_attrs:
+                            # 检查该属性对应的列类型
+                            is_string_field = False
+                            for a_name, col_prop in mapper.column_attrs.items():
+                                if a_name == attr_name:
+                                    for col in col_prop.columns:
+                                        col_type = str(col.type).upper()
+                                        if 'VARCHAR' in col_type or 'STRING' in col_type or 'TEXT' in col_type:
+                                            is_string_field = True
+                                            break
+                                    break
+                            if is_string_field:
+                                value = value.isoformat()
 
                     converted_record[attr_name] = value
 
