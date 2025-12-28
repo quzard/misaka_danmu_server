@@ -285,17 +285,23 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
             # 获取数据库列名到 Python 属性名的映射
             column_mapping = get_column_mapping(model_class)
 
-            # 获取模型的列信息，用于检查日期时间类型
+            # 获取模型的所有有效属性名（用于过滤无效字段）
             mapper = inspect(model_class)
-            datetime_columns = set()
+            valid_attrs = set()
+            datetime_attrs = set()  # 存储日期时间类型的 Python 属性名
+
             for column in mapper.columns:
+                # column.key 是 Python 属性名
+                attr_name = column.key
+                valid_attrs.add(attr_name)
+
                 col_type_class = type(column.type).__name__.upper()
                 col_type = str(column.type).upper()
                 if 'DATETIME' in col_type or 'TIMESTAMP' in col_type or 'NAIVEDATETIME' in col_type_class:
-                    datetime_columns.add(column.key)
+                    datetime_attrs.add(attr_name)
 
-            if datetime_columns:
-                logger.debug(f"表 {table_name} 的日期时间列: {datetime_columns}")
+            if datetime_attrs:
+                logger.debug(f"表 {table_name} 的日期时间属性: {datetime_attrs}")
 
             for record in records:
                 # 将数据库列名转换为 Python 属性名
@@ -303,6 +309,11 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
                 for db_col_name, value in record.items():
                     # 获取对应的 Python 属性名
                     attr_name = column_mapping.get(db_col_name, db_col_name)
+
+                    # 只添加模型中存在的属性，忽略无效字段
+                    if attr_name not in valid_attrs:
+                        logger.debug(f"忽略无效字段: {db_col_name} -> {attr_name}")
+                        continue
 
                     # 处理 datetime 字段
                     if isinstance(value, str) and 'T' in value:
@@ -315,14 +326,10 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
 
                 # 为日期时间字段提供默认值（如果值为 None）
                 # 这样可以处理从 MySQL 备份还原到 PostgreSQL 时的 NOT NULL 约束问题
-                for attr_name in datetime_columns:
+                for attr_name in datetime_attrs:
                     if attr_name in converted_record and converted_record[attr_name] is None:
                         converted_record[attr_name] = now
                         logger.info(f"为 {table_name}.{attr_name} 设置默认时间: {now}")
-                    # 如果字段不在 converted_record 中，也需要设置默认值
-                    elif attr_name not in converted_record:
-                        converted_record[attr_name] = now
-                        logger.info(f"为 {table_name}.{attr_name} 添加缺失的默认时间: {now}")
 
                 obj = model_class(**converted_record)
                 session.add(obj)
