@@ -1,6 +1,9 @@
 # --- Stage 1: Extract SO files ---
 # 定义构建参数，用于确定.so文件来源镜像的标签
 ARG SO_TAG=latest
+ARG BUILD_DATE
+ARG VERSION
+
 FROM l429609201/so:${SO_TAG} AS so-extractor
 
 # --- Stage 2: Build Frontend ---
@@ -87,6 +90,16 @@ RUN chown -R appuser:appgroup /app
 
 # 暴露应用运行的端口
 EXPOSE 7768
+
+# OCI 标准镜像标签
+LABEL org.opencontainers.image.title="Misaka Danmu Server" \
+      org.opencontainers.image.description="弹幕 API 服务器 - 支持多弹幕源聚合、智能匹配、本地缓存" \
+      org.opencontainers.image.url="https://github.com/Yanyutin753/misaka_danmu_server" \
+      org.opencontainers.image.source="https://github.com/Yanyutin753/misaka_danmu_server" \
+      org.opencontainers.image.vendor="Misaka Network" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.licenses="MIT"
 
 # 运行应用的默认命令
 CMD ["/exec.sh"]
