@@ -330,6 +330,12 @@ app = FastAPI(
     redoc_url=None         # 禁用ReDoc
 )
 
+# --- favicon.ico 路由 ---
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """提供网站图标"""
+    return FileResponse("web/dist/images/favicon.ico", media_type="image/x-icon")
+
 # --- 新增：自定义本地化的 Swagger UI 文档路由 ---
 @app.get("/api/control/docs", include_in_schema=False)
 async def custom_swagger_ui_html():

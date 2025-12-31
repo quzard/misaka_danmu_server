@@ -145,8 +145,12 @@ class SchedulerManager:
                 run_immediately=True  # 立即执行，不排队等待
             )
             # The apscheduler job now waits for the actual task to complete.
-            await done_event.wait()
-            logger.info(f"定时任务的运行器已确认任务 '{job_instance.job_name}' (ID: {task_id}) 执行完毕。")
+            # 添加超时保护，防止因流控暂停导致调度器卡死
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=300.0)  # 5分钟超时
+                logger.info(f"定时任务的运行器已确认任务 '{job_instance.job_name}' (ID: {task_id}) 执行完毕。")
+            except asyncio.TimeoutError:
+                logger.warning(f"定时任务 '{job_instance.job_name}' (ID: {task_id}) 执行超时（可能因流控暂停），任务将在后台继续执行。")
         
         return runner
 
