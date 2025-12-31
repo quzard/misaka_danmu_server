@@ -87,6 +87,10 @@
 
 - 请不要在 ***B站*** 或中国大陆社交平台发布视频或文章宣传本项目
 
+### 相关文章
+
+- [Docker 部署御坂网络弹幕服务 Misaka Danmu Server](https://catcat.blog/2025/12/misaka-danmu-server-deploy)
+
 ### 贡献者
 
 <a href="https://github.com/l429609201/misaka_danmu_server/graphs/contributors">
