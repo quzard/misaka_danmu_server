@@ -280,3 +280,32 @@ async def execute_scraper_action(
         logger.error(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时出错: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"操作执行失败: {str(e)}")
 
+
+@router.get("/scrapers/{providerName}/default-blacklist", summary="获取搜索源的默认分集黑名单")
+async def get_scraper_default_blacklist(
+    providerName: str,
+    current_user: models.User = Depends(security.get_current_user),
+    manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """
+    获取指定搜索源的默认分集标题黑名单正则表达式。
+    这个值来自源代码中的硬编码默认值，用于用户想要重置或填充默认规则时使用。
+    """
+    scraper_class = manager.get_scraper_class(providerName)
+    if not scraper_class:
+        raise HTTPException(status_code=404, detail=f"搜索源 '{providerName}' 不存在")
+
+    default_blacklist = getattr(scraper_class, '_PROVIDER_SPECIFIC_BLACKLIST_DEFAULT', '')
+    return {"providerName": providerName, "defaultBlacklist": default_blacklist}
+
+
+@router.get("/scrapers/common-blacklist", summary="获取通用分集黑名单规则")
+async def get_common_blacklist(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取通用的分集标题黑名单正则表达式。
+    这个值是一个通用的过滤规则，适用于大多数场景，用于用户想要快速填充规则时使用。
+    """
+    from ...scrapers.base import COMMON_EPISODE_BLACKLIST_REGEX
+    return {"commonBlacklist": COMMON_EPISODE_BLACKLIST_REGEX}

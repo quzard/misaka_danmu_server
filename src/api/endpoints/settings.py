@@ -182,6 +182,23 @@ async def get_global_filter_settings(
     return GlobalFilterSettings(cn=cn_filter, eng=eng_filter)
 
 
+@router.get("/settings/global-filter/defaults", summary="获取全局标题过滤的默认规则")
+async def get_global_filter_defaults(
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """
+    获取全局搜索结果标题过滤的默认规则。
+    这些值来自 default_configs.py 中的硬编码默认值，用于用户想要重置或填充默认规则时使用。
+    """
+    from ...default_configs import get_default_configs
+    defaults = get_default_configs()
+
+    cn_default = defaults.get('search_result_global_blacklist_cn', ('', ''))[0]
+    eng_default = defaults.get('search_result_global_blacklist_eng', ('', ''))[0]
+
+    return {"cn": cn_default, "eng": eng_default}
+
+
 
 @router.put("/settings/global-filter", summary="更新全局标题过滤规则")
 async def update_global_filter_settings(

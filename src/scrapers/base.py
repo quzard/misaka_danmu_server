@@ -105,30 +105,20 @@ def track_performance(func):
     return wrapper
 
 
+# 通用分集过滤规则（硬编码），用于前端"填充通用规则"按钮
+COMMON_EPISODE_BLACKLIST_REGEX = r'^(.*?)((.+?版)|(特(别|典))|((导|演)员|嘉宾|角色)访谈|福利|彩蛋|花絮|预告|特辑|专访|访谈|幕后|周边|资讯|看点|速看|回顾|盘点|合集|PV|MV|CM|OST|ED|OP|BD|特典|SP|NCOP|NCED|MENU|Web-DL|rip|x264|x265|aac|flac)(.*?)$'
+
+
 class BaseScraper(ABC):
     """
     所有搜索源的抽象基类。
     定义了搜索媒体、获取分集和获取弹幕的通用接口。
-    """
-    # 新增：全局搜索结果过滤规则，适用于所有源
-    _GLOBAL_SEARCH_JUNK_TITLE_PATTERN = re.compile(
-        r'纪录片|预告|花絮|专访|直拍|直播回顾|加更|走心|解忧|纯享|节点|解读|揭秘|赏析|速看|资讯|访谈|番外|短片|'
-        r'拍摄花絮|制作花絮|幕后花絮|未播花絮|独家花絮|花絮特辑|'
-        r'预告片|先导预告|终极预告|正式预告|官方预告|'
-        r'彩蛋片段|删减片段|未播片段|番外彩蛋|'
-        r'精彩片段|精彩看点|精彩回顾|精彩集锦|看点解析|看点预告|'
-        r'NG镜头|NG花絮|番外篇|番外特辑|'
-        r'制作特辑|拍摄特辑|幕后特辑|导演特辑|演员特辑|'
-        r'片尾曲|插曲|主题曲|背景音乐|OST|音乐MV|歌曲MV|'
-        r'前季回顾|剧情回顾|往期回顾|内容总结|剧情盘点|精选合集|剪辑合集|混剪视频|'
-        r'独家专访|演员访谈|导演访谈|主创访谈|媒体采访|发布会采访|'
-        r'抢先看|抢先版|试看版|即将上线',
-        re.IGNORECASE
-    )
 
-    # 新增：全局分集标题过滤规则的默认值
-    _GLOBAL_EPISODE_BLACKLIST_DEFAULT = r"^(.*?)((.+?版)|(特(别|典))|((导|演)员|嘉宾|角色)访谈|福利|彩蛋|花絮|预告|特辑|专访|访谈|幕后|周边|资讯|看点|速看|回顾|盘点|合集|PV|MV|CM|OST|ED|OP|BD|特典|SP|NCOP|NCED|MENU|Web-DL|rip|x264|x265|aac|flac)(.*?)$"
-    _PROVIDER_SPECIFIC_BLACKLIST_DEFAULT: str = ""
+    注意：分集过滤规则现在完全从 config 表读取，不再使用硬编码的默认值。
+    - 特定源分集黑名单：{provider_name}_episode_blacklist_regex
+    如果 config 表中键不存在，启动时会通过 register_defaults 创建并填充默认值。
+    如果键存在但值为空，则不进行过滤。
+    """
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: "ConfigManager", transport_manager: TransportManager):
         self._session_factory = session_factory
@@ -267,37 +257,25 @@ class BaseScraper(ABC):
 
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
-        获取最终用于过滤分集标题的正则表达式对象。
-        它会合并全局黑名单和特定于提供商的黑名单。
+        获取用于过滤分集标题的正则表达式对象。
+        只使用特定于提供商的黑名单，不再有全局黑名单。
+
+        注意：此方法不使用硬编码的默认值作为兜底。
+        - 如果 config 表中键不存在，启动时会通过 register_defaults 创建并填充默认值
+        - 如果键存在但值为空，则不进行过滤
         """
-        # 1. 获取全局黑名单，如果用户未配置，则使用内置默认值
-        global_pattern_str = await self.config_manager.get(
-            "episode_blacklist_regex",
-            self._GLOBAL_EPISODE_BLACKLIST_DEFAULT
-        )
-
-        # 2. 获取特定于提供商的黑名单
+        # 获取特定于提供商的黑名单
         provider_key = f"{self.provider_name}_episode_blacklist_regex"
-        # 注意：这里不提供默认值。如果数据库中没有（即用户从未保存过，且启动时也未注册上），
-        # 则返回 None，我们只使用全局黑名单。
-        provider_pattern_str = await self.config_manager.get(provider_key, None)
+        # 不提供默认值，如果数据库中没有则返回空字符串
+        provider_pattern_str = await self.config_manager.get(provider_key, "")
 
-        # 3. 合并两个正则表达式
-        final_patterns = []
-        if global_pattern_str and global_pattern_str.strip():
-            final_patterns.append(f"({global_pattern_str})")
-        
-        if provider_pattern_str and provider_pattern_str.strip():
-            final_patterns.append(f"({provider_pattern_str})")
-
-        if not final_patterns:
+        if not provider_pattern_str or not provider_pattern_str.strip():
             return None
 
-        final_regex_str = "|".join(final_patterns)
         try:
-            return re.compile(final_regex_str, re.IGNORECASE)
+            return re.compile(provider_pattern_str, re.IGNORECASE)
         except re.error as e:
-            self.logger.error(f"编译分集黑名单正则表达式失败: '{final_regex_str}'. 错误: {e}")
+            self.logger.error(f"编译分集黑名单正则表达式失败: '{provider_pattern_str}'. 错误: {e}")
         return None
 
     async def execute_action(self, action_name: str, payload: Dict[str, Any]) -> Any:
@@ -357,46 +335,54 @@ class BaseScraper(ABC):
         """
         return str(provider_episode_id)
 
-    def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
+    async def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
         """
         过滤掉垃圾分集（预告、花絮等）
+
+        注意：此方法现在从 config 表读取过滤规则，不再使用硬编码的正则表达式。
+        如果 config 表中没有配置过滤规则，则不进行过滤。
         """
         if not episodes:
             return episodes
-        
+
+        # 从 config 表获取过滤规则，不使用硬编码兜底
+        blacklist_pattern = await self.get_episode_blacklist_pattern()
+
+        # 如果没有配置过滤规则，直接返回所有分集
+        if not blacklist_pattern:
+            self.logger.info(f"{self.provider_name}: 分集过滤结果 (无过滤规则):")
+            for episode in episodes:
+                self.logger.info(f"  - {episode.title}")
+            return episodes
+
         filtered_episodes = []
         filtered_out_episodes = []
-        
+
         for episode in episodes:
-            # 检查是否匹配垃圾内容模式
-            match = self._GLOBAL_SEARCH_JUNK_TITLE_PATTERN.search(episode.title)
+            # 使用从 config 表获取的正则表达式进行过滤
+            match = blacklist_pattern.search(episode.title)
             if match:
                 junk_type = match.group(0)
                 filtered_out_episodes.append((episode, junk_type))
             else:
                 filtered_episodes.append(episode)
-        
+
         # 打印分集过滤结果
         self.logger.info(f"{self.provider_name}: 分集过滤结果:")
-        
+
         # 打印过滤掉的分集
         if filtered_out_episodes:
             for episode, junk_type in filtered_out_episodes:
                 self.logger.info(f"  - 已过滤: {episode.title} (类型: {junk_type})")
-        
+
         # 打印保留的分集
         if filtered_episodes:
             for episode in filtered_episodes:
-                # 检查是否包含预告关键词但未被过滤
-                title_lower = episode.title.lower()
-                if any(keyword in title_lower for keyword in ['预告', 'preview', 'trailer', 'teaser']):
-                    self.logger.info(f"  - {episode.title} (注意: 标题包含预告关键词但未被过滤)")
-                else:
-                    self.logger.info(f"  - {episode.title}")
-        
+                self.logger.info(f"  - {episode.title}")
+
         if not filtered_episodes and not filtered_out_episodes:
             self.logger.info(f"  - 无分集数据")
-        
+
         return filtered_episodes
 
     @abstractmethod

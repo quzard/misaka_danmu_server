@@ -427,6 +427,13 @@ export const getGlobalFilter = () => api.get('/api/ui/settings/global-filter')
 /** 更新全局过滤规则 */
 export const setGlobalFilter = data =>
   api.put('/api/ui/settings/global-filter', data)
+/** 获取全局过滤默认规则 */
+export const getGlobalFilterDefaults = () => api.get('/api/ui/settings/global-filter/defaults')
+/** 获取搜索源默认分集黑名单 */
+export const getScraperDefaultBlacklist = (providerName) =>
+  api.get(`/api/ui/scrapers/${providerName}/default-blacklist`)
+/** 获取通用分集黑名单规则 */
+export const getCommonBlacklist = () => api.get('/api/ui/scrapers/common-blacklist')
 
 /** 获取bi站登录信息 */
 export const getbiliUserinfo = () =>

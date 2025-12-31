@@ -44,6 +44,8 @@ import {
   deleteCurrentScrapers,
   getScraperAutoUpdate,
   saveScraperAutoUpdate,
+  getScraperDefaultBlacklist,
+  getCommonBlacklist,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -187,6 +189,9 @@ export const Scrapers = () => {
   const [dandanAuthMode, setDandanAuthMode] = useState('local') // 'local' or 'proxy'
   const [showAppSecret, setShowAppSecret] = useState(false)
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false)
+  // 填充默认黑名单加载状态
+  const [loadingDefaultBlacklist, setLoadingDefaultBlacklist] = useState(false)
+  const [loadingCommonBlacklist, setLoadingCommonBlacklist] = useState(false)
 
   // 资源仓库相关
   const [resourceRepoUrl, setResourceRepoUrl] = useState('')
@@ -800,6 +805,44 @@ export const Scrapers = () => {
     setBiliLoginOpen(false)
     clearInterval(timer.current)
     setBiliQrcodeStatus('')
+  }
+
+  // 填充源默认分集黑名单
+  const handleFillDefaultBlacklist = async () => {
+    if (!setname) return
+    try {
+      setLoadingDefaultBlacklist(true)
+      const res = await getScraperDefaultBlacklist(setname)
+      if (res.data && res.data.defaultBlacklist) {
+        form.setFieldValue(`${setname}EpisodeBlacklistRegex`, res.data.defaultBlacklist)
+        messageApi.success('已填充源默认过滤规则')
+      } else {
+        messageApi.warning('该搜索源没有默认过滤规则')
+      }
+    } catch (error) {
+      messageApi.error('获取源默认过滤规则失败')
+    } finally {
+      setLoadingDefaultBlacklist(false)
+    }
+  }
+
+  // 填充通用分集黑名单
+  const handleFillCommonBlacklist = async () => {
+    if (!setname) return
+    try {
+      setLoadingCommonBlacklist(true)
+      const res = await getCommonBlacklist()
+      if (res.data && res.data.commonBlacklist) {
+        form.setFieldValue(`${setname}EpisodeBlacklistRegex`, res.data.commonBlacklist)
+        messageApi.success('已填充通用过滤规则')
+      } else {
+        messageApi.warning('未找到通用过滤规则')
+      }
+    } catch (error) {
+      messageApi.error('获取通用过滤规则失败')
+    } finally {
+      setLoadingCommonBlacklist(false)
+    }
   }
 
   const handleBiliLogout = () => {
@@ -1716,7 +1759,29 @@ export const Scrapers = () => {
           {/* 通用部分 分集标题黑名单 记录原始响应 */}
           <Form.Item
             name={`${setname}EpisodeBlacklistRegex`}
-            label="分集标题黑名单 (正则)"
+            label={
+              <div className="flex items-center justify-between w-full">
+                <span>分集标题黑名单 (正则)</span>
+                <Space size="small">
+                  <Button
+                    type="link"
+                    size="small"
+                    loading={loadingCommonBlacklist}
+                    onClick={handleFillCommonBlacklist}
+                  >
+                    填充通用规则
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    loading={loadingDefaultBlacklist}
+                    onClick={handleFillDefaultBlacklist}
+                  >
+                    填充源默认规则
+                  </Button>
+                </Space>
+              </div>
+            }
             className="mb-4"
           >
             <Input.TextArea rows={6} />
