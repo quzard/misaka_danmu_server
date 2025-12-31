@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import json
 from typing import Callable
@@ -53,15 +52,15 @@ class WebhookProcessorJob(BaseJob):
                     title_recognition_manager=self.title_recognition_manager,
                     **payload
                 )
-                # 修正：使用 run_immediately=True 来串行执行任务，避免并发冲突
-                # 这样每个任务都会立即执行并完成，而不是加入队列等待
-                task_id, done_event = await self.task_manager.submit_task(
-                    task_coro, task.taskTitle, unique_key=task.uniqueKey, run_immediately=True
+                # 修正：不使用 run_immediately，让任务正常进入队列
+                # 这样任务可以正确处理流控暂停和恢复
+                task_id, _ = await self.task_manager.submit_task(
+                    task_coro, task.taskTitle, unique_key=task.uniqueKey
                 )
-                # 等待任务完成
-                await done_event.wait()
-                # 修正：只有在任务成功提交并完成后才删除记录
+                # 修正：不等待任务完成，直接删除 webhook 记录
+                # 任务会在队列中正常执行，不会因为流控暂停而卡住
                 await session.delete(task)
+                logger.info(f"Webhook 任务 '{task.taskTitle}' 已提交到任务队列 (ID: {task_id})")
 
             except Exception as e:
                 logger.error(f"处理 Webhook 任务 (ID: {task.id}) 时失败: {e}", exc_info=True)

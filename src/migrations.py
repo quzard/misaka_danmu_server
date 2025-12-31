@@ -186,7 +186,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'task_history': ['progress'],
         'external_api_logs': ['status_code'],
         'rate_limit_state': ['request_count'],
-        'title_recognition': ['id'],
+        # 'title_recognition': ['id'],  # 主键字段，需要保留 AUTO_INCREMENT，单独处理
         # 'media_servers': ['id'],  # 被外键 media_items_ibfk_1 引用，跳过
         'media_items': ['season', 'episode', 'year'],
         'local_danmaku_items': ['season', 'episode', 'year'],
@@ -479,6 +479,122 @@ async def _rename_duplicate_idx_created_at(conn: AsyncConnection, db_type: str):
         # 不抛出异常，允许继续执行
 
 
+async def _fix_title_recognition_id_autoincrement(conn: AsyncConnection):
+    """
+    修复 title_recognition 表的 id 字段，确保有自增属性
+
+    问题：更新识别词配置时报错 "Field 'id' doesn't have a default value"
+    原因：id 字段缺少自增属性（MySQL: AUTO_INCREMENT, PostgreSQL: SERIAL/IDENTITY）
+    解决：根据数据库类型添加相应的自增属性
+    """
+    logger.info("检查 title_recognition 表的 id 字段...")
+    db_type = conn.dialect.name
+
+    try:
+        if db_type == 'mysql':
+            # === MySQL 处理逻辑 ===
+            check_sql = text("""
+                SELECT COLUMN_NAME, COLUMN_TYPE, EXTRA
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'title_recognition'
+                AND COLUMN_NAME = 'id'
+            """)
+
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
+
+            if row:
+                extra = str(row[2]).lower() if row[2] else ""
+                logger.info(f"  当前 id 字段 (MySQL): {row[0]} {row[1]} {row[2]}")
+
+                # 检查是否已经有 AUTO_INCREMENT
+                if 'auto_increment' in extra:
+                    logger.info("  ✅ id 字段已有 AUTO_INCREMENT 属性，无需修复")
+                    return
+
+            logger.warning("  ⚠️  id 字段缺少 AUTO_INCREMENT 属性，开始修复...")
+
+            # 修改 id 字段，添加 AUTO_INCREMENT
+            alter_sql = text("""
+                ALTER TABLE title_recognition
+                MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT
+            """)
+
+            await conn.execute(alter_sql)
+            logger.info("  ✅ 成功为 title_recognition.id 添加 AUTO_INCREMENT 属性")
+
+        elif db_type == 'postgresql':
+            # === PostgreSQL 处理逻辑 ===
+            check_sql = text("""
+                SELECT
+                    column_name,
+                    data_type,
+                    column_default,
+                    is_identity
+                FROM information_schema.columns
+                WHERE table_schema = CURRENT_SCHEMA()
+                AND table_name = 'title_recognition'
+                AND column_name = 'id'
+            """)
+
+            result = await conn.execute(check_sql)
+            row = result.fetchone()
+
+            if row:
+                column_default = str(row[2]) if row[2] else ""
+                is_identity = str(row[3]) if row[3] else "NO"
+                logger.info(f"  当前 id 字段 (PostgreSQL): {row[0]} {row[1]}, default={row[2]}, is_identity={row[3]}")
+
+                # 检查是否已有自增（序列或 IDENTITY）
+                if 'nextval' in column_default or is_identity == 'YES':
+                    logger.info("  ✅ id 字段已有自增属性，无需修复")
+                    return
+
+            logger.warning("  ⚠️  id 字段缺少自增属性，开始修复...")
+
+            # 创建序列（如果不存在）
+            sequence_name = 'title_recognition_id_seq'
+            create_seq_sql = text(f"""
+                CREATE SEQUENCE IF NOT EXISTS {sequence_name}
+                START WITH 1
+                INCREMENT BY 1
+                NO MINVALUE
+                NO MAXVALUE
+                CACHE 1
+            """)
+            await conn.execute(create_seq_sql)
+
+            # 获取当前最大 id 值
+            max_id_sql = text("SELECT COALESCE(MAX(id), 0) FROM title_recognition")
+            result = await conn.execute(max_id_sql)
+            max_id = result.scalar() or 0
+
+            # 设置序列的起始值
+            if max_id > 0:
+                await conn.execute(text(f"SELECT setval('{sequence_name}', {max_id})"))
+
+            # 设置默认值为序列
+            alter_sql = text(f"""
+                ALTER TABLE title_recognition
+                ALTER COLUMN id SET DEFAULT nextval('{sequence_name}')
+            """)
+            await conn.execute(alter_sql)
+
+            # 将序列与列关联
+            await conn.execute(text(f"ALTER SEQUENCE {sequence_name} OWNED BY title_recognition.id"))
+
+            logger.info("  ✅ 成功为 title_recognition.id 添加序列自增属性")
+
+        else:
+            logger.warning(f"  ⚠️  不支持的数据库类型: {db_type}，跳过此迁移")
+            return
+
+    except Exception as e:
+        logger.error(f"  ❌ 修复 title_recognition.id 失败: {e}")
+        raise
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -495,6 +611,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("rollback_to_original_types_v1", _rollback_to_original_types_v1, (db_type,)),
         ("fix_api_tokens_id_autoincrement_v2", _fix_api_tokens_id_autoincrement, ()),  # v2: 增加 PostgreSQL 支持
         ("rename_duplicate_idx_created_at_v1", _rename_duplicate_idx_created_at, (db_type,)),  # 修复重复索引名
+        ("fix_title_recognition_id_autoincrement_v1", _fix_title_recognition_id_autoincrement, ()),  # 修复 title_recognition.id 自增
     ]
 
     for migration_id, migration_func, args in migrations:
