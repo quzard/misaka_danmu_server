@@ -209,20 +209,44 @@ async def _perform_update(
                     # 更新 versions.json
                     from datetime import datetime
                     release_version = asset_info['version'].lstrip('v')
+
+                    # 从解压后的 package.json 读取各个源的版本信息
+                    scrapers_versions = {}
+                    scrapers_hashes = {}
+                    local_package_file = scrapers_dir / "package.json"
+                    try:
+                        if local_package_file.exists():
+                            package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                            # 从 resources 字段提取各个源的版本号和哈希值
+                            resources = package_content.get('resources', {})
+                            for scraper_name, scraper_info in resources.items():
+                                if isinstance(scraper_info, dict):
+                                    version = scraper_info.get('version')
+                                    if version:
+                                        scrapers_versions[scraper_name] = version
+                                    # 提取哈希值
+                                    hashes = scraper_info.get('hashes', {})
+                                    platform_key = f"{platform_info['platform']}_{platform_info['arch']}"
+                                    if platform_key in hashes:
+                                        scrapers_hashes[scraper_name] = hashes[platform_key]
+                            logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息")
+                    except Exception as e:
+                        logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
+
                     versions_data = {
                         "platform": platform_info['platform'],
                         "type": platform_info['arch'],
                         "version": release_version,
-                        "scrapers": {},
-                        "hashes": {},
+                        "scrapers": scrapers_versions,
+                        "hashes": scrapers_hashes,
                         "full_replace": True,
                         "update_time": datetime.now().isoformat()
                     }
                     versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
                     await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
+                    logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
 
-                    # 同时更新 package.json 的版本号（前端从这里读取版本）
-                    local_package_file = scrapers_dir / "package.json"
+                    # 同时更新 package.json 的版本号（前端从这里读取整体版本）
                     try:
                         if local_package_file.exists():
                             package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
