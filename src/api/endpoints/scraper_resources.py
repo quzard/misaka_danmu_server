@@ -711,6 +711,123 @@ async def load_resources_stream(
                         logger.info(f"GitHub资源下载将使用代理: {proxy_to_use}")
                         yield f"data: {json.dumps({'type': 'info', 'message': f'使用代理: {proxy_to_use}'}, ensure_ascii=False)}\n\n"
 
+                    # 检查是否启用全量替换模式
+                    full_replace_enabled = await config_manager.get("scraperFullReplaceEnabled", "false")
+                    use_full_replace = full_replace_enabled.lower() == "true"
+
+                    # ========== 全量替换模式 ==========
+                    if use_full_replace and repo_info:
+                        logger.info("使用全量替换模式，从 GitHub Releases 下载压缩包")
+                        yield f"data: {json.dumps({'type': 'info', 'message': '全量替换模式：正在从 GitHub Releases 获取压缩包...'}, ensure_ascii=False)}\n\n"
+
+                        # 获取 Release 资产信息
+                        asset_info = await _fetch_github_release_asset(
+                            repo_info=repo_info,
+                            platform_key=platform_key,
+                            headers=headers,
+                            proxy=proxy_to_use
+                        )
+
+                        if not asset_info:
+                            logger.warning("未找到匹配的 Release 压缩包，回退到逐文件下载模式")
+                            yield f"data: {json.dumps({'type': 'info', 'message': '未找到 Release 压缩包，回退到逐文件下载模式'}, ensure_ascii=False)}\n\n"
+                            use_full_replace = False
+                        else:
+                            yield f"data: {json.dumps({'type': 'info', 'message': f'找到压缩包: {asset_info["filename"]} (版本: {asset_info["version"]})'}, ensure_ascii=False)}\n\n"
+
+                            # 先备份当前文件
+                            yield f"data: {json.dumps({'type': 'info', 'message': '正在备份当前弹幕源...'}, ensure_ascii=False)}\n\n"
+                            try:
+                                await backup_scrapers(current_user)
+                                logger.info("备份当前弹幕源成功")
+                                yield f"data: {json.dumps({'type': 'info', 'message': '备份完成'}, ensure_ascii=False)}\n\n"
+                            except Exception as backup_error:
+                                logger.error(f"备份失败: {backup_error}")
+                                yield f"data: {json.dumps({'type': 'error', 'message': f'备份失败: {str(backup_error)}'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                return
+
+                            # 下载并解压
+                            scrapers_dir = _get_scrapers_dir()
+
+                            async def progress_cb(msg):
+                                nonlocal last_heartbeat
+                                last_heartbeat = asyncio.get_event_loop().time()
+
+                            # 使用生成器无法直接 yield，需要手动发送进度
+                            yield f"data: {json.dumps({'type': 'info', 'message': '正在下载压缩包...'}, ensure_ascii=False)}\n\n"
+
+                            success = await _download_and_extract_release(
+                                asset_info=asset_info,
+                                scrapers_dir=scrapers_dir,
+                                headers=headers,
+                                proxy=proxy_to_use,
+                                progress_callback=progress_cb
+                            )
+
+                            if success:
+                                # 更新 versions.json
+                                platform_info = get_platform_info()
+                                release_version = asset_info['version'].lstrip('v')
+                                versions_data = {
+                                    "platform": platform_info['platform'],
+                                    "type": platform_info['arch'],
+                                    "version": release_version,
+                                    "scrapers": {},
+                                    "hashes": {},
+                                    "full_replace": True,
+                                    "update_time": datetime.now().isoformat()
+                                }
+                                versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+                                await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
+
+                                # 同时更新 package.json 的版本号（前端从这里读取版本）
+                                local_package_file = scrapers_dir / "package.json"
+                                try:
+                                    if local_package_file.exists():
+                                        package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                                        package_content['version'] = release_version
+                                    else:
+                                        package_content = {"version": release_version}
+                                    package_json_str = json.dumps(package_content, indent=2, ensure_ascii=False)
+                                    await asyncio.to_thread(local_package_file.write_text, package_json_str)
+                                    logger.info(f"已更新 package.json 版本号为: {release_version}")
+                                except Exception as pkg_err:
+                                    logger.warning(f"更新 package.json 失败: {pkg_err}")
+
+                                yield f"data: {json.dumps({'type': 'complete', 'downloaded': 1, 'skipped': 0, 'failed': 0, 'failed_list': [], 'full_replace': True}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 全量替换完成，由于 .so 文件已被替换，建议重启服务以确保更新生效'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'restart_required', 'message': '建议重启服务以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+                                # 后台重载任务
+                                async def reload_scrapers_background():
+                                    global _version_cache, _version_cache_time
+                                    await asyncio.sleep(0.5)
+                                    try:
+                                        logger.info("开始重载弹幕源...")
+                                        await manager.load_and_sync_scrapers()
+                                        logger.info(f"用户 '{current_user.username}' 通过全量替换模式更新了弹幕源")
+                                        _version_cache = None
+                                        _version_cache_time = None
+                                    except Exception as e:
+                                        logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
+
+                                asyncio.create_task(reload_scrapers_background())
+                                return
+                            else:
+                                logger.error("全量替换失败")
+                                yield f"data: {json.dumps({'type': 'error', 'message': '全量替换失败，请检查日志'}, ensure_ascii=False)}\n\n"
+                                # 尝试还原备份
+                                try:
+                                    await restore_scrapers(current_user, manager)
+                                    yield f"data: {json.dumps({'type': 'info', 'message': '已还原备份'}, ensure_ascii=False)}\n\n"
+                                except Exception as restore_error:
+                                    logger.error(f"还原备份失败: {restore_error}")
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                return
+
+                    # ========== 逐文件下载模式（默认）==========
                     # 下载 package.json
                     package_url = f"{base_url}/package.json"
                     logger.info(f"正在从 {package_url} 获取资源包信息...")
@@ -1034,6 +1151,11 @@ async def load_resources_stream(
                     logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
                     yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
 
+                    # 如果有文件被下载（不是全部跳过），提示可能需要重启
+                    if download_count > 0:
+                        yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 如果更新后弹幕源功能异常，建议重启服务以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'restart_suggested', 'message': '如有异常建议重启服务'}, ensure_ascii=False)}\n\n"
+
                     # 发送流结束信号
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
@@ -1112,6 +1234,190 @@ async def save_auto_update_config(
     await config_manager.setValue("scraperAutoUpdateInterval", str(interval))
 
     logger.info(f"用户 '{current_user.username}' 更新了自动更新配置: enabled={enabled}, interval={interval}分钟")
+
+
+@router.get("/scrapers/full-replace", summary="获取全量替换配置")
+async def get_full_replace_config(
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """获取弹幕源全量替换配置
+
+    全量替换模式：从 GitHub Releases 下载压缩包进行全量替换，
+    而不是逐个文件对比哈希值下载。适用于 .so 文件更新不生效的情况。
+    """
+    enabled = await config_manager.get("scraperFullReplaceEnabled", "false")
+    return {
+        "enabled": enabled.lower() == "true"
+    }
+
+
+@router.put("/scrapers/full-replace", status_code=status.HTTP_204_NO_CONTENT, summary="保存全量替换配置")
+async def save_full_replace_config(
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """保存弹幕源全量替换配置"""
+    enabled = payload.get("enabled", False)
+    await config_manager.setValue("scraperFullReplaceEnabled", str(enabled).lower())
+    logger.info(f"用户 '{current_user.username}' 更新了全量替换配置: enabled={enabled}")
+
+
+async def _fetch_github_release_asset(
+    repo_info: Dict[str, str],
+    platform_key: str,
+    headers: Dict[str, str],
+    proxy: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    从 GitHub Releases 获取最新版本的压缩包资产信息
+
+    Args:
+        repo_info: 仓库信息 (owner, repo)
+        platform_key: 平台标识 (如 linux-x86, windows-amd64)
+        headers: HTTP 请求头
+        proxy: 代理URL
+
+    Returns:
+        包含 download_url, filename, version 的字典，失败返回 None
+    """
+    owner = repo_info['owner']
+    repo = repo_info['repo']
+
+    # GitHub Releases API
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+    timeout = httpx.Timeout(10.0, read=30.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+            response = await client.get(api_url)
+            if response.status_code != 200:
+                logger.warning(f"获取 GitHub Releases 失败: HTTP {response.status_code}")
+                return None
+
+            release_data = response.json()
+            version = release_data.get('tag_name', 'unknown')
+            assets = release_data.get('assets', [])
+
+            # 查找匹配当前平台的压缩包
+            # 支持的命名格式: scrapers-{platform_key}.zip 或 {platform_key}.zip
+            target_patterns = [
+                f"scrapers-{platform_key}.zip",
+                f"{platform_key}.zip",
+                f"scrapers_{platform_key}.zip",
+            ]
+
+            for asset in assets:
+                asset_name = asset.get('name', '').lower()
+                for pattern in target_patterns:
+                    if pattern.lower() in asset_name or asset_name == pattern.lower():
+                        download_url = asset.get('browser_download_url')
+                        if download_url:
+                            logger.info(f"找到匹配的 Release 资产: {asset.get('name')} (版本: {version})")
+                            return {
+                                'download_url': download_url,
+                                'filename': asset.get('name'),
+                                'version': version,
+                                'size': asset.get('size', 0)
+                            }
+
+            logger.warning(f"未找到匹配平台 {platform_key} 的压缩包资产")
+            return None
+
+    except Exception as e:
+        logger.error(f"获取 GitHub Releases 信息失败: {e}")
+        return None
+
+
+async def _download_and_extract_release(
+    asset_info: Dict[str, Any],
+    scrapers_dir: Path,
+    headers: Dict[str, str],
+    proxy: Optional[str] = None,
+    progress_callback = None
+) -> bool:
+    """
+    下载并解压 Release 压缩包
+
+    Args:
+        asset_info: 资产信息 (download_url, filename, version)
+        scrapers_dir: 目标目录
+        headers: HTTP 请求头
+        proxy: 代理URL
+        progress_callback: 进度回调函数
+
+    Returns:
+        是否成功
+    """
+    import zipfile
+    import io
+
+    download_url = asset_info['download_url']
+
+    timeout = httpx.Timeout(30.0, read=120.0)  # 下载大文件需要更长超时
+
+    try:
+        if progress_callback:
+            await progress_callback("正在下载压缩包...")
+
+        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+            response = await client.get(download_url)
+            if response.status_code != 200:
+                logger.error(f"下载压缩包失败: HTTP {response.status_code}")
+                return False
+
+            zip_content = response.content
+            logger.info(f"压缩包下载完成: {len(zip_content)} 字节")
+
+        if progress_callback:
+            await progress_callback("正在解压文件...")
+
+        # 先清理旧的 .so/.pyd 文件
+        deleted_count = 0
+        for file in scrapers_dir.glob("*"):
+            if file.suffix in ['.so', '.pyd']:
+                try:
+                    file.unlink()
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"删除旧文件 {file.name} 失败: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"已删除 {deleted_count} 个旧的编译文件")
+
+        # 解压新文件
+        extracted_count = 0
+        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
+            for zip_info in zip_ref.infolist():
+                # 只解压 .so, .pyd, .json 文件
+                if zip_info.filename.endswith(('.so', '.pyd', '.json')):
+                    # 获取文件名（去掉路径前缀）
+                    base_name = Path(zip_info.filename).name
+                    if not base_name:
+                        continue
+
+                    target_path = scrapers_dir / base_name
+
+                    # 读取并写入文件
+                    file_content = zip_ref.read(zip_info.filename)
+                    await asyncio.to_thread(target_path.write_bytes, file_content)
+                    extracted_count += 1
+                    logger.debug(f"解压: {base_name}")
+
+        logger.info(f"解压完成: 共 {extracted_count} 个文件")
+
+        if progress_callback:
+            await progress_callback(f"解压完成: {extracted_count} 个文件")
+
+        return extracted_count > 0
+
+    except zipfile.BadZipFile:
+        logger.error("压缩包格式错误")
+        return False
+    except Exception as e:
+        logger.error(f"下载或解压失败: {e}", exc_info=True)
+        return False
 
 
 @router.delete("/scrapers/backup", summary="删除弹幕源备份")

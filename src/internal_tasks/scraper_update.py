@@ -24,6 +24,8 @@ from ..api.endpoints.scraper_resources import (
     SCRAPERS_PACKAGE_FILE,
     _download_lock,
     backup_scrapers,
+    _fetch_github_release_asset,
+    _download_and_extract_release,
 )
 
 logger = logging.getLogger("ScraperAutoUpdate")
@@ -87,7 +89,8 @@ async def scraper_auto_update_handler(app: FastAPI) -> None:
         headers=headers,
         proxy_to_use=proxy_to_use,
         local_version=local_version,
-        remote_version=remote_version
+        remote_version=remote_version,
+        repo_info=repo_info
     )
 
 
@@ -153,9 +156,11 @@ async def _perform_update(
     headers: Dict,
     proxy_to_use: Optional[str],
     local_version: str,
-    remote_version: str
+    remote_version: str,
+    repo_info: Optional[Dict] = None
 ) -> None:
     """执行实际的更新操作"""
+    config_manager = app.state.config_manager
     scraper_manager = app.state.scraper_manager
 
     # 检查下载锁
@@ -177,6 +182,78 @@ async def _perform_update(
         platform_info = get_platform_info()
         scrapers_dir = _get_scrapers_dir()
 
+        # 检查是否启用全量替换模式
+        full_replace_enabled = await config_manager.get("scraperFullReplaceEnabled", "false")
+        use_full_replace = full_replace_enabled.lower() == "true"
+
+        # ========== 全量替换模式 ==========
+        if use_full_replace and repo_info:
+            logger.info("使用全量替换模式，从 GitHub Releases 下载压缩包")
+
+            asset_info = await _fetch_github_release_asset(
+                repo_info=repo_info,
+                platform_key=platform_key,
+                headers=headers,
+                proxy=proxy_to_use
+            )
+
+            if asset_info:
+                success = await _download_and_extract_release(
+                    asset_info=asset_info,
+                    scrapers_dir=scrapers_dir,
+                    headers=headers,
+                    proxy=proxy_to_use
+                )
+
+                if success:
+                    # 更新 versions.json
+                    from datetime import datetime
+                    release_version = asset_info['version'].lstrip('v')
+                    versions_data = {
+                        "platform": platform_info['platform'],
+                        "type": platform_info['arch'],
+                        "version": release_version,
+                        "scrapers": {},
+                        "hashes": {},
+                        "full_replace": True,
+                        "update_time": datetime.now().isoformat()
+                    }
+                    versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+                    await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
+
+                    # 同时更新 package.json 的版本号（前端从这里读取版本）
+                    local_package_file = scrapers_dir / "package.json"
+                    try:
+                        if local_package_file.exists():
+                            package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                            package_content['version'] = release_version
+                        else:
+                            package_content = {"version": release_version}
+                        package_json_str = json.dumps(package_content, indent=2, ensure_ascii=False)
+                        await asyncio.to_thread(local_package_file.write_text, package_json_str)
+                        logger.info(f"已更新 package.json 版本号为: {release_version}")
+                    except Exception as pkg_err:
+                        logger.warning(f"更新 package.json 失败: {pkg_err}")
+
+                    # 重载弹幕源
+                    try:
+                        await scraper_manager.load_and_sync_scrapers()
+                        logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}")
+                        logger.warning("⚠️ 全量替换完成，建议重启服务以确保 .so 文件更新生效")
+
+                        # 清除版本缓存
+                        import src.api.endpoints.scraper_resources as sr
+                        sr._version_cache = None
+                        sr._version_cache_time = None
+                    except Exception as e:
+                        logger.error(f"重载弹幕源失败: {e}")
+                    return
+                else:
+                    logger.warning("全量替换失败，回退到逐文件下载模式")
+            else:
+                logger.warning("未找到匹配的 Release 压缩包，回退到逐文件下载模式")
+
+        # ========== 逐文件下载模式（默认）==========
         # 获取资源列表
         resources = package_data.get('resources', {})
         if not resources:
