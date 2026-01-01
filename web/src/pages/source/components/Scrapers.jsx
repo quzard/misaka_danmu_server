@@ -491,11 +491,19 @@ export const Scrapers = () => {
                 }))
                 break
 
+              case 'compare_result':
+                // 哈希比对完成，显示比对结果
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  message: `比对完成: ${data.to_download} 个需要下载, ${data.to_skip} 个已是最新${data.unsupported > 0 ? `, ${data.unsupported} 个不支持当前平台` : ''}`
+                }))
+                break
+
               case 'total':
                 setDownloadProgress(prev => ({
                   ...prev,
                   total: data.total,
-                  message: `准备下载 ${data.total} 个弹幕源...`
+                  message: `开始下载 ${data.total} 个弹幕源...`
                 }))
                 break
 
@@ -514,7 +522,13 @@ export const Scrapers = () => {
                 break
 
               case 'skip':
+                // 不支持当前平台的源
                 console.log(`跳过: ${data.scraper}`)
+                break
+
+              case 'skip_hash':
+                // 哈希值相同，跳过下载（在新流程中这个事件不再发送，但保留兼容）
+                console.log(`哈希相同跳过: ${data.scraper}`)
                 break
 
               case 'failed':
@@ -526,7 +540,7 @@ export const Scrapers = () => {
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
-                  message: `下载完成! 成功: ${data.downloaded}, 失败: ${data.failed}`
+                  message: `下载完成! 成功: ${data.downloaded}, 跳过: ${data.skipped || 0}, 失败: ${data.failed}`
                 }))
 
                 messageApi.success('资源加载成功,服务正在重启...')
