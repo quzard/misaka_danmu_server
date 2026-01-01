@@ -400,6 +400,10 @@ export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current'
 export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
 /** 保存自动更新配置 */
 export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-update', data)
+/** 获取全量替换配置 */
+export const getScraperFullReplace = () => api.get('/api/ui/scrapers/full-replace')
+/** 保存全量替换配置 */
+export const saveScraperFullReplace = data => api.put('/api/ui/scrapers/full-replace', data)
 /** 获取GitHub Token */
 export const getGithubToken = () => api.get('/api/ui/config/github-token')
 /** 保存GitHub Token */

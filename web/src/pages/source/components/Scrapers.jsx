@@ -44,6 +44,8 @@ import {
   deleteCurrentScrapers,
   getScraperAutoUpdate,
   saveScraperAutoUpdate,
+  getScraperFullReplace,
+  saveScraperFullReplace,
   getScraperDefaultBlacklist,
   getCommonBlacklist,
 } from '../../../apis'
@@ -210,6 +212,10 @@ export const Scrapers = () => {
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false)
   const [autoUpdateLoading, setAutoUpdateLoading] = useState(false)
 
+  // 全量替换相关
+  const [fullReplaceEnabled, setFullReplaceEnabled] = useState(false)
+  const [fullReplaceLoading, setFullReplaceLoading] = useState(false)
+
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
     visible: false,
@@ -243,6 +249,7 @@ export const Scrapers = () => {
     getInfo()
     loadResourceRepoConfig()
     loadAutoUpdateConfig()
+    loadFullReplaceConfig()
 
     // 建立 SSE 日志流, 根据相关事件自动刷新版本信息
     const token = Cookies.get('danmu_token')
@@ -372,6 +379,35 @@ export const Scrapers = () => {
       messageApi.error('保存自动更新配置失败')
     } finally {
       setAutoUpdateLoading(false)
+    }
+  }
+
+  // 加载全量替换配置
+  const loadFullReplaceConfig = async () => {
+    try {
+      const res = await getScraperFullReplace()
+      const enabled = res.data?.enabled || false
+      setFullReplaceEnabled(enabled)
+    } catch (error) {
+      console.error('加载全量替换配置失败:', error)
+    }
+  }
+
+  // 切换全量替换状态
+  const handleFullReplaceToggle = async (checked) => {
+    try {
+      setFullReplaceLoading(true)
+      await saveScraperFullReplace({ enabled: checked })
+      setFullReplaceEnabled(checked)
+      if (checked) {
+        messageApi.success('已启用全量替换模式，下次更新将从 Releases 下载压缩包')
+      } else {
+        messageApi.success('已关闭全量替换模式，将使用逐文件对比下载')
+      }
+    } catch (error) {
+      messageApi.error('保存全量替换配置失败')
+    } finally {
+      setFullReplaceLoading(false)
     }
   }
 
@@ -1265,6 +1301,33 @@ export const Scrapers = () => {
                           </Button>
                         </div>
                       </div>
+                      {/* 移动端：自动更新和全量替换开关 */}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-2">
+                          <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
+                          <Switch
+                            size="small"
+                            checked={autoUpdateEnabled}
+                            loading={autoUpdateLoading}
+                            checkedChildren="启用"
+                            unCheckedChildren="关闭"
+                            onChange={handleAutoUpdateToggle}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Tooltip title="启用后从 GitHub Releases 下载压缩包全量替换，适用于 .so 文件更新不生效的情况">
+                            <Typography.Text className="text-sm text-gray-600" style={{ cursor: 'help' }}>全量替换:</Typography.Text>
+                          </Tooltip>
+                          <Switch
+                            size="small"
+                            checked={fullReplaceEnabled}
+                            loading={fullReplaceLoading}
+                            checkedChildren="启用"
+                            unCheckedChildren="关闭"
+                            onChange={handleFullReplaceToggle}
+                          />
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex items-center gap-4">
@@ -1293,6 +1356,19 @@ export const Scrapers = () => {
                           checkedChildren="启用"
                           unCheckedChildren="关闭"
                           onChange={handleAutoUpdateToggle}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Tooltip title="启用后从 GitHub Releases 下载压缩包全量替换，适用于 .so 文件更新不生效的情况">
+                          <Typography.Text className="text-sm text-gray-600" style={{ cursor: 'help' }}>全量替换:</Typography.Text>
+                        </Tooltip>
+                        <Switch
+                          size="small"
+                          checked={fullReplaceEnabled}
+                          loading={fullReplaceLoading}
+                          checkedChildren="启用"
+                          unCheckedChildren="关闭"
+                          onChange={handleFullReplaceToggle}
                         />
                       </div>
                       <Button
