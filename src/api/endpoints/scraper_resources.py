@@ -859,32 +859,53 @@ async def load_resources_stream(
                     logger.info(f"正在从 {package_url} 获取资源包信息...")
                     yield f"data: {json.dumps({'type': 'info', 'message': '正在获取资源包信息...'}, ensure_ascii=False)}\n\n"
 
-                    # 设置更详细的超时配置: 连接超时5秒, 读取超时15秒
-                    timeout_config = httpx.Timeout(5.0, read=15.0)
+                    # 设置更详细的超时配置: 连接超时10秒, 读取超时30秒
+                    timeout_config = httpx.Timeout(10.0, read=30.0)
+                    max_package_retries = 3  # 获取 package.json 的重试次数
+                    package_data = None
 
-                    try:
-                        async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
-                            response = await client.get(package_url)
-                            if response.status_code != 200:
-                                logger.error(f"获取资源包信息失败: HTTP {response.status_code}")
-                                yield f"data: {json.dumps({'type': 'error', 'message': f'无法获取资源包信息 (HTTP {response.status_code})，请检查仓库链接或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                    for pkg_retry in range(max_package_retries + 1):
+                        try:
+                            if pkg_retry > 0:
+                                wait_time = min(2 ** pkg_retry, 8)
+                                logger.warning(f"获取资源包信息重试 {pkg_retry}/{max_package_retries}，等待 {wait_time} 秒...")
+                                yield f"data: {json.dumps({'type': 'info', 'message': f'获取资源包信息失败，正在重试 ({pkg_retry}/{max_package_retries})...'}, ensure_ascii=False)}\n\n"
+                                await asyncio.sleep(wait_time)
+
+                            async with httpx.AsyncClient(timeout=timeout_config, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
+                                response = await client.get(package_url)
+                                if response.status_code == 200:
+                                    package_data = response.json()
+                                    logger.info("成功获取资源包信息")
+                                    break  # 成功，跳出重试循环
+                                else:
+                                    logger.warning(f"获取资源包信息失败: HTTP {response.status_code} (重试 {pkg_retry}/{max_package_retries})")
+                                    if pkg_retry == max_package_retries:
+                                        yield f"data: {json.dumps({'type': 'error', 'message': f'无法获取资源包信息 (HTTP {response.status_code})，请检查仓库链接或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                        return
+
+                        except httpx.TimeoutException as timeout_err:
+                            logger.warning(f"连接超时 (重试 {pkg_retry}/{max_package_retries}): {timeout_err}")
+                            if pkg_retry == max_package_retries:
+                                yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                return
+                        except httpx.ConnectError as conn_err:
+                            logger.warning(f"连接失败 (重试 {pkg_retry}/{max_package_retries}): {conn_err}")
+                            if pkg_retry == max_package_retries:
+                                yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                return
+                        except Exception as e:
+                            logger.warning(f"获取资源包信息异常 (重试 {pkg_retry}/{max_package_retries}): {e}")
+                            if pkg_retry == max_package_retries:
+                                yield f"data: {json.dumps({'type': 'error', 'message': f'获取资源包信息失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                                 return
 
-                            package_data = response.json()
-                            logger.info("成功获取资源包信息")
-                    except httpx.TimeoutException as timeout_err:
-                        logger.error(f"连接超时: {timeout_err}")
-                        yield f"data: {json.dumps({'type': 'error', 'message': '连接超时，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
-                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
-                        return
-                    except httpx.ConnectError as conn_err:
-                        logger.error(f"连接失败: {conn_err}")
-                        yield f"data: {json.dumps({'type': 'error', 'message': '无法连接到资源仓库，请检查网络或更换CDN节点'}, ensure_ascii=False)}\n\n"
-                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
-                        return
-                    except Exception as e:
-                        logger.error(f"获取资源包信息异常: {e}", exc_info=True)
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'获取资源包信息失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    if not package_data:
+                        yield f"data: {json.dumps({'type': 'error', 'message': '获取资源包信息失败'}, ensure_ascii=False)}\n\n"
                         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
 
@@ -997,131 +1018,135 @@ async def load_resources_stream(
                     # 下载文件
                     download_count = 0  # 已完成下载的数量
                     failed_downloads = []
-                    download_timeout = httpx.Timeout(3.0, read=15.0)
+                    # 增加超时时间：连接10秒，读取45秒（适应网络不稳定的情况）
+                    download_timeout = httpx.Timeout(10.0, read=45.0)
 
-                    async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
-                        for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
-                            logger.info(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
-                            await asyncio.sleep(0)
+                    for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
+                        logger.info(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
+                        await asyncio.sleep(0)
 
-                            # 发送心跳
-                            heartbeat = await send_heartbeat_if_needed()
-                            if heartbeat:
-                                yield heartbeat
+                        # 发送心跳
+                        heartbeat = await send_heartbeat_if_needed()
+                        if heartbeat:
+                            yield heartbeat
 
-                            try:
-                                target_path = scrapers_dir / filename
+                        try:
+                            target_path = scrapers_dir / filename
 
-                                # 推送下载进度
-                                progress = int((index / need_download_count) * 100)
-                                last_heartbeat = asyncio.get_event_loop().time()
-                                yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': need_download_count, 'download_index': index, 'progress': progress}, ensure_ascii=False)}\n\n"
+                            # 推送下载进度
+                            progress = int((index / need_download_count) * 100)
+                            last_heartbeat = asyncio.get_event_loop().time()
+                            yield f"data: {json.dumps({'type': 'progress', 'scraper': scraper_name, 'filename': filename, 'current': index, 'total': need_download_count, 'download_index': index, 'progress': progress}, ensure_ascii=False)}\n\n"
 
-                                # 下载文件 - 重试机制
-                                file_url = f"{base_url}/{file_path}"
-                                max_retries = 3
-                                logger.info(f"\t开始下载 {scraper_name} ({filename}) [{index}/{need_download_count}]")
+                            # 下载文件 - 增强重试机制
+                            file_url = f"{base_url}/{file_path}"
+                            max_retries = 3  # 增加重试次数
+                            logger.info(f"\t开始下载 {scraper_name} ({filename}) [{index}/{need_download_count}]")
 
-                                for retry_count in range(max_retries + 1):
-                                    try:
-                                        if retry_count > 0:
-                                            logger.warning(f"\t\t[重试 {retry_count}/{max_retries}] 下载 {scraper_name}")
-                                            await asyncio.sleep(1.0)
-                                            # 重试时发送心跳
-                                            heartbeat = await send_heartbeat_if_needed()
-                                            if heartbeat:
-                                                yield heartbeat
-
-                                        # 开始下载前发送心跳
+                            for retry_count in range(max_retries + 1):
+                                try:
+                                    if retry_count > 0:
+                                        # 指数退避：1秒, 2秒, 4秒, 8秒, 10秒(最大)
+                                        wait_time = min(2 ** (retry_count - 1), 10)
+                                        logger.warning(f"\t\t[重试 {retry_count}/{max_retries}] 下载 {scraper_name}，等待 {wait_time} 秒...")
+                                        await asyncio.sleep(wait_time)
+                                        # 重试时发送心跳
                                         heartbeat = await send_heartbeat_if_needed()
                                         if heartbeat:
                                             yield heartbeat
 
-                                        response = await asyncio.wait_for(client.get(file_url), timeout=18.0)
+                                    # 开始下载前发送心跳
+                                    heartbeat = await send_heartbeat_if_needed()
+                                    if heartbeat:
+                                        yield heartbeat
 
-                                        # 下载完成后发送心跳
-                                        heartbeat = await send_heartbeat_if_needed()
-                                        if heartbeat:
-                                            yield heartbeat
+                                    # 每次重试创建新的连接（避免连接池问题）
+                                    async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
+                                        response = await asyncio.wait_for(client.get(file_url), timeout=60.0)
 
-                                        if response.status_code == 200:
-                                            # 写入文件
-                                            file_content = response.content
+                                    # 下载完成后发送心跳
+                                    heartbeat = await send_heartbeat_if_needed()
+                                    if heartbeat:
+                                        yield heartbeat
 
-                                            # 让出控制权，防止阻塞
-                                            await asyncio.sleep(0)
+                                    if response.status_code == 200:
+                                        # 写入文件
+                                        file_content = response.content
 
-                                            # 验证文件哈希值（如果远程提供了哈希值）- 使用异步方式
-                                            if remote_hash:
-                                                import hashlib
-                                                # 将哈希计算放到线程池，防止阻塞事件循环（大文件可能耗时数秒）
-                                                local_hash = await asyncio.to_thread(
-                                                    lambda data: hashlib.sha256(data).hexdigest(),
-                                                    file_content
-                                                )
-                                                # 哈希计算完成后发送心跳
-                                                heartbeat = await send_heartbeat_if_needed()
-                                                if heartbeat:
-                                                    yield heartbeat
+                                        # 让出控制权，防止阻塞
+                                        await asyncio.sleep(0)
 
-                                                if local_hash != remote_hash:
-                                                    # 哈希值不匹配，文件可能损坏，删除并标记失败
-                                                    logger.error(f"\t文件哈希验证失败 {scraper_name}: 期望 {remote_hash[:16]}..., 实际 {local_hash[:16]}...")
-                                                    try:
-                                                        await asyncio.to_thread(target_path.unlink)
-                                                    except Exception:
-                                                        pass
-                                                    if retry_count == max_retries:
-                                                        failed_downloads.append(scraper_name)
-                                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '哈希验证失败'}, ensure_ascii=False)}\n\n"
-                                                    continue  # 重试下载
-                                                hashes_data[scraper_name] = remote_hash
-                                                logger.debug(f"\t\t哈希验证通过: {scraper_name}")
-
-                                            # 写入文件（异步方式，防止阻塞）
-                                            logger.debug(f"\t\t正在写入文件: {filename} ({len(file_content)} 字节)")
-                                            await asyncio.to_thread(target_path.write_bytes, file_content)
-                                            logger.debug(f"\t\t文件写入完成: {filename}")
-
-                                            # 文件写入后发送心跳
+                                        # 验证文件哈希值（如果远程提供了哈希值）- 使用异步方式
+                                        if remote_hash:
+                                            import hashlib
+                                            # 将哈希计算放到线程池，防止阻塞事件循环（大文件可能耗时数秒）
+                                            local_hash = await asyncio.to_thread(
+                                                lambda data: hashlib.sha256(data).hexdigest(),
+                                                file_content
+                                            )
+                                            # 哈希计算完成后发送心跳
                                             heartbeat = await send_heartbeat_if_needed()
                                             if heartbeat:
                                                 yield heartbeat
 
-                                            download_count += 1
-                                            version = scraper_info.get('version', 'unknown')
-                                            versions_data[scraper_name] = version
+                                            if local_hash != remote_hash:
+                                                # 哈希值不匹配，文件可能损坏，删除并标记失败
+                                                logger.error(f"\t文件哈希验证失败 {scraper_name}: 期望 {remote_hash[:16]}..., 实际 {local_hash[:16]}...")
+                                                try:
+                                                    await asyncio.to_thread(target_path.unlink)
+                                                except Exception:
+                                                    pass
+                                                if retry_count == max_retries:
+                                                    failed_downloads.append(scraper_name)
+                                                    yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': '哈希验证失败'}, ensure_ascii=False)}\n\n"
+                                                continue  # 重试下载
+                                            hashes_data[scraper_name] = remote_hash
+                                            logger.debug(f"\t\t哈希验证通过: {scraper_name}")
 
-                                            logger.info(f"\t✓ 成功下载: {filename} (版本: {version}, 大小: {len(file_content)} 字节)")
-                                            last_heartbeat = asyncio.get_event_loop().time()
-                                            yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
+                                        # 写入文件（异步方式，防止阻塞）
+                                        logger.debug(f"\t\t正在写入文件: {filename} ({len(file_content)} 字节)")
+                                        await asyncio.to_thread(target_path.write_bytes, file_content)
+                                        logger.debug(f"\t\t文件写入完成: {filename}")
 
-                                            # 下载成功后让出控制权
-                                            await asyncio.sleep(0)
-                                            break
-                                        else:
-                                            if retry_count == max_retries:
-                                                failed_downloads.append(scraper_name)
-                                                logger.error(f"\t下载失败 {scraper_name}: HTTP {response.status_code}")
-                                                yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'HTTP {response.status_code}'}, ensure_ascii=False)}\n\n"
+                                        # 文件写入后发送心跳
+                                        heartbeat = await send_heartbeat_if_needed()
+                                        if heartbeat:
+                                            yield heartbeat
 
-                                    except (httpx.TimeoutException, asyncio.TimeoutError, httpx.ConnectError) as e:
+                                        download_count += 1
+                                        version = scraper_info.get('version', 'unknown')
+                                        versions_data[scraper_name] = version
+
+                                        logger.info(f"\t✓ 成功下载: {filename} (版本: {version}, 大小: {len(file_content)} 字节)")
+                                        last_heartbeat = asyncio.get_event_loop().time()
+                                        yield f"data: {json.dumps({'type': 'success', 'scraper': scraper_name, 'filename': filename}, ensure_ascii=False)}\n\n"
+
+                                        # 下载成功后让出控制权
+                                        await asyncio.sleep(0)
+                                        break
+                                    else:
                                         if retry_count == max_retries:
                                             failed_downloads.append(scraper_name)
-                                            error_msg = "超时" if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)) else "连接失败"
-                                            logger.error(f"\t下载失败 {scraper_name}: {error_msg}", exc_info=True)
-                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': error_msg}, ensure_ascii=False)}\n\n"
-                                        # 让出控制权，防止连续重试时阻塞
-                                        await asyncio.sleep(0)
-                                    except Exception as retry_error:
-                                        # 捕获其他异常（如网络错误、解析错误等）
-                                        logger.error(f"\t\t下载 {scraper_name} 时出现异常 (重试 {retry_count}/{max_retries}): {retry_error}", exc_info=True)
-                                        if retry_count == max_retries:
-                                            failed_downloads.append(scraper_name)
-                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'异常: {str(retry_error)}'}, ensure_ascii=False)}\n\n"
-                                        await asyncio.sleep(0)
+                                            logger.error(f"\t下载失败 {scraper_name}: HTTP {response.status_code}")
+                                            yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'HTTP {response.status_code}'}, ensure_ascii=False)}\n\n"
 
-                            except Exception as e:
+                                except (httpx.TimeoutException, asyncio.TimeoutError, httpx.ConnectError) as e:
+                                    if retry_count == max_retries:
+                                        failed_downloads.append(scraper_name)
+                                        error_msg = "超时" if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)) else "连接失败"
+                                        logger.error(f"\t下载失败 {scraper_name}: {error_msg}", exc_info=True)
+                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': error_msg}, ensure_ascii=False)}\n\n"
+                                    # 让出控制权，防止连续重试时阻塞
+                                    await asyncio.sleep(0)
+                                except Exception as retry_error:
+                                    # 捕获其他异常（如网络错误、解析错误等）
+                                    logger.error(f"\t\t下载 {scraper_name} 时出现异常 (重试 {retry_count}/{max_retries}): {retry_error}", exc_info=True)
+                                    if retry_count == max_retries:
+                                        failed_downloads.append(scraper_name)
+                                        yield f"data: {json.dumps({'type': 'failed', 'scraper': scraper_name, 'message': f'异常: {str(retry_error)}'}, ensure_ascii=False)}\n\n"
+                                    await asyncio.sleep(0)
+
+                        except Exception as e:
                                 # 外层异常处理：捕获整个文件处理流程中的错误
                                 failed_downloads.append(scraper_name)
                                 logger.error(f"\t处理 {scraper_name} 时发生严重错误: {e}", exc_info=True)
@@ -1400,20 +1425,57 @@ async def _download_and_extract_release(
     download_url = asset_info['download_url']
     filename = asset_info.get('filename', '').lower()
 
-    timeout = httpx.Timeout(30.0, read=120.0)  # 下载大文件需要更长超时
+    timeout = httpx.Timeout(30.0, read=180.0)  # 下载大文件需要更长超时
+    max_retries = 3  # 最大重试次数
+    archive_content = None
 
-    try:
-        if progress_callback:
-            await progress_callback("正在下载压缩包...")
+    # 带重试的下载逻辑
+    for retry_count in range(max_retries + 1):
+        try:
+            if retry_count > 0:
+                # 指数退避：2秒, 4秒, 8秒
+                wait_time = min(2 ** retry_count, 10)
+                logger.warning(f"下载压缩包重试 {retry_count}/{max_retries}，等待 {wait_time} 秒...")
+                if progress_callback:
+                    await progress_callback(f"下载失败，正在重试 ({retry_count}/{max_retries})...")
+                await asyncio.sleep(wait_time)
+            else:
+                if progress_callback:
+                    await progress_callback("正在下载压缩包...")
 
-        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
-            response = await client.get(download_url)
-            if response.status_code != 200:
-                logger.error(f"下载压缩包失败: HTTP {response.status_code}")
+            async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+                response = await client.get(download_url)
+                if response.status_code == 200:
+                    archive_content = response.content
+                    logger.info(f"压缩包下载完成: {len(archive_content)} 字节")
+                    break  # 下载成功，跳出重试循环
+                else:
+                    logger.warning(f"下载压缩包失败: HTTP {response.status_code} (重试 {retry_count}/{max_retries})")
+                    if retry_count == max_retries:
+                        logger.error(f"下载压缩包失败，已重试 {max_retries} 次: HTTP {response.status_code}")
+                        return False
+
+        except (httpx.TimeoutException, asyncio.TimeoutError) as e:
+            logger.warning(f"下载压缩包超时 (重试 {retry_count}/{max_retries}): {e}")
+            if retry_count == max_retries:
+                logger.error(f"下载压缩包超时，已重试 {max_retries} 次")
+                return False
+        except httpx.ConnectError as e:
+            logger.warning(f"连接失败 (重试 {retry_count}/{max_retries}): {e}")
+            if retry_count == max_retries:
+                logger.error(f"连接失败，已重试 {max_retries} 次")
+                return False
+        except Exception as e:
+            logger.warning(f"下载异常 (重试 {retry_count}/{max_retries}): {e}")
+            if retry_count == max_retries:
+                logger.error(f"下载异常，已重试 {max_retries} 次: {e}")
                 return False
 
-            archive_content = response.content
-            logger.info(f"压缩包下载完成: {len(archive_content)} 字节")
+    if not archive_content:
+        logger.error("下载压缩包失败：未获取到内容")
+        return False
+
+    try:
 
         if progress_callback:
             await progress_callback("正在解压文件...")
