@@ -1338,11 +1338,17 @@ async def _fetch_github_release_asset(
             assets = release_data.get('assets', [])
 
             # 查找匹配当前平台的压缩包
-            # 支持的命名格式: scrapers-{platform_key}.zip 或 {platform_key}.zip
+            # 支持的命名格式:
+            # - scrapers-{platform_key}.zip / .tar.gz
+            # - {platform_key}.zip / .tar.gz
+            # - scrapers_{platform_key}.zip / .tar.gz
             target_patterns = [
                 f"scrapers-{platform_key}.zip",
+                f"scrapers-{platform_key}.tar.gz",
                 f"{platform_key}.zip",
+                f"{platform_key}.tar.gz",
                 f"scrapers_{platform_key}.zip",
+                f"scrapers_{platform_key}.tar.gz",
             ]
 
             for asset in assets:
@@ -1375,7 +1381,7 @@ async def _download_and_extract_release(
     progress_callback = None
 ) -> bool:
     """
-    下载并解压 Release 压缩包
+    下载并解压 Release 压缩包（支持 .zip 和 .tar.gz）
 
     Args:
         asset_info: 资产信息 (download_url, filename, version)
@@ -1388,9 +1394,11 @@ async def _download_and_extract_release(
         是否成功
     """
     import zipfile
+    import tarfile
     import io
 
     download_url = asset_info['download_url']
+    filename = asset_info.get('filename', '').lower()
 
     timeout = httpx.Timeout(30.0, read=120.0)  # 下载大文件需要更长超时
 
@@ -1404,8 +1412,8 @@ async def _download_and_extract_release(
                 logger.error(f"下载压缩包失败: HTTP {response.status_code}")
                 return False
 
-            zip_content = response.content
-            logger.info(f"压缩包下载完成: {len(zip_content)} 字节")
+            archive_content = response.content
+            logger.info(f"压缩包下载完成: {len(archive_content)} 字节")
 
         if progress_callback:
             await progress_callback("正在解压文件...")
@@ -1425,22 +1433,45 @@ async def _download_and_extract_release(
 
         # 解压新文件
         extracted_count = 0
-        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
-            for zip_info in zip_ref.infolist():
-                # 只解压 .so, .pyd, .json 文件
-                if zip_info.filename.endswith(('.so', '.pyd', '.json')):
-                    # 获取文件名（去掉路径前缀）
-                    base_name = Path(zip_info.filename).name
-                    if not base_name:
-                        continue
 
-                    target_path = scrapers_dir / base_name
+        # 判断压缩包类型
+        if filename.endswith('.tar.gz') or filename.endswith('.tgz'):
+            # 处理 tar.gz 格式
+            with tarfile.open(fileobj=io.BytesIO(archive_content), mode='r:gz') as tar_ref:
+                for member in tar_ref.getmembers():
+                    if member.isfile() and member.name.endswith(('.so', '.pyd', '.json')):
+                        # 获取文件名（去掉路径前缀）
+                        base_name = Path(member.name).name
+                        if not base_name:
+                            continue
 
-                    # 读取并写入文件
-                    file_content = zip_ref.read(zip_info.filename)
-                    await asyncio.to_thread(target_path.write_bytes, file_content)
-                    extracted_count += 1
-                    logger.debug(f"解压: {base_name}")
+                        target_path = scrapers_dir / base_name
+
+                        # 读取并写入文件
+                        file_obj = tar_ref.extractfile(member)
+                        if file_obj:
+                            file_content = file_obj.read()
+                            await asyncio.to_thread(target_path.write_bytes, file_content)
+                            extracted_count += 1
+                            logger.debug(f"解压: {base_name}")
+        else:
+            # 处理 zip 格式
+            with zipfile.ZipFile(io.BytesIO(archive_content), 'r') as zip_ref:
+                for zip_info in zip_ref.infolist():
+                    # 只解压 .so, .pyd, .json 文件
+                    if zip_info.filename.endswith(('.so', '.pyd', '.json')):
+                        # 获取文件名（去掉路径前缀）
+                        base_name = Path(zip_info.filename).name
+                        if not base_name:
+                            continue
+
+                        target_path = scrapers_dir / base_name
+
+                        # 读取并写入文件
+                        file_content = zip_ref.read(zip_info.filename)
+                        await asyncio.to_thread(target_path.write_bytes, file_content)
+                        extracted_count += 1
+                        logger.debug(f"解压: {base_name}")
 
         logger.info(f"解压完成: 共 {extracted_count} 个文件")
 
@@ -1450,7 +1481,10 @@ async def _download_and_extract_release(
         return extracted_count > 0
 
     except zipfile.BadZipFile:
-        logger.error("压缩包格式错误")
+        logger.error("ZIP 压缩包格式错误")
+        return False
+    except tarfile.TarError as e:
+        logger.error(f"TAR 压缩包格式错误: {e}")
         return False
     except Exception as e:
         logger.error(f"下载或解压失败: {e}", exc_info=True)
