@@ -1734,8 +1734,8 @@ async def search_anime_for_dandan(
     season_to_search = parsed_info.get("season")
     episode_to_search = parsed_info.get("episode")
 
-    # 首先搜索本地库
-    db_results = await crud.search_animes_for_dandan(session, search_term)
+    # 首先搜索本地库（使用解析后的标题，而非原始搜索词）
+    db_results = await crud.search_animes_for_dandan(session, title_to_search)
 
     # 如果指定了具体集数，需要检查该集数是否存在
     should_trigger_fallback = False
