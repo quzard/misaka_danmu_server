@@ -412,8 +412,10 @@ async def backup_scrapers(
             if file.suffix in ['.so', '.pyd']:
                 shutil.copy2(file, BACKUP_DIR / file.name)
 
-                # 从文件名提取弹幕源名称 (去掉扩展名)
-                scraper_name = file.stem
+                # 从文件名提取弹幕源名称
+                # 文件名格式: bilibili.cpython-312-aarch64-linux-gnu.so
+                # 需要提取第一个 '.' 之前的部分作为弹幕源名称
+                scraper_name = file.name.split('.')[0]
 
                 file_info = {
                     "name": file.name,
@@ -422,9 +424,13 @@ async def backup_scrapers(
                     "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat()
                 }
 
-                # 添加版本号（如果有）
+                # 添加版本号（如果有）- 从 versions.json 的 scrapers 字段中查找
                 if scraper_name in versions:
                     file_info["version"] = versions[scraper_name]
+                elif isinstance(versions, dict) and 'scrapers' in versions:
+                    # 兼容新格式的 versions.json
+                    if scraper_name in versions.get('scrapers', {}):
+                        file_info["version"] = versions['scrapers'][scraper_name]
 
                 backed_files.append(file_info)
                 backup_count += 1
