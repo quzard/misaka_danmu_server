@@ -545,7 +545,7 @@ export const Scrapers = () => {
 
                 messageApi.success('资源加载成功,服务正在重启...')
 
-                // 延迟刷新页面
+                // 延迟5秒刷新页面，等待服务重启完成
                 setTimeout(() => {
                   setDownloadProgress({
                     visible: false,
@@ -558,7 +558,7 @@ export const Scrapers = () => {
                   getInfo()
                   loadVersionInfo()
                   setLoadingResources(false)
-                }, 2500)
+                }, 4000)
                 break
 
               case 'error':
