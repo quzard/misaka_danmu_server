@@ -270,11 +270,22 @@ async def _perform_update(
 
                     # 检查是否有 Docker socket
                     from ..docker_utils import is_docker_socket_available, restart_container
+                    import sys
                     docker_available = is_docker_socket_available()
 
                     if docker_available:
                         # 有 Docker socket：重启容器
                         logger.info("全量替换完成，准备重启容器...")
+
+                        # 刷新日志缓冲，确保日志输出
+                        for handler in logging.getLogger().handlers:
+                            handler.flush()
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+
+                        # 等待日志写入完成
+                        await asyncio.sleep(1.0)
+
                         container_name = await config_manager.get("containerName", "misaka-danmu-server")
                         result = await restart_container(container_name)
                         if result.get("success"):
@@ -372,11 +383,22 @@ async def _perform_update(
 
         # 根据情况决定是重启容器还是热加载
         from ..docker_utils import is_docker_socket_available, restart_container
+        import sys
         docker_available = is_docker_socket_available()
 
         if has_updates and docker_available:
             # 有更新已有源且有 Docker socket：重启容器
             logger.info("检测到更新已有源，准备重启容器...")
+
+            # 刷新日志缓冲，确保日志输出
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+            # 等待日志写入完成
+            await asyncio.sleep(1.0)
+
             container_name = await config_manager.get("containerName", "misaka-danmu-server")
             result = await restart_container(container_name)
             if result.get("success"):

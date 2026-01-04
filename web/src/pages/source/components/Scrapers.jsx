@@ -464,6 +464,9 @@ export const Scrapers = () => {
         setLoadingResources(false)
       }, 5 * 60 * 1000) // 5分钟
 
+      // 标记是否已完成下载（用于忽略容器重启导致的连接断开错误）
+      let downloadCompleted = false
+
       await fetchEventSource('/api/ui/scrapers/load-resources-stream', {
         method: 'POST',
         headers: {
@@ -537,6 +540,7 @@ export const Scrapers = () => {
 
               case 'complete':
                 clearTimeout(globalTimeout) // 清除超时
+                downloadCompleted = true // 标记下载已完成
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
@@ -561,6 +565,16 @@ export const Scrapers = () => {
                 }, 4000)
                 break
 
+              case 'container_restart_required':
+                // 容器即将重启，标记为已完成，忽略后续连接断开错误
+                downloadCompleted = true
+                break
+
+              case 'done':
+                // SSE 流正常结束，标记为已完成
+                downloadCompleted = true
+                break
+
               case 'error':
                 clearTimeout(globalTimeout) // 清除超时
                 messageApi.error(data.message || '加载失败')
@@ -582,6 +596,11 @@ export const Scrapers = () => {
         onerror: error => {
           console.error('SSE 下载流错误:', error)
           clearTimeout(globalTimeout) // 清除超时
+          // 如果下载已完成，忽略连接断开错误（可能是容器重启导致）
+          if (downloadCompleted) {
+            console.log('下载已完成，忽略连接断开错误')
+            return
+          }
           if (error.name !== 'AbortError') {
             messageApi.error('下载连接出错')
             setDownloadProgress({

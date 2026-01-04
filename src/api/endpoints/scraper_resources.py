@@ -1243,14 +1243,28 @@ async def load_resources_stream(
                     # - 如果只有新增源：软件重启（热加载）即可
                     # - 如果有更新已有源：需要重启容器（.so 文件被占用无法热更新）
                     from ...docker_utils import is_docker_socket_available, restart_container
+                    import sys
 
                     need_container_restart = has_updates and download_count > 0
                     docker_available = is_docker_socket_available()
 
+                    # ========== 先备份新下载的资源到持久化目录（在 SSE 流中同步执行）==========
+                    if download_count > 0:
+                        yield f"data: {json.dumps({'type': 'info', 'message': '正在备份新下载的资源...'}, ensure_ascii=False)}\n\n"
+                        try:
+                            logger.info("正在备份新下载的资源到持久化目录...")
+                            await backup_scrapers(current_user)
+                            logger.info("新资源备份完成")
+                            yield f"data: {json.dumps({'type': 'info', 'message': '✓ 新资源备份完成'}, ensure_ascii=False)}\n\n"
+                        except Exception as backup_error:
+                            logger.warning(f"备份新资源失败: {backup_error}")
+                            yield f"data: {json.dumps({'type': 'warning', 'message': f'备份失败: {str(backup_error)}'}, ensure_ascii=False)}\n\n"
+
+                    # ========== 根据情况提示用户 ==========
                     if download_count > 0:
                         if need_container_restart:
                             if docker_available:
-                                yield f"data: {json.dumps({'type': 'info', 'message': '检测到更新已有源，将在备份后重启容器以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'info', 'message': '检测到更新已有源，将在 2 秒后重启容器以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
                                 yield f"data: {json.dumps({'type': 'container_restart_required', 'message': '需要重启容器'}, ensure_ascii=False)}\n\n"
                             else:
                                 yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 更新已有源需要重启容器，但未检测到 Docker 套接字，请手动重启容器'}, ensure_ascii=False)}\n\n"
@@ -1261,24 +1275,32 @@ async def load_resources_stream(
                     # 发送流结束信号
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
+                    # 刷新日志缓冲，确保日志输出
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+
                     # 后台重载任务
                     async def reload_scrapers_background():
                         global _version_cache, _version_cache_time
-                        await asyncio.sleep(0.5)
+                        # 等待 SSE 流完全关闭和日志刷新
+                        await asyncio.sleep(1.0)
                         try:
-                            # 先备份新下载的资源到持久化目录
-                            try:
-                                logger.info("正在备份新下载的资源到持久化目录...")
-                                await backup_scrapers(current_user)
-                                logger.info("新资源备份完成")
-                            except Exception as backup_error:
-                                logger.warning(f"备份新资源失败: {backup_error}")
-
                             # 根据情况决定是重启容器还是热加载
                             if need_container_restart and docker_available:
                                 # 有更新已有源且有 Docker socket：重启容器
                                 # 容器重启后会自动从备份恢复新的源文件
                                 logger.info("检测到更新已有源，准备重启容器...")
+
+                                # 再次刷新日志，确保上面的日志输出
+                                for handler in logging.getLogger().handlers:
+                                    handler.flush()
+                                sys.stdout.flush()
+
+                                # 等待日志写入完成
+                                await asyncio.sleep(1.0)
+
                                 container_name = await config_manager.get("containerName", "misaka-danmu-server")
                                 result = await restart_container(container_name)
                                 if result.get("success"):
