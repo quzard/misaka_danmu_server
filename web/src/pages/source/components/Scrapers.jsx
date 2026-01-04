@@ -547,9 +547,21 @@ export const Scrapers = () => {
                   message: `下载完成! 成功: ${data.downloaded}, 跳过: ${data.skipped || 0}, 失败: ${data.failed}`
                 }))
 
-                messageApi.success('资源加载成功,服务正在重启...')
+                // 根据实际下载数量显示不同的提示
+                if (data.downloaded > 0) {
+                  // 有文件被下载，可能会触发重启或热加载
+                  if (data.full_replace) {
+                    messageApi.success('全量替换完成，服务正在重启...')
+                  } else {
+                    messageApi.success('资源加载成功，正在应用更新...')
+                  }
+                } else {
+                  // 没有文件被下载，所有源都是最新的
+                  messageApi.success('所有弹幕源都是最新的')
+                }
 
-                // 延迟5秒刷新页面，等待服务重启完成
+                // 延迟刷新页面
+                const delay = data.downloaded > 0 ? 4000 : 1500
                 setTimeout(() => {
                   setDownloadProgress({
                     visible: false,
@@ -562,7 +574,7 @@ export const Scrapers = () => {
                   getInfo()
                   loadVersionInfo()
                   setLoadingResources(false)
-                }, 4000)
+                }, delay)
                 break
 
               case 'container_restart_required':
