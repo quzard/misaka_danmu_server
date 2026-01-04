@@ -29,6 +29,10 @@ router = APIRouter()
 # 全局锁：防止并发下载
 _download_lock = asyncio.Lock()
 
+# 下载冷却时间控制
+_last_download_start_time: Optional[datetime] = None
+_DOWNLOAD_COOLDOWN = timedelta(seconds=10)  # 两次下载之间至少间隔10秒
+
 # 版本信息缓存
 _version_cache: Optional[Dict[str, Any]] = None
 _version_cache_time: Optional[datetime] = None
@@ -701,14 +705,29 @@ async def load_resources_stream(
     manager = Depends(get_scraper_manager)
 ):
     """从资源仓库下载并加载弹幕源文件,通过SSE推送进度"""
+    global _last_download_start_time
 
     async def event_generator():
         """SSE事件生成器"""
+        global _last_download_start_time
+
         # 检查是否有其他下载任务正在进行
         if _download_lock.locked():
             logger.warning("检测到并发下载请求，已拒绝")
             yield f"data: {json.dumps({'type': 'error', 'message': '已有下载任务正在进行，请稍后再试'}, ensure_ascii=False)}\n\n"
             return
+
+        # 检查冷却时间，防止短时间内重复请求
+        if _last_download_start_time:
+            time_since_last = datetime.now() - _last_download_start_time
+            if time_since_last < _DOWNLOAD_COOLDOWN:
+                remaining = (_DOWNLOAD_COOLDOWN - time_since_last).seconds
+                logger.warning(f"下载请求过于频繁，需等待 {remaining} 秒")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'请求过于频繁，请等待 {remaining} 秒后再试'}, ensure_ascii=False)}\n\n"
+                return
+
+        # 记录本次下载开始时间
+        _last_download_start_time = datetime.now()
 
         # 获取锁，防止并发下载
         logger.info("开始下载任务，已获取下载锁")

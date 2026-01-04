@@ -188,6 +188,13 @@ class ScraperManager:
                             description = f"{provider_name.capitalize()} 源的特定分集标题黑名单 (正则表达式)。"
                             default_configs_to_register[config_key] = (default_value, description)
 
+                        # 收集 scraper 声明的其他默认配置（如 dandanplay 的跨域代理配置）
+                        if hasattr(obj, '_DEFAULT_CONFIGS'):
+                            scraper_default_configs = getattr(obj, '_DEFAULT_CONFIGS', {})
+                            for config_key, config_tuple in scraper_default_configs.items():
+                                default_configs_to_register[config_key] = config_tuple
+                                logging.getLogger(__name__).debug(f"发现 {provider_name} 的默认配置: {config_key}")
+
                         self._scraper_classes[provider_name] = obj
                         # 存储版本号：优先使用 versions.json 中的版本（因为 .so 模块无法热更新）
                         if provider_name in versions_from_file:

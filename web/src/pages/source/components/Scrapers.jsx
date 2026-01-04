@@ -612,7 +612,8 @@ export const Scrapers = () => {
           // 如果下载已完成，忽略连接断开错误（可能是容器重启导致）
           if (downloadCompleted) {
             console.log('下载已完成，忽略连接断开错误')
-            return
+            // 抛出错误以停止 fetchEventSource 的自动重试
+            throw new Error('下载已完成，停止重试')
           }
           if (error.name !== 'AbortError') {
             messageApi.error('下载连接出错')
@@ -626,7 +627,8 @@ export const Scrapers = () => {
             })
             setLoadingResources(false)
           }
-          // 不抛出错误,停止自动重试
+          // 抛出错误以停止 fetchEventSource 的自动重试，防止连接断开后自动重新发起请求
+          throw error
         },
       }).catch(error => {
         clearTimeout(globalTimeout) // 清除超时
