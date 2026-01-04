@@ -1001,6 +1001,26 @@ async def load_resources_stream(
                         return
 
                     # ========== 第二阶段：备份并下载需要更新的文件 ==========
+                    # 判断是"新增源"还是"更新已有源"
+                    # 检查本地是否已存在这些源文件
+                    existing_scrapers = set()
+                    for f in scrapers_dir.iterdir():
+                        if f.is_file() and f.suffix in ['.so', '.pyd']:
+                            # 从文件名提取源名称（如 bilibili.cpython-312-x86_64-linux-gnu.so -> bilibili）
+                            existing_scrapers.add(f.name.split('.')[0])
+
+                    # 分类：新增 vs 更新
+                    new_scrapers = []  # 新增的源
+                    update_scrapers = []  # 更新已有的源
+                    for scraper_name, _, _, _, _ in to_download:
+                        if scraper_name in existing_scrapers:
+                            update_scrapers.append(scraper_name)
+                        else:
+                            new_scrapers.append(scraper_name)
+
+                    has_updates = len(update_scrapers) > 0  # 是否有更新已有源
+                    logger.info(f"下载分类: 新增 {len(new_scrapers)} 个, 更新 {len(update_scrapers)} 个")
+
                     # 保存 package.json 到本地 - 使用异步IO
                     local_package_file = scrapers_dir / "package.json"
                     package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
@@ -1219,10 +1239,24 @@ async def load_resources_stream(
                     logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
                     yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
 
-                    # 如果有文件被下载（不是全部跳过），提示可能需要重启
+                    # 根据下载类型决定后续操作
+                    # - 如果只有新增源：软件重启（热加载）即可
+                    # - 如果有更新已有源：需要重启容器（.so 文件被占用无法热更新）
+                    from ...docker_utils import is_docker_socket_available, restart_container
+
+                    need_container_restart = has_updates and download_count > 0
+                    docker_available = is_docker_socket_available()
+
                     if download_count > 0:
-                        yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 如果更新后弹幕源功能异常，建议重启服务以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
-                        yield f"data: {json.dumps({'type': 'restart_suggested', 'message': '如有异常建议重启服务'}, ensure_ascii=False)}\n\n"
+                        if need_container_restart:
+                            if docker_available:
+                                yield f"data: {json.dumps({'type': 'info', 'message': '检测到更新已有源，将在备份后重启容器以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'container_restart_required', 'message': '需要重启容器'}, ensure_ascii=False)}\n\n"
+                            else:
+                                yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 更新已有源需要重启容器，但未检测到 Docker 套接字，请手动重启容器'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'restart_suggested', 'message': '建议手动重启容器'}, ensure_ascii=False)}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'info', 'message': '新增源已下载，正在热加载...'}, ensure_ascii=False)}\n\n"
 
                     # 发送流结束信号
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -1232,19 +1266,35 @@ async def load_resources_stream(
                         global _version_cache, _version_cache_time
                         await asyncio.sleep(0.5)
                         try:
-                            logger.info("开始重载弹幕源...")
-                            await manager.load_and_sync_scrapers()
-                            logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
-                            _version_cache = None
-                            _version_cache_time = None
-
-                            # 重载成功后，自动备份新下载的资源
+                            # 先备份新下载的资源到持久化目录
                             try:
-                                logger.info("正在备份新下载的资源...")
+                                logger.info("正在备份新下载的资源到持久化目录...")
                                 await backup_scrapers(current_user)
                                 logger.info("新资源备份完成")
                             except Exception as backup_error:
                                 logger.warning(f"备份新资源失败: {backup_error}")
+
+                            # 根据情况决定是重启容器还是热加载
+                            if need_container_restart and docker_available:
+                                # 有更新已有源且有 Docker socket：重启容器
+                                # 容器重启后会自动从备份恢复新的源文件
+                                logger.info("检测到更新已有源，准备重启容器...")
+                                container_name = await config_manager.get("containerName", "misaka-danmu-server")
+                                result = await restart_container(container_name)
+                                if result.get("success"):
+                                    logger.info(f"已向容器 '{container_name}' 发送重启指令")
+                                else:
+                                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                                    # 降级到热加载
+                                    await manager.load_and_sync_scrapers()
+                            else:
+                                # 只有新增源或没有 Docker socket：热加载
+                                logger.info("开始热加载弹幕源...")
+                                await manager.load_and_sync_scrapers()
+                                logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
+
+                            _version_cache = None
+                            _version_cache_time = None
                         except Exception as e:
                             logger.error(f"后台加载弹幕源失败: {e}", exc_info=True)
                             try:

@@ -26,6 +26,7 @@ if [ -S /var/run/docker.sock ]; then
         echo "检测到 Docker 套接字权限不足，正在授权..."
         chmod 666 /var/run/docker.sock 2>/dev/null && \
             echo "已授予 Docker 套接字访问权限" || \
+            echo "警告: 无法修改 Docker 套接字权限"
     fi
 fi
 

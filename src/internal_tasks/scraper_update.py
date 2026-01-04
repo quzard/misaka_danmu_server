@@ -259,18 +259,46 @@ async def _perform_update(
                     except Exception as pkg_err:
                         logger.warning(f"更新 package.json 失败: {pkg_err}")
 
-                    # 重载弹幕源
+                    # 全量替换模式：一定是更新已有源，需要重启容器
+                    # 先备份新下载的资源到持久化目录
                     try:
-                        await scraper_manager.load_and_sync_scrapers()
-                        logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}")
-                        logger.warning("⚠️ 全量替换完成，建议重启服务以确保 .so 文件更新生效")
+                        logger.info("正在备份全量替换的资源到持久化目录...")
+                        await backup_scrapers(SystemUser())
+                        logger.info("全量替换资源备份完成")
+                    except Exception as backup_error:
+                        logger.warning(f"备份资源失败: {backup_error}")
 
-                        # 清除版本缓存
-                        import src.api.endpoints.scraper_resources as sr
-                        sr._version_cache = None
-                        sr._version_cache_time = None
-                    except Exception as e:
-                        logger.error(f"重载弹幕源失败: {e}")
+                    # 检查是否有 Docker socket
+                    from ..docker_utils import is_docker_socket_available, restart_container
+                    docker_available = is_docker_socket_available()
+
+                    if docker_available:
+                        # 有 Docker socket：重启容器
+                        logger.info("全量替换完成，准备重启容器...")
+                        container_name = await config_manager.get("containerName", "misaka-danmu-server")
+                        result = await restart_container(container_name)
+                        if result.get("success"):
+                            logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}，已向容器 '{container_name}' 发送重启指令")
+                        else:
+                            logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                            try:
+                                await scraper_manager.load_and_sync_scrapers()
+                                logger.info(f"弹幕源全量替换完成（热加载）: {local_version} -> {release_version}")
+                            except Exception as e:
+                                logger.error(f"热加载失败: {e}")
+                    else:
+                        # 没有 Docker socket：热加载并提示
+                        try:
+                            await scraper_manager.load_and_sync_scrapers()
+                            logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}")
+                            logger.warning("⚠️ 全量替换完成但未检测到 Docker 套接字，建议手动重启容器以确保 .so 文件更新生效")
+                        except Exception as e:
+                            logger.error(f"重载弹幕源失败: {e}")
+
+                    # 清除版本缓存
+                    import src.api.endpoints.scraper_resources as sr
+                    sr._version_cache = None
+                    sr._version_cache_time = None
                     return
                 else:
                     logger.warning("全量替换失败，回退到逐文件下载模式")
@@ -321,17 +349,60 @@ async def _perform_update(
         # 保存版本信息
         await _save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
 
-        # 重载弹幕源
-        try:
-            await scraper_manager.load_and_sync_scrapers()
-            logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count}, 失败: {len(failed_downloads)})")
+        # 判断是"新增源"还是"更新已有源"
+        existing_scrapers = set()
+        for f in scrapers_dir.iterdir():
+            if f.is_file() and f.suffix in ['.so', '.pyd']:
+                existing_scrapers.add(f.name.split('.')[0])
 
-            # 清除版本缓存
-            import src.api.endpoints.scraper_resources as sr
-            sr._version_cache = None
-            sr._version_cache_time = None
-        except Exception as e:
-            logger.error(f"重载弹幕源失败: {e}")
+        # 检查下载的源中有多少是更新已有的
+        downloaded_scrapers = list(versions_data.keys())
+        update_count = sum(1 for s in downloaded_scrapers if s in existing_scrapers)
+        has_updates = update_count > 0 and download_count > 0
+
+        logger.info(f"下载分类: 新增 {download_count - update_count} 个, 更新 {update_count} 个")
+
+        # 先备份新下载的资源到持久化目录
+        try:
+            logger.info("正在备份新下载的资源到持久化目录...")
+            await backup_scrapers(SystemUser())
+            logger.info("新资源备份完成")
+        except Exception as backup_error:
+            logger.warning(f"备份新资源失败: {backup_error}")
+
+        # 根据情况决定是重启容器还是热加载
+        from ..docker_utils import is_docker_socket_available, restart_container
+        docker_available = is_docker_socket_available()
+
+        if has_updates and docker_available:
+            # 有更新已有源且有 Docker socket：重启容器
+            logger.info("检测到更新已有源，准备重启容器...")
+            container_name = await config_manager.get("containerName", "misaka-danmu-server")
+            result = await restart_container(container_name)
+            if result.get("success"):
+                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version}，已向容器 '{container_name}' 发送重启指令")
+            else:
+                logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                # 降级到热加载
+                try:
+                    await scraper_manager.load_and_sync_scrapers()
+                    logger.info(f"弹幕源自动更新完成（热加载）: {local_version} -> {remote_version}")
+                except Exception as e:
+                    logger.error(f"热加载失败: {e}")
+        else:
+            # 只有新增源或没有 Docker socket：热加载
+            try:
+                await scraper_manager.load_and_sync_scrapers()
+                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count}, 失败: {len(failed_downloads)})")
+                if has_updates and not docker_available:
+                    logger.warning("⚠️ 更新了已有源但未检测到 Docker 套接字，建议手动重启容器以确保 .so 文件更新生效")
+            except Exception as e:
+                logger.error(f"重载弹幕源失败: {e}")
+
+        # 清除版本缓存
+        import src.api.endpoints.scraper_resources as sr
+        sr._version_cache = None
+        sr._version_cache_time = None
 
 
 
