@@ -143,8 +143,8 @@ def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_in
     if gitee_info:
         owner = gitee_info['owner']
         repo = gitee_info['repo']
-        # Gitee raw 文件 URL 格式: https://gitee.com/owner/repo/raw/master/path
-        return f"https://gitee.com/{owner}/{repo}/raw/master"
+        # Gitee raw 文件 URL 格式: https://gitee.com/owner/repo/raw/main/path
+        return f"https://gitee.com/{owner}/{repo}/raw/main"
 
     if repo_info:
         owner = repo_info['owner']
@@ -1797,4 +1797,70 @@ async def delete_current_scrapers(
         raise
     except Exception as e:
         logger.error(f"删除当前弹幕源失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.delete("/scrapers/all", summary="删除当前源和备份源")
+async def delete_all_scrapers(
+    current_user: models.User = Depends(get_current_user),
+    manager = Depends(get_scraper_manager)
+):
+    """删除当前弹幕源和备份目录中的所有文件"""
+    try:
+        scrapers_dir = _get_scrapers_dir()
+        deleted_current = 0
+        deleted_backup = 0
+
+        # 删除当前源
+        if scrapers_dir.exists():
+            for file in scrapers_dir.glob("*"):
+                if file.suffix in ['.so', '.pyd']:
+                    file.unlink()
+                    deleted_current += 1
+
+            # 删除 package.json 和 versions.json
+            if SCRAPERS_PACKAGE_FILE.exists():
+                SCRAPERS_PACKAGE_FILE.unlink()
+                logger.info("已删除 package.json")
+
+            if SCRAPERS_VERSIONS_FILE.exists():
+                SCRAPERS_VERSIONS_FILE.unlink()
+                logger.info("已删除 versions.json")
+
+        # 删除备份
+        if BACKUP_DIR.exists():
+            for file in BACKUP_DIR.glob("*"):
+                if file.is_file():
+                    file.unlink()
+                    deleted_backup += 1
+            # 尝试删除空目录
+            try:
+                BACKUP_DIR.rmdir()
+            except OSError:
+                pass
+
+        # 清除版本缓存
+        global _version_cache, _version_cache_time
+        _version_cache = None
+        _version_cache_time = None
+
+        logger.info(f"用户 '{current_user.username}' 删除了 {deleted_current} 个当前源文件和 {deleted_backup} 个备份文件")
+
+        # 创建后台任务重新加载 scrapers（此时应该是空的）
+        async def reload_scrapers_background():
+            await asyncio.sleep(1)
+            try:
+                await manager.load_and_sync_scrapers()
+                logger.info(f"用户 '{current_user.username}' 删除所有弹幕源后已重载")
+            except Exception as e:
+                logger.error(f"后台重载弹幕源失败: {e}", exc_info=True)
+
+        asyncio.create_task(reload_scrapers_background())
+
+        return {"message": f"成功删除 {deleted_current} 个当前源文件和 {deleted_backup} 个备份文件，正在后台重载..."}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除所有弹幕源失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")

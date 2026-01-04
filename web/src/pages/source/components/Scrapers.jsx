@@ -42,6 +42,7 @@ import {
   uploadScraperPackage,
   deleteScraperBackup,
   deleteCurrentScrapers,
+  deleteAllScrapers,
   getScraperAutoUpdate,
   saveScraperAutoUpdate,
   getScraperFullReplace,
@@ -1456,144 +1457,33 @@ export const Scrapers = () => {
                 </div>
               </Card>
 
-              {/* 右侧：操作按钮组 —— 仅在 PC 端显示 */}
+              {/* 右侧：源操作按钮 —— 仅在 PC 端显示 */}
               {!isMobile && (
-                <div className="flex gap-2">
-                  <Dropdown
-                    menu={{
-                      items: [
-                        {
-                          key: 'backup',
-                          label: '备份弹幕源',
-                          onClick: async () => {
-                            try {
-                              const res = await backupScrapers()
-                              messageApi.success(res.data?.message || '备份成功')
-                            } catch (error) {
-                              messageApi.error(error.response?.data?.detail || '备份失败')
-                            }
-                          }
-                        },
-                        {
-                          key: 'restore',
-                          label: '备份还原',
-                          onClick: () => {
-                            modalApi.confirm({
-                              title: '还原弹幕源',
-                              content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
-                              okText: '确认',
-                              cancelText: '取消',
-                              onOk: async () => {
-                                try {
-                                  const res = await restoreScrapers()
-                                  messageApi.success(res.data?.message || '还原成功，正在后台重载...')
-                                  setTimeout(() => {
-                                    getInfo()
-                                    loadVersionInfo()
-                                  }, 2500)
-                                } catch (error) {
-                                  messageApi.error(error.response?.data?.detail || '还原失败')
-                                }
-                              },
-                            })
-                          }
-                        },
-                        {
-                          key: 'deleteBackup',
-                          label: '删除备份',
-                          danger: true,
-                          onClick: () => {
-                            modalApi.confirm({
-                              title: '删除备份',
-                              content: '确定要删除所有备份文件吗？此操作不可恢复。',
-                              okText: '确认删除',
-                              cancelText: '取消',
-                              okButtonProps: { danger: true },
-                              onOk: async () => {
-                                try {
-                                  const res = await deleteScraperBackup()
-                                  messageApi.success(res.data?.message || '删除备份成功')
-                                } catch (error) {
-                                  messageApi.error(error.response?.data?.detail || '删除备份失败')
-                                }
-                              },
-                            })
-                          }
-                        },
-                      ]
-                    }}
-                  >
-                    <Button>备份</Button>
-                  </Dropdown>
-                  <Dropdown
-                    menu={{
-                      items: [
-                        {
-                          key: 'reload',
-                          label: '重载当前源',
-                          onClick: async () => {
-                            try {
-                              setLoading(true)
-                              const res = await reloadScrapers()
-                              messageApi.success(res.data?.message || '重载成功，正在后台重载...')
-                              setTimeout(() => {
-                                getInfo()
-                                loadVersionInfo()
-                              }, 2500)
-                            } catch (error) {
-                              messageApi.error(error.response?.data?.detail || '重载失败')
-                            } finally {
-                              setLoading(false)
-                            }
-                          }
-                        },
-                        {
-                          key: 'deleteCurrent',
-                          label: '删除当前源',
-                          danger: true,
-                          onClick: () => {
-                            modalApi.confirm({
-                              title: '删除当前弹幕源',
-                              content: '确定要删除所有当前弹幕源文件吗？此操作不可恢复。',
-                              okText: '确认删除',
-                              cancelText: '取消',
-                              okButtonProps: { danger: true },
-                              onOk: async () => {
-                                try {
-                                  const res = await deleteCurrentScrapers()
-                                  messageApi.success(res.data?.message || '删除成功')
-                                  setTimeout(() => {
-                                    getInfo()
-                                    loadVersionInfo()
-                                  }, 2500)
-                                } catch (error) {
-                                  messageApi.error(error.response?.data?.detail || '删除失败')
-                                }
-                              },
-                            })
-                          }
-                        },
-                      ]
-                    }}
-                  >
-                    <Button type="primary">当前源</Button>
-                  </Dropdown>
-                </div>
-              )}
-            </div>
-          )
-          }
-
-          {/* 移动端：单独显示按钮 */}
-          {
-            isMobile && (
-              <div className="flex gap-2 flex-wrap mb-4">
                 <Dropdown
                   menu={{
                     items: [
                       {
+                        key: 'reload',
+                        label: '重载当前源',
+                        onClick: async () => {
+                          try {
+                            setLoading(true)
+                            const res = await reloadScrapers()
+                            messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+                            setTimeout(() => {
+                              getInfo()
+                              loadVersionInfo()
+                            }, 2500)
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '重载失败')
+                          } finally {
+                            setLoading(false)
+                          }
+                        }
+                      },
+                      {
                         key: 'backup',
-                        label: '备份弹幕源',
+                        label: '备份当前源',
                         onClick: async () => {
                           try {
                             const res = await backupScrapers()
@@ -1605,7 +1495,7 @@ export const Scrapers = () => {
                       },
                       {
                         key: 'restore',
-                        label: '备份还原',
+                        label: '从备份中还原',
                         onClick: () => {
                           modalApi.confirm({
                             title: '还原弹幕源',
@@ -1627,9 +1517,10 @@ export const Scrapers = () => {
                           })
                         }
                       },
+                      { type: 'divider' },
                       {
                         key: 'deleteBackup',
-                        label: '删除备份',
+                        label: '删除备份源',
                         danger: true,
                         onClick: () => {
                           modalApi.confirm({
@@ -1647,33 +1538,6 @@ export const Scrapers = () => {
                               }
                             },
                           })
-                        }
-                      },
-                    ]
-                  }}
-                >
-                  <Button className="flex-1 min-w-0">备份</Button>
-                </Dropdown>
-                <Dropdown
-                  menu={{
-                    items: [
-                      {
-                        key: 'reload',
-                        label: '重载当前源',
-                        onClick: async () => {
-                          try {
-                            setLoading(true)
-                            const res = await reloadScrapers()
-                            messageApi.success(res.data?.message || '重载成功，正在后台重载...')
-                            setTimeout(() => {
-                              getInfo()
-                              loadVersionInfo()
-                            }, 2500)
-                          } catch (error) {
-                            messageApi.error(error.response?.data?.detail || '重载失败')
-                          } finally {
-                            setLoading(false)
-                          }
                         }
                       },
                       {
@@ -1702,10 +1566,183 @@ export const Scrapers = () => {
                           })
                         }
                       },
+                      {
+                        key: 'deleteAll',
+                        label: '删除当前&备份源',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除所有弹幕源',
+                            content: '确定要删除所有当前弹幕源和备份文件吗？此操作不可恢复！',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteAllScrapers()
+                                messageApi.success(res.data?.message || '删除成功')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除失败')
+                              }
+                            },
+                          })
+                        }
+                      },
                     ]
                   }}
                 >
-                  <Button type="primary" className="flex-1 min-w-0">当前源</Button>
+                  <Button type="primary">源操作</Button>
+                </Dropdown>
+              )}
+            </div>
+          )
+          }
+
+          {/* 移动端：源操作按钮 */}
+          {
+            isMobile && (
+              <div className="flex gap-2 flex-wrap mb-4">
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'reload',
+                        label: '重载当前源',
+                        onClick: async () => {
+                          try {
+                            setLoading(true)
+                            const res = await reloadScrapers()
+                            messageApi.success(res.data?.message || '重载成功，正在后台重载...')
+                            setTimeout(() => {
+                              getInfo()
+                              loadVersionInfo()
+                            }, 2500)
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '重载失败')
+                          } finally {
+                            setLoading(false)
+                          }
+                        }
+                      },
+                      {
+                        key: 'backup',
+                        label: '备份当前源',
+                        onClick: async () => {
+                          try {
+                            const res = await backupScrapers()
+                            messageApi.success(res.data?.message || '备份成功')
+                          } catch (error) {
+                            messageApi.error(error.response?.data?.detail || '备份失败')
+                          }
+                        }
+                      },
+                      {
+                        key: 'restore',
+                        label: '从备份中还原',
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '还原弹幕源',
+                            content: '确定要从备份还原弹幕源吗？这将覆盖当前的弹幕源文件。',
+                            okText: '确认',
+                            cancelText: '取消',
+                            onOk: async () => {
+                              try {
+                                const res = await restoreScrapers()
+                                messageApi.success(res.data?.message || '还原成功，正在后台重载...')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '还原失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                      { type: 'divider' },
+                      {
+                        key: 'deleteBackup',
+                        label: '删除备份源',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除备份',
+                            content: '确定要删除所有备份文件吗？此操作不可恢复。',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteScraperBackup()
+                                messageApi.success(res.data?.message || '删除备份成功')
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除备份失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                      {
+                        key: 'deleteCurrent',
+                        label: '删除当前源',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除当前弹幕源',
+                            content: '确定要删除所有当前弹幕源文件吗？此操作不可恢复。',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteCurrentScrapers()
+                                messageApi.success(res.data?.message || '删除成功')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                      {
+                        key: 'deleteAll',
+                        label: '删除当前&备份源',
+                        danger: true,
+                        onClick: () => {
+                          modalApi.confirm({
+                            title: '删除所有弹幕源',
+                            content: '确定要删除所有当前弹幕源和备份文件吗？此操作不可恢复！',
+                            okText: '确认删除',
+                            cancelText: '取消',
+                            okButtonProps: { danger: true },
+                            onOk: async () => {
+                              try {
+                                const res = await deleteAllScrapers()
+                                messageApi.success(res.data?.message || '删除成功')
+                                setTimeout(() => {
+                                  getInfo()
+                                  loadVersionInfo()
+                                }, 2500)
+                              } catch (error) {
+                                messageApi.error(error.response?.data?.detail || '删除失败')
+                              }
+                            },
+                          })
+                        }
+                      },
+                    ]
+                  }}
+                >
+                  <Button type="primary" className="flex-1 min-w-0">源操作</Button>
                 </Dropdown>
               </div>
             )

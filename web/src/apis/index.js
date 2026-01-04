@@ -413,6 +413,8 @@ export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
 export const deleteScraperBackup = () => api.delete('/api/ui/scrapers/backup')
 /** 删除当前弹幕源 */
 export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current')
+/** 删除当前源和备份源 */
+export const deleteAllScrapers = () => api.delete('/api/ui/scrapers/all')
 /** 获取自动更新配置 */
 export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
 /** 保存自动更新配置 */
