@@ -79,7 +79,7 @@ def get_docker_client() -> Optional[Any]:
 def get_docker_status() -> Dict[str, Any]:
     """
     获取 Docker 状态信息
-    
+
     Returns:
         包含 Docker 状态的字典
     """
@@ -87,18 +87,19 @@ def get_docker_status() -> Dict[str, Any]:
         "sdkInstalled": DOCKER_AVAILABLE,
         "socketAvailable": False,
         "socketPath": DOCKER_SOCKET_PATH,
+        "socketExists": Path(DOCKER_SOCKET_PATH).exists(),
         "canRestart": False,
         "canUpdate": False,
     }
-    
+
     if not DOCKER_AVAILABLE:
-        status["message"] = "Docker SDK 未安装"
+        status["message"] = "Docker SDK 未安装，请确保已安装 docker 库 (pip install docker)"
         return status
-    
+
     if not Path(DOCKER_SOCKET_PATH).exists():
-        status["message"] = f"Docker 套接字 未映射 ({DOCKER_SOCKET_PATH})"
+        status["message"] = f"Docker 套接字 未映射 ({DOCKER_SOCKET_PATH})，请在 docker-compose.yml 中添加: - /var/run/docker.sock:/var/run/docker.sock"
         return status
-    
+
     try:
         client = docker.from_env()
         client.ping()
@@ -106,9 +107,11 @@ def get_docker_status() -> Dict[str, Any]:
         status["canRestart"] = True
         status["canUpdate"] = True
         status["message"] = "Docker 连接正常"
+    except PermissionError as e:
+        status["message"] = f"权限不足，无法访问 Docker socket。请确保容器有权限访问 /var/run/docker.sock (错误: {str(e)})"
     except Exception as e:
-        status["message"] = f"无法连接 Docker: {str(e)}"
-    
+        status["message"] = f"无法连接 Docker daemon: {str(e)}"
+
     return status
 
 

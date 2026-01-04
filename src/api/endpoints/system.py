@@ -28,6 +28,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from ... import crud, models, orm_models, security, scraper_manager
 from src import models as api_models
 from ...log_manager import get_logs, subscribe_to_logs, unsubscribe_from_logs
+from ..._version import APP_VERSION, DOCS_URL, GITHUB_OWNER, GITHUB_REPO
 from ...task_manager import TaskManager, TaskSuccess, TaskStatus
 from fastapi.responses import StreamingResponse
 from ...metadata_manager import MetadataSourceManager
@@ -38,7 +39,6 @@ from ...webhook_manager import WebhookManager
 from ...image_utils import download_image
 from ...scheduler import SchedulerManager
 from ...title_recognition import TitleRecognitionManager
-from ..._version import APP_VERSION, DOCS_URL
 from thefuzz import fuzz
 from ...config import settings
 from ...timezone import get_now
@@ -148,10 +148,8 @@ async def check_app_update(
     }
 
     try:
-        # GitHub 仓库信息
-        owner = "l429609201"
-        repo = "misaka_danmu_server"
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        # 使用 _version.py 中的 GitHub 仓库信息
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
         # 获取代理配置
         proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
@@ -198,6 +196,70 @@ async def check_app_update(
     _app_version_cache_time = datetime.now()
 
     return VersionCheckResponse(**result)
+
+
+class ReleaseInfo(BaseModel):
+    """单个 Release 信息"""
+    version: str = Field(..., description="版本号")
+    changelog: str = Field("", description="更新日志")
+    publishedAt: Optional[str] = Field(None, description="发布时间")
+    releaseUrl: Optional[str] = Field(None, description="Release 页面链接")
+
+
+class ReleasesResponse(BaseModel):
+    """历史 Releases 响应"""
+    releases: List[ReleaseInfo] = Field(default_factory=list, description="历史版本列表")
+
+
+@router.get("/version/releases", response_model=ReleasesResponse, summary="获取历史版本列表")
+async def get_release_history(
+    config_manager: ConfigManager = Depends(get_config_manager),
+    limit: int = Query(10, description="获取的版本数量", ge=1, le=50)
+):
+    """
+    获取历史版本列表和更新日志。
+
+    从 GitHub Releases 获取最近的版本信息。
+    """
+    releases = []
+
+    try:
+        # 使用 _version.py 中的 GitHub 仓库信息
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page={limit}"
+
+        # 获取代理配置
+        proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+        proxy_url = await config_manager.get("proxyUrl", "") if proxy_enabled else None
+
+        # 获取 GitHub Token
+        github_token = await config_manager.get("github_token", "")
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+
+        timeout = httpx.Timeout(10.0, connect=5.0)
+
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy_url) as client:
+            response = await client.get(api_url, headers=headers)
+
+            if response.status_code == 200:
+                releases_data = response.json()
+
+                for release in releases_data:
+                    version = release.get("tag_name", "").lstrip("v")
+                    releases.append(ReleaseInfo(
+                        version=version,
+                        changelog=release.get("body", ""),
+                        publishedAt=release.get("published_at"),
+                        releaseUrl=release.get("html_url")
+                    ))
+            else:
+                logger.warning(f"获取 GitHub Releases 列表失败: HTTP {response.status_code}")
+
+    except Exception as e:
+        logger.warning(f"获取历史版本失败: {e}")
+
+    return ReleasesResponse(releases=releases)
 
 
 

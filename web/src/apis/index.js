@@ -7,6 +7,10 @@ export const getVersion = () => api.get('/api/ui/version')
 export const checkAppUpdate = (forceRefresh = false) =>
   api.get(`/api/ui/version/check?force_refresh=${forceRefresh}`)
 
+/** 获取历史版本列表 */
+export const getReleaseHistory = (limit = 10) =>
+  api.get(`/api/ui/version/releases?limit=${limit}`)
+
 /** 获取 Docker 状态 */
 export const getDockerStatus = () => api.get('/api/ui/docker/status')
 

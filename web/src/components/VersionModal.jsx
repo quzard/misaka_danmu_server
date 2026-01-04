@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert } from 'antd'
-import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
-import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
+import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Collapse, Timeline } from 'antd'
+import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined } from '@ant-design/icons'
+import { checkAppUpdate, getDockerStatus, restartService, getReleaseHistory } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
+import dayjs from 'dayjs'
 
 const { Text, Paragraph, Title } = Typography
 
@@ -16,6 +17,9 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updateLogs, setUpdateLogs] = useState([])
   const [updateComplete, setUpdateComplete] = useState(false)
   const [updateError, setUpdateError] = useState(null)
+  const [showReleaseHistory, setShowReleaseHistory] = useState(false)
+  const [releaseHistory, setReleaseHistory] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const messageApi = useMessage()
 
   // 加载更新信息和 Docker 状态
@@ -38,6 +42,25 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
       console.error('加载数据失败:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // 加载历史版本
+  const loadReleaseHistory = async () => {
+    if (releaseHistory.length > 0) {
+      setShowReleaseHistory(!showReleaseHistory)
+      return
+    }
+    setLoadingHistory(true)
+    try {
+      const res = await getReleaseHistory(20)
+      setReleaseHistory(res.data.releases || [])
+      setShowReleaseHistory(true)
+    } catch (error) {
+      console.error('加载历史版本失败:', error)
+      messageApi.error('加载历史版本失败')
+    } finally {
+      setLoadingHistory(false)
     }
   }
 
@@ -210,6 +233,13 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
             <Button onClick={() => loadData()} icon={<SyncOutlined />}>
               刷新
             </Button>
+            <Button
+              onClick={loadReleaseHistory}
+              icon={<HistoryOutlined />}
+              loading={loadingHistory}
+            >
+              更新日志
+            </Button>
             {updateInfo?.hasUpdate && dockerStatus?.canUpdate && (
               <Button
                 type="primary"
@@ -230,6 +260,57 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               </Button>
             )}
           </div>
+
+          {/* 历史版本列表 */}
+          {showReleaseHistory && releaseHistory.length > 0 && (
+            <div className="mt-4">
+              <Divider>历史版本</Divider>
+              <Timeline
+                items={releaseHistory.map((release, index) => ({
+                  color: index === 0 ? 'green' : 'gray',
+                  children: (
+                    <Collapse
+                      size="small"
+                      items={[{
+                        key: release.version,
+                        label: (
+                          <div className="flex items-center gap-2">
+                            <Tag color={index === 0 ? 'green' : 'default'}>
+                              v{release.version}
+                            </Tag>
+                            {release.publishedAt && (
+                              <Text type="secondary" className="text-xs">
+                                {dayjs(release.publishedAt).format('YYYY-MM-DD HH:mm')}
+                              </Text>
+                            )}
+                            {index === 0 && <Badge status="processing" text="最新" />}
+                          </div>
+                        ),
+                        children: (
+                          <div className="max-h-[200px] overflow-y-auto">
+                            <pre className="whitespace-pre-wrap text-sm m-0">
+                              {release.changelog || '暂无更新说明'}
+                            </pre>
+                            {release.releaseUrl && (
+                              <Button
+                                type="link"
+                                size="small"
+                                href={release.releaseUrl}
+                                target="_blank"
+                                className="mt-2 p-0"
+                              >
+                                查看 Release 页面
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      }]}
+                    />
+                  )
+                }))}
+              />
+            </div>
+          )}
         </div>
       </Spin>
     </Modal>
