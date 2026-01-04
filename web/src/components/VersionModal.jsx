@@ -44,7 +44,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   // 开始更新
   const handleUpdate = async () => {
     if (!dockerStatus?.canUpdate) {
-      messageApi.error('Docker socket 不可用，无法执行更新')
+      messageApi.error('Docker 套接字 不可用，无法执行更新')
       return
     }
 
@@ -164,8 +164,8 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
             <Alert
               type="info"
               showIcon
-              message="Docker socket 未映射"
-              description="如需使用一键更新功能，请在 docker-compose.yml 中添加 /var/run/docker.sock 映射"
+              message="Docker 套接字 未映射"
+              description="如需使用一键更新功能，请在 docker-compose.yml 中添加 /var/run/docker.sock:/var/run/docker.sock 路径映射"
             />
           )}
 

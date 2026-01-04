@@ -96,7 +96,7 @@ def get_docker_status() -> Dict[str, Any]:
         return status
     
     if not Path(DOCKER_SOCKET_PATH).exists():
-        status["message"] = f"Docker socket 未映射 ({DOCKER_SOCKET_PATH})"
+        status["message"] = f"Docker 套接字 未映射 ({DOCKER_SOCKET_PATH})"
         return status
     
     try:
@@ -179,7 +179,7 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
         拉取进度信息
     """
     if not is_docker_socket_available():
-        yield {"status": "Docker socket 不可用", "event": "ERROR"}
+        yield {"status": "Docker 套接字 不可用", "event": "ERROR"}
         return
 
     # 设置代理环境变量

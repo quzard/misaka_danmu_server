@@ -149,7 +149,7 @@ async def check_app_update(
 
     try:
         # GitHub 仓库信息
-        owner = "yanyutin753"
+        owner = "l429609201"
         repo = "misaka_danmu_server"
         api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
