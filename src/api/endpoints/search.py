@@ -310,7 +310,13 @@ async def search_anime_provider(
             logger.info(f"用于过滤的别名列表: {list(filter_aliases)}")
 
             def normalize_for_filtering(title: str) -> str:
+                """标准化标题用于过滤比较
+
+                1. 移除括号及其内容（如 [僅限港澳台地區]）
+                2. 转小写并移除空格
+                """
                 if not title: return ""
+                # 移除各种括号及其内容
                 title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
                 return title.lower().replace(" ", "").replace("：", ":").strip()
 
