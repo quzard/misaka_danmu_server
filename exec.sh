@@ -26,15 +26,16 @@ if [ -S /var/run/docker.sock ]; then
     # 检查是否已存在该 GID 的组，如果不存在则创建
     if ! getent group ${DOCKER_GID} > /dev/null 2>&1; then
         echo "创建 docker_host 组 (GID: ${DOCKER_GID})..."
-        addgroup -g ${DOCKER_GID} docker_host 2>/dev/null || groupadd -g ${DOCKER_GID} docker_host 2>/dev/null || true
+        groupadd -g ${DOCKER_GID} docker_host 2>/dev/null || true
     fi
 
     # 获取组名（可能是 docker 或 docker_host 或其他）
     DOCKER_GROUP=$(getent group ${DOCKER_GID} | cut -d: -f1)
     if [ -n "${DOCKER_GROUP}" ]; then
-        echo "将用户 (UID: ${PUID}) 加入 ${DOCKER_GROUP} 组..."
-        # 尝试使用 adduser（Alpine）或 usermod（Debian）
-        adduser appuser ${DOCKER_GROUP} 2>/dev/null || usermod -aG ${DOCKER_GROUP} appuser 2>/dev/null || true
+        # 使用 usermod 将 appuser 加入 docker 组（Debian 系统）
+        if usermod -aG ${DOCKER_GROUP} appuser 2>/dev/null; then
+            echo "已将 appuser 加入 ${DOCKER_GROUP} 组"
+        fi
     fi
 fi
 
