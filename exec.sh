@@ -17,25 +17,15 @@ umask ${UMASK}
 echo "正在更新 /app/config 和 /app/src/scrapers 目录的所有权为 ${PUID}:${PGID}..."
 chown -R ${PUID}:${PGID} /app/config /app/src/scrapers
 
-# 如果 docker.sock 存在，自动将运行用户加入 docker 组以获得访问权限
-# 这样用户无需在 docker-compose.yml 中手动配置 group_add
+# 如果 docker.sock 存在，确保运行用户有访问权限
 if [ -S /var/run/docker.sock ]; then
-    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-    echo "检测到 Docker 套接字，GID: ${DOCKER_GID}"
-
-    # 检查是否已存在该 GID 的组，如果不存在则创建
-    if ! getent group ${DOCKER_GID} > /dev/null 2>&1; then
-        echo "创建 docker_host 组 (GID: ${DOCKER_GID})..."
-        groupadd -g ${DOCKER_GID} docker_host 2>/dev/null || true
-    fi
-
-    # 获取组名（可能是 docker 或 docker_host 或其他）
-    DOCKER_GROUP=$(getent group ${DOCKER_GID} | cut -d: -f1)
-    if [ -n "${DOCKER_GROUP}" ]; then
-        # 使用 usermod 将 appuser 加入 docker 组（Debian 系统）
-        if usermod -aG ${DOCKER_GROUP} appuser 2>/dev/null; then
-            echo "已将 appuser 加入 ${DOCKER_GROUP} 组"
-        fi
+    # 检测目标用户是否已有访问权限
+    if su-exec ${PUID}:${PGID} test -r /var/run/docker.sock -a -w /var/run/docker.sock 2>/dev/null; then
+        echo "Docker 套接字权限正常，无需修改"
+    else
+        echo "检测到 Docker 套接字权限不足，正在授权..."
+        chmod 666 /var/run/docker.sock 2>/dev/null && \
+            echo "已授予 Docker 套接字访问权限" || \
     fi
 fi
 
