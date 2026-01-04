@@ -369,10 +369,13 @@ export const Scrapers = () => {
   const handleAutoUpdateToggle = async (checked) => {
     try {
       setAutoUpdateLoading(true)
-      await saveScraperAutoUpdate({ enabled: checked, interval: 15 })
+      // 获取当前配置的间隔时间，默认30分钟
+      const currentConfig = await getScraperAutoUpdate()
+      const interval = currentConfig.data?.interval || 30
+      await saveScraperAutoUpdate({ enabled: checked, interval })
       setAutoUpdateEnabled(checked)
       if (checked) {
-        messageApi.success('已启用自动更新，后台每15分钟检查一次')
+        messageApi.success(`已启用自动更新，后台每${interval}分钟检查一次`)
       } else {
         messageApi.success('已关闭自动更新')
       }

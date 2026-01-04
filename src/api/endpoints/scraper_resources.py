@@ -377,7 +377,15 @@ async def get_versions(
 
             base_url = _build_base_url(repo_info, repo_url, gitee_info)
             package_url = f"{base_url}/package.json"
+
+            # 区分日志：用户配置的仓库
+            platform_name = "Gitee" if gitee_info else "GitHub"
+            logger.info(f"[版本检查] 正在获取用户配置仓库版本 ({platform_name}): {repo_url}")
             remote_version = await _fetch_package_version_with_retry(package_url, headers, proxy=proxy_to_use)
+            if remote_version:
+                logger.info(f"[版本检查] 用户配置仓库版本: {remote_version}")
+            else:
+                logger.warning(f"[版本检查] 用户配置仓库版本获取失败")
 
         # 固定源仓库（官方仓库）版本
         official_version = None
@@ -391,7 +399,14 @@ async def get_versions(
 
             official_base_url = _build_base_url(official_repo_info, "https://github.com/l429609201/Misaka-Scraper-Resources")
             official_package_url = f"{official_base_url}/package.json"
+
+            # 区分日志：官方仓库
+            logger.info(f"[版本检查] 正在获取官方仓库版本 (GitHub): https://github.com/l429609201/Misaka-Scraper-Resources")
             official_version = await _fetch_package_version_with_retry(official_package_url, headers_official, proxy=proxy_to_use)
+            if official_version:
+                logger.info(f"[版本检查] 官方仓库版本: {official_version}")
+            else:
+                logger.warning(f"[版本检查] 官方仓库版本获取失败")
         except Exception as e:
             logger.warning(f"获取官方资源仓库版本失败: {e}")
 
@@ -1599,7 +1614,8 @@ async def _fetch_gitee_release_asset(
 
             release_data = response.json()
             version = release_data.get('tag_name', 'unknown')
-            assets = release_data.get('assets', [])
+            # Gitee API 返回的是 'attach_files' 而不是 'assets'
+            assets = release_data.get('attach_files', [])
 
             # 查找匹配当前平台的压缩包
             asset_info = _find_matching_asset(assets, platform_key, version, 'gitee')
@@ -1651,7 +1667,8 @@ def _find_matching_asset(
             if pattern.lower() in asset_name or asset_name == pattern.lower():
                 # GitHub 和 Gitee 的下载 URL 字段不同
                 if platform_type == 'gitee':
-                    download_url = asset.get('browser_download_url')
+                    # Gitee 使用 cli_download_url 作为完整下载链接
+                    download_url = asset.get('cli_download_url') or asset.get('browser_download_url')
                 else:
                     download_url = asset.get('browser_download_url')
 
