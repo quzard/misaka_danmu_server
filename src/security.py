@@ -392,22 +392,31 @@ async def get_current_user(
     """
     依赖项：解码JWT，验证其有效性，并获取当前用户。
     支持 IP 白名单：如果客户端 IP 在白名单中，可以免登录访问。
+
+    优先级：
+    1. 如果有有效的 token，优先使用 token（避免重复创建白名单会话）
+    2. 如果没有 token 或 token 无效，再检查 IP 白名单
     """
-    # 先检查 IP 白名单
+    # 如果有 token，优先尝试使用 token
+    if token:
+        try:
+            user, _ = await _get_user_from_token(token, session)
+            return user
+        except HTTPException:
+            # token 无效，继续检查白名单
+            pass
+
+    # 检查 IP 白名单
     whitelist_user = await check_ip_whitelist(request, session)
     if whitelist_user:
         return whitelist_user
 
-    # 如果不在白名单中，必须有有效的 token
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user, _ = await _get_user_from_token(token, session)
-    return user
+    # 既没有有效 token，也不在白名单中
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def get_current_user_with_jti(
@@ -419,18 +428,27 @@ async def get_current_user_with_jti(
     依赖项：解码JWT，验证其有效性，并获取当前用户和 jti。
     用于需要知道当前会话 jti 的场景（如会话管理）。
     支持 IP 白名单：如果客户端 IP 在白名单中，可以免登录访问。
+
+    优先级：
+    1. 如果有有效的 token，优先使用 token（避免重复创建白名单会话）
+    2. 如果没有 token 或 token 无效，再检查 IP 白名单
     """
-    # 先检查 IP 白名单（需要获取 jti）
+    # 如果有 token，优先尝试使用 token
+    if token:
+        try:
+            return await _get_user_from_token(token, session)
+        except HTTPException:
+            # token 无效，继续检查白名单
+            pass
+
+    # 检查 IP 白名单（需要获取 jti）
     whitelist_result = await check_ip_whitelist_with_jti(request, session)
     if whitelist_result:
         return whitelist_result
 
-    # 如果不在白名单中，必须有有效的 token
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return await _get_user_from_token(token, session)
+    # 既没有有效 token，也不在白名单中
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
