@@ -1044,8 +1044,8 @@ async def load_resources_stream(
                     # 下载文件
                     download_count = 0  # 已完成下载的数量
                     failed_downloads = []
-                    # 增加超时时间：连接10秒，读取45秒（适应网络不稳定的情况）
-                    download_timeout = httpx.Timeout(10.0, read=45.0)
+                    # 增加超时时间：连接10秒，读取60秒（适应网络不稳定的情况）
+                    download_timeout = httpx.Timeout(15.0, read=60.0)
 
                     for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
                         logger.info(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
@@ -1238,6 +1238,32 @@ async def load_resources_stream(
                     # 推送完成信息
                     logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
                     yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
+
+                    # 检查是否有下载失败的文件 - 有失败则不触发重启，只热加载成功的部分
+                    if failed_downloads:
+                        logger.warning(f"有 {len(failed_downloads)} 个文件下载失败: {failed_downloads}")
+                        yield f"data: {json.dumps({'type': 'warning', 'message': f'有 {len(failed_downloads)} 个文件下载失败，跳过重启，仅热加载已成功下载的源'}, ensure_ascii=False)}\n\n"
+
+                        # 尝试热加载已成功下载的源
+                        if download_count > 0:
+                            try:
+                                logger.info("正在备份已成功下载的资源...")
+                                await backup_scrapers(current_user)
+                                await manager.load_and_sync_scrapers()
+                                logger.info(f"部分更新完成（热加载）: 下载 {download_count}, 跳过 {skip_count}, 失败 {len(failed_downloads)}")
+                                yield f"data: {json.dumps({'type': 'info', 'message': '已热加载成功下载的源'}, ensure_ascii=False)}\n\n"
+                            except Exception as e:
+                                logger.error(f"热加载失败: {e}")
+                                yield f"data: {json.dumps({'type': 'error', 'message': f'热加载失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+                        # 清除版本缓存
+                        global _version_cache, _version_cache_time
+                        _version_cache = None
+                        _version_cache_time = None
+
+                        # 发送流结束信号
+                        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                        return  # 有失败则不继续执行重启逻辑
 
                     # 根据下载类型决定后续操作
                     # - 如果只有新增源：软件重启（热加载）即可

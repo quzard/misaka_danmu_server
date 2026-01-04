@@ -335,8 +335,8 @@ async def _perform_update(
         package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
         await asyncio.to_thread(local_package_file.write_text, package_json_str)
 
-        # 下载文件
-        download_timeout = httpx.Timeout(3.0, read=15.0)
+        # 下载文件（增加超时时间：连接10秒，读取60秒）
+        download_timeout = httpx.Timeout(15.0, read=60.0)
         async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
             for scraper_name, scraper_info in resources.items():
                 result = await _download_single_scraper(
@@ -359,6 +359,31 @@ async def _perform_update(
 
         # 保存版本信息
         await _save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
+
+        # 检查是否有下载失败的文件
+        if failed_downloads:
+            logger.warning(f"有 {len(failed_downloads)} 个文件下载失败: {failed_downloads}")
+            logger.warning("由于存在下载失败，跳过重启，仅尝试热加载已成功下载的源")
+            # 尝试热加载已成功下载的源
+            try:
+                await scraper_manager.load_and_sync_scrapers()
+                logger.info(f"部分更新完成（热加载）: 下载 {download_count}, 跳过 {skip_count}, 失败 {len(failed_downloads)}")
+            except Exception as e:
+                logger.error(f"热加载失败: {e}")
+            # 清除版本缓存
+            import src.api.endpoints.scraper_resources as sr
+            sr._version_cache = None
+            sr._version_cache_time = None
+            return  # 有失败则不继续执行重启逻辑
+
+        # 如果没有成功下载任何文件，直接返回
+        if download_count == 0:
+            logger.info(f"没有新文件需要下载 (跳过: {skip_count})")
+            # 清除版本缓存
+            import src.api.endpoints.scraper_resources as sr
+            sr._version_cache = None
+            sr._version_cache_time = None
+            return
 
         # 判断是"新增源"还是"更新已有源"
         existing_scrapers = set()
@@ -415,11 +440,11 @@ async def _perform_update(
             # 只有新增源或没有 Docker socket：热加载
             try:
                 await scraper_manager.load_and_sync_scrapers()
-                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count}, 失败: {len(failed_downloads)})")
+                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count})")
                 if has_updates and not docker_available:
                     logger.warning("⚠️ 更新了已有源但未检测到 Docker 套接字，建议手动重启容器以确保 .so 文件更新生效")
             except Exception as e:
-                logger.error(f"重载弹幕源失败: {e}")
+                logger.error(f"热加载失败: {e}")
 
         # 清除版本缓存
         import src.api.endpoints.scraper_resources as sr
@@ -479,7 +504,7 @@ async def _download_single_scraper(
 
         for retry in range(max_retries):
             try:
-                response = await asyncio.wait_for(client.get(file_url), timeout=18.0)
+                response = await asyncio.wait_for(client.get(file_url), timeout=60.0)
                 if response.status_code == 200:
                     file_content = response.content
 
@@ -530,6 +555,77 @@ async def _download_single_scraper(
         return "failed"
 
 
+async def _verify_local_files_consistency() -> bool:
+    """
+    验证本地源文件与 versions.json 中记录的哈希值是否一致
+
+    Returns:
+        True: 一致或无法验证（versions.json 不存在等情况）
+        False: 不一致
+    """
+    if not SCRAPERS_VERSIONS_FILE.exists():
+        logger.debug("versions.json 不存在，跳过一致性检查")
+        return True
+
+    try:
+        existing_versions = json.loads(await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.read_text))
+        existing_hashes = existing_versions.get('hashes', {})
+
+        if not existing_hashes:
+            logger.debug("versions.json 中没有哈希值记录，跳过一致性检查")
+            return True
+
+        scrapers_dir = _get_scrapers_dir()
+
+        # 确定文件扩展名
+        import platform as plat
+        system = plat.system().lower()
+        if system == 'windows':
+            ext = '.pyd'
+        else:
+            ext = '.so'
+
+        inconsistent_files = []
+
+        for scraper_name, expected_hash in existing_hashes.items():
+            # 查找对应的源文件
+            # 文件名格式可能是: scraper_name.cpython-3xx-xxx.pyd/so 或 scraper_name.pyd/so
+            possible_files = list(scrapers_dir.glob(f"{scraper_name}*{ext}"))
+
+            if not possible_files:
+                # 文件不存在，可能已被删除，这种情况允许更新
+                logger.debug(f"源文件 {scraper_name} 不存在，跳过检查")
+                continue
+
+            # 取第一个匹配的文件
+            local_file = possible_files[0]
+
+            try:
+                # 计算本地文件的哈希值
+                file_content = await asyncio.to_thread(local_file.read_bytes)
+                local_hash = hashlib.sha256(file_content).hexdigest()
+
+                if local_hash != expected_hash:
+                    inconsistent_files.append(scraper_name)
+                    logger.warning(f"源文件 {scraper_name} 哈希值不一致: 期望 {expected_hash[:16]}..., 实际 {local_hash[:16]}...")
+            except Exception as e:
+                logger.warning(f"计算 {scraper_name} 哈希值失败: {e}")
+                # 计算失败时不阻止更新
+                continue
+
+        if inconsistent_files:
+            logger.warning(f"发现 {len(inconsistent_files)} 个源文件与 versions.json 记录不一致: {inconsistent_files}")
+            return False
+
+        logger.debug("本地源文件与 versions.json 记录一致")
+        return True
+
+    except Exception as e:
+        logger.warning(f"验证本地文件一致性失败: {e}")
+        # 验证失败时不阻止更新
+        return True
+
+
 async def _save_versions(
     versions_data: Dict,
     hashes_data: Dict,
@@ -542,6 +638,12 @@ async def _save_versions(
         return
 
     try:
+        # 在更新前，检查本地源文件与当前 versions.json 是否一致
+        is_consistent = await _verify_local_files_consistency()
+        if not is_consistent:
+            logger.warning("本地源文件与 versions.json 记录不一致，跳过更新版本信息文件")
+            return
+
         # 如果有下载失败的文件，合并旧版本信息
         existing_scrapers = {}
         existing_hashes = {}
