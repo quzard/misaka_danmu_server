@@ -1,0 +1,495 @@
+"""
+Docker 工具模块
+
+提供 Docker 容器管理功能，包括：
+- 检测 Docker socket 是否可用
+- 重启容器（通过 Docker API 或进程退出）
+- 拉取镜像
+- 使用 watchtower 更新容器
+"""
+
+import os
+import sys
+import socket
+import logging
+from pathlib import Path
+from typing import Optional, Dict, Any, Generator
+
+logger = logging.getLogger(__name__)
+
+# Docker socket 路径
+DOCKER_SOCKET_PATH = "/var/run/docker.sock"
+
+# 尝试导入 docker 库
+try:
+    import docker
+    from docker.errors import DockerException, NotFound, APIError
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_AVAILABLE = False
+    docker = None
+    DockerException = Exception
+    NotFound = Exception
+    APIError = Exception
+
+
+def is_docker_socket_available() -> bool:
+    """
+    检测 Docker socket 是否可用
+    
+    Returns:
+        bool: Docker socket 是否可用
+    """
+    if not DOCKER_AVAILABLE:
+        logger.debug("Docker SDK 未安装")
+        return False
+    
+    # 检查 socket 文件是否存在
+    if not Path(DOCKER_SOCKET_PATH).exists():
+        logger.debug(f"Docker socket 不存在: {DOCKER_SOCKET_PATH}")
+        return False
+    
+    # 尝试连接 Docker daemon
+    try:
+        client = docker.from_env()
+        client.ping()
+        logger.debug("Docker socket 可用")
+        return True
+    except Exception as e:
+        logger.debug(f"无法连接 Docker daemon: {e}")
+        return False
+
+
+def get_docker_client() -> Optional[Any]:
+    """
+    获取 Docker 客户端
+
+    Returns:
+        docker.DockerClient 或 None
+    """
+    if not DOCKER_AVAILABLE:
+        return None
+
+    try:
+        return docker.from_env()
+    except Exception as e:
+        logger.error(f"获取 Docker 客户端失败: {e}")
+        return None
+
+
+def get_current_container_id() -> Optional[str]:
+    """
+    自动检测当前运行的容器 ID
+
+    通过以下方式尝试获取：
+    1. hostname（Docker 默认将容器 ID 的前 12 位作为 hostname）
+    2. /proc/self/cgroup 文件（兼容旧版本 Docker）
+
+    Returns:
+        容器 ID（短格式，12位）或 None
+    """
+    container_id = None
+
+    # 方法1: 通过 hostname
+    # Docker 默认将容器 ID 的前 12 位作为容器的 hostname
+    try:
+        hostname = socket.gethostname()
+        # 检查是否看起来像容器 ID（12位十六进制）
+        if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
+            container_id = hostname
+            logger.debug(f"通过 hostname 获取到容器 ID: {container_id}")
+            return container_id
+    except Exception as e:
+        logger.debug(f"通过 hostname 获取容器 ID 失败: {e}")
+
+    # 方法2: 通过 /proc/self/cgroup 文件
+    try:
+        cgroup_path = Path('/proc/self/cgroup')
+        if cgroup_path.exists():
+            with open(cgroup_path, 'r') as f:
+                for line in f:
+                    # 格式类似: 12:memory:/docker/容器ID
+                    if 'docker' in line or 'containerd' in line:
+                        parts = line.strip().split('/')
+                        if parts:
+                            potential_id = parts[-1]
+                            # 容器 ID 是 64 位十六进制，取前 12 位
+                            if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                                container_id = potential_id[:12]
+                                logger.debug(f"通过 cgroup 获取到容器 ID: {container_id}")
+                                return container_id
+    except Exception as e:
+        logger.debug(f"通过 cgroup 获取容器 ID 失败: {e}")
+
+    # 方法3: 通过 /proc/1/cpuset 文件（某些环境下可用）
+    try:
+        cpuset_path = Path('/proc/1/cpuset')
+        if cpuset_path.exists():
+            with open(cpuset_path, 'r') as f:
+                content = f.read().strip()
+                # 格式类似: /docker/容器ID
+                if 'docker' in content or 'containerd' in content:
+                    parts = content.split('/')
+                    if parts:
+                        potential_id = parts[-1]
+                        if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                            container_id = potential_id[:12]
+                            logger.debug(f"通过 cpuset 获取到容器 ID: {container_id}")
+                            return container_id
+    except Exception as e:
+        logger.debug(f"通过 cpuset 获取容器 ID 失败: {e}")
+
+    logger.warning("无法自动检测容器 ID，可能不在 Docker 容器中运行")
+    return None
+
+
+def get_docker_status() -> Dict[str, Any]:
+    """
+    获取 Docker 状态信息
+
+    Returns:
+        包含 Docker 状态的字典
+    """
+    status = {
+        "sdkInstalled": DOCKER_AVAILABLE,
+        "socketAvailable": False,
+        "socketPath": DOCKER_SOCKET_PATH,
+        "socketExists": Path(DOCKER_SOCKET_PATH).exists(),
+        "canRestart": False,
+        "canUpdate": False,
+    }
+
+    if not DOCKER_AVAILABLE:
+        status["message"] = "Docker SDK 未安装，请确保已安装 docker 库 (pip install docker)"
+        return status
+
+    if not Path(DOCKER_SOCKET_PATH).exists():
+        status["message"] = f"Docker 套接字 未映射 ({DOCKER_SOCKET_PATH})，请在 docker-compose.yml 中添加: - /var/run/docker.sock:/var/run/docker.sock"
+        return status
+
+    try:
+        client = docker.from_env()
+        client.ping()
+        status["socketAvailable"] = True
+        status["canRestart"] = True
+        status["canUpdate"] = True
+        status["message"] = "Docker 连接正常"
+    except PermissionError as e:
+        status["message"] = f"权限不足，无法访问 Docker socket。请确保容器有权限访问 /var/run/docker.sock (错误: {str(e)})"
+    except Exception as e:
+        status["message"] = f"无法连接 Docker daemon: {str(e)}"
+
+    return status
+
+
+async def restart_container(container_name: str) -> Dict[str, Any]:
+    """
+    重启指定容器
+    
+    Args:
+        container_name: 容器名称
+        
+    Returns:
+        操作结果字典
+    """
+    if not is_docker_socket_available():
+        return {
+            "success": False,
+            "message": "Docker socket 不可用，无法通过 Docker API 重启",
+            "fallback": True
+        }
+    
+    try:
+        client = get_docker_client()
+        if not client:
+            return {"success": False, "message": "无法获取 Docker 客户端", "fallback": True}
+        
+        container = client.containers.get(container_name)
+        logger.info(f"正在重启容器: {container_name}")
+        container.restart(timeout=10)
+        
+        return {
+            "success": True,
+            "message": f"已向容器 '{container_name}' 发送重启指令"
+        }
+    except NotFound:
+        return {
+            "success": False,
+            "message": f"找不到名为 '{container_name}' 的容器",
+            "fallback": True
+        }
+    except Exception as e:
+        logger.error(f"重启容器失败: {e}")
+        return {
+            "success": False,
+            "message": f"重启容器失败: {str(e)}",
+            "fallback": True
+        }
+
+
+def restart_via_exit() -> None:
+    """
+    通过退出进程来触发容器重启（依赖 Docker 的 restart policy）
+
+    这是在没有 Docker socket 时的备用方案
+    """
+    logger.info("正在通过退出进程触发容器重启...")
+    sys.exit(0)
+
+
+def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Generator[Dict[str, Any], None, None]:
+    """
+    流式拉取 Docker 镜像
+
+    Args:
+        image_name: 镜像名称（含标签）
+        proxy_url: 代理 URL（可选）
+
+    Yields:
+        拉取进度信息
+    """
+    if not is_docker_socket_available():
+        yield {"status": "Docker 套接字 不可用", "event": "ERROR"}
+        return
+
+    # 设置代理环境变量
+    old_env = os.environ.copy()
+    try:
+        if proxy_url:
+            os.environ['HTTPS_PROXY'] = proxy_url
+            os.environ['HTTP_PROXY'] = proxy_url
+            yield {"status": f"使用代理: {proxy_url}"}
+
+        client = get_docker_client()
+        if not client:
+            yield {"status": "无法获取 Docker 客户端", "event": "ERROR"}
+            return
+
+        yield {"status": f"正在拉取镜像: {image_name}..."}
+
+        # 使用低级 API 获取流式输出
+        stream = client.api.pull(image_name, stream=True, decode=True)
+
+        last_line = {}
+        for line in stream:
+            last_line = line
+            # 可以在这里发送更详细的进度，但为简化只保留最后状态
+
+        # 检查最终状态
+        final_status = last_line.get('status', '')
+        if 'Status: Image is up to date' in final_status:
+            yield {"status": "当前已是最新版本", "event": "UP_TO_DATE"}
+        elif 'errorDetail' in last_line:
+            error_msg = last_line['errorDetail'].get('message', '未知错误')
+            yield {"status": f"拉取失败: {error_msg}", "event": "ERROR"}
+        else:
+            yield {"status": "镜像拉取完成", "event": "PULLED"}
+
+    except Exception as e:
+        logger.error(f"拉取镜像失败: {e}")
+        yield {"status": f"拉取镜像失败: {str(e)}", "event": "ERROR"}
+    finally:
+        # 恢复环境变量
+        os.environ.clear()
+        os.environ.update(old_env)
+
+
+def get_container_stats(fallback_container_name: str = "misaka_danmu_server") -> Dict[str, Any]:
+    """
+    获取容器的资源使用统计信息
+
+    Args:
+        fallback_container_name: 兜底容器名称（自动检测失败时使用）
+
+    Returns:
+        包含 CPU、内存、网络等统计信息的字典
+    """
+    if not is_docker_socket_available():
+        return {
+            "available": False,
+            "message": "Docker socket 不可用"
+        }
+
+    # 优先自动检测当前容器 ID
+    container_name = get_current_container_id()
+
+    # 如果自动检测失败，使用兜底容器名称
+    if not container_name:
+        logger.info(f"自动检测容器 ID 失败，使用兜底容器名称: {fallback_container_name}")
+        container_name = fallback_container_name
+
+    try:
+        client = get_docker_client()
+        if not client:
+            return {"available": False, "message": "无法获取 Docker 客户端"}
+
+        container = client.containers.get(container_name)
+
+        # 获取一次性统计数据（stream=False）
+        stats = container.stats(stream=False)
+
+        # 计算 CPU 使用率
+        cpu_percent = 0.0
+        cpu_stats = stats.get("cpu_stats", {})
+        precpu_stats = stats.get("precpu_stats", {})
+
+        cpu_delta = cpu_stats.get("cpu_usage", {}).get("total_usage", 0) - \
+                    precpu_stats.get("cpu_usage", {}).get("total_usage", 0)
+        system_delta = cpu_stats.get("system_cpu_usage", 0) - \
+                       precpu_stats.get("system_cpu_usage", 0)
+
+        if system_delta > 0 and cpu_delta > 0:
+            # 获取 CPU 核心数
+            online_cpus = cpu_stats.get("online_cpus")
+            if online_cpus is None:
+                # 兼容旧版本 Docker
+                online_cpus = len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [1]))
+            cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0
+
+        # 计算内存使用
+        memory_stats = stats.get("memory_stats", {})
+        memory_usage = memory_stats.get("usage", 0)
+        memory_limit = memory_stats.get("limit", 0)
+        # 减去缓存（如果有的话）
+        cache = memory_stats.get("stats", {}).get("cache", 0)
+        memory_usage_actual = memory_usage - cache
+
+        memory_percent = 0.0
+        if memory_limit > 0:
+            memory_percent = (memory_usage_actual / memory_limit) * 100.0
+
+        # 网络 I/O
+        networks = stats.get("networks", {})
+        network_rx = 0
+        network_tx = 0
+        for iface_stats in networks.values():
+            network_rx += iface_stats.get("rx_bytes", 0)
+            network_tx += iface_stats.get("tx_bytes", 0)
+
+        # 磁盘 I/O
+        blkio_stats = stats.get("blkio_stats", {})
+        io_read = 0
+        io_write = 0
+        for entry in blkio_stats.get("io_service_bytes_recursive", []) or []:
+            if entry.get("op") == "read":
+                io_read += entry.get("value", 0)
+            elif entry.get("op") == "write":
+                io_write += entry.get("value", 0)
+
+        # 获取容器信息
+        container_info = container.attrs
+        state = container_info.get("State", {})
+
+        return {
+            "available": True,
+            "containerName": container_name,
+            "containerId": container.short_id,
+            "status": state.get("Status", "unknown"),
+            "startedAt": state.get("StartedAt"),
+            "cpu": {
+                "percent": round(cpu_percent, 2),
+                "onlineCpus": cpu_stats.get("online_cpus", 1)
+            },
+            "memory": {
+                "usage": memory_usage_actual,
+                "limit": memory_limit,
+                "percent": round(memory_percent, 2),
+                "usageFormatted": _format_bytes(memory_usage_actual),
+                "limitFormatted": _format_bytes(memory_limit)
+            },
+            "network": {
+                "rxBytes": network_rx,
+                "txBytes": network_tx,
+                "rxFormatted": _format_bytes(network_rx),
+                "txFormatted": _format_bytes(network_tx)
+            },
+            "io": {
+                "readBytes": io_read,
+                "writeBytes": io_write,
+                "readFormatted": _format_bytes(io_read),
+                "writeFormatted": _format_bytes(io_write)
+            }
+        }
+
+    except NotFound:
+        return {
+            "available": False,
+            "message": f"找不到容器: {container_name}"
+        }
+    except Exception as e:
+        logger.error(f"获取容器统计信息失败: {e}")
+        return {
+            "available": False,
+            "message": f"获取统计信息失败: {str(e)}"
+        }
+
+
+def _format_bytes(bytes_value: int) -> str:
+    """将字节数格式化为人类可读的字符串"""
+    if bytes_value == 0:
+        return "0 B"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    unit_index = 0
+    value = float(bytes_value)
+
+    while value >= 1024 and unit_index < len(units) - 1:
+        value /= 1024
+        unit_index += 1
+
+    return f"{value:.2f} {units[unit_index]}"
+
+
+def update_container_with_watchtower(
+    container_name: str,
+    watchtower_image: str = "containrrr/watchtower"
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    使用 watchtower 更新容器
+
+    Args:
+        container_name: 要更新的容器名称
+        watchtower_image: watchtower 镜像名称
+
+    Yields:
+        更新进度信息
+    """
+    if not is_docker_socket_available():
+        yield {"status": "Docker socket 不可用", "event": "ERROR"}
+        return
+
+    try:
+        client = get_docker_client()
+        if not client:
+            yield {"status": "无法获取 Docker 客户端", "event": "ERROR"}
+            return
+
+        # 确保 watchtower 镜像存在
+        try:
+            client.images.get(watchtower_image)
+        except NotFound:
+            yield {"status": f"正在拉取更新工具: {watchtower_image}..."}
+            client.images.pull(watchtower_image)
+
+        yield {"status": "正在启动更新任务..."}
+
+        # 运行 watchtower 一次性更新
+        command = ["--cleanup", "--run-once", container_name]
+
+        client.containers.run(
+            image=watchtower_image,
+            command=command,
+            remove=True,
+            detach=True,
+            volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}}
+        )
+
+        yield {"status": "更新任务已启动，容器将在后台被重启"}
+        yield {"status": "请稍后刷新页面访问新版本", "event": "DONE"}
+
+    except NotFound:
+        yield {"status": f"找不到容器: {container_name}", "event": "ERROR"}
+    except Exception as e:
+        logger.error(f"更新容器失败: {e}")
+        yield {"status": f"更新失败: {str(e)}", "event": "ERROR"}
+

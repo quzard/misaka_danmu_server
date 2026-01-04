@@ -117,12 +117,34 @@ const SessionManager = ({ open, onClose }) => {
   const activeSessions = sessions.filter(s => !s.isRevoked && (!s.expiresAt || dayjs(s.expiresAt).isAfter(dayjs())))
   const otherActiveSessions = activeSessions.filter(s => s.jti !== currentJti)
 
+  // 底部按钮
+  const footerContent = otherActiveSessions.length > 0 && !loading ? (
+    <div className="flex justify-end">
+      <Popconfirm
+        title="确定踢出所有其他设备？"
+        description={`将踢出 ${otherActiveSessions.length} 个其他设备`}
+        onConfirm={handleRevokeOthers}
+        okText="确定"
+        cancelText="取消"
+        icon={<ExclamationCircleOutlined style={{ color: 'red' }} />}
+      >
+        <Button
+          type="primary"
+          danger
+          loading={revoking === 'all'}
+        >
+          踢出所有其他设备
+        </Button>
+      </Popconfirm>
+    </div>
+  ) : null
+
   return (
     <Modal
       title="会话管理"
       open={open}
       onCancel={onClose}
-      footer={null}
+      footer={footerContent}
       width={700}
       styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
     >
@@ -137,84 +159,60 @@ const SessionManager = ({ open, onClose }) => {
       ) : activeSessions.length === 0 ? (
         <Empty description="暂无活跃会话" />
       ) : (
-        <>
-          <div className="space-y-3">
-            {activeSessions.map((session) => {
-              const { browser, os, isMobile } = parseUserAgent(session.userAgent)
-              const expireStatus = getExpireStatus(session.expiresAt, session.isRevoked)
-              const isCurrent = session.jti === currentJti
+        <div className="space-y-3">
+          {activeSessions.map((session) => {
+            const { browser, os, isMobile } = parseUserAgent(session.userAgent)
+            const expireStatus = getExpireStatus(session.expiresAt, session.isRevoked)
+            const isCurrent = session.jti === currentJti
 
-              return (
-                <Card
-                  key={session.id}
-                  size="small"
-                  className={isCurrent ? 'border-blue-400 border-2' : ''}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        {isMobile ? <MobileOutlined /> : <DesktopOutlined />}
-                        <span className="font-medium">{browser} / {os}</span>
-                        {isCurrent && <Tag color="blue">当前会话</Tag>}
-                        <Tag color={expireStatus.color}>{expireStatus.text}</Tag>
+            return (
+              <Card
+                key={session.id}
+                size="small"
+                className={isCurrent ? 'border-blue-400 border-2' : ''}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      {isMobile ? <MobileOutlined /> : <DesktopOutlined />}
+                      <span className="font-medium">{browser} / {os}</span>
+                      {isCurrent && <Tag color="blue">当前会话</Tag>}
+                      <Tag color={expireStatus.color}>{expireStatus.text}</Tag>
+                    </div>
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <div className="flex items-center gap-1">
+                        <GlobalOutlined />
+                        <span>IP: {session.ipAddress || '未知'}</span>
                       </div>
-                      <div className="text-xs text-gray-500 space-y-1">
-                        <div className="flex items-center gap-1">
-                          <GlobalOutlined />
-                          <span>IP: {session.ipAddress || '未知'}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <ClockCircleOutlined />
-                          <span>登录时间: {formatTime(session.createdAt)}</span>
-                        </div>
+                      <div className="flex items-center gap-1">
+                        <ClockCircleOutlined />
+                        <span>登录时间: {formatTime(session.createdAt)}</span>
                       </div>
                     </div>
-                    {!isCurrent && (
-                      <Popconfirm
-                        title="确定踢出此设备？"
-                        description="该设备将需要重新登录"
-                        onConfirm={() => handleRevokeSession(session.id)}
-                        okText="确定"
-                        cancelText="取消"
-                      >
-                        <Button
-                          type="text"
-                          danger
-                          icon={<DeleteOutlined />}
-                          loading={revoking === session.id}
-                        >
-                          踢出
-                        </Button>
-                      </Popconfirm>
-                    )}
                   </div>
-                </Card>
-              )
-            })}
-          </div>
-
-          {/* 踢出所有其他设备按钮 */}
-          {otherActiveSessions.length > 0 && (
-            <div className="mt-4 flex justify-end">
-              <Popconfirm
-                title="确定踢出所有其他设备？"
-                description={`将踢出 ${otherActiveSessions.length} 个其他设备`}
-                onConfirm={handleRevokeOthers}
-                okText="确定"
-                cancelText="取消"
-                icon={<ExclamationCircleOutlined style={{ color: 'red' }} />}
-              >
-                <Button
-                  type="primary"
-                  danger
-                  loading={revoking === 'all'}
-                >
-                  踢出所有其他设备
-                </Button>
-              </Popconfirm>
-            </div>
-          )}
-        </>
+                  {!isCurrent && (
+                    <Popconfirm
+                      title="确定踢出此设备？"
+                      description="该设备将需要重新登录"
+                      onConfirm={() => handleRevokeSession(session.id)}
+                      okText="确定"
+                      cancelText="取消"
+                    >
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        loading={revoking === session.id}
+                      >
+                        踢出
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </Card>
+            )
+          })}
+        </div>
       )}
     </Modal>
   )

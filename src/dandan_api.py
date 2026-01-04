@@ -1734,8 +1734,8 @@ async def search_anime_for_dandan(
     season_to_search = parsed_info.get("season")
     episode_to_search = parsed_info.get("episode")
 
-    # 首先搜索本地库
-    db_results = await crud.search_animes_for_dandan(session, search_term)
+    # 首先搜索本地库（使用解析后的标题，而非原始搜索词）
+    db_results = await crud.search_animes_for_dandan(session, title_to_search)
 
     # 如果指定了具体集数，需要检查该集数是否存在
     should_trigger_fallback = False
@@ -3012,28 +3012,28 @@ async def get_comments_for_dandan(
     模拟 dandanplay 的弹幕获取接口。
     优化：优先使用弹幕库，如果没有则直接从源站获取并异步存储。
     """
-    # 预下载下一集弹幕 (异步,不阻塞当前响应)
-    # 在函数开始时就提交,无论当前集是否有弹幕
-    # 添加异常处理回调，确保任何错误都能被记录
-    predownload_task = asyncio.create_task(_try_predownload_next_episode(
-        episodeId, request.app.state.db_session_factory, config_manager, task_manager,
-        scraper_manager, rate_limiter
-    ))
-
-    # 添加异常处理回调
-    def handle_predownload_exception(task):
-        try:
-            task.result()  # 如果任务有异常，这里会抛出
-        except Exception as e:
-            logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
-
-    predownload_task.add_done_callback(handle_predownload_exception)
-
     # 检查是否有刷新任务正在执行，如果有则等待（最多15秒）
     await _wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=15.0)
 
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
+
+    # 预下载下一集弹幕 (异步,不阻塞当前响应)
+    # 只有当前集已存在于数据库时才触发预下载（后备场景会在任务完成后单独触发）
+    if comments_data:
+        predownload_task = asyncio.create_task(_try_predownload_next_episode(
+            episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+            scraper_manager, rate_limiter
+        ))
+
+        # 添加异常处理回调
+        def handle_predownload_exception(task):
+            try:
+                task.result()  # 如果任务有异常，这里会抛出
+            except Exception as e:
+                logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+
+        predownload_task.add_done_callback(handle_predownload_exception)
 
     if not comments_data:
         logger.info(f"弹幕库中未找到 episodeId={episodeId} 的弹幕，尝试直接从源站获取")
@@ -3329,6 +3329,19 @@ async def get_comments_for_dandan(
                         comments_data = await crud.fetch_comments(session, episodeId)
                         if comments_data:
                             logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
+
+                            # 匹配后备弹幕下载完成后，触发预下载下一集
+                            predownload_task = asyncio.create_task(_try_predownload_next_episode(
+                                episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+                                scraper_manager, rate_limiter
+                            ))
+                            def handle_predownload_exception(task):
+                                try:
+                                    task.result()
+                                except Exception as e:
+                                    logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+                            predownload_task.add_done_callback(handle_predownload_exception)
+                            logger.info(f"匹配后备场景：已触发预下载下一集")
                         else:
                             logger.warning(f"任务完成但数据库中未找到弹幕数据")
                     except asyncio.TimeoutError:
@@ -3715,6 +3728,19 @@ async def get_comments_for_dandan(
                             comments_data = await crud.fetch_comments(session, episodeId)
                             if comments_data:
                                 logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
+
+                                # 后备搜索弹幕下载完成后，触发预下载下一集
+                                predownload_task = asyncio.create_task(_try_predownload_next_episode(
+                                    episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+                                    scraper_manager, rate_limiter
+                                ))
+                                def handle_predownload_exception(task):
+                                    try:
+                                        task.result()
+                                    except Exception as e:
+                                        logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+                                predownload_task.add_done_callback(handle_predownload_exception)
+                                logger.info(f"后备搜索场景：已触发预下载下一集")
                             else:
                                 logger.warning(f"任务完成但数据库中未找到弹幕数据")
                         except asyncio.TimeoutError:

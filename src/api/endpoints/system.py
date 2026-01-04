@@ -14,7 +14,7 @@ import json
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import update, select, func, exc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,6 +28,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from ... import crud, models, orm_models, security, scraper_manager
 from src import models as api_models
 from ...log_manager import get_logs, subscribe_to_logs, unsubscribe_from_logs
+from ..._version import APP_VERSION, DOCS_URL, GITHUB_OWNER, GITHUB_REPO
 from ...task_manager import TaskManager, TaskSuccess, TaskStatus
 from fastapi.responses import StreamingResponse
 from ...metadata_manager import MetadataSourceManager
@@ -38,7 +39,6 @@ from ...webhook_manager import WebhookManager
 from ...image_utils import download_image
 from ...scheduler import SchedulerManager
 from ...title_recognition import TitleRecognitionManager
-from ..._version import APP_VERSION, DOCS_URL
 from thefuzz import fuzz
 from ...config import settings
 from ...timezone import get_now
@@ -101,6 +101,165 @@ async def get_comments(
 async def get_app_version():
     """获取当前后端应用的版本号和文档链接。"""
     return {"version": APP_VERSION, "docsUrl": DOCS_URL}
+
+
+class VersionCheckResponse(BaseModel):
+    """版本检查响应"""
+    currentVersion: str = Field(..., description="当前版本")
+    latestVersion: Optional[str] = Field(None, description="最新版本")
+    hasUpdate: bool = Field(False, description="是否有更新")
+    releaseUrl: Optional[str] = Field(None, description="Release 页面链接")
+    changelog: Optional[str] = Field(None, description="更新日志（Markdown）")
+    publishedAt: Optional[str] = Field(None, description="发布时间")
+
+
+# 版本检查缓存
+_app_version_cache: Optional[Dict[str, Any]] = None
+_app_version_cache_time: Optional[datetime] = None
+_APP_VERSION_CACHE_DURATION = timedelta(minutes=30)
+
+
+@router.get("/version/check", response_model=VersionCheckResponse, summary="检查应用更新")
+async def check_app_update(
+    config_manager: ConfigManager = Depends(get_config_manager),
+    force_refresh: bool = Query(False, description="强制刷新缓存")
+):
+    """
+    检查是否有新版本可用。
+
+    从 GitHub Releases 获取最新版本信息和更新日志。
+    """
+    global _app_version_cache, _app_version_cache_time
+
+    # 检查缓存
+    if not force_refresh and _app_version_cache and _app_version_cache_time:
+        cache_age = datetime.now() - _app_version_cache_time
+        if cache_age < _APP_VERSION_CACHE_DURATION:
+            logger.debug(f"使用缓存的版本检查结果 (缓存时间: {cache_age.total_seconds():.1f}秒)")
+            return VersionCheckResponse(**_app_version_cache)
+
+    result = {
+        "currentVersion": APP_VERSION,
+        "latestVersion": None,
+        "hasUpdate": False,
+        "releaseUrl": None,
+        "changelog": None,
+        "publishedAt": None,
+    }
+
+    try:
+        # 使用 _version.py 中的 GitHub 仓库信息
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+
+        # 获取代理配置
+        proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+        proxy_url = await config_manager.get("proxyUrl", "") if proxy_enabled else None
+
+        # 获取 GitHub Token
+        github_token = await config_manager.get("github_token", "")
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+
+        timeout = httpx.Timeout(10.0, connect=5.0)
+
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy_url) as client:
+            response = await client.get(api_url, headers=headers)
+
+            if response.status_code == 200:
+                release_data = response.json()
+
+                latest_version = release_data.get("tag_name", "").lstrip("v")
+                result["latestVersion"] = latest_version
+                result["releaseUrl"] = release_data.get("html_url")
+                result["changelog"] = release_data.get("body", "")
+                result["publishedAt"] = release_data.get("published_at")
+
+                # 比较版本号
+                if latest_version and latest_version != APP_VERSION:
+                    # 简单的版本比较（假设语义化版本）
+                    try:
+                        current_parts = [int(x) for x in APP_VERSION.split(".")]
+                        latest_parts = [int(x) for x in latest_version.split(".")]
+                        result["hasUpdate"] = latest_parts > current_parts
+                    except ValueError:
+                        # 如果版本号格式不标准，直接字符串比较
+                        result["hasUpdate"] = latest_version != APP_VERSION
+            else:
+                logger.warning(f"获取 GitHub Release 失败: HTTP {response.status_code}")
+
+    except Exception as e:
+        logger.warning(f"检查更新失败: {e}")
+
+    # 更新缓存
+    _app_version_cache = result
+    _app_version_cache_time = datetime.now()
+
+    return VersionCheckResponse(**result)
+
+
+class ReleaseInfo(BaseModel):
+    """单个 Release 信息"""
+    version: str = Field(..., description="版本号")
+    changelog: str = Field("", description="更新日志")
+    publishedAt: Optional[str] = Field(None, description="发布时间")
+    releaseUrl: Optional[str] = Field(None, description="Release 页面链接")
+
+
+class ReleasesResponse(BaseModel):
+    """历史 Releases 响应"""
+    releases: List[ReleaseInfo] = Field(default_factory=list, description="历史版本列表")
+
+
+@router.get("/version/releases", response_model=ReleasesResponse, summary="获取历史版本列表")
+async def get_release_history(
+    config_manager: ConfigManager = Depends(get_config_manager),
+    limit: int = Query(10, description="获取的版本数量", ge=1, le=50)
+):
+    """
+    获取历史版本列表和更新日志。
+
+    从 GitHub Releases 获取最近的版本信息。
+    """
+    releases = []
+
+    try:
+        # 使用 _version.py 中的 GitHub 仓库信息
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page={limit}"
+
+        # 获取代理配置
+        proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+        proxy_url = await config_manager.get("proxyUrl", "") if proxy_enabled else None
+
+        # 获取 GitHub Token
+        github_token = await config_manager.get("github_token", "")
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+
+        timeout = httpx.Timeout(10.0, connect=5.0)
+
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy_url) as client:
+            response = await client.get(api_url, headers=headers)
+
+            if response.status_code == 200:
+                releases_data = response.json()
+
+                for release in releases_data:
+                    version = release.get("tag_name", "").lstrip("v")
+                    releases.append(ReleaseInfo(
+                        version=version,
+                        changelog=release.get("body", ""),
+                        publishedAt=release.get("published_at"),
+                        releaseUrl=release.get("html_url")
+                    ))
+            else:
+                logger.warning(f"获取 GitHub Releases 列表失败: HTTP {response.status_code}")
+
+    except Exception as e:
+        logger.warning(f"获取历史版本失败: {e}")
+
+    return ReleasesResponse(releases=releases)
 
 
 
@@ -328,4 +487,151 @@ async def get_rate_limit_status(
     )
 
 
+# ==================== Docker 容器管理 API ====================
+
+from ...docker_utils import (
+    is_docker_socket_available,
+    get_docker_status,
+    get_container_stats,
+    restart_container,
+    restart_via_exit,
+    pull_image_stream,
+    update_container_with_watchtower
+)
+import json
+
+
+class DockerStatusResponse(BaseModel):
+    """Docker 状态响应"""
+    sdkInstalled: bool = Field(..., description="Docker SDK 是否已安装")
+    socketAvailable: bool = Field(..., description="Docker socket 是否可用")
+    socketPath: str = Field(..., description="Docker socket 路径")
+    canRestart: bool = Field(..., description="是否可以通过 Docker API 重启")
+    canUpdate: bool = Field(..., description="是否可以通过 Docker API 更新")
+    message: str = Field(..., description="状态消息")
+
+
+class RestartResponse(BaseModel):
+    """重启响应"""
+    success: bool
+    message: str
+    method: str = Field(..., description="重启方式: docker_api 或 process_exit")
+
+
+@router.get("/docker/status", response_model=DockerStatusResponse, summary="获取 Docker 状态")
+async def get_docker_status_endpoint(
+    _: models.User = Depends(security.get_current_user)
+):
+    """
+    获取 Docker 连接状态，用于判断是否可以使用 Docker API 进行重启/更新操作。
+    """
+    status = get_docker_status()
+    return DockerStatusResponse(**status)
+
+
+@router.get("/docker/stats", summary="获取容器资源使用统计")
+async def get_docker_stats_endpoint(
+    _: models.User = Depends(security.get_current_user)
+):
+    """
+    获取当前容器的资源使用统计信息，包括 CPU、内存、网络 I/O 等。
+
+    自动检测当前运行的容器，无需手动指定容器名称。
+    需要 Docker socket 可用才能获取统计信息。
+    """
+    # 不传参数，自动检测当前容器
+    stats = get_container_stats()
+    return stats
+
+
+@router.post("/restart", response_model=RestartResponse, summary="重启服务")
+async def restart_service(
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    重启服务。
+
+    - 如果 Docker socket 可用，通过 Docker API 重启容器
+    - 如果 Docker socket 不可用，通过退出进程触发容器重启（依赖 restart policy）
+    """
+    container_name = await config_manager.get("containerName", "misaka-danmu-server")
+
+    if is_docker_socket_available():
+        # 使用 Docker API 重启
+        result = await restart_container(container_name)
+        if result.get("success"):
+            logger.info(f"用户 '{current_user.username}' 通过 Docker API 重启了容器 '{container_name}'")
+            return RestartResponse(
+                success=True,
+                message=result["message"],
+                method="docker_api"
+            )
+        elif result.get("fallback"):
+            # Docker API 失败，降级到进程退出
+            logger.warning(f"Docker API 重启失败，降级到进程退出: {result['message']}")
+
+    # 通过进程退出重启
+    logger.info(f"用户 '{current_user.username}' 通过进程退出方式重启服务")
+
+    # 创建后台任务延迟退出，让响应先返回
+    async def delayed_exit():
+        await asyncio.sleep(1)
+        restart_via_exit()
+
+    asyncio.create_task(delayed_exit())
+
+    return RestartResponse(
+        success=True,
+        message="服务将在 1 秒后重启，请稍后刷新页面",
+        method="process_exit"
+    )
+
+
+@router.get("/update/stream", summary="流式更新服务")
+async def stream_update(
+    current_user: models.User = Depends(security.get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """
+    通过 SSE 流式返回更新进度。
+
+    流程：
+    1. 拉取最新镜像
+    2. 使用 watchtower 更新容器
+    """
+    if not is_docker_socket_available():
+        async def error_stream():
+            yield f"data: {json.dumps({'status': 'Docker socket 不可用，无法执行更新', 'event': 'ERROR'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+    container_name = await config_manager.get("containerName", "misaka-danmu-server")
+    image_name = await config_manager.get("dockerImageName", "yanyutin753/misaka_danmu_server:latest")
+    proxy_url = await config_manager.get("proxyUrl", "")
+    proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+
+    effective_proxy = proxy_url if proxy_enabled and proxy_url else None
+
+    async def generate_progress():
+        try:
+            # 阶段 1: 拉取镜像
+            for progress in pull_image_stream(image_name, effective_proxy):
+                yield f"data: {json.dumps(progress)}\n\n"
+
+                # 如果已是最新或出错，直接结束
+                if progress.get("event") in ("UP_TO_DATE", "ERROR"):
+                    if progress.get("event") == "UP_TO_DATE":
+                        yield f"data: {json.dumps({'status': '无需更新', 'event': 'DONE'})}\n\n"
+                    return
+
+            # 阶段 2: 使用 watchtower 更新
+            for progress in update_container_with_watchtower(container_name):
+                yield f"data: {json.dumps(progress)}\n\n"
+
+        except Exception as e:
+            logger.error(f"更新过程出错: {e}")
+            yield f"data: {json.dumps({'status': f'更新失败: {str(e)}', 'event': 'ERROR'})}\n\n"
+
+    logger.info(f"用户 '{current_user.username}' 开始更新服务 (镜像: {image_name})")
+    return StreamingResponse(generate_progress(), media_type="text/event-stream")
 

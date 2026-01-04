@@ -79,6 +79,7 @@ class ScraperManager:
         await self.close_all()
         self.scrapers.clear()
         self._scraper_classes.clear()
+        self._scraper_versions.clear()  # 清理版本号缓存
         self.scraper_settings.clear()
 
         # 检查是否需要从备份恢复
@@ -135,8 +136,20 @@ class ScraperManager:
 
         self._domain_map.clear()
         discovered_providers = []
-        scraper_classes = {}
         default_configs_to_register: Dict[str, Tuple[Any, str]] = {}
+
+        # 从 versions.json 读取各个源的版本号（优先使用，因为 .so 模块无法热更新）
+        versions_from_file: Dict[str, str] = {}
+        versions_json_path = scrapers_dir / "versions.json"
+        if versions_json_path.exists():
+            try:
+                import json
+                versions_data = json.loads(versions_json_path.read_text())
+                # versions.json 中的 scrapers 字段存储各个源的版本号
+                versions_from_file = versions_data.get('scrapers', {})
+                logging.getLogger(__name__).debug(f"从 versions.json 读取到 {len(versions_from_file)} 个源的版本信息")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"读取 versions.json 失败: {e}")
 
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
@@ -176,8 +189,10 @@ class ScraperManager:
                             default_configs_to_register[config_key] = (default_value, description)
 
                         self._scraper_classes[provider_name] = obj
-                        # 存储版本号
-                        if module_version:
+                        # 存储版本号：优先使用 versions.json 中的版本（因为 .so 模块无法热更新）
+                        if provider_name in versions_from_file:
+                            self._scraper_versions[provider_name] = versions_from_file[provider_name]
+                        elif module_version:
                             self._scraper_versions[provider_name] = module_version
 
             except TypeError as e:

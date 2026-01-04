@@ -44,6 +44,8 @@ import {
   deleteCurrentScrapers,
   getScraperAutoUpdate,
   saveScraperAutoUpdate,
+  getScraperFullReplace,
+  saveScraperFullReplace,
   getScraperDefaultBlacklist,
   getCommonBlacklist,
 } from '../../../apis'
@@ -210,6 +212,10 @@ export const Scrapers = () => {
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false)
   const [autoUpdateLoading, setAutoUpdateLoading] = useState(false)
 
+  // 全量替换相关
+  const [fullReplaceEnabled, setFullReplaceEnabled] = useState(false)
+  const [fullReplaceLoading, setFullReplaceLoading] = useState(false)
+
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
     visible: false,
@@ -243,6 +249,7 @@ export const Scrapers = () => {
     getInfo()
     loadResourceRepoConfig()
     loadAutoUpdateConfig()
+    loadFullReplaceConfig()
 
     // 建立 SSE 日志流, 根据相关事件自动刷新版本信息
     const token = Cookies.get('danmu_token')
@@ -375,6 +382,35 @@ export const Scrapers = () => {
     }
   }
 
+  // 加载全量替换配置
+  const loadFullReplaceConfig = async () => {
+    try {
+      const res = await getScraperFullReplace()
+      const enabled = res.data?.enabled || false
+      setFullReplaceEnabled(enabled)
+    } catch (error) {
+      console.error('加载全量替换配置失败:', error)
+    }
+  }
+
+  // 切换全量替换状态
+  const handleFullReplaceToggle = async (checked) => {
+    try {
+      setFullReplaceLoading(true)
+      await saveScraperFullReplace({ enabled: checked })
+      setFullReplaceEnabled(checked)
+      if (checked) {
+        messageApi.success('已启用全量替换模式，下次更新将从 Releases 下载压缩包')
+      } else {
+        messageApi.success('已关闭全量替换模式，将使用逐文件对比下载')
+      }
+    } catch (error) {
+      messageApi.error('保存全量替换配置失败')
+    } finally {
+      setFullReplaceLoading(false)
+    }
+  }
+
   const handleLoadResources = async () => {
     if (!resourceRepoUrl.trim()) {
       messageApi.error('请输入资源仓库链接')
@@ -428,6 +464,9 @@ export const Scrapers = () => {
         setLoadingResources(false)
       }, 5 * 60 * 1000) // 5分钟
 
+      // 标记是否已完成下载（用于忽略容器重启导致的连接断开错误）
+      let downloadCompleted = false
+
       await fetchEventSource('/api/ui/scrapers/load-resources-stream', {
         method: 'POST',
         headers: {
@@ -455,11 +494,19 @@ export const Scrapers = () => {
                 }))
                 break
 
+              case 'compare_result':
+                // 哈希比对完成，显示比对结果
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  message: `比对完成: ${data.to_download} 个需要下载, ${data.to_skip} 个已是最新${data.unsupported > 0 ? `, ${data.unsupported} 个不支持当前平台` : ''}`
+                }))
+                break
+
               case 'total':
                 setDownloadProgress(prev => ({
                   ...prev,
                   total: data.total,
-                  message: `准备下载 ${data.total} 个弹幕源...`
+                  message: `开始下载 ${data.total} 个弹幕源...`
                 }))
                 break
 
@@ -478,7 +525,13 @@ export const Scrapers = () => {
                 break
 
               case 'skip':
+                // 不支持当前平台的源
                 console.log(`跳过: ${data.scraper}`)
+                break
+
+              case 'skip_hash':
+                // 哈希值相同，跳过下载（在新流程中这个事件不再发送，但保留兼容）
+                console.log(`哈希相同跳过: ${data.scraper}`)
                 break
 
               case 'failed':
@@ -487,15 +540,16 @@ export const Scrapers = () => {
 
               case 'complete':
                 clearTimeout(globalTimeout) // 清除超时
+                downloadCompleted = true // 标记下载已完成
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
-                  message: `下载完成! 成功: ${data.downloaded}, 失败: ${data.failed}`
+                  message: `下载完成! 成功: ${data.downloaded}, 跳过: ${data.skipped || 0}, 失败: ${data.failed}`
                 }))
 
                 messageApi.success('资源加载成功,服务正在重启...')
 
-                // 延迟刷新页面
+                // 延迟5秒刷新页面，等待服务重启完成
                 setTimeout(() => {
                   setDownloadProgress({
                     visible: false,
@@ -508,7 +562,17 @@ export const Scrapers = () => {
                   getInfo()
                   loadVersionInfo()
                   setLoadingResources(false)
-                }, 2500)
+                }, 4000)
+                break
+
+              case 'container_restart_required':
+                // 容器即将重启，标记为已完成，忽略后续连接断开错误
+                downloadCompleted = true
+                break
+
+              case 'done':
+                // SSE 流正常结束，标记为已完成
+                downloadCompleted = true
                 break
 
               case 'error':
@@ -532,6 +596,11 @@ export const Scrapers = () => {
         onerror: error => {
           console.error('SSE 下载流错误:', error)
           clearTimeout(globalTimeout) // 清除超时
+          // 如果下载已完成，忽略连接断开错误（可能是容器重启导致）
+          if (downloadCompleted) {
+            console.log('下载已完成，忽略连接断开错误')
+            return
+          }
           if (error.name !== 'AbortError') {
             messageApi.error('下载连接出错')
             setDownloadProgress({
@@ -1265,6 +1334,33 @@ export const Scrapers = () => {
                           </Button>
                         </div>
                       </div>
+                      {/* 移动端：自动更新和全量替换开关 */}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-2">
+                          <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
+                          <Switch
+                            size="small"
+                            checked={autoUpdateEnabled}
+                            loading={autoUpdateLoading}
+                            checkedChildren="启用"
+                            unCheckedChildren="关闭"
+                            onChange={handleAutoUpdateToggle}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Tooltip title="启用后从 GitHub Releases 下载压缩包全量替换，适用于 .so 文件更新不生效的情况">
+                            <Typography.Text className="text-sm text-gray-600" style={{ cursor: 'help' }}>全量替换:</Typography.Text>
+                          </Tooltip>
+                          <Switch
+                            size="small"
+                            checked={fullReplaceEnabled}
+                            loading={fullReplaceLoading}
+                            checkedChildren="启用"
+                            unCheckedChildren="关闭"
+                            onChange={handleFullReplaceToggle}
+                          />
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex items-center gap-4">
@@ -1293,6 +1389,19 @@ export const Scrapers = () => {
                           checkedChildren="启用"
                           unCheckedChildren="关闭"
                           onChange={handleAutoUpdateToggle}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Tooltip title="启用后从 GitHub Releases 下载压缩包全量替换，适用于 .so 文件更新不生效的情况">
+                          <Typography.Text className="text-sm text-gray-600" style={{ cursor: 'help' }}>全量替换:</Typography.Text>
+                        </Tooltip>
+                        <Switch
+                          size="small"
+                          checked={fullReplaceEnabled}
+                          loading={fullReplaceLoading}
+                          checkedChildren="启用"
+                          unCheckedChildren="关闭"
+                          onChange={handleFullReplaceToggle}
                         />
                       </div>
                       <Button

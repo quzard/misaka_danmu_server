@@ -36,6 +36,14 @@ services:
     volumes:
       # 挂载 config 目录以持久化日志和配置文件。
       - ./config:/app/config
+      # [可选] 映射 Docker socket，启用一键重启和更新功能
+      # 如果不需要此功能，可以注释掉下面这行
+      - /var/run/docker.sock:/var/run/docker.sock
+
+# Docker Socket 映射说明：
+# - 映射 Docker socket 后，可以通过 Web 界面一键重启和更新容器
+# - 如果不映射，重启功能将通过退出进程触发（依赖 restart: unless-stopped）
+# - 更新功能在不映射 socket 时不可用，需要手动执行 docker pull 和 docker-compose up -d
 
 # 由于不再使用容器化的数据库，db 服务、volumes 和 networks 部分已被移除。
 # 请确保您的宿主机上已经运行了 MySQL 服务，并且：

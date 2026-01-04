@@ -3,6 +3,23 @@ import api from './fetch'
 /** 获取应用版本号 */
 export const getVersion = () => api.get('/api/ui/version')
 
+/** 检查应用更新 */
+export const checkAppUpdate = (forceRefresh = false) =>
+  api.get(`/api/ui/version/check?force_refresh=${forceRefresh}`)
+
+/** 获取历史版本列表 */
+export const getReleaseHistory = (limit = 10) =>
+  api.get(`/api/ui/version/releases?limit=${limit}`)
+
+/** 获取 Docker 状态 */
+export const getDockerStatus = () => api.get('/api/ui/docker/status')
+
+/** 获取容器资源使用统计 */
+export const getDockerStats = () => api.get('/api/ui/docker/stats')
+
+/** 重启服务 */
+export const restartService = () => api.post('/api/ui/restart')
+
 /** -------------------------------------------------用户相关开始------------------------------------------------- */
 /** 登录 */
 export const login = data =>
@@ -400,6 +417,10 @@ export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current'
 export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
 /** 保存自动更新配置 */
 export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-update', data)
+/** 获取全量替换配置 */
+export const getScraperFullReplace = () => api.get('/api/ui/scrapers/full-replace')
+/** 保存全量替换配置 */
+export const saveScraperFullReplace = data => api.put('/api/ui/scrapers/full-replace', data)
 /** 获取GitHub Token */
 export const getGithubToken = () => api.get('/api/ui/config/github-token')
 /** 保存GitHub Token */
