@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert } from 'antd'
-import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined } from '@ant-design/icons'
-import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
+import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic } from 'antd'
+import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined } from '@ant-design/icons'
+import { checkAppUpdate, getDockerStatus, getDockerStats, restartService } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
@@ -13,6 +13,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [loading, setLoading] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
   const [dockerStatus, setDockerStatus] = useState(null)
+  const [dockerStats, setDockerStats] = useState(null)
   const [updating, setUpdating] = useState(false)
   const [updateLogs, setUpdateLogs] = useState([])
   const [updateComplete, setUpdateComplete] = useState(false)
@@ -36,6 +37,16 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
       ])
       setUpdateInfo(updateRes.data)
       setDockerStatus(dockerRes.data)
+
+      // 如果 Docker 已连接，获取容器统计信息
+      if (dockerRes.data?.socketAvailable) {
+        try {
+          const statsRes = await getDockerStats()
+          setDockerStats(statsRes.data)
+        } catch (e) {
+          console.error('获取容器统计失败:', e)
+        }
+      }
     } catch (error) {
       console.error('加载数据失败:', error)
     } finally {
@@ -171,6 +182,58 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               message="Docker 套接字 未映射"
               description="如需使用一键更新功能，请在 docker-compose.yml 中添加 /var/run/docker.sock:/var/run/docker.sock 路径映射"
             />
+          )}
+
+          {/* 容器资源统计卡片 */}
+          {dockerStats?.available && (
+            <Card
+              size="small"
+              className="!mt-4"
+              title={
+                <div className="flex items-center gap-2">
+                  <CloudServerOutlined />
+                  <span>容器状态</span>
+                  <Tag color={dockerStats.status === 'running' ? 'success' : 'warning'} className="!ml-2">
+                    {dockerStats.status}
+                  </Tag>
+                </div>
+              }
+            >
+              <Row gutter={[16, 12]}>
+                <Col span={12}>
+                  <div className="text-xs text-gray-500 mb-1">CPU 使用率</div>
+                  <Progress
+                    percent={dockerStats.cpu?.percent || 0}
+                    size="small"
+                    status={dockerStats.cpu?.percent > 80 ? 'exception' : 'normal'}
+                    format={(percent) => `${percent}%`}
+                  />
+                </Col>
+                <Col span={12}>
+                  <div className="text-xs text-gray-500 mb-1">内存使用</div>
+                  <Progress
+                    percent={dockerStats.memory?.percent || 0}
+                    size="small"
+                    status={dockerStats.memory?.percent > 80 ? 'exception' : 'normal'}
+                    format={() => `${dockerStats.memory?.usageFormatted || '0 B'}`}
+                  />
+                </Col>
+                <Col span={12}>
+                  <Statistic
+                    title="网络接收"
+                    value={dockerStats.network?.rxFormatted || '0 B'}
+                    valueStyle={{ fontSize: '14px' }}
+                  />
+                </Col>
+                <Col span={12}>
+                  <Statistic
+                    title="网络发送"
+                    value={dockerStats.network?.txFormatted || '0 B'}
+                    valueStyle={{ fontSize: '14px' }}
+                  />
+                </Col>
+              </Row>
+            </Card>
           )}
 
           {/* 更新日志 */}

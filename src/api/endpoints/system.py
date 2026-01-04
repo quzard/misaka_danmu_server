@@ -492,6 +492,7 @@ async def get_rate_limit_status(
 from ...docker_utils import (
     is_docker_socket_available,
     get_docker_status,
+    get_container_stats,
     restart_container,
     restart_via_exit,
     pull_image_stream,
@@ -519,13 +520,28 @@ class RestartResponse(BaseModel):
 
 @router.get("/docker/status", response_model=DockerStatusResponse, summary="获取 Docker 状态")
 async def get_docker_status_endpoint(
-    current_user: models.User = Depends(security.get_current_user)
+    _: models.User = Depends(security.get_current_user)
 ):
     """
     获取 Docker 连接状态，用于判断是否可以使用 Docker API 进行重启/更新操作。
     """
     status = get_docker_status()
     return DockerStatusResponse(**status)
+
+
+@router.get("/docker/stats", summary="获取容器资源使用统计")
+async def get_docker_stats_endpoint(
+    _: models.User = Depends(security.get_current_user)
+):
+    """
+    获取当前容器的资源使用统计信息，包括 CPU、内存、网络 I/O 等。
+
+    自动检测当前运行的容器，无需手动指定容器名称。
+    需要 Docker socket 可用才能获取统计信息。
+    """
+    # 不传参数，自动检测当前容器
+    stats = get_container_stats()
+    return stats
 
 
 @router.post("/restart", response_model=RestartResponse, summary="重启服务")

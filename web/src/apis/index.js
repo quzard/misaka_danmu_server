@@ -14,6 +14,9 @@ export const getReleaseHistory = (limit = 10) =>
 /** 获取 Docker 状态 */
 export const getDockerStatus = () => api.get('/api/ui/docker/status')
 
+/** 获取容器资源使用统计 */
+export const getDockerStats = () => api.get('/api/ui/docker/stats')
+
 /** 重启服务 */
 export const restartService = () => api.post('/api/ui/restart')
 
