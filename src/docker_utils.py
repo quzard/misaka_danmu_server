@@ -294,12 +294,12 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
         os.environ.update(old_env)
 
 
-def get_container_stats(container_name: Optional[str] = None) -> Dict[str, Any]:
+def get_container_stats(fallback_container_name: str = "misaka_danmu_server") -> Dict[str, Any]:
     """
     获取容器的资源使用统计信息
 
     Args:
-        container_name: 容器名称或 ID（可选，默认自动检测当前容器）
+        fallback_container_name: 兜底容器名称（自动检测失败时使用）
 
     Returns:
         包含 CPU、内存、网络等统计信息的字典
@@ -310,14 +310,13 @@ def get_container_stats(container_name: Optional[str] = None) -> Dict[str, Any]:
             "message": "Docker socket 不可用"
         }
 
-    # 如果没有指定容器名称，自动检测当前容器
+    # 优先自动检测当前容器 ID
+    container_name = get_current_container_id()
+
+    # 如果自动检测失败，使用兜底容器名称
     if not container_name:
-        container_name = get_current_container_id()
-        if not container_name:
-            return {
-                "available": False,
-                "message": "无法自动检测当前容器 ID，请确保在 Docker 容器中运行"
-            }
+        logger.info(f"自动检测容器 ID 失败，使用兜底容器名称: {fallback_container_name}")
+        container_name = fallback_container_name
 
     try:
         client = get_docker_client()
