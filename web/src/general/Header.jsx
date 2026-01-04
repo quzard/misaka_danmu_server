@@ -6,12 +6,13 @@ import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
-import { Tag, Dropdown, Modal, Form, Input, Button, Space } from 'antd';
-import { logout, changePassword } from '../apis/index.js'
+import { Tag, Dropdown, Modal, Form, Input, Button, Space, Badge } from 'antd';
+import { logout, changePassword, checkAppUpdate } from '../apis/index.js'
 import Cookies from 'js-cookie'
 import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
 import { Tooltip } from 'antd'
 import SessionManager from '@/components/SessionManager'
+import VersionModal from '@/components/VersionModal'
 
 // GitHub 图标 (Simple Icons 标准)
 const GithubIcon = () => (
@@ -132,6 +133,8 @@ export const Header = () => {
   const navigate = useNavigate()
   const [version, setVersion] = useState('N/A');
   const [docsUrl, setDocsUrl] = useState('');
+  const [hasUpdate, setHasUpdate] = useState(false);
+  const [versionModalOpen, setVersionModalOpen] = useState(false);
   console.log(location)
 
   const activeKey = useMemo(() => {
@@ -150,6 +153,17 @@ export const Header = () => {
       setDocsUrl(res.data.docsUrl || '');
     };
     fetchVersion();
+
+    // 检查更新
+    const checkUpdate = async () => {
+      try {
+        const res = await checkAppUpdate();
+        setHasUpdate(res.data?.hasUpdate || false);
+      } catch (e) {
+        console.error('检查更新失败:', e);
+      }
+    };
+    checkUpdate();
   }, []);
   useEffect(() => {
     const checkScreenSize = () => {
@@ -204,7 +218,14 @@ export const Header = () => {
                     </a>
                   </Tooltip>
                 )}
-                <Tag>{version}</Tag>
+                <Badge dot={hasUpdate} offset={[-5, 5]}>
+                  <Tag
+                    className="cursor-pointer"
+                    onClick={() => setVersionModalOpen(true)}
+                  >
+                    {version}
+                  </Tag>
+                </Badge>
                 <DarkModeToggle />
               </div>
             </div>
@@ -212,8 +233,21 @@ export const Header = () => {
           <MobileHeader activeKey={activeKey} />
         </>
       ) : (
-        <DesktopHeader activeKey={activeKey} version={version} docsUrl={docsUrl} />
+        <DesktopHeader
+          activeKey={activeKey}
+          version={version}
+          docsUrl={docsUrl}
+          hasUpdate={hasUpdate}
+          onVersionClick={() => setVersionModalOpen(true)}
+        />
       )}
+
+      {/* 版本信息弹窗 */}
+      <VersionModal
+        open={versionModalOpen}
+        onClose={() => setVersionModalOpen(false)}
+        currentVersion={version}
+      />
     </>
   )
 }
@@ -464,7 +498,7 @@ const MobileHeader = ({ activeKey }) => {
   )
 }
 
-const DesktopHeader = ({ activeKey, version, docsUrl }) => {
+const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick }) => {
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
   const messageApi = useMessage()
@@ -568,7 +602,14 @@ const DesktopHeader = ({ activeKey, version, docsUrl }) => {
                 </a>
               </Tooltip>
             )}
-            <Tag>{version}</Tag>
+            <Badge dot={hasUpdate} offset={[-5, 5]}>
+              <Tag
+                className="cursor-pointer"
+                onClick={onVersionClick}
+              >
+                {version}
+              </Tag>
+            </Badge>
             <Dropdown
               menu={{
                 items: [

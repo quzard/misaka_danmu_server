@@ -3,6 +3,16 @@ import api from './fetch'
 /** 获取应用版本号 */
 export const getVersion = () => api.get('/api/ui/version')
 
+/** 检查应用更新 */
+export const checkAppUpdate = (forceRefresh = false) =>
+  api.get(`/api/ui/version/check?force_refresh=${forceRefresh}`)
+
+/** 获取 Docker 状态 */
+export const getDockerStatus = () => api.get('/api/ui/docker/status')
+
+/** 重启服务 */
+export const restartService = () => api.post('/api/ui/restart')
+
 /** -------------------------------------------------用户相关开始------------------------------------------------- */
 /** 登录 */
 export const login = data =>
