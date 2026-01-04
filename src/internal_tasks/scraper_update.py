@@ -146,7 +146,7 @@ async def _get_repo_headers(config_manager, repo_url: str) -> tuple:
 async def _fetch_remote_package(base_url: str, headers: Dict, proxy: Optional[str]) -> Optional[Dict]:
     """获取远程 package.json"""
     package_url = f"{base_url}/package.json"
-    timeout = httpx.Timeout(15.0, read=15.0)
+    timeout = httpx.Timeout(30.0, read=30.0)
 
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
@@ -347,8 +347,8 @@ async def _perform_update(
         package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
         await asyncio.to_thread(local_package_file.write_text, package_json_str)
 
-        # 下载文件（增加超时时间：连接10秒，读取60秒）
-        download_timeout = httpx.Timeout(15.0, read=60.0)
+        # 下载文件（增加超时时间：连接30秒，读取60秒）
+        download_timeout = httpx.Timeout(30.0, read=60.0)
         async with httpx.AsyncClient(timeout=download_timeout, headers=headers, follow_redirects=True, proxy=proxy_to_use) as client:
             for scraper_name, scraper_info in resources.items():
                 result = await _download_single_scraper(

@@ -290,7 +290,7 @@ async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str,
     Returns:
         版本号字符串，失败返回 None
     """
-    timeout_config = httpx.Timeout(3.0, read=5.0)  # 降低超时时间：连接3秒，读取5秒
+    timeout_config = httpx.Timeout(30.0, read=30.0)  # 连接30秒，读取30秒
 
     for attempt in range(max_retries):
         try:
@@ -921,8 +921,8 @@ async def load_resources_stream(
                     logger.info(f"正在从 {package_url} 获取资源包信息...")
                     yield f"data: {json.dumps({'type': 'info', 'message': '正在获取资源包信息...'}, ensure_ascii=False)}\n\n"
 
-                    # 设置更详细的超时配置: 连接超时10秒, 读取超时30秒
-                    timeout_config = httpx.Timeout(10.0, read=30.0)
+                    # 设置更详细的超时配置: 连接超时30秒, 读取超时30秒
+                    timeout_config = httpx.Timeout(30.0, read=30.0)
                     max_package_retries = 3  # 获取 package.json 的重试次数
                     package_data = None
 
@@ -1100,8 +1100,8 @@ async def load_resources_stream(
                     # 下载文件
                     download_count = 0  # 已完成下载的数量
                     failed_downloads = []
-                    # 增加超时时间：连接10秒，读取60秒（适应网络不稳定的情况）
-                    download_timeout = httpx.Timeout(15.0, read=60.0)
+                    # 增加超时时间：连接30秒，读取60秒（适应网络不稳定的情况）
+                    download_timeout = httpx.Timeout(30.0, read=60.0)
 
                     for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
                         logger.info(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
