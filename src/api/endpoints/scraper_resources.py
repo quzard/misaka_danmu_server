@@ -1510,7 +1510,7 @@ async def _fetch_github_release_asset(
     # GitHub Releases API
     api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
-    timeout = httpx.Timeout(10.0, read=30.0)
+    timeout = httpx.Timeout(60.0, read=60.0)  # 连接60秒，读取60秒
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
             response = await client.get(api_url)
@@ -1585,7 +1585,7 @@ async def _download_and_extract_release(
     download_url = asset_info['download_url']
     filename = asset_info.get('filename', '').lower()
 
-    timeout = httpx.Timeout(30.0, read=180.0)  # 下载大文件需要更长超时
+    timeout = httpx.Timeout(180.0, read=180.0)  # 下载大文件需要更长超时
     max_retries = 3  # 最大重试次数
     archive_content = None
 
