@@ -128,16 +128,24 @@ def get_platform_key() -> str:
         return f'{system}-{arch}'
 
 
-def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str) -> str:
+def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_info: Optional[Dict[str, str]] = None) -> str:
     """构造资源下载的base URL
 
     Args:
         repo_info: GitHub仓库解析信息 (包含owner, repo, proxy, proxy_type)
         repo_url: 原始仓库URL
+        gitee_info: Gitee仓库解析信息 (包含owner, repo, platform)
 
     Returns:
         构造好的base URL
     """
+    # 优先处理 Gitee
+    if gitee_info:
+        owner = gitee_info['owner']
+        repo = gitee_info['repo']
+        # Gitee raw 文件 URL 格式: https://gitee.com/owner/repo/raw/master/path
+        return f"https://gitee.com/{owner}/{repo}/raw/master"
+
     if repo_info:
         owner = repo_info['owner']
         repo = repo_info['repo']
@@ -152,8 +160,44 @@ def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str) -> str:
         else:
             return f"https://raw.githubusercontent.com/{owner}/{repo}/main"
     else:
-        # 非 GitHub 地址：视为静态资源根路径
+        # 非 GitHub/Gitee 地址：视为静态资源根路径
         return repo_url.rstrip("/")
+
+
+def parse_gitee_url(url: str) -> Optional[Dict[str, str]]:
+    """解析 Gitee 仓库 URL
+
+    支持的格式:
+    - https://gitee.com/owner/repo
+    - https://gitee.com/owner/repo.git
+
+    返回:
+        {
+            'owner': 'owner',
+            'repo': 'repo',
+            'platform': 'gitee'
+        }
+        如果不是 Gitee URL，返回 None
+    """
+    # Gitee URL 格式
+    gitee_match = re.match(r'^https?://gitee\.com/([^/]+)/([^/]+?)(?:\.git)?$', url)
+    if gitee_match:
+        return {
+            'owner': gitee_match.group(1),
+            'repo': gitee_match.group(2).replace('.git', ''),
+            'platform': 'gitee'
+        }
+
+    # 也支持路径中带有额外部分的情况
+    gitee_match2 = re.match(r'^https?://gitee\.com/([^/]+)/([^/]+)', url)
+    if gitee_match2:
+        return {
+            'owner': gitee_match2.group(1),
+            'repo': gitee_match2.group(2).replace('.git', '').split('/')[0],
+            'platform': 'gitee'
+        }
+
+    return None
 
 
 def parse_github_url(url: str) -> Dict[str, str]:
@@ -314,18 +358,24 @@ async def get_versions(
         if repo_url:
             headers = {}
             repo_info = None
-            try:
-                repo_info = parse_github_url(repo_url)
-            except ValueError:
-                pass
+            gitee_info = None
 
-            # 如果是GitHub仓库,添加Token
+            # 先尝试解析为 Gitee URL
+            gitee_info = parse_gitee_url(repo_url)
+            if not gitee_info:
+                # 不是 Gitee，尝试解析为 GitHub URL
+                try:
+                    repo_info = parse_github_url(repo_url)
+                except ValueError:
+                    pass
+
+            # 如果是GitHub仓库,添加Token（Gitee不需要Token）
             if repo_info:
                 github_token = await config_manager.get("github_token", "")
                 if github_token:
                     headers["Authorization"] = f"Bearer {github_token}"
 
-            base_url = _build_base_url(repo_info, repo_url)
+            base_url = _build_base_url(repo_info, repo_url, gitee_info)
             package_url = f"{base_url}/package.json"
             remote_version = await _fetch_package_version_with_retry(package_url, headers, proxy=proxy_to_use)
 
@@ -694,18 +744,24 @@ async def load_resources_stream(
                     # 解析仓库URL并构造base_url
                     headers = {}
                     repo_info = None
-                    try:
-                        repo_info = parse_github_url(repo_url)
-                    except ValueError:
-                        pass
+                    gitee_info = None
 
-                    # 如果是GitHub仓库,添加Token
+                    # 先尝试解析为 Gitee URL
+                    gitee_info = parse_gitee_url(repo_url)
+                    if not gitee_info:
+                        # 不是 Gitee，尝试解析为 GitHub URL
+                        try:
+                            repo_info = parse_github_url(repo_url)
+                        except ValueError:
+                            pass
+
+                    # 如果是GitHub仓库,添加Token（Gitee不需要Token）
                     if repo_info:
                         github_token = await config_manager.get("github_token", "")
                         if github_token:
                             headers["Authorization"] = f"Bearer {github_token}"
 
-                    base_url = _build_base_url(repo_info, repo_url)
+                    base_url = _build_base_url(repo_info, repo_url, gitee_info)
 
                     # 获取代理配置
                     proxy_url = await config_manager.get("proxyUrl", "")

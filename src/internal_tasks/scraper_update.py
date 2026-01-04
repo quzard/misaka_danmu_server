@@ -16,6 +16,7 @@ from fastapi import FastAPI
 # 复用 scraper_resources 中的工具函数
 from ..api.endpoints.scraper_resources import (
     parse_github_url,
+    parse_gitee_url,
     _build_base_url,
     get_platform_key,
     get_platform_info,
@@ -60,8 +61,8 @@ async def scraper_auto_update_handler(app: FastAPI) -> None:
     proxy_to_use = await _get_proxy_config(config_manager)
 
     # 解析仓库URL并获取headers
-    headers, repo_info = await _get_repo_headers(config_manager, repo_url)
-    base_url = _build_base_url(repo_info, repo_url)
+    headers, repo_info, gitee_info = await _get_repo_headers(config_manager, repo_url)
+    base_url = _build_base_url(repo_info, repo_url, gitee_info)
 
     # 获取远程版本和包数据
     package_data = await _fetch_remote_package(base_url, headers, proxy_to_use)
@@ -115,26 +116,37 @@ async def _get_proxy_config(config_manager) -> Optional[str]:
 
 
 async def _get_repo_headers(config_manager, repo_url: str) -> tuple:
-    """获取仓库请求头和解析信息"""
+    """获取仓库请求头和解析信息
+
+    Returns:
+        tuple: (headers, repo_info, gitee_info)
+    """
     headers = {}
     repo_info = None
-    try:
-        repo_info = parse_github_url(repo_url)
-    except ValueError:
-        pass
+    gitee_info = None
 
+    # 先尝试解析为 Gitee URL
+    gitee_info = parse_gitee_url(repo_url)
+    if not gitee_info:
+        # 不是 Gitee，尝试解析为 GitHub URL
+        try:
+            repo_info = parse_github_url(repo_url)
+        except ValueError:
+            pass
+
+    # 如果是GitHub仓库,添加Token（Gitee不需要Token）
     if repo_info:
         github_token = await config_manager.get("github_token", "")
         if github_token:
             headers["Authorization"] = f"Bearer {github_token}"
 
-    return headers, repo_info
+    return headers, repo_info, gitee_info
 
 
 async def _fetch_remote_package(base_url: str, headers: Dict, proxy: Optional[str]) -> Optional[Dict]:
     """获取远程 package.json"""
     package_url = f"{base_url}/package.json"
-    timeout = httpx.Timeout(5.0, read=15.0)
+    timeout = httpx.Timeout(15.0, read=15.0)
 
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
