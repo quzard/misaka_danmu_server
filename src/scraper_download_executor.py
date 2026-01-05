@@ -224,6 +224,9 @@ class ScraperDownloadExecutor:
         self._log("正在更新版本信息...")
         await self._update_versions_json(asset_info, scrapers_dir, platform_key)
 
+        # 清除版本缓存，让前端能获取到最新版本号
+        self._clear_version_cache()
+
         self.task.progress.current = 1
         self.task.progress.total = 1
         self.task.progress.downloaded.append("full_replace")
@@ -381,6 +384,9 @@ class ScraperDownloadExecutor:
 
         # 全部成功，保存版本信息
         await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
+
+        # 清除版本缓存，让前端能获取到最新版本号
+        self._clear_version_cache()
 
         # 热加载或容器重启
         if download_count > 0:
@@ -607,6 +613,16 @@ class ScraperDownloadExecutor:
             self._log(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息")
         except Exception as e:
             self._log(f"保存版本信息失败: {e}", "warning")
+
+    def _clear_version_cache(self):
+        """清除版本缓存，让前端能获取到最新版本号"""
+        try:
+            import src.api.endpoints.scraper_resources as scraper_resources_module
+            scraper_resources_module._version_cache = None
+            scraper_resources_module._version_cache_time = None
+            logger.info("已清除版本缓存")
+        except Exception as e:
+            logger.warning(f"清除版本缓存失败: {e}")
 
     async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):  # noqa: ARG002
         """全量替换后更新 versions.json"""
